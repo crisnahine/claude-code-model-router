@@ -102,8 +102,9 @@ class ModelResolution(unittest.TestCase):
 
     def test_unknown_or_inherit(self):
         self.assertIsNone(orch.resolve_agent_model(self.config, "other-plugin:thing", None))
+        # Built-ins inherit; with no known parent model there's nothing to check.
         self.assertIsNone(orch.resolve_agent_model(self.config, "general-purpose", None))
-        self.assertEqual(orch.resolve_agent_model(self.config, "Explore", None), "haiku")
+        self.assertIsNone(orch.resolve_agent_model(self.config, "Explore", None))
 
 
 class PreAgentHook(TempDataDir):
@@ -159,6 +160,154 @@ class PreAgentHook(TempDataDir):
         res = subprocess.run([sys.executable, str(SCRIPT), "pre-agent"], input="not json",
                              capture_output=True, text=True, env={**os.environ, **self.env})
         self.assertEqual(res.returncode, 0)
+
+
+class EdgeCases(TempDataDir):
+    """Coexistence with other plugins, user agents, env overrides and bad input."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = Path(self.tmp.name) / "home"
+        self.home.mkdir()
+        self.home_patch = mock.patch.dict(os.environ, {"HOME": str(self.home), "USERPROFILE": str(self.home)})
+        self.home_patch.start()
+        self.config = orch.load_config({"cwd": str(self.project)})
+
+    def tearDown(self):
+        self.home_patch.stop()
+        super().tearDown()
+
+    def resolve(self, agent, requested=None, parent=None):
+        return orch.resolve_agent_model(self.config, agent, requested, parent, self.project)
+
+    def test_builtins_inherit_the_session_model(self):
+        self.assertEqual(self.resolve("general-purpose", parent="claude-opus-5-5"), "opus")
+        self.assertEqual(self.resolve("Plan", parent="claude-sonnet-5-5"), "sonnet")
+        self.assertEqual(self.resolve("Explore", parent="claude-sonnet-5-5"), "sonnet")
+        self.assertEqual(self.resolve("Explore", parent="claude-fable-5-2"), "opus")
+
+    def test_other_plugins_agent_with_same_name_is_not_ours(self):
+        self.assertIsNone(self.resolve("acme:reviewer"))
+        self.assertIsNone(self.resolve("acme:deep-solver"))
+
+    def test_bare_name_is_ours_only_without_a_local_agent(self):
+        self.assertEqual(self.resolve("reviewer"), "opus")
+        agents = self.project / ".claude" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "my-reviewer.md").write_text("---\nname: reviewer\ndescription: mine\nmodel: haiku\n---\nbody\n")
+        self.assertIsNone(self.resolve("reviewer"))
+        self.assertEqual(self.resolve("orchestrator:reviewer"), "opus")
+
+    def test_user_level_agent_also_shadows_bare_name(self):
+        agents = self.home / ".claude" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "scout.md").write_text("---\nname: \"scout\"\ndescription: x\n---\n")
+        self.assertIsNone(self.resolve("scout"))
+
+    def test_forced_subagent_model_wins_over_everything(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_SUBAGENT_MODEL": "haiku",
+                                          "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}):
+            self.assertEqual(self.resolve("orchestrator:deep-solver", requested="opus"), "haiku")
+
+    def test_unforced_subagent_model_only_replaces_inherit(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_SUBAGENT_MODEL": "haiku"}):
+            self.assertEqual(self.resolve("general-purpose", parent="claude-opus-5-5"), "haiku")
+            self.assertEqual(self.resolve("orchestrator:architect"), "opus")
+
+    def test_malformed_override_is_ignored_not_fatal(self):
+        claude = self.project / ".claude"
+        claude.mkdir()
+        for bad in ('{"agents": "oops"}', '{"agents": {"scout": "haiku"}}', "[1, 2]", "{not json"):
+            (claude / "orchestrator.json").write_text(bad)
+            config = orch.load_config({"cwd": str(self.project)})
+            self.assertEqual(config["agents"]["scout"]["model"], "haiku")
+            orch.routing_table(config)
+
+    def test_model_switch_changes_what_inherit_means(self):
+        payload = {"session_id": "s9", "cwd": str(self.project), "tool_name": "Agent",
+                   "tool_input": {"subagent_type": "general-purpose", "description": "d", "prompt": "p"}}
+        env = {**self.env, "HOME": str(self.home), "USERPROFILE": str(self.home), "CLAUDE_PLUGIN_OPTION_MAX_TIER": "sonnet"}
+        run_hook("session-start", {"session_id": "s9", "source": "startup", "model": "claude-sonnet-5-5"}, env)
+        self.assertEqual(run_hook("pre-agent", payload, env).stdout.strip(), "")
+        run_hook("model-switch", {"session_id": "s9", "from_model": "claude-sonnet-5-5",
+                                  "to_model": "claude-opus-5-5"}, env)
+        out = json.loads(run_hook("pre-agent", payload, env).stdout)["hookSpecificOutput"]
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_session_model_from_transcript(self):
+        transcript = Path(self.tmp.name) / "t.jsonl"
+        transcript.write_text("\n".join(json.dumps(r) for r in [
+            {"type": "user", "message": {"role": "user", "content": "hi"}},
+            {"type": "assistant", "message": {"role": "assistant", "model": "claude-sonnet-5-5"}},
+            {"type": "assistant", "message": {"role": "assistant", "model": "claude-opus-5-5"}},
+            {"type": "user", "message": {"role": "user", "content": "x"}},
+        ]) + "\n")
+        self.assertEqual(orch.session_model("nope", str(transcript)), "claude-opus-5-5")
+        self.assertIsNone(orch.session_model("nope", str(transcript) + ".missing"))
+        payload = {"session_id": "s7", "transcript_path": str(transcript), "cwd": str(self.project),
+                   "tool_input": {"subagent_type": "general-purpose", "description": "d", "prompt": "p"}}
+        out = run_hook("pre-agent", payload, {**self.env, "HOME": str(self.home), "USERPROFILE": str(self.home),
+                                              "CLAUDE_PLUGIN_OPTION_MAX_TIER": "sonnet"})
+        self.assertEqual(json.loads(out.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_hooks_ignore_a_stale_recorded_cap(self):
+        orch.save_json(orch.state_path(), {"max_tier": "haiku"})
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_OPTION_MAX_TIER"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(orch.max_tier(), "fable")
+            self.assertEqual(orch.max_tier(from_state=True), "haiku")
+
+    def test_invalid_cap_means_no_cap(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_PLUGIN_OPTION_MAX_TIER": "gpt-9"}):
+            self.assertEqual(orch.max_tier(), "fable")
+        with mock.patch.dict(os.environ, {"CLAUDE_PLUGIN_OPTION_MAX_TIER": " Opus "}):
+            self.assertEqual(orch.max_tier(), "opus")
+
+    def test_ledger_rotates(self):
+        with mock.patch.object(orch, "LEDGER_MAX_BYTES", 2000):
+            for i in range(100):
+                orch.append_ledger({"event": "spawn", "agent": f"a{i}"})
+        size = orch.ledger_path().stat().st_size
+        self.assertLess(size, 4000)
+        self.assertEqual(self.ledger()[-1]["agent"], "a99")
+
+    def test_corrupt_state_files_are_tolerated(self):
+        self.data.mkdir(parents=True, exist_ok=True)
+        for name in ("state.json", "sessions.json"):
+            (self.data / name).write_text("{{{")
+        (self.data / "ledger.jsonl").write_text("garbage\n{\"event\": \"spawn\"}\n")
+        res = run_hook("session-start", {"session_id": "s", "source": "startup", "model": "opus"}, self.env)
+        self.assertEqual(res.returncode, 0)
+        self.assertIn("additionalContext", res.stdout)
+        orch.usage_report(7)
+
+    def test_offline_refresh_fails_quietly(self):
+        orch.save_json(orch.state_path(), {"cache": {"fetched_at": 0}, "max_tier": "opus"})
+        res = run_hook("refresh-cache", {}, {**self.env, "HTTPS_PROXY": "http://127.0.0.1:9", "https_proxy": "http://127.0.0.1:9"})
+        self.assertEqual(res.returncode, 0)
+        self.assertEqual(orch.load_json(orch.state_path(), {})["max_tier"], "opus")
+
+
+@unittest.skipIf(os.name == "nt", "POSIX shell launcher")
+class LauncherScript(unittest.TestCase):
+    launcher = PLUGIN / "scripts" / "orchestrator.sh"
+
+    def test_no_python_on_path_exits_zero(self):
+        with tempfile.TemporaryDirectory() as empty:
+            res = subprocess.run(["/bin/sh", str(self.launcher), "pre-agent"], input='{"tool_input": {}}',
+                                 capture_output=True, text=True, env={"PATH": empty})
+        self.assertEqual((res.returncode, res.stdout), (0, ""))
+
+    def test_runs_from_a_path_with_spaces(self):
+        import shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "My Plugins" / "orchestrator"
+            shutil.copytree(PLUGIN, root, ignore=shutil.ignore_patterns("evals"))
+            res = subprocess.run(["sh", str(root / "scripts" / "orchestrator.sh"), "session-start"],
+                                 input='{"source": "startup"}', capture_output=True, text=True,
+                                 env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(root),
+                                      "CLAUDE_PLUGIN_DATA": str(Path(tmp) / "data")})
+        self.assertIn("additionalContext", res.stdout, res.stderr)
 
 
 class PostAgentHook(TempDataDir):

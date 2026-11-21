@@ -7,6 +7,8 @@ Hook commands (read hook JSON on stdin):
   session-start    Print routing context and pending upstream-change notices.
   pre-agent        PreToolUse on Agent: enforce the model tier cap, log the spawn.
   post-agent       PostToolUse on Agent: log the model the subagent actually ran on.
+  model-switch     PostModelSwitch: remember the session's model, which inheriting
+                   subagents run on.
   refresh-cache    Async SessionStart: refresh the upstream cache at most once a day.
 
 Helper commands (used by skills and CI):
@@ -77,7 +79,9 @@ def load_json(path: Path, default: Any) -> Any:
 
 
 def save_json(path: Path, value: Any) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    # A unique temp name per process, so two sessions writing at once can't clobber
+    # each other's half-written file; the rename itself is atomic.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{time.monotonic_ns()}.tmp")
     tmp.write_text(json.dumps(value, indent=2, sort_keys=True), encoding="utf-8")
     tmp.replace(path)
 
@@ -101,11 +105,31 @@ def project_dir(hook_input: dict | None = None) -> Path:
     return Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
 
 
+def _clean_override(override: Any) -> dict:
+    """Keep only well-formed parts of a project override, so a typo can't break hooks."""
+    if not isinstance(override, dict):
+        return {}
+    out: dict = {}
+    for section in ("agents", "tiers"):
+        value = override.get(section)
+        if isinstance(value, dict):
+            out[section] = {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, dict)}
+    for section in ("builtin_agents",):
+        value = override.get(section)
+        if isinstance(value, dict):
+            out[section] = {k: v for k, v in value.items() if isinstance(v, str)}
+    return out
+
+
+def base_config() -> dict:
+    return load_json(PLUGIN_ROOT / "config" / "routing.json", {})
+
+
 def load_config(hook_input: dict | None = None) -> dict:
-    config = load_json(PLUGIN_ROOT / "config" / "routing.json", {})
-    override = load_json(project_dir(hook_input) / ".claude" / "orchestrator.json", {})
-    if isinstance(override, dict):
-        config = _merge(config, override)
+    config = base_config()
+    override = _clean_override(load_json(project_dir(hook_input) / ".claude" / "orchestrator.json", {}))
+    config = _merge(config, override)
+    config["_override_agents"] = sorted((override.get("agents") or {}).keys())
     return config
 
 
@@ -134,18 +158,71 @@ def strip_namespace(agent_type: str) -> str:
     return agent_type.split(":", 1)[1] if ":" in agent_type else agent_type
 
 
-def resolve_agent_model(config: dict, subagent_type: str, requested: str | None) -> str | None:
-    """Return the tier a spawn will most likely run on, or None when it inherits."""
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def local_agent_names(project: Path) -> set[str]:
+    """Names of user and project subagents, which shadow nothing of ours (ours are
+    namespaced) but do share bare names such as `reviewer`."""
+    names: set[str] = set()
+    for folder in (project / ".claude" / "agents", Path.home() / ".claude" / "agents"):
+        try:
+            files = list(folder.rglob("*.md"))
+        except OSError:
+            continue
+        for path in files[:500]:
+            try:
+                head = path.read_text(encoding="utf-8", errors="replace")[:2000]
+            except OSError:
+                continue
+            match = re.search(r"^---\s*\n(?:.*\n)*?name:\s*['\"]?([^'\"\n]+?)['\"]?\s*\n", head)
+            if match:
+                names.add(match.group(1).strip())
+    return names
+
+
+def resolve_agent_model(config: dict, subagent_type: str, requested: str | None,
+                        session_model: str | None = None, project: Path | None = None) -> str | None:
+    """Return the tier a spawn will most likely run on, or None when it can't be known.
+
+    Mirrors the order in the subagents docs: a forced CLAUDE_CODE_SUBAGENT_MODEL wins,
+    then the per-call model, then the agent's own model, then CLAUDE_CODE_SUBAGENT_MODEL,
+    then the parent conversation's model.
+    """
+    env_model = os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL")
+    if _truthy(os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")):
+        return model_family(env_model) or model_family(session_model)
     if requested:
         return model_family(requested)
-    name = strip_namespace(subagent_type or "")
+
+    subagent_type = subagent_type or "general-purpose"
     agents = config.get("agents") or {}
-    if ":" in (subagent_type or "") and not subagent_type.startswith("orchestrator:"):
-        return None  # another plugin's agent: we don't know its model
-    if name in agents:
-        return model_family(agents[name].get("model"))
-    builtin = (config.get("builtin_agents") or {}).get(name)
-    return model_family(builtin)
+    base_agents = (base_config().get("agents") or {})
+    defined: str | None = None
+    known = False
+    if ":" in subagent_type:
+        prefix, name = subagent_type.split(":", 1)
+        if prefix == "orchestrator" and name in agents:
+            defined, known = agents[name].get("model"), True
+    else:
+        name = subagent_type
+        if name in (config.get("_override_agents") or []):
+            defined, known = agents[name].get("model"), True
+        elif name in (config.get("builtin_agents") or {}):
+            defined, known = config["builtin_agents"][name], True
+        elif name in base_agents and name not in local_agent_names(project or Path.cwd()):
+            # A bare name for one of ours, with no user or project agent of that name.
+            defined, known = agents[name].get("model"), True
+    if not known:
+        return None  # another plugin's or the user's own agent: its model is its business
+
+    if defined and defined != "inherit":
+        return model_family(defined)
+    parent = model_family(env_model) or model_family(session_model)
+    if subagent_type == "Explore" and parent == "fable":
+        return "opus"  # documented: Explore steps down from Fable to Opus on most connections
+    return parent
 
 
 def agent_label(name: str) -> str:
@@ -154,13 +231,14 @@ def agent_label(name: str) -> str:
     return f"orchestrator:{name}" if name in base else name
 
 
-def max_tier() -> str:
-    """The tier cap. Hooks get it from the environment; skill commands run through the
-    Bash tool, which doesn't receive plugin options, so they read the value the last
-    SessionStart hook recorded."""
+def max_tier(from_state: bool = False) -> str:
+    """The tier cap. Hooks read it from the environment, where Claude Code puts plugin
+    options. Skill commands run through the Bash tool, which doesn't get plugin
+    options, so they pass from_state and read what the last SessionStart recorded."""
     value = os.environ.get("CLAUDE_PLUGIN_OPTION_MAX_TIER")
-    if not value:
-        value = load_json(state_path(), {}).get("max_tier") or "fable"
+    if not value and from_state:
+        value = load_json(state_path(), {}).get("max_tier")
+    value = value or "fable"
     value = value.strip().lower()
     return value if value in TIER_RANK_DEFAULT else "fable"
 
@@ -168,10 +246,76 @@ def max_tier() -> str:
 # ------------------------------------------------------------------------- ledger
 
 
+LEDGER_MAX_BYTES = 4 * 1024 * 1024
+
+
 def append_ledger(entry: dict) -> None:
     entry = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"), **entry}
-    with ledger_path().open("a", encoding="utf-8") as fh:
+    path = ledger_path()
+    with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry) + "\n")
+    try:
+        if path.stat().st_size > LEDGER_MAX_BYTES:
+            lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+            tmp.write_text("".join(lines[len(lines) // 2:]), encoding="utf-8")
+            tmp.replace(path)
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------- session models
+
+
+def sessions_path() -> Path:
+    return data_dir() / "sessions.json"
+
+
+def record_session_model(session_id: str | None, model: str | None) -> None:
+    if not session_id or not model:
+        return
+    sessions = load_json(sessions_path(), {})
+    if not isinstance(sessions, dict):
+        sessions = {}
+    sessions.pop(session_id, None)
+    sessions[session_id] = model
+    while len(sessions) > 200:
+        sessions.pop(next(iter(sessions)))
+    save_json(sessions_path(), sessions)
+
+
+def model_from_transcript(transcript_path: str | None) -> str | None:
+    """The model of the newest assistant message in a transcript, read from its tail."""
+    if not transcript_path:
+        return None
+    try:
+        with open(os.path.expanduser(transcript_path), "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - 512 * 1024))
+            tail = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    for line in reversed(tail.splitlines()):
+        if '"assistant"' not in line or '"model"' not in line:
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        message = row.get("message") if isinstance(row, dict) else None
+        model = message.get("model") if isinstance(message, dict) else None
+        if isinstance(model, str) and model_family(model):
+            return model
+    return None
+
+
+def session_model(session_id: str | None, transcript_path: str | None = None) -> str | None:
+    """Best effort: the model recorded by SessionStart or PostModelSwitch, else the one
+    the transcript shows. SessionStart doesn't always carry `model`."""
+    sessions = load_json(sessions_path(), {})
+    recorded = sessions.get(session_id) if isinstance(sessions, dict) and session_id else None
+    return model_from_transcript(transcript_path) or recorded
 
 
 def read_ledger(days: int | None = None) -> list[dict]:
@@ -301,7 +445,7 @@ def pending_changes(state: dict) -> dict | None:
 
 
 def routing_table(config: dict) -> str:
-    cap = max_tier()
+    cap = max_tier(from_state=True)
     ranks = tier_ranks(config)
     lines = [f"Model tier cap: **{cap}** (set with /config, option max_tier).", "",
              "| Agent | Model | Role |", "| :- | :- | :- |"]
@@ -358,6 +502,7 @@ def hook_session_start(hook_input: dict) -> None:
     if state.get("max_tier") != cap:
         state["max_tier"] = cap
         save_json(state_path(), state)
+    record_session_model(hook_input.get("session_id"), hook_input.get("model"))
     agents = ", ".join(
         f"{agent_label(name)}={a.get('model')}" for name, a in sorted((config.get("agents") or {}).items())
     )
@@ -386,7 +531,9 @@ def hook_pre_agent(hook_input: dict) -> int:
     requested = tool_input.get("model")
     config = load_config(hook_input)
     ranks = tier_ranks(config)
-    tier = resolve_agent_model(config, subagent_type, requested)
+    tier = resolve_agent_model(config, subagent_type, requested,
+                               session_model(hook_input.get("session_id"), hook_input.get("transcript_path")),
+                               project_dir(hook_input))
     cap = max_tier()
     decision = "allow"
     if tier and ranks.get(tier, 0) > ranks.get(cap, 4):
@@ -397,7 +544,7 @@ def hook_pre_agent(hook_input: dict) -> int:
             "session": hook_input.get("session_id"),
             "agent": subagent_type,
             "requested_model": requested,
-            "expected_tier": tier or "inherit",
+            "expected_tier": tier or "unknown",
             "decision": decision,
             "description": (tool_input.get("description") or "")[:120],
         })
@@ -417,6 +564,10 @@ def hook_pre_agent(hook_input: dict) -> int:
                                                  "permissionDecision": "deny",
                                                  "permissionDecisionReason": reason}}))
     return 0
+
+
+def hook_model_switch(hook_input: dict) -> None:
+    record_session_model(hook_input.get("session_id"), hook_input.get("to_model"))
 
 
 def hook_post_agent(hook_input: dict) -> None:
@@ -470,7 +621,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="orchestrator")
     parser.add_argument("--data-dir", help="plugin data directory; skills pass ${CLAUDE_PLUGIN_DATA}")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in ("session-start", "pre-agent", "post-agent", "refresh-cache", "routing-table", "ack"):
+    for name in ("session-start", "pre-agent", "post-agent", "model-switch", "refresh-cache", "routing-table", "ack"):
         sub.add_parser(name)
     p = sub.add_parser("refresh")
     p.add_argument("--force", action="store_true")
@@ -486,7 +637,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.data_dir and "${" not in args.data_dir:
         os.environ["CLAUDE_PLUGIN_DATA"] = args.data_dir
 
-    hook_cmds = {"session-start", "pre-agent", "post-agent", "refresh-cache"}
+    hook_cmds = {"session-start", "pre-agent", "post-agent", "model-switch", "refresh-cache"}
     if args.cmd in hook_cmds:
         try:
             hook_input = read_hook_input()
@@ -496,6 +647,8 @@ def main(argv: list[str] | None = None) -> int:
                 return hook_pre_agent(hook_input)
             elif args.cmd == "post-agent":
                 hook_post_agent(hook_input)
+            elif args.cmd == "model-switch":
+                hook_model_switch(hook_input)
             elif args.cmd == "refresh-cache":
                 if os.environ.get("CLAUDE_PLUGIN_OPTION_UPDATE_CHECK", "true").lower() not in ("false", "0", "no"):
                     refresh(force=False)

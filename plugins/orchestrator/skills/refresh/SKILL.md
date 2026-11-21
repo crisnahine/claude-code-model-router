@@ -2,14 +2,14 @@
 name: refresh
 description: Check the live Claude Code changelog and documentation for releases, new features, model updates and breaking changes since the last review, and report what they mean for this plugin and the user's setup.
 disable-model-invocation: true
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py *)
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.sh" *)
 ---
 
 # Review upstream Claude Code changes
 
 ## What changed since the last review
 
-!`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py --data-dir "${CLAUDE_PLUGIN_DATA}" refresh --force`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" refresh --force`
 
 ## Steps
 
@@ -21,7 +21,7 @@ allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py *)
    - `plugin.json`, marketplace, evals or workflows
    - anything deprecated or removed
 3. Present a short impact report: each item, what it affects, and the recommended action. Mark breaking changes first.
-4. Ask the user whether to mark these changes as reviewed. When they agree, run `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py --data-dir "${CLAUDE_PLUGIN_DATA}" ack`.
+4. Ask the user whether to mark these changes as reviewed. When they agree, run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" ack`.
 
 ## If the current project is the orchestrator plugin's own repository
 

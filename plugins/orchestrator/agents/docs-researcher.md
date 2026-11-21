@@ -4,6 +4,7 @@ description: Reads the current official Claude Code documentation and changelog 
 model: haiku
 effort: medium
 tools: Read, Grep, Glob, WebFetch, WebSearch
+omitClaudeMd: true
 color: blue
 ---
 

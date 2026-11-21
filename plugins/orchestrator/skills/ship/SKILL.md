@@ -15,7 +15,7 @@ Run this pipeline yourself as the coordinator. Delegate each stage to the named 
 
 - If the task is a GitHub issue number or URL, read it with `gh issue view` (ask once if `gh` isn't available).
 - Read `CLAUDE.md` and the parts of the codebase the task touches. Use `orchestrator:scout` if that takes more than a few searches.
-- Decide the size with the `orchestrator:route` rubric. If the task is trivial (one obvious edit), skip step 1 and implement directly.
+- Decide the size with the `orchestrator:route` rubric. If the task is trivial (one obvious edit of a few lines in one file), skip steps 1 and 2 and make the edit yourself. Otherwise delegate building, even when the plan is short: running it on the implementer's cheaper model is the point.
 - Make sure work happens on a branch, not the default branch. Create one named after the task if needed.
 
 ## 1. Plan
@@ -30,11 +30,11 @@ Give `orchestrator:implementer` the plan. When the plan marks steps as independe
 
 ## 3. Verify
 
-Run `orchestrator:verifier` on the result. If it fails, send the failures to `orchestrator:implementer` and verify again.
+Run `orchestrator:verifier` on the result and wait for it before starting the review. If it reports that it couldn't run a command because of permissions, run that command yourself and use its output. If it fails, send the failures to `orchestrator:implementer` and verify again.
 
 ## 4. Review
 
-Run `orchestrator:reviewer` on the diff. Send blocking and should-fix findings back to the implementer, then verify again.
+Save the full diff against the base branch, including new files, to a file in the session's scratchpad (for example `git add -N . && git diff <base> > <scratchpad>/review.diff`), then run `orchestrator:reviewer` with that path and the task's acceptance criteria. Send blocking and should-fix findings back to the implementer, then verify again.
 
 Limit steps 3 and 4 to **2 fix loops** in total. If problems remain after that, escalate the remaining problem once to `orchestrator:architect` for a diagnosis, apply its fix, and verify. If it still fails, stop and report.
 

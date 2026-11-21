@@ -3,14 +3,14 @@ name: route
 description: Choose which Claude model and which orchestrator agent should handle a task, by complexity, risk and cost. Use before delegating any non-trivial coding, debugging, review or research task, and when the user asks which model to use.
 when_to_use: Which model should do this, plan this work, delegate, split this up, this is a big task, use the cheapest model that can do it.
 argument-hint: "[task description]"
-allowed-tools: Bash(python3 ${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py *)
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.sh" *)
 ---
 
 # Route a task to the right model
 
 ## Current routing policy
 
-!`python3 ${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.py --data-dir "${CLAUDE_PLUGIN_DATA}" routing-table`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" routing-table`
 
 ## Task
 

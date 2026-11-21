@@ -28,7 +28,7 @@
     "deep-solver": { "model": "fable", "role": "Hardest, longest, most ambiguous tasks" }
   },
   "builtin_agents": {
-    "Explore": "haiku",
+    "Explore": "inherit",
     "Plan": "inherit",
     "general-purpose": "inherit"
   },

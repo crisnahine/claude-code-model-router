@@ -16,7 +16,7 @@ In Claude Code:
 /plugin install orchestrator@claude-code-orchestrator
 ```
 
-Requirements: Claude Code 2.1.300 or later, and `python3` (3.9+) on your `PATH` for the hooks. The update check needs network access to `code.claude.com`.
+Requirements: Claude Code 2.1.270 or later, `sh`, and Python 3.9+ as `python3` or `python` on your `PATH`. Without Python the plugin stays out of the way: hooks do nothing and skills say why. The update check needs network access to `code.claude.com`.
 
 To try it from a clone without installing: `claude --plugin-dir ./plugins/orchestrator`.
 
@@ -49,7 +49,7 @@ Model choice is enforced by Claude Code itself through each agent's `model` fron
 
 Run `/config` and find the Orchestrator rows:
 
-- **Highest model tier** (`max_tier`): `haiku`, `sonnet`, `opus` or `fable` (default). A subagent spawn above it is refused, and Claude is told which cheaper agent to use instead.
+- **Highest model tier** (`max_tier`): `haiku`, `sonnet`, `opus` or `fable` (default, no cap). A subagent spawn above it is refused, and Claude is told which cheaper agent or model to use instead. This includes built-in agents that inherit your session's model, so with the cap at `sonnet` and an Opus session, Explore runs are retried on Sonnet.
 - **Check for Claude Code updates** (`update_check`): on by default. Turns off the daily fetch from `code.claude.com`.
 
 To extend routing for one project, add `.claude/orchestrator.json` with the parts of [`config/routing.json`](plugins/orchestrator/config/routing.json) you want to merge in. The most useful case is registering your project's own subagents, so the routing table lists them and the tier cap knows their models:
@@ -69,6 +69,30 @@ Being specific about limits, so you know what you're getting:
 - **Minimal human intervention, not zero.** `/orchestrator:ship` runs end to end without questions, except when a plan changes a public API, schema, security behavior or dependencies, and it never pushes, merges or deploys without being asked. Those are deliberate stops.
 - **Cost reporting is about routing.** Token and dollar totals come from Claude Code's own `/usage` and `/cost`; the ledger records which agents and models ran.
 
+## Compatibility and edge cases
+
+What has been checked, and how:
+
+| Situation | Status |
+| :- | :- |
+| Claude Code 2.1.270, 2.1.300 and 2.1.330 | Loaded and run live: agents spawn on their models and hooks fire |
+| Another plugin with an agent named `reviewer`, a skill named `route` and its own `Agent` hooks | Run live: both plugins' hooks run, names stay separate, the cap only judges agents whose model it knows |
+| Your own `.claude/agents/scout.md` or `~/.claude/agents/reviewer.md` | Unit tested and run live: a bare `scout` is treated as yours, `orchestrator:scout` as ours |
+| Plugin installed under a path with spaces | Run live (skills and hooks) |
+| Built-in agents (Explore, Plan, general-purpose) that inherit the session model | Run live: the cap uses the session's model, read from the transcript. Following `/model` switches is unit tested |
+| `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` | Unit tested, following the documented precedence |
+| Offline, corrupt state files, malformed `.claude/orchestrator.json`, no Python | Unit tested: hooks exit cleanly and never block a session |
+| Linux, macOS and Windows, Python 3.9 and 3.13 | Hook logic unit tested in CI on all six combinations |
+| Fable | Run live: `deep-solver` ran on `claude-fable-5-2` |
+
+Known limits:
+
+- **The cap only sees the `Agent` tool.** Agents started by a [workflow](https://code.claude.com/docs/en/workflows), agent-team teammates, and a mod that sets the model in `agent.spawn` aren't checked.
+- **Inherited models are detected best-effort.** On the very first turn of a session, before Claude has replied once, an inheriting built-in agent can't be checked and is allowed.
+- **Models your plan or gateway doesn't serve.** Claude Code falls back as described in its [subagent docs](https://code.claude.com/docs/en/sub-agents#when-an-allowlist-blocks-a-subagent-model). If your gateway doesn't serve Fable, set the cap to `opus` so Claude routes the hardest work there directly.
+- **Windows.** Hooks need `sh`, which Git for Windows provides. Claude Code on Windows without Git Bash hasn't been tested.
+- **Another plugin's agents** are never capped, since their models aren't knowable from the outside.
+
 ## How it's built
 
 Only documented Claude Code plugin mechanisms are used: subagents with `model` and `effort` frontmatter, skills with dynamic context injection, `SessionStart`, `PreToolUse` and `PostToolUse` hooks on the `Agent` tool, `userConfig` options, and a plugin marketplace. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -80,6 +104,7 @@ plugins/orchestrator/
   agents/                         seven model-pinned subagents
   skills/                         route, ship, refresh, usage
   hooks/hooks.json                session context, tier cap, ledger, update check
+  scripts/orchestrator.sh         launcher that finds Python and never fails a hook
   scripts/orchestrator.py         hook handlers and helpers (Python standard library only)
   config/routing.json             tiers, agents and escalation policy
   evals/                          claude plugin eval cases for routing
