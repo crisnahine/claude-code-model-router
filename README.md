@@ -82,7 +82,7 @@ What has been checked, and how:
 | Built-in agents (Explore, Plan, general-purpose) that inherit the session model | Run live: the cap uses the session's model, read from the transcript. Following `/model` switches is unit tested |
 | `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` | Unit tested, following the documented precedence |
 | Offline, corrupt state files, malformed `.claude/orchestrator.json`, no Python | Unit tested: hooks exit cleanly and never block a session |
-| Linux, macOS and Windows, Python 3.9 and 3.13 | Hook logic unit tested in CI on all six combinations |
+| Linux, macOS and Windows, Python 3.9 to 3.13 | Hook logic unit tested in CI on all three systems with Python 3.10 and 3.13, and locally on 3.9 |
 | Fable | Run live: `deep-solver` ran on `claude-fable-5-2` |
 
 Known limits:
