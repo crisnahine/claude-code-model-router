@@ -1,0 +1,28 @@
+{
+  "name": "orchestrator",
+  "displayName": "Orchestrator",
+  "version": "0.1.0",
+  "description": "Autonomous multi-model orchestration for Claude Code: routes work to Haiku, Sonnet, Opus or Fable by task complexity, runs a plan-build-verify-review pipeline, enforces a model cost cap, and flags Claude Code releases and docs changes that need review.",
+  "author": { "name": "Cris", "url": "https://github.com/crisnahine" },
+  "homepage": "https://github.com/crisnahine/claude-code-orchestrator",
+  "repository": "https://github.com/crisnahine/claude-code-orchestrator",
+  "license": "MIT",
+  "keywords": ["orchestration", "multi-model", "subagents", "model-routing", "autonomous", "sdlc", "code-review", "cost-optimization"],
+  "engines": { "claude-code": ">=2.1.300" },
+  "network": { "hosts": ["code.claude.com"] },
+  "userConfig": {
+    "max_tier": {
+      "type": "string",
+      "title": "Highest model tier",
+      "description": "The most capable model subagents may run on. Spawns above it are refused with a suggestion to use a cheaper agent.",
+      "options": ["haiku", "sonnet", "opus", "fable"],
+      "default": "fable"
+    },
+    "update_check": {
+      "type": "boolean",
+      "title": "Check for Claude Code updates",
+      "description": "Once a day, fetch the Claude Code changelog and docs index from code.claude.com and mention changes that affect this plugin.",
+      "default": true
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "claude-code-orchestrator",
+  "description": "Marketplace for Orchestrator, an autonomous multi-model orchestration plugin for Claude Code.",
+  "owner": { "name": "Cris", "url": "https://github.com/crisnahine" },
+  "plugins": [
+    {
+      "name": "orchestrator",
+      "source": "./plugins/orchestrator",
+      "description": "Claude Code plugin for autonomous multi-model orchestration: routes tasks to Haiku, Sonnet, Opus or Fable by complexity, runs a plan-build-verify-review pipeline, caps model cost, and tracks Claude Code releases.",
+      "category": "development",
+      "tags": ["orchestration", "multi-model", "subagents", "autonomous", "model-routing"]
+    }
+  ]
+}

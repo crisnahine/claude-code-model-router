@@ -1,0 +1,546 @@
+#!/usr/bin/env python3
+"""Orchestrator plugin runtime: hook handlers and helper commands.
+
+Standard library only, so it runs anywhere Python 3.9+ is installed.
+
+Hook commands (read hook JSON on stdin):
+  session-start    Print routing context and pending upstream-change notices.
+  pre-agent        PreToolUse on Agent: enforce the model tier cap, log the spawn.
+  post-agent       PostToolUse on Agent: log the model the subagent actually ran on.
+  refresh-cache    Async SessionStart: refresh the upstream cache at most once a day.
+
+Helper commands (used by skills and CI):
+  routing-table    Print the effective routing policy as Markdown.
+  refresh [--force]
+  status [--json]  Show Claude Code releases and docs pages that changed since the
+                   last acknowledged review.
+  ack              Mark everything in the cache as reviewed.
+  usage [DAYS]     Summarize the subagent ledger by agent and model.
+  upstream-check --baseline FILE [--write]
+                   CI mode: compare live upstream against a committed baseline.
+
+Hooks must never break a session, so every hook handler swallows its own errors
+and exits 0, except a deliberate deny from pre-agent.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as _dt
+import hashlib
+import json
+import os
+import re
+import sys
+import time
+import urllib.request
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Any
+
+PLUGIN_ROOT = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or Path(__file__).resolve().parent.parent)
+CHANGELOG_RSS = "https://code.claude.com/docs/en/changelog/rss.xml"
+DOCS_INDEX = "https://code.claude.com/docs/llms.txt"
+CACHE_TTL_SECONDS = 24 * 3600
+HTTP_TIMEOUT = 10
+TIER_RANK_DEFAULT = {"haiku": 1, "sonnet": 2, "opus": 3, "fable": 4}
+# Docs pages that describe the surfaces this plugin is built on. A change to one of
+# these is flagged as high impact in `status`.
+WATCHED_PAGES = (
+    "plugins", "sub-agents", "hooks", "skills", "model-config", "workflows",
+    "plugin-evals", "mcp", "settings", "agent-teams", "costs",
+)
+
+
+# --------------------------------------------------------------------------- paths
+
+
+def data_dir() -> Path:
+    env = os.environ.get("CLAUDE_PLUGIN_DATA")
+    path = Path(env) if env else Path.home() / ".claude" / "plugins" / "data" / "orchestrator-local"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def state_path() -> Path:
+    return data_dir() / "state.json"
+
+
+def ledger_path() -> Path:
+    return data_dir() / "ledger.jsonl"
+
+
+def load_json(path: Path, default: Any) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+def save_json(path: Path, value: Any) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(value, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+# ------------------------------------------------------------------------- config
+
+
+def _merge(base: dict, override: dict) -> dict:
+    out = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def project_dir(hook_input: dict | None = None) -> Path:
+    if hook_input and hook_input.get("cwd"):
+        return Path(hook_input["cwd"])
+    return Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
+
+
+def load_config(hook_input: dict | None = None) -> dict:
+    config = load_json(PLUGIN_ROOT / "config" / "routing.json", {})
+    override = load_json(project_dir(hook_input) / ".claude" / "orchestrator.json", {})
+    if isinstance(override, dict):
+        config = _merge(config, override)
+    return config
+
+
+def tier_ranks(config: dict) -> dict[str, int]:
+    ranks = dict(TIER_RANK_DEFAULT)
+    for name, tier in (config.get("tiers") or {}).items():
+        if isinstance(tier, dict) and isinstance(tier.get("rank"), int):
+            ranks[name] = tier["rank"]
+    return ranks
+
+
+def model_family(model: str | None) -> str | None:
+    """Map an alias or full model ID to a tier name, or None if unknown/inherit."""
+    if not model:
+        return None
+    m = model.lower().split("[")[0]
+    if m == "best":
+        return "opus"
+    for family in ("fable", "opus", "sonnet", "haiku"):
+        if m == family or family in m:
+            return family
+    return None
+
+
+def strip_namespace(agent_type: str) -> str:
+    return agent_type.split(":", 1)[1] if ":" in agent_type else agent_type
+
+
+def resolve_agent_model(config: dict, subagent_type: str, requested: str | None) -> str | None:
+    """Return the tier a spawn will most likely run on, or None when it inherits."""
+    if requested:
+        return model_family(requested)
+    name = strip_namespace(subagent_type or "")
+    agents = config.get("agents") or {}
+    if ":" in (subagent_type or "") and not subagent_type.startswith("orchestrator:"):
+        return None  # another plugin's agent: we don't know its model
+    if name in agents:
+        return model_family(agents[name].get("model"))
+    builtin = (config.get("builtin_agents") or {}).get(name)
+    return model_family(builtin)
+
+
+def agent_label(name: str) -> str:
+    """Plugin agents are namespaced; project agents registered by override aren't."""
+    base = (load_json(PLUGIN_ROOT / "config" / "routing.json", {}).get("agents") or {})
+    return f"orchestrator:{name}" if name in base else name
+
+
+def max_tier() -> str:
+    """The tier cap. Hooks get it from the environment; skill commands run through the
+    Bash tool, which doesn't receive plugin options, so they read the value the last
+    SessionStart hook recorded."""
+    value = os.environ.get("CLAUDE_PLUGIN_OPTION_MAX_TIER")
+    if not value:
+        value = load_json(state_path(), {}).get("max_tier") or "fable"
+    value = value.strip().lower()
+    return value if value in TIER_RANK_DEFAULT else "fable"
+
+
+# ------------------------------------------------------------------------- ledger
+
+
+def append_ledger(entry: dict) -> None:
+    entry = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"), **entry}
+    with ledger_path().open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry) + "\n")
+
+
+def read_ledger(days: int | None = None) -> list[dict]:
+    rows: list[dict] = []
+    cutoff = None
+    if days:
+        cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)
+    try:
+        lines = ledger_path().read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return rows
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if cutoff:
+            try:
+                if _dt.datetime.fromisoformat(row["ts"]) < cutoff:
+                    continue
+            except (KeyError, ValueError):
+                continue
+        rows.append(row)
+    return rows
+
+
+# ----------------------------------------------------------------------- upstream
+
+
+def http_get(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": "orchestrator-plugin/0.1"})
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:  # noqa: S310 (fixed https URLs)
+        return resp.read().decode("utf-8", "replace")
+
+
+def parse_rss(xml_text: str, limit: int = 30) -> list[dict]:
+    root = ET.fromstring(xml_text)
+    items = []
+    for item in root.iter("item"):
+        title = (item.findtext("title") or "").strip()
+        content = ""
+        for child in item:
+            if child.tag.endswith("encoded"):
+                content = child.text or ""
+        text = re.sub(r"<[^>]+>", "", content)
+        bullets = [b.strip() for b in text.splitlines() if b.strip()]
+        items.append({
+            "version": title,
+            "date": (item.findtext("pubDate") or "").strip(),
+            "link": (item.findtext("link") or "").strip(),
+            "highlights": bullets[:40],
+        })
+        if len(items) >= limit:
+            break
+    return items
+
+
+def parse_llms_index(text: str) -> dict[str, str]:
+    """Map docs page URL to its one-line summary from llms.txt."""
+    pages = {}
+    for match in re.finditer(r"^- \[[^\]]*\]\((https://[^)]+)\):?\s*(.*)$", text, re.M):
+        pages[match.group(1)] = match.group(2).strip()
+    return pages
+
+
+def version_key(version: str) -> tuple:
+    return tuple(int(p) if p.isdigit() else 0 for p in re.split(r"[.\-]", version))
+
+
+def fetch_upstream() -> dict:
+    releases = parse_rss(http_get(CHANGELOG_RSS))
+    pages = parse_llms_index(http_get(DOCS_INDEX))
+    return {
+        "fetched_at": int(time.time()),
+        "releases": releases,
+        "pages": {url: hashlib.sha256(summary.encode()).hexdigest()[:16] for url, summary in pages.items()},
+    }
+
+
+def diff_upstream(reviewed: dict, live: dict) -> dict:
+    reviewed_version = reviewed.get("claude_code_version") or "0"
+    new_releases = [
+        r for r in live.get("releases", [])
+        if r.get("version") and version_key(r["version"]) > version_key(reviewed_version)
+    ]
+    old_pages = reviewed.get("pages") or {}
+    new_pages = live.get("pages") or {}
+    added = sorted(set(new_pages) - set(old_pages))
+    removed = sorted(set(old_pages) - set(new_pages))
+    changed = sorted(u for u in set(new_pages) & set(old_pages) if new_pages[u] != old_pages[u])
+
+    def watched(url: str) -> bool:
+        slug = url.rsplit("/docs/en/", 1)[-1].removesuffix(".md")
+        return any(slug == p or slug.startswith(p + "/") or slug.startswith(p + "-") for p in WATCHED_PAGES)
+
+    return {
+        "reviewed_version": reviewed_version,
+        "new_releases": new_releases,
+        "pages_added": added,
+        "pages_removed": removed,
+        "pages_changed": changed,
+        "watched_pages_touched": sorted(u for u in added + removed + changed if watched(u)),
+    }
+
+
+def refresh(force: bool = False) -> dict:
+    state = load_json(state_path(), {})
+    cache = state.get("cache") or {}
+    if not force and time.time() - cache.get("fetched_at", 0) < CACHE_TTL_SECONDS:
+        return state
+    state["cache"] = fetch_upstream()
+    if "reviewed" not in state:
+        # First run: treat the present as reviewed so users aren't flooded with history.
+        latest = state["cache"]["releases"][0]["version"] if state["cache"]["releases"] else "0"
+        state["reviewed"] = {"claude_code_version": latest, "pages": state["cache"]["pages"]}
+    save_json(state_path(), state)
+    return state
+
+
+def pending_changes(state: dict) -> dict | None:
+    if not state.get("cache") or not state.get("reviewed"):
+        return None
+    return diff_upstream(state["reviewed"], state["cache"])
+
+
+# -------------------------------------------------------------------- formatting
+
+
+def routing_table(config: dict) -> str:
+    cap = max_tier()
+    ranks = tier_ranks(config)
+    lines = [f"Model tier cap: **{cap}** (set with /config, option max_tier).", "",
+             "| Agent | Model | Role |", "| :- | :- | :- |"]
+    for name, agent in sorted((config.get("agents") or {}).items(), key=lambda kv: ranks.get(kv[1].get("model"), 9)):
+        model = agent.get("model", "inherit")
+        flag = " (over cap)" if ranks.get(model, 0) > ranks.get(cap, 4) else ""
+        lines.append(f"| {agent_label(name)} | {model}{flag} | {agent.get('role', '')} |")
+    lines += ["", "| Tier | Use for |", "| :- | :- |"]
+    for name, tier in sorted((config.get("tiers") or {}).items(), key=lambda kv: kv[1].get("rank", 9)):
+        lines.append(f"| {name} | {tier.get('use_for', '')} |")
+    return "\n".join(lines)
+
+
+def status_text(changes: dict | None) -> str:
+    if changes is None:
+        return "No upstream data cached yet. Run `/orchestrator:refresh`."
+    out = [f"Last reviewed Claude Code version: {changes['reviewed_version']}"]
+    if changes["new_releases"]:
+        out.append(f"\nNew releases since then ({len(changes['new_releases'])}):")
+        for rel in changes["new_releases"]:
+            out.append(f"- {rel['version']} ({rel['date']}): {rel['link']}")
+    else:
+        out.append("No new releases.")
+    for label, key in (("Docs pages added", "pages_added"), ("Docs pages removed", "pages_removed"),
+                       ("Docs pages whose summary changed", "pages_changed")):
+        if changes[key]:
+            out.append(f"\n{label} ({len(changes[key])}):")
+            out += [f"- {u}" for u in changes[key][:25]]
+    if changes["watched_pages_touched"]:
+        out.append("\nHigh impact (pages this plugin is built on):")
+        out += [f"- {u}" for u in changes["watched_pages_touched"]]
+    return "\n".join(out)
+
+
+def has_pending(changes: dict | None) -> bool:
+    return bool(changes and (changes["new_releases"] or changes["watched_pages_touched"]))
+
+
+# -------------------------------------------------------------------- hook handlers
+
+
+def read_hook_input() -> dict:
+    try:
+        data = json.load(sys.stdin)
+        return data if isinstance(data, dict) else {}
+    except ValueError:
+        return {}
+
+
+def hook_session_start(hook_input: dict) -> None:
+    config = load_config(hook_input)
+    cap = max_tier()
+    state = load_json(state_path(), {})
+    if state.get("max_tier") != cap:
+        state["max_tier"] = cap
+        save_json(state_path(), state)
+    agents = ", ".join(
+        f"{agent_label(name)}={a.get('model')}" for name, a in sorted((config.get("agents") or {}).items())
+    )
+    parts = [
+        "Orchestrator plugin is active. Delegate by task complexity instead of doing everything on the "
+        f"main model: agents {agents}. Model tier cap: {cap}. "
+        "For a non-trivial task, use the orchestrator:route skill to pick the agent; for a full "
+        "plan-build-verify-review loop the user runs /orchestrator:ship."
+    ]
+    if os.environ.get("CLAUDE_PLUGIN_OPTION_UPDATE_CHECK", "true").lower() not in ("false", "0", "no"):
+        changes = pending_changes(load_json(state_path(), {}))
+        if has_pending(changes):
+            n = len(changes["new_releases"])
+            touched = len(changes["watched_pages_touched"])
+            parts.append(
+                f"Upstream: {n} Claude Code release(s) and {touched} plugin-relevant docs page change(s) "
+                "since the last review. Mention once to the user that /orchestrator:refresh reviews them."
+            )
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                             "additionalContext": " ".join(parts)}}))
+
+
+def hook_pre_agent(hook_input: dict) -> int:
+    tool_input = hook_input.get("tool_input") or {}
+    subagent_type = tool_input.get("subagent_type") or "general-purpose"
+    requested = tool_input.get("model")
+    config = load_config(hook_input)
+    ranks = tier_ranks(config)
+    tier = resolve_agent_model(config, subagent_type, requested)
+    cap = max_tier()
+    decision = "allow"
+    if tier and ranks.get(tier, 0) > ranks.get(cap, 4):
+        decision = "deny"
+    try:
+        append_ledger({
+            "event": "spawn",
+            "session": hook_input.get("session_id"),
+            "agent": subagent_type,
+            "requested_model": requested,
+            "expected_tier": tier or "inherit",
+            "decision": decision,
+            "description": (tool_input.get("description") or "")[:120],
+        })
+    except OSError:
+        pass
+    if decision == "deny":
+        allowed = sorted(
+            (n for n, a in (config.get("agents") or {}).items() if ranks.get(a.get("model"), 0) <= ranks.get(cap, 4)),
+        )
+        reason = (
+            f"Orchestrator tier cap is '{cap}', and this spawn would run on '{tier}'. "
+            f"Retry with model: \"{cap}\" or one of these agents: "
+            + ", ".join(agent_label(n) for n in allowed)
+            + ". The user can raise the cap with /config (orchestrator max_tier)."
+        )
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                                 "permissionDecision": "deny",
+                                                 "permissionDecisionReason": reason}}))
+    return 0
+
+
+def hook_post_agent(hook_input: dict) -> None:
+    tool_input = hook_input.get("tool_input") or {}
+    response = hook_input.get("tool_response") or {}
+    if not isinstance(response, dict):
+        response = {}
+    append_ledger({
+        "event": "result",
+        "session": hook_input.get("session_id"),
+        "agent": tool_input.get("subagent_type") or "general-purpose",
+        "resolved_model": response.get("resolvedModel"),
+        "status": response.get("status"),
+        "total_tokens": response.get("totalTokens"),
+    })
+
+
+# ------------------------------------------------------------------------- usage
+
+
+def usage_report(days: int) -> str:
+    rows = read_ledger(days)
+    spawns = [r for r in rows if r.get("event") == "spawn"]
+    results = [r for r in rows if r.get("event") == "result"]
+    if not spawns and not results:
+        return f"No subagent activity recorded in the last {days} days."
+    by_agent: dict[str, dict] = {}
+    for r in spawns:
+        a = by_agent.setdefault(r.get("agent", "?"), {"spawns": 0, "denied": 0, "models": {}})
+        a["spawns"] += 1
+        if r.get("decision") == "deny":
+            a["denied"] += 1
+    for r in results:
+        a = by_agent.setdefault(r.get("agent", "?"), {"spawns": 0, "denied": 0, "models": {}})
+        model = r.get("resolved_model") or "background (not reported)"
+        a["models"][model] = a["models"].get(model, 0) + 1
+    lines = [f"Subagent usage, last {days} days", "", "| Agent | Spawns | Denied by cap | Ran on |",
+             "| :- | -: | -: | :- |"]
+    for agent, a in sorted(by_agent.items(), key=lambda kv: -kv[1]["spawns"]):
+        models = ", ".join(f"{m} x{n}" for m, n in sorted(a["models"].items())) or "-"
+        lines.append(f"| {agent} | {a['spawns']} | {a['denied']} | {models} |")
+    lines.append("")
+    lines.append("Token and dollar totals per model are in /usage and /cost; this ledger shows routing.")
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- main
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="orchestrator")
+    parser.add_argument("--data-dir", help="plugin data directory; skills pass ${CLAUDE_PLUGIN_DATA}")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    for name in ("session-start", "pre-agent", "post-agent", "refresh-cache", "routing-table", "ack"):
+        sub.add_parser(name)
+    p = sub.add_parser("refresh")
+    p.add_argument("--force", action="store_true")
+    p = sub.add_parser("status")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("usage")
+    p.add_argument("days", nargs="?", default="7")
+    p = sub.add_parser("upstream-check")
+    p.add_argument("--baseline", required=True)
+    p.add_argument("--write", action="store_true", help="overwrite the baseline with live data")
+    p.add_argument("--json-out")
+    args = parser.parse_args(argv)
+    if args.data_dir and "${" not in args.data_dir:
+        os.environ["CLAUDE_PLUGIN_DATA"] = args.data_dir
+
+    hook_cmds = {"session-start", "pre-agent", "post-agent", "refresh-cache"}
+    if args.cmd in hook_cmds:
+        try:
+            hook_input = read_hook_input()
+            if args.cmd == "session-start":
+                hook_session_start(hook_input)
+            elif args.cmd == "pre-agent":
+                return hook_pre_agent(hook_input)
+            elif args.cmd == "post-agent":
+                hook_post_agent(hook_input)
+            elif args.cmd == "refresh-cache":
+                if os.environ.get("CLAUDE_PLUGIN_OPTION_UPDATE_CHECK", "true").lower() not in ("false", "0", "no"):
+                    refresh(force=False)
+        except Exception as exc:  # noqa: BLE001 - a hook must never break the session
+            print(f"orchestrator {args.cmd}: {exc}", file=sys.stderr)
+        return 0
+
+    if args.cmd == "routing-table":
+        print(routing_table(load_config()))
+    elif args.cmd == "refresh":
+        state = refresh(force=args.force)
+        print(status_text(pending_changes(state)))
+    elif args.cmd == "status":
+        changes = pending_changes(load_json(state_path(), {}))
+        print(json.dumps(changes, indent=2) if args.json else status_text(changes))
+    elif args.cmd == "ack":
+        state = load_json(state_path(), {})
+        cache = state.get("cache")
+        if not cache:
+            print("Nothing cached yet; run refresh first.")
+            return 1
+        latest = cache["releases"][0]["version"] if cache.get("releases") else "0"
+        state["reviewed"] = {"claude_code_version": latest, "pages": cache.get("pages", {}),
+                             "reviewed_at": int(time.time())}
+        save_json(state_path(), state)
+        print(f"Marked Claude Code {latest} and the current docs index as reviewed.")
+    elif args.cmd == "usage":
+        days = int(args.days) if str(args.days).isdigit() else 7
+        print(usage_report(days))
+    elif args.cmd == "upstream-check":
+        baseline_path = Path(args.baseline)
+        baseline = load_json(baseline_path, {})
+        live = fetch_upstream()
+        changes = diff_upstream(baseline, live)
+        if args.write:
+            latest = live["releases"][0]["version"] if live["releases"] else "0"
+            save_json(baseline_path, {"claude_code_version": latest, "pages": live["pages"]})
+            print(f"Baseline written for Claude Code {latest} ({len(live['pages'])} docs pages).")
+            return 0
+        if args.json_out:
+            Path(args.json_out).write_text(json.dumps(changes, indent=2), encoding="utf-8")
+        print(status_text(changes))
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
