@@ -112,6 +112,8 @@ def _clean_override(override: Any) -> dict:
     if not isinstance(override, dict):
         return {}
     out: dict = {}
+    if isinstance(override.get("routing_mode"), str):
+        out["routing_mode"] = override["routing_mode"]
     redirect = override.get("redirect")
     if isinstance(redirect, dict):
         out["redirect"] = {k: [n for n in v if isinstance(n, str)] for k, v in redirect.items()
@@ -252,13 +254,41 @@ def max_tier(from_state: bool = False) -> str:
 ROUTING_MODES = ("off", "guide", "steer", "strict")
 
 
-def routing_mode() -> str:
+REDIRECT_BATCH_SECONDS = 3.0
+
+
+def routing_mode(config: dict | None = None) -> str:
     """off: no routing guidance or redirects (cap and ledger still work).
     guide: routing policy is injected as context only.
     steer (default): also redirect generic built-in agent calls to ours, once per prompt.
-    strict: always refuse generic built-in agent calls the user didn't ask for by name."""
+    strict: always refuse generic built-in agent calls the user didn't ask for by name.
+
+    A project's .claude/orchestrator.json may set "routing_mode" too. The weaker of the
+    two wins, so a repository can opt out but can't force a stronger mode on its users."""
     value = (os.environ.get("CLAUDE_PLUGIN_OPTION_ROUTING_MODE") or "steer").strip().lower()
-    return value if value in ROUTING_MODES else "steer"
+    mode = value if value in ROUTING_MODES else "steer"
+    project = (config or {}).get("routing_mode")
+    if isinstance(project, str) and project.strip().lower() in ROUTING_MODES:
+        project = project.strip().lower()
+        if ROUTING_MODES.index(project) < ROUTING_MODES.index(mode):
+            mode = project
+    return mode
+
+
+def batch_window() -> float:
+    try:
+        return float(os.environ.get("ORCHESTRATOR_REDIRECT_BATCH_SECONDS", REDIRECT_BATCH_SECONDS))
+    except ValueError:
+        return REDIRECT_BATCH_SECONDS
+
+
+_NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
+
+
+def is_user_prompt(prompt: str) -> bool:
+    """UserPromptSubmit also fires for background-task notifications and similar
+    machine-written turns. Those must not reset what the user asked for."""
+    return not (prompt or "").lstrip().startswith("<")
 
 
 # -------------------------------------------------------------- per-prompt state
@@ -293,9 +323,14 @@ def named_in_prompt(prompt: str, agent_type: str) -> bool:
     text = (prompt or "").lower()
     name = agent_type.lower()
     if "-" in name or ":" in name:
-        return name in text or name.replace("-", " ") in text
-    return bool(re.search(r"\b%s\s+(?:sub-?)?agent\b|subagent_type\W+%s\b|built-?in\s+%s\b"
-                          % (re.escape(name), re.escape(name), re.escape(name)), text))
+        pattern = r"%s|%s" % (re.escape(name), re.escape(name.replace("-", " ")))
+    else:
+        pattern = (r"\b%s\s+(?:sub-?)?agent\b|subagent_type\W+%s\b|built-?in\s+%s\b"
+                   % (re.escape(name), re.escape(name), re.escape(name)))
+    for match in re.finditer(pattern, text):
+        if not _NEGATION.search(text[max(0, match.start() - 40):match.start()]):
+            return True  # at least one mention that isn't "don't use the X agent"
+    return False
 
 
 def redirect_targets(config: dict, agent_type: str, cap: str) -> list[str]:
@@ -585,7 +620,7 @@ def hook_session_start(hook_input: dict) -> None:
     agents = ", ".join(
         f"{agent_label(name)}={a.get('model')}" for name, a in sorted((config.get("agents") or {}).items())
     )
-    mode = routing_mode()
+    mode = routing_mode(config)
     if mode == "off":
         parts = []
     else:
@@ -611,14 +646,19 @@ def hook_session_start(hook_input: dict) -> None:
 def hook_user_prompt(hook_input: dict) -> None:
     """Remember which built-in agents the user named, and restate the policy in one line
     so it holds deep into a long session and inside other plugins' skills."""
-    mode = routing_mode()
-    if mode == "off":
-        return
     config = load_config(hook_input)
+    mode = routing_mode(config)
     prompt = hook_input.get("prompt") or ""
-    named = [a for a in (config.get("redirect") or {}) if named_in_prompt(prompt, a)]
-    save_prompt_state(hook_input.get("session_id"), {
-        "prompt_id": hook_input.get("prompt_id"), "named": named, "redirected": []})
+    if mode == "off" or not is_user_prompt(prompt):
+        return
+    session_id = hook_input.get("session_id")
+    # An agent the user names stays allowed for the rest of the session: they asked for
+    # it, and a long task spans many turns. Redirects start fresh with each prompt.
+    named = set(load_prompt_state(session_id).get("named") or [])
+    named.update(a for a in (config.get("redirect") or {}) if named_in_prompt(prompt, a))
+    save_prompt_state(session_id, {
+        "prompt_id": hook_input.get("prompt_id"), "named": sorted(named), "redirected": {},
+        "redirected_calls": []})
     reminder = (
         "Orchestrator routing is on: delegate through the orchestrator: agents (scout, verifier, implementer, "
         "architect, reviewer, deep-solver) rather than general-purpose, Explore or Plan, whichever skill or "
@@ -643,18 +683,39 @@ def hook_pre_agent(hook_input: dict) -> int:
     if tier and ranks.get(tier, 0) > ranks.get(cap, 4):
         decision = "deny"
     else:
-        mode = routing_mode()
+        mode = routing_mode(config)
         targets = redirect_targets(config, subagent_type, cap)
+        if subagent_type == "Plan" and hook_input.get("permission_mode") == "plan":
+            targets = []  # plan mode's own research agent: leave the user's plan flow alone
+        if targets and subagent_type in local_agent_names(project_dir(hook_input)):
+            targets = []  # the user replaced this built-in with their own agent
         if mode in ("steer", "strict") and targets and not (requested and mode == "steer"):
             session_id = hook_input.get("session_id")
             entry = load_prompt_state(session_id)
+            redirected = entry.get("redirected")
+            if not isinstance(redirected, dict):
+                redirected = {}
+            first = redirected.get(subagent_type)
+            now = time.time()
+            call_key = hashlib.sha256(
+                (subagent_type + "\0" + str(tool_input.get("prompt") or "")).encode("utf-8", "replace")
+            ).hexdigest()[:16]
+            seen = entry.get("redirected_calls")
+            if not isinstance(seen, list):
+                seen = []
             if subagent_type in (entry.get("named") or []):
                 pass  # the user asked for this agent by name
             elif mode == "strict":
                 decision = "redirect"
-            elif subagent_type not in (entry.get("redirected") or []):
+            elif call_key in seen:
+                pass  # the very call we already redirected, issued again: Claude insists
+            elif first is None or now - first < batch_window():
+                # Different calls issued together in one response arrive within moments
+                # of each other and are all redirected. After that, a repeat is allowed.
                 decision = "redirect"
-                entry.setdefault("redirected", []).append(subagent_type)
+                redirected.setdefault(subagent_type, now)
+                entry["redirected"] = redirected
+                entry["redirected_calls"] = (seen + [call_key])[-50:]
                 try:
                     save_prompt_state(session_id, entry)
                 except OSError:
@@ -675,7 +736,7 @@ def hook_pre_agent(hook_input: dict) -> int:
         agents = config.get("agents") or {}
         options = "; ".join(f"{agent_label(n)} ({agents[n].get('model')}: {agents[n].get('role', '').lower()})"
                             for n in targets)
-        if routing_mode() == "strict":
+        if routing_mode(config) == "strict":
             tail = ("Strict routing is on, so this agent type is only available when the user asks for it "
                     "by name.")
         else:
@@ -691,6 +752,17 @@ def hook_pre_agent(hook_input: dict) -> int:
         allowed = sorted(
             (n for n, a in (config.get("agents") or {}).items() if ranks.get(a.get("model"), 0) <= ranks.get(cap, 4)),
         )
+        if _truthy(os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")):
+            reason = (
+                f"Orchestrator tier cap is '{cap}', but CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every "
+                f"subagent to '{tier}', so no subagent can run. Do the work yourself, and tell the user "
+                "once that these two settings conflict: raise the cap in /config (orchestrator max_tier) "
+                "or change CLAUDE_CODE_SUBAGENT_MODEL."
+            )
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                                     "permissionDecision": "deny",
+                                                     "permissionDecisionReason": reason}}))
+            return 0
         reason = (
             f"Orchestrator tier cap is '{cap}', and this spawn would run on '{tier}'. "
             f"Retry with model: \"{cap}\" or one of these agents: "

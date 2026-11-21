@@ -314,14 +314,24 @@ class LauncherScript(unittest.TestCase):
 class AutoRouting(TempDataDir):
     """Generic built-in agent calls are redirected to the orchestrator's agents."""
 
-    def call(self, agent="general-purpose", mode=None, session="r1", cap=None, **tool_input):
-        env = dict(self.env)
+    def setUp(self):
+        super().setUp()
+        self.home = Path(self.tmp.name) / "home"
+        self.home.mkdir()
+        self.env.update({"HOME": str(self.home), "USERPROFILE": str(self.home)})
+
+    def call(self, agent="general-purpose", mode=None, session="r1", cap=None, batch="0",
+             permission_mode="default", **tool_input):
+        env = {**self.env, "ORCHESTRATOR_REDIRECT_BATCH_SECONDS": batch}
         if mode:
             env["CLAUDE_PLUGIN_OPTION_ROUTING_MODE"] = mode
         if cap:
             env["CLAUDE_PLUGIN_OPTION_MAX_TIER"] = cap
+        ti = {"description": "d", "prompt": "p", **tool_input}
+        if agent is not None:
+            ti["subagent_type"] = agent
         payload = {"session_id": session, "cwd": str(self.project), "tool_name": "Agent",
-                   "tool_input": {"subagent_type": agent, "description": "d", "prompt": "p", **tool_input}}
+                   "permission_mode": permission_mode, "tool_input": ti}
         out = run_hook("pre-agent", payload, env).stdout.strip()
         return json.loads(out)["hookSpecificOutput"] if out else None
 
@@ -402,6 +412,75 @@ class AutoRouting(TempDataDir):
     def test_bad_mode_falls_back_to_steer(self):
         with mock.patch.dict(os.environ, {"CLAUDE_PLUGIN_OPTION_ROUTING_MODE": "banana"}):
             self.assertEqual(orch.routing_mode(), "steer")
+
+    def test_parallel_batch_is_redirected_as_a_whole(self):
+        self.prompt("go")
+        for i in range(3):
+            out = self.call("Explore", batch="30", prompt=f"part {i}")
+            self.assertEqual(out["permissionDecision"], "deny")
+        # The same call issued again is Claude insisting: allowed at once, however fast.
+        self.assertIsNone(self.call("Explore", batch="30", prompt="part 1"))
+        # A reworded call is allowed once the batch window has passed.
+        self.assertEqual(self.call("Explore", batch="30", prompt="reworded")["permissionDecision"], "deny")
+        self.assertIsNone(self.call("Explore", batch="0", prompt="reworded again"))
+
+    def test_task_notifications_do_not_reset_state(self):
+        self.prompt("use the Explore agent to map the repo")
+        self.assertEqual(self.prompt("<task-notification><task-id>x</task-id></task-notification>"), "")
+        self.assertIsNone(self.call("Explore"))
+        self.assertEqual(self.call("general-purpose")["permissionDecision"], "deny")
+        self.prompt("<task-notification>done</task-notification>")
+        self.assertIsNone(self.call("general-purpose"))  # still the same prompt: no second redirect
+
+    def test_named_agent_stays_allowed_for_the_session(self):
+        self.prompt("use the Explore agent for searches in this session")
+        self.prompt("now look at the tests")
+        self.assertIsNone(self.call("Explore"))
+
+    def test_negated_mention_is_not_a_request(self):
+        for text in ("don't use the Explore agent", "never use a general-purpose agent here",
+                     "do it without the Explore agent", "use scout instead of the Explore agent"):
+            self.assertFalse(orch.named_in_prompt(text, "Explore") or orch.named_in_prompt(text, "general-purpose"), text)
+        self.assertTrue(orch.named_in_prompt("don't guess; use the Explore agent", "Explore"))
+
+    def test_fork_and_omitted_type(self):
+        self.prompt("go")
+        self.assertIsNone(self.call("fork"))
+        self.assertIsNone(self.call("fork", mode="strict", cap="haiku"))
+        self.assertEqual(self.call(None)["permissionDecision"], "deny")  # no type means general-purpose
+
+    def test_users_own_agent_named_like_a_builtin_is_left_alone(self):
+        agents = self.project / ".claude" / "agents"
+        agents.mkdir(parents=True)
+        (agents / "explore.md").write_text("---\nname: Explore\ndescription: mine\nmodel: haiku\n---\nx\n")
+        self.prompt("go")
+        self.assertIsNone(self.call("Explore"))
+        self.assertIsNone(self.call("Explore", mode="strict"))
+        self.assertEqual(self.call("general-purpose")["permissionDecision"], "deny")
+
+    def test_plan_agent_is_left_alone_in_plan_mode(self):
+        self.prompt("go")
+        self.assertIsNone(self.call("Plan", permission_mode="plan"))
+        self.assertEqual(self.call("Explore", permission_mode="plan")["permissionDecision"], "deny")
+        self.assertEqual(self.call("Plan")["permissionDecision"], "deny")
+
+    def test_project_can_opt_out_but_not_force_stricter(self):
+        claude = self.project / ".claude"
+        claude.mkdir()
+        (claude / "orchestrator.json").write_text('{"routing_mode": "off"}')
+        self.assertIsNone(self.call("Explore"))
+        self.assertIsNone(self.call("Explore", mode="strict"))
+        (claude / "orchestrator.json").write_text('{"routing_mode": "strict"}')
+        self.assertEqual(self.call("Explore", mode="steer")["permissionDecision"], "deny")
+        self.assertIsNone(self.call("Explore", mode="steer"))  # still steer: repeat allowed
+        self.assertIsNone(self.call("Explore", mode="guide", session="g"))
+
+    def test_forced_subagent_model_over_cap_is_refused_whatever_the_agent(self):
+        env = {"CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}
+        with mock.patch.dict(self.env, env):
+            out = self.call("orchestrator:scout", cap="sonnet")
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", out["permissionDecisionReason"])
 
     def test_redirect_is_logged(self):
         self.call("Explore")

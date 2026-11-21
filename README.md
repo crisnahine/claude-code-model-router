@@ -42,22 +42,26 @@ Once installed, the orchestrator is used without anyone asking for it, whatever 
 
 1. **Every session and every prompt** gets the routing policy as context, so it applies inside your own skills and other plugins' skills too, not only when an orchestrator skill is running.
 2. **Generic built-in agent calls are redirected.** When Claude, or a skill from any plugin, tries to start `Explore`, `Plan` or `general-purpose`, a hook refuses the call and names the orchestrator agent to use instead (`Explore` to `scout`, `Plan` to `architect`, `general-purpose` to whichever of ours fits). Claude re-issues the call with that agent.
-3. **You stay in charge.** If you name an agent ("use the Explore agent", "a general-purpose agent"), you get it. Your own agents and other plugins' agents are never redirected or blocked, and your skills still run; only the delegation inside them is routed.
+3. **You stay in charge.** If you name an agent ("use the Explore agent", "a general-purpose agent"), you get it for the rest of the session. Your own agents and other plugins' agents are never redirected or blocked, including your own agent named `Explore` if you replaced the built-in. Your skills still run; only the delegation inside them is routed.
 
 The **Routing mode** option in `/config` sets how hard this pushes:
 
 | Mode | Policy as context | Generic agent calls |
 | :- | :- | :- |
-| `steer` (default) | Yes | Redirected once per prompt. If Claude asks again for the same agent, it is allowed, so nothing can get stuck |
+| `steer` (default) | Yes | Redirected once per prompt, including every call of a parallel batch. If Claude then issues the same call again, it is allowed, so nothing can get stuck |
 | `strict` | Yes | Always refused unless you named the agent in your prompt |
 | `guide` | Yes | Not touched |
 | `off` | No | Not touched. The tier cap and the usage ledger still work |
+
+A repository can turn routing down for everyone who works in it by setting `"routing_mode"` in `.claude/orchestrator.json`, for example `{"routing_mode": "off"}`. The weaker of your setting and the repository's wins, so a repository can opt out but can't force `strict` on you.
 
 What this guarantees and what it doesn't:
 
 - **Guaranteed:** a redirected call does not run; an orchestrator agent runs on its pinned model; in `strict`, the built-in agents never run unless you name them.
 - **Best effort:** which of our agents Claude picks, and whether Claude delegates at all. Work the main conversation does itself runs on your session's model; a plugin can't change that model.
-- **Out of reach:** agents started by workflows or agent teams, and other plugins' own agents.
+- **Out of reach:** agents started by workflows or agent teams, other plugins' own agents, forks of the conversation, and a skill that runs itself in a subagent with `context: fork` (Claude Code starts that one directly, without an agent call a hook can see).
+- **Settings that switch it off:** `disableAllHooks`, and `allowManagedHooksOnly` in an organization's managed settings unless the organization force-enables this plugin. The agents and skills still work then; the automatic redirect, the cap and the ledger don't.
+- **Other plugins' hooks:** if another plugin's hook allows an agent call that ours refuses, the refusal wins, because Claude Code ranks deny above allow. If another plugin's hook refuses one of our agents, that refusal wins too.
 - **Cost:** the per-prompt reminder adds about 60 tokens to each prompt.
 
 ## Commands
@@ -109,6 +113,15 @@ What has been checked, and how:
 | Offline, corrupt state files, malformed `.claude/orchestrator.json`, no Python | Unit tested: hooks exit cleanly and never block a session |
 | Another plugin's skill that insists on `Explore`, and a project skill that asks for "a subagent" | Run live: the call was redirected and ran on `orchestrator:scout` (Haiku) |
 | You name a built-in agent in your prompt | Run live: it runs, not redirected |
+| Another plugin whose hook returns "allow" for every agent call and whose prompt hook says "always use Explore" | Run live: our redirect still wins |
+| Three `Explore` calls issued in parallel | Run live: all three redirected, then run as three scouts |
+| Claude repeats the same refused call (`steer`) | Run live: allowed the second time. In `strict`, set through `/config`, refused both times |
+| Your project defines its own agent named `Explore` | Run live: your agent runs, not redirected |
+| A permission rule denies `orchestrator:scout` | Run live: Claude fell back to the built-in agent on the repeat call |
+| `disableAllHooks` | Run live: no redirect, as documented; agents and skills still load |
+| Options set through `/config` (stored in `pluginConfigs`) | Run live: `routing_mode` and `max_tier` reach the hooks |
+| A skill with `context: fork` and `agent: Explore` | Run live: not routed. Claude Code starts it without an agent call |
+| Background-task notifications between turns | Unit tested, from real captured hook input: they don't reset what you asked for |
 | Linux, macOS and Windows, Python 3.9 to 3.13 | Hook logic unit tested in CI on all three systems with Python 3.10 and 3.13, and locally on 3.9 |
 | Fable | Run live: `deep-solver` ran on `claude-fable-5-2` |
 
