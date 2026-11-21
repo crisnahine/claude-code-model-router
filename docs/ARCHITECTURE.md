@@ -6,7 +6,8 @@ Orchestrator maps each goal to a documented Claude Code plugin mechanism. Nothin
 | :- | :- | :- |
 | Run each kind of work on the right model | Subagents in `agents/` with `model` and `effort` frontmatter | Enforced by Claude Code |
 | Pick the agent by task complexity | `route` skill: a scoring rubric plus the live routing table injected with `` !`command` `` | Advisory: Claude follows it |
-| Keep Claude aware of the routing every session | `SessionStart` hook adds a short context line | Advisory |
+| Apply the routing whatever skill or plugin is driving | `SessionStart` and `UserPromptSubmit` hooks inject the policy as context | Advisory |
+| Make our agents the default over the built-ins | `PreToolUse` hook on `Agent` refuses `Explore`, `Plan` and `general-purpose` with the agent to use instead; `routing_mode` sets once per prompt (`steer`), always (`strict`) or never | Enforced for the refused call; the user naming an agent overrides it |
 | Cap cost by model tier | `PreToolUse` hook on `Agent` denies spawns above `max_tier`, naming cheaper agents | Enforced |
 | See what ran where | `PreToolUse` and `PostToolUse` hooks on `Agent` append to `${CLAUDE_PLUGIN_DATA}/ledger.jsonl`; `PostToolUse` records `resolvedModel` | Measured |
 | Automate the development lifecycle | `ship` skill: plan, build, verify, review, bounded fix loops, commit on a branch | Advisory, with hard stops before push, merge and deploy |
@@ -18,6 +19,8 @@ Orchestrator maps each goal to a documented Claude Code plugin mechanism. Nothin
 ```text
 SessionStart ─┬─ session-start   (sync, <100 ms)  prints routing context, records max_tier and model
               └─ refresh-cache   (async)          refreshes upstream cache if older than 24 h
+UserPromptSubmit ─ user-prompt                    one-line policy reminder; notes built-in agents the
+                                                  user named; resets the per-prompt redirect list
 PostModelSwitch ─ model-switch                    records the session's new model
 
 Agent tool call
@@ -28,7 +31,11 @@ Agent tool call
                                 > CLAUDE_CODE_SUBAGENT_MODEL
                                 > the session's model (transcript, then recorded)
                               another plugin's or the user's own agent: unknown, allowed
-                              tier > max_tier ? deny with suggestion : allow
+                              tier > max_tier ? deny with suggestion
+                              else generic built-in, not named by the user in this prompt,
+                                and routing_mode is steer (first time this prompt) or strict
+                                ? deny, naming the orchestrator agent to use
+                              else allow
                               append "spawn" row to ledger
   PostToolUse ── post-agent   (async) append "result" row with resolvedModel
 
@@ -48,6 +55,7 @@ All state lives in `${CLAUDE_PLUGIN_DATA}`, which survives plugin updates:
 - `state.json`: upstream cache, the last reviewed version and docs index, and the recorded `max_tier`
 - `ledger.jsonl`: one row per spawn and per result, trimmed to the newest half when it passes 4 MB
 - `sessions.json`: the last known model of up to 200 sessions
+- `prompts.json`: per session, the built-in agents the user named in the current prompt and the ones already redirected
 
 Writes go to a per-process temp file and are renamed into place, so concurrent sessions can't leave a half-written file.
 
@@ -58,3 +66,9 @@ Skill commands run through the Bash tool, which doesn't receive plugin environme
 Routing uses the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves to the newest model in each family for your provider. When a new model ships under an existing alias, the agents pick it up with no change here. A new family or a renamed alias shows up in the changelog, the `model-config` page is on the watched list, and the routing table and agents get updated in a release.
 
 If your organization's `availableModels` allowlist blocks a family, Claude Code falls back as described in the subagents docs. `fable` isn't served by every gateway; set `max_tier` to `opus` if yours doesn't.
+
+## Why redirect by refusing, and why only the built-ins
+
+The redirect could rewrite `subagent_type` with `updatedInput`, but that has the auto-mode problem described above, and a silent swap would hide from Claude which agent it is talking to. A refusal that names the replacement keeps Claude informed, and it re-issues the call.
+
+Only `Explore`, `Plan` and `general-purpose` are redirected. An agent the user or another plugin defined was put there on purpose, with its own prompt and tools; replacing it would break that setup, and its model can't be known from outside. In `steer` mode a second call for the same agent within one prompt is allowed, so a job none of our agents fits can never deadlock. If saving the redirect record fails, the call is allowed for the same reason.

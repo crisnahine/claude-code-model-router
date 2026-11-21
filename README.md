@@ -36,6 +36,30 @@ The `orchestrator:route` skill scores a task on ambiguity, scope, risk, novelty 
 
 Model choice is enforced by Claude Code itself through each agent's `model` frontmatter, so routing doesn't depend on Claude remembering a rule.
 
+## Automatic by default
+
+Once installed, the orchestrator is used without anyone asking for it, whatever else is installed:
+
+1. **Every session and every prompt** gets the routing policy as context, so it applies inside your own skills and other plugins' skills too, not only when an orchestrator skill is running.
+2. **Generic built-in agent calls are redirected.** When Claude, or a skill from any plugin, tries to start `Explore`, `Plan` or `general-purpose`, a hook refuses the call and names the orchestrator agent to use instead (`Explore` to `scout`, `Plan` to `architect`, `general-purpose` to whichever of ours fits). Claude re-issues the call with that agent.
+3. **You stay in charge.** If you name an agent ("use the Explore agent", "a general-purpose agent"), you get it. Your own agents and other plugins' agents are never redirected or blocked, and your skills still run; only the delegation inside them is routed.
+
+The **Routing mode** option in `/config` sets how hard this pushes:
+
+| Mode | Policy as context | Generic agent calls |
+| :- | :- | :- |
+| `steer` (default) | Yes | Redirected once per prompt. If Claude asks again for the same agent, it is allowed, so nothing can get stuck |
+| `strict` | Yes | Always refused unless you named the agent in your prompt |
+| `guide` | Yes | Not touched |
+| `off` | No | Not touched. The tier cap and the usage ledger still work |
+
+What this guarantees and what it doesn't:
+
+- **Guaranteed:** a redirected call does not run; an orchestrator agent runs on its pinned model; in `strict`, the built-in agents never run unless you name them.
+- **Best effort:** which of our agents Claude picks, and whether Claude delegates at all. Work the main conversation does itself runs on your session's model; a plugin can't change that model.
+- **Out of reach:** agents started by workflows or agent teams, and other plugins' own agents.
+- **Cost:** the per-prompt reminder adds about 60 tokens to each prompt.
+
 ## Commands
 
 | Command | What it does |
@@ -49,6 +73,7 @@ Model choice is enforced by Claude Code itself through each agent's `model` fron
 
 Run `/config` and find the Orchestrator rows:
 
+- **Routing mode** (`routing_mode`): `steer` (default), `strict`, `guide` or `off`. See [Automatic by default](#automatic-by-default).
 - **Highest model tier** (`max_tier`): `haiku`, `sonnet`, `opus` or `fable` (default, no cap). A subagent spawn above it is refused, and Claude is told which cheaper agent or model to use instead. This includes built-in agents that inherit your session's model, so with the cap at `sonnet` and an Opus session, Explore runs are retried on Sonnet.
 - **Check for Claude Code updates** (`update_check`): on by default. Turns off the daily fetch from `code.claude.com`.
 
@@ -82,6 +107,8 @@ What has been checked, and how:
 | Built-in agents (Explore, Plan, general-purpose) that inherit the session model | Run live: the cap uses the session's model, read from the transcript. Following `/model` switches is unit tested |
 | `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` | Unit tested, following the documented precedence |
 | Offline, corrupt state files, malformed `.claude/orchestrator.json`, no Python | Unit tested: hooks exit cleanly and never block a session |
+| Another plugin's skill that insists on `Explore`, and a project skill that asks for "a subagent" | Run live: the call was redirected and ran on `orchestrator:scout` (Haiku) |
+| You name a built-in agent in your prompt | Run live: it runs, not redirected |
 | Linux, macOS and Windows, Python 3.9 to 3.13 | Hook logic unit tested in CI on all three systems with Python 3.10 and 3.13, and locally on 3.9 |
 | Fable | Run live: `deep-solver` ran on `claude-fable-5-2` |
 

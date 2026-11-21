@@ -73,6 +73,21 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.sh",
+              "user-prompt"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

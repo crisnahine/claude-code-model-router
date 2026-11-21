@@ -29,6 +29,12 @@
     ]
   },
   "userConfig": {
+    "routing_mode": {
+      "type": "string",
+      "title": "Routing mode",
+      "description": "How strongly work is routed to the orchestrator's agents. steer (default): generic built-in agent calls are redirected to ours once per prompt. strict: they are always refused unless you name the agent. guide: advice only. off: no routing.",
+      "default": "steer"
+    },
     "max_tier": {
       "type": "string",
       "title": "Highest model tier",

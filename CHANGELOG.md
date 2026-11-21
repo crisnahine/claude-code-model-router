@@ -10,3 +10,4 @@ First release, reviewed against Claude Code 2.1.330 and tested live on 2.1.270, 
 - `max_tier` and `update_check` options in `/config`.
 - Routing evals, unit tests on Linux, macOS and Windows, CI validation, and a daily upstream-watch workflow.
 - The tier cap follows Claude Code's model precedence, including inherited session models, `/model` switches and `CLAUDE_CODE_SUBAGENT_MODEL`, and never judges another plugin's or the user's own agents.
+- Automatic by default: the routing policy is injected every session and prompt, and generic built-in agent calls (`Explore`, `Plan`, `general-purpose`) are redirected to the orchestrator's agents. `routing_mode` option: `steer` (default), `strict`, `guide`, `off`.

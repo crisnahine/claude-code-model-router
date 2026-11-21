@@ -5,7 +5,9 @@ Standard library only, so it runs anywhere Python 3.9+ is installed.
 
 Hook commands (read hook JSON on stdin):
   session-start    Print routing context and pending upstream-change notices.
-  pre-agent        PreToolUse on Agent: enforce the model tier cap, log the spawn.
+  user-prompt      UserPromptSubmit: restate the routing policy, note agents the user named.
+  pre-agent        PreToolUse on Agent: enforce the model tier cap, redirect generic
+                   built-in agents to ours, log the spawn.
   post-agent       PostToolUse on Agent: log the model the subagent actually ran on.
   model-switch     PostModelSwitch: remember the session's model, which inheriting
                    subagents run on.
@@ -110,6 +112,10 @@ def _clean_override(override: Any) -> dict:
     if not isinstance(override, dict):
         return {}
     out: dict = {}
+    redirect = override.get("redirect")
+    if isinstance(redirect, dict):
+        out["redirect"] = {k: [n for n in v if isinstance(n, str)] for k, v in redirect.items()
+                           if isinstance(k, str) and isinstance(v, list)}
     for section in ("agents", "tiers"):
         value = override.get(section)
         if isinstance(value, dict):
@@ -241,6 +247,79 @@ def max_tier(from_state: bool = False) -> str:
     value = value or "fable"
     value = value.strip().lower()
     return value if value in TIER_RANK_DEFAULT else "fable"
+
+
+ROUTING_MODES = ("off", "guide", "steer", "strict")
+
+
+def routing_mode() -> str:
+    """off: no routing guidance or redirects (cap and ledger still work).
+    guide: routing policy is injected as context only.
+    steer (default): also redirect generic built-in agent calls to ours, once per prompt.
+    strict: always refuse generic built-in agent calls the user didn't ask for by name."""
+    value = (os.environ.get("CLAUDE_PLUGIN_OPTION_ROUTING_MODE") or "steer").strip().lower()
+    return value if value in ROUTING_MODES else "steer"
+
+
+# -------------------------------------------------------------- per-prompt state
+
+
+def prompts_path() -> Path:
+    return data_dir() / "prompts.json"
+
+
+def load_prompt_state(session_id: str | None) -> dict:
+    data = load_json(prompts_path(), {})
+    entry = data.get(session_id) if isinstance(data, dict) and session_id else None
+    return entry if isinstance(entry, dict) else {}
+
+
+def save_prompt_state(session_id: str | None, entry: dict) -> None:
+    if not session_id:
+        return
+    data = load_json(prompts_path(), {})
+    if not isinstance(data, dict):
+        data = {}
+    data.pop(session_id, None)
+    data[session_id] = entry
+    while len(data) > 200:
+        data.pop(next(iter(data)))
+    save_json(prompts_path(), data)
+
+
+def named_in_prompt(prompt: str, agent_type: str) -> bool:
+    """Did the user ask for this built-in agent by name? Plain words like "explore the
+    code" or "plan this" don't count; "the Explore agent" or "general-purpose" do."""
+    text = (prompt or "").lower()
+    name = agent_type.lower()
+    if "-" in name or ":" in name:
+        return name in text or name.replace("-", " ") in text
+    return bool(re.search(r"\b%s\s+(?:sub-?)?agent\b|subagent_type\W+%s\b|built-?in\s+%s\b"
+                          % (re.escape(name), re.escape(name), re.escape(name)), text))
+
+
+def redirect_targets(config: dict, agent_type: str, cap: str) -> list[str]:
+    ranks = tier_ranks(config)
+    agents = config.get("agents") or {}
+    names = (config.get("redirect") or {}).get(agent_type) or []
+    return [n for n in names if n in agents and ranks.get(agents[n].get("model"), 9) <= ranks.get(cap, 4)]
+
+
+def policy_line(config: dict, cap: str) -> str:
+    ranks = tier_ranks(config)
+    agents = [
+        f"{agent_label(n)} ({a.get('model')}: {a.get('role', '').lower()})"
+        for n, a in sorted((config.get("agents") or {}).items(), key=lambda kv: ranks.get(kv[1].get("model"), 9))
+        if ranks.get(a.get("model"), 9) <= ranks.get(cap, 4)
+    ]
+    return (
+        "Orchestrator routing policy (applies to every task, including work driven by any other skill, "
+        "command or plugin): when you delegate, use these model-pinned agents instead of general-purpose, "
+        "Explore or Plan: " + "; ".join(agents) + ". Pick the cheapest one that can do the job reliably, "
+        "run independent pieces in parallel, and have non-trivial code changes verified and reviewed. "
+        "Don't delegate work that takes you one or two tool calls. If the user names a specific agent or "
+        "model, use what they asked for."
+    )
 
 
 # ------------------------------------------------------------------------- ledger
@@ -506,12 +585,15 @@ def hook_session_start(hook_input: dict) -> None:
     agents = ", ".join(
         f"{agent_label(name)}={a.get('model')}" for name, a in sorted((config.get("agents") or {}).items())
     )
-    parts = [
-        "Orchestrator plugin is active. Delegate by task complexity instead of doing everything on the "
-        f"main model: agents {agents}. Model tier cap: {cap}. "
-        "For a non-trivial task, use the orchestrator:route skill to pick the agent; for a full "
-        "plan-build-verify-review loop the user runs /orchestrator:ship."
-    ]
+    mode = routing_mode()
+    if mode == "off":
+        parts = []
+    else:
+        parts = [
+            policy_line(config, cap) + f" Model tier cap: {cap}. "
+            "For a non-trivial task, the orchestrator:route skill has the scoring rubric; for a full "
+            "plan-build-verify-review loop the user runs /orchestrator:ship."
+        ]
     if os.environ.get("CLAUDE_PLUGIN_OPTION_UPDATE_CHECK", "true").lower() not in ("false", "0", "no"):
         changes = pending_changes(load_json(state_path(), {}))
         if has_pending(changes):
@@ -521,8 +603,29 @@ def hook_session_start(hook_input: dict) -> None:
                 f"Upstream: {n} Claude Code release(s) and {touched} plugin-relevant docs page change(s) "
                 "since the last review. Mention once to the user that /orchestrator:refresh reviews them."
             )
-    print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
-                                             "additionalContext": " ".join(parts)}}))
+    if parts:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                                 "additionalContext": " ".join(parts)}}))
+
+
+def hook_user_prompt(hook_input: dict) -> None:
+    """Remember which built-in agents the user named, and restate the policy in one line
+    so it holds deep into a long session and inside other plugins' skills."""
+    mode = routing_mode()
+    if mode == "off":
+        return
+    config = load_config(hook_input)
+    prompt = hook_input.get("prompt") or ""
+    named = [a for a in (config.get("redirect") or {}) if named_in_prompt(prompt, a)]
+    save_prompt_state(hook_input.get("session_id"), {
+        "prompt_id": hook_input.get("prompt_id"), "named": named, "redirected": []})
+    reminder = (
+        "Orchestrator routing is on: delegate through the orchestrator: agents (scout, verifier, implementer, "
+        "architect, reviewer, deep-solver) rather than general-purpose, Explore or Plan, whichever skill or "
+        "plugin is driving the work, unless the user named a specific agent."
+    )
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                             "additionalContext": reminder}}))
 
 
 def hook_pre_agent(hook_input: dict) -> int:
@@ -536,8 +639,26 @@ def hook_pre_agent(hook_input: dict) -> int:
                                project_dir(hook_input))
     cap = max_tier()
     decision = "allow"
+    targets: list[str] = []
     if tier and ranks.get(tier, 0) > ranks.get(cap, 4):
         decision = "deny"
+    else:
+        mode = routing_mode()
+        targets = redirect_targets(config, subagent_type, cap)
+        if mode in ("steer", "strict") and targets and not (requested and mode == "steer"):
+            session_id = hook_input.get("session_id")
+            entry = load_prompt_state(session_id)
+            if subagent_type in (entry.get("named") or []):
+                pass  # the user asked for this agent by name
+            elif mode == "strict":
+                decision = "redirect"
+            elif subagent_type not in (entry.get("redirected") or []):
+                decision = "redirect"
+                entry.setdefault("redirected", []).append(subagent_type)
+                try:
+                    save_prompt_state(session_id, entry)
+                except OSError:
+                    decision = "allow"  # can't remember the redirect, so don't risk a loop
     try:
         append_ledger({
             "event": "spawn",
@@ -550,6 +671,22 @@ def hook_pre_agent(hook_input: dict) -> int:
         })
     except OSError:
         pass
+    if decision == "redirect":
+        agents = config.get("agents") or {}
+        options = "; ".join(f"{agent_label(n)} ({agents[n].get('model')}: {agents[n].get('role', '').lower()})"
+                            for n in targets)
+        if routing_mode() == "strict":
+            tail = ("Strict routing is on, so this agent type is only available when the user asks for it "
+                    "by name.")
+        else:
+            tail = ("If none of them can do this particular job, call the same agent again and it will be "
+                    "allowed.")
+        reason = (f"Orchestrator routes '{subagent_type}' work to model-pinned agents. Re-issue this call "
+                  f"with the same prompt and subagent_type set to one of: {options}. {tail}")
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                                 "permissionDecision": "deny",
+                                                 "permissionDecisionReason": reason}}))
+        return 0
     if decision == "deny":
         allowed = sorted(
             (n for n, a in (config.get("agents") or {}).items() if ranks.get(a.get("model"), 0) <= ranks.get(cap, 4)),
@@ -596,19 +733,21 @@ def usage_report(days: int) -> str:
         return f"No subagent activity recorded in the last {days} days."
     by_agent: dict[str, dict] = {}
     for r in spawns:
-        a = by_agent.setdefault(r.get("agent", "?"), {"spawns": 0, "denied": 0, "models": {}})
+        a = by_agent.setdefault(r.get("agent", "?"), {"spawns": 0, "denied": 0, "redirected": 0, "models": {}})
         a["spawns"] += 1
         if r.get("decision") == "deny":
             a["denied"] += 1
+        if r.get("decision") == "redirect":
+            a["redirected"] = a.get("redirected", 0) + 1
     for r in results:
-        a = by_agent.setdefault(r.get("agent", "?"), {"spawns": 0, "denied": 0, "models": {}})
+        a = by_agent.setdefault(r.get("agent", "?"), {"spawns": 0, "denied": 0, "redirected": 0, "models": {}})
         model = r.get("resolved_model") or "background (not reported)"
         a["models"][model] = a["models"].get(model, 0) + 1
-    lines = [f"Subagent usage, last {days} days", "", "| Agent | Spawns | Denied by cap | Ran on |",
-             "| :- | -: | -: | :- |"]
+    lines = [f"Subagent usage, last {days} days", "", "| Agent | Calls | Redirected to ours | Denied by cap | Ran on |",
+             "| :- | -: | -: | -: | :- |"]
     for agent, a in sorted(by_agent.items(), key=lambda kv: -kv[1]["spawns"]):
         models = ", ".join(f"{m} x{n}" for m, n in sorted(a["models"].items())) or "-"
-        lines.append(f"| {agent} | {a['spawns']} | {a['denied']} | {models} |")
+        lines.append(f"| {agent} | {a['spawns']} | {a.get('redirected', 0)} | {a['denied']} | {models} |")
     lines.append("")
     lines.append("Token and dollar totals per model are in /usage and /cost; this ledger shows routing.")
     return "\n".join(lines)
@@ -621,7 +760,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="orchestrator")
     parser.add_argument("--data-dir", help="plugin data directory; skills pass ${CLAUDE_PLUGIN_DATA}")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in ("session-start", "pre-agent", "post-agent", "model-switch", "refresh-cache", "routing-table", "ack"):
+    for name in ("session-start", "user-prompt", "pre-agent", "post-agent", "model-switch", "refresh-cache",
+                 "routing-table", "ack"):
         sub.add_parser(name)
     p = sub.add_parser("refresh")
     p.add_argument("--force", action="store_true")
@@ -637,12 +777,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.data_dir and "${" not in args.data_dir:
         os.environ["CLAUDE_PLUGIN_DATA"] = args.data_dir
 
-    hook_cmds = {"session-start", "pre-agent", "post-agent", "model-switch", "refresh-cache"}
+    hook_cmds = {"session-start", "user-prompt", "pre-agent", "post-agent", "model-switch", "refresh-cache"}
     if args.cmd in hook_cmds:
         try:
             hook_input = read_hook_input()
             if args.cmd == "session-start":
                 hook_session_start(hook_input)
+            elif args.cmd == "user-prompt":
+                hook_user_prompt(hook_input)
             elif args.cmd == "pre-agent":
                 return hook_pre_agent(hook_input)
             elif args.cmd == "post-agent":

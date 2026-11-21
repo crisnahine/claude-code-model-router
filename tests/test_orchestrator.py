@@ -226,7 +226,8 @@ class EdgeCases(TempDataDir):
     def test_model_switch_changes_what_inherit_means(self):
         payload = {"session_id": "s9", "cwd": str(self.project), "tool_name": "Agent",
                    "tool_input": {"subagent_type": "general-purpose", "description": "d", "prompt": "p"}}
-        env = {**self.env, "HOME": str(self.home), "USERPROFILE": str(self.home), "CLAUDE_PLUGIN_OPTION_MAX_TIER": "sonnet"}
+        env = {**self.env, "HOME": str(self.home), "USERPROFILE": str(self.home),
+               "CLAUDE_PLUGIN_OPTION_MAX_TIER": "sonnet", "CLAUDE_PLUGIN_OPTION_ROUTING_MODE": "guide"}
         run_hook("session-start", {"session_id": "s9", "source": "startup", "model": "claude-sonnet-5-5"}, env)
         self.assertEqual(run_hook("pre-agent", payload, env).stdout.strip(), "")
         run_hook("model-switch", {"session_id": "s9", "from_model": "claude-sonnet-5-5",
@@ -308,6 +309,103 @@ class LauncherScript(unittest.TestCase):
                                  env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(root),
                                       "CLAUDE_PLUGIN_DATA": str(Path(tmp) / "data")})
         self.assertIn("additionalContext", res.stdout, res.stderr)
+
+
+class AutoRouting(TempDataDir):
+    """Generic built-in agent calls are redirected to the orchestrator's agents."""
+
+    def call(self, agent="general-purpose", mode=None, session="r1", cap=None, **tool_input):
+        env = dict(self.env)
+        if mode:
+            env["CLAUDE_PLUGIN_OPTION_ROUTING_MODE"] = mode
+        if cap:
+            env["CLAUDE_PLUGIN_OPTION_MAX_TIER"] = cap
+        payload = {"session_id": session, "cwd": str(self.project), "tool_name": "Agent",
+                   "tool_input": {"subagent_type": agent, "description": "d", "prompt": "p", **tool_input}}
+        out = run_hook("pre-agent", payload, env).stdout.strip()
+        return json.loads(out)["hookSpecificOutput"] if out else None
+
+    def prompt(self, text, session="r1", mode=None):
+        env = dict(self.env)
+        if mode:
+            env["CLAUDE_PLUGIN_OPTION_ROUTING_MODE"] = mode
+        return run_hook("user-prompt", {"session_id": session, "prompt_id": "p1", "prompt": text}, env).stdout
+
+    def test_steer_redirects_once_then_allows(self):
+        self.prompt("fix the login bug")
+        first = self.call("general-purpose")
+        self.assertEqual(first["permissionDecision"], "deny")
+        self.assertIn("orchestrator:implementer", first["permissionDecisionReason"])
+        self.assertIsNone(self.call("general-purpose"))
+        # A new prompt steers again.
+        self.prompt("now add tests")
+        self.assertEqual(self.call("general-purpose")["permissionDecision"], "deny")
+
+    def test_explore_and_plan_have_specific_targets(self):
+        self.prompt("look around")
+        self.assertIn("orchestrator:scout", self.call("Explore")["permissionDecisionReason"])
+        plan = self.call("Plan")["permissionDecisionReason"]
+        self.assertIn("orchestrator:architect", plan)
+        self.assertNotIn("orchestrator:scout", plan)
+
+    def test_user_naming_the_agent_wins(self):
+        self.prompt("Use the Explore agent to map the repo, and a general-purpose agent for the rest")
+        self.assertIsNone(self.call("Explore"))
+        self.assertIsNone(self.call("general-purpose"))
+
+    def test_plain_words_are_not_naming(self):
+        self.assertFalse(orch.named_in_prompt("explore the code and plan the work", "Explore"))
+        self.assertFalse(orch.named_in_prompt("explore the code and plan the work", "Plan"))
+        self.assertTrue(orch.named_in_prompt("have the Plan subagent do it", "Plan"))
+        self.assertTrue(orch.named_in_prompt("spawn a general purpose agent", "general-purpose"))
+
+    def test_other_agents_are_never_redirected(self):
+        self.prompt("go")
+        for agent in ("acme:reviewer", "my-own-agent", "orchestrator:scout"):
+            self.assertIsNone(self.call(agent), agent)
+
+    def test_explicit_model_passes_in_steer_but_not_strict(self):
+        self.prompt("go")
+        self.assertIsNone(self.call("general-purpose", model="haiku"))
+        self.assertEqual(self.call("general-purpose", mode="strict", model="haiku")["permissionDecision"], "deny")
+
+    def test_strict_always_refuses_unless_named(self):
+        self.prompt("go", mode="strict")
+        for _ in range(3):
+            out = self.call("Explore", mode="strict")
+            self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("by name", out["permissionDecisionReason"])
+        self.prompt("use the Explore agent", mode="strict")
+        self.assertIsNone(self.call("Explore", mode="strict"))
+
+    def test_guide_and_off_never_redirect(self):
+        for mode in ("guide", "off"):
+            self.assertIsNone(self.call("general-purpose", mode=mode))
+        self.assertEqual(self.prompt("hi", mode="off"), "")
+        self.assertIn("additionalContext", self.prompt("hi", mode="guide"))
+        off = run_hook("session-start", {"source": "startup"},
+                       {**self.env, "CLAUDE_PLUGIN_OPTION_ROUTING_MODE": "off"})
+        self.assertEqual(off.stdout.strip(), "")
+
+    def test_redirect_respects_the_cap(self):
+        self.prompt("go")
+        reason = self.call("general-purpose", cap="haiku")["permissionDecisionReason"]
+        self.assertIn("orchestrator:scout", reason)
+        self.assertNotIn("implementer", reason)
+        # Plan's only target is the opus architect, which a haiku cap rules out.
+        self.assertIsNone(self.call("Plan", cap="haiku"))
+
+    def test_redirect_without_a_prior_prompt_still_cannot_loop(self):
+        self.assertEqual(self.call("Explore", session="fresh")["permissionDecision"], "deny")
+        self.assertIsNone(self.call("Explore", session="fresh"))
+
+    def test_bad_mode_falls_back_to_steer(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_PLUGIN_OPTION_ROUTING_MODE": "banana"}):
+            self.assertEqual(orch.routing_mode(), "steer")
+
+    def test_redirect_is_logged(self):
+        self.call("Explore")
+        self.assertEqual(self.ledger()[0]["decision"], "redirect")
 
 
 class PostAgentHook(TempDataDir):
