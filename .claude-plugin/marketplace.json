@@ -1,6 +1,6 @@
 {
   "name": "claude-code-model-router",
-  "description": "Marketplace for Claude Code Model Router, an autonomous multi-model orchestration plugin that routes every Claude Code subagent to the right Claude model.",
+  "description": "Marketplace for Model Router, a plugin for Claude Code that routes every subagent to the Claude model and reasoning effort its task needs.",
   "owner": {
     "name": "Cris",
     "url": "https://github.com/crisnahine"
@@ -9,7 +9,7 @@
     {
       "name": "model-router",
       "source": "./plugins/model-router",
-      "description": "Claude Code model router: a Claude Code plugin for autonomous multi-model orchestration. Automatic Claude model routing for every subagent call, from any plugin, skill or agent, to Haiku, Sonnet, Opus or Fable by task complexity, speed and cost.",
+      "description": "Model Router, a plugin for Claude Code: automatic Claude model routing for every subagent, teammate and workflow agent, from any plugin, skill or agent, to Haiku, Sonnet, Opus or Fable with a matching reasoning effort, by task complexity, speed and cost.",
       "category": "development",
       "tags": [
         "model-router",
