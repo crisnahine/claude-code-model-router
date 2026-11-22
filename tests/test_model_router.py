@@ -3408,5 +3408,20 @@ class ClockAndCleanup(Sandbox):
         self.assertEqual(copies[-1].read_text(), '{"broken": ' + str(store.KEEP_SET_ASIDE + 2))
 
 
+class DesignDecisions(unittest.TestCase):
+    """A design decision worked out against load and consistency limits needs the strongest coding level."""
+
+    def test_a_design_against_load_and_consistency_limits_is_hardest(self):
+        brief = ("Read SPEC.md and design how the catalog servers cache prices. This is a design decision with "
+                 "data-consistency and performance trade-offs: honour the staleness limits and the database's "
+                 "capacity. Write DESIGN.json with the strategy, ttl_seconds and max_staleness_seconds.")
+        result = profile.profile_call({"description": "Design catalog price caching", "prompt": brief}, "claude")
+        self.assertEqual((result["level"], sorted(result["signals"])), ("hardest", ["ambiguity", "load", "risk"]))
+        # Loading a file isn't a load limit.
+        self.assertEqual(profile.profile_call({"description": "Find the key load path",
+                                               "prompt": "Find where the app loads its config."}, "Explore")["level"],
+                         "lookup")
+
+
 if __name__ == "__main__":
     unittest.main()

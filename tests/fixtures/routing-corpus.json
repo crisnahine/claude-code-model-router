@@ -1545,6 +1545,27 @@
    "agent": "general-purpose",
    "description": "Fix token count rounding",
    "prompt": "Fix the rounding of the token counts in the usage report."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "hardest",
+   "agent": "claude",
+   "description": "Design catalog price caching",
+   "prompt": "Read SPEC.md there and design how the catalog servers cache prices. This is a design decision with consistency/performance trade-offs: read the spec's requirements carefully (staleness limits, write paths, event infrastructure, failure modes) and choose accordingly.\n\nWrite DESIGN.json in the repository root with exactly these keys:\n- \"strategy\": one of \"no_cache\", \"ttl_only\", \"event_invalidation\", \"write_through_from_admin\"\n- \"ttl_seconds\": a number, or null for none\n- \"max_staleness_seconds\": the longest a changed price can still be served (a number)\n- \"reasons\": a list of short strings justifying the choice, citing spec constraints\n\nValidate the file is valid JSON with only those keys."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "hardest",
+   "agent": "claude",
+   "description": "Design catalog price caching",
+   "prompt": "Read SPEC.md there carefully and design how the catalog servers cache prices. The hard part is a design decision with data-correctness and performance trade-offs: honour every constraint in SPEC.md (staleness limits, event/infrastructure availability, load, consistency requirements) and pick the strategy that satisfies all of them.\n\nWrite DESIGN.json in the repository root with exactly these keys:\n- \"strategy\": one of \"no_cache\", \"ttl_only\", \"event_invalidation\", \"write_through_from_admin\"\n- \"ttl_seconds\": a number, or null for none\n- \"max_staleness_seconds\": the longest a changed price can still be served (a number)\n- \"reasons\": a list of short strings citing the SPEC constraints"
+  },
+  {
+   "lowest": "hardest",
+   "highest": "hardest",
+   "agent": "claude",
+   "description": "Design catalog price caching",
+   "prompt": "Read SPEC.md there and design how the catalog servers cache prices. This is a design decision with data-consistency and performance trade-offs, so read the spec carefully for staleness requirements, load, event/messaging infrastructure, and failure modes, and make sure the numbers you pick are consistent with every constraint in it.\n\nWrite DESIGN.json in the repository root with exactly these keys:\n- \"strategy\": one of \"no_cache\", \"ttl_only\", \"event_invalidation\", \"write_through_from_admin\"\n- \"ttl_seconds\": a number, or null for none\n- \"max_staleness_seconds\": the longest a changed price can still be served (a number)\n- \"reasons\": a list of short strings"
   }
  ]
 }
