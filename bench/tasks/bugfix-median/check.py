@@ -20,9 +20,12 @@ def raises(fn, *args):
     return False
 
 
-median = load("stats").median
-values = [4, 1, 3, 2]
-ok = (median([3, 1, 2]) == 2 and median(values) == 2.5 and values == [4, 1, 3, 2]
-      and median([1, 2]) == 1.5 and median([5]) == 5 and median([1, 1, 2, 2]) == 1.5
-      and median([7, 3, 5, 1, 9]) == 5 and raises(median, []))
+try:
+    median = load("stats").median
+    values = [4, 1, 3, 2]
+    ok = (median([3, 1, 2]) == 2 and median(values) == 2.5 and values == [4, 1, 3, 2]
+          and median([1, 2]) == 1.5 and median([5]) == 5 and median([1, 1, 2, 2]) == 1.5
+          and median([7, 3, 5, 1, 9]) == 5 and raises(median, []))
+except BaseException:  # a SystemExit from work-dir code is a failure
+    ok = False
 sys.exit(0 if ok else 1)

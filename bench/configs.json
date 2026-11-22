@@ -3,30 +3,74 @@
     "id": "plugin",
     "description": "Model Router loaded with --plugin-dir",
     "plugin": true,
-    "env": {}
+    "env": {},
+    "price_model": "opus"
   },
   {
     "id": "defaults",
     "description": "No plugin: subagents inherit the session model at its default effort",
     "plugin": false,
-    "env": {}
+    "env": {},
+    "price_model": "sonnet"
   },
   {
     "id": "haiku",
     "description": "No plugin: every subagent on haiku (CLAUDE_CODE_SUBAGENT_MODEL=haiku, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1)",
     "plugin": false,
-    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "haiku", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}
+    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "haiku", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"},
+    "price_model": "haiku"
   },
   {
     "id": "sonnet",
     "description": "No plugin: every subagent on sonnet (CLAUDE_CODE_SUBAGENT_MODEL=sonnet, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1)",
     "plugin": false,
-    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}
+    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"},
+    "price_model": "sonnet"
+  },
+  {
+    "id": "sonnet-medium",
+    "description": "No plugin: every subagent on sonnet at medium effort (CLAUDE_CODE_SUBAGENT_EFFORT=medium)",
+    "plugin": false,
+    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
+            "CLAUDE_CODE_SUBAGENT_EFFORT": "medium"},
+    "price_model": "sonnet"
+  },
+  {
+    "id": "sonnet-high",
+    "description": "No plugin: every subagent on sonnet at high effort (CLAUDE_CODE_SUBAGENT_EFFORT=high)",
+    "plugin": false,
+    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
+            "CLAUDE_CODE_SUBAGENT_EFFORT": "high"},
+    "price_model": "sonnet"
   },
   {
     "id": "opus",
     "description": "No plugin: every subagent on opus (CLAUDE_CODE_SUBAGENT_MODEL=opus, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1)",
     "plugin": false,
-    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}
+    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"},
+    "price_model": "opus"
+  },
+  {
+    "id": "fable",
+    "description": "No plugin: every subagent on fable (CLAUDE_CODE_SUBAGENT_MODEL=fable, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1); needs Fable access",
+    "plugin": false,
+    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "fable", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"},
+    "price_model": "fable"
+  },
+  {
+    "id": "opusplan",
+    "description": "No plugin: session model opusplan (--model opusplan). Opus plans only in plan mode, which a headless dontAsk run never enters, so this runs Sonnet throughout",
+    "plugin": false,
+    "env": {},
+    "model": "opusplan",
+    "price_model": "sonnet"
+  },
+  {
+    "id": "advisor",
+    "description": "No plugin: a sonnet session with an opus advisor (--advisor opus); needs the Anthropic API, Claude Platform on AWS or Claude Models on Google Cloud, on a subscription or API billing",
+    "plugin": false,
+    "env": {},
+    "args": ["--advisor", "opus"],
+    "price_model": "opus"
   }
 ]
