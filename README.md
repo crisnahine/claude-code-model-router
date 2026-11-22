@@ -126,7 +126,7 @@ In order, strongest first:
 5. `CLAUDE_CODE_SUBAGENT_MODEL`, your default for agents without a model.
 6. The router's pick.
 
-Whatever wins then has to be usable: inside your cap, allowed by your settings and known to work. If it isn't, the strongest usable model below it runs, or the weakest usable one when none is below it. Effort is left alone when the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` already sets it.
+Under steps 1 and 5 your environment has decided, so the model is left as it is: with `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` the router sets only effort, and with `CLAUDE_CODE_SUBAGENT_MODEL` it leaves the call alone, unless `agent_pins` is `override`. Under steps 2, 3, 4 and 6, whatever wins then has to be usable: inside your cap, allowed by your settings and known to work. If it isn't, the strongest usable model below it runs, or the weakest usable one when none is below it. Effort is left alone when the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` already sets it.
 
 ### The checks before a turn ends
 
