@@ -1650,6 +1650,20 @@
    "agent": "general-purpose",
    "description": "Plan release notes",
    "prompt": "Plan the release notes for 2.0; the API answers in 120 ms."
+  },
+  {
+   "lowest": "complex",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Rename payments column",
+   "prompt": "As decided on Monday, rename the payments column in every service that reads it, across all services."
+  },
+  {
+   "lowest": "complex",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Migrate billing schema",
+   "prompt": "We decided on Postgres, so migrate the billing schema in all services to it."
   }
  ]
 }
