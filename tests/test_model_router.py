@@ -790,15 +790,23 @@ class Profile(unittest.TestCase):
         self.level("do not" + " " * 64_000 + "x")
         self.assertLess(time.monotonic() - started, 0.5)
 
-    def test_a_brief_in_another_language_is_never_a_lookup(self):
+    def test_a_brief_in_another_language_starts_at_standard(self):
         for brief in ("Corrige le bug de sécurité dans le module de paiement.",
                       "Corrige le bug dans le module de paiement et ajoute un test pour la validation.",
                       "Diseña una migración de OAuth2 para todos los servicios y encuentra la causa raíz del fallo.",
-                      "すべてのサービスでOAuth2への移行を設計し、断続的な障害の根本原因を見つけてください。"):
+                      "Behebe den Fehler in der Zahlungsfunktion und füge einen Test für die Validierung hinzu.",
+                      "Correggi il bug nella funzione di pagamento e aggiungi un test per la validazione.",
+                      "Corrija o erro na função de pagamento e adicione um teste para a validação.",
+                      "Los de fout in de betaalmodule op en voeg een test toe voor de validatie.",
+                      "すべてのサービスでOAuth2への移行を設計し、断続的な障害の根本原因を見つけてください。",
+                      "Найди, где определена функция retry."):
             self.assertEqual(self.level(brief), "standard", brief)
             self.assertNotEqual(profile.profile_prompt(brief)["level"], "lookup", brief)
-        for brief in ("grep TODO src/*.py", "list the files under src", "ls -la src/", "cat README.md"):
+        for brief in ("grep TODO src/*.py", "list the files under src", "ls -la src/", "cat README.md",
+                      "List i18n files: locales/de.json, locales/en.json, locales/es.json",
+                      "grep -rn 'des_encrypt' lib/des/ lib/des.c"):
             self.assertEqual(self.level(brief), "lookup", brief)
+            self.assertEqual(profile.profile_prompt(brief)["level"], "lookup", brief)
 
     def test_make_sure_keeps_the_task_it_introduces(self):
         self.assertEqual(self.level("Make sure to fix the auth bug in the login handler."), "complex")

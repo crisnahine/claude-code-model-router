@@ -68,10 +68,16 @@ _OTHER_WORDS = frozenset(
     "het een van niet voor não com uma em na ao dos de en".split())
 
 
+# Paths, file names and identifiers ("locales/de.json", "des_encrypt") aren't language evidence.
+# A match starts only where an ASCII word run starts, so a long run without a separator stays linear.
+_PATHLIKE = r"(?<![A-Za-z0-9-])(?:[A-Za-z0-9-]+[/._\\])+[A-Za-z0-9-]+"
+
+
 def _not_english(text: str) -> bool:
+    text = re.sub(_PATHLIKE, " ", text)
     letters = [c for c in text if c.isalpha()]
     if letters and 2 * sum(not c.isascii() for c in letters) > len(letters):
-        return True  # mostly another script: CJK, Cyrillic, Arabic and the like
+        return True  # mostly another script, such as Japanese or Cyrillic
     words = re.findall(r"[^\W\d_]+", text)
     other = sum(w in _OTHER_WORDS for w in words)
     return other >= 2 and other > sum(w in _ENGLISH_WORDS for w in words)
