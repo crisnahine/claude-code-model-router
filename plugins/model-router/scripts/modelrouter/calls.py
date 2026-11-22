@@ -40,9 +40,7 @@ def _runs(entry: dict) -> dict:
 
 def routed(config: dict, session_id: str | None, key: str, model: str | None, *, level: str | None = None,
            effort: str | None = None, source: str | None = None, awaiting: bool = False) -> str | None:
-    """Record a spawned call running on `model`. `source` is who chose the model, None when
-    the call was passed through untouched; `awaiting` marks a fallback rewrite that waits
-    for its result. Returns the model the router picked for this call earlier in this request."""
+    """Record a spawned call and return the model the router gave it earlier in this request."""
     if awaiting:
         store.mutate_entry("pending", session_id, lambda pending: _put(
             pending, key, {"model": model, "level": level, "effort": effort}))
@@ -51,19 +49,16 @@ def routed(config: dict, session_id: str | None, key: str, model: str | None, *,
     before = _runs(entry).get(key)
     earlier = before.get("model") if isinstance(before, dict) and before.get("source") == "router" else None
 
-    def power(name: object) -> float:
-        return registry.strength(config, name)
-
     def update(entry: dict) -> None:
         # Re-read under the lock: calls issued together record at the same moment.
         if stood:
             runs = _runs(entry)
             _put(runs, key, {"level": level, "model": model, "effort": effort, "source": source})
             entry["calls"] = runs
-        if power(model) > power(entry.get("top_spawn")):
+        if registry.stronger(config, model, entry.get("top_spawn")):
             entry["top_spawn"] = model
 
-    if session_id and (stood or power(model) > power(entry.get("top_spawn"))):
+    if session_id and (stood or registry.stronger(config, model, entry.get("top_spawn"))):
         store.mutate_entry("prompts", session_id, update)
     return earlier
 

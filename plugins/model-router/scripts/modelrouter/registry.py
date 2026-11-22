@@ -32,6 +32,10 @@ def strength(config: dict, name: Any) -> float:
     return float((spec or {}).get("strength") or 0)
 
 
+def stronger(config: dict, a: Any, b: Any) -> bool:
+    return strength(config, a) > strength(config, b)
+
+
 def by_strength(config: dict, names: Any = None) -> list[str]:
     names = models(config) if names is None else names
     return sorted(names, key=lambda n: (strength(config, n), n))
@@ -42,15 +46,13 @@ def family(config: dict, model: Any) -> str | None:
     if not model or not isinstance(model, str):
         return None
     m = model.lower().split("[")[0]
-    if m == "best":
-        m = "opus"
+    m = (config.get("aliases") or {}).get(m, m)
     for name in sorted(models(config), key=len, reverse=True):
         if m == name or name in m:
             return name
     return None
 
 
-# ------------------------------------------------------------------------ health
 
 
 def health() -> dict:
@@ -118,7 +120,6 @@ def record_result(name: str, ran_as: str | None, ran_family: str | None) -> None
     edit_health(name, change)
 
 
-# --------------------------------------------------------------------- allowlists
 
 
 def _settings_files(project: Path) -> list[Path]:
@@ -150,7 +151,6 @@ def permitted(config: dict, project: Path) -> set[str]:
     return names
 
 
-# ---------------------------------------------------------------------- selection
 
 
 def available(config: dict, project: Path | None = None, cap: str | None = None) -> list[str]:
@@ -160,7 +160,7 @@ def available(config: dict, project: Path | None = None, cap: str | None = None)
     if cap:
         # Under a cap, only models whose strength the user vouches for count: a model a
         # repository added carries the repository's own claim about its rank.
-        trusted = config.get("_trusted") or names
+        trusted = cfg.trusted_models(config) or names
         names = [n for n in names if n in trusted and strength(config, n) <= strength(config, cap)]
     if project is not None:
         allowed = permitted(config, project)
@@ -215,7 +215,6 @@ def select(config: dict, needs: float, priority: str, usable: list[str]) -> str 
     return min(qualifying, key=lambda n: (cost(n), -speed(n)))
 
 
-# --------------------------------------------------------------------------- prices
 
 
 def price(config: dict, model_id: str) -> dict | None:

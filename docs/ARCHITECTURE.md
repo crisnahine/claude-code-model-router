@@ -54,7 +54,7 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 | `settings` | The plugin's options and the environment facts routing depends on, resolved once per hook call or command |
 | `hooks`, `cli`, `report`, `store`, `config` | Handlers for settings hooks and mod calls, commands, tables, state files, and the registry and override files |
 
-All of it is standard-library Python, plus the one TypeScript file the engine runs. No module names a model: the shipped models are entries in `config/models.json`.
+All of it is standard-library Python, plus the one TypeScript file the engine runs. No module names a model: the shipped models, and aliases such as `best`, are entries in `config/models.json`.
 
 ## The ladder
 
@@ -78,7 +78,7 @@ A level's `needs` is a strength. `ladder.pick` adds any learned raise, and `regi
 
 Both paths call one procedure, `spawn.run`. It gathers the facts about the call (the agent's definition, the model it would inherit, the usable models, and an earlier finished run of the same call), passes them to `router.decide`, writes one ledger row (`via` says which path), and records the call in `calls` and its votes in `learn`. Each path is a thin adapter around it: the fallback turns the decision into `updatedInput` and a note, the mod into `{model, effort, reason}`.
 
-`router.decide` reads no state of its own. It returns one record: keep or rewrite, plus the model, the effort, the level and the reason. The reason is written to the ledger, so every choice can be explained afterwards.
+`router.decide` reads no state of its own: the parent's model, the agent's definition, the call's earlier run and the learned raises all arrive as facts. It returns one record: keep or rewrite, plus the model, the effort, the level and the reason. The reason is written to the ledger, so every choice can be explained afterwards.
 
 Order of authority, strongest first:
 
@@ -102,7 +102,7 @@ Some details of how the rules apply:
 
 ### Redo escalation
 
-When an agent's result comes back, the call is remembered with the level it ran at (`done`, per session). If the same call is issued again, the first answer wasn't good enough, so it runs one level higher, and the redo is a vote that its first level was too low. Up the ladder that means more effort first (complex to hardest), then a stronger model (standard to complex, hardest to frontier). A call that names its own model is never escalated: the caller has decided.
+When an agent's result comes back, the call is remembered with the level it ran at (`done`, per session). A background launch reports at once, so it doesn't count until a result does, and the `post-agent` hook runs before Claude's next step so a redo always finds the record. If the same call is issued again, the first answer wasn't good enough, so it runs one level higher, and the redo is a vote that its first level was too low. Up the ladder that means more effort first (complex to hardest), then a stronger model (standard to complex, hardest to frontier). A call that names its own model is never escalated: the caller has decided.
 
 ### Rewrites that don't take
 
@@ -159,7 +159,7 @@ SessionStart ─┬─ session-start   records options and the session model; ex
 UserPromptSubmit ─ user-prompt   profiles the request; notes a model the user may be asking for
 PostModelSwitch ─ model-switch   records the session's new model
 PreToolUse (Agent|Task) ─ pre-agent      fallback: spawn.run, returns updatedInput
-PostToolUse (Agent|Task) ─ post-agent    (async) the model that ran; remembers the call for redos
+PostToolUse (Agent|Task) ─ post-agent    the model that ran; a returned result finishes the call for redos
 PostToolUseFailure (Agent|Task) ─ agent-failed   counts model errors
 PostToolUse (Edit|Write|NotebookEdit) ─ post-edit   notes that code changed
 Stop ─ stop                      the two checks

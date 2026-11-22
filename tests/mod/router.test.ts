@@ -160,14 +160,22 @@ test('a failing or garbled CLI leaves every event unchanged', async () => {
   }
 })
 
-test('every hook but turn.step falls back to next(e) when it throws', async () => {
+test('every hook falls back to next(e) when it throws', async () => {
   const mod = load()
-  assert.deepEqual(Object.keys(mod.hooks).sort(), ['agent.spawn', 'session.start', 'tool.call', 'turn.complete', 'turn.start', 'turn.step'])
-  assert.deepEqual(Object.keys(mod.catches).sort(), ['agent.spawn', 'session.start', 'tool.call', 'turn.complete', 'turn.start'])
-  for (const handler of Object.values(mod.catches)) {
+  const events = ['agent.spawn', 'session.start', 'tool.call', 'turn.complete', 'turn.start', 'turn.step']
+  assert.deepEqual(Object.keys(mod.hooks).sort(), events)
+  assert.deepEqual(Object.keys(mod.catches).sort(), events)
+  for (const [event, handler] of Object.entries(mod.catches)) {
     const e = { any: 'event' }
     let seen: unknown
-    assert.equal(await handler(mod.$, e, (x: unknown) => { seen = x; return 'result' }), 'result')
+    if (event === 'turn.step') {
+      const stream = handler(mod.$, e, async function* (x: unknown) { seen = x; yield { kind: 'text' }; return 'result' })
+      let step = await stream.next()
+      while (!step.done) step = await stream.next()
+      assert.equal(step.value, 'result')
+    } else {
+      assert.equal(await handler(mod.$, e, (x: unknown) => { seen = x; return 'result' }), 'result')
+    }
     assert.equal(seen, e)
   }
 })

@@ -34,7 +34,7 @@ async function ask($: EngineInterface, options: Record<string, string>, command:
   }
 }
 
-function level(effort: ModelEffort | undefined): number {
+function effortRank(effort: ModelEffort | undefined): number {
   return effort === undefined ? -1 : EFFORTS.indexOf(effort)
 }
 
@@ -102,8 +102,10 @@ export const register: Register = (on, options) => {
     // only ever raises what the session already asks for.
     const want = e.agentId !== undefined ? agentEffort.get(e.agentId) : turnEffort.get(e.turnId)
     const apply = want !== undefined && current !== undefined && want !== current
-      && (e.agentId !== undefined || level(want) > level(current))
+      && (e.agentId !== undefined || effortRank(want) > effortRank(current))
     return yield* next(apply ? { ...e, effort: want } : e)
+  }).catch(async function* ($, e, next) {
+    return yield* next(e)
   })
 
   on('turn.complete', async ($, e, next) => {

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import os
 import re
 import time
 
@@ -29,8 +28,7 @@ def is_checker(agent_type: object) -> bool:
 
 
 def note_edit(hook_input: dict) -> None:
-    tool_input = hook_input.get("tool_input")
-    tool_input = tool_input if isinstance(tool_input, dict) else {}
+    tool_input = cfg.tool_input(hook_input)
     path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
     if path and not path.lower().endswith(_NON_CODE):
         store.update_entry("edits", hook_input.get("session_id"), edited_at=time.time())
@@ -42,14 +40,8 @@ def note_check(session_id: str | None) -> None:
 
 def checks_ran_since(transcript_path: object, since: float) -> bool:
     """Did a test, lint, type-check or build command run after `since`?"""
-    if not isinstance(transcript_path, str) or not transcript_path:
-        return False
-    try:
-        with open(os.path.expanduser(transcript_path), "rb") as fh:
-            fh.seek(0, os.SEEK_END)
-            fh.seek(max(0, fh.tell() - 1024 * 1024))
-            tail = fh.read().decode("utf-8", "replace")
-    except OSError:
+    tail = session.transcript_tail(transcript_path, 1024 * 1024)
+    if tail is None:
         return False
     for line in tail.splitlines():
         if '"tool_use"' not in line or '"command"' not in line:
@@ -83,7 +75,7 @@ def escalation(config: dict, hook_input: dict) -> str | None:
     agent of that strength: ask once for a stronger model to check the result."""
     session_id = hook_input.get("session_id")
     entry = store.load_entry("prompts", session_id)
-    if entry.get("escalation_asked") or entry.get("level") not in ("complex", "hardest", "frontier"):
+    if entry.get("escalation_asked") or entry.get("level") not in cfg.LEVELS[cfg.LEVELS.index("complex"):]:
         return None
     need = entry.get("need")
     # On a session's first prompt the model isn't known yet; by now the transcript has it.

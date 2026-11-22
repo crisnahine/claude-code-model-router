@@ -12,16 +12,23 @@ def record(session_id: str | None, model: object) -> None:
         store.save_entry("sessions", session_id, {"model": model})
 
 
-def from_transcript(transcript_path: object) -> str | None:
-    """The model of the newest main-thread assistant message, read from the file's tail."""
+def transcript_tail(transcript_path: object, size: int) -> str | None:
+    """The last `size` bytes of the transcript as text, or None when it can't be read."""
     if not isinstance(transcript_path, str) or not transcript_path:
         return None
     try:
         with open(os.path.expanduser(transcript_path), "rb") as fh:
             fh.seek(0, os.SEEK_END)
-            fh.seek(max(0, fh.tell() - 512 * 1024))
-            tail = fh.read().decode("utf-8", "replace")
+            fh.seek(max(0, fh.tell() - size))
+            return fh.read().decode("utf-8", "replace")
     except OSError:
+        return None
+
+
+def from_transcript(transcript_path: object) -> str | None:
+    """The model of the newest main-thread assistant message, read from the file's tail."""
+    tail = transcript_tail(transcript_path, 512 * 1024)
+    if tail is None:
         return None
     for line in reversed(tail.splitlines()):
         if '"assistant"' not in line or '"model"' not in line:

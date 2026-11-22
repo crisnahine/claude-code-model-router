@@ -40,10 +40,14 @@ def load_dict(path: Path) -> dict:
 
 
 def save_json(path: Path, value: Any) -> None:
+    write_atomic(path, json.dumps(value, indent=2, sort_keys=True))
+
+
+def write_atomic(path: Path, text: str) -> None:
     # A unique temp name per process, then an atomic rename: a reader never sees a
     # half-written file.
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{time.monotonic_ns()}.tmp")
-    tmp.write_text(json.dumps(value, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8")
     for _ in range(40):
         try:
             tmp.replace(path)
@@ -111,7 +115,6 @@ def update_dict(path: Path, change: Callable[[dict], Any]) -> dict:
         return data
 
 
-# ------------------------------------------------------------------------- state
 
 
 def state_path() -> Path:
@@ -126,7 +129,6 @@ def update_state(change: Callable[[dict], Any]) -> dict:
     return update_dict(state_path(), change)
 
 
-# ------------------------------------------------------- files keyed by session id
 
 
 def _keyed(name: str) -> Path:
@@ -174,7 +176,6 @@ def update_entry(name: str, key: str | None, **changes: Any) -> dict:
     return mutate_entry(name, key, lambda entry: entry.update(changes))
 
 
-# ------------------------------------------------------------------------ ledger
 
 
 def ledger_path() -> Path:
@@ -190,9 +191,7 @@ def append_ledger(entry: dict) -> None:
         if path.stat().st_size > LEDGER_MAX_BYTES:
             with locked(path):
                 lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-                tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-                tmp.write_text("".join(lines[len(lines) // 2:]), encoding="utf-8")
-                tmp.replace(path)
+                write_atomic(path, "".join(lines[len(lines) // 2:]))
     except OSError:
         pass
 

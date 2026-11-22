@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import time
 
-from . import agents, calls, gates, ladder, registry, session, settings, spawn, store, upstream
+from . import agents, calls, gates, ladder, learn, registry, session, settings, spawn, store, upstream
 from . import config as cfg
 from .profile import profile_prompt
 
@@ -37,11 +37,6 @@ def named_model(config: dict, prompt: str) -> str | None:
 
 def _context(event: str, text: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
-
-
-def _tool_input(hook_input: dict) -> dict:
-    tool_input = hook_input.get("tool_input")
-    return tool_input if isinstance(tool_input, dict) else {}
 
 
 def session_start(hook_input: dict) -> dict | None:
@@ -115,7 +110,7 @@ def user_prompt(hook_input: dict) -> dict | None:
     usable = registry.available(config, cfg.project_dir(hook_input), options.cap)
     result = profile_prompt(prompt)
     level = result["level"]
-    need = ladder.pick(config, level, options.priority, usable).model
+    need = ladder.pick(config, level, options.priority, usable, learn.raises()).model
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
     below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
     store.save_entry("prompts", session_id, {
@@ -129,7 +124,7 @@ def user_prompt(hook_input: dict) -> dict | None:
     elif below:
         notes.append(
             f"This request looks {level}{why}: about {need}-level reasoning, and this conversation runs on "
-            f"{current}. A plugin can't switch the conversation's model, so this is required, not optional: "
+            f"{current}. This conversation keeps its model, so this step is required: "
             f"hand the hard thinking (the design, the root cause, the risky decision) to "
             f"{gates.strong_agent(config, need)} rather than settling it inline. You will be asked to before "
             "finishing if you don't. If the code shows the task is simpler than its wording, say so instead."
@@ -154,7 +149,7 @@ def pre_agent(hook_input: dict) -> dict | None:
     decision = spawn.run(hook_input, "fallback", guard=lambda *args: _refused_rewrite(session_id, *args))
     if decision["action"] == "rewrite":
         return {"hookSpecificOutput": {
-            "hookEventName": "PreToolUse", "updatedInput": _rewritten_input(_tool_input(hook_input), decision),
+            "hookEventName": "PreToolUse", "updatedInput": _rewritten_input(cfg.tool_input(hook_input), decision),
             "additionalContext": _note(decision)}}
     if decision["action"] == "deny":
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -200,17 +195,18 @@ def _rewritten_input(tool_input: dict, decision: dict) -> dict:
 
 def _note(decision: dict) -> str:
     """One line for Claude, delivered with the agent's result."""
-    if not decision.get("model"):
-        return (f"Model Router set this agent's effort to {decision['effort']} ({decision['reason']}). "
-                "If the result falls short, re-issue the same call: it runs one level higher.")
-    effort = f" at {decision['effort']} effort" if decision.get("effort") else ""
-    return (f"Model Router set this agent's model to {decision['model']}{effort} ({decision['reason']}). "
+    if decision.get("model"):
+        effort = f" at {decision['effort']} effort" if decision.get("effort") else ""
+        what = f"model to {decision['model']}{effort}"
+    else:
+        what = f"effort to {decision['effort']}"
+    return (f"Model Router set this agent's {what} ({decision['reason']}). "
             "If the result falls short, re-issue the same call: it runs one level higher.")
 
 
 def _asked_for(config: dict, hook_input: dict) -> str | None:
     """The model a finished or failed call was meant to run on, if it named one."""
-    tool_input = _tool_input(hook_input)
+    tool_input = cfg.tool_input(hook_input)
     asked = registry.family(config, tool_input.get("model"))
     if asked:
         return asked
@@ -223,13 +219,14 @@ def _asked_for(config: dict, hook_input: dict) -> str | None:
 
 def post_agent(hook_input: dict) -> dict | None:
     config = cfg.load_config(hook_input)
-    tool_input = _tool_input(hook_input)
+    tool_input = cfg.tool_input(hook_input)
     response = hook_input.get("tool_response")
     response = response if isinstance(response, dict) else {}
     ran_as = response.get("resolvedModel")
     asked = _asked_for(config, hook_input)
     try:
-        calls.settled(hook_input.get("session_id"), tool_input, finished=True)
+        # A background launch reports at once; only a returned result finishes the call.
+        calls.settled(hook_input.get("session_id"), tool_input, finished=response.get("status") != "async_launched")
         if asked and registry.family(config, ran_as):
             registry.record_result(asked, ran_as, registry.family(config, ran_as))
     except OSError:
@@ -245,7 +242,7 @@ def agent_failed(hook_input: dict) -> dict | None:
     """An agent call failed. If the error says the model itself isn't usable, count it,
     and route around that model once it has happened twice."""
     try:
-        calls.settled(hook_input.get("session_id"), _tool_input(hook_input))
+        calls.settled(hook_input.get("session_id"), cfg.tool_input(hook_input))
     except OSError:
         pass
     error = str(hook_input.get("error") or "")
@@ -257,7 +254,7 @@ def agent_failed(hook_input: dict) -> dict | None:
         return None
     fails = registry.record_failure(asked, error)
     store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
-                         "agent": _tool_input(hook_input).get("subagent_type"), "model": asked})
+                         "agent": cfg.tool_input(hook_input).get("subagent_type"), "model": asked})
     cap = settings.resolve(config).cap
     usable = [n for n in registry.available(config, cfg.project_dir(hook_input), cap) if n != asked]
     if not usable:
@@ -291,13 +288,12 @@ def refresh_cache(hook_input: dict) -> dict | None:
     return None
 
 
-# ------------------------------------------------------------------ the mod's calls
 # hooks/router.ts forwards three engine events here. Its spawn event sees every subagent,
 # teammate and workflow agent, and names the parent's model exactly.
 
 
 def mod_start(hook_input: dict) -> dict | None:
-    store.save_entry("mod", hook_input.get("session_id"), {"active": True, "at": time.time()})
+    _mark_mod(hook_input.get("session_id"))
     return None
 
 

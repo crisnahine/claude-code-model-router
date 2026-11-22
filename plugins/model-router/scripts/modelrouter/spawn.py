@@ -11,14 +11,10 @@ from . import config as cfg
 Guard = Callable[[dict, str, dict, settings.Settings], None]
 
 
-def _tool_input(hook_input: dict) -> dict:
-    tool_input = hook_input.get("tool_input")
-    return tool_input if isinstance(tool_input, dict) else {}
-
-
-def facts(hook_input: dict, config: dict, options: settings.Settings) -> router.Facts:
-    tool_input = _tool_input(hook_input)
-    agent, key = calls.identify(tool_input)
+def facts(hook_input: dict, config: dict, options: settings.Settings, key: str | None = None) -> router.Facts:
+    tool_input = cfg.tool_input(hook_input)
+    agent, found = calls.identify(tool_input)
+    key = key or found
     project = cfg.project_dir(hook_input)
     definition = agents.find(agent, project)
     if definition is None and hook_input.get("kind") in ("workflow", "teammate"):
@@ -37,15 +33,15 @@ def facts(hook_input: dict, config: dict, options: settings.Settings) -> router.
                                                        hook_input.get("transcript_path")))
     return router.Facts(agent=agent, tool_input=tool_input, usable=registry.available(config, project, options.cap),
                         definition=definition, parent=parent,
-                        earlier=calls.finished_run(hook_input.get("session_id"), key))
+                        earlier=calls.finished_run(hook_input.get("session_id"), key), raises=learn.raises())
 
 
 def run(hook_input: dict, via: str, guard: Guard | None = None) -> dict:
     """Decide one spawn and record it. `via` is "mod" or "fallback"."""
     config = cfg.load_config(hook_input)
     options = settings.resolve(config)
-    found = facts(hook_input, config, options)
-    key = calls.identify(found.tool_input)[1]
+    key = calls.identify(cfg.tool_input(hook_input))[1]
+    found = facts(hook_input, config, options, key)
     decision = router.decide(found, config, options)
     if guard:
         guard(decision, key, config, options)

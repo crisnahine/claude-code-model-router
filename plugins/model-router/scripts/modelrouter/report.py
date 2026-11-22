@@ -19,7 +19,7 @@ def policy(config: dict, settings: Settings) -> str:
              f"Cap: **{limit or 'none'}**. Strongest model in use: **{usable[-1] if usable else 'none'}**.", "",
              "| Subtask level | Model | Effort |", "| :- | :- | :- |"]
     for level in cfg.LEVELS:
-        pick = ladder.pick(config, level, settings.priority, usable)
+        pick = ladder.pick(config, level, settings.priority, usable, learn.raises())
         note = " (raised by feedback)" if learn.bump(level) else ""
         lines.append(f"| {level} | {pick.model}{note} | {pick.effort or 'as the agent or session sets it'} |")
     lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
@@ -51,7 +51,7 @@ def models(config: dict, settings: Settings) -> str:
         info = table.get(name) if isinstance(table.get(name), dict) else {}
         if limit and registry.strength(config, name) > registry.strength(config, limit):
             status = "above your cap"
-        elif limit and name not in (config.get("_trusted") or []):
+        elif limit and name not in cfg.trusted_models(config):
             status = "added by this project, so not used while a cap is set"
         elif name not in allowed:
             status = "not permitted by the availableModels or deniedModels setting"
@@ -84,7 +84,7 @@ def explain(config: dict, settings: Settings, text: str, agent: str | None = Non
     usable = _usable(config, settings)
     result = profile_call({"prompt": text}, agent) if agent else profile_prompt(text)
     level = result["level"]
-    pick = ladder.pick(config, level, settings.priority, usable)
+    pick = ladder.pick(config, level, settings.priority, usable, learn.raises())
     why = ", ".join(result["signals"]) or "no risk, scope or ambiguity wording"
     out = [f"Level: **{level}** ({why}).",
            f"Model: **{pick.model}**, effort: {pick.effort or 'unchanged'}.",

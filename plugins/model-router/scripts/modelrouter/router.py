@@ -1,26 +1,35 @@
-"""Decide the model and reasoning effort for one agent call.
-
-The agent the caller chose is never changed. Only `model` and `effort` on the call are,
-and only when that makes a difference. Order of authority, strongest first:
-
-  1. CLAUDE_CODE_SUBAGENT_MODEL_FORCE   the user pinned every subagent: set effort only
-  2. a model named on the call          Claude, the user through Claude, or a skill: keep
-  3. a per-agent rule in an override file
-  4. the agent's own model              kept unless agent_pins is "override"
-  5. CLAUDE_CODE_SUBAGENT_MODEL         the user's default for agents without a model
-  6. the router's pick                  from the subtask's profile, priority and feedback
-
-Whatever wins is then lowered, never raised, to fit the cap and what is available.
-
-decide only decides: the spawn procedure gathers the facts and records the outcome."""
+"""Decide the model and effort for one call, from facts the spawn procedure gathers.
+The agent never changes. The order of authority (force, the call's own model, a rule,
+the agent's pin, CLAUDE_CODE_SUBAGENT_MODEL, then the ladder's pick) and the cap are in
+docs/ARCHITECTURE.md. decide reads no state: every input arrives as a fact."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal, Optional, TypedDict
 
 from . import ladder, registry
 from . import config as cfg
 from .profile import profile_call
 from .settings import Settings
+
+
+Action = Literal["keep", "rewrite", "deny"]
+Source = Literal["caller", "rule", "pin", "router"]
+
+
+class Decision(TypedDict):
+    agent: str
+    action: Action
+    model: Optional[str]
+    effort: Optional[str]
+    level: Optional[str]
+    signals: list
+    source: Optional[Source]
+    pick: Optional[str]
+    was: Optional[str]
+    reason: str
+    repeat_of: Optional[str]
+    escalated_from: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -32,11 +41,12 @@ class Facts:
     definition: dict | None = None  # agents.find, or the engine's stand-in for its own agents
     parent: str | None = None  # the model an agent without one inherits, when known
     earlier: dict | None = None  # calls.finished_run: this call's finished run in this request
+    raises: dict = field(default_factory=dict)  # learn.raises: the learned raise of each level
 
 
-def decide(facts: Facts, config: dict, settings: Settings) -> dict:
+def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
     tool_input, agent, definition, usable = facts.tool_input, facts.agent, facts.definition, facts.usable
-    out = {"agent": agent, "action": "keep", "model": None, "effort": None, "level": None,
+    out: Decision = {"agent": agent, "action": "keep", "model": None, "effort": None, "level": None,
            "signals": [], "source": None, "pick": None, "was": None, "reason": "", "repeat_of": None,
            "escalated_from": None}
     if agent == "fork":
@@ -65,7 +75,7 @@ def decide(facts: Facts, config: dict, settings: Settings) -> dict:
         above = cfg.LEVELS.index(done["level"]) + 1
         if above < len(cfg.LEVELS) and cfg.LEVELS.index(level) < above:
             level, out["escalated_from"] = cfg.LEVELS[above], done["level"]
-    pick, level_effort = ladder.pick(config, level, settings.priority, usable)
+    pick, level_effort = ladder.pick(config, level, settings.priority, usable, facts.raises)
     out.update(level=level, signals=profile["signals"], pick=pick)
 
     if settings.mode != "auto" or not usable:
@@ -127,7 +137,7 @@ def decide(facts: Facts, config: dict, settings: Settings) -> dict:
 def _above_earlier(config: dict, effort: str | None, model: str | None, done: dict) -> str | None:
     """A redo must ask for more than the run it replaces. When the cap or availability
     keeps it on the same model, that means more effort than last time."""
-    if registry.strength(config, model) > registry.strength(config, done.get("model")):
+    if registry.stronger(config, model, done.get("model")):
         return effort
     earlier = done.get("effort")
     if earlier not in cfg.EFFORTS:

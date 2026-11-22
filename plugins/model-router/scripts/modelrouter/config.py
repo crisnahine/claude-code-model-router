@@ -38,7 +38,7 @@ def _number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _mode(value: Any) -> str | None:
+def parse_mode(value: Any) -> str | None:
     value = value.strip().lower() if isinstance(value, str) else None
     return value if value in MODES else None
 
@@ -49,8 +49,8 @@ def _clean(override: Any) -> dict:
     if not isinstance(override, dict):
         return {}
     out: dict = {}
-    if _mode(override.get("routing_mode")):
-        out["routing_mode"] = _mode(override.get("routing_mode"))
+    if parse_mode(override.get("routing_mode")):
+        out["routing_mode"] = parse_mode(override.get("routing_mode"))
     models = override.get("models")
     if isinstance(models, dict):
         out["models"] = {
@@ -85,6 +85,19 @@ def _clean(override: Any) -> dict:
     return out
 
 
+def tool_input(hook_input: dict) -> dict:
+    value = hook_input.get("tool_input")
+    return value if isinstance(value, dict) else {}
+
+
+def trusted_models(config: dict) -> list[str]:
+    """Models whose strength the shipped registry or the user vouches for. A repository's
+    additions carry only the repository's claim, so they don't count under a cap."""
+    user = _clean(store.load_json(store.claude_home() / OVERRIDE_FILE, {}))
+    vouched = set(base_config().get("models") or {}) | set(user.get("models") or {})
+    return sorted(vouched & set(config.get("models") or {}))
+
+
 def base_config() -> dict:
     return store.load_dict(PLUGIN_ROOT / "config" / "models.json")
 
@@ -104,7 +117,6 @@ def load_config(hook_input: dict | None = None) -> dict:
     # A model needs a strength to be routed to; drop half-defined ones.
     config["models"] = {k: v for k, v in (config.get("models") or {}).items()
                         if isinstance(v, dict) and _number(v.get("strength"))}
-    config["_trusted"] = sorted(trusted & set(config["models"]))
     config.pop("routing_mode", None)
     if file_modes:
         config["routing_mode"] = min(file_modes, key=MODES.index)

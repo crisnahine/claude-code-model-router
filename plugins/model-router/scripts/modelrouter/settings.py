@@ -9,7 +9,7 @@ import os
 from dataclasses import dataclass, field
 
 from . import store
-from .config import MODES, PRIORITIES, _mode
+from .config import MODES, PRIORITIES, parse_mode
 
 CLOUDS = ("bedrock", "vertex", "foundry")
 
@@ -56,8 +56,8 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
         return os.environ.get(name) or None
 
     config = config or {}
-    user = _mode(option("routing_mode")) or "auto"
-    from_files = _mode(config.get("routing_mode"))
+    user = parse_mode(option("routing_mode")) or "auto"
+    from_files = parse_mode(config.get("routing_mode"))
     cap = option("max_tier")
     return Settings(
         mode=from_files if from_files and MODES.index(from_files) < MODES.index(user) else user,

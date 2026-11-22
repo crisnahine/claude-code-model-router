@@ -71,8 +71,7 @@
               "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh",
               "post-agent"
             ],
-            "timeout": 10,
-            "async": true
+            "timeout": 10
           }
         ]
       },

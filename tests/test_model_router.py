@@ -552,6 +552,10 @@ class Router(Sandbox):
         self.assertEqual((d["model"], d["source"], d["effort"]), ("opus", "pin", "low"))
         d = decide(definition={"source": "project", "model": None}, earlier={"level": "lookup", "model": "haiku"})
         self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("standard", "sonnet", "lookup"))
+        d = decide(definition={"source": "project", "model": None}, raises={"lookup": 1})
+        self.assertEqual(d["model"], "sonnet")  # the learned raise arrives as a fact
+        with mock.patch.object(learn, "stats", side_effect=AssertionError("decide read learned.json")):
+            decide(definition={"source": "project", "model": None})
 
     def test_fork_is_never_touched(self):
         self.assertEqual(self.decide("fork", LOOKUP)["action"], "keep")
@@ -693,6 +697,13 @@ class RepeatGuard(Sandbox):
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
         self.assertIsNotNone(self.pre("general-purpose", LOOKUP))
+
+    def test_a_background_launch_is_not_a_finished_run(self):
+        self.pre("general-purpose", LOOKUP, run_in_background=True)
+        hooks.post_agent({**self.call("general-purpose", LOOKUP, model="haiku", run_in_background=True),
+                          "tool_response": {"status": "async_launched", "resolvedModel": "claude-haiku-5-5"}})
+        again = self.decide("general-purpose", LOOKUP, run_in_background=True)
+        self.assertEqual((again["level"], again["escalated_from"]), ("lookup", None))
 
     def test_a_call_redone_after_its_result_runs_one_level_up(self):
         self.pre("general-purpose", LOOKUP)

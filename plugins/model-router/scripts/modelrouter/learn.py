@@ -1,16 +1,7 @@
-"""Feedback. When work routed at some level keeps being redone on a stronger model,
-that level is raised one step from then on. When a raised level keeps being given a
-weaker model than the raise picks, the raise is undone.
-
-`decided` takes the facts of each spawn and casts the votes:
-  * a call on the router's own pick counts as one routed call at its level
-  * a redo that ran one level up is a vote against the level it ran at first (1 vote)
-  * Claude names a stronger model for a call the router routed earlier in the request (2 votes)
-  * Claude names a stronger model than the router would have picked (1 vote)
-  * Claude names a weaker one, while the level is raised: a vote to undo the raise
-A level changes once it has 6 votes that amount to 30% of its routed calls. Feedback
-never takes a level below what ships. This is a simple rule on real outcomes, not a
-measurement of answer quality."""
+"""Feedback from what Claude redoes. A level whose routed calls keep being redone or
+overruled with a stronger model is raised one step, and a raise that keeps being
+overruled downwards is undone. The votes are counted from outcomes; answer quality
+itself is never measured."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,8 +22,17 @@ def stats() -> dict:
     return store.load_dict(_path())
 
 
+def raises() -> dict[str, int]:
+    """The learned raise of every level, read once."""
+    data = stats()
+    return {level: _raise(data.get(level)) for level in LEVELS}
+
+
 def bump(level: str) -> int:
-    info = stats().get(level)
+    return _raise(stats().get(level))
+
+
+def _raise(info: object) -> int:
     try:
         return max(0, min(MAX_BUMP, int(info.get("bump") or 0))) if isinstance(info, dict) else 0
     except (TypeError, ValueError):
@@ -63,27 +63,22 @@ def _update(level: str, calls: int = 0, up: int = 0, down: int = 0) -> None:
 
 def decided(config: dict, *, source: str | None, level: str | None, pick: str | None, runs_on: str | None,
             earlier: str | None = None, escalated_from: str | None = None) -> None:
-    """One spawn's votes. `source` is who chose the model (None when the call ran
-    untouched), `pick` the router's pick for `level`, `runs_on` the model it starts on,
-    `earlier` the model the router picked for the same call earlier in this request, and
-    `escalated_from` the level a redo was raised from."""
+    """Count one spawn and cast the votes its facts carry. `source` is None for a call
+    that ran untouched."""
     if not level:
         return
-
-    def power(name: object) -> float:
-        return registry.strength(config, name)
-
     if source == "router":
         _update(level, calls=1)
     if source in LEVEL_SOURCES and escalated_from:
         _update(escalated_from, up=1)
     if source != "caller":
         return
-    if earlier and power(runs_on) > power(earlier):
+    # The same call routed weaker earlier in this request counts double: it was redone.
+    if earlier and registry.stronger(config, runs_on, earlier):
         _update(level, up=2)
-    elif power(runs_on) > power(pick):
+    elif registry.stronger(config, runs_on, pick):
         _update(level, up=1)
-    elif power(runs_on) < power(pick) and bump(level) > 0:
+    elif registry.stronger(config, pick, runs_on) and bump(level) > 0:
         _update(level, down=1)
 
 
