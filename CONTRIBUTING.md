@@ -48,6 +48,10 @@ The routing evals also run free in CI. Each case under `plugins/model-router/eva
 - No AI or tool attribution anywhere: no `Co-Authored-By` trailer for a tool, no "Generated with" footer, in commits, PRs or files.
 - Never force-push `main`.
 
+## License of contributions
+
+Contributions are licensed under Apache-2.0, the same as the project (section 5 of the license). No CLA or sign-off is required.
+
 ## Releases
 
 [RELEASING.md](RELEASING.md) is the checklist, worked in order. The version is set only in `plugins/model-router/.claude-plugin/plugin.json`; `python3 tools/docs_assets.py` copies it into the version badge, the site and `CITATION.cff`. The maintainer merges, tags and publishes.

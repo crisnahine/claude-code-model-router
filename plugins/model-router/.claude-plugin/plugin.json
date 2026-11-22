@@ -9,7 +9,7 @@
   },
   "homepage": "https://github.com/crisnahine/claude-code-model-router",
   "repository": "https://github.com/crisnahine/claude-code-model-router",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": [
     "model-router",
     "model-routing",
