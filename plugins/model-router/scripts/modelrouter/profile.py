@@ -54,6 +54,35 @@ _FRONTIER = (r"\b(?:research(?:-grade)?|open[- ]ended|no known (?:fix|approach|c
              r"novel|unknown (?:root )?cause|long[- ]running investigation|multi[- ]day|unsolved)\b")
 
 
+# Every pattern above is English, so a brief in another language can't show what it asks for.
+# Such a brief is told apart by its small words, never by the absence of English ones: short
+# English like "grep TODO src/*.py" has none either.
+_ENGLISH_WORDS = frozenset(
+    "the a an and or of to in on for with is are be it this that from by at as if not all any each "
+    "into then so but which what where how why when who should must can does you we i my our your".split())
+_OTHER_WORDS = frozenset(
+    "le la les des du dans pour avec une est sur sont pas qui que et au aux cette "
+    "el los las del para una por con sin como este esta "
+    "il gli della delle nel nella sono di che "
+    "der das und ist nicht mit für ein eine den dem zu von auf im "
+    "het een van niet voor não com uma em na ao dos de en".split())
+
+
+# Paths, file names and identifiers ("locales/de.json", "des_encrypt") aren't language evidence.
+# A match starts only where an ASCII word run starts, so a long run without a separator stays linear.
+_PATHLIKE = r"(?<![A-Za-z0-9-])(?:[A-Za-z0-9-]+[/._\\])+[A-Za-z0-9-]+"
+
+
+def _not_english(text: str) -> bool:
+    text = re.sub(_PATHLIKE, " ", text)
+    letters = [c for c in text if c.isalpha()]
+    if letters and 2 * sum(not c.isascii() for c in letters) > len(letters):
+        return True  # mostly another script, such as Japanese or Cyrillic
+    words = re.findall(r"[^\W\d_]+", text)
+    other = sum(w in _OTHER_WORDS for w in words)
+    return other >= 2 and other > sum(w in _ENGLISH_WORDS for w in words)
+
+
 def signals(text: str) -> list[str]:
     return [name for name, pattern in SIGNALS.items() if re.search(r"\b(?:%s)\b" % pattern, text)]
 
@@ -72,7 +101,7 @@ def profile_prompt(prompt: str) -> dict:
         level = "complex"
     elif changes or hits:
         level = "standard"
-    elif re.search(_LOOKUP, text) or len(text) < 80:
+    elif (re.search(_LOOKUP, text) or len(text) < 80) and not _not_english(text):
         level = "lookup"
     else:
         level = "standard"
@@ -94,6 +123,8 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
             level = "standard"
     elif len(hits) >= 2:
         level = "standard"  # finds or explains something broad or sensitive, but only reads
+    elif _not_english(text):
+        level, why = "standard", why + ["not in English"]
     else:
         level = "lookup"
     if level == "lookup" and (re.search(_THOROUGH, text) or len(text) > LONG_BRIEF):
