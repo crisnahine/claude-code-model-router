@@ -648,6 +648,39 @@ class Profile(unittest.TestCase):
         self.assertEqual(self.level("list the routes. Make sure to include the line numbers"), "lookup")
         self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "standard")
 
+    def test_a_limit_ends_with_its_clause_and_keeps_the_task_after_it(self):
+        self.assertEqual(self.level("Without changing the public API, fix the race condition in the payments "
+                                    "service and add a regression test."), "complex")
+        self.assertEqual(self.level("Never guess: debug why the auth token refresh fails intermittently across "
+                                    "services, find the root cause and fix it."), "hardest")
+        self.assertEqual(self.level("Do not stop until the database migration across all services is fixed "
+                                    "and verified."), "standard")
+        self.assertEqual(self.level("No need to ask questions, just implement the OAuth2 login flow and secure "
+                                    "the session cookies."), "complex")
+
+    def test_a_limit_over_a_list_of_single_verbs_stays_a_limit(self):
+        for brief in ("Find where the retry logic lives. Do not add, remove or rename files.",
+                      "Find where the retry logic lives. Do not edit, delete or create any files.",
+                      "Explain how sessions are stored. Don't write, change or delete anything.",
+                      "List the routes; do not change, fix or refactor anything.",
+                      "Explain the cache. Never, ever change files.",
+                      "Find where the retry logic lives. Do not add, remove, or rename files.",
+                      "Find where the retry logic lives. Do not edit files, create branches or update the database."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+
+    def test_a_comma_before_the_task_ends_the_limit(self):
+        self.assertEqual(self.level("No need to ask, just implement the OAuth2 login flow and secure the session "
+                                    "cookies."), "complex")
+        self.assertEqual(self.level("Never guess, debug why the auth token refresh fails intermittently across "
+                                    "services."), "hardest")
+        self.assertEqual(self.level("The sync job runs without retries, add backoff to the payments client."),
+                         "complex")
+
+    def test_a_huge_whitespace_run_after_a_limit_stays_fast(self):
+        started = time.monotonic()
+        self.level("do not" + " " * 64_000 + "x")
+        self.assertLess(time.monotonic() - started, 0.5)
+
     def test_make_sure_keeps_the_task_it_introduces(self):
         self.assertEqual(self.level("Make sure to fix the auth bug in the login handler."), "complex")
         self.assertEqual(self.level("Make sure the payments database migration is safe across all services "

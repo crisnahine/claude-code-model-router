@@ -23,11 +23,18 @@ SIGNALS = {
 }
 # Words that mean the subtask changes something or has to reason its way to an answer.
 # A subtask that does neither is a lookup, whatever it happens to mention.
-_CHANGE = (r"\b(?:add|implement|fix|change|update|refactor|rename|remove|delete|write|create|build|make(?! sure)|"
-           r"migrate|convert|upgrade|optimi[sz]e|rewrite|redesign|replace)\b(?!-)")
-# "Do not change any files" limits a subtask; it doesn't ask for a change.
+_CHANGE_VERB = (r"(?:add|implement|fix|change|update|refactor|rename|remove|delete|write|create|build|make(?! sure)|"
+                r"migrate|convert|upgrade|optimi[sz]e|rewrite|redesign|replace)\b(?!-)")
+_CHANGE = rf"\b{_CHANGE_VERB}"
+# "Do not change any files" limits a subtask; it doesn't ask for a change. The limit ends with
+# its clause, so "Without changing the API, fix the race" and "Do not stop until X is fixed"
+# keep their task. After "do not" a comma followed by another change verb is still the limit:
+# "do not add, remove or rename files".
 # "Make sure" isn't here: it introduces the task, so _CHANGE skips it instead.
-_NEGATED = r"\b(?:do not|don't|never|without|no need to)\b[^.\n]*"
+_CLAUSE_WORD = r"\b(?:until|unless|before|after|while|once|but|because)\b"
+_CLAUSE = rf"(?:(?!{_CLAUSE_WORD})[^.,;:!?\n])*"
+_NEGATED = (rf"\bwithout\b{_CLAUSE}|\b(?:do not|don't|never|no need to)\b(?:\s*,)?{_CLAUSE}"
+            rf"(?:,(?=\s*(?:(?:or|and|nor)\s+)?{_CHANGE}){_CLAUSE})*")
 _REASONING = (r"\b(?:review|audit|analy[sz]e|debug|diagnos\w*|plan|design|prove|verify the logic|"
               r"investigat\w*|troubleshoot\w*|figure out|root.?caus\w*|reproduc\w*|bisect)\b")
 _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"
