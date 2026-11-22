@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="docs/assets/badge-version.svg" height="28" alt="version 0.1.2"></a>
+  <a href="CHANGELOG.md"><img src="docs/assets/badge-version.svg" height="28" alt="version 0.1.0"></a>
   <a href="#install-the-claude-code-plugin"><img src="docs/assets/badge-claude-code.svg" height="28" alt="Claude Code 2.1.292 or later"></a>
   <a href="#install-the-claude-code-plugin"><img src="docs/assets/badge-python.svg" height="28" alt="Python 3.9 or later"></a>
   <a href="CONTRIBUTING.md#rules-for-a-change"><img src="docs/assets/badge-dependencies.svg" height="28" alt="dependencies: none, standard library only"></a>
@@ -93,7 +93,7 @@ Each subtask is scored from its own brief. The profile looks for risk (security,
 
 ![The ladder: lookup on Haiku at low effort, standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high, frontier on Fable at high. A call climbs one rung each time it comes back for a redo.](docs/assets/ladder.svg)
 
-The ladder starts cheap and relies on redo escalation to catch what falls short, the policy Anthropic measured as cheapest for a high pass rate. In this repository's benchmark the earlier, stronger ladder (standard at `high`, complex on Opus) cost 1.2 to 2.2 times as much per solved task as Claude Code's defaults on 7 of 8 task classes, at the same pass rate, on a Sonnet session (raw data in [bench/results/archive/pre-0.1.1](bench/results/archive/pre-0.1.1/)). So standard work runs Sonnet at `medium`, Claude Code's own default for it, and complex work Sonnet at `high`. Opus 5.5 at `high` came within a point of Fable 5.2 at `high` on coding (95.5% against 96.3%) for under a quarter of the cost, so the hardest work runs on Opus and Fable is kept for research-grade work.
+The ladder starts cheap and relies on redo escalation to catch what falls short, the policy Anthropic measured as cheapest for a high pass rate. In this repository's benchmark the earlier, stronger ladder (standard at `high`, complex on Opus) cost 1.2 to 2.2 times as much per solved task as Claude Code's defaults on 7 of 8 task classes, at the same pass rate, on a Sonnet session (raw data in [bench/results/archive/early-builds](bench/results/archive/early-builds/)). So standard work runs Sonnet at `medium`, Claude Code's own default for it, and complex work Sonnet at `high`. Opus 5.5 at `high` came within a point of Fable 5.2 at `high` on coding (95.5% against 96.3%) for under a quarter of the cost, so the hardest work runs on Opus and Fable is kept for research-grade work.
 
 ### 2. Select a model
 
@@ -151,7 +151,7 @@ On an Opus 5.5 session, the default model for every account type but Microsoft F
 
 On a Sonnet session the router is behind. It is cheapest only in lookup (24% less than the defaults, PASS), and in the other 7 classes it costs more per solved task than the best baseline at the same pass rate, from 7% more in implementation and root cause to 63% more in design (FAIL). It runs the same model there, but writes more cache tokens per run, runs security review and half the cross-module tasks at `high` effort, and sent 4 of 10 design tasks to the read-only architect, which then needed an implementer on Opus to write the file. Complex subtasks stay on Sonnet at `high` effort as a quality margin; the next step is a harder task set and the `fast` priority ([roadmap](docs/ROADMAP.md)).
 
-Both sessions ran 0.1.2's routing code (commit `780ee86`, which differs from the release only in its version and license), 10 runs per class and configuration, beside the 0.1.1 baselines on the same Claude Code version and tasks. Against 0.1.1 it cost 2% less per solved task on Opus and 8% less on Sonnet, both inside the noise; research fell most, since only research-grade wording now reaches Fable. [BENCHMARKS.md](docs/BENCHMARKS.md) has every table, the raw data and the commands to rerun it.
+Both sessions ran the routing code at commit `780ee86`, which differs from this release in its license, a state-file fix and the architect's description, 10 runs per class and configuration, beside baselines run with commit `27b94e6` on the same Claude Code version and tasks. Against the router at `27b94e6` it cost 2% less per solved task on Opus and 8% less on Sonnet, both inside the noise; research fell most, since only research-grade wording now reaches Fable. [BENCHMARKS.md](docs/BENCHMARKS.md) has every table, the raw data and the commands to rerun it.
 
 ## Role agents and `/model-router:ship`
 
@@ -301,7 +301,7 @@ A daily GitHub workflow compares live Claude Code releases, docs, model aliases 
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE). Versions 0.1.0 and 0.1.1 were released under MIT.
+Apache-2.0. See [LICENSE](LICENSE).
 
 Copyright 2026 Cris Nahine.
 
