@@ -59,7 +59,7 @@ def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[l
     env.update(config.get("env", {}))
     cmd = [options["claude"], "-p", prompt, "--output-format", "json", "--model", options["model"],
            "--max-budget-usd", str(options["budget"]), "--setting-sources", "project", "--strict-mcp-config",
-           "--no-session-persistence", "--permission-mode", "dontAsk"]
+           "--permission-mode", "dontAsk"]
     if config.get("plugin"):
         cmd += ["--plugin-dir", options["plugin_dir"]]
     return cmd + ["--allowedTools", *TOOLS], env
@@ -77,6 +77,21 @@ def plugin_data_dir(env: dict) -> Path:
     name = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"]
     home = Path(env.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
     return home / "plugins" / "data" / re.sub(r"[^A-Za-z0-9_-]", "-", f"{name}@inline")
+
+
+def session_dir(work: Path, env: dict) -> Path:
+    """The folder Claude Code keeps a session's transcripts in for this cwd: projects/<the resolved path with
+    anything but letters and digits turned into ->, as Claude Code 2.1.330 names it."""
+    home = Path(env.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    return home / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(work.resolve()))
+
+
+def _forget_session(folder: Path) -> bool:
+    # Only a folder named after one of the bench's own scratch copies is ever removed.
+    if "-mrbench-" not in folder.name or not folder.is_dir():
+        return False
+    shutil.rmtree(folder)
+    return True
 
 
 def state_hashes(folder: Path) -> dict:
@@ -153,6 +168,7 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
     (scratch / "answer.txt").write_text(answer, encoding="utf-8")
     check = subprocess.run([sys.executable, str(task["dir"] / "check.py"), str(work), str(scratch / "answer.txt")],
                            capture_output=True, text=True, timeout=120)
+    session_removed = _forget_session(session_dir(work, env))
     shutil.rmtree(scratch, ignore_errors=True)
     models = {name: {k: usage.get(k) for k in ("inputTokens", "outputTokens", "cacheReadInputTokens",
                                                 "cacheCreationInputTokens", "costUSD", "costBasis")}
@@ -163,7 +179,7 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
         "schema": 1, "task": task["id"], "class": task["class"], "config": config["id"],
         "started_at": started, "claude_version": options["claude_version"], "main_model": options["model"],
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
-        "plugin_state": plugin_state,
+        "plugin_state": plugin_state, "sessions_saved": True, "session_dir_removed": session_removed,
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
         # Without a result the cost is unknown; count the whole budget so totals never understate spend.
         "total_cost_usd": cost if isinstance(cost, (int, float)) else options["budget"],
