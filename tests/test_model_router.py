@@ -29,6 +29,7 @@ from modelrouter import config as cfg  # noqa: E402
 LOOKUP = "list the files under src"
 BUILD = "implement the parser change"
 HARD = "fix the auth migration across every service"
+HARDEST = "investigate why auth is flaky and redesign it across every service"
 
 
 def frontmatter(path: Path) -> dict:
@@ -297,6 +298,10 @@ class SkillGrants(unittest.TestCase):
 
 class DeliveredMessages(Sandbox):
     """A teammate's report or another session's message reaching the main loop isn't the user's request."""
+
+    def setUp(self):
+        super().setUp()
+        self.options(main_effort="true")  # off by default
 
     def delivered(self, tag: str = "teammate-message") -> str:
         return (f'Another Claude session sent a message:\n<{tag} teammate_id="auditor" color="blue">\n'
@@ -990,9 +995,9 @@ class Router(Sandbox):
             self.assertEqual((d["action"], d["model"], d["effort"], d["source"]),
                              ("rewrite", "haiku", "low", "router"), agent)
         d = self.decide("helper", BUILD)
-        self.assertEqual((d["model"], d["effort"]), ("sonnet", "high"))
+        self.assertEqual((d["model"], d["effort"]), ("sonnet", "medium"))
         d = self.decide("helper", HARD)
-        self.assertEqual((d["model"], d["effort"]), ("opus", "high"))
+        self.assertEqual((d["model"], d["effort"]), ("sonnet", "high"))
 
     def test_a_rewrite_changes_two_fields_and_approves_nothing(self):
         out = self.pre("general-purpose", LOOKUP, description="d", run_in_background=True)
@@ -1120,16 +1125,17 @@ class Router(Sandbox):
         self.options(priority="fast")
         self.assertEqual(self.decide("general-purpose", BUILD)["model"], "haiku")
         d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["model"], d["effort"]), ("sonnet", None))
+        self.assertEqual((d["model"], d["effort"]), ("haiku", None))
         self.assertEqual(self.decide("general-purpose", LOOKUP)["effort"], "low")
 
     def test_an_unavailable_model_is_routed_around(self):
-        registry.update_health("opus", unavailable_until=time.time() + 999)
+        registry.update_health("sonnet", unavailable_until=time.time() + 999)
         self.session_on("claude-sonnet-5-5")
-        self.assertEqual(self.decide("general-purpose", HARD)["model"], "fable")  # the next one strong enough
+        self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")  # the next one strong enough
         registry.update_health("fable", unavailable_until=time.time() + 999)
+        registry.update_health("opus", unavailable_until=time.time() + 999)
         self.agent("pinned", "opus")
-        self.assertEqual(self.decide("pinned", LOOKUP)["model"], "sonnet")  # a named model is only ever lowered
+        self.assertEqual(self.decide("pinned", LOOKUP)["model"], "haiku")  # a named model is only ever lowered
 
     def test_rules_in_override_files(self):
         self.override({"agents": {"general-purpose": {"model": "sonnet"}, "Explore": {"route": False},
@@ -1194,7 +1200,7 @@ class RepeatGuard(Sandbox):
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
         again = self.decide("general-purpose", LOOKUP)
-        self.assertEqual((again["level"], again["model"], again["effort"]), ("standard", "sonnet", "high"))
+        self.assertEqual((again["level"], again["model"], again["effort"]), ("standard", "sonnet", "medium"))
         self.assertIn("one level above the lookup run", again["reason"])
         self.pre("general-purpose", LOOKUP)
         self.assertEqual(learn.stats()["lookup"]["votes"], 1)
@@ -1213,11 +1219,11 @@ class RepeatGuard(Sandbox):
         self.options(max_tier="opus")
         hard = "investigate why auth is flaky and redesign it across every service"
         first = self.decide("general-purpose", hard)
-        self.assertEqual((first["level"], first["model"], first["effort"]), ("hardest", "opus", "xhigh"))
+        self.assertEqual((first["level"], first["model"], first["effort"]), ("hardest", "opus", "high"))
         self.pre("general-purpose", hard)
-        self.done("general-purpose", hard, "claude-opus-5-5", model="opus", effort="xhigh")
+        self.done("general-purpose", hard, "claude-opus-5-5", model="opus", effort="high")
         again = self.decide("general-purpose", hard)
-        self.assertEqual((again["level"], again["model"], again["effort"]), ("frontier", "opus", "max"))
+        self.assertEqual((again["level"], again["model"], again["effort"]), ("frontier", "opus", "xhigh"))
 
     def test_redo_escalation_stops_at_the_top_and_skips_named_models(self):
         hard = "research a novel fix for the auth migration across every service, root cause unknown"
@@ -1384,7 +1390,7 @@ class Mod(Sandbox):
     def test_spawns_are_routed_from_the_parents_exact_model(self):
         self.assertEqual(self.spawn("general-purpose", LOOKUP), {"model": "haiku", "effort": "low",
                                                                  "reason": "lookup subtask"})
-        self.assertEqual(self.spawn("general-purpose", HARD)["model"], "opus")
+        self.assertEqual(self.spawn("general-purpose", HARD)["model"], "sonnet")
         self.assertIsNone(self.spawn("general-purpose", BUILD, model="sonnet", effort="high"))
         self.assertEqual(self.ledger()[-1]["via"], "mod")
 
@@ -1438,7 +1444,7 @@ class Mod(Sandbox):
         self.assertEqual(self.spawn("pinned", LOOKUP)["effort"], "low")
         self.done("pinned", LOOKUP, "claude-opus-5-5")
         pick = self.spawn("pinned", LOOKUP)
-        self.assertEqual((pick["model"], pick["effort"]), ("opus", "high"))
+        self.assertEqual((pick["model"], pick["effort"]), ("opus", "medium"))
 
     def test_workflow_stages_and_teammate_roles_without_a_file_are_routed(self):
         for kind, agent in (("workflow", "workflow-subagent"), ("teammate", "helper-two")):
@@ -1453,13 +1459,20 @@ class Mod(Sandbox):
         self.assertEqual((pick["model"], pick["effort"]), (None, "low"))
 
     def test_turn_effort_stays_off_without_a_first_party_credential(self):
+        self.options(main_effort="true")  # off by default
         session.record("s1", "claude-opus-5-5")
         turn = lambda **extra: hooks.mod_turn({"session_id": "s1", "text": HARD, **extra})  # noqa: E731
         self.assertIsNone(turn(first_party=False))  # a gateway: an effort change re-reads the context
         self.assertEqual(turn(first_party=True), {"level": "complex", "effort": "high"})
         self.assertEqual(turn(), {"level": "complex", "effort": "high"})  # not known: raised as before
 
+    def test_turn_effort_is_off_by_default(self):
+        session.record("s1", "claude-opus-5-5")
+        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": HARD}))
+        self.assertFalse(settings.resolve().main_effort)
+
     def test_turn_effort_rises_for_hard_requests_only(self):
+        self.options(main_effort="true")  # off by default
         session.record("s1", "claude-opus-5-5")
         turn = lambda text: hooks.mod_turn({"session_id": "s1", "text": text})  # noqa: E731
         self.assertEqual(turn(HARD), {"level": "complex", "effort": "high"})
@@ -1474,6 +1487,7 @@ class Mod(Sandbox):
                 self.assertIsNone(turn(HARD), name)
 
     def test_turn_effort_is_left_alone_where_an_effort_change_drops_the_cache(self):
+        self.options(main_effort="true")  # off by default
         turn = lambda: hooks.mod_turn({"session_id": "s1", "text": HARD})  # noqa: E731
         for model in ("claude-opus-5-5[1m]", "claude-opus-5-5[1M]", "claude-fable-5-1", "claude-fable-5-2",
                       "claude-fable-6", "claude-sonnet-5-5-20260101", "claude-haiku-5-5"):
@@ -1575,7 +1589,7 @@ class NewestOnProviders(Sandbox):
     def test_each_lagging_alias_gets_its_familys_newest_id(self):
         for provider, lagging in self.LAGS.items():
             with mock.patch.dict(os.environ, {f"CLAUDE_CODE_USE_{provider.upper()}": "1"}):
-                for family, prompt in (("opus", HARD), ("sonnet", BUILD), ("haiku", LOOKUP)):
+                for family, prompt in (("opus", HARDEST), ("sonnet", BUILD), ("haiku", LOOKUP)):
                     want = self.NEWEST[family] if family in lagging else family
                     self.assertEqual(self.model(prompt), want, (provider, family))
         self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "sonnet"))  # the Anthropic API
@@ -1636,6 +1650,7 @@ class ModPayloads(Sandbox):
     def setUp(self):
         super().setUp()
         self.payloads = json.loads((FIXTURES / "mod-payloads.json").read_text(encoding="utf-8"))
+        self.options(main_effort="true")  # off by default
 
     def test_each_command_has_a_handler(self):
         self.assertEqual(set(self.payloads), {name for name in hooks.HANDLERS if name.startswith("mod-")})
@@ -1720,14 +1735,15 @@ class Feedback(Sandbox):
         self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "haiku")
 
     def test_the_prompt_note_and_the_stop_gate_follow_a_raised_level(self):
+        self.session_on("claude-sonnet-5-5")
         for _ in range(learn.VOTES_NEEDED):
-            learn.decided(cfg.load_config(), source="caller", level="complex", pick="opus", runs_on="fable")
-        hooks.user_prompt({"session_id": "s1", "prompt": HARD})  # opus would do, but complex is raised
+            learn.decided(cfg.load_config(), source="caller", level="complex", pick="sonnet", runs_on="opus")
+        hooks.user_prompt({"session_id": "s1", "prompt": HARD})  # sonnet would do, but complex is raised
         entry = store.load_entry("prompts", "s1")
-        self.assertEqual((entry["level"], entry["need"], entry["below"]), ("complex", "fable", True))
-        self.assertIn("fable-level reasoning", hooks.stop({"session_id": "s1"})["reason"])
+        self.assertEqual((entry["level"], entry["need"], entry["below"]), ("complex", "opus", True))
+        self.assertIn("opus-level reasoning", hooks.stop({"session_id": "s1"})["reason"])
         text = hooks.user_prompt({"session_id": "s1", "prompt": HARD})["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("about fable-level reasoning, and this conversation runs on opus", text)
+        self.assertIn("about opus-level reasoning, and this conversation runs on sonnet", text)
 
     def test_a_few_overrides_among_many_calls_change_nothing(self):
         for i in range(40):
@@ -1832,9 +1848,9 @@ class Hooks(Sandbox):
 
     def test_user_prompt_is_silent_unless_the_session_is_too_weak(self):
         self.session_on("claude-opus-5-5")
-        self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARD}))
+        self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
         self.session_on("claude-haiku-5-5")
-        text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARD}))
+        text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
         self.assertIn("model-router:architect", text)
         self.assertTrue(store.load_entry("prompts", "s1")["below"])
 
@@ -1857,7 +1873,7 @@ class Hooks(Sandbox):
         text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": "use haiku to refactor the auth module"}))
         self.assertIn('model: "haiku"', text)
         self.assertIn("If the user is asking", text)
-        self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")  # nothing is forced
+        self.assertEqual(self.decide("general-purpose", HARD)["model"], "sonnet")  # nothing is forced
         config = cfg.load_config()
         self.assertEqual(hooks.named_model(config, "Use Opus for the review"), "opus")
         self.assertEqual(hooks.named_model(config, "run this on claude fable please"), "fable")
@@ -1985,7 +2001,7 @@ class Gates(Sandbox):
 
     def test_hard_request_on_a_weak_session_needs_a_strong_agent(self):
         self.session_on("claude-haiku-5-5")
-        hooks.user_prompt({"session_id": "s1", "prompt": HARD})
+        hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
         self.assertIn("model-router:architect", hooks.stop({"session_id": "s1"})["reason"])
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
 
@@ -1997,8 +2013,8 @@ class Gates(Sandbox):
 
     def test_agents_started_together_cant_hide_the_strong_one(self):
         self.session_on("claude-haiku-5-5")
-        hooks.user_prompt({"session_id": "s1", "prompt": HARD})
-        self.pre("general-purpose", HARD)
+        hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
+        self.pre("general-purpose", HARDEST)
         self.pre("general-purpose", LOOKUP)
         self.assertEqual(calls.strongest("s1"), "opus")
 
@@ -2342,7 +2358,7 @@ class RefreshBackoff(Sandbox):
 
 class Reports(Sandbox):
     def test_policy_shows_levels_cap_and_lowered_crew(self):
-        self.assertIn("| complex | opus | high |", self.out("policy"))
+        self.assertIn("| complex | sonnet | high |", self.out("policy"))
         store.update_state(lambda state: state.update(max_tier="sonnet", priority="quality"))
         text = self.out("policy")
         self.assertIn("Cap: **sonnet**", text)
@@ -2526,6 +2542,10 @@ class ResetCommand(Sandbox):
 
 class SlashSkills(Sandbox):
     """A skill typed as /name is profiled by what it asks for: its arguments and its body."""
+
+    def setUp(self):
+        super().setUp()
+        self.options(main_effort="true")  # off by default
 
     HARD_BODY = ("Base directory for this skill: /p/.claude/skills/hard\n\nInvestigate the race condition in the "
                  "auth migration across every service, find the root cause and redesign the locking.")
@@ -3083,7 +3103,9 @@ class SpawnPaths(Sandbox):
                 mod = hooks.mod_spawn({"session_id": mod_session, "cwd": str(self.project),
                                        "parent_model": "claude-opus-5-5", "kind": "subagent",
                                        "tool_input": tool_input}) or {}
-                self.assertEqual((fallback.get("model"), fallback.get("effort")), (mod.get("model"), mod.get("effort")))
+                # What runs: the fallback returns the whole call, the mod only what it changes.
+                ran = lambda pick: (pick.get("model") or extra.get("model"), pick.get("effort") or extra.get("effort"))  # noqa: E731
+                self.assertEqual(ran(fallback), ran(mod))
                 levels = {r["session"]: r.get("level") for r in self.ledger() if r.get("event") == "spawn"}
                 self.assertEqual(levels.get(fallback_session), levels.get(mod_session))
 

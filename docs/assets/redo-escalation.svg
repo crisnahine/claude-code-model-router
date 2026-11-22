@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="300" viewBox="0 0 860 300" role="img" aria-labelledby="title desc">
   <title id="title">Redo escalation: the same call again runs one level higher</title>
-  <desc id="desc">A call is routed at its level, for example standard on Sonnet at high effort. Its result comes back and the call is recorded as finished. If Claude issues the same call again, it runs one level higher, complex on Opus at high, and counts as a vote that standard was routed too low. At least 6 votes, and at least 30 percent of a level's calls, raise that level one step.</desc>
+  <desc id="desc">A call is routed at its level, for example standard on Sonnet at medium effort. Its result comes back and the call is recorded as finished. If Claude issues the same call again, it runs one level higher, complex on Sonnet at high, and counts as a vote that standard was routed too low. At least 6 votes, and at least 30 percent of a level's calls, raise that level one step.</desc>
   <style>
     .bg { fill: #ffffff; }
     .panel { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.2; }
@@ -33,7 +33,7 @@
   <rect class="first" x="20" y="24" width="190" height="86" rx="8"/>
   <text class="h" x="36" y="50">1. Agent call</text>
   <text class="s" x="36" y="72">Routed at its level:</text>
-  <text class="s" x="36" y="92">standard, Sonnet, high</text>
+  <text class="s" x="36" y="92">standard, Sonnet, medium</text>
 
   <path class="arrow" d="M210,67 L238,67"/>
   <rect class="panel" x="240" y="24" width="190" height="86" rx="8"/>
@@ -50,7 +50,7 @@
   <path class="arrow" d="M620,67 L648,67"/>
   <rect class="redo" x="650" y="24" width="190" height="86" rx="8"/>
   <text class="h" x="666" y="50">4. One level higher</text>
-  <text class="s" x="666" y="72">complex, Opus, high</text>
+  <text class="s" x="666" y="72">complex, Sonnet, high</text>
   <text class="s" x="666" y="92">up a model, or up effort</text>
 
   <path class="arrow" d="M745,110 L745,150"/>
@@ -58,8 +58,8 @@
   <text class="h" x="446" y="176">A vote that standard was routed too low</text>
   <text class="s" x="446" y="198">At least 6 votes and 30% of its calls raise the level one step.</text>
 
-  <text class="m" x="24" y="160">One level up the ladder: lookup, standard and hardest</text>
-  <text class="m" x="24" y="180">move to a stronger model; complex stays on Opus at xhigh.</text>
+  <text class="m" x="24" y="160">One level up the ladder: lookup, complex and hardest</text>
+  <text class="m" x="24" y="180">move to a stronger model; standard stays on Sonnet at high.</text>
   <text class="m" x="24" y="200">A frontier redo runs at one step more effort.</text>
   <text class="m" x="24" y="244">Not a redo: copies of one brief started together. Never escalated: a call that names its own model.</text>
   <text class="m" x="24" y="264">A background agent's call counts as finished when the agent stops with an answer.</text>

@@ -22,7 +22,7 @@ class Settings:
     priority: str = "balanced"
     cap: str | None = None  # max_tier, when it names a registry model
     pins: str = "respect"  # agent_pins: respect or override
-    main_effort: bool = True
+    main_effort: bool = False
     update_check: bool = True
     verify_gate: bool = True
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
@@ -81,7 +81,7 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
         priority=option("priority") if option("priority") in PRIORITIES else "balanced",
         cap=cap if cap in (config.get("models") or {}) else None,
         pins="override" if option("agent_pins") == "override" else "respect",
-        main_effort=_on(option("main_effort")),
+        main_effort=truthy(option("main_effort")),
         update_check=_on(option("update_check")),
         verify_gate=_on(option("verify_gate")),
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),

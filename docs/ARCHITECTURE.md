@@ -61,15 +61,15 @@ All of it is standard-library Python, plus the one TypeScript file the engine ru
 | Level | Needs | Model (balanced) | Effort |
 | :- | -: | :- | :- |
 | lookup | 1 | Haiku | low |
-| standard | 2 | Sonnet | high |
-| complex | 3 | Opus | high |
-| hardest | 3 | Opus | xhigh |
+| standard | 2 | Sonnet | medium |
+| complex | 2 | Sonnet | high |
+| hardest | 3 | Opus | high |
 | frontier | 4 | Fable | high |
 
 Each step is set from the measurements in the research notes:
 
-- Standard work runs Sonnet at `high`. Claude Code's default for Sonnet 5.5 is `medium`, which scored about 7 points lower on coding.
-- Complex and hardest share Opus and differ in effort. Effort is the cheaper lever: on current models it keeps the prompt cache, and Opus 5.5 at `high` came within a point of Fable 5.2 at `high` for under a quarter of the cost.
+- The ladder starts cheap and relies on redo escalation. The earlier ladder (standard at `high`, complex on Opus, hardest at `xhigh`) cost 1.2 to 2.2 times as much per solved task as Claude Code's defaults on 7 of 8 task classes at the same pass rate ([BENCHMARKS.md](BENCHMARKS.md)).
+- Standard and complex share Sonnet and differ in effort: `medium`, Claude Code's own default for Sonnet 5.5, then `high`. Effort is the cheaper lever: on current models it keeps the prompt cache. Hardest runs on Opus at `high`, which came within a point of Fable 5.2 at `high` for under a quarter of the cost.
 - Fable is kept for frontier work, where the brief is hardest and also open-ended or research-grade, and for redos of hardest work.
 
 A level's `needs` is a strength. `ladder.pick` adds any learned raise, and `registry.select` takes the cheapest usable model at or above it, so a cap or an unavailable model moves the pick without any level naming a model.
@@ -104,7 +104,7 @@ Some details of how the rules apply:
 
 ### Redo escalation
 
-When an agent's result comes back, the call is remembered with the level it ran at (`done`, per session). For an agent that runs in the background the `Agent` call returns as soon as the agent has launched, so its call waits under the agent's id (`launched`) and counts as finished when the agent stops with an answer. Copies of one brief started together therefore all run at the brief's own level. The `post-agent` hook runs before Claude's next step, so a redo always finds the record. If the same call is issued again, the first answer wasn't good enough, so it runs one level higher, and the redo is a vote that its first level was too low. On the shipped ladder (`levels` in `config/models.json`), lookup to standard, standard to complex and hardest to frontier move to a stronger model, and complex to hardest stays on Opus and raises effort to xhigh. Any redo that stays on the model of the run it replaces, as complex to hardest does, or under a cap that holds it there, or for a frontier run with no level above it, runs at least one step more effort than that run (`router._above_earlier`). A call that names its own model is never escalated: the caller has decided.
+When an agent's result comes back, the call is remembered with the level it ran at (`done`, per session). For an agent that runs in the background the `Agent` call returns as soon as the agent has launched, so its call waits under the agent's id (`launched`) and counts as finished when the agent stops with an answer. Copies of one brief started together therefore all run at the brief's own level. The `post-agent` hook runs before Claude's next step, so a redo always finds the record. If the same call is issued again, the first answer wasn't good enough, so it runs one level higher, and the redo is a vote that its first level was too low. On the shipped ladder (`levels` in `config/models.json`), lookup to standard, complex to hardest and hardest to frontier move to a stronger model, and standard to complex stays on Sonnet and raises effort to high. Any redo that stays on the model of the run it replaces, as standard to complex does, or under a cap that holds it there, or for a frontier run with no level above it, runs at least one step more effort than that run (`router._above_earlier`). A call that names its own model is never escalated: the caller has decided.
 
 ### Rewrites that don't take
 
@@ -250,8 +250,8 @@ Plugin options have no version key of their own, since `userConfig` has Claude C
 - Answer quality. The profile is an estimate from the brief's wording and the agent's name. Redo escalation and the feedback loop react to what Claude redoes. Neither measures whether an answer was right.
 - Sessions where hooks are disabled by `disableAllHooks` or `allowManagedHooksOnly`. Where an organization doesn't load user mods, routing falls back to the `Agent` call and workflow stages and teammates aren't routed.
 - Another installed mod that also sets a spawn's model. Mods run in their own order. The model that ran is in the ledger either way.
-- A HIPAA organization. An effort change there re-reads the context uncached (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level), but the router finds no reliable sign that the configuration applies, so the main conversation's effort is still raised. Turn `main_effort` off in such an organization.
-- A Claude apps gateway reached through the Claude Desktop app. Desktop never lends its sign-in to plugins, so `$.session.authorize()` is null there whether the session signed in to a subscription or a gateway, and the router treats it as unknown and keeps the raise. Desktop reads the gateway URL from its own managed configuration (https://code.claude.com/docs/en/claude-apps-gateway.md#deliver-policy-to-claude-desktop-sessions), which a hook can't read either. Turn `main_effort` off if Desktop reaches Claude through a gateway.
+- A HIPAA organization. An effort change there re-reads the context uncached (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level), but the router finds no reliable sign that the configuration applies, so with `main_effort` on the main conversation's effort is still raised. Leave `main_effort` off, its default, in such an organization.
+- A Claude apps gateway reached through the Claude Desktop app. Desktop never lends its sign-in to plugins, so `$.session.authorize()` is null there whether the session signed in to a subscription or a gateway, and the router treats it as unknown and keeps the raise when `main_effort` is on. Desktop reads the gateway URL from its own managed configuration (https://code.claude.com/docs/en/claude-apps-gateway.md#deliver-policy-to-claude-desktop-sessions), which a hook can't read either. Leave `main_effort` off, its default, if Desktop reaches Claude through a gateway.
 - Fast mode's price. Fast mode runs the same model ID at higher per-token rates (https://code.claude.com/docs/en/fast-mode.md#understand-the-cost-tradeoff), and the usage the mod gets from `turn.step` and `turn.complete` holds only the token counts and the model, so nothing tells a fast request from a standard one. Those requests are logged at standard rates. Claude Code's own estimate in `/cost` includes them.
 
 ## Verified live
