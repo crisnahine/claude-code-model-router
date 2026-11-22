@@ -12,10 +12,12 @@ from .config import LEVELS, PLUGIN_NAME
 # Two or more systems named in a list ("across the API, the web client and ...") are cross-module work.
 _SYSTEM = r"(?:services?|clients?|api|gateway|backend|frontend|workers?|apps?|layers?|modules?)"
 _SYSTEMS = rf"(?:across|touching|between)\s+(?:the\s+)?(?:[\w-]+\s+){{0,2}}?{_SYSTEM},\s+(?:the\s+)?(?:[\w-]+\s+){{0,2}}?{_SYSTEM}"
-# Asked to make a choice, not to pick an item or report one made: decide how, choose a scheme, weigh options.
-_DECISION = (r"(?:decid(?:e|es|ing)|choos(?:e|es|ing)|pick(?:s|ing)?|weigh(?:s|ing)?)\s+"
-             r"(?:how|which|whether|between|what|on|among)|"
-             r"(?:choos(?:e|es|ing)|pick(?:s|ing)?)\s+(?:a|an|the)\s+(?:[\w-]+\s+){0,2}"
+# Only the forms that ask for a choice: "decided", "chose" and "picked" report one already made.
+_CHOOSE = r"choos(?:e|es|ing)|pick(?:s|ing)?"
+_ASK_CHOICE = rf"decid(?:e|es|ing)|{_CHOOSE}|weigh(?:s|ing)?"
+# Asked to make a choice, not to pick an item: decide how, choose a scheme, weigh options.
+_DECISION = (rf"(?:{_ASK_CHOICE})\s+(?:how|which|whether|between|what|on|among)|"
+             rf"(?:{_CHOOSE})\s+(?:a|an|the)\s+(?:[\w-]+\s+){{0,2}}"
              r"(?:schemes?|strateg\w*|approach\w*|architectures?|algorithms?|data models?|layouts?|protocols?)|"
              r"weigh(?:s|ing)?\s+(?:the\s+)?(?:options|alternatives|trade.?offs?)|"
              r"which\s+(?:[\w-]+\s+){1,3}should\s+(?:we|i|it|they)\s+(?:use|adopt|pick|choose|go with)")
@@ -132,8 +134,10 @@ def _not_english(text: str) -> bool:
 
 
 # A load limit only makes a brief harder when a design or a choice has to be worked out against it.
-_CHOICE = (r"\b(?:design\w*|choos\w*|choices?|trade.?offs?|strateg\w*|capacity planning|plan\w*|"
-           r"siz(?:e|es|ed|ing)|decid\w*|pick|select\w*|how many|estimat\w*|targets?|budgets?)\b")
+# Asking forms only: "the plan", "as designed", "the selected approach" report a choice already made.
+_PLAN = r"(?:(?<![\w])(?:to|and|then|please|let's)\s+plan|^\s*plan|\n\s*plan|[.;:!?]\s+plan)\b|\bplanning\b"
+_CHOICE = (rf"\b(?:design(?:s|ing)?|{_ASK_CHOICE}|choices?|trade.?offs?|strateg\w*|siz(?:e|es|ing)|"
+           rf"select(?:s|ing)?|how many|estimat(?:e|es|ing)|targets?|budgets?)\b|{_PLAN}")
 
 
 def signals(text: str) -> list[str]:
