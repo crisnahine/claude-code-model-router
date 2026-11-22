@@ -2,7 +2,7 @@
 
 One row per requirement the project holds itself to, numbered by the section of the maintainer's project brief it comes from (Sections 2 to 14). Checked on 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `76bddd9`, on Claude Code 2.1.330. The CI evidence is the run on `8ec8eec`; nothing after it has run in CI yet.
 
-Summary: 106 PASS, 49 PARTIAL, 1 FAIL, 1 BLOCKED, 157 requirements.
+Summary: 107 PASS, 48 PARTIAL, 1 FAIL, 1 BLOCKED, 157 requirements.
 
 The line above is counted by `python3 tools/traceability.py`, never by hand. `tests/test_traceability.py` fails when it disagrees with the rows. After changing a status, run the script and paste its output over that line.
 
@@ -93,7 +93,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S5.1 | Runtime uses the standard library only, on Python 3.9, tested in CI on Linux, macOS and Windows | stdlib imports only | `scripts/` | Grep, CI | Imports: argparse, contextlib, dataclasses, datetime, hashlib, itertools, json, os, pathlib, re, sys, time, typing, urllib, xml. CI main: 3.9 and 3.13 on all three | PASS |
 | S5.2 | The mod stays thin and hands every decision to the runtime | Mod forwards events | `hooks/router.ts` | Inspection | One decision stays in the mod: `turn.step` compares effort ranks so the main loop's effort only rises | PARTIAL |
 | S5.3 | The launcher works on `sh` and on Windows | `model-router.sh` | `scripts/model-router.sh` | Unit, CI | `Launcher.test_launcher_runs_hooks_and_commands` passed on windows-latest 3.13 in CI main (log checked) | PASS |
-| S5.4 | Components match `GLOSSARY.md`; a term is added for every named module or concept | Glossary of 16 terms | `GLOSSARY.md` | Inspection | No entry for registry, profile, priority, gate, fork or model health | PARTIAL |
+| S5.4 | Components match `GLOSSARY.md`; a term is added for every named module or concept | Glossary of 33 terms | `GLOSSARY.md` | Inspection | An entry for each module's concept (profile, signal, registry, override file, decision, session model, ladder, pick, pin, cap, priority, routing mode, allowlist, model health, main-loop effort, fork, call, spawn, path, redo, vote, ledger, spend, gate, schema, set aside, upstream) and the benchmark's terms (baseline, pass check, cost per solved task, pilot), each checked against the code | PASS |
 | S5.5 | No dead code, duplicated logic or unjustified abstraction | Dead-code trim before 0.1.0 | `scripts/modelrouter/` | Review | Not rechecked in this pass | PARTIAL |
 | S5.6 | Documented interfaces only; undocumented binary behaviour recorded and covered live | Research doc records binary checks and UNCONFIRMED items | `docs/research/model-control.md` | Inspection, live | `agent.spawn` fields from a binary check, covered by live 2.1.330 on macOS only | PARTIAL |
 
