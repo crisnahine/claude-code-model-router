@@ -85,6 +85,16 @@ def _clean(override: Any) -> dict:
     return out
 
 
+def _prices(value: Any) -> dict:
+    """The numeric rate fields of a prices block, keyed by lowercase model ID."""
+    if not isinstance(value, dict):
+        return {}
+    fields = ("input", "output", "cache_read", "cache_write", "cache_write_1h")
+    out = {name.lower(): {f: spec[f] for f in fields if _number(spec.get(f))}
+           for name, spec in value.items() if isinstance(name, str) and isinstance(spec, dict)}
+    return {k: v for k, v in out.items() if v}
+
+
 def tool_input(hook_input: dict) -> dict:
     value = hook_input.get("tool_input")
     return value if isinstance(value, dict) else {}
@@ -107,7 +117,10 @@ def load_config(hook_input: dict | None = None) -> dict:
     project's .claude/model-router.json. The user's file is trusted in full. A project's
     file may add a model but not re-rank one the user's cap is measured against."""
     base = base_config()
-    user = _clean(store.load_dict(store.claude_home() / OVERRIDE_FILE))
+    user_file = store.load_dict(store.claude_home() / OVERRIDE_FILE)
+    user = _clean(user_file)
+    # Prices only feed the spend report; a repository's file doesn't get to set them.
+    user["prices"] = _prices(user_file.get("prices"))
     project = _clean(store.load_dict(project_dir(hook_input) / ".claude" / OVERRIDE_FILE))
     trusted = set(base.get("models") or {}) | set(user.get("models") or {})
     if "models" in project:
