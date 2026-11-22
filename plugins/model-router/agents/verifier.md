@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: Runs the project's tests, type checks, linters and builds and reports exactly what passed and failed. Use after any code change and before any commit. Does not fix code.
+description: Runs the project's tests, type checks, linters and builds when code changed and nothing has checked it, and reports what passed and failed. Doesn't fix code.
 model: haiku
 effort: low
 tools: Read, Grep, Glob, Bash
