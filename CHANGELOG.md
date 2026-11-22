@@ -1,10 +1,15 @@
 # Changelog
 
-## 0.2.0 - 2026-11-22
+## 0.1.1 - 2026-11-23
 
 Reviewed against Claude Code 2.1.330 and the platform docs of the same day. Tested live on 2.1.330 on macOS, headless and in an interactive terminal in auto mode. Needs Claude Code 2.1.292 or later.
 
+- The ladder starts cheaper: lookup on Haiku at `low`, standard on Sonnet at `medium`, complex on Sonnet at `high`, hardest on Opus at `high`, and frontier on Fable at `high`. A redo still climbs one level: lookup to standard, complex to hardest and hardest to frontier change the model, and standard to complex keeps Sonnet at more effort.
+- `main_effort` is off by default, so the main conversation runs at the effort you set unless you turn the raise on.
+- The two checks before a turn ends have their own options. `verify_gate`, which asks for a test run after code changes, is off by default. The new `strong_agent_gate`, which asks for a stronger agent's check when a hard request was answered by a weaker session model alone, is on.
 - The implementer, architect, reviewer and deep-solver no longer pin a model or effort, so the router routes each by its brief: the architect and reviewer start at complex, and the deep-solver's name floors it at hardest, from where a frontier brief can still take it higher. The scout and verifier stay on Haiku at low effort and the docs-researcher on Haiku at medium, also where the router isn't routing. Their descriptions say when each is the right tool rather than asking for one on every change, and the stop check asks for a reviewer only on a risky or cross-module change. A strong agent the session note or the stop check asks for is named without a model, so the router routes its brief and a redo of it still escalates.
+- A design decision against load or consistency limits, such as throughput, latency, staleness or a per-second rate, or data that must stay consistent, routes to hardest, on Opus.
+- The plugin adds less to every request's context: 728 tokens where it added 1,215, on a headless Haiku run, from a shorter session-start note, shorter role-agent descriptions and a shorter `route` skill description.
 - On Bedrock, Google Cloud's Agent Platform, Microsoft Foundry, Claude Platform on AWS and Claude Models on Google Cloud, where an alias runs an older model, the mod starts routed work on that family's newest model and falls back to the alias if the provider refuses it. Setting `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` keeps the alias.
 - A hard skill typed as a slash command raises that turn's effort, and a skill that takes its arguments is judged by them, so a small job given to a large pipeline skill stays at standard. An argument that only names a target, such as a file, leaves the level to the skill's own body.
 - Briefs are profiled more accurately: other languages start at standard instead of lookup, a negated limit ends with its clause, and judgment verbs such as design and review, named systems and more risk words count. A labeled corpus of 219 briefs checks it.
@@ -16,10 +21,11 @@ Reviewed against Claude Code 2.1.330 and the platform docs of the same day. Test
 - Haiku 5.5's prompts over 100K tokens are priced at their own rate per request, and the Mythos models are priced. Fast-mode requests are logged at standard rates, which the README now says.
 - The main conversation's effort is left alone behind a Claude apps gateway, where a change drops the cache.
 - The Stop check counts test runs inside subagents before asking for a verifier.
-- A clock that moves backwards no longer makes an old call look like a redo or stretches a model's outage, and only the three newest set-aside copies of a state file are kept.
+- A clock that moves backwards no longer makes an old call look like a redo, makes a fan-out copy look like a refused rewrite, or stretches a model's outage, and only the three newest set-aside copies of a state file are kept.
 - Skills pre-approve only the commands they run.
 - The registry and override files carry a `schema` version, with a written compatibility policy.
-- New docs: a security assessment, hook latency and state-size measurements, a benchmark pilot with its raw data, diagrams in the README, and a glossary.
+- The benchmark can run a router variant with its own ladder and options (`router_config`, `plugin_options`) or from another commit (`plugin_ref`), keeps a run's scratch folder and transcripts with `--keep`, records each task's revision on every row, and names scratch folders without the task id, so a brief can't pick up signal words from its own path.
+- New docs: a security assessment, hook latency, state-size and context measurements, diagrams in the README, and a glossary.
 
 ## 0.1.0 - 2026-11-22
 
