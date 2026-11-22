@@ -175,6 +175,23 @@ test('the main loop passes where its prompt came from, once', async () => {
   assert.equal('origin' in mod.calls[4]!.stdin, false)
 })
 
+test('a typed skill sends its command and body with the turn', async () => {
+  const mod = load()
+  const skill = (e: object) => mod.hooks['skill.prompt']!(mod.$, e, async (x: { text: string }) => ({ text: x.text }))
+  const line = '<command-message>hard</command-message>'
+  await mod.submit({ text: '/hard src', command: { name: 'hard', args: 'src' }, wait: false, origin: { kind: 'composer' } })
+  await skill({ skill: 'hard', text: 'Investigate the race.', source: 'projectSettings', frontmatter: {} })
+  await mod.start({ turnId: 't1', text: line })
+  assert.deepEqual(mod.calls[0]!.stdin.command, { name: 'hard', args: 'src', body: 'Investigate the race.' })
+  await skill({ skill: 'other', text: 'A skill Claude ran mid-turn.', source: 'userSettings', frontmatter: {} })
+  await mod.start({ turnId: 't2', text: 'next' })
+  assert.equal('command' in mod.calls[1]!.stdin, false)
+  await mod.submit({ text: '/plugin:hard', command: { name: 'plugin:hard', args: '' }, wait: false, origin: { kind: 'composer' } })
+  await skill({ skill: 'other', text: 'not this one', source: 'plugin', frontmatter: {} })
+  await mod.start({ turnId: 't3', text: line })
+  assert.deepEqual(mod.calls[2]!.stdin.command, { name: 'plugin:hard', args: '' })
+})
+
 test('a lower main loop effort is ignored', async () => {
   const mod = load({ 'mod-turn': { stdout: JSON.stringify({ level: 'lookup', effort: 'low' }) } })
   await mod.start({ turnId: 't1', text: 'list files' })
@@ -244,7 +261,8 @@ test('a CLI that throws after next(e) ran does not run next again', async () => 
 
 test('every hook falls back to next(e) when it throws', async () => {
   const mod = load()
-  const events = ['agent.spawn', 'prompt.submit', 'session.start', 'tool.call', 'turn.complete', 'turn.start', 'turn.step']
+  const events = ['agent.spawn', 'prompt.submit', 'session.start', 'skill.prompt', 'tool.call', 'turn.complete',
+    'turn.start', 'turn.step']
   assert.deepEqual(Object.keys(mod.hooks).sort(), events)
   assert.deepEqual(Object.keys(mod.catches).sort(), events)
   for (const [event, handler] of Object.entries(mod.catches)) {

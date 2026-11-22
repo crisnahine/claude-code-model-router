@@ -33,6 +33,32 @@ def is_user_prompt(prompt: str) -> bool:
     return not prompt.startswith("<") or prompt.startswith("<pasted_content")
 
 
+def _skill_request(args: object, body: object) -> str:
+    """What a typed skill asks for: its arguments and its body, without the engine's base-directory line
+    or the file's frontmatter."""
+    body = body if isinstance(body, str) else ""
+    body = re.sub(r"\A\s*Base directory for this skill: [^\n]*\n", "", body)
+    body = re.sub(r"\A---\n.*?\n---\n", "", body, flags=re.S)
+    return "\n\n".join(part.strip() for part in (args if isinstance(args, str) else "", body) if part.strip())
+
+
+def _typed_skill(prompt: str, hook_input: dict) -> str | None:
+    """The request behind "/name args" when name is a project or user skill or command on disk.
+    UserPromptSubmit sees only the typed line; a plugin's skill isn't found this way."""
+    match = re.match(r"/([A-Za-z0-9_.-]+)(?:\s+(.*))?\Z", prompt.strip(), re.S)
+    if not match:
+        return None
+    name, args = match.group(1), match.group(2) or ""
+    project, home = cfg.project_dir(hook_input) / ".claude", store.claude_home()
+    for path in (project / "skills" / name / "SKILL.md", home / "skills" / name / "SKILL.md",
+                 project / "commands" / f"{name}.md", home / "commands" / f"{name}.md"):
+        try:
+            return _skill_request(args, path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            continue
+    return None
+
+
 def named_model(config: dict, prompt: str) -> str | None:
     """A model the user may be asking for: "use opus", "run this on haiku". These are
     ordinary words too, so this only prompts Claude to decide; it forces nothing."""
@@ -127,7 +153,7 @@ def user_prompt(hook_input: dict) -> dict | None:
         return None
     session_id = hook_input.get("session_id")
     usable = registry.available(config, cfg.project_dir(hook_input), options.cap)
-    result = profile_prompt(prompt)
+    result = profile_prompt(_typed_skill(prompt, hook_input) or prompt)
     level = result["level"]
     need = ladder.pick(config, level, options.priority, usable, learn.raises()).model
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
@@ -363,10 +389,15 @@ def mod_turn(hook_input: dict) -> dict | None:
     options = settings.resolve(config)
     text = hook_input.get("text")
     text = text if isinstance(text, str) else ""
+    command = hook_input.get("command")
+    if isinstance(command, dict):
+        text, asked = _skill_request(command.get("args"), command.get("body")), True
+    else:
+        asked = is_user_prompt(text)
     # The mod's live model, when it is an ID; a record can miss a fallback to another model.
     model = hook_input.get("model")
     model = model if upstream.version_of(model) else session.model(session_id)
-    if (options.mode != "auto" or not options.main_effort or not is_user_prompt(text)
+    if (options.mode != "auto" or not options.main_effort or not asked
             or options.effort_level or hook_input.get("first_party") is False
             or str(hook_input.get("origin")) in MACHINE_ORIGINS
             or not _effort_keeps_cache(options, model)):
@@ -376,7 +407,7 @@ def mod_turn(hook_input: dict) -> dict | None:
     if effort not in cfg.EFFORTS:
         return None
     store.append_ledger({"event": "turn", "session": hook_input.get("session_id"), "level": level,
-                         "effort": effort})
+                         "effort": effort, **({"command": command.get("name")} if isinstance(command, dict) else {})})
     return {"level": level, "effort": effort}
 
 

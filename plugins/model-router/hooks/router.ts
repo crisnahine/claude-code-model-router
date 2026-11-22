@@ -103,23 +103,41 @@ export const register: Register = (on, options) => {
   // a notification is not the person's request. Set before next(e), since the turn starts
   // inside it; taken once, and a turn with no submit sends none.
   let idleOrigin: string | undefined
+  // A typed /skill turn starts with a <command-message> line; what it asks for is the
+  // command's arguments and the body skill.prompt renders for it before the turn starts.
+  let idleCommand: { name: string; args: string; body?: string } | undefined
   on('prompt.submit', async ($, e, next) => {
-    const kind = e.turnId === undefined && typeof e.origin?.kind === 'string' ? e.origin.kind : undefined
+    const idle = e.turnId === undefined
+    const kind = idle && typeof e.origin?.kind === 'string' ? e.origin.kind : undefined
     if (kind) idleOrigin = kind
+    if (idle) idleCommand = e.command ? { name: e.command.name, args: e.command.args } : undefined
     const entered = await next(e)
-    if (kind && typeof (entered as { drop?: unknown } | undefined)?.drop === 'string') idleOrigin = undefined
+    if (idle && typeof (entered as { drop?: unknown } | undefined)?.drop === 'string') {
+      idleOrigin = undefined
+      idleCommand = undefined
+    }
     return entered
+  }).catch(($, e, next) => next(e))
+
+  on('skill.prompt', async ($, e, next) => {
+    const rendered = await next(e)
+    if (idleCommand && idleCommand.body === undefined && idleCommand.name === e.skill) {
+      idleCommand.body = rendered.text
+    }
+    return rendered
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       const origin = idleOrigin
+      const command = idleCommand
       idleOrigin = undefined
+      idleCommand = undefined
       const model = await Promise.resolve().then(() => $.session.model()).catch(() => undefined)
       const firstParty = options.main_effort === false ? undefined : await hasFirstPartyCredential($)
       const pick = await ask($, opts, 'mod-turn', {
         text: e.text, ...(model ? { model } : {}), ...(firstParty !== undefined ? { first_party: firstParty } : {}),
-        ...(origin ? { origin } : {}),
+        ...(origin ? { origin } : {}), ...(command ? { command } : {}),
       })
       if (pick?.effort) remember(turnEffort, e.turnId, pick.effort)
     } else if (!agentEffort.has(e.agentId)) {

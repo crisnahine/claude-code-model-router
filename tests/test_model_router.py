@@ -2204,6 +2204,45 @@ class ResetCommand(Sandbox):
         self.assertFalse((self.data / "learned.json").exists())
 
 
+class SlashSkills(Sandbox):
+    """A skill typed as /name is profiled by what it asks for: its arguments and its body."""
+
+    HARD_BODY = ("Base directory for this skill: /p/.claude/skills/hard\n\nInvestigate the race condition in the "
+                 "auth migration across every service, find the root cause and redesign the locking.")
+    LOOKUP_BODY = "Base directory for this skill: /p/.claude/skills/where\n\nList the files under src."
+    LINE = "<command-message>{0}</command-message>\n<command-name>/{0}</command-name>\n<command-args>{1}</command-args>"
+
+    def turn(self, name: str, args: str, body: str | None, **extra) -> dict | None:
+        command = {"name": name, "args": args, **({"body": body} if body is not None else {})}
+        return hooks.mod_turn({"session_id": "s1", "text": self.LINE.format(name, args), "command": command, **extra})
+
+    def test_a_hard_skill_raises_the_turn_and_a_lookup_does_not(self):
+        self.session_on("claude-opus-5-5")
+        self.assertEqual(self.turn("hard", "please check src too", self.HARD_BODY)["effort"], "xhigh")
+        self.assertIsNone(self.turn("where", "", self.LOOKUP_BODY))
+        self.assertEqual(self.turn("plain", HARD, None), {"level": "complex", "effort": "high"})  # args alone
+
+    def test_a_teammate_message_still_does_not_raise(self):
+        self.session_on("claude-opus-5-5")
+        self.assertIsNone(self.turn("hard", "", self.HARD_BODY, origin="peer"))
+        delivered = "Another Claude session sent a message:\n<cross-session-message from=\"x\">\n" + HARD
+        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": delivered}))
+
+    def test_the_settings_hook_reads_a_project_or_user_skill_it_can_find(self):
+        self.session_on("claude-haiku-5-5")
+        skills = self.project / ".claude" / "skills" / "hard"
+        skills.mkdir(parents=True)
+        (skills / "SKILL.md").write_text("---\nname: hard\ndescription: x\n---\n" + self.HARD_BODY.split("\n\n")[1])
+        commands = self.home / "commands"
+        commands.mkdir(parents=True)
+        (commands / "where.md").write_text("List the files under src.")
+        level = lambda prompt: (hooks.user_prompt({"session_id": "s1", "prompt": prompt, "cwd": str(self.project)}),  # noqa: E731
+                                store.load_entry("prompts", "s1")["level"])[1]
+        self.assertEqual(level("/hard please check src too"), "hardest")
+        self.assertEqual(level("/where"), "lookup")
+        self.assertEqual(level("/elsewhere:unknown " + LOOKUP), "lookup")  # not found: the typed line is profiled
+
+
 @unittest.skipUnless(shutil.which("sh"), "needs sh")
 class Launcher(Sandbox):
     def test_launcher_runs_hooks_and_commands(self):
