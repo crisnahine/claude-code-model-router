@@ -31,11 +31,13 @@ _CHANGE = rf"\b{_CHANGE_VERB}"
 # keep their task. A limit that starts with a verb runs past a comma only into a list of short
 # verb items closed by "or"/"nor" ("do not add, remove, or rename files"); "and" doesn't close one.
 # "Make sure" isn't here: it introduces the task, so _CHANGE skips it instead. "And" ends the
-# limit only when a change or reasoning verb follows it: "do not touch tests and implement X".
+# limit only before a change or reasoning verb with an object: "do not touch tests and implement
+# the retry" has a task, "do not add and remove files" or "the config and build scripts" doesn't.
 _REASONING_WORDS = (r"review|audit|analy[sz]e|debug|diagnos\w*|plan|design|prove|verify the logic|"
                     r"investigat\w*|troubleshoot\w*|figure out|root.?caus\w*|reproduc\w*|bisect")
+_OBJECT = r"\s+(?:the|a|an|it|this|that|these|those|its|their|our|my|your|all|each|every)\b"
 _CLAUSE_WORD = (rf"\b(?:until|unless|before|after|while|once|but|because)\b"
-                rf"|\band\s+(?:{_CHANGE_VERB}|(?:{_REASONING_WORDS})\b)")
+                rf"|\band\s+(?:{_CHANGE_VERB}|(?:{_REASONING_WORDS})\b)(?={_OBJECT})")
 _CLAUSE = rf"(?:(?!{_CLAUSE_WORD})[^.,;:!?\n])*"
 _LIST_VERB = rf"\b(?:{_CHANGE_VERB}|(?:edit|modify|move|touch)\b(?!-))"
 _ITEM = rf"{_LIST_VERB}(?:\s+[\w'-]+){{0,3}}?"
@@ -114,10 +116,12 @@ def profile_prompt(prompt: str) -> dict:
 def profile_call(tool_input: dict, agent_type: str) -> dict:
     """One agent call, judged by its own brief and by what its agent is for."""
     text = f"{tool_input.get('description') or ''}\n{tool_input.get('prompt') or ''}".lower()
-    # A limit says what the subtask may not change, never what the work is about, so the
-    # signals come from the whole brief and only the change and reasoning words skip limits.
+    # A limit still names what the work touches, so its risk counts; its scope and ambiguity
+    # words describe what to avoid, so they don't, and neither do its change words.
     asked = re.sub(_NEGATED, "", text)
-    hits = signals(text)
+    hits = signals(asked)
+    if "risk" not in hits and "risk" in signals(text):
+        hits.insert(0, "risk")
     why = list(hits)
     if re.search(_CHANGE, asked) or re.search(_REASONING, asked):
         if len(hits) >= 3:

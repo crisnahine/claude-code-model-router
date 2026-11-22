@@ -778,9 +778,20 @@ class Profile(unittest.TestCase):
                  ["risk"])):
             result = profile.profile_call({"prompt": brief}, "general-purpose")
             self.assertEqual((result["level"], result["signals"]), ("complex", signals), brief)
-        # A risk named only inside the limit still says what the work is about.
+        # A risk named only inside the limit still says what the work touches.
         self.assertEqual(self.level("Rename the session helper without touching the auth tokens."), "complex")
         self.assertEqual(self.level("Find the config loader. Do not touch the database."), "lookup")
+        # A limit's scope and ambiguity words don't count, so guardrails can't push a small edit to hardest.
+        self.assertEqual(self.level("Fix the typo in docs/setup.md. Do not touch the database schema, do not make "
+                                    "changes across other modules, and do not try to figure out the flaky CI job."),
+                         "complex")
+        # "And" ends a limit only before a verb that takes an object.
+        for brief in ("Find X. Do not add and remove files.", "List the routes; don't review and fix anything.",
+                      "Explain Y. Never plan and design new modules.",
+                      "List the CI jobs. Do not edit the Dockerfile and build scripts.",
+                      "Find the deploy script. Do not touch the production config and build scripts.",
+                      "Show the migration files. Do not touch the schema and update scripts."):
+            self.assertEqual(self.level(brief), "lookup", brief)
 
     def test_a_limit_over_a_list_of_single_verbs_stays_a_limit(self):
         for brief in ("Find where the retry logic lives. Do not add, remove or rename files.",
