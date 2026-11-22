@@ -6,6 +6,13 @@
 
 # Changelog
 
+## Unreleased
+
+- An installed plugin now carries the MIT license text in its own folder, and the marketplace calls the product Model Router, a plugin for Claude Code.
+- The `architect` agent's and the `usage` skill's frontmatter is valid YAML again, so GitHub and other strict YAML readers no longer reject it: their descriptions are quoted, since an unquoted `: ` broke the block.
+- Only research-grade wording (research-grade, open-ended, no known approach, first principles and the like) sends a brief to frontier on Fable. A brief that researches docs or writes a file named RESEARCH.json routes hardest at most.
+- A doc called a migration guide no longer counts as a migration, and a file named RESEARCH.json no longer counts as research, so a docs lookup that mentions them routes on Sonnet at the level it needs.
+
 ## 0.1.1 - 2026-11-23
 
 Reviewed against Claude Code 2.1.330 and the platform docs of the same day. Tested live on 2.1.330 on macOS, headless and in an interactive terminal in auto mode. Needs Claude Code 2.1.292 or later.

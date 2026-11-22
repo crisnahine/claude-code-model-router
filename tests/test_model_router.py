@@ -39,7 +39,8 @@ def frontmatter(path: Path) -> dict:
     for line in match.group(1).splitlines():
         if ":" in line and not line.startswith(" "):
             key, value = line.split(":", 1)
-            fields[key.strip()] = value.strip()
+            value = value.strip()
+            fields[key.strip()] = json.loads(value) if value.startswith('"') else value
     return fields
 
 
@@ -173,6 +174,26 @@ class Shipped(unittest.TestCase):
             # A description is when Claude delegates (sub-agents docs), so none asks to run on every change.
             self.assertNotRegex(fields["description"], r"(?i)\b(?:every|any) (?:diff|code change|change)\b", path.name)
 
+    def test_frontmatter_plain_scalars_are_valid_yaml(self):
+        # Claude Code's loader tolerates these, but GitHub and other strict YAML readers reject the whole block.
+        indicators = tuple("-?:,[]{}#&*!|>'\"%@`")
+        bad = []
+        for path in sorted(PLUGIN.rglob("*.md")):
+            match = re.match(r"^---\n(.*?)\n---\n", path.read_text(encoding="utf-8"), re.S)
+            for line in match.group(1).splitlines() if match else ():
+                item = re.match(r"^\s+- (.*)$", line)
+                field = re.match(r"^[A-Za-z_][\w-]*:(?: (.*))?$", line)
+                value = (item.group(1) if item else (field.group(1) or "") if field else line).strip()
+                if not value or value[0] in "\"'" and value[-1] == value[0] and len(value) > 1:
+                    continue
+                if value[0] in "[{" and value[-1] == {"[": "]", "{": "}"}[value[0]] and ": " not in value:
+                    continue
+                if re.fullmatch(r"[|>][-+]?", value):
+                    continue
+                if ": " in value or " #" in value or value.endswith(":") or value.startswith(indicators):
+                    bad.append(f"{path.relative_to(PLUGIN)}: {line}")
+        self.assertEqual(bad, [])
+
     def test_levels_and_models_are_complete(self):
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
         self.assertEqual(tuple(config["levels"]), cfg.LEVELS)
@@ -223,6 +244,19 @@ class Shipped(unittest.TestCase):
         self.assertEqual(manifest["userConfig"]["routing_mode"]["default"], "auto")
         for option in manifest["userConfig"].values():
             self.assertNotIn("options", option)  # not accepted by the oldest supported Claude Code
+
+    def test_the_installed_plugin_carries_the_license(self):
+        # An install copies only the plugin folder, and the license asks for its notice in every copy.
+        copy = PLUGIN / "LICENSE"
+        self.assertFalse(copy.is_symlink())
+        self.assertEqual(copy.read_bytes(), (ROOT / "LICENSE").read_bytes())
+
+    def test_the_marketplace_names_the_product_model_router(self):
+        market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        for text in (market["description"], market["plugins"][0]["description"]):
+            self.assertIn("Model Router, a plugin for Claude Code", text)
+            self.assertNotIn("Claude Code Model Router", text)
+            self.assertNotIn("Claude Code model router", text)
 
     def test_ci_tests_the_oldest_python_the_launcher_accepts(self):
         entry = (SCRIPTS / "model-router.py").read_text(encoding="utf-8")
@@ -3531,6 +3565,23 @@ class DesignDecisions(unittest.TestCase):
             result = profile.profile_call({"prompt": prompt}, "general-purpose")
             self.assertEqual(result["level"], "complex", prompt)
             self.assertNotIn("load", result["signals"], prompt)
+
+    def test_a_doc_or_file_name_is_not_a_signal(self):
+        cases = {"Read the migration guides under docs/ and list every renamed option.": [],
+                 "Using only docs/, find the version that changed the default and write RESEARCH.json.": [],
+                 "Migrate the billing schema to Postgres.": ["risk"],
+                 "Research which queue the team should adopt and write a short note.": ["ambiguity"]}
+        for prompt, expected in cases.items():
+            self.assertEqual(profile.profile_call({"prompt": prompt}, "general-purpose")["signals"], expected, prompt)
+
+    def test_researching_docs_is_not_research_grade(self):
+        brief = ("Research the fetchkit docs: read the changelogs and migration guides across the docs tree, then "
+                 "write RESEARCH.json with the version where the retry default changed.")
+        self.assertEqual(profile.profile_call({"prompt": brief}, "general-purpose")["level"], "complex")
+        self.assertEqual(profile.profile_prompt(brief)["level"], "complex")
+        grade = ("Research-grade problem: our CRDT editor diverges in rare three-way merges across clients; find the "
+                 "root cause and design a fix for the data loss.")
+        self.assertEqual(profile.profile_call({"prompt": grade}, "general-purpose")["level"], "frontier")
 
     def test_only_a_millisecond_budget_counts_as_load(self):
         for prompt in ("Plan the release notes for 2.0; the API answers in 120 ms.",
