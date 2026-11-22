@@ -158,7 +158,9 @@ class Shipped(unittest.TestCase):
 
     def test_the_costly_role_agents_say_when_not_to_use_them(self):
         # Claude delegates from descriptions, so these limits keep the costliest agents for the work they're for.
-        for name, limit in (("architect", "Not for a file to deliver or a clear change."),
+        for name, limit in (("architect", "Not for a clear change"),
+                            # With no note on the request, this is all Claude reads about who writes the file.
+                            ("architect", "you write any file from its answer"),
                             ("reviewer", "A small, tested change doesn't need one."),
                             ("deep-solver", "Not for ordinary hard coding.")):
             self.assertIn(limit, frontmatter(PLUGIN / "agents" / f"{name}.md")["description"], name)

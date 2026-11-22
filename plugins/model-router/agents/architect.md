@@ -1,6 +1,6 @@
 ---
 name: architect
-description: "Returns a plan or decision and writes nothing: cross-module or system design, an unclear root cause, a security, data or performance choice. Not for a file to deliver or a clear change."
+description: "Plans and decides, writes nothing: cross-module or system design, an unclear root cause, a security, data or performance choice. Not for a clear change; you write any file from its answer."
 tools: Read, Grep, Glob, Bash, WebFetch
 color: purple
 ---
