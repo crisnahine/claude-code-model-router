@@ -2,7 +2,7 @@
 
 One row per requirement the project holds itself to, numbered by the section of the maintainer's project brief it comes from (Sections 2 to 14). Checked on 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `76bddd9`, on Claude Code 2.1.330. The CI evidence is the run on `8ec8eec`; nothing after it has run in CI yet.
 
-Summary: 103 PASS, 51 PARTIAL, 2 FAIL, 1 BLOCKED, 157 requirements.
+Summary: 105 PASS, 49 PARTIAL, 2 FAIL, 1 BLOCKED, 157 requirements.
 
 The line above is counted by `python3 tools/traceability.py`, never by hand. `tests/test_traceability.py` fails when it disagrees with the rows. After changing a status, run the script and paste its output over that line.
 
@@ -131,7 +131,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | :- | :- | :- | :- | :- | :- | :- |
 | S8.1 | The state documents exist: traceability, release readiness, roadmap | This file, `RELEASE_READINESS.md`, `ROADMAP.md` | `docs/` | Unit | `tests/test_traceability.py` | PASS |
 | S8.2 | Documentation and install steps true to the code | README, ARCHITECTURE, CHANGELOG | repo docs | Inspection | `CHANGELOG.md` 0.1.0 says unit tests ran on Python 3.9, 3.10 and 3.13; `ci.yml` runs 3.9 and 3.13 only | PARTIAL |
-| S8.3 | Security and reliability testing repeated after each significant change | Unit tests, among them the skills' permission grants | `tests/` | Unit | `SkillGrants.test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files`. No security assessment on file yet (in progress) | PARTIAL |
+| S8.3 | Security and reliability testing repeated after each significant change | Unit tests, among them the skills' permission grants | `tests/` | Unit | `SkillGrants.test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files`. The assessment in [SECURITY.md](SECURITY.md) was checked against the code on 2026-11-22; nothing repeats it after each change | PARTIAL |
 | S8.4 | Dogfood: the team's subagents run through the router and the ledger is read as evidence | Plugin loaded in team sessions | n/a | n/a | The ledger was not read in this pass | PARTIAL |
 
 ## Section 9: quality assurance
@@ -162,7 +162,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S10.9 | Automated tests on Linux, macOS and Windows, oldest and newest Python in CI | CI matrix | `.github/workflows/ci.yml` | CI | CI main: Python 3.9 and 3.13 on all three. The mod's Node tests ran on Linux only in 0.1.0; `ci.yml` now runs them on all three, not yet run in CI | PASS |
 | S10.10 | CI green on the release PR and on the merge commit in `main` before tagging | Release checklist | `RELEASING.md` | CI | PR run 45004814197 passed; main run 45004998622 passed at 08:56 UTC; `v0.1.0` points at `8ec8eec`, released 08:57 UTC | PASS |
 | S10.11 | Reproducible cost and quality results | Benchmark harness and pilot | `bench/`, `docs/BENCHMARKS.md` | Pilot | A 12-run pilot, every row PARTIAL. The full suite, about $21 at the pilot's mean, waits on the maintainer | PARTIAL |
-| S10.12 | A security assessment | `docs/SECURITY.md` | `docs/SECURITY.md` | n/a | In progress | PARTIAL |
+| S10.12 | A security assessment | [SECURITY.md](SECURITY.md): who can influence routing, the network, credentials, state files, the mod, skills, workflows and open items | `docs/SECURITY.md` | Inspection | Each claim cites the file and line it was checked against on 2026-11-22 | PASS |
 | S10.13 | Professional documentation and install steps, README at release polish with SVG diagrams | README with three SVG diagrams in "How it works" | `README.md`, `docs/assets/` | Unit, inspection | `ReadmeDiagrams` class (6 tests). The 0.1.0 changelog's Python claim still stands (S8.2) | PARTIAL |
 
 ## Section 11: final delivery
@@ -175,7 +175,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S11.4 | Supported versions, surfaces, platforms, providers | README "Compatibility", ARCHITECTURE "Verified live" | `README.md`, `docs/ARCHITECTURE.md` | Inspection | Present | PASS |
 | S11.5 | Install and usage instructions | README "Install" | `README.md` | Inspection | Present | PASS |
 | S11.6 | Automated test results | `docs/TEST_RESULTS.md` | `docs/TEST_RESULTS.md` | Inspection | Present | PASS |
-| S11.7 | Security assessment | `docs/SECURITY.md` | `docs/SECURITY.md` | n/a | In progress | PARTIAL |
+| S11.7 | Security assessment | [SECURITY.md](SECURITY.md) | `docs/SECURITY.md` | Inspection | Present; see S10.12 | PASS |
 | S11.8 | Reproducible cost and quality results with raw data | [BENCHMARKS.md](BENCHMARKS.md), raw data in `bench/results/` | `docs/BENCHMARKS.md`, `bench/results/` | Pilot | A 12-run pilot only | PARTIAL |
 | S11.9 | Hook latency and state-size measurements | None | n/a | n/a | Missing. In progress: per-hook timings and state size | FAIL |
 | S11.10 | Remaining defects, incomplete requirements and release readiness | `docs/RELEASE_READINESS.md` | `docs/RELEASE_READINESS.md` | Inspection | Present | PASS |

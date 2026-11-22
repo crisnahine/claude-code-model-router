@@ -2,7 +2,7 @@
 
 Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `76bddd9`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
 
-**Verdict: the next release is not ready.** Of the 13 release gates, 9 pass and 4 are partial. Two defects are open, and the cost and quality results are a pilot. Nothing after `8ec8eec` has run in CI yet.
+**Verdict: the next release is not ready.** Of the 13 release gates, 10 pass and 3 are partial. Two defects are open, and the cost and quality results are a pilot. Nothing after `8ec8eec` has run in CI yet.
 
 ## Release gates
 
@@ -19,7 +19,7 @@ Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits afte
 | Automated tests on Linux, macOS and Windows, oldest and newest Python | PASS | CI on `8ec8eec`: Python 3.9 and 3.13 on all three, 180 tests each. The mod's Node tests now run on all three in `ci.yml`, not yet run in CI (S10.9) |
 | CI green on the release PR and on the merge commit in `main`, before tagging | PASS for 0.1.0 | PR run 45004814197 and main run 45004998622 passed before `v0.1.0` was tagged. Must be redone for the next release (S10.10) |
 | Reproducible cost and quality results | PARTIAL | [BENCHMARKS.md](BENCHMARKS.md): a 12-run pilot with raw data and commands, every row PARTIAL. The full suite waits on the maintainer (S10.11) |
-| A security assessment | PARTIAL | `docs/SECURITY.md` is in progress (S10.12) |
+| A security assessment | PASS | [SECURITY.md](SECURITY.md), each claim cited to the code it was checked against (S10.12) |
 | Professional documentation and install steps | PARTIAL | The README has its SVG diagrams. The 0.1.0 changelog still names a Python version CI doesn't test (S10.13, S8.2) |
 
 ## Remaining defects and incomplete requirements
@@ -48,7 +48,7 @@ Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits afte
 
 ### Incomplete or not verified enough (PARTIAL)
 
-- In progress on branches not merged yet: the security assessment (S8.3, S10.12, S11.7); hook latency and state size (S4.10, S11.9); the main loop's effort for a hard skill typed as a slash command, which ran at the session's default effort live (S3.4). CI actions are pinned to SHAs but that hasn't run in CI yet (S6.12).
+- In progress on branches not merged yet: hook latency and state size (S4.10, S11.9); the main loop's effort for a hard skill typed as a slash command, which ran at the session's default effort live (S3.4). CI actions are pinned to SHAs but that hasn't run in CI yet (S6.12).
 - No live run: Desktop, VS Code, JetBrains and the Agent SDK (S3.7); acceptEdits and bypass modes (S3.8); which login each run used (S3.9); Bedrock, Vertex and Foundry (S3.10); `allowManagedHooksOnly` (S3.13); Linux and Windows installs (S6.1); undocumented binary behaviour beyond macOS (S5.6); no full live rerun since 0.1.0 (S9.6).
 - Edge cases without a test or with a known gap: compaction (S12.7); a short brief, or a language outside the profile's list (S12.10); an empty brief (S12.11); two mods setting one spawn (S12.14); a clock moving backwards (S12.20); a missing Python (S12.23, S13.3); a Claude Code rename of an event or field (S12.26); the upstream workflow, which hasn't run on `main` yet (S6.16).
 - Not measured, or only in the pilot: cache sharing across fan-outs (S4.5); hook latency against the timeouts (S4.10); `claude plugin eval` not rerun (S4.11, S9.4); cost per solved task and the baselines (S4.1, S4.12 to S4.15, S10.11, S11.8, S11.12, S14.1 to S14.3).
