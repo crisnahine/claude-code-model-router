@@ -245,6 +245,19 @@ class Shipped(unittest.TestCase):
         for option in manifest["userConfig"].values():
             self.assertNotIn("options", option)  # not accepted by the oldest supported Claude Code
 
+    def test_the_installed_plugin_carries_the_license(self):
+        # An install copies only the plugin folder, and the license asks for its notice in every copy.
+        copy = PLUGIN / "LICENSE"
+        self.assertFalse(copy.is_symlink())
+        self.assertEqual(copy.read_bytes(), (ROOT / "LICENSE").read_bytes())
+
+    def test_the_marketplace_names_the_product_model_router(self):
+        market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        for text in (market["description"], market["plugins"][0]["description"]):
+            self.assertIn("Model Router, a plugin for Claude Code", text)
+            self.assertNotIn("Claude Code Model Router", text)
+            self.assertNotIn("Claude Code model router", text)
+
     def test_ci_tests_the_oldest_python_the_launcher_accepts(self):
         entry = (SCRIPTS / "model-router.py").read_text(encoding="utf-8")
         floor = "%s.%s" % re.search(r"sys\.version_info < \((\d+), (\d+)\)", entry).groups()
