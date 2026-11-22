@@ -1980,10 +1980,18 @@ class ResetCommand(Sandbox):
 
     def test_update_reports_whether_it_wrote(self):
         path = self.data / "learned.json"
-        self.assertEqual(store.try_update(path, lambda data: data.update(a=1)), ({"a": 1}, True))
+        self.assertEqual(store.try_update(path, lambda data: data.update(a=1)), ({"a": 1}, "saved"))
         path.write_text(json.dumps({"schema": 99, "a": 1}))
-        self.assertEqual(store.try_update(path, lambda data: data.update(a=2)), ({"a": 2}, False))
+        self.assertEqual(store.try_update(path, lambda data: data.update(a=2)), ({"a": 2}, "newer"))
         self.assertEqual(json.loads(path.read_text()), {"schema": 99, "a": 1})
+
+    def test_corrupt_files_are_set_aside_not_deleted(self):
+        for name in ("state.json", "learned.json"):
+            (self.data / name).write_text('{"half": ')
+        self.assertEqual(self.reset(), "No learned availability to clear.\nFeedback cleared.")
+        self.assertEqual(len(list(self.data.glob("state.json.corrupt-*"))), 1)
+        self.assertEqual(len(list(self.data.glob("learned.json.corrupt-*"))), 1)
+        self.assertFalse((self.data / "learned.json").exists())
 
 
 @unittest.skipUnless(shutil.which("sh"), "needs sh")

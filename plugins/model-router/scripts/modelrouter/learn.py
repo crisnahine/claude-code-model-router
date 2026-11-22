@@ -81,16 +81,5 @@ def decided(config: dict, *, source: str | None, level: str | None, pick: str | 
 
 
 def reset() -> str:
-    """Forget what was learned: cleared, nothing, newer (left for the release that wrote it)
-    or unreadable."""
-    path = _path()
-    status = store.file_status(path)
-    if status in ("newer", "unreadable"):
-        return status
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return "nothing"
-    except OSError:
-        return "unreadable"
-    return "cleared"
+    """Forget what was learned: removed, missing, or left as newer or unreadable."""
+    return store.remove_state_file(_path())
