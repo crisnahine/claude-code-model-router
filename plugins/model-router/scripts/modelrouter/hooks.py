@@ -275,6 +275,19 @@ def agent_failed(hook_input: dict) -> dict | None:
     asked = _asked_for(config, tool_input, routed)
     if not asked:
         return None
+    named = tool_input.get("model")
+    newest = None
+    if mod_active(hook_input.get("session_id")) and (not named or str(named).lower() == asked):
+        newest = registry.newest_id(config, asked, settings.resolve(config).provider, cfg.project_dir(hook_input))
+    if newest:
+        # The mod sent the family's newest ID, and this provider refused it: the alias runs
+        # from now on, and the ID is tried again after the outage.
+        registry.record_failure(newest, error, strikes=1)
+        store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
+                             "agent": tool_input.get("subagent_type"), "model": newest})
+        return _context("PostToolUseFailure", (
+            f"{newest} isn't available here. Re-issue this agent call unchanged: it now runs on the "
+            f"'{asked}' alias, as Claude Code resolves it for this provider."))
     fails = registry.record_failure(asked, error)
     store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
                          "agent": tool_input.get("subagent_type"), "model": asked})
@@ -337,9 +350,20 @@ def mod_spawn(hook_input: dict) -> dict | None:
     _mark_mod(hook_input.get("session_id"))
     # The spawn procedure reads agent_id as "the call comes from inside a subagent".
     decision = spawn.run({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, "mod")
-    if decision["action"] != "rewrite":
+    newest = _newest(hook_input, decision)
+    if decision["action"] != "rewrite" and not newest:
         return None
-    return {"model": decision["model"], "effort": decision["effort"], "reason": decision["reason"]}
+    return {"model": newest or decision["model"], "effort": decision["effort"], "reason": decision["reason"]}
+
+
+def _newest(hook_input: dict, decision: dict) -> str | None:
+    """The newest full ID to send in place of the decided family alias, on a provider whose
+    alias lags. Only agent.spawn takes a full ID; the Agent tool's model takes an alias
+    (https://code.claude.com/docs/en/sub-agents.md)."""
+    if decision["action"] == "deny" or decision["version"]:
+        return None
+    config = cfg.load_config(hook_input)
+    return registry.newest_id(config, decision["model"], settings.resolve(config).provider, cfg.project_dir(hook_input))
 
 
 def _effort_keeps_cache(options: settings.Settings, model: object) -> bool:

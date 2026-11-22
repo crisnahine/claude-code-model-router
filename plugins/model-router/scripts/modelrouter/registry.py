@@ -93,13 +93,13 @@ def _route_around(info: dict) -> None:
     info.update(outages=outages, unavailable_until=time.time() + days * 86400)
 
 
-def record_failure(name: str, error: str) -> int:
+def record_failure(name: str, error: str, strikes: int = 2) -> int:
     """A call on this model failed in a way that points at the model itself. The second
     time, it is routed around. After that outage, one more failure is enough."""
     def change(info: dict) -> None:
         info["fail"] = int(info.get("fail") or 0) + 1
         info["last_error"] = error[:200]
-        if info["fail"] >= 2:
+        if info["fail"] >= strikes:
             _route_around(info)
     return int(edit_health(name, change).get("fail") or 0)
 
@@ -151,7 +151,24 @@ def _managed_settings() -> dict:
         for key in ("availableModels", "deniedModels"):
             if isinstance(data.get(key), list):
                 merged[key] = merged.get(key, []) + [e for e in data[key] if e not in merged.get(key, [])]
+        if data.get("availableModelsMatch") == "exact":
+            merged["availableModelsMatch"] = "exact"
+        if isinstance(data.get("modelOverrides"), dict) and data["modelOverrides"]:
+            merged["modelOverrides"] = True
     return merged
+
+
+def _model_lists(project: Path) -> tuple[list | None, list | None, dict]:
+    """availableModels as Claude Code applies it (a managed list alone, else the user,
+    project and local lists concatenated), the managed deniedModels, and the managed rest."""
+    managed = _managed_settings()
+    allow = managed.get("availableModels")
+    if not isinstance(allow, list):
+        lists = [store.load_dict(path).get("availableModels") for path in _settings_files(project)]
+        lists = [a for a in lists if isinstance(a, list)]
+        allow = sum(lists, []) if lists else None
+    deny = managed.get("deniedModels")
+    return allow, deny if isinstance(deny, list) else None, managed
 
 
 def permitted(config: dict, project: Path) -> set[str]:
@@ -167,20 +184,39 @@ def permitted(config: dict, project: Path) -> set[str]:
         found = {family(config, e) for e in entries}
         return {n for n in names if n in found}
 
-    managed = _managed_settings()
-    allow = managed.get("availableModels")
-    if not isinstance(allow, list):
-        lists = [store.load_dict(path).get("availableModels") for path in _settings_files(project)]
-        lists = [a for a in lists if isinstance(a, list)]
-        allow = sum(lists, []) if lists else None
+    allow, deny, _ = _model_lists(project)
     if allow is not None:
         names = matches(allow)
-    deny = managed.get("deniedModels")
-    if isinstance(deny, list):
+    if deny is not None:
         aliases = config.get("aliases") or {}
         names -= {aliases.get(e.lower(), e.lower()) for e in deny
                   if isinstance(e, str) and e.lower() not in ("best", "opusplan", "default")}
     return names
+
+
+def newest_id(config: dict, name: str | None, provider: str | None, project: Path) -> str | None:
+    """The newest full ID of `name`'s family, where `provider`'s alias for it resolves to an
+    older model, or None to send the alias. Never past the user's own choices: an
+    ANTHROPIC_DEFAULT_<FAMILY>_MODEL pin, modelOverrides, or availableModels and deniedModels
+    that rule the version out (https://code.claude.com/docs/en/model-config.md). An ID that
+    failed here is routed around, and the alias runs until it is retried."""
+    model_id = (config.get("newest") or {}).get(name or "")
+    if (not isinstance(model_id, str) or name not in ((config.get("older_aliases") or {}).get(provider or "") or ())
+            or os.environ.get(f"ANTHROPIC_DEFAULT_{str(name).upper()}_MODEL")):
+        return None
+    allow, deny, managed = _model_lists(project)
+    exact = managed.get("availableModelsMatch") == "exact"
+
+    def names(entries: list, prefix: bool) -> bool:
+        return any(isinstance(e, str) and (e.lower() in (name, model_id) or prefix and model_id.startswith(e.lower() + "-"))
+                   for e in entries)
+
+    if allow is not None and not names(allow, not exact) or deny is not None and names(deny, True):
+        return None
+    overrides = [store.load_dict(path).get("modelOverrides") for path in _settings_files(project)]
+    if managed.get("modelOverrides") or any(isinstance(o, dict) and o for o in overrides):
+        return None
+    return model_id if healthy(model_id) else None
 
 
 def available(config: dict, project: Path | None = None, cap: str | None = None) -> list[str]:
