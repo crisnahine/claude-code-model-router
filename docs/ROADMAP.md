@@ -6,11 +6,11 @@
 
 # Roadmap
 
-What to build next, highest user value first. It starts from what 0.1.0 left undone and adds the gaps in [RELEASE_READINESS.md](RELEASE_READINESS.md). Row IDs point into [TRACEABILITY.md](TRACEABILITY.md). Move an item to "Done since 0.1.0" when its rows pass.
+What to build next, highest user value first. It starts from what this release leaves undone and adds the gaps in [RELEASE_READINESS.md](RELEASE_READINESS.md). Row IDs point into [TRACEABILITY.md](TRACEABILITY.md). Move an item to "Done" when its rows pass.
 
 ## Next
 
-1. Close the cost gap the benchmark shows. The ladder starts cheap (standard Sonnet `medium`, complex Sonnet `high`, hardest Opus `high`), and `main_effort` and the verify gate are off by default. Measured on 0.1.2's routing code at 10 runs per cell ([BENCHMARKS.md](BENCHMARKS.md)): on an Opus 5.5 session, the default for most accounts, it beats `defaults` in 7 of 8 classes, 21% less over all runs, and is level in design. On a Sonnet session it wins lookup only, and costs 7 to 20% more than the best baseline in six classes and 63% more in design. Complex subtasks stay on Sonnet at `high` effort: that part of the Sonnet gap is a stated quality margin (the Architect's decision). Next: a harder task set, where the margin can show in the pass rate, and the `fast` priority measured on both sessions. Also keep design tasks off the read-only architect (4 of 10 Sonnet design runs went there first) and keep each spawn's brief and signals in the bench rows, so the next run shows what set the level. Then run the baselines still missing (`haiku`, `opus` and `fable` at default and `high`, `opusplan`, the advisor), fan-outs, cache temperature and router overhead. Rows S4.12, S4.13, S4.15, S14.1.
+1. Close the cost gap the benchmark shows. The ladder starts cheap (standard Sonnet `medium`, complex Sonnet `high`, hardest Opus `high`), and `main_effort` and the verify gate are off by default. Measured on the routing code at commit `780ee86`, 10 runs per cell ([BENCHMARKS.md](BENCHMARKS.md)): on an Opus 5.5 session, the default for most accounts, it beats `defaults` in 7 of 8 classes, 21% less over all runs, and is level in design. On a Sonnet session it wins lookup only, and costs 7 to 20% more than the best baseline in six classes and 63% more in design. Complex subtasks stay on Sonnet at `high` effort: that part of the Sonnet gap is a stated quality margin (the Architect's decision). Next: a harder task set, where the margin can show in the pass rate, and the `fast` priority measured on both sessions. Also keep design tasks off the read-only architect (4 of 10 Sonnet design runs went there first) and keep each spawn's brief and signals in the bench rows, so the next run shows what set the level. Then run the baselines still missing (`haiku`, `opus` and `fable` at default and `high`, `opusplan`, the advisor), fan-outs, cache temperature and router overhead. Rows S4.12, S4.13, S4.15, S14.1.
 2. Run live beyond the macOS terminal. Linux and Windows installs; Desktop, VS Code, JetBrains and the Agent SDK; Bedrock, Vertex and Foundry; an API-key login; `allowManagedHooksOnly`; split-pane teammates. Record each in "Verified live". Rows S3.7 to S3.10, S3.13, S6.1.
 3. Decide how fast mode shows in the spend log. Claude Code doesn't say which requests ran fast, so the only full figure is its own estimate in `/cost`, which a mod can read. Rows S4.8, S10.7.
 4. Add a `claude plugin eval` case for the `route` skill. The three routing cases pass with the plugin and fail without it ([TEST_RESULTS.md](TEST_RESULTS.md)), but the skill's own command needs a narrow `--allow-tools` Bash grant to run inside an eval. Rows S4.11, S9.4.
@@ -23,7 +23,7 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 - Whether the Mythos models, priced but not routed, become a routable family. Row S2.15.
 - A live marketplace install with one routed call, which needs the maintainer's login or an API key in a scratch config folder. Row S6.1.
 
-## Done since 0.1.0
+## Done
 
 - The ladder starts cheap: standard on Sonnet at `medium`, complex on Sonnet at `high`, hardest on Opus at `high`, and `main_effort` off by default, from the benchmark's cost gap. Rows S4.2, S10.11.
 - The state documents: this file, `TRACEABILITY.md` with its count script, `RELEASE_READINESS.md`, `TEST_RESULTS.md`, the `docs/README.md` index and `CONTRIBUTING.md`.
@@ -37,7 +37,7 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 - The full live set rerun on 2.1.330, acceptEdits and bypassPermissions included, and the subscription login recorded. Rows S3.8, S3.9, S9.6.
 - The routing evals' expected routes are checked in the unit gate, on every CI cell. Row S14.4.
 - A benchmark harness and a 336-run comparison of the router, `defaults`, `sonnet-medium` and `sonnet-high` on all sixteen tasks, with saved sessions, a plugins root per run, and pauses on rate or usage limits. Rows S4.1, S4.14, S10.11, S11.8, S11.12, S14.3.
-- SVG diagrams in the README, and the 0.1.0 changelog's Python versions corrected. Rows S10.13, S8.2.
+- SVG diagrams in the README, and the changelog's Python versions true to the CI matrix. Rows S10.13, S8.2.
 - A dead-code recheck, the dogfood ledger read, every outside source linked, and the `agent.spawn` research re-cited to the mod API types. Rows S5.5, S8.4, S13.6, S5.6 (partial).
 - Briefs in other languages start at standard; a negated limit ends with its clause; teammates' reports no longer raise the lead's effort. Rows S12.10, S12.12, S12.13.
 - A `schema` version on the registry and overrides, and a written compatibility policy. Row S6.15.

@@ -92,7 +92,7 @@ class Analysis(unittest.TestCase):
         self.assertIn("plugin-cheap", verdict["configs"])  # still shown on the page
 
     def test_each_session_model_gets_its_own_table_and_router(self):
-        real = json.loads((ROOT / "bench" / "results" / "archive" / "pre-0.1.1" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
+        real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
         n = analyze.MIN_RUNS
         sonnet = [dict(real, main_model="sonnet", config=c, total_cost_usd=usd, passed=True)
                   for c, usd in (("plugin", 0.3), ("defaults", 0.2)) for _ in range(n)]
@@ -115,7 +115,7 @@ class Analysis(unittest.TestCase):
         self.assertNotIn("$0.9000", sonnet_part)
 
     def test_the_page_reports_latency_cache_level_accuracy_and_escalation(self):
-        real = json.loads((ROOT / "bench" / "results" / "archive" / "pre-0.1.1" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
+        real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
         usage = {"m": {"inputTokens": 10, "cacheReadInputTokens": 80, "cacheCreationInputTokens": 10}}
         first = {"agent": "model-router:implementer", "level": "standard", "escalated_from": None}
         redo = {"agent": "general-purpose", "level": "complex", "escalated_from": "standard"}
@@ -159,22 +159,22 @@ class Analysis(unittest.TestCase):
                 dict(old, bench_commit="b" * 40), dict(base)]
         with tempfile.TemporaryDirectory() as tmp:
             res = Path(tmp) / "results"
-            (res / "archive" / "pre-0.1.1" / "infra").mkdir(parents=True)
+            (res / "archive" / "early-builds" / "infra").mkdir(parents=True)
             (res / "new-lookup.jsonl").write_text(json.dumps(base) + "\n")
-            (res / "archive" / "pre-0.1.1" / "old-lookup.jsonl").write_text("".join(json.dumps(r) + "\n" for r in kept))
-            (res / "archive" / "pre-0.1.1" / "infra" / "net.jsonl").write_text(json.dumps(old) + "\n")
+            (res / "archive" / "early-builds" / "old-lookup.jsonl").write_text("".join(json.dumps(r) + "\n" for r in kept))
+            (res / "archive" / "early-builds" / "infra" / "net.jsonl").write_text(json.dumps(old) + "\n")
             out = Path(tmp) / "page.md"
             analyze.main([str(res / "new-lookup.jsonl"), "--out", str(out)])
             page = out.read_text(encoding="utf-8")
         raw = page.split("## Raw data and commands")[1]
-        self.assertIn("- `bench/results/archive/pre-0.1.1/` holds 3 rows left out of every table, plus 1 set-aside "
+        self.assertIn("- `bench/results/archive/early-builds/` holds 3 rows left out of every table, plus 1 set-aside "
                       "line under its `infra/` and `limited/`: 2 ran on 2 other commits (older builds of the router "
                       "and the bench), 1 on an earlier revision of `design-cache-invalidation`, and 2 were recorded "
                       "while the run's folder name held its task id.", raw)
         self.assertNotIn("$0.15", page.split("## Raw data and commands")[0])  # archived spend is in no table
 
     def test_the_page_names_set_aside_runs_agent_spend_and_batches(self):
-        real = [json.loads(line) for line in (ROOT / "bench" / "results" / "archive" / "pre-0.1.1" / "m6-05-bugfix-2026-11-22.jsonl")
+        real = [json.loads(line) for line in (ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl")
                 .read_text(encoding="utf-8").splitlines() if line]
         base = dict(real[0], started_at="2026-11-22T10:00:00+00:00")
         lost = dict(base, config="plugin", task="bugfix-median", started_at="2026-11-22T09:00:00+00:00")
@@ -810,7 +810,7 @@ class TaskIdentity(unittest.TestCase):
         self.assertEqual(tasks["design-cache-invalidation"]["revision"], 2)
 
     def test_the_page_names_each_tasks_revision_and_the_folder_name_bias(self):
-        template = json.loads((ROOT / "bench" / "results" / "archive" / "pre-0.1.1" / "m6-05-design-2026-11-22.jsonl")
+        template = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-design-2026-11-22.jsonl")
                               .read_text(encoding="utf-8").splitlines()[0])
         old = {k: v for k, v in template.items() if k != "task_revision"}
         rows = [dict(old, task="design-cache-invalidation", config="plugin"),

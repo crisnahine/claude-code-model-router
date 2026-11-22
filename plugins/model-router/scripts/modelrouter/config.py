@@ -10,8 +10,8 @@ from . import store
 PLUGIN_NAME = "model-router"
 PLUGIN_ROOT = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or Path(__file__).resolve().parent.parent.parent)
 OVERRIDE_FILE = "model-router.json"
-# The shape of config/models.json and model-router.json; a file without `schema` is version 1,
-# the 0.1.0 shape. docs/ARCHITECTURE.md "Compatibility" says when it changes.
+# The shape of config/models.json and model-router.json; a file without `schema` is version 1.
+# docs/ARCHITECTURE.md "Compatibility" says when it changes.
 CONFIG_SCHEMA = 1
 MODES = ("off", "advise", "auto")
 PRIORITIES = ("fast", "balanced", "quality")
