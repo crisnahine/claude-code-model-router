@@ -19,7 +19,7 @@ import hashlib
 import os
 import time
 
-from . import agents, learn, registry, session, store
+from . import agents, ladder, registry, session, store
 from . import config as cfg
 from .profile import profile_call
 
@@ -89,10 +89,7 @@ def decide(hook_input: dict, config: dict) -> dict:
         above = cfg.LEVELS.index(done["level"]) + 1
         if above < len(cfg.LEVELS) and cfg.LEVELS.index(level) < above:
             level, out["escalated_from"] = cfg.LEVELS[above], done["level"]
-    spec = (config.get("levels") or {}).get(level) or {}
-    needs = float(spec.get("needs") or cfg.LEVELS.index(level) + 1) + learn.bump(level)
-    priority = cfg.priority()
-    pick = registry.select(config, needs, priority, usable)
+    pick, level_effort = ladder.pick(config, level, cfg.priority(), usable)
     out.update(level=level, signals=profile["signals"], pick=pick)
 
     mode = cfg.mode(config)
@@ -106,9 +103,7 @@ def decide(hook_input: dict, config: dict) -> dict:
         # The user pinned every subagent's model. Effort is still free to set, and on a
         # pinned strong model it is the only lever left on cost.
         out.update(was=env_default or parent, reason="CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent's model")
-        effort = None if _effort_decided(tool_input, definition) else spec.get("effort")
-        if priority == "fast" and effort != "low":
-            effort = None
+        effort = None if _effort_decided(tool_input, definition) else level_effort
         if effort and not tool_input.get("model"):
             out.update(action="rewrite", effort=effort, source="router",
                        reason=f"{level} subtask; the model is pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE, so only effort is set")
@@ -143,9 +138,7 @@ def decide(hook_input: dict, config: dict) -> dict:
     # Effort is set whenever nobody chose it, a pinned agent included: the pin is about
     # the model, and on current models effort is the cheaper lever for quality.
     if source in ("router", "pin", "rule") and not _effort_decided(tool_input, definition):
-        effort = spec.get("effort")
-        if priority == "fast" and effort != "low":
-            effort = None  # more thinking is slower; fast keeps only the reductions
+        effort = level_effort
     if out.get("escalated_from") and isinstance(done, dict):
         effort = _above_earlier(config, effort, final, done)
     out.update(model=final, source=source, reason=why)

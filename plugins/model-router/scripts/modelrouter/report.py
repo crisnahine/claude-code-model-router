@@ -2,7 +2,7 @@
 what the last SessionStart recorded."""
 from __future__ import annotations
 
-from . import agents, learn, registry, store, upstream
+from . import agents, ladder, learn, registry, store, upstream
 from . import config as cfg
 from .profile import profile_call, profile_prompt
 
@@ -11,10 +11,8 @@ def _usable(config: dict) -> list[str]:
     return registry.available(config, cfg.project_dir(), from_state=True)
 
 
-def _pick(config: dict, level: str, usable: list[str]) -> str | None:
-    spec = (config.get("levels") or {}).get(level) or {}
-    needs = float(spec.get("needs") or cfg.LEVELS.index(level) + 1) + learn.bump(level)
-    return registry.select(config, needs, cfg.priority(from_state=True), usable)
+def _pick(config: dict, level: str, usable: list[str]) -> ladder.Pick:
+    return ladder.pick(config, level, cfg.priority(from_state=True), usable)
 
 
 def policy(config: dict) -> str:
@@ -24,10 +22,9 @@ def policy(config: dict) -> str:
              f"Cap: **{limit or 'none'}**. Strongest model in use: **{usable[-1] if usable else 'none'}**.", "",
              "| Subtask level | Model | Effort |", "| :- | :- | :- |"]
     for level in cfg.LEVELS:
-        spec = (config.get("levels") or {}).get(level) or {}
+        pick = _pick(config, level, usable)
         note = " (raised by feedback)" if learn.bump(level) else ""
-        lines.append(f"| {level} | {_pick(config, level, usable)}{note} | "
-                     f"{spec.get('effort') or 'as the agent or session sets it'} |")
+        lines.append(f"| {level} | {pick.model}{note} | {pick.effort or 'as the agent or session sets it'} |")
     lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
     for name in registry.by_strength(config):
         info = registry.models(config)[name]
@@ -90,10 +87,10 @@ def explain(config: dict, text: str, agent: str | None = None) -> str:
     usable = _usable(config)
     result = profile_call({"prompt": text}, agent) if agent else profile_prompt(text)
     level = result["level"]
-    spec = (config.get("levels") or {}).get(level) or {}
+    pick = _pick(config, level, usable)
     why = ", ".join(result["signals"]) or "no risk, scope or ambiguity wording"
     out = [f"Level: **{level}** ({why}).",
-           f"Model: **{_pick(config, level, usable)}**, effort: {spec.get('effort') or 'unchanged'}.",
+           f"Model: **{pick.model}**, effort: {pick.effort or 'unchanged'}.",
            f"Priority {cfg.priority(from_state=True)}; models in use: {', '.join(usable)}."]
     if agent:
         definition = agents.find(agent, cfg.project_dir())

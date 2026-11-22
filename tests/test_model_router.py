@@ -828,6 +828,16 @@ class Feedback(Sandbox):
         self.assertIn("cleared", self.out("models", "--reset"))
         self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "haiku")
 
+    def test_the_prompt_note_and_the_stop_gate_follow_a_raised_level(self):
+        for _ in range(learn.VOTES_NEEDED):
+            learn.vote_up("complex")
+        hooks.user_prompt({"session_id": "s1", "prompt": HARD})  # opus would do, but complex is raised
+        entry = store.load_entry("prompts", "s1")
+        self.assertEqual((entry["level"], entry["need"], entry["below"]), ("complex", "fable", True))
+        self.assertIn("fable-level reasoning", hooks.stop({"session_id": "s1"})["reason"])
+        text = hooks.user_prompt({"session_id": "s1", "prompt": HARD})["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("about fable-level reasoning, and this conversation runs on opus", text)
+
     def test_a_few_overrides_among_many_calls_change_nothing(self):
         for i in range(40):
             self.pre("general-purpose", f"list the files under dir{i}")

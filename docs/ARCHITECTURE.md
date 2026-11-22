@@ -18,7 +18,7 @@ The aim is the lowest cost per finished task at a high quality bar. Every subtas
                                 └──────────────┬────────────────────┘
                                                ▼
                                   scripts/modelrouter (Python)
-                         router.decide · registry · profile · learn · gates
+                         router.decide · ladder · registry · profile · learn · gates
 ```
 
 **The mod** (`hooks/router.ts`, a hooks module loaded from `hooks/hooks.json` under `modules`) is the primary path. It hooks four engine events:
@@ -42,6 +42,7 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 | :- | :- |
 | `registry` | Which models exist, which are usable right now, the `select` and `clamp` rules, and list prices |
 | `profile` | Turns a brief and an agent's name into a level and the reasons for it |
+| `ladder` | Turns a level, the priority and learned raises into the pick: a model and an effort |
 | `router` | Applies the order of authority and produces one decision per agent |
 | `learn` | Counts votes that a level was routed too low, and raises it |
 | `agents` | Finds an agent's definition in the project, the user folder, this plugin or another installed plugin |
@@ -68,7 +69,7 @@ Each step is set from the measurements in the research notes:
 - Complex and hardest share Opus and differ in effort. Effort is the cheaper lever: on current models it keeps the prompt cache, and Opus 5.5 at `high` came within a point of Fable 5.2 at `high` for under a quarter of the cost.
 - Fable is kept for frontier work, where the brief is hardest and also open-ended or research-grade, and for redos of hardest work.
 
-A level's `needs` is a strength. `registry.select` takes the cheapest usable model at or above it, so a cap or an unavailable model moves the pick without any level naming a model.
+A level's `needs` is a strength. `ladder.pick` adds any learned raise, and `registry.select` takes the cheapest usable model at or above it, so a cap or an unavailable model moves the pick without any level naming a model.
 
 ## The decision
 
@@ -81,7 +82,7 @@ Order of authority, strongest first:
 3. A per-agent rule in a `model-router.json` file.
 4. The agent's own `model`, unless `agent_pins` is `override`.
 5. `CLAUDE_CODE_SUBAGENT_MODEL`, the user's default for agents without a model.
-6. The router's pick: `registry.select(level needs + learned raise, priority, usable models)`.
+6. The router's pick: `ladder.pick(level, priority, usable models)`, which runs `registry.select` on the level's needs plus any learned raise.
 
 Then `registry.clamp` lowers the result to the nearest usable model. It never raises.
 

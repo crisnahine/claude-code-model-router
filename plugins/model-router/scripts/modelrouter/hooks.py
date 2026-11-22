@@ -9,7 +9,7 @@ import os
 import re
 import time
 
-from . import agents, gates, learn, registry, router, session, store, upstream
+from . import agents, gates, ladder, learn, registry, router, session, store, upstream
 from . import config as cfg
 from .profile import profile_prompt
 
@@ -117,8 +117,7 @@ def user_prompt(hook_input: dict) -> dict | None:
     usable = registry.available(config, cfg.project_dir(hook_input))
     result = profile_prompt(prompt)
     level = result["level"]
-    needs = float(((config.get("levels") or {}).get(level) or {}).get("needs") or 1)
-    need = registry.select(config, needs, cfg.priority(), usable)
+    need = ladder.pick(config, level, cfg.priority(), usable).model
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
     below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
     store.save_entry("prompts", session_id, {
