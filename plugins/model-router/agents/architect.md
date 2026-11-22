@@ -1,6 +1,6 @@
 ---
 name: architect
-description: Plans and designs, read-only: system or cross-module design, an unclear root cause, or a decision with security, data or performance risk.
+description: Plans and designs, read-only: system or cross-module design, an unclear root cause, or a decision with security, data or performance risk. Not for a change whose approach is already clear.
 tools: Read, Grep, Glob, Bash, WebFetch
 color: purple
 ---

@@ -1,6 +1,6 @@
 ---
 name: deep-solver
-description: Takes research-grade, open-ended problems with no known approach, or work the architect couldn't settle.
+description: Takes research-grade, open-ended problems with no known approach, or work the architect couldn't settle. Not for ordinary hard coding.
 color: orange
 ---
 

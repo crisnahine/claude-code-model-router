@@ -150,6 +150,13 @@ class Shipped(unittest.TestCase):
             self.assertEqual(files[name].get("name"), name)
             self.assertTrue(agent.get("role"), name)
 
+    def test_the_costly_role_agents_say_when_not_to_use_them(self):
+        # Claude delegates from descriptions, so these limits keep the costliest agents for the work they're for.
+        for name, limit in (("architect", "Not for a change whose approach is already clear."),
+                            ("reviewer", "A small, tested change doesn't need one."),
+                            ("deep-solver", "Not for ordinary hard coding.")):
+            self.assertIn(limit, frontmatter(PLUGIN / "agents" / f"{name}.md")["description"], name)
+
     def test_role_agents_leave_model_and_effort_to_the_router(self):
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
         for path in (PLUGIN / "agents").glob("*.md"):

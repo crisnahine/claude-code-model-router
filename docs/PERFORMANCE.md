@@ -66,16 +66,16 @@ The mod's own handlers were also timed in Node with the runtime's answer returne
 
 ## Context the plugin adds
 
-The plugin's text is in the model's context, so it is paid for on every request. Measured 2026-11-22 on Claude Code 2.1.330 with a headless Haiku run that only says "ok" (`--setting-sources project`, a plugins root of its own): the first request's prompt (input plus cache read plus cache write) was 18,523 tokens without the plugin, 19,738 with it before the cut below, and 19,212 after, so the plugin adds 689 tokens where it added 1,215.
+The plugin's text is in the model's context, so it is paid for on every request. Measured 2026-11-22 on Claude Code 2.1.330 with a headless Haiku run that only says "ok" (`--setting-sources project`, a plugins root of its own): the first request's prompt (input plus cache read plus cache write) was 18,523 tokens without the plugin, 19,738 with it before the cut below, and 19,251 after, so the plugin adds 728 tokens where it added 1,215.
 
 | Item | Before | After |
 | :- | -: | -: |
 | Session-start note (`hooks.session_start`) | about 386 tokens | about 104 |
-| The seven role agents' names and descriptions in the agent list | about 385 | about 256 |
+| The seven role agents' names and descriptions in the agent list | about 385 | about 286 |
 | The `route` skill's description (the other four skills set `disable-model-invocation`, so theirs aren't in context, https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill) | about 61 | about 49 |
 | The hard-request note, only when the request needs more than the session's model | about 122 | about 97 |
 
-Per-item figures are the rendered text at about 4 characters a token; the totals are measured. The note keeps what Claude must act on: don't name a model or effort, say what makes a subtask hard, and re-issue a call that fell short.
+Per-item figures are the rendered text at about 4 characters a token; the totals are measured. The note keeps what Claude must act on: don't name a model or effort, say what makes a subtask hard, and re-issue a call that fell short. The architect's, reviewer's and deep-solver's descriptions keep a line on when not to use them (about 30 tokens), since Claude delegates from descriptions (https://code.claude.com/docs/en/sub-agents.md) and those are the costliest agents.
 
 ## State size
 
