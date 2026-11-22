@@ -23,11 +23,22 @@ SIGNALS = {
 }
 # Words that mean the subtask changes something or has to reason its way to an answer.
 # A subtask that does neither is a lookup, whatever it happens to mention.
-_CHANGE = (r"\b(?:add|implement|fix|change|update|refactor|rename|remove|delete|write|create|build|make(?! sure)|"
-           r"migrate|convert|upgrade|optimi[sz]e|rewrite|redesign|replace)\b(?!-)")
-# "Do not change any files" limits a subtask; it doesn't ask for a change.
+_CHANGE_VERB = (r"(?:add|implement|fix|change|update|refactor|rename|remove|delete|write|create|build|make(?! sure)|"
+                r"migrate|convert|upgrade|optimi[sz]e|rewrite|redesign|replace)\b(?!-)")
+_CHANGE = rf"\b{_CHANGE_VERB}"
+# "Do not change any files" limits a subtask; it doesn't ask for a change. The limit ends with
+# its clause, so "Without changing the API, fix the race" and "Do not stop until X is fixed"
+# keep their task. A limit that starts with a verb runs past a comma only into a list of short
+# verb items closed by "or"/"nor" ("do not add, remove, or rename files"); "and" doesn't close one.
 # "Make sure" isn't here: it introduces the task, so _CHANGE skips it instead.
-_NEGATED = r"\b(?:do not|don't|never|without|no need to)\b[^.\n]*"
+_CLAUSE_WORD = r"\b(?:until|unless|before|after|while|once|but|because)\b"
+_CLAUSE = rf"(?:(?!{_CLAUSE_WORD})[^.,;:!?\n])*"
+_LIST_VERB = rf"\b(?:{_CHANGE_VERB}|(?:edit|modify|move|touch)\b(?!-))"
+_ITEM = rf"{_LIST_VERB}(?:\s+[\w'-]+){{0,3}}?"
+# At most eight more items, so a pasted run of negations inside one list stays linear.
+_LIST = rf",\s*(?:{_ITEM}(?:\s*,\s*{_ITEM}){{0,8}}?(?:\s*,)?\s+)?(?:or|nor)\s+{_LIST_VERB}{_CLAUSE}"
+_NEGATED = (rf"\bwithout\b{_CLAUSE}|\b(?:do not|don't|never|no need to)\b(?:\s*,(?:[^.,;:!?\n]{{0,40}},)?)?"
+            rf"(?:\s*(?={_LIST_VERB}){_CLAUSE}(?:{_LIST})*|{_CLAUSE})")
 _REASONING = (r"\b(?:review|audit|analy[sz]e|debug|diagnos\w*|plan|design|prove|verify the logic|"
               r"investigat\w*|troubleshoot\w*|figure out|root.?caus\w*|reproduc\w*|bisect)\b")
 _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"
