@@ -139,9 +139,14 @@ def load_state_file(path: Path) -> dict:
 
 def _set_aside(path: Path) -> bool:
     stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    target = path.with_name(f"{path.name}.corrupt-{stamp}")
-    if target.exists():  # never overwrite an earlier copy
+    base = f"{path.name}.corrupt-{stamp}"
+    # Two set-asides can share a stamp (Windows' clock ticks in about 15 ms), so a counter one
+    # above the newest copy with this stamp keeps each one and still sorts it last. Never overwrite.
+    taken = sorted(p.name for p in path.parent.glob(base + "*"))
+    n = 0 if not taken else 1 if taken[-1] == base else int(taken[-1][len(base) + 1:]) + 1
+    if n > 999:
         return False
+    target = path.with_name(base + (f"-{n:03d}" if n else ""))
     try:
         os.replace(path, target)
     except OSError:
