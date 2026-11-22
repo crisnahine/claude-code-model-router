@@ -156,14 +156,12 @@ def hook_latency(base: Path, inputs: dict, runs: int) -> list[dict]:
 
 
 # The launcher's own loop (scripts/model-router.sh) with no router code after it.
-FLOOR = ("for py in python3 python; do "
-         "if command -v \"$py\" >/dev/null 2>&1 && \"$py\" -c 'import sys; sys.exit(sys.version_info < (3, 9))' "
-         ">/dev/null 2>&1; then exec \"$py\" -c pass; fi; done; exit 1")
+FLOOR = ("for py in python3 python; do if command -v \"$py\" >/dev/null 2>&1; then "
+         "\"$py\" -c pass; code=$?; [ \"$code\" -eq 87 ] || exit \"$code\"; fi; done; exit 1")
 
 
 def python_floor(runs: int) -> dict:
-    """sh, the launcher's version probe, and one more interpreter start: the floor under
-    every hook."""
+    """sh and one interpreter start, as the launcher runs them: the floor under every hook."""
     samples = []
     for _ in range(runs + 1):
         started = time.perf_counter()

@@ -1,0 +1,1479 @@
+{
+ "rules": [
+  "lookup: reads, finds, lists, counts, runs a command and reports; a narrow explanation.",
+  "standard: implements to a clear spec, writes tests, fixes a bug whose cause is stated, refactors inside one module, explains how a whole system works.",
+  "complex: touches security, auth, payments, data, schemas, migrations, a public API or concurrency; changes across modules; reviews; designs a module; hunts an unclear cause in one area.",
+  "hardest: ambiguous, multi-system and risky at once.",
+  "frontier: research-grade or open-ended, with no known approach.",
+  "lowest is the least a brief needs for a high pass rate; highest is the most that is still a sensible spend."
+ ],
+ "briefs": [
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "Explore",
+   "description": "Find retry config",
+   "prompt": "Find where the HTTP client reads its retry limit. Report the file path, the function name and the default value. Do not change any files."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "List API routes",
+   "prompt": "List every route registered in src/server/routes/. For each, give the HTTP method, the path and the handler function. Read only; don't modify anything."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Count TODO comments",
+   "prompt": "How many TODO comments are in the .py files under src/? Reply with the number and the three files with the most."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Locate feature flag",
+   "prompt": "Where is the `enable_new_checkout` feature flag read? Give file:line for each use."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Run test suite",
+   "prompt": "Run `npm test` and report which tests fail, with the first error line of each. Don't fix anything."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Check Node version",
+   "prompt": "What Node version does this project require? Check package.json engines, .nvmrc and the CI config, and report any disagreement."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Summarize the README",
+   "prompt": "Summarize README.md in five bullet points for someone new to the repo."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find env vars",
+   "prompt": "Find every environment variable the app reads (process.env.*) and list them with the file that reads each. No changes."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find parser callers",
+   "prompt": "Find all callers of `parse_invoice_date` and list them as file:line. Do not edit files and don't run anything."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Show cache commits",
+   "prompt": "Show the last 10 commits that touched lib/cache/ with their subjects and authors."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find auth middleware",
+   "prompt": "Find where the auth middleware is registered in the Express app and report the file and line. Read only."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Explain cache eviction",
+   "prompt": "Explain how the caching layer in lib/cache/ decides when to evict entries. Keep it to a short paragraph and cite the functions involved."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "List schema tables",
+   "prompt": "List the database tables defined in db/schema.sql with their primary keys. Do not connect to any database."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Grep deprecated calls",
+   "prompt": "grep the repo for calls to the deprecated `fs.exists` and list them."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find tokenizer test",
+   "prompt": "Which test file covers src/parser/tokenize.ts? Just the path."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Lint findings report",
+   "prompt": "Run `ruff check .` and report the count of findings per rule code. Don't fix them."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find dev port",
+   "prompt": "Which port does the dev server listen on, and where is that set?"
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "List dependencies",
+   "prompt": "List the direct dependencies in pyproject.toml with their version constraints. No new dependencies, no changes; just read."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find Stripe key load",
+   "prompt": "Find where the app loads the Stripe secret key from the environment. Report file:line only. Never print the key's value."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Search docs for limits",
+   "prompt": "Search docs/ for any mention of 'rate limit' and quote the sentences."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "List migration files",
+   "prompt": "List the migration files under db/migrations/ in order, with their dates. Do not run any migration and do not touch the database."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "List Dockerfile stages",
+   "prompt": "List the build stages in the Dockerfile and the base image each uses."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Largest source files",
+   "prompt": "Which five source files under src/ are the largest by line count?"
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find config precedence",
+   "prompt": "Find where the config loader merges defaults, the config file and environment variables, and say in which order. Read only, and don't change anything."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Check CI triggers",
+   "prompt": "What events trigger the workflows in .github/workflows/? List each workflow and its `on:` triggers."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Count hook components",
+   "prompt": "List the React components under src/components/ and count how many use hooks."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find billing owners",
+   "prompt": "Check CODEOWNERS and tell me who owns services/billing/."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find error message",
+   "prompt": "Find where the error message 'session expired, please log in again' is defined and every place it's shown."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read stack trace",
+   "prompt": "Here's a stack trace from the logs: `TypeError: Cannot read properties of undefined (reading 'id') at mapUser (src/users/map.ts:42)`. Open that file and tell me which variable is undefined on that line. Don't fix it."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Report test coverage",
+   "prompt": "Run `pytest --cov=app --cov-report=term` and report the total coverage and the three least-covered modules."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Missing German keys",
+   "prompt": "List the translation keys in locales/en.json that are missing from locales/de.json."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find unused exports",
+   "prompt": "Find exported functions in src/utils/ that nothing imports. Report them; do not delete anything."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find DROP TABLE",
+   "prompt": "Look through db/migrations/2024_*.sql and list any that contain DROP TABLE. Do not run them."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find orders handler",
+   "prompt": "Which handler serves GET /api/v2/orders/:id? Give the file and function, then stop."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "List env defaults",
+   "prompt": "List the .env.example keys and say which have no default."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "List flaky markers",
+   "prompt": "Which tests in tests/e2e/ have 'flaky' in a comment or a skip marker? List them."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Check version entry",
+   "prompt": "What version is in plugin.json, and does CHANGELOG.md have a section for it?"
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find legacy verify calls",
+   "prompt": "Find references to `legacy_auth.verify_token` in services/*/handlers/*.py and list file:line."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Describe top directories",
+   "prompt": "Give me a one-line description of each top-level directory in this repo."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find missing headers",
+   "prompt": "List source files under src/ that lack the license header comment. Don't add it."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Explain backoff values",
+   "prompt": "Explain what `computeBackoff` in src/net/retry.ts returns for attempt 0 through 5."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find request timeout",
+   "prompt": "Find the default timeout for outbound requests. Make sure to include the unit."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find session cookies",
+   "prompt": "Find where sessions are created and list the cookie flags set on them. Do not change the code."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Report common warnings",
+   "prompt": "Run the linter and then report the five most common warnings. Do not fix them and do not commit."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Explain session storage",
+   "prompt": "Explain how sessions are stored. Don't write, change or delete anything."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find payments config",
+   "prompt": "Find the payments config. Do not edit files, create branches or update the database."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Add slugify tests",
+   "prompt": "Add unit tests for `slugify` in src/text/slug.ts covering empty input, accents and repeated separators. Use the existing vitest setup. Don't change slugify itself."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Add JSON flag",
+   "prompt": "Add a `--json` flag to the `report` command in cli/report.py that prints the same data as JSON. Follow the existing argparse style. No new dependencies."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Fix page off-by-one",
+   "prompt": "page_slice in pages.py treats pages as 0-based but they're 1-based. Fix the start index and add a test for page 1."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Rename user helper",
+   "prompt": "Rename `getUsr` to `getUser` across src/ and update its imports. Keep behavior identical."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Document cache option",
+   "prompt": "Update docs/config.md to document the new `cache_ttl` option: its type, default (300) and what it does."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Implement parse_duration",
+   "prompt": "Implement `parse_duration` in durations.py per its docstring (units d, h, m, s in order, each at most once; ValueError otherwise). Standard library only. Then run the tests in tests/test_durations.py."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Convert callbacks to async",
+   "prompt": "Convert the callback-style functions in src/fs-utils.js to async/await. Keep the exported names and signatures."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Log retry attempts",
+   "prompt": "Add debug logging to the retry loop in src/net/retry.ts: log the attempt number and the delay. Use the existing logger."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Write line counter",
+   "prompt": "Write a small script scripts/count_lines.py that prints the line count per top-level folder. Standard library only."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Fix long lines",
+   "prompt": "Fix the 12 ruff E501 line-too-long errors in app/views.py without changing behavior."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Validate new users",
+   "prompt": "Add input validation to `create_user` in app/users.py: the email must contain '@' and the name can't be empty. Raise ValueError with a clear message. Add tests."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Split report renderer",
+   "prompt": "Split the 120-line `render_report` in report/render.py into smaller functions. No behavior change; the existing tests must still pass."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Bump requests pin",
+   "prompt": "Bump `requests` from 2.31 to 2.32 in requirements.txt and run the tests. Don't touch other pins.",
+   "known_under": "missing change verbs"
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Add subcommand help",
+   "prompt": "Add help text to every subcommand in cli/main.py, one sentence each."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Fix even median",
+   "prompt": "median() in stats.py returns the upper middle value for even-length input instead of the mean of the two middle values. Fix it and keep odd-length behavior."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Add Button size",
+   "prompt": "Add an optional `size` prop ('sm' | 'md' | 'lg', default 'md') to the Button component and map it to the existing CSS classes. Update the story."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Fix negative zero",
+   "prompt": "Write a failing test for `formatCurrency(0)`, which currently returns '$-0.00', then fix formatCurrency so it returns '$0.00'."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Port levenshtein",
+   "prompt": "Port `levenshtein` from utils/strings.py to TypeScript in src/utils/strings.ts with the same behavior, plus tests.",
+   "known_under": "missing change verbs"
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Add cleanup dry run",
+   "prompt": "Implement the `--dry-run` flag for scripts/cleanup.sh so it prints what it would delete. Don't commit; leave the change in the working tree."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Memoize catalog lookup",
+   "prompt": "Do not change the public interface. Add memoization to `expensiveLookup` in src/catalog/lookup.ts using a Map keyed by id."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Explain request flow",
+   "prompt": "Explain how a request flows through the app from the router to the database layer, naming the main modules. A page is fine."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Fix receive typo",
+   "prompt": "Fix the typo 'recieve' in all user-facing strings under src/ui/ and update the snapshot tests."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Add health endpoint",
+   "prompt": "Add a GET /health endpoint to the Flask app that returns {\"status\": \"ok\"} and the git commit from the GIT_SHA env var. Add a test."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Type date utils",
+   "prompt": "Add type hints to every function in app/utils/dates.py and make mypy pass on that file."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Remove legacy format",
+   "prompt": "Remove the unused `legacyFormat` function from src/format.ts and its test. Nothing imports it."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Configurable timeout",
+   "prompt": "Make the request timeout configurable through the TIMEOUT_SECONDS env var, defaulting to 30. Document it in README."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Add SQLite fixture",
+   "prompt": "Create a pytest fixture in tests/conftest.py that builds a temporary SQLite file with the users table, and use it in tests/test_users.py."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Use f-strings",
+   "prompt": "Upgrade the string formatting in scripts/ from % formatting to f-strings. No behavior change."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Implement chunk helper",
+   "prompt": "Implement `chunk(items, size)` in src/utils/array.ts that splits an array into chunks, and add tests for size 1, an exact multiple and a remainder. then run the tests."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Speed up dedupe",
+   "prompt": "Optimize `findDuplicates` in src/dedupe.ts from O(n^2) to O(n) with a Set. Keep the output order."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Fix CSV last row",
+   "prompt": "The CSV export drops the last row because the loop stops at len-1. Fix the loop in export/csv.py and add a regression test."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Retry weather calls",
+   "prompt": "Add a retry with exponential backoff (3 attempts, 200ms base) around the call to the weather API in services/weather.py."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Write development section",
+   "prompt": "Write a 'Development' section in README.md with the commands to install, test and lint, taken from the Makefile."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Rename build variables",
+   "prompt": "Don't touch the tests. Then rename the `tmp` variables in src/build/pack.ts to something descriptive."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Ops lookup table",
+   "prompt": "Refactor the switch statement in src/parser/ops.ts into a lookup table. Don't change any behavior and keep the tests green."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Build EmptyState component",
+   "prompt": "Build a small `<EmptyState>` component with a title, a message and an optional action button, matching the existing Card styles."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Update submit selector",
+   "prompt": "The e2e test `login.spec.ts` fails because the selector `#submit` changed to `[data-test=submit]`. Update the selector in the test."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Defaults to YAML",
+   "prompt": "Convert config/defaults.json to config/defaults.yaml and update the loader in config/load.py to read YAML with the existing pyyaml dependency."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Changelog entry",
+   "prompt": "Add a CHANGELOG entry under Unreleased for the new --json flag."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Add quiet flag",
+   "prompt": "Implement the `--quiet` flag in cli/run.py, then list the files you changed. Do not add, remove or rename files."
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Rewrite date parsing",
+   "prompt": "Keep the function names but rewrite the date parsing in utils/dates.py to use datetime.fromisoformat."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Review login diff",
+   "prompt": "Review the diff on this branch (git diff main...HEAD) for correctness and security problems in the login flow. Report findings ranked by severity with file:line; don't change code."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Fix token refresh",
+   "prompt": "Fix the bug where the access token isn't refreshed when it expires during a long upload; the refresh happens in src/auth/session.ts. Add a test that simulates expiry mid-request."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Idempotent refunds",
+   "prompt": "Make the refund endpoint in services/payments/refund.py idempotent using the Idempotency-Key header, so a retried request never refunds twice. Add tests."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Split name column",
+   "prompt": "Write a migration that splits the `name` column of `users` into `first_name` and `last_name`, backfills existing rows, and keeps the old column until the next release. Postgres."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Paginate invoices API",
+   "prompt": "Add pagination to the public GET /v1/invoices endpoint without breaking existing clients: keep the current response when no cursor is passed.",
+   "known_under": "missing risk words"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Share date helpers",
+   "prompt": "Move the date formatting helpers out of three services (orders, billing, notifications) into the shared lib/dates package and update every import. Keep behavior identical."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Fix job claim race",
+   "prompt": "Fix the race condition in the job queue worker where two workers can claim the same job; claims happen in worker/claim.go. Add a test with concurrent claims."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Review upload handler",
+   "prompt": "Do a security review of the file upload handler in api/uploads.py: path traversal, size limits, content-type checks. Report issues with fixes; don't commit."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Design rate limiter",
+   "prompt": "Design the interface for a new rate limiter module that the API gateway and the webhook sender will share. Propose the API, the storage choice and the trade-offs; no code yet.",
+   "known_under": "one signal stays standard"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Empty export file",
+   "prompt": "Investigate why the nightly export job sometimes produces an empty file. Look at jobs/export.py and its logs; find the root cause and propose a fix.",
+   "known_under": "one signal stays standard"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Encrypt SSN column",
+   "prompt": "Encrypt the `ssn` column at rest using the existing KMS helper in lib/crypto.py, with a migration for existing rows.",
+   "known_under": "missing change verbs"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Admin-only project delete",
+   "prompt": "Add a role check so only admins can call DELETE /api/projects/:id. Today any logged-in user can. Add tests for admin and non-admin.",
+   "known_under": "missing risk words"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Fix search injection",
+   "prompt": "Do not touch the tests and fix the SQL injection in the search endpoint (api/search.py builds the query with string formatting).",
+   "known_under": "missing risk words"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Add Google login",
+   "prompt": "Add Google OAuth login next to the existing email login, using the oauthlib already in requirements. Store the provider id on the user."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "pr-reviewer",
+   "description": "Review PR 482",
+   "prompt": "Review PR #482 (the diff is in /tmp/pr482.diff) and report bugs, missing tests and anything that breaks the public API."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Config to TOML",
+   "prompt": "Change the config file format from INI to TOML while still reading old INI files, so existing users don't break. Add a migration note to the docs."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Fix transfer deadlock",
+   "prompt": "The service deadlocks under load when two requests update the same account; the locks are taken in services/accounts/transfer.py. Fix the lock ordering and add a stress test."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Soft delete projects",
+   "prompt": "Implement soft delete for projects: add a deleted_at column, filter deleted projects in every query in the projects, search and reports modules, and add a restore endpoint.",
+   "known_under": "missing risk words"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Lost drafts on reconnect",
+   "prompt": "Users report losing unsaved drafts when the editor reconnects. The reconnect logic is in src/editor/sync.ts. Find why drafts are dropped and fix it without changing the sync protocol.",
+   "known_under": "missing risk words"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Review billing migration",
+   "prompt": "Review db/migrations/0042_billing.sql before it runs in production: check locking, backfill time on a 50M-row table and rollback."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Verify Stripe webhooks",
+   "prompt": "Verify the Stripe webhook signature in api/webhooks/stripe.py before processing events; reject unsigned or stale ones. Add tests with a fake secret."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Per-tenant resize limit",
+   "prompt": "Limit the image resize worker to 4 concurrent jobs per tenant without blocking other tenants. The worker is in workers/resize.ts.",
+   "known_under": "missing change verbs"
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Flaky checkout total",
+   "prompt": "The test test_checkout_total is flaky on CI (fails about 1 in 20 runs). Figure out why and fix the cause, not the test."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Review queue RFC",
+   "prompt": "Review the proposed architecture in docs/rfc/queue.md for scaling to 10x traffic and point out risks.",
+   "known_under": "one signal stays standard"
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Safe formula evaluator",
+   "prompt": "Never use eval and then implement the formula evaluator in calc/eval.py for +, -, *, / and parentheses, with operator precedence. Add tests."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Logout on all devices",
+   "prompt": "Do not change the session format and fix the bug where logging out on one device logs out every device. The logic is in auth/sessions.py."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Rename customerId",
+   "prompt": "Rename the `customerId` field to `accountId` across the API, the web client and the mobile client, keeping the old name accepted in requests for one release.",
+   "known_under": "one signal stays standard"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Stop stored XSS",
+   "prompt": "Escape user-supplied HTML in comment rendering (web/comments.tsx) to stop stored XSS, without breaking existing markdown formatting.",
+   "known_under": "missing change verbs"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Rate limit logins",
+   "prompt": "Add rate limiting to the login endpoint: 5 failed attempts per IP per 15 minutes, stored in Redis. Add tests.",
+   "known_under": "missing risk words"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Plan websocket move",
+   "prompt": "Plan the move from REST polling to websockets for order status updates: which services change, the rollout order and how to fall back. Write the plan in docs/plans/ws.md.",
+   "known_under": "missing risk words"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Scrub secrets from logs",
+   "prompt": "Make sure no secrets are written to the logs: scrub tokens and passwords in the request logger (lib/log/request.ts) and add tests."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Invalidate price caches",
+   "prompt": "Fix stale prices after an update: the product cache in three services isn't invalidated. Add invalidation on update events in each service.",
+   "known_under": "missing risk words"
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "code-reviewer",
+   "description": "Check rounding change",
+   "prompt": "Look at the diff in src/format.ts and check the new rounding logic."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "security-auditor",
+   "description": "Audit password reset",
+   "prompt": "Check the new password reset flow in auth/reset.py."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Thread-safe cache",
+   "prompt": "Make the in-memory cache in lib/cache.py thread-safe; it's used from the request threads and the background refresher.",
+   "known_under": "missing risk words"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Fix editor delete check",
+   "prompt": "Run the tests and then fix the failing authorization check in api/permissions.py so editors can't delete projects."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Rewrite payment retries",
+   "prompt": "Keep the public API as it is but rewrite the payment retry logic to use the new queue."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Unique email index",
+   "prompt": "Don't commit anything. Write the Alembic migration that adds a unique index on users.email, handling existing duplicates first."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Upgrade to Django 5",
+   "prompt": "Upgrade the app from Django 4.2 to 5.0: fix deprecations, update settings and run the test suite.",
+   "known_under": "missing risk words"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Find memory leak",
+   "prompt": "Investigate a memory leak in the Node API: RSS grows ~50MB/hour. Use the heap snapshots in /tmp/heaps/ to find what's retained and fix it.",
+   "known_under": "one signal stays standard"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Check CSRF token",
+   "prompt": "Do not change the tests, fix the auth bug in the login handler where the CSRF token isn't checked."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Intermittent logouts",
+   "prompt": "Users intermittently get logged out across the web app, the API gateway and the mobile backend since last week's deploy. Investigate the root cause across all three services (token refresh, clock skew, cache), fix it, and keep backward compatibility for existing sessions."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Order total mismatch",
+   "prompt": "Some orders end up with a total that doesn't match their line items, maybe 1 in 10,000, across the checkout service, the pricing service and the billing database. Figure out where the mismatch is introduced and fix it without downtime."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Move to OAuth2 PKCE",
+   "prompt": "Migrate authentication from our session cookies to OAuth2 with PKCE across every service and both clients, with a dual-run period and a rollback plan. Work out the best approach first."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Duplicate charges",
+   "prompt": "Duplicate charges happen rarely when the payment service and the order service both retry after a timeout. Investigate across both services and the queue, find the root cause and design a fix that is safe under retries."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Multi-tenant schema",
+   "prompt": "Redesign the database schema to support multi-tenancy across all services, with a migration path for existing customers and no data loss. Evaluate the trade-offs between schema-per-tenant and row-level tenancy first."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Flaky CI end-to-end",
+   "prompt": "The end-to-end suite fails intermittently only in CI across the API, worker and websocket services. Find out why; we're not sure whether it's a race condition, a timeout or test pollution.",
+   "known_under": "multi-system work scored low"
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Privilege escalation",
+   "prompt": "We suspect a privilege escalation: a viewer account edited a project last night. Investigate the authorization checks across the API, the admin service and the GraphQL layer, find how it happened and fix it."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Checkout latency doubled",
+   "prompt": "p99 latency for checkout doubled after the last release, touching the cart service, the pricing service and the payments gateway. Find the root cause and fix it without changing the public API.",
+   "known_under": "multi-system work scored low"
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Encrypt PII everywhere",
+   "prompt": "Roll out encryption at rest for all customer PII across every service's database, including key rotation, without downtime. Propose the strategy and then implement the first service."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Merge user tables",
+   "prompt": "Merge the two user tables (legacy_users and accounts) into one across the monolith and the new services. Some users exist in both with conflicting emails; figure out the right merge rules and migrate safely."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Pipeline deadlock",
+   "prompt": "Under heavy load the order pipeline stalls: the inventory service, the order service and the payment service all wait on each other. Investigate the deadlock across services and fix it."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Refresh races logout",
+   "prompt": "Token refresh sometimes races with logout in all services that share the session store, leaving revoked tokens usable. Find the cause and fix it everywhere.",
+   "known_under": "multi-system work scored low"
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "CRDT merge divergence",
+   "prompt": "Research-grade problem: our CRDT-based collaborative editor diverges in rare three-way merge cases across clients and the sync service. There's no known fix; work out from first principles whether the merge function is commutative and design a provably convergent replacement, with a migration for existing documents."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Build farm scheduling",
+   "prompt": "Design a novel scheduling algorithm for our build farm that minimizes total build time across 200 machines with heterogeneous caches. Nothing off the shelf fits; evaluate approaches, prove bounds where you can, and prototype the best one across the scheduler and worker services.",
+   "known_under": "multi-system work scored low"
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Codec memory corruption",
+   "prompt": "Long-running investigation: a memory corruption bug in the native image codec crashes production about once a week across all regions, with an unknown root cause. Figure out the best approach to reproduce it, find the cause and fix it safely."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Token forgery research",
+   "prompt": "Open-ended security research: assess whether our custom token format is vulnerable to forgery or replay across the auth service and every API that verifies it, and propose a migration to a safer design."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Prove lock exclusion",
+   "prompt": "From first principles, prove or disprove that our distributed lock service (lockd) guarantees mutual exclusion under network partitions, across the lock service, its clients and the database it persists to. If it doesn't, design a fix."
+  },
+  {
+   "lowest": "complex",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Research search ranking",
+   "prompt": "Research: find a better ranking approach for search across the product, docs and community indexes. Evaluate learning-to-rank against our heuristics with the click logs, and recommend one with trade-offs.",
+   "known_under": "one signal stays standard"
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Bad query plans",
+   "prompt": "Unsolved problem: the query planner picks a bad plan for the reporting queries about 5% of the time across all tenants' databases and nobody has found why. Investigate from first principles and propose a durable fix."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "Broker migration study",
+   "prompt": "Multi-day project: evaluate whether to move the event pipeline from Kafka to a different broker across all services. Figure out the trade-offs, the migration strategy and the risks to data loss, and write a proposal."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Trouver la limite",
+   "prompt": "Trouve où la limite de tentatives est lue dans le client HTTP et donne le fichier."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Listar migraciones",
+   "prompt": "Lista los archivos de migración en db/migrations y su fecha. No cambies nada."
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Slugify Tests",
+   "prompt": "Füge der Funktion slugify in src/text/slug.ts Tests für leere Eingaben und Akzente hinzu."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Faille d'authentification",
+   "prompt": "Corrige la faille de sécurité dans le module d'authentification : les jetons expirés sont encore acceptés. Ajoute un test.",
+   "known_under": "other languages capped at standard"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Carrera en pagos",
+   "prompt": "Arregla la condición de carrera en el servicio de pagos que duplica los cobros y añade una prueba.",
+   "known_under": "other languages capped at standard"
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Implementar parse_duration",
+   "prompt": "Implemente a função parse_duration em durations.py conforme a docstring e adicione testes.",
+   "known_under": "other languages capped at standard"
+  },
+  {
+   "lowest": "hardest",
+   "highest": "frontier",
+   "agent": "general-purpose",
+   "description": "認証トークンの失効",
+   "prompt": "すべてのサービスで認証トークンが断続的に失効する原因を調査し、後方互換性を保ったまま修正してください。",
+   "known_under": "other languages capped at standard"
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Elenca le rotte",
+   "prompt": "Elenca le rotte dell'API in src/routes e il gestore di ciascuna. Non modificare nulla."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Dubbele afschrijvingen",
+   "prompt": "Herschrijf de betalingslogica zodat dubbele afschrijvingen onmogelijk zijn en voeg tests toe.",
+   "known_under": "other languages capped at standard"
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Найти таймаут",
+   "prompt": "Найди, где задаётся таймаут запросов, и укажи файл и строку."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and implement the payment retry."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Don't break the public API and fix the authentication bug in the login service."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Never log secrets and refactor the credentials loader across all services."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not use any new dependencies and migrate the database schema to the new billing tables."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and implement payment retries."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Don't break the API and fix auth token refresh in the login service."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Never log secrets and refactor credentials loading."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests then implement the payment retry."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Don't touch the UI and also fix the race condition in the payments worker."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Never edit generated code and instead fix the auth bug in the source."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and just fix the auth bug."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and please fix the auth bug."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and debug why payments fail intermittently."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and fix scripts that rotate the production credentials."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Never log secrets and migrate records in the billing database."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not change the UI and fix builds that leak secrets."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and refactor tools that handle payments."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and fix paths in the auth middleware."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and then also fix the deadlock."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and update the database schema."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and implement OAuth login."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and audit the authentication flow."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and make the auth token refresh thread-safe."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and then refactor the payment service."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and investigate why the billing migration deadlocks."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch the frontend and secure the session cookies.",
+   "known_under": "missing change verbs"
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Retry with guardrail",
+   "prompt": "Do not touch tests and harden the password hashing.",
+   "known_under": "missing change verbs"
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Fix retry bug",
+   "prompt": "Fix the retry bug. Do not change the public API."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Find the config loader. Do not touch the database."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "List the routes. Do not change the auth module."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Explain how sessions are stored. Never print secrets or credentials."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Find where the retry logic lives. Do not edit files, create branches or update the database."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Find the retry logic. Do not add and remove files."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "List the routes; don't review and fix anything."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Explain the cache. Never plan and design new modules."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "List the CI jobs. Do not edit the Dockerfile and build scripts."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Find the deploy script. Do not touch the production config and build scripts."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Show the migration files. Do not touch the schema and update scripts."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "List the endpoints. Do not touch the auth module and debug logs."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Find the config. Do not delete the settings and audit logs."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Show the release notes. Do not edit the changelog and upgrade notes."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Find the tests. Do not edit the auth fixtures and debug output."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Explain the logger. Do not touch production and audit trails."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Find the importer. Do not touch the billing tables and update records."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read-only with a limit",
+   "prompt": "Find the CI config. Do not touch the runners and build tools."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Contrived noun phrasing",
+   "prompt": "Find the deploy job. Do not touch the database and migrate scripts."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Contrived noun phrasing",
+   "prompt": "List the services. Do not change the payment code and fix scripts."
+  }
+ ]
+}

@@ -202,8 +202,8 @@ class Shipped(unittest.TestCase):
             self.assertNotIn("options", option)  # not accepted by the oldest supported Claude Code
 
     def test_ci_tests_the_oldest_python_the_launcher_accepts(self):
-        launcher = (SCRIPTS / "model-router.sh").read_text(encoding="utf-8")
-        floor = "%s.%s" % re.search(r"sys\.version_info < \((\d+), (\d+)\)", launcher).groups()
+        entry = (SCRIPTS / "model-router.py").read_text(encoding="utf-8")
+        floor = "%s.%s" % re.search(r"sys\.version_info < \((\d+), (\d+)\)", entry).groups()
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         matrix = re.findall(r'"(\d+\.\d+)"', re.search(r"python: \[([^\]]*)\]", ci).group(1))
         self.assertEqual(min(matrix, key=lambda v: tuple(map(int, v.split(".")))), floor)
@@ -756,7 +756,8 @@ class Profile(unittest.TestCase):
         self.assertEqual(self.level("which plugins support hooks?"), "lookup")
         self.assertEqual(self.level("read the update-check option"), "lookup")
         self.assertEqual(self.level("list the routes. Make sure to include the line numbers"), "lookup")
-        self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "standard")
+        # The limit names what the fix must work around, so its risk counts.
+        self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "complex")
 
     def test_a_limit_ends_with_its_clause_and_keeps_the_task_after_it(self):
         self.assertEqual(self.level("Without changing the public API, fix the race condition in the payments "
@@ -767,6 +768,70 @@ class Profile(unittest.TestCase):
                                     "and verified."), "standard")
         self.assertEqual(self.level("No need to ask questions, just implement the OAuth2 login flow and secure "
                                     "the session cookies."), "complex")
+
+    def test_a_task_joined_to_a_limit_by_and_keeps_what_it_is_about(self):
+        for brief, signals in (
+                ("Do not touch tests and implement the payment retry.", ["risk"]),
+                ("Don't break the public API and fix the authentication bug in the login service.", ["risk"]),
+                ("Never log secrets and refactor the credentials loader across all services.", ["risk", "scope"]),
+                ("Do not use any new dependencies and migrate the database schema to the new billing tables.",
+                 ["risk"])):
+            result = profile.profile_call({"prompt": brief}, "general-purpose")
+            self.assertEqual((result["level"], result["signals"]), ("complex", signals), brief)
+        # A risk named only inside the limit still says what the work touches.
+        self.assertEqual(self.level("Rename the session helper without touching the auth tokens."), "complex")
+        self.assertEqual(self.level("Find the config loader. Do not touch the database."), "lookup")
+        # A limit's scope and ambiguity words don't count, so guardrails can't push a small edit to hardest.
+        self.assertEqual(self.level("Fix the typo in docs/setup.md. Do not touch the database schema, do not make "
+                                    "changes across other modules, and do not try to figure out the flaky CI job."),
+                         "complex")
+        # "And" ends a limit only before a verb that takes an object.
+        for brief in ("Find X. Do not add and remove files.", "List the routes; don't review and fix anything.",
+                      "Explain Y. Never plan and design new modules.",
+                      "List the CI jobs. Do not edit the Dockerfile and build scripts.",
+                      "Find the deploy script. Do not touch the production config and build scripts.",
+                      "Show the migration files. Do not touch the schema and update scripts."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+
+    def test_and_or_then_before_a_task_verb_ends_a_limit_without_an_article(self):
+        for brief in ("Do not touch tests and implement payment retries.",
+                      "Don't break the API and fix auth token refresh in the login service.",
+                      "Never log secrets and refactor credentials loading.",
+                      "Do not touch tests then implement the payment retry.",
+                      "Don't touch the UI and also fix the race condition in the payments worker.",
+                      "Never edit generated code and instead fix the auth bug in the source.",
+                      "Do not touch tests and just fix the auth bug.",
+                      "Do not touch tests and please fix the auth bug.",
+                      "Do not touch tests and debug why payments fail intermittently."):
+            self.assertEqual(self.level(brief), "complex", brief)
+        # A verb that is often a noun ends the limit only with an object after it.
+        for brief in ("List the CI jobs. Do not edit the Dockerfile and build scripts.",
+                      "Find the deploy script. Do not touch the production config and build scripts.",
+                      "Show the migration files. Do not touch the schema and update scripts."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+        # So does a task verb in a compound noun such as "debug logs" or "audit trails".
+        for brief in ("List the endpoints. Do not touch the auth module and debug logs.",
+                      "Find the config. Do not delete the settings and audit logs.",
+                      "Show the release notes. Do not edit the changelog and upgrade notes.",
+                      "Find the tests. Do not edit the auth fixtures and debug output.",
+                      "Explain the logger. Do not touch production and audit trails."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+        # Scripts, builds, records, paths and tools are what these verbs take as an object, not compounds.
+        for brief in ("Do not touch tests and fix scripts that rotate the production credentials.",
+                      "Never log secrets and migrate records in the billing database.",
+                      "Do not change the UI and fix builds that leak secrets.",
+                      "Do not touch tests and refactor tools that handle payments.",
+                      "Do not touch tests and fix paths in the auth middleware."):
+            result = profile.profile_call({"prompt": brief}, "general-purpose")
+            self.assertEqual((result["level"], result["signals"]), ("complex", ["risk"]), brief)
+
+    def test_joins_inside_a_limit_stay_fast(self):
+        started = time.monotonic()
+        self.level("do not touch" + " tests and fix" * 20_000)
+        self.level("do not add" + " and remove" * 20_000 + " files")
+        self.level("never x" + " and then just" * 20_000 + " fix it")
+        self.level("do not touch tests" + " " * 64_000 + "and fix it")
+        self.assertLess(time.monotonic() - started, 0.5)
 
     def test_a_limit_over_a_list_of_single_verbs_stays_a_limit(self):
         for brief in ("Find where the retry logic lives. Do not add, remove or rename files.",
@@ -2373,6 +2438,81 @@ class Launcher(Sandbox):
         self.assertEqual(json.loads(res.stdout)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
         res = subprocess.run(["sh", launcher, "policy"], capture_output=True, text=True, env={**os.environ})
         self.assertIn("Subtask level", res.stdout)
+
+    def fake_pythons(self, python3: str, python: str) -> dict:
+        """A PATH whose python3 and python are scripts that log each start and then run `real`
+        (the interpreter running this test) or exit as a too-old one would."""
+        folder = Path(self.tmp.name) / "bin"
+        folder.mkdir()
+        log = folder / "starts.log"
+        real = Path(sys.executable).as_posix()
+        bodies = {"real": f'exec "{real}" "$@"', "old": "exit 87",
+                  "broken": "echo 'Python was not found' >&2; exit 49"}  # a Store stub or an unset shim
+        for name, kind in (("python3", python3), ("python", python)):
+            body = bodies[kind]
+            script = folder / name
+            script.write_bytes(f'#!/bin/sh\necho {name} >> "{log.as_posix()}"\n{body}\n'.encode())
+            script.chmod(0o755)
+        env = {**os.environ, "PATH": f"{folder}{os.pathsep}/usr/bin{os.pathsep}/bin"}
+        return {"env": env, "log": log}
+
+    def test_a_hook_starts_python_once(self):
+        self.session_on("claude-opus-5-5")
+        fake = self.fake_pythons("real", "real")
+        res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), "pre-agent"],
+                             input=json.dumps(self.call("general-purpose", LOOKUP)), capture_output=True,
+                             text=True, env=fake["env"])
+        self.assertEqual(json.loads(res.stdout)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
+        self.assertEqual(fake["log"].read_text().split(), ["python3"])
+
+    def test_a_too_old_or_broken_python3_falls_through_to_python(self):
+        self.session_on("claude-opus-5-5")
+        for kind in ("old", "broken"):
+            with self.subTest(python3=kind):
+                fake = self.fake_pythons(kind, "real")
+                res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), "pre-agent"],
+                                     input=json.dumps(self.call("general-purpose", LOOKUP)), capture_output=True,
+                                     text=True, env=fake["env"])
+                self.assertEqual(json.loads(res.stdout)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
+                shutil.rmtree(fake["log"].parent)
+
+    def test_with_no_new_enough_python_hooks_pass_and_commands_explain(self):
+        launcher = (SCRIPTS / "model-router.sh").as_posix()
+        for kind in ("old", "broken"):
+            with self.subTest(pythons=kind):
+                fake = self.fake_pythons(kind, kind)
+                hook = subprocess.run(["sh", launcher, "pre-agent"], input="{}", capture_output=True, text=True,
+                                      env=fake["env"])
+                self.assertEqual((hook.returncode, hook.stdout), (0, ""))
+                command = subprocess.run(["sh", launcher, "policy"], capture_output=True, text=True,
+                                         env=fake["env"])
+                self.assertEqual(command.returncode, 0)
+                self.assertIn("needs Python 3.9 or later", command.stdout)
+                shutil.rmtree(fake["log"].parent)
+
+    def test_a_real_command_error_keeps_its_exit_code(self):
+        fake = self.fake_pythons("real", "real")
+        res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), "--no-such-flag"],
+                             capture_output=True, text=True, env=fake["env"])
+        self.assertEqual(res.returncode, 2)  # argparse's code, not the fallback's 0
+        self.assertEqual(fake["log"].read_text().split(), ["python3", "python3"])  # the run, then the probe
+
+    def test_hooks_dont_load_the_network_or_xml_modules(self):
+        probe = ("import sys; sys.path.insert(0, sys.argv[1]); import modelrouter.cli; "
+                 "print(sorted(m for m in ('urllib.request', 'http.client', 'xml.etree.ElementTree') if m in sys.modules))")
+        res = subprocess.run([sys.executable, "-c", probe, str(SCRIPTS)], capture_output=True, text=True)
+        self.assertEqual(res.stdout.strip(), "[]", res.stderr)
+
+    def test_the_entry_point_exits_87_on_an_old_python_before_importing_anything(self):
+        source = (SCRIPTS / "model-router.py").read_text(encoding="utf-8")
+        head = source.split("from pathlib")[0]
+        self.assertIn("sys.version_info < (3, 9)", head)
+        self.assertIn("87", head)
+        # An old Python compiles the whole file before the check runs: any newer syntax would
+        # exit 1, which the launcher reads as a real error rather than "try the next one".
+        code = "\n".join(line.split("#")[0] for line in source.splitlines() if not line.lstrip().startswith(('"""', "#")))
+        self.assertTrue(source.isascii())
+        self.assertNotRegex(code, r"""\bf["']|:=|->|\w+\s*:\s*\w+\s*=""")
 
 
 class ReadmeDiagrams(unittest.TestCase):
