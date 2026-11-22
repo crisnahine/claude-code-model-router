@@ -201,7 +201,7 @@ Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours
 }
 ```
 
-Your own file is trusted in full. A project's file can turn routing down to `advise` or `off`, set rules for agents and add models. It can't turn routing on for someone who switched it off, re-rank a model that ships with the plugin or that you defined, or get any model past your cap.
+Your own file is trusted in full. A project's file can turn routing down to `advise` or `off`, set rules for agents, add models, and raise or lower any level's model and effort. So a repository you clone can make its subagents run on a stronger model or at more effort, and cost more. It can't turn routing on for someone who switched it off, re-rank a model that ships with the plugin or that you defined, or get any model past your cap. To bound what a cloned repository can spend, set `max_tier`: it caps the model, and the effort the project set stays.
 
 A file may carry `"schema": 1`, the version of this shape; without it, it is read as version 1. A file written for a newer release still loads: the settings this release understands apply, and `/model-router:models` names the file. Older shapes keep working after an update ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#compatibility)).
 
@@ -238,7 +238,7 @@ Failure handling: every hook and every mod hook fails open. A bug in this plugin
 
 ## Security
 
-Model Router fetches four fixed docs pages and, with an API key, the Models API. It sends no prompt or code anywhere and keeps its state in its own data directory. A repository's `.claude/model-router.json` can't set prices or get past your cap. [docs/SECURITY.md](docs/SECURITY.md) has the threat model, what reaches the network, the API key path and the open items. To report a problem, read its "Reporting a problem" section first: there is no private channel yet, so never put details in a public issue.
+Model Router fetches four fixed docs pages and, with an API key, the Models API. It sends no prompt or code anywhere and keeps its state in its own data directory. A repository's `.claude/model-router.json` can raise levels and effort, but it can't set prices or get past your cap. [docs/SECURITY.md](docs/SECURITY.md) has the threat model, what reaches the network, the API key path and the open items. To report a problem, read its "Reporting a problem" section first: there is no private channel yet, so never put details in a public issue.
 
 ## Questions
 

@@ -19,7 +19,6 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 
 ## Waiting on a decision
 
-- Whether a project's file may raise levels and effort (the open question on project raises). The user decides; 0.1.0 allows raises. Row S6.4.
 - Whether the fallback's one denial, which protects the cap, stays as an exception to "never blocks a spawn". Row S2.25.
 - Whether the Mythos models, priced but not routed, become a routable family. Row S2.15.
 - A live marketplace install with one routed call, which needs the maintainer's login or an API key in a scratch config folder. Row S6.1.

@@ -6,6 +6,10 @@
 
 # Changelog
 
+## Unreleased
+
+- The docs now say that a project's `.claude/model-router.json` may raise levels and effort as well as lower them, so a cloned repository can cost more, and that `max_tier` still caps the model it gets. The behavior is unchanged from 0.1.x.
+
 ## 0.1.2 - 2026-11-23
 
 Relicensed under the Apache License 2.0, with routing fixes from the 0.1.1 benchmark and a redesigned README, docs and site. Needs Claude Code 2.1.292 or later.

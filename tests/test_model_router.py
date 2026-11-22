@@ -1141,6 +1141,15 @@ class Router(Sandbox):
         d = self.decide("general-purpose", LOOKUP, model="opus")
         self.assertEqual((d["action"], d["model"], d["source"]), ("keep", "opus", "caller"))
 
+    def test_a_project_file_may_raise_a_level_but_not_past_the_cap(self):
+        self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "haiku")
+        self.override({"levels": {"lookup": {"needs": 3, "effort": "high"}}})
+        d = self.decide("general-purpose", LOOKUP)
+        self.assertEqual((d["model"], d["effort"]), ("opus", "high"))
+        self.options(max_tier="sonnet")
+        d = self.decide("general-purpose", LOOKUP)
+        self.assertEqual((d["model"], d["effort"]), ("sonnet", "high"))  # the cap bounds the model, not effort
+
     def test_a_model_named_on_the_call_is_lowered_to_the_cap(self):
         self.options(max_tier="sonnet")
         d = self.decide("general-purpose", LOOKUP, model="fable")
