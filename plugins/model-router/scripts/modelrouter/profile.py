@@ -35,7 +35,7 @@ SIGNALS = {
     # Capacity, freshness and speed limits a choice has to be worked out against, not just honoured in passing.
     "load": r"performance|throughput|latency|capacity|staleness|freshness|(?:reads?|writes?|requests?|queries) "
             r"(?:per|a|/) ?(?:second|sec|s)|qps|rps|bottlenecks?|under (?:heavy |peak )?load|"
-            r"\d[\d,.]*k?\s*(?:per second|/s)|\d+\s*ms",
+            r"\d[\d,.]*k?\s*(?:per second|/s)|(?:under|below|within|less than|at most|p\d\d(?: of)?)\s+\d+\s*ms",
     "ambiguity": _DECISION + r"|design|investigat\w*|root.?causes?|intermittent\w*|flaky|figure out|not sure|"
                  r"why (?:does|is|do|are|did)|research|evaluate|trade.?offs?|best (?:way|approach)|"
                  r"should we|strategy|proposal|sometimes|occasionally|(?:find|identify) the cause",

@@ -1643,6 +1643,13 @@
    "agent": "general-purpose",
    "description": "Choose driver version",
    "prompt": "Choose the database driver version in requirements.txt."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Plan release notes",
+   "prompt": "Plan the release notes for 2.0; the API answers in 120 ms."
   }
  ]
 }
