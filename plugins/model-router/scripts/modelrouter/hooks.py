@@ -33,17 +33,23 @@ def is_user_prompt(prompt: str) -> bool:
     return not prompt.startswith("<") or prompt.startswith("<pasted_content")
 
 
-def _skill_request(args: object, body: object) -> str:
-    """What a typed skill asks for: its arguments and its body, without the engine's base-directory line
-    or the file's frontmatter."""
-    body = body if isinstance(body, str) else ""
+# A skill's body is standing instructions, not the request: only its opening counts, so its length
+# never reads as scope and a !`cmd` output or checklist further down can't make every use hard.
+_SKILL_BODY_CHARS = 1500
+
+
+def _profile_skill(args: object, body: object) -> dict:
+    """A typed skill's profile: the higher of its arguments' and its body's opening, without the
+    engine's base-directory line or the file's frontmatter."""
+    body = (body if isinstance(body, str) else "").lstrip("﻿")
     body = re.sub(r"\A\s*Base directory for this skill: [^\n]*\n", "", body)
-    body = re.sub(r"\A---\n.*?\n---\n", "", body, flags=re.S)
-    return "\n\n".join(part.strip() for part in (args if isinstance(args, str) else "", body) if part.strip())
+    body = re.sub(r"\A---[ \t]*\r?\n.*?\r?\n---[ \t]*\r?\n", "", body, flags=re.S)
+    parts = [profile_prompt(text) for text in (args if isinstance(args, str) else "", body[:_SKILL_BODY_CHARS])]
+    return max(parts, key=lambda p: cfg.LEVELS.index(p["level"]))
 
 
-def _typed_skill(prompt: str, hook_input: dict) -> str | None:
-    """The request behind "/name args" when name is a project or user skill or command on disk.
+def _typed_skill(prompt: str, hook_input: dict) -> dict | None:
+    """The profile behind "/name args" when name is a project or user skill or command on disk.
     UserPromptSubmit sees only the typed line; a plugin's skill isn't found this way."""
     match = re.match(r"/([A-Za-z0-9_.-]+)(?:\s+(.*))?\Z", prompt.strip(), re.S)
     if not match:
@@ -52,9 +58,12 @@ def _typed_skill(prompt: str, hook_input: dict) -> str | None:
     project, home = cfg.project_dir(hook_input) / ".claude", store.claude_home()
     for path in (project / "skills" / name / "SKILL.md", home / "skills" / name / "SKILL.md",
                  project / "commands" / f"{name}.md", home / "commands" / f"{name}.md"):
+        if not path.is_file():  # a FIFO or device would hang or never end
+            continue
         try:
-            return _skill_request(args, path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError):
+            with path.open("rb") as fh:
+                return _profile_skill(args, fh.read(64 * 1024).decode("utf-8", "replace"))
+        except OSError:
             continue
     return None
 
@@ -153,7 +162,7 @@ def user_prompt(hook_input: dict) -> dict | None:
         return None
     session_id = hook_input.get("session_id")
     usable = registry.available(config, cfg.project_dir(hook_input), options.cap)
-    result = profile_prompt(_typed_skill(prompt, hook_input) or prompt)
+    result = _typed_skill(prompt, hook_input) or profile_prompt(prompt)
     level = result["level"]
     need = ladder.pick(config, level, options.priority, usable, learn.raises()).model
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
@@ -389,11 +398,10 @@ def mod_turn(hook_input: dict) -> dict | None:
     options = settings.resolve(config)
     text = hook_input.get("text")
     text = text if isinstance(text, str) else ""
+    # Only a turn that opens with the command's own line is that command's turn.
     command = hook_input.get("command")
-    if isinstance(command, dict):
-        text, asked = _skill_request(command.get("args"), command.get("body")), True
-    else:
-        asked = is_user_prompt(text)
+    command = command if isinstance(command, dict) and text.lstrip().startswith("<command-") else None
+    asked = command is not None or is_user_prompt(text)
     # The mod's live model, when it is an ID; a record can miss a fallback to another model.
     model = hook_input.get("model")
     model = model if upstream.version_of(model) else session.model(session_id)
@@ -402,12 +410,12 @@ def mod_turn(hook_input: dict) -> dict | None:
             or str(hook_input.get("origin")) in MACHINE_ORIGINS
             or not _effort_keeps_cache(options, model)):
         return None
-    level = profile_prompt(text)["level"]
+    level = (_profile_skill(command.get("args"), command.get("body")) if command else profile_prompt(text))["level"]
     effort = ((config.get("main") or {}).get("effort") or {}).get(level)
     if effort not in cfg.EFFORTS:
         return None
     store.append_ledger({"event": "turn", "session": hook_input.get("session_id"), "level": level,
-                         "effort": effort, **({"command": command.get("name")} if isinstance(command, dict) else {})})
+                         "effort": effort, **({"command": command.get("name")} if command else {})})
     return {"level": level, "effort": effort}
 
 

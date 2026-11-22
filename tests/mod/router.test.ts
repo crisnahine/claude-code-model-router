@@ -186,10 +186,16 @@ test('a typed skill sends its command and body with the turn', async () => {
   await skill({ skill: 'other', text: 'A skill Claude ran mid-turn.', source: 'userSettings', frontmatter: {} })
   await mod.start({ turnId: 't2', text: 'next' })
   assert.equal('command' in mod.calls[1]!.stdin, false)
+  // A plugin's skill is named plugin:skill in both events (probed live on 2.1.330).
   await mod.submit({ text: '/plugin:hard', command: { name: 'plugin:hard', args: '' }, wait: false, origin: { kind: 'composer' } })
   await skill({ skill: 'other', text: 'not this one', source: 'plugin', frontmatter: {} })
-  await mod.start({ turnId: 't3', text: line })
-  assert.deepEqual(mod.calls[2]!.stdin.command, { name: 'plugin:hard', args: '' })
+  await skill({ skill: 'plugin:hard', text: 'The plugin body.', source: 'plugin', frontmatter: {}, pluginName: 'plugin' })
+  await mod.start({ turnId: 't3', text: '<command-message>plugin:hard</command-message>' })
+  assert.deepEqual(mod.calls[2]!.stdin.command, { name: 'plugin:hard', args: '', body: 'The plugin body.' })
+  // A command whose turn never starts (a local built-in) must not ride on the next drained message.
+  await mod.submit({ text: '/rename x', command: { name: 'rename', args: 'fix the auth race everywhere' }, wait: false, origin: { kind: 'composer' } })
+  await mod.start({ turnId: 't4', text: 'Another Claude session sent a message:\n<cross-session-message>' })
+  assert.equal('command' in mod.calls[3]!.stdin, false)
 })
 
 test('a lower main loop effort is ignored', async () => {

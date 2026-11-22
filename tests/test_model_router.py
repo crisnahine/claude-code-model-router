@@ -2222,11 +2222,21 @@ class SlashSkills(Sandbox):
         self.assertIsNone(self.turn("where", "", self.LOOKUP_BODY))
         self.assertEqual(self.turn("plain", HARD, None), {"level": "complex", "effort": "high"})  # args alone
 
+    def test_a_long_ordinary_skill_body_is_not_a_hard_request(self):
+        self.session_on("claude-opus-5-5")
+        body = "Never commit secrets or credentials. " + "Write a clear commit message for the staged change. " * 40
+        self.assertGreater(len(body), 1500)
+        self.assertIsNone(self.turn("commit", "", body))
+        self.assertIsNone(self.turn("commit", "", "Review the staged diff in production style.\n" + body))
+
     def test_a_teammate_message_still_does_not_raise(self):
         self.session_on("claude-opus-5-5")
         self.assertIsNone(self.turn("hard", "", self.HARD_BODY, origin="peer"))
         delivered = "Another Claude session sent a message:\n<cross-session-message from=\"x\">\n" + HARD
         self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": delivered}))
+        # A command left over from a submit whose turn never started can't stand in for another turn's text.
+        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": delivered,
+                                          "command": {"name": "rename", "args": HARD}}))
 
     def test_the_settings_hook_reads_a_project_or_user_skill_it_can_find(self):
         self.session_on("claude-haiku-5-5")
@@ -2241,6 +2251,14 @@ class SlashSkills(Sandbox):
         self.assertEqual(level("/hard please check src too"), "hardest")
         self.assertEqual(level("/where"), "lookup")
         self.assertEqual(level("/elsewhere:unknown " + LOOKUP), "lookup")  # not found: the typed line is profiled
+        (skills / "SKILL.md").write_text("﻿---\r\nname: hard\r\ndescription: secrets schema production\r\n---\r\n"
+                                         "List the files under src.\r\n")
+        self.assertEqual(level("/hard"), "lookup")  # a BOM and CRLF frontmatter is still left out
+        if hasattr(os, "mkfifo"):
+            fifo = self.project / ".claude" / "skills" / "pipe"
+            fifo.mkdir()
+            os.mkfifo(fifo / "SKILL.md")
+            self.assertEqual(level("/pipe " + LOOKUP), "lookup")  # never opened, so the hook can't hang
 
 
 @unittest.skipUnless(shutil.which("sh"), "needs sh")

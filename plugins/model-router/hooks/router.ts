@@ -137,7 +137,7 @@ export const register: Register = (on, options) => {
       const firstParty = options.main_effort === false ? undefined : await hasFirstPartyCredential($)
       const pick = await ask($, opts, 'mod-turn', {
         text: e.text, ...(model ? { model } : {}), ...(firstParty !== undefined ? { first_party: firstParty } : {}),
-        ...(origin ? { origin } : {}), ...(command ? { command } : {}),
+        ...(origin ? { origin } : {}), ...(command && e.text.trimStart().startsWith('<command-') ? { command } : {}),
       })
       if (pick?.effort) remember(turnEffort, e.turnId, pick.effort)
     } else if (!agentEffort.has(e.agentId)) {
