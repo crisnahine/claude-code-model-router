@@ -64,7 +64,8 @@ _NOUN_VERB = (r"(?:build|update|change|design|plan|review|add|write|create|delet
 # Only nouns that form a compound with these verbs; scripts, builds, records and the like are their objects.
 _COMPOUND = r"\s+(?:logs?|output|trails?|notes?|mode|flags?|messages?|statements?|info|guides?|reports?)\b"
 _LIMIT_WORD = rf"(?:{_CHANGE_VERB}|(?:edit|modify|move|touch|{_REASONING_WORDS})\b)"
-_JOIN = (rf"\b(?!{_LIMIT_WORD})[\w'-]+\s+(?:and|then)\s+(?:(?:also|then|instead|please|just)\s+){{0,2}}"
+# Only where a whole token starts: a \b inside "a-b-c" would rescan the rest of the run at every hyphen.
+_JOIN = (rf"(?<![\w'-])(?!{_LIMIT_WORD})[\w'-]+\s+(?:and|then)\s+(?:(?:also|then|instead|please|just)\s+){{0,2}}"
          rf"(?:{_TASK_VERB}|{_NOUN_VERB}(?={_OBJECT}))(?!{_COMPOUND})")
 _CLAUSE_WORD = rf"\b(?:until|unless|before|after|while|once|but|because)\b|{_JOIN}"
 _CLAUSE = rf"(?:(?!{_CLAUSE_WORD})[^.,;:!?\n])*"

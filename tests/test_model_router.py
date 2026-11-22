@@ -833,6 +833,12 @@ class Profile(unittest.TestCase):
         self.level("do not touch tests" + " " * 64_000 + "and fix it")
         self.assertLess(time.monotonic() - started, 0.5)
 
+    def test_a_long_hyphen_or_apostrophe_run_after_a_limit_stays_fast(self):
+        for run in ("a-" * 32_000, "a'" * 32_000):  # 64 KB, such as a pasted token or a kebab-case list
+            started = time.monotonic()
+            self.level("do not " + run)
+            self.assertLess(time.monotonic() - started, 0.5, run[:4])
+
     def test_a_limit_over_a_list_of_single_verbs_stays_a_limit(self):
         for brief in ("Find where the retry logic lives. Do not add, remove or rename files.",
                       "Find where the retry logic lives. Do not edit, delete or create any files.",
