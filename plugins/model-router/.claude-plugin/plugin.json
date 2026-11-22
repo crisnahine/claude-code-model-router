@@ -1,0 +1,69 @@
+{
+  "name": "model-router",
+  "displayName": "Model Router",
+  "version": "0.1.0",
+  "description": "Claude Code model router: a Claude Code plugin for autonomous multi-model orchestration. Automatic Claude model routing that sets the right model and reasoning effort for every subagent call, from any plugin, skill or agent, by task complexity, speed and cost. It learns from results in your setup, adapts to model changes, and checks the work before a turn ends.",
+  "author": {
+    "name": "Cris",
+    "url": "https://github.com/crisnahine"
+  },
+  "homepage": "https://github.com/crisnahine/claude-code-model-router",
+  "repository": "https://github.com/crisnahine/claude-code-model-router",
+  "license": "MIT",
+  "keywords": [
+    "model-router",
+    "model-routing",
+    "multi-model",
+    "orchestration",
+    "subagents",
+    "autonomous",
+    "cost-optimization",
+    "code-review"
+  ],
+  "engines": {
+    "claude-code": ">=2.1.270"
+  },
+  "network": {
+    "hosts": [
+      "code.claude.com"
+    ]
+  },
+  "userConfig": {
+    "routing_mode": {
+      "type": "string",
+      "title": "Routing mode",
+      "description": "auto (default): the model and reasoning effort of every subagent call are set automatically. advise: Claude is told the estimate but nothing is changed. off: no routing.",
+      "default": "auto"
+    },
+    "priority": {
+      "type": "string",
+      "title": "Priority",
+      "description": "What routing favors. balanced (default): the cheapest model strong enough for each subtask. quality: one step stronger. fast: one step lighter, and the quickest that qualifies.",
+      "default": "balanced"
+    },
+    "max_tier": {
+      "type": "string",
+      "title": "Strongest model allowed",
+      "description": "The most capable model subagents may run on: haiku, sonnet, opus or fable. Anything stronger is lowered to it. Leave as none for no cap.",
+      "default": "none"
+    },
+    "agent_pins": {
+      "type": "string",
+      "title": "Agents that name their own model",
+      "description": "respect (default): an agent whose definition names a model keeps it, within the cap. override: those agents are routed by task like every other.",
+      "default": "respect"
+    },
+    "update_check": {
+      "type": "boolean",
+      "title": "Check for Claude Code updates",
+      "description": "Once a day, fetch the Claude Code changelog and docs index from code.claude.com and mention changes that affect this plugin.",
+      "default": true
+    },
+    "verify_gate": {
+      "type": "boolean",
+      "title": "Quality gates before finishing",
+      "description": "Ask Claude once, before it finishes a turn, to (1) run the verifier when code changed and no test, lint or build ran afterwards, and (2) get a stronger agent's check when a hard request was answered by a weaker session model alone.",
+      "default": true
+    }
+  }
+}

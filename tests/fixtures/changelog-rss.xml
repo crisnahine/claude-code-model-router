@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0">
+    <channel>
+        <title><![CDATA[Claude Code changelog]]></title>
+        <description><![CDATA[Release notes for Claude Code, including new features, improvements, and bug fixes by version.]]></description>
+        <link>https://code.claude.com/docs</link>
+        <generator>Mintlify</generator>
+        <lastBuildDate>Sat, 21 Nov 2026 05:24:50 GMT</lastBuildDate>
+        <atom:link href="https://code.claude.com/docs/en/changelog/rss.xml" rel="self" type="application/rss+xml"/>
+        <copyright><![CDATA[Claude Code Docs]]></copyright>
+        <docs>https://code.claude.com/docs</docs>
+        <item>
+            <title><![CDATA[2.1.330]]></title>
+            <link>https://code.claude.com/docs/en/changelog#2-1-330</link>
+            <guid isPermaLink="false">db1b54608ebb86a7</guid>
+            <pubDate>Fri, 20 Nov 2026 22:38:51 GMT</pubDate>
+            <content:encoded><![CDATA[<p><strong>Added</strong></p>
+<ul>
+<li>Added sign-in to organizations managed in Anthropic's Enterprise Admin Console: after <code>claude auth login</code>, Claude Code applies the organization's settings and uses its cloud provider or gateway</li>
+<li>Added easel, a built-in mod that draws charts when asked and under MCP metrics results, on Pro, Max and, where available, Team and Enterprise on macOS and Linux; turn automatic charts off in <code>/config</code></li>
+<li>Added <code>CLAUDE_CODE_FULL_SIGN_IN_LINK=1</code> to print the full sign-in link, if the short one shows an error or a script reads values from it</li>
+<li>Self-hosted runner: Added <code>--start-dir</code> / <code>SELF_HOSTED_RUNNER_START_DIR</code> to have Claude start its work in a folder of a repository, while settings and hooks load as without it</li>
+<li>Added a notice in cloud and self-hosted runner sessions when a plugin marketplace can't be fetched because its repository isn't one of the session's</li>
+<li>Self-hosted runner: Added a notice when Anthropic-managed git refuses a plugin's own repository, naming the plugin and what to do</li>
+<li>Added <code>commandPrinted</code> to <code>claude plugin install --json</code> results, true when the plugin's install command wrote to stderr, and <code>commandFailed</code> when it exited with an error, was killed or timed out</li>
+<li>Added <code>claude_code_self_hosted_runner_order_to_registered_seconds</code> to the self-hosted runner's <code>/metrics</code>: seconds from work order issued to registration accepted, on orchestrator-spawned runners</li>
+<li>Added <code>claude_code_self_hosted_runner_order_to_first_session_seconds</code> to the self-hosted runner's <code>/metrics</code>: seconds from work order to first session handed over, on runners started for a session</li>
+<li>[VSCode] Added <code>/fork</code> to fork a conversation after its last reply (anthropics/claude-code#69272)</li>
+<li>[VSCode] Added <code>/workflows</code>, which opens the agent map with running workflows</li>
+<li>[VSCode] Added the <code>claudeCode.escapeStopsClaude</code> setting; turn it off so Escape does not stop Claude (anthropics/claude-code#91536)</li>
+<li>[VSCode] Added the <code>claudeCode.pinPrompt</code> setting to let your message scroll away instead of staying pinned</li>
+<li>[VSCode] Added the <code>claudeCode.contextUsageThreshold</code> setting for when the context indicator shows (anthropics/claude-code#93036)</li>
+<li>[VSCode] Added a <code>prompt</code> argument to the "Open in Side Bar" command for keybindings and extensions</li>
+<li>[VSCode] Added Move up and Move down to a session group's menu (anthropics/claude-code#98654)</li>
+</ul>
+<p><strong>Changed</strong></p>
+<ul>
+<li>Reverted 2.1.329's removal of the automatic retry when <code>max_tokens</code> exceeds a model's or gateway's limit</li>
+<li>Changed recurring scheduled tasks and <code>/loop</code> to run up to 30 days instead of 7 while their session keeps running, and say when they end; tasks made before this release still end at 7 days</li>
+<li>Changed more <code>rm</code> commands aimed at the root, home, a top-level folder or the working folder to ask for approval; where nobody can answer, they're refused</li>
+<li>Changed <code>deniedMcpServers</code> name entries to hide only the named claude.ai connector, not others at its URL; to block them all, deny its exact URL</li>
+<li>Changed <code>claude --teleport</code> in some setups to print the git commands for switching branch instead of running them; with <code>-p</code> it exits 1 until you switch</li>
+<li>Changed unrecognized model names containing "sonnet" or "haiku" to use the shorter system prompt, like other unrecognized names; <code>CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0</code> gives every model the full one</li>
+<li>Changed skills that Claude runs with a <code>model</code> setting, other than <code>context: fork</code> skills, to leave subagents, forks, compaction and <code>/recap</code> on the session's model</li>
+<li>Changed a subagent's model fallback to carry over: agents with no model and forks it then starts run on the fallback, and the agents they start use its Bedrock region</li>
+<li>Self-hosted runner: Changed <code>spawn-runner</code> hooks to start while earlier ones still run, up to <code>--hook-concurrency</code> per orchestrator (4 by default); set it to 1 if yours can't run beside another</li>
+<li>Self-hosted runner: Changed Bash commands to skip the file diff when nothing needs it, so transcripts can lack it; set <code>bashEditDiffEnabled</code> to true in managed settings to get every diff</li>
+<li>Changed self-hosted runners to stop a session's start at once, without trying other runners, when a checkout hook exits with status 108</li>
+<li>Changed prompt hooks to accept model aliases such as <code>haiku</code> or <code>sonnet</code> in their <code>model</code> field</li>
+<li>Changed <code>/design-sync</code>'s fallback build of the reference Storybook to use only a Storybook installed in the project</li>
+<li>Changed subagent progress summaries in terminal sessions signed in to a Claude apps gateway to be written from short notes instead of the whole conversation, using far fewer tokens</li>
+</ul>]]></content:encoded>
+        </item><item>
+            <title><![CDATA[2.1.329]]></title>
+            <link>https://code.claude.com/docs/en/changelog#2-1-329</link>
+            <guid isPermaLink="false">e09cca4d5251636c</guid>
+            <pubDate>Thu, 19 Nov 2026 22:20:41 GMT</pubDate>
+            <content:encoded><![CDATA[<p><strong>Added</strong></p>
+<ul>
+<li>Added a trust dialog warning that says where a folder's hooks are declared</li>
+<li>Added a warning in the conversation, in Claude Desktop and other non-interactive hosts, when hooks in managed settings fail to load</li>
+<li>Added this session's scheduled tasks, <code>/loop</code> wakeups, the goal and this conversation's forks to <code>/tasks</code>; x stops one after asking</li>
+<li>Added a "Server message" row to a server's page in <code>/mcp</code> that shows the JSON-RPC error message of a remote HTTP MCP server that refuses the connection</li>
+<li>Added a "Marketplace auto-update" row to <code>/status</code> that names managed marketplaces that get no automatic updates, and why</li>
+<li>Added support for turning on Code Mode while OpenTelemetry events and metrics are enabled; each tool call the code makes sends its events; tracing still keeps it off</li>
+<li>[VSCode] Added a line above the message box after you decline the trust prompt, with Review trust to bring the prompt back without reloading the window</li>
+</ul>
+<p><strong>Changed</strong></p>
+<ul>
+<li>Updated computer use on macOS to newer safety rules, so some actions are refused and some apps have less access</li>
+<li>Changed saved scheduled tasks: in new signed-in sessions, most saved by earlier versions need scheduling again, though <code>--resume</code> of their own session still runs them</li>
+<li>Changed <code>/code-review</code> with no target on most models to review the whole branch against the default branch, and fixed it losing the diff on multi-commit branches</li>
+<li>Changed auto mode to run <code>git status</code> less often so most requests wait less in large repositories; a git command that discards changes may be blocked until the working tree is checked</li>
+<li>Changed <code>/code-review &#x3C;pr number> --fix</code>, and <code>/code-review</code> given a pull request URL, to stop without reviewing when <code>gh pr diff</code> is refused or fails</li>
+<li>Changed 'Exit and stop tasks' to end this session's scheduled tasks so they don't run again on resume, unless you exit while Claude is responding</li>
+<li>Changed some teammate panes to start through /bin/sh, so they may not read shell start-up files</li>
+<li>Changed computer use on macOS to give up on an app launch that has not finished after 30 seconds</li>
+<li>Gateway: Changed the start-up warning shown while <code>access_control.allow_cidrs</code> is empty to a notice at every start, boxed in text logs: never expose the gateway to the public internet</li>
+<li>Self-hosted runner: Changed a second host name's clone of the same owner/name to go under <code>_repos/clones/&#x3C;host>/</code> in the base folder; no clone moves</li>
+<li>Self-hosted runner: Changed repositories with unusual characters in their address path to clone anew in a new folder; rules and volumes naming the old one stop applying, and the old clone stays put</li>
+<li>Self-hosted runner: Changed <code>--repository-folder</code> to take most folders in the base folder at <code>--capacity 1</code> (above 1, one there stops start-up); another repository's session overlapping one is refused</li>
+<li>Changed Code Mode so a PreToolUse hook that errors no longer refuses a script's tool call, as outside Code Mode; set <code>"onFailure": "block"</code> on a command, HTTP or MCP tool hook that must refuse</li>
+<li>Changed Code Mode to refuse a script's read of a line range over 256 MiB, which could use gigabytes of memory, and fixed reads of very long lines timing out</li>
+<li>Changed Code Mode to also start when telemetry, nonessential traffic or feature flags are turned off; an administrator can keep it off in managed settings</li>
+<li>Changed Code Mode to run a script that declares its own <code>log</code>, <code>preview</code> or <code>sleep</code>, which it used to refuse</li>
+<li>Changed macOS login renewal to test the Keychain with a <code>Claude Code-write-check</code> item</li>
+<li>Changed the <code>/tasks</code> header and the footer's background count to one number covering shells, monitors, MCP calls, agents, workflows and scheduled tasks</li>
+<li>Changed Stop and SubagentStop hooks to list a Monitor's script as <code>monitor</code>, not <code>shell</code>, in <code>background_tasks</code></li>
+<li>Removed 2.1.326's automatic retry at the limit named in a <code>max_tokens</code> error; behind a gateway whose model takes fewer output tokens, set <code>CLAUDE_CODE_MAX_OUTPUT_TOKENS</code> to that limit</li>
+<li>[VSCode] Changed Down to stop at the last item of a permission prompt instead of wrapping to Yes</li>
+<li>[VSCode] Changed command output to show hidden characters and control sequences other than plain colors as symbols, so Persian, Khmer, Lao, Sinhala and Malayalam text can look broken or out of order</li>
+</ul>]]></content:encoded>
+        </item><item>
+            <title><![CDATA[2.1.328]]></title>
+            <link>https://code.claude.com/docs/en/changelog#2-1-328</link>
+            <guid isPermaLink="false">453fb6a2269cefe6</guid>
+            <pubDate>Thu, 19 Nov 2026 01:20:10 GMT</pubDate>
+            <content:encoded><![CDATA[<p><strong>Added</strong></p>
+<ul>
+<li>Added auto mode for Claude Opus 4.6 and Sonnet 4.6 on Amazon Bedrock, Google Cloud's Agent Platform, Microsoft Foundry and Claude apps gateway; interactive sessions with no permission mode start in it</li>
+<li>Added <code>"onFailure": "block"</code> for <code>mcp_tool</code> hooks, as for command and HTTP hooks: a hook whose call fails blocks the action</li>
+<li>Added a warning when a message from a session that skips permission prompts may be held and dropped by a cloud session</li>
+<li>Added a notice in <code>/status</code> and <code>claude doctor</code> when an OpenTelemetry exporter has no endpoint and its data would likely be lost</li>
+<li>Added <code>CLAUDE_CODE_DISABLE_DEFERRED_TOOL_RESUME</code>, which lets a host stop <code>claude -p --resume</code> and <code>--continue</code> from running a tool call that a hook deferred</li>
+<li>Added support for apps that embed Claude Code to switch on the policy plugin's <code>allowManagedModsOnly</code> option; an admin's managed settings still win</li>
+<li>Added a startup warning to the Claude apps gateway when a policy's <code>maxEffortLevel</code> is not a valid effort level</li>
+<li>Self-hosted runner: Added <code>--repository-folder</code> to name the folder that sessions use for a repository at <code>--capacity 1</code>, in place of its path under the base folder, which can't be a symbolic link</li>
+<li>Self-hosted runner: Added a start-up warning when the host's settings.json sets a default permission mode that sessions ignore</li>
+<li>Self-hosted runner: Added <code>--hook-label</code> to <code>claude self-hosted-runner orchestrator</code>, to hand chosen session labels to the <code>spawn-runner</code> hook</li>
+<li>Self-hosted runner: Added <code>--metadata key=value</code> to <code>claude --environment</code>, to label a session for the <code>spawn-runner</code> hook</li>
+<li>Self-hosted runner: Added <code>claude_code_self_hosted_orchestrator_session_queue_wait_by_reason_seconds</code> to the orchestrator's <code>/metrics</code>, so a re-opened session's wait can be told from a new one's</li>
+<li>Self-hosted runner: Added an orchestrator metric, <code>claude_code_self_hosted_orchestrator_sessions_given_up_total</code>, that counts by cause how often Anthropic gave up starting a runner for a session</li>
+<li>[VSCode] Added a notice when a message from another session is held, with a link to the settings file that can allow it</li>
+</ul>
+<p><strong>Changed</strong></p>
+<ul>
+<li>Changed plan mode and Bash prompts for Opus 4.6 and Sonnet 4.6 on third-party providers to use and offer auto mode, as on newer models; <code>disableAutoMode</code> turns both off</li>
+<li>Changed Code Mode to no longer run UserPromptSubmit hooks, managed ones included, on scripts' output; to redact that output, use a PostToolUse hook with <code>updatedToolOutput</code></li>
+<li>Changed <code>/code-review</code> on most models to report only bugs and CLAUDE.md violations; run <code>/simplify</code> for reuse, simplification and efficiency cleanups</li>
+<li>Changed <code>/code-review</code> to mark each finding Important, Pre-existing or Nit on most models, and to end each summary with a suggested fix; a clean review's list now reads "Code review found no issues."</li>
+<li>Changed <code>deniedMcpServers</code> entries of the form <code>claude.ai &#x3C;name></code> to apply to that connector in cloud and self-hosted runner sessions too</li>
+<li>Changed managed <code>PostToolUse</code> hooks to no longer fire for calls refused before they ran: no log entry, rewrite, block or stop there; <code>PostToolBatch</code> gets most, not marked as refused</li>
+<li>Changed <code>/bug</code> to ask Yes or No before sending, so repeated Enters no longer send a report or open GitHub</li>
+<li>Changed subagents in <code>claude -p</code>, the Agent SDK, desktop and VS Code to wait for their own subagents by default when <code>CLAUDE_CODE_FORK_SUBAGENT=0</code> is set</li>
+<li>Changed <code>claude -p</code> with <code>CLAUDE_CODE_FORK_SUBAGENT=0</code> to count a background subagent and those it waits for against one 10-minute wait; raise <code>CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS</code> for longer chains</li>
+<li>Changed a shell command rewritten by a PermissionRequest hook to a sandbox-excluded command to run outside the sandbox</li>
+<li>Changed the Claude in Chrome welcome screen and <code>/chrome</code> to say that Claude Code asks before Claude acts on a site, unless your permission mode or a rule in <code>/permissions</code> answers</li>
+<li>Changed Claude Desktop and Agent SDK sessions on third-party providers or with telemetry or feature flags off to end the turn when closed with a question open, instead of continuing without an answer</li>
+<li>Changed pasted text to be marked for Claude as pasted, on third-party providers or with telemetry or feature flags turned off</li>
+<li>Changed subagent progress summaries in terminal sessions on the Anthropic API to be written by the default small fast model from short notes, also with telemetry off, using far fewer tokens</li>
+<li>Changed how a sandbox that can't start is reported, unless <code>sandbox.failIfUnavailable</code> is set: the next sandboxed Bash command is refused and says that the sandbox is off for the session</li>
+<li>Changed <code>/list-agents</code> to show its list to you alone; Claude lists sessions itself when needed</li>
+<li>Self-hosted runner: Changed the built-in <code>gh api</code> to be off by default where settings guard Claude's GitHub tools by name; <code>--use-anthropic-gh true</code> turns it on</li>
+<li>Self-hosted runner: Changed a <code>claude</code> that a wrapper script runs before the session's own <code>claude</code> is up, or after it has ended, to have no Anthropic-managed git</li>
+<li>Self-hosted runner: Changed <code>CLAUDE_RUNNER_SESSION_UUID</code> and <code>CLAUDE_CODE_REMOTE_SESSION_UUID</code> to both be set for the session and its <code>checkout</code>, <code>post-session</code> and <code>spawn-runner</code> hooks</li>
+<li>Changed self-hosted runners at <code>--capacity 1</code> to refuse a session earlier when the path of a repository it pushes to is a symbolic link</li>
+</ul>]]></content:encoded>
+        </item></channel></rss>

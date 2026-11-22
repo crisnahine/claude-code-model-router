@@ -1,0 +1,171 @@
+"""The tables the skills print. Skills run through the Bash tool, so options come from
+what the last SessionStart recorded."""
+from __future__ import annotations
+
+from . import agents, learn, registry, store, upstream
+from . import config as cfg
+from .profile import profile_call, profile_prompt
+
+
+def _usable(config: dict) -> list[str]:
+    return registry.available(config, cfg.project_dir(), from_state=True)
+
+
+def _pick(config: dict, level: str, usable: list[str]) -> str | None:
+    spec = (config.get("levels") or {}).get(level) or {}
+    needs = float(spec.get("needs") or cfg.LEVELS.index(level) + 1) + learn.bump(level)
+    return registry.select(config, needs, cfg.priority(from_state=True), usable)
+
+
+def policy(config: dict) -> str:
+    usable = _usable(config)
+    limit = cfg.cap(config, from_state=True)
+    lines = [f"Routing: **{cfg.mode(config)}**. Priority: **{cfg.priority(from_state=True)}**. "
+             f"Cap: **{limit or 'none'}**. Strongest model in use: **{usable[-1] if usable else 'none'}**.", "",
+             "| Subtask level | Model | Effort |", "| :- | :- | :- |"]
+    for level in cfg.LEVELS:
+        spec = (config.get("levels") or {}).get(level) or {}
+        note = " (raised by feedback)" if learn.bump(level) else ""
+        lines.append(f"| {level} | {_pick(config, level, usable)}{note} | "
+                     f"{spec.get('effort') or 'as the agent or session sets it'} |")
+    lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
+    for name in registry.by_strength(config):
+        info = registry.models(config)[name]
+        flag = "" if name in usable else " (not in use)"
+        lines.append(f"| {name}{flag} | {info.get('strength')} | {info.get('speed', '-')} | "
+                     f"{info.get('cost', '-')} | {info.get('use_for', '')} |")
+    lines += ["", "Strength, speed and cost are relative ranks, not prices.", "",
+              "| Role agent | Model | Role |", "| :- | :- | :- |"]
+    for name, agent in sorted((config.get("crew") or {}).items(),
+                              key=lambda kv: registry.strength(config, kv[1].get("model"))):
+        model = agent.get("model")
+        runs = registry.clamp(config, model, usable) if model in registry.models(config) else model
+        shown = model if runs == model else f"{runs} (lowered from {model})"
+        lines.append(f"| {cfg.PLUGIN_NAME}:{name} | {shown} | {agent.get('role', '')} |")
+    return "\n".join(lines)
+
+
+def models(config: dict) -> str:
+    table = registry.health()
+    limit = cfg.cap(config, from_state=True)
+    usable = _usable(config)
+    allowed = registry.permitted(config, cfg.project_dir())
+    lines = [f"Cap: **{limit or 'none'}**. Strongest model in use: **{usable[-1] if usable else 'none'}**. "
+             f"Priority: **{cfg.priority(from_state=True)}**.",
+             "", "| Model | Last ran as | Status |", "| :- | :- | :- |"]
+    for name in registry.by_strength(config):
+        info = table.get(name) if isinstance(table.get(name), dict) else {}
+        if limit and registry.strength(config, name) > registry.strength(config, limit):
+            status = "above your cap"
+        elif limit and name not in (config.get("_trusted") or []):
+            status = "added by this project, so not used while a cap is set"
+        elif name not in allowed:
+            status = "not permitted by the availableModels or deniedModels setting"
+        elif not registry.healthy(name, table):
+            why = (f"ran as {info.get('substituted_by')} instead" if info.get("substituted")
+                   else str(info.get("last_error") or "calls failed with a model error"))
+            status = f"routed around until retried ({why})"
+        elif info.get("last_model"):
+            status = "working"
+        else:
+            status = "not used yet"
+        lines.append(f"| {name} | {info.get('last_model') or '-'} | {status} |")
+    learned = learn.stats()
+    rows = [(level, learned[level]) for level in cfg.LEVELS if isinstance(learned.get(level), dict)]
+    if rows:
+        lines += ["", "| Subtask level | Routed calls | Votes it was too low | Raised |", "| :- | -: | -: | :- |"]
+        lines += [f"| {level} | {info.get('calls', 0)} | {info.get('votes', 0)} | "
+                  f"{'yes' if info.get('bump') else 'no'} |" for level, info in rows]
+    aliases = (upstream.load().get("cache") or {}).get("aliases") or []
+    if aliases:
+        lines += ["", "Model aliases in the current Claude Code docs: " + ", ".join(aliases) + "."]
+        new = [f for f in upstream.model_families(aliases) if f not in registry.models(config)]
+        if new:
+            lines.append("Not in the registry yet, so not routed to: " + ", ".join(new) + ".")
+    return "\n".join(lines)
+
+
+def explain(config: dict, text: str, agent: str | None = None) -> str:
+    """What the router would make of this task, and why."""
+    usable = _usable(config)
+    result = profile_call({"prompt": text}, agent) if agent else profile_prompt(text)
+    level = result["level"]
+    spec = (config.get("levels") or {}).get(level) or {}
+    why = ", ".join(result["signals"]) or "no risk, scope or ambiguity wording"
+    out = [f"Level: **{level}** ({why}).",
+           f"Model: **{_pick(config, level, usable)}**, effort: {spec.get('effort') or 'unchanged'}.",
+           f"Priority {cfg.priority(from_state=True)}; models in use: {', '.join(usable)}."]
+    if agent:
+        definition = agents.find(agent, cfg.project_dir())
+        pinned = (definition or {}).get("model")
+        if definition is None:
+            out.append(f"The definition of `{agent}` wasn't found, so its calls are left alone.")
+        elif pinned and cfg.pins(from_state=True) == "respect":
+            out.append(f"`{agent}` names its own model ({pinned}), which is kept within the cap.")
+    return "\n".join(out)
+
+
+def status(changes: dict | None) -> str:
+    if changes is None:
+        return f"No upstream data cached yet. Run `/{cfg.PLUGIN_NAME}:refresh`."
+    out = [f"Last reviewed Claude Code version: {changes['reviewed_version']}"]
+    if changes["new_releases"]:
+        out.append(f"\nNew releases since then ({len(changes['new_releases'])}):")
+        out += [f"- {r.get('version')} ({r.get('date', '')}): {r.get('link', '')}" for r in changes["new_releases"]]
+    else:
+        out.append("No new releases.")
+    for label, key in (("Docs pages added", "pages_added"), ("Docs pages removed", "pages_removed"),
+                       ("Docs pages whose summary changed", "pages_changed")):
+        if changes[key]:
+            out.append(f"\n{label} ({len(changes[key])}):")
+            out += [f"- {u}" for u in changes[key][:25]]
+    if changes.get("new_model_families"):
+        out.append("\nNew model aliases in the docs, not in the registry yet: "
+                   + ", ".join(changes["new_model_families"]))
+    if changes.get("removed_model_families"):
+        out.append("\nRegistry models the docs no longer list: " + ", ".join(changes["removed_model_families"]))
+    if changes["watched_pages_touched"]:
+        out.append("\nHigh impact (pages this plugin is built on):")
+        out += [f"- {u}" for u in changes["watched_pages_touched"]]
+    return "\n".join(out)
+
+
+def usage(days: int) -> str:
+    rows = store.read_ledger(days)
+    spawns = [r for r in rows if r.get("event") == "spawn"]
+    results = [r for r in rows if r.get("event") == "result"]
+    if not spawns and not results:
+        return f"No subagent activity recorded in the last {days} days."
+    by_agent: dict[str, dict] = {}
+
+    def row(agent: object) -> dict:
+        return by_agent.setdefault(str(agent or "?"), {"calls": 0, "routed": 0, "levels": {}, "models": {}})
+
+    for r in spawns:
+        a = row(r.get("agent"))
+        a["calls"] += 1
+        a["routed"] += r.get("action") == "rewrite"
+        if r.get("level"):
+            a["levels"][r["level"]] = a["levels"].get(r["level"], 0) + 1
+    by_model: dict[str, dict] = {}
+    for r in results:
+        model = str(r.get("resolved_model") or "background (not reported)")
+        a = row(r.get("agent"))
+        a["models"][model] = a["models"].get(model, 0) + 1
+        m = by_model.setdefault(model, {"runs": 0, "tokens": 0})
+        m["runs"] += 1
+        m["tokens"] += r.get("total_tokens") if isinstance(r.get("total_tokens"), int) else 0
+    lines = [f"Subagent usage, last {days} days", "",
+             "| Agent | Calls | Model set by router | Levels | Ran on |", "| :- | -: | -: | :- | :- |"]
+    for agent, a in sorted(by_agent.items(), key=lambda kv: -kv[1]["calls"]):
+        levels = ", ".join(f"{level} x{n}" for level, n in a["levels"].items()) or "-"
+        ran = ", ".join(f"{m} x{n}" for m, n in sorted(a["models"].items())) or "-"
+        lines.append(f"| {agent} | {a['calls']} | {a['routed']} | {levels} | {ran} |")
+    if by_model:
+        lines += ["", "| Model | Agent runs | Tokens |", "| :- | -: | -: |"]
+        lines += [f"| {m} | {v['runs']} | {v['tokens']:,} |" for m, v in sorted(by_model.items())]
+    errors = sum(1 for r in rows if r.get("event") == "model_error")
+    if errors:
+        lines += ["", f"Agent calls that failed with a model error: {errors}."]
+    lines += ["", "Dollar totals are in /usage and /cost; this ledger shows what was routed where."]
+    return "\n".join(lines)

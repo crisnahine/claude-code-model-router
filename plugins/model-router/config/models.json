@@ -1,0 +1,81 @@
+{
+  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength, speed and cost are relative ranks, not prices. A model's name must be an alias the Agent tool accepts. Crew models must match each agent's frontmatter; the tests check that.",
+  "models": {
+    "haiku": {
+      "strength": 1,
+      "speed": 4,
+      "cost": 1,
+      "use_for": "Lookups, file search, summarizing known code, running a command and reporting, formatting, trivial edits."
+    },
+    "sonnet": {
+      "strength": 2,
+      "speed": 3,
+      "cost": 2,
+      "use_for": "Everyday implementation: features and fixes with a clear spec, tests, refactors inside one module."
+    },
+    "opus": {
+      "strength": 3,
+      "speed": 2,
+      "cost": 3,
+      "use_for": "Design and planning, cross-module changes, subtle bugs, security-sensitive code, adversarial review."
+    },
+    "fable": {
+      "strength": 4,
+      "speed": 1,
+      "cost": 4,
+      "use_for": "The hardest and longest work: ambiguous multi-system problems, large migrations, research-grade debugging."
+    }
+  },
+  "levels": {
+    "lookup": {
+      "needs": 1,
+      "effort": "low"
+    },
+    "standard": {
+      "needs": 2,
+      "effort": null
+    },
+    "complex": {
+      "needs": 3,
+      "effort": "high"
+    },
+    "hardest": {
+      "needs": 4,
+      "effort": "xhigh"
+    }
+  },
+  "crew": {
+    "scout": {
+      "model": "haiku",
+      "role": "Read-only search and summary"
+    },
+    "verifier": {
+      "model": "haiku",
+      "role": "Runs tests, lint and type checks and reports results"
+    },
+    "docs-researcher": {
+      "model": "haiku",
+      "role": "Reads current Claude Code docs and changelog"
+    },
+    "implementer": {
+      "model": "sonnet",
+      "role": "Writes code and tests to a clear spec"
+    },
+    "architect": {
+      "model": "opus",
+      "role": "Plans changes and designs systems, read-only"
+    },
+    "reviewer": {
+      "model": "opus",
+      "role": "Adversarial review of a diff"
+    },
+    "deep-solver": {
+      "model": "fable",
+      "role": "Hardest, longest, most ambiguous tasks"
+    }
+  },
+  "agents": {},
+  "ship": {
+    "max_fix_loops": 2
+  }
+}
