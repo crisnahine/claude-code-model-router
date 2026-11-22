@@ -756,7 +756,8 @@ class Profile(unittest.TestCase):
         self.assertEqual(self.level("which plugins support hooks?"), "lookup")
         self.assertEqual(self.level("read the update-check option"), "lookup")
         self.assertEqual(self.level("list the routes. Make sure to include the line numbers"), "lookup")
-        self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "standard")
+        # The limit names what the fix must work around, so its risk counts.
+        self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "complex")
 
     def test_a_limit_ends_with_its_clause_and_keeps_the_task_after_it(self):
         self.assertEqual(self.level("Without changing the public API, fix the race condition in the payments "
@@ -767,6 +768,19 @@ class Profile(unittest.TestCase):
                                     "and verified."), "standard")
         self.assertEqual(self.level("No need to ask questions, just implement the OAuth2 login flow and secure "
                                     "the session cookies."), "complex")
+
+    def test_a_task_joined_to_a_limit_by_and_keeps_what_it_is_about(self):
+        for brief, signals in (
+                ("Do not touch tests and implement the payment retry.", ["risk"]),
+                ("Don't break the public API and fix the authentication bug in the login service.", ["risk"]),
+                ("Never log secrets and refactor the credentials loader across all services.", ["risk", "scope"]),
+                ("Do not use any new dependencies and migrate the database schema to the new billing tables.",
+                 ["risk"])):
+            result = profile.profile_call({"prompt": brief}, "general-purpose")
+            self.assertEqual((result["level"], result["signals"]), ("complex", signals), brief)
+        # A risk named only inside the limit still says what the work is about.
+        self.assertEqual(self.level("Rename the session helper without touching the auth tokens."), "complex")
+        self.assertEqual(self.level("Find the config loader. Do not touch the database."), "lookup")
 
     def test_a_limit_over_a_list_of_single_verbs_stays_a_limit(self):
         for brief in ("Find where the retry logic lives. Do not add, remove or rename files.",
