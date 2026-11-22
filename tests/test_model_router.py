@@ -790,6 +790,24 @@ class Profile(unittest.TestCase):
         self.level("do not" + " " * 64_000 + "x")
         self.assertLess(time.monotonic() - started, 0.5)
 
+    def test_a_brief_in_another_language_starts_at_standard(self):
+        for brief in ("Corrige le bug de sécurité dans le module de paiement.",
+                      "Corrige le bug dans le module de paiement et ajoute un test pour la validation.",
+                      "Diseña una migración de OAuth2 para todos los servicios y encuentra la causa raíz del fallo.",
+                      "Behebe den Fehler in der Zahlungsfunktion und füge einen Test für die Validierung hinzu.",
+                      "Correggi il bug nella funzione di pagamento e aggiungi un test per la validazione.",
+                      "Corrija o erro na função de pagamento e adicione um teste para a validação.",
+                      "Los de fout in de betaalmodule op en voeg een test toe voor de validatie.",
+                      "すべてのサービスでOAuth2への移行を設計し、断続的な障害の根本原因を見つけてください。",
+                      "Найди, где определена функция retry."):
+            self.assertEqual(self.level(brief), "standard", brief)
+            self.assertNotEqual(profile.profile_prompt(brief)["level"], "lookup", brief)
+        for brief in ("grep TODO src/*.py", "list the files under src", "ls -la src/", "cat README.md",
+                      "List i18n files: locales/de.json, locales/en.json, locales/es.json",
+                      "grep -rn 'des_encrypt' lib/des/ lib/des.c"):
+            self.assertEqual(self.level(brief), "lookup", brief)
+            self.assertEqual(profile.profile_prompt(brief)["level"], "lookup", brief)
+
     def test_make_sure_keeps_the_task_it_introduces(self):
         self.assertEqual(self.level("Make sure to fix the auth bug in the login handler."), "complex")
         self.assertEqual(self.level("Make sure the payments database migration is safe across all services "
@@ -1780,6 +1798,31 @@ class Gates(Sandbox):
         self.session_on("claude-fable-5-2")
         hooks.user_prompt({"session_id": "s1", "prompt": HARD})
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
+
+
+class SubagentChecks(Sandbox):
+    """A subagent's commands are in its own transcript (SubagentStop's agent_transcript_path)."""
+
+    def transcript(self, name: str, command: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(json.dumps({"timestamp": "2099-01-01T00:00:00Z", "message": {"content": [
+            {"type": "tool_use", "name": "Bash", "input": {"command": command}}]}}) + "\n")
+        return str(path)
+
+    def subagent_fixes_and_stops(self, command: str) -> dict:
+        hooks.post_edit({"session_id": "s1", "agent_id": "a1", "agent_type": "model-router:implementer",
+                         "tool_input": {"file_path": "pages.py"}})
+        hooks.agent_stopped({"session_id": "s1", "agent_id": "a1", "agent_type": "model-router:implementer",
+                             "agent_transcript_path": self.transcript("agent-a1.jsonl", command),
+                             "last_assistant_message": "Fixed the start index."})
+        return {"session_id": "s1", "transcript_path": self.transcript("main.jsonl", "ls")}
+
+    def test_a_test_run_inside_the_subagent_that_edited_satisfies_the_stop_check(self):
+        self.assertIsNone(hooks.stop(self.subagent_fixes_and_stops("python3 -m pytest test_pages.py | tail -15")))
+
+    def test_a_subagent_that_ran_no_check_still_gets_one_asked_for(self):
+        stopped = hooks.stop(self.subagent_fixes_and_stops("cat pages.py"))
+        self.assertIn("model-router:verifier", json.dumps(stopped))
 
 
 class Upstream(Sandbox):

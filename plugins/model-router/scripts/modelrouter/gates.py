@@ -51,6 +51,15 @@ def note_check(session_id: str | None) -> None:
     store.update_entry("edits", session_id, verified_at=time.time())
 
 
+def note_agent_checks(hook_input: dict) -> None:
+    """A subagent's commands are in its own transcript, which the Stop check doesn't read."""
+    session_id = hook_input.get("session_id")
+    entry = store.load_entry("edits", session_id)
+    edited = entry.get("edited_at") or 0
+    if edited > (entry.get("verified_at") or 0) and checks_ran_since(hook_input.get("agent_transcript_path"), edited):
+        note_check(session_id)
+
+
 def checks_ran_since(transcript_path: object, since: float) -> bool:
     """Did a test, lint, type-check or build command run after `since`?"""
     tail = session.transcript_tail(transcript_path, 1024 * 1024)

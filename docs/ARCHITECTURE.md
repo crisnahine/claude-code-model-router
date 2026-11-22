@@ -123,7 +123,7 @@ A mod could send the main loop's requests to another model, and the first probe 
 - `UserPromptSubmit` profiles each request against the session's model. When the request needs more than that model, Claude is told to hand the hard thinking to a strong subagent. Otherwise the hook says nothing, so a normal prompt carries no extra tokens.
 - `Stop` checks whether that happened. A complex or harder request on a weaker session, with no agent of the needed strength started, blocks the stop once and asks for a strong agent to check the result.
 
-A second check at `Stop` asks for verification once, when code in the project (under the hook's `cwd` or `CLAUDE_PROJECT_DIR`) changed and no test, lint, type-check or build command ran after the last edit and no verifier or reviewer was started.
+A second check at `Stop` asks for verification once, when code in the project (under the hook's `cwd` or `CLAUDE_PROJECT_DIR`) changed and no test, lint, type-check or build command ran after the last edit and no verifier or reviewer was started. A command counts whether the conversation ran it or a subagent did: a subagent's commands are in its own transcript, which `SubagentStop` names (`agent_transcript_path`), so a subagent that fixes code and runs the tests doesn't trigger a second agent to run them again.
 
 ## Discovery and adaptation
 
@@ -164,7 +164,8 @@ UserPromptSubmit ─ user-prompt   profiles the request; notes a model the user 
 PostModelSwitch ─ model-switch   records the session's new model
 PreToolUse (Agent|Task) ─ pre-agent      fallback: spawn.run, returns updatedInput
 PostToolUse (Agent|Task) ─ post-agent    the model that ran; a returned result finishes the call for redos
-SubagentStop ─ agent-stopped    a background agent's result is back; finishes its call for redos
+SubagentStop ─ agent-stopped    a background agent's result is back; finishes its call for redos;
+                                counts the checks the agent ran
 PostToolUseFailure (Agent|Task) ─ agent-failed   counts model errors
 PostToolUse (Edit|Write|NotebookEdit) ─ post-edit   notes that code changed
 Stop ─ stop                      the two checks
