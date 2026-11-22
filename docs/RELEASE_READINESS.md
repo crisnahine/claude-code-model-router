@@ -1,6 +1,6 @@
 # Release readiness
 
-Checked 2026-11-22 for 0.1.1, against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `0f8292f`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
+Checked 2026-11-23 for 0.1.1, against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `241b465`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
 
 **Verdict: the next release is not ready.** Of the 13 release gates, 10 pass, 2 are partial and 1 waits for the release PR. No defect is open. One requirement fails: on a Sonnet session, the benchmark shows the router costing more per solved task than the best baseline in 7 of 8 task classes, at the same pass rate (S4.15). On an Opus 5.5 session, Claude Code's default for most accounts, a build with the verify gate off cost 21% less per solved task than `defaults`, but on 4 runs per cell, under the 10 a PASS needs. The confirmation on the shipped commit (`a06e5d4`, 1 run per task) cost $0.124 per solved task against $0.156 and solved 15 of 16, a difference inside the noise. Nothing after `8ec8eec` has run in CI yet.
 
