@@ -1122,6 +1122,30 @@ class Router(Sandbox):
         self.options(max_tier="sonnet")
         self.assertEqual(self.decide("model-router:architect", check)["model"], "sonnet")
 
+    def test_a_hand_off_while_handling_another_sessions_message_routes_on_its_brief(self):
+        self.session_on("claude-sonnet-5-5")
+        hard = ("Our order service double-charges customers under concurrent retries across the payments API and "
+                "the worker queue. Find the root cause and design a fix that keeps backward compatibility.")
+        rename = "Review this one-line rename of a config field."
+        for message in ("Another Claude session sent a message:\n<cross-session-message from=\"peer\">"
+                        "Rename the field</cross-session-message>",
+                        "Another Claude session sent a message:\n<teammate-message teammate_id=\"dev\">"
+                        "Rename the field</teammate-message>"):
+            hooks.user_prompt({"session_id": "s1", "prompt": hard})
+            hooks.user_prompt({"session_id": "s1", "prompt": message})
+            d = self.decide("model-router:architect", rename)
+            self.assertEqual((d["level"], d["model"]), ("complex", "sonnet"), message)
+            self.assertEqual(store.load_entry("prompts", "s1")["level"], "hardest")  # the Stop check still sees it
+
+    def test_a_task_notification_keeps_the_requests_floor(self):
+        self.session_on("claude-sonnet-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": (
+            "Our order service double-charges customers under concurrent retries across the payments API and "
+            "the worker queue. Find the root cause and design a fix that keeps backward compatibility.")})
+        hooks.user_prompt({"session_id": "s1", "prompt": "<task-notification>done</task-notification>"})
+        d = self.decide("model-router:architect", "Review this one-line rename of a config field.")
+        self.assertEqual((d["level"], d["model"]), ("hardest", "opus"))
+
     def test_with_no_request_level_the_brief_decides_the_hand_off(self):
         self.session_on("claude-sonnet-5-5")
         d = self.decide("model-router:architect", "Plan a fix for the double-charge bug described above.")

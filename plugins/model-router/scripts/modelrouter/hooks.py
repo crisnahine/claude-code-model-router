@@ -22,13 +22,18 @@ MACHINE_ORIGINS = {"task-notification", "peer", "peer-send-message", "observer",
 _DELIVERED = "Another Claude session sent a message:"
 
 
+def is_delivered(prompt: str) -> bool:
+    """A teammate's report or another session's message, framed as Claude Code delivers it."""
+    first, _, rest = (prompt or "").lstrip().partition("\n")
+    return first.strip() == _DELIVERED and rest.lstrip().startswith(("<teammate-message", "<cross-session-message"))
+
+
 def is_user_prompt(prompt: str) -> bool:
     """UserPromptSubmit also fires for background-task notifications, teammates' reports
     and other sessions' messages. Those must not reset what is known about the user's
     request. Pasted text is the user's, though it arrives wrapped in a <pasted_content> tag."""
     prompt = (prompt or "").lstrip()
-    first, _, rest = prompt.partition("\n")
-    if first.strip() == _DELIVERED and rest.lstrip().startswith(("<teammate-message", "<cross-session-message")):
+    if is_delivered(prompt):
         return False
     return not prompt.startswith("<") or prompt.startswith("<pasted_content")
 
@@ -186,9 +191,16 @@ def user_prompt(hook_input: dict) -> dict | None:
     mode = options.mode
     prompt = hook_input.get("prompt")
     prompt = prompt if isinstance(prompt, str) else ""
+    session_id = hook_input.get("session_id")
+    if mode != "off" and is_delivered(prompt):
+        # Work for someone else's message isn't the user's request, so it doesn't get its floor.
+        # A task notification continues the user's request and keeps it.
+        try:
+            store.update_entry("prompts", session_id, floor_off=True)
+        except OSError:
+            pass
     if mode == "off" or not is_user_prompt(prompt):
         return None
-    session_id = hook_input.get("session_id")
     usable = registry.available(config, cfg.project_dir(hook_input), options.cap)
     result = _typed_skill(prompt, hook_input) or profile_prompt(prompt)
     level = result["level"]

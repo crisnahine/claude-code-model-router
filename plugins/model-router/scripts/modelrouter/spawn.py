@@ -34,7 +34,8 @@ def facts(hook_input: dict, config: dict, options: settings.Settings,
     # A hand-off brief often reads simpler than the request it serves, so the strong role
     # agents start no lower than the request's level; a redo still climbs from there.
     strong = agent in (f"{cfg.PLUGIN_NAME}:architect", f"{cfg.PLUGIN_NAME}:deep-solver")
-    floor = store.load_entry("prompts", hook_input.get("session_id")).get("level") if strong else None
+    request = store.load_entry("prompts", hook_input.get("session_id")) if strong else {}
+    floor = None if request.get("floor_off") else request.get("level")
     return router.Facts(agent=agent, tool_input=tool_input, usable=registry.available(config, project, options.cap),
                         definition=definition, parent=parent,
                         earlier=calls.finished_run(hook_input.get("session_id"), key), raises=learn.raises(),
