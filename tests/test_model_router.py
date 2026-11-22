@@ -2572,7 +2572,8 @@ class SlashSkills(Sandbox):
         body = "Base directory for this skill: /p/.claude/skills/security-review\n\n" + raw.split("---\n", 2)[2]
         for target in ("482", "src/auth.py", "https://github.com/acme/api/pull/482", "PaymentService",
                        "src/a.py src/b.py src/c.py", "482 --base main", "src/auth.py src/session.py",
-                       "docs/plan.md app/x.py", "auth module", "payments service", "audit"):
+                       "docs/plan.md app/x.py", "auth module", "payments service", "audit", "the login page",
+                       "PR 482 from Dana", "look at it", "the payments service", "the auth module docs"):
             with self.subTest(target=target):
                 self.assertEqual(self.turn("security-review", target, body.replace("$ARGUMENTS", target))["effort"],
                                  "high")
@@ -2580,8 +2581,9 @@ class SlashSkills(Sandbox):
         skills = self.project / ".claude" / "skills" / "security-review"
         skills.mkdir(parents=True)
         (skills / "SKILL.md").write_text(raw, encoding="utf-8")
-        hooks.user_prompt({"session_id": "s1", "prompt": "/security-review 482", "cwd": str(self.project)})
-        self.assertEqual(store.load_entry("prompts", "s1")["level"], "complex")
+        for typed in ("/security-review 482", "/security-review the login page"):
+            hooks.user_prompt({"session_id": "s1", "prompt": typed, "cwd": str(self.project)})
+            self.assertEqual(store.load_entry("prompts", "s1")["level"], "complex", typed)
         ship = (PLUGIN / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8").split("---\n", 2)[2]
         ship_body = lambda args: ship.replace("$ARGUMENTS", args)  # noqa: E731
         # A template body serves many targets, so its own wording decides at most complex: an issue number
@@ -2589,12 +2591,16 @@ class SlashSkills(Sandbox):
         self.assertEqual(self.turn("model-router:ship", "1234", ship_body("1234")), {"level": "complex",
                                                                                   "effort": "high"})
         # A task in the arguments still decides, the m3-02 case.
-        for args in ("fix the typo in README.md", "explain the retry flow", "the README typo near the top",
-                     "fix it"):
+        for args in ("fix the typo in README.md", "explain the retry flow", "fix it"):
             with self.subTest(args=args):
                 self.assertIsNone(self.turn("model-router:ship", args, ship_body(args)))
+        # No listed verb: a description without an instruction leaves the task to ship's body, capped at complex.
+        for args in ("the README typo near the top", "tidy the imports please"):
+            with self.subTest(args=args):
+                self.assertEqual(self.turn("model-router:ship", args, ship_body(args))["level"], "complex")
         for text, work in (("fix the typo", True), ("audit", False), ("src/a.py src/b.py", False),
-                           ("tidy the imports please", True), ("PaymentService", False)):
+                           ("tidy the imports please", False), ("PaymentService", False),
+                           ("the payments service", False), ("please review PR 482", True)):
             self.assertEqual(profile.asks_for_work(text), work, text)
 
     def test_only_a_placeholder_that_receives_the_arguments_hands_them_the_task(self):
