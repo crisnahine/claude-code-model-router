@@ -3566,11 +3566,19 @@ class DesignDecisions(unittest.TestCase):
             self.assertEqual(result["level"], "complex", prompt)
             self.assertNotIn("load", result["signals"], prompt)
 
+    def test_a_doc_or_file_name_is_not_a_signal(self):
+        cases = {"Read the migration guides under docs/ and list every renamed option.": [],
+                 "Using only docs/, find the version that changed the default and write RESEARCH.json.": [],
+                 "Migrate the billing schema to Postgres.": ["risk"],
+                 "Research which queue the team should adopt and write a short note.": ["ambiguity"]}
+        for prompt, expected in cases.items():
+            self.assertEqual(profile.profile_call({"prompt": prompt}, "general-purpose")["signals"], expected, prompt)
+
     def test_researching_docs_is_not_research_grade(self):
         brief = ("Research the fetchkit docs: read the changelogs and migration guides across the docs tree, then "
                  "write RESEARCH.json with the version where the retry default changed.")
-        self.assertEqual(profile.profile_call({"prompt": brief}, "general-purpose")["level"], "hardest")
-        self.assertEqual(profile.profile_prompt(brief)["level"], "hardest")
+        self.assertEqual(profile.profile_call({"prompt": brief}, "general-purpose")["level"], "complex")
+        self.assertEqual(profile.profile_prompt(brief)["level"], "complex")
         grade = ("Research-grade problem: our CRDT editor diverges in rare three-way merges across clients; find the "
                  "root cause and design a fix for the data loss.")
         self.assertEqual(profile.profile_call({"prompt": grade}, "general-purpose")["level"], "frontier")

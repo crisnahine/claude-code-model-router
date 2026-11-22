@@ -1720,6 +1720,20 @@
    "agent": "general-purpose",
    "description": "Research fetchkit retry docs",
    "prompt": "Using ONLY the files under docs/ in this directory, answer:\n1. In which fetchkit version did the default of Client.retry change from 3 to 5?\n2. In which version could it first be set through an environment variable?\n3. What is that environment variable's name?\n\nRead all relevant docs files carefully (changelogs, migration guides, config references, etc.). Docs may conflict or contain misleading/superseded statements, so reconcile them and prefer the authoritative statement. Check every file across the docs tree.\n\nThen write RESEARCH.json in that directory's root with exactly these keys: \"default_changed_in\", \"configurable_in\", \"variable\" and \"sources\"."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "List renamed options",
+   "prompt": "Read the migration guides under docs/ and list every renamed option."
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Research fetchkit retry docs",
+   "prompt": "Using ONLY the files under docs/ in this directory, answer: in which fetchkit version did the default of Client.retry change from 3 to 5, in which version could it first be set through an environment variable, and what is that variable? Read all relevant docs files carefully (changelogs, migration guides, config references). Then write RESEARCH.json in that directory's root with the keys default_changed_in, configurable_in, variable and sources."
   }
  ]
 }
