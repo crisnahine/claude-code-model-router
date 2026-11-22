@@ -17,7 +17,7 @@ Statuses: **PASS** implemented and verified; **PARTIAL** incomplete or not verif
 How to read the evidence column:
 
 - `Class.test_name` is a test in `tests/test_model_router.py`. A quoted title is a test in `tests/mod/router.test.ts`.
-- "CI main" is run [45055601879](https://github.com/crisnahine/claude-code-model-router/actions/runs/45055601879) on `27b94e6`: all 12 jobs passed. Job by job in [TEST_RESULTS.md](TEST_RESULTS.md).
+- "CI main" is run [45055601879](https://github.com/crisnahine/claude-code-model-router/actions/runs/45055601879) on `27b94e6`: all 11 jobs passed. Job by job in [TEST_RESULTS.md](TEST_RESULTS.md).
 - "Live 2.1.330" is the "Verified live" section of [ARCHITECTURE.md](ARCHITECTURE.md): macOS only, headless and an interactive terminal in auto mode, before 0.1.0 shipped. Not rerun since.
 - "In progress" means that part is being built on a branch not merged yet. The row moves when it lands.
 
@@ -145,7 +145,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | ID | Requirement | Implementation | Source | Verification | Evidence | Status |
 | :- | :- | :- | :- | :- | :- | :- |
 | S9.1 | Gate: `python3 -m unittest discover -s tests` | Unit suite | `tests/` | Local, CI | Local on 2026-11-23 at `38b11c3` with the 0.1.2 benchmark merged: 377 tests OK on Python 3.9.6, the system 3.9.6 and 3.15.2 (319 in `test_model_router.py`, 48 in `test_bench.py`, 3 in `test_routing_corpus.py`, 3 in `test_traceability.py`, 4 in `test_docs_assets.py`); CI main on `27b94e6`: 361 tests OK on each of 6 jobs | PASS |
-| S9.2 | Gate: `node --experimental-strip-types --test "tests/mod/*.test.ts"` | Node suite | `tests/mod/router.test.ts` | Local, CI | Local Node 22.22.3: 18 of 18 pass; CI main `mod` job 12 of 12 | PASS |
+| S9.2 | Gate: `node --experimental-strip-types --test "tests/mod/*.test.ts"` | Node suite | `tests/mod/router.test.ts` | Local, CI | Local Node 22.22.3: 18 of 18 pass; CI main on `27b94e6`: the `mod` jobs on Linux, macOS and Windows, 18 of 18 each | PASS |
 | S9.3 | Gate: `claude plugin validate --strict .` and `plugins/model-router` | Manifests | `.claude-plugin/`, `plugins/model-router/.claude-plugin/` | Local, CI | Both "Validation passed" on 2.1.330 locally and in CI main `validate` | PASS |
 | S9.4 | Gate: `claude plugin eval plugins/model-router --trust-plugin` | Three routing evals graded on the model each subagent ran on | `evals/` | Live eval | Run 2026-11-22 on Claude Code 2.1.330 with a no-plugin baseline arm, 3 runs per case per arm: every case scored 1.0 with the plugin; without it 0, 0 and 0.67; $0.43 plus a $0.10 rerun of one case ([TEST_RESULTS.md](TEST_RESULTS.md)). Their expected routes are also checked for free in the unit gate (S14.4) | PASS |
 | S9.5 | Type-check the mod and its test with `tsc` against the installed build's mod API types, tsconfig outside the plugin | `tests/mod/typecheck.sh` with `tests/mod/tsconfig.json`, against the published types at a pinned commit; a `typecheck` job in `ci.yml` | `tests/mod/`, `.github/workflows/ci.yml` | Local, CI | `tsc` 6.0.3: the mod and its test pass. With the test's old identity helper back it fails with `TS2322` at `tests/mod/router.test.ts:46`. Against the 2.1.330 types the engine writes, the mod passes with full lib checks. The CI job hasn't run yet | PASS |

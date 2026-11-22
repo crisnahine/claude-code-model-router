@@ -10,7 +10,7 @@ The latest results, with the commands that produce them. Replace this file's num
 
 ## CI on `main`
 
-`gh run list --branch main` shows the CI run on the latest release merge: [45055601879](https://github.com/crisnahine/claude-code-model-router/actions/runs/45055601879), on `27b94e6` (the `v0.1.1` merge), started 2026-11-22 18:31 UTC. Result: success, 12 of 12 jobs. The run before it, [45004998622](https://github.com/crisnahine/claude-code-model-router/actions/runs/45004998622) on `8ec8eec` (the `v0.1.0` merge), also passed.
+`gh run list --branch main` shows the CI run on the latest release merge: [45055601879](https://github.com/crisnahine/claude-code-model-router/actions/runs/45055601879), on `27b94e6` (the `v0.1.1` merge), started 2026-11-22 18:31 UTC. Result: success, 11 of 11 jobs. The run before it, [45004998622](https://github.com/crisnahine/claude-code-model-router/actions/runs/45004998622) on `8ec8eec` (the `v0.1.0` merge), also passed.
 
 | Job | Result | Tests | Took |
 | :- | :- | :- | -: |
