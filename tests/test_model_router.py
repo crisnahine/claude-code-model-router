@@ -1142,6 +1142,8 @@ class Mod(Sandbox):
         self.assertEqual(turn(HARD), {"level": "complex", "effort": "high"})
         self.assertIsNone(turn(LOOKUP))
         self.assertIsNone(turn("<task-notification>done</task-notification>"))
+        self.assertEqual(turn('<pasted_content id="x">\nlog\n</pasted_content id="x">\n' + HARD),
+                         {"level": "complex", "effort": "high"})
         for name, value in (("CLAUDE_CODE_EFFORT_LEVEL", "low"), ("CLAUDE_CODE_USE_BEDROCK", "1"),
                             ("main_effort", "false")):
             with mock.patch.dict(os.environ):
@@ -1399,6 +1401,14 @@ class Hooks(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": HARD})
         self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": "<task-notification>done</task-notification>"}))
         self.assertEqual(store.load_entry("prompts", "s1")["level"], "complex")
+
+    def test_a_prompt_that_opens_with_pasted_text_is_the_users_request(self):
+        self.session_on("claude-haiku-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": HARD})
+        pasted = ('<pasted_content id="x">\nTraceback (most recent call last):\n  File "billing.py"\n'
+                  '</pasted_content id="x">\n' + LOOKUP)
+        hooks.user_prompt({"session_id": "s1", "prompt": pasted})
+        self.assertEqual(store.load_entry("prompts", "s1")["level"], "standard")  # the pasted traceback counts too
 
     def test_a_model_the_user_may_be_asking_for_is_left_to_claude(self):
         self.session_on("claude-opus-5-5")
