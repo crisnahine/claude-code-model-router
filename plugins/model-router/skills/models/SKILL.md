@@ -1,7 +1,7 @@
 ---
 name: models
 description: Shows which Claude models Model Router can route to in this setup, what each really runs as, which are capped, blocked or unavailable, what the feedback loop has learned, and any new model in the docs that isn't routed to yet.
-argument-hint: "[reset]"
+argument-hint: "[reset] [--json]"
 disable-model-invocation: true
 allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" *)
 ---
@@ -12,7 +12,9 @@ allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" *)
 
 Arguments: $ARGUMENTS
 
-Show the table above. "Last ran as" is the model Claude Code reported for the most recent agent on that model, so it reflects this account and provider, not a fixed list.
+If the arguments include `--json`, run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" models --json` (with `--reset` too if the arguments include `reset`). It prints one JSON object in the `model-router.models/1` schema: show it unchanged in a `json` code block and add nothing else.
+
+Otherwise show the table above. "Last ran as" is the model Claude Code reported for the most recent agent on that model, so it reflects this account and provider, not a fixed list.
 
 If the argument is `reset`, run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" models --reset` and show its first lines, which say what was cleared and what was left and why, then the new table. Do this when a model marked "routed around" should be tried again now, or to undo a level the feedback loop raised.
 
