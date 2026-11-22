@@ -532,6 +532,11 @@ class Profile(unittest.TestCase):
         self.assertEqual(self.level("list the routes. Make sure to include the line numbers"), "lookup")
         self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "standard")
 
+    def test_make_sure_keeps_the_task_it_introduces(self):
+        self.assertEqual(self.level("Make sure to fix the auth bug in the login handler."), "complex")
+        self.assertEqual(self.level("Make sure the payments database migration is safe across all services "
+                                    "and keep backward compatibility."), "standard")
+
     def test_thorough_or_long_briefs_are_not_lookups(self):
         self.assertEqual(self.level("very thorough: how does the request pipeline work"), "standard")
         self.assertEqual(self.level("note " * 1000), "standard")
