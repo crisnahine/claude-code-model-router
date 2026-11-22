@@ -8,6 +8,9 @@ Orchestrator maps each goal to a documented Claude Code plugin mechanism. Nothin
 | Pick the agent by task complexity | `route` skill: a scoring rubric plus the live routing table injected with `` !`command` `` | Advisory: Claude follows it |
 | Apply the routing whatever skill or plugin is driving | `SessionStart` and `UserPromptSubmit` hooks inject the policy as context | Advisory |
 | Make our agents the default over the built-ins | `PreToolUse` hook on `Agent` refuses `Explore`, `Plan` and `general-purpose` with the agent to use instead; `routing_mode` sets once per prompt (`steer`), always (`strict`) or never | Enforced for the refused call; the user naming an agent overrides it |
+| Start routing from the task, not the session model | `UserPromptSubmit` hook rates each prompt from its wording and injects the suggested agents and level | Advisory |
+| Get a hard task to a strong model even from a weak session | `Stop` hook: a `complex` or `hardest` request, a session model below the needed level, and no agent of that level spawned, blocks the stop once and asks for `architect` or `deep-solver` | Enforced once per prompt; Claude may decline with a reason |
+| Don't finish unverified code changes | `PostToolUse` on `Edit\|Write\|NotebookEdit` records code edits; `Stop` hook blocks once unless a check command ran after the last edit or a verifier or reviewer was started | Enforced once per batch of edits |
 | Cap cost by model tier | `PreToolUse` hook on `Agent` denies spawns above `max_tier`, naming cheaper agents | Enforced |
 | See what ran where | `PreToolUse` and `PostToolUse` hooks on `Agent` append to `${CLAUDE_PLUGIN_DATA}/ledger.jsonl`; `PostToolUse` records `resolvedModel` | Measured |
 | Automate the development lifecycle | `ship` skill: plan, build, verify, review, bounded fix loops, commit on a branch | Advisory, with hard stops before push, merge and deploy |
@@ -48,6 +51,14 @@ Every hook handler catches its own errors and exits 0, so a broken network, a mi
 
 A `PreToolUse` hook can rewrite `tool_input.model` with `updatedInput`, but in auto mode Claude Code can then refuse the call because the server reviewed the original input, not the rewritten one (see "PreToolUse updatedInput in auto mode" in the hooks reference). A deny with a reason works in every permission mode, and Claude retries with the suggested agent or model. Hooks read the cap only from the environment Claude Code sets, never from a stored value, so a cap from an earlier session can't leak into this one.
 
+## The gates
+
+Both gates live in the `Stop` hook and follow the documented pattern for enforcing a check: return `decision: "block"` with a reason, and never block when `stop_hook_active` is true, so a gate can't loop. Each gate records that it asked, so it asks once.
+
+The session's model usually isn't known on a session's first prompt (`SessionStart` doesn't always carry it), so the escalation gate reads it from the transcript at stop time, when the turn's own replies are there.
+
+"A check ran" means a Bash command after the last code edit that matches common test, lint, type-check and build commands, found in the transcript tail, or a spawned `verifier` or `reviewer`. Documentation-only edits (`.md`, `.txt` and similar) don't arm the gate.
+
 ## State
 
 All state lives in `${CLAUDE_PLUGIN_DATA}`, which survives plugin updates:
@@ -55,7 +66,8 @@ All state lives in `${CLAUDE_PLUGIN_DATA}`, which survives plugin updates:
 - `state.json`: upstream cache, the last reviewed version and docs index, and the recorded `max_tier`
 - `ledger.jsonl`: one row per spawn and per result, trimmed to the newest half when it passes 4 MB
 - `sessions.json`: the last known model of up to 200 sessions
-- `prompts.json`: per session, the built-in agents the user named in the current prompt and the ones already redirected
+- `prompts.json`: per session, the built-in agents the user named, the calls already redirected, the current prompt's difficulty estimate and the strongest agent tier spawned for it
+- `edits.json`: per session, when code was last edited and when it was last checked
 
 Writes go to a per-process temp file and are renamed into place, so concurrent sessions can't leave a half-written file.
 

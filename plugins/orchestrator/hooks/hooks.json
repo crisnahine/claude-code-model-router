@@ -72,6 +72,20 @@
             "async": true
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.sh",
+              "post-edit"
+            ],
+            "timeout": 10
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -85,6 +99,21 @@
               "user-prompt"
             ],
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/orchestrator.sh",
+              "stop"
+            ],
+            "timeout": 10
           }
         ]
       }

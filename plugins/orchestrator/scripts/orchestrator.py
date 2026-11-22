@@ -9,6 +9,8 @@ Hook commands (read hook JSON on stdin):
   pre-agent        PreToolUse on Agent: enforce the model tier cap, redirect generic
                    built-in agents to ours, log the spawn.
   post-agent       PostToolUse on Agent: log the model the subagent actually ran on.
+  post-edit        PostToolUse on Edit/Write: note that code changed.
+  stop             Stop: if code changed and nothing checked it, ask for verification once.
   model-switch     PostModelSwitch: remember the session's model, which inheriting
                    subagents run on.
   refresh-cache    Async SessionStart: refresh the upstream cache at most once a day.
@@ -357,6 +359,224 @@ def policy_line(config: dict, cap: str) -> str:
     )
 
 
+# ------------------------------------------------------------- task classification
+
+_SIGNALS = {
+    "risk": r"secur|vulnerab|auth\w*|oauth|password|credential|secret|encrypt|payment|billing|"
+            r"migrat\w*|schema|database|production|data loss|permission|concurren\w*|race condition|"
+            r"deadlock|public api|breaking change|backward.compat",
+    "scope": r"across|every (?:service|module|package|file)|all (?:services|modules|packages)|multiple "
+             r"(?:services|modules|repos|packages)|entire|whole (?:codebase|system|app)|architect\w*|"
+             r"redesign|rewrite|monorepo|end.to.end|large.scale",
+    "ambiguity": r"design\b|investigat\w*|root cause|intermittent|flaky|figure out|not sure|"
+                 r"why (?:does|is|do|are|did)|research|evaluate|trade.?offs?|best (?:way|approach)|"
+                 r"should we|strategy|proposal",
+}
+_CHANGE = (r"\b(?:add|implement|fix|change|update|refactor|rename|remove|delete|write|create|build|make|"
+           r"migrate|convert|upgrade|optimi[sz]e|rewrite|redesign|replace|port|support)\b")
+_LOOKUP = r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|describe|summari[sz]e|is there|does)\b"
+
+
+def classify_prompt(prompt: str) -> dict:
+    """A cheap estimate of how hard a request is, from its wording alone.
+
+    It is a hint for Claude, which sees the code and decides. It exists so the routing
+    decision starts from the task rather than from whatever model the session is on."""
+    text = (prompt or "").lower()
+    hits = [name for name, pattern in _SIGNALS.items() if re.search(r"\b(?:%s)" % pattern, text)]
+    changes = bool(re.search(_CHANGE, text))
+    if len(text) > 1500 and "scope" not in hits:
+        hits.append("scope")  # a long brief is rarely a small task
+    if len(hits) >= 3:
+        level = "hardest"
+    elif len(hits) == 2:
+        level = "complex"
+    elif changes or hits:
+        level = "standard"
+    elif re.search(_LOOKUP, text) or len(text) < 80:
+        level = "lookup"
+    else:
+        level = "standard"
+    return {"level": level, "signals": hits, "changes": changes}
+
+
+LEVEL_TIER = {"lookup": "haiku", "standard": "sonnet", "complex": "opus", "hardest": "fable"}
+
+
+def routing_hint(config: dict, prompt: str, cap: str, parent_model: str | None) -> str:
+    return routing_estimate(config, prompt, cap, parent_model)["hint"]
+
+
+def routing_estimate(config: dict, prompt: str, cap: str, parent_model: str | None) -> dict:
+    result = classify_prompt(prompt)
+    level = result["level"]
+    ranks = tier_ranks(config)
+    need = LEVEL_TIER[level]
+    if ranks.get(need, 0) > ranks.get(cap, 4):
+        need = cap
+    why = (" (wording suggests: " + ", ".join(result["signals"]) + ")") if result["signals"] else ""
+    if level == "lookup":
+        plan = ("answer it yourself if it takes one or two tool calls, otherwise use orchestrator:scout")
+    elif level == "standard":
+        plan = ("orchestrator:implementer for the code, then orchestrator:verifier" if result["changes"]
+                else "orchestrator:scout for the digging, and answer from its report")
+    elif level == "complex":
+        plan = ("have orchestrator:architect plan it before any edits, orchestrator:implementer build it, "
+                "then orchestrator:verifier and orchestrator:reviewer")
+    else:
+        top = "orchestrator:deep-solver" if ranks.get(cap, 4) >= ranks.get("fable", 4) else "orchestrator:architect"
+        plan = (f"give the core problem to {top}, and have the result verified by orchestrator:verifier "
+                "and reviewed by orchestrator:reviewer")
+    hint = (f"Routing estimate for this request: {level}{why}, needs about {need}-level reasoning. "
+            f"Suggested: {plan}. This estimate reads only the wording; if the code shows the task is "
+            "harder or easier, route by what you find.")
+    session = model_family(parent_model)
+    below = bool(session and ranks.get(session, 0) < ranks.get(need, 0))
+    if below:
+        hint += (f" This conversation runs on {session}, below that level, so this is required, not optional: "
+                 "delegate the hard thinking to the named agent instead of settling it inline. You will be "
+                 "asked to do so before finishing if you don't.")
+    return {"hint": hint, "level": level, "need": need, "below": below, "session": session}
+
+
+# ------------------------------------------------------------------ verify gate
+
+_NON_CODE = (".md", ".mdx", ".txt", ".rst", ".adoc", ".csv", ".log")
+_CHECK_COMMAND = re.compile(
+    r"\b(?:pytest|unittest|tox|nox|jest|vitest|mocha|playwright|cypress|rspec|phpunit|ctest|tsc|mypy|pyright|"
+    r"ruff|eslint|flake8|pylint|clippy|golangci-lint|rubocop)\b|"
+    r"\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|lint|typecheck|check|build)\b|"
+    r"\b(?:cargo|go|dotnet|mvn|gradle|gradlew|make|just|swift|mix|deno)\s+\S*\s*(?:test|check|build|vet|lint|verify)\b")
+
+
+def edits_path() -> Path:
+    return data_dir() / "edits.json"
+
+
+def load_edit_state(session_id: str | None) -> dict:
+    data = load_json(edits_path(), {})
+    entry = data.get(session_id) if isinstance(data, dict) and session_id else None
+    return entry if isinstance(entry, dict) else {}
+
+
+def save_edit_state(session_id: str | None, **changes: Any) -> None:
+    if not session_id:
+        return
+    data = load_json(edits_path(), {})
+    if not isinstance(data, dict):
+        data = {}
+    entry = data.pop(session_id, None)
+    entry = entry if isinstance(entry, dict) else {}
+    entry.update(changes)
+    data[session_id] = entry
+    while len(data) > 200:
+        data.pop(next(iter(data)))
+    save_json(edits_path(), data)
+
+
+def verify_gate_enabled(config: dict) -> bool:
+    if routing_mode(config) in ("off", "guide"):
+        return False
+    return (os.environ.get("CLAUDE_PLUGIN_OPTION_VERIFY_GATE") or "true").strip().lower() not in ("false", "0", "no", "off")
+
+
+def hook_post_edit(hook_input: dict) -> None:
+    path = str((hook_input.get("tool_input") or {}).get("file_path")
+               or (hook_input.get("tool_input") or {}).get("notebook_path") or "")
+    if not path or path.lower().endswith(_NON_CODE):
+        return
+    save_edit_state(hook_input.get("session_id"), edited_at=time.time())
+
+
+def checks_ran_since(transcript_path: str | None, since: float) -> bool:
+    """Did a test, lint, type-check or build command run after `since`?"""
+    if not transcript_path:
+        return False
+    try:
+        with open(os.path.expanduser(transcript_path), "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - 1024 * 1024))
+            tail = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return False
+    for line in tail.splitlines():
+        if '"tool_use"' not in line or '"command"' not in line:
+            continue
+        try:
+            row = json.loads(line)
+            stamp = _dt.datetime.fromisoformat(str(row.get("timestamp", "")).replace("Z", "+00:00")).timestamp()
+            content = row["message"]["content"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        if stamp < since:
+            continue
+        for block in content if isinstance(content, list) else []:
+            command = (block.get("input") or {}).get("command") if isinstance(block, dict) else None
+            if isinstance(command, str) and _CHECK_COMMAND.search(command):
+                return True
+    return False
+
+
+def escalation_needed(config: dict, session_id: str | None, transcript_path: str | None = None) -> bool:
+    """A request estimated above the session model's level, answered without any agent
+    of that level: ask once for a stronger model to check the result."""
+    entry = load_prompt_state(session_id)
+    if entry.get("escalation_asked") or entry.get("level") not in ("complex", "hardest"):
+        return False
+    ranks = tier_ranks(config)
+    need = entry.get("need")
+    # On a session's first prompt the model isn't known yet; by now the transcript has it.
+    session = model_family(session_model(session_id, transcript_path)) or entry.get("session_tier")
+    if not session or ranks.get(session, 0) >= ranks.get(need, 0):
+        return False
+    entry["session_tier"] = session
+    if ranks.get(entry.get("top_spawn"), 0) >= ranks.get(need, 9):
+        return False
+    entry["escalation_asked"] = True
+    try:
+        save_prompt_state(session_id, entry)
+    except OSError:
+        return False
+    agent = "orchestrator:deep-solver" if need == "fable" else "orchestrator:architect"
+    print(json.dumps({"decision": "block", "reason": (
+        f"This request was estimated as {entry.get('level')}, which needs about {need}-level reasoning, and "
+        f"this conversation runs on {entry.get('session_tier')}. No {need}-level agent has looked at it. "
+        f"Before finishing, give the task and your result to {agent} to check and improve, then give the "
+        "user the reconciled answer. If the task turned out to be simple and the estimate was wrong, say "
+        "so in one line and finish."
+    )}))
+    return True
+
+
+def hook_stop(hook_input: dict) -> None:
+    """Before Claude finishes a turn that changed code, make sure something checked it."""
+    if hook_input.get("stop_hook_active"):
+        return
+    config = load_config(hook_input)
+    if not verify_gate_enabled(config):
+        return
+    session_id = hook_input.get("session_id")
+    if escalation_needed(config, session_id, hook_input.get("transcript_path")):
+        return
+    entry = load_edit_state(session_id)
+    edited = entry.get("edited_at") or 0
+    if not edited or edited <= (entry.get("verified_at") or 0):
+        return
+    for task in hook_input.get("background_tasks") or []:
+        if isinstance(task, dict) and str(task.get("agent_type", "")).endswith(("verifier", "reviewer")):
+            return  # a check is still running; its report will bring Claude back
+    if checks_ran_since(hook_input.get("transcript_path"), edited):
+        save_edit_state(session_id, verified_at=time.time())
+        return
+    save_edit_state(session_id, verified_at=time.time())  # ask once per batch of edits
+    print(json.dumps({"decision": "block", "reason": (
+        "Code changed in this turn and nothing has checked it since the last edit. Before finishing, run "
+        "orchestrator:verifier on the change (it finds and runs the project's tests, lint and type checks), "
+        "and for anything beyond a trivial edit also orchestrator:reviewer. If the project has no runnable "
+        "checks, or the change can't affect behavior, say so in one line and finish."
+    )}))
+
+
 # ------------------------------------------------------------------------- ledger
 
 
@@ -656,13 +876,17 @@ def hook_user_prompt(hook_input: dict) -> None:
     # it, and a long task spans many turns. Redirects start fresh with each prompt.
     named = set(load_prompt_state(session_id).get("named") or [])
     named.update(a for a in (config.get("redirect") or {}) if named_in_prompt(prompt, a))
+    estimate = routing_estimate(config, prompt, max_tier(),
+                                session_model(session_id, hook_input.get("transcript_path")))
     save_prompt_state(session_id, {
         "prompt_id": hook_input.get("prompt_id"), "named": sorted(named), "redirected": {},
-        "redirected_calls": []})
+        "redirected_calls": [], "level": estimate["level"], "need": estimate["need"],
+        "below": estimate["below"], "session_tier": estimate["session"], "top_spawn": None})
     reminder = (
         "Orchestrator routing is on: delegate through the orchestrator: agents (scout, verifier, implementer, "
         "architect, reviewer, deep-solver) rather than general-purpose, Explore or Plan, whichever skill or "
-        "plugin is driving the work, unless the user named a specific agent."
+        "plugin is driving the work, unless the user named a specific agent. "
+        + estimate["hint"]
     )
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                              "additionalContext": reminder}}))
@@ -732,6 +956,19 @@ def hook_pre_agent(hook_input: dict) -> int:
         })
     except OSError:
         pass
+    if decision == "allow" and tier:
+        try:
+            entry = load_prompt_state(hook_input.get("session_id"))
+            if entry and ranks.get(tier, 0) > ranks.get(entry.get("top_spawn"), 0):
+                entry["top_spawn"] = tier
+                save_prompt_state(hook_input.get("session_id"), entry)
+        except OSError:
+            pass
+    if decision == "allow" and subagent_type.endswith(("verifier", "reviewer")):
+        try:
+            save_edit_state(hook_input.get("session_id"), verified_at=time.time())
+        except OSError:
+            pass
     if decision == "redirect":
         agents = config.get("agents") or {}
         options = "; ".join(f"{agent_label(n)} ({agents[n].get('model')}: {agents[n].get('role', '').lower()})"
@@ -832,8 +1069,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="orchestrator")
     parser.add_argument("--data-dir", help="plugin data directory; skills pass ${CLAUDE_PLUGIN_DATA}")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in ("session-start", "user-prompt", "pre-agent", "post-agent", "model-switch", "refresh-cache",
-                 "routing-table", "ack"):
+    for name in ("session-start", "user-prompt", "pre-agent", "post-agent", "post-edit", "stop", "model-switch",
+                 "refresh-cache", "routing-table", "ack"):
         sub.add_parser(name)
     p = sub.add_parser("refresh")
     p.add_argument("--force", action="store_true")
@@ -849,7 +1086,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.data_dir and "${" not in args.data_dir:
         os.environ["CLAUDE_PLUGIN_DATA"] = args.data_dir
 
-    hook_cmds = {"session-start", "user-prompt", "pre-agent", "post-agent", "model-switch", "refresh-cache"}
+    hook_cmds = {"session-start", "user-prompt", "pre-agent", "post-agent", "post-edit", "stop", "model-switch",
+                 "refresh-cache"}
     if args.cmd in hook_cmds:
         try:
             hook_input = read_hook_input()
@@ -861,6 +1099,10 @@ def main(argv: list[str] | None = None) -> int:
                 return hook_pre_agent(hook_input)
             elif args.cmd == "post-agent":
                 hook_post_agent(hook_input)
+            elif args.cmd == "post-edit":
+                hook_post_edit(hook_input)
+            elif args.cmd == "stop":
+                hook_stop(hook_input)
             elif args.cmd == "model-switch":
                 hook_model_switch(hook_input)
             elif args.cmd == "refresh-cache":

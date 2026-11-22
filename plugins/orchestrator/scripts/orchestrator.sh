@@ -10,7 +10,7 @@ for py in python3 python; do
   fi
 done
 case " $* " in
-  *" session-start "*|*" user-prompt "*|*" pre-agent "*|*" post-agent "*|*" model-switch "*|*" refresh-cache "*)
+  *" session-start "*|*" user-prompt "*|*" post-edit "*|*" stop "*|*" pre-agent "*|*" post-agent "*|*" model-switch "*|*" refresh-cache "*)
     [ -t 0 ] || cat >/dev/null ;;
   *) echo "(Orchestrator's helper needs Python 3.9 or later on PATH, so this information is unavailable.)" ;;
 esac

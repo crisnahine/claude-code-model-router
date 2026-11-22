@@ -44,7 +44,12 @@ Once installed, the orchestrator is used without anyone asking for it, whatever 
 2. **Generic built-in agent calls are redirected.** When Claude, or a skill from any plugin, tries to start `Explore`, `Plan` or `general-purpose`, a hook refuses the call and names the orchestrator agent to use instead (`Explore` to `scout`, `Plan` to `architect`, `general-purpose` to whichever of ours fits). Claude re-issues the call with that agent.
 3. **You stay in charge.** If you name an agent ("use the Explore agent", "a general-purpose agent"), you get it for the rest of the session. Your own agents and other plugins' agents are never redirected or blocked, including your own agent named `Explore` if you replaced the built-in. Your skills still run; only the delegation inside them is routed.
 
-The **Routing mode** option in `/config` sets how hard this pushes:
+4. **Every request gets a difficulty estimate.** A hook reads the wording of each prompt for signs of risk, scope and ambiguity, rates it `lookup`, `standard`, `complex` or `hardest`, and tells Claude which agents and model level fit. Claude sees the code and can overrule it.
+5. **Two quality gates run before Claude finishes a turn**, each asking at most once:
+   - **Escalation:** if a request rated `complex` or `hardest` was answered by a session model below that level, and no agent of that level looked at it, Claude is sent back to have `architect` or `deep-solver` check and improve the result. This is how a hard task typed into a Haiku or Sonnet session still reaches Opus or Fable.
+   - **Verification:** if code files changed and no test, lint, type-check or build ran afterwards, and no verifier or reviewer was started, Claude is sent back to run `orchestrator:verifier`.
+
+The **Routing mode** option in `/config` sets how hard this pushes. The gates run in `steer` and `strict`, and the **Quality gates before finishing** option turns them off on their own:
 
 | Mode | Policy as context | Generic agent calls |
 | :- | :- | :- |
@@ -58,11 +63,12 @@ A repository can turn routing down for everyone who works in it by setting `"rou
 What this guarantees and what it doesn't:
 
 - **Guaranteed:** a redirected call does not run; an orchestrator agent runs on its pinned model; in `strict`, the built-in agents never run unless you name them.
-- **Best effort:** which of our agents Claude picks, and whether Claude delegates at all. Work the main conversation does itself runs on your session's model; a plugin can't change that model.
+- **Guaranteed, once per turn:** the two gates fire when their conditions hold. Claude can answer a gate with one line saying why it doesn't apply, so they prompt a check rather than prove one happened.
+- **Best effort:** which of our agents Claude picks, and whether Claude delegates at all. The difficulty estimate reads only the prompt's wording, so it can misjudge a task that sounds simple and isn't, or the reverse. Work the main conversation does itself runs on your session's model; a plugin can't change that model, which is why the escalation gate exists.
 - **Out of reach:** agents started by workflows or agent teams, other plugins' own agents, forks of the conversation, and a skill that runs itself in a subagent with `context: fork` (Claude Code starts that one directly, without an agent call a hook can see).
 - **Settings that switch it off:** `disableAllHooks`, and `allowManagedHooksOnly` in an organization's managed settings unless the organization force-enables this plugin. The agents and skills still work then; the automatic redirect, the cap and the ledger don't.
 - **Other plugins' hooks:** if another plugin's hook allows an agent call that ours refuses, the refusal wins, because Claude Code ranks deny above allow. If another plugin's hook refuses one of our agents, that refusal wins too.
-- **Cost:** the per-prompt reminder adds about 60 tokens to each prompt.
+- **Cost:** the per-prompt reminder and estimate add about 150 tokens to each prompt. A gate that fires adds one more model turn plus the agent it asks for.
 
 ## Commands
 
@@ -79,6 +85,7 @@ Run `/config` and find the Orchestrator rows:
 
 - **Routing mode** (`routing_mode`): `steer` (default), `strict`, `guide` or `off`. See [Automatic by default](#automatic-by-default).
 - **Highest model tier** (`max_tier`): `haiku`, `sonnet`, `opus` or `fable` (default, no cap). A subagent spawn above it is refused, and Claude is told which cheaper agent or model to use instead. This includes built-in agents that inherit your session's model, so with the cap at `sonnet` and an Opus session, Explore runs are retried on Sonnet.
+- **Quality gates before finishing** (`verify_gate`): on by default. See [Automatic by default](#automatic-by-default).
 - **Check for Claude Code updates** (`update_check`): on by default. Turns off the daily fetch from `code.claude.com`.
 
 To extend routing for one project, add `.claude/orchestrator.json` with the parts of [`config/routing.json`](plugins/orchestrator/config/routing.json) you want to merge in. The most useful case is registering your project's own subagents, so the routing table lists them and the tier cap knows their models:
@@ -121,6 +128,8 @@ What has been checked, and how:
 | `disableAllHooks` | Run live: no redirect, as documented; agents and skills still load |
 | Options set through `/config` (stored in `pluginConfigs`) | Run live: `routing_mode` and `max_tier` reach the hooks |
 | A skill with `context: fork` and `agent: Explore` | Run live: not routed. Claude Code starts it without an agent call |
+| A hard design request typed into a Sonnet session | Run live: the escalation gate fired and `orchestrator:architect` checked it on Opus |
+| A small code edit Claude made itself, with no checks requested | Run live: the verifier ran before the turn ended |
 | Background-task notifications between turns | Unit tested, from real captured hook input: they don't reset what you asked for |
 | Linux, macOS and Windows, Python 3.9 to 3.13 | Hook logic unit tested in CI on all three systems with Python 3.10 and 3.13, and locally on 3.9 |
 | Fable | Run live: `deep-solver` ran on `claude-fable-5-2` |

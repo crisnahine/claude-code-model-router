@@ -487,6 +487,150 @@ class AutoRouting(TempDataDir):
         self.assertEqual(self.ledger()[0]["decision"], "redirect")
 
 
+class Classifier(unittest.TestCase):
+    def level(self, text):
+        return orch.classify_prompt(text)["level"]
+
+    def test_levels(self):
+        self.assertEqual(self.level("where is parse_config defined?"), "lookup")
+        self.assertEqual(self.level("thanks"), "lookup")
+        self.assertEqual(self.level("add a --verbose flag to the CLI"), "standard")
+        self.assertEqual(self.level("the author field is misspelled, fix it"), "standard")
+        self.assertEqual(self.level("refactor the payment module across every service"), "complex")
+        self.assertEqual(self.level(
+            "investigate the intermittent auth failure across all services and fix it"), "hardest")
+        self.assertEqual(self.level("x " * 1000 + "update the database schema"), "complex")
+
+    def test_hint_respects_cap_and_session_model(self):
+        config = orch.load_config()
+        hard = "design the migration of auth to oauth across every service"
+        hint = orch.routing_hint(config, hard, "fable", "claude-sonnet-5-5")
+        self.assertIn("orchestrator:deep-solver", hint)
+        self.assertIn("runs on sonnet, below that level", hint)
+        capped = orch.routing_hint(config, hard, "opus", "claude-opus-5-5")
+        self.assertIn("orchestrator:architect", capped)
+        self.assertNotIn("deep-solver", capped)
+        self.assertNotIn("below that level", capped)
+        easy = orch.routing_hint(config, "where is the config loaded?", "fable", "claude-opus-5-5")
+        self.assertIn("lookup", easy)
+        self.assertNotIn("below that level", easy)
+
+
+class VerifyGate(TempDataDir):
+    def setUp(self):
+        super().setUp()
+        self.transcript = Path(self.tmp.name) / "t.jsonl"
+        self.transcript.write_text("")
+
+    def hook(self, cmd, extra=None, **env):
+        payload = {"session_id": "v1", "cwd": str(self.project), "transcript_path": str(self.transcript)}
+        payload.update(extra or {})
+        return run_hook(cmd, payload, {**self.env, **env}).stdout.strip()
+
+    def edit(self, path="/p/src/app.py"):
+        self.hook("post-edit", {"tool_name": "Edit", "tool_input": {"file_path": path}})
+
+    def test_blocks_once_when_code_changed_and_nothing_checked(self):
+        self.assertEqual(self.hook("stop"), "")
+        self.edit()
+        out = json.loads(self.hook("stop"))
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("orchestrator:verifier", out["reason"])
+        self.assertEqual(self.hook("stop"), "")  # asked once
+        self.edit()
+        self.assertEqual(json.loads(self.hook("stop"))["decision"], "block")  # new edits, new ask
+
+    def test_never_blocks_while_already_continuing(self):
+        self.edit()
+        self.assertEqual(self.hook("stop", {"stop_hook_active": True}), "")
+
+    def test_docs_only_edits_do_not_count(self):
+        self.edit("/p/README.md")
+        self.edit("/p/notes.txt")
+        self.assertEqual(self.hook("stop"), "")
+
+    def test_verifier_spawn_satisfies_the_gate(self):
+        self.edit()
+        run_hook("pre-agent", {"session_id": "v1", "cwd": str(self.project),
+                               "tool_input": {"subagent_type": "orchestrator:verifier", "prompt": "p"}}, self.env)
+        self.assertEqual(self.hook("stop"), "")
+
+    def test_running_background_verifier_satisfies_the_gate(self):
+        self.edit()
+        tasks = [{"id": "1", "type": "subagent", "status": "running", "agent_type": "orchestrator:reviewer"}]
+        self.assertEqual(self.hook("stop", {"background_tasks": tasks}), "")
+
+    def test_test_command_after_the_edit_satisfies_the_gate(self):
+        import datetime
+        self.edit()
+        stamp = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=5)).isoformat()
+        row = {"type": "assistant", "timestamp": stamp.replace("+00:00", "Z"), "message": {"content": [
+            {"type": "tool_use", "name": "Bash", "input": {"command": "python3 -m pytest -q"}}]}}
+        self.transcript.write_text(json.dumps(row) + "\n")
+        self.assertEqual(self.hook("stop"), "")
+
+    def test_old_test_command_does_not_count(self):
+        row = {"type": "assistant", "timestamp": "2020-01-01T00:00:00Z", "message": {"content": [
+            {"type": "tool_use", "name": "Bash", "input": {"command": "npm test"}}]}}
+        self.transcript.write_text(json.dumps(row) + "\n")
+        self.edit()
+        self.assertEqual(json.loads(self.hook("stop"))["decision"], "block")
+
+    def test_gate_can_be_switched_off(self):
+        self.edit()
+        self.assertEqual(self.hook("stop", CLAUDE_PLUGIN_OPTION_VERIFY_GATE="false"), "")
+        self.assertEqual(self.hook("stop", CLAUDE_PLUGIN_OPTION_ROUTING_MODE="guide"), "")
+        self.assertEqual(self.hook("stop", CLAUDE_PLUGIN_OPTION_ROUTING_MODE="off"), "")
+
+    HARD = "investigate and design the auth migration across every service"
+
+    def prompt(self, text, model, **env):
+        row = {"type": "assistant", "timestamp": "2020-01-01T00:00:00Z",
+               "message": {"role": "assistant", "model": model, "content": []}}
+        self.transcript.write_text(json.dumps(row) + "\n")
+        return self.hook("user-prompt", {"prompt": text, "prompt_id": "p"}, **env)
+
+    def test_hard_request_on_weak_session_needs_a_strong_agent(self):
+        self.assertIn("required, not optional", self.prompt(self.HARD, "claude-sonnet-5-5"))
+        out = json.loads(self.hook("stop"))
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("orchestrator:deep-solver", out["reason"])
+        self.assertEqual(self.hook("stop"), "")  # asked once
+
+    def test_strong_agent_spawn_satisfies_escalation(self):
+        self.prompt(self.HARD, "claude-sonnet-5-5", CLAUDE_PLUGIN_OPTION_MAX_TIER="opus")
+        run_hook("pre-agent", {"session_id": "v1", "cwd": str(self.project),
+                               "tool_input": {"subagent_type": "orchestrator:scout", "prompt": "p"}}, self.env)
+        out = json.loads(self.hook("stop", CLAUDE_PLUGIN_OPTION_MAX_TIER="opus"))
+        self.assertIn("orchestrator:architect", out["reason"])  # a haiku scout isn't enough
+        self.prompt(self.HARD, "claude-sonnet-5-5", CLAUDE_PLUGIN_OPTION_MAX_TIER="opus")
+        run_hook("pre-agent", {"session_id": "v1", "cwd": str(self.project),
+                               "tool_input": {"subagent_type": "orchestrator:architect", "prompt": "p"}}, self.env)
+        self.assertEqual(self.hook("stop", CLAUDE_PLUGIN_OPTION_MAX_TIER="opus"), "")
+
+    def test_first_prompt_with_unknown_model_is_judged_at_stop(self):
+        self.assertNotIn("required", self.hook("user-prompt", {"prompt": self.HARD, "prompt_id": "p"}))
+        row = {"type": "assistant", "timestamp": "2020-01-01T00:00:00Z",
+               "message": {"role": "assistant", "model": "claude-haiku-5-5", "content": []}}
+        self.transcript.write_text(json.dumps(row) + "\n")
+        self.assertEqual(json.loads(self.hook("stop"))["decision"], "block")
+
+    def test_no_escalation_when_session_is_strong_enough_or_task_is_easy(self):
+        self.prompt(self.HARD, "claude-fable-5-2")
+        self.assertEqual(self.hook("stop"), "")
+        self.prompt("add a --verbose flag", "claude-haiku-5-5")
+        self.assertEqual(self.hook("stop"), "")
+        self.prompt(self.HARD, "claude-sonnet-5-5", CLAUDE_PLUGIN_OPTION_MAX_TIER="sonnet")
+        self.assertEqual(self.hook("stop"), "")  # the cap is the user's ceiling
+
+    def test_check_command_patterns(self):
+        for cmd in ("npm test", "pnpm run lint", "cargo test --all", "go test ./...", "make check",
+                    "python -m unittest discover", "npx tsc --noEmit", "ruff check ."):
+            self.assertTrue(orch._CHECK_COMMAND.search(cmd), cmd)
+        for cmd in ("git status", "ls -la", "cat test.txt", "npm install"):
+            self.assertFalse(orch._CHECK_COMMAND.search(cmd), cmd)
+
+
 class PostAgentHook(TempDataDir):
     def test_logs_resolved_model(self):
         run_hook("post-agent", {"session_id": "s1", "tool_input": {"subagent_type": "orchestrator:reviewer"},
