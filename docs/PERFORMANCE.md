@@ -15,30 +15,39 @@ Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.
 
 Each hook runs the way `hooks/hooks.json` runs it: `sh scripts/model-router.sh <command>` with the hook's JSON on stdin ([hook input](https://code.claude.com/docs/en/hooks.md)). Each run gets a different brief, so repeats don't read as redos.
 
-- **Cold:** no bytecode cache and no state. This is the first hook after installing or updating the plugin.
+- **Cold:** an empty bytecode cache and no state. The bench points the cache at a fresh folder, so even the standard library compiles from source. A real first hook after installing or updating the plugin usually finds the standard library compiled already, so it lands between the cold and warm columns.
 - **Warm:** bytecode in place, after one seeded session (start, prompt, agent call, result, edit), with a 1 MB transcript.
 
 Some hooks still take a quick path on most warm runs. `stop` asks for a check once and then lets go, and `agent-stopped` finds no background agent waiting.
 
-Times are wall time per call in milliseconds, over 30 runs.
+Times are wall time per call in milliseconds, over 30 runs. The hook and mod tables come from a `--runs 30 --calls 200` run; `--calls` only sets how many calls the state simulation runs, and that run's bytes per 1,000 calls agree with the state table below within 1%.
 
 | Command | Event | Cold p50 | Cold p95 | Warm p50 | Warm p95 |
 | :- | :- | -: | -: | -: | -: |
-| `session-start` | SessionStart | 279 | 325 | 91 | 105 |
-| `user-prompt` | UserPromptSubmit | 286 | 318 | 96 | 127 |
-| `pre-agent` | PreToolUse (Agent) | 295 | 367 | 99 | 111 |
-| `post-agent` | PostToolUse (Agent) | 286 | 339 | 91 | 109 |
-| `post-edit` | PostToolUse (Edit, Write) | 280 | 297 | 89 | 107 |
-| `agent-failed` | PostToolUseFailure (Agent) | 270 | 318 | 90 | 99 |
-| `agent-stopped` | SubagentStop | 269 | 304 | 89 | 117 |
-| `stop` | Stop | 290 | 369 | 97 | 111 |
-| `model-switch` | PostModelSwitch | 281 | 322 | 96 | 135 |
+| `session-start` | SessionStart | 182 | 231 | 59 | 82 |
+| `user-prompt` | UserPromptSubmit | 187 | 208 | 58 | 64 |
+| `pre-agent` | PreToolUse (Agent) | 188 | 208 | 60 | 63 |
+| `post-agent` | PostToolUse (Agent) | 183 | 204 | 54 | 62 |
+| `post-edit` | PostToolUse (Edit, Write) | 183 | 207 | 55 | 57 |
+| `agent-failed` | PostToolUseFailure (Agent) | 187 | 203 | 55 | 57 |
+| `agent-stopped` | SubagentStop | 185 | 203 | 54 | 66 |
+| `stop` | Stop | 179 | 197 | 54 | 77 |
+| `model-switch` | PostModelSwitch | 184 | 218 | 55 | 68 |
 
 `refresh-cache` isn't timed: it is async, so nothing waits for it, and it would fetch over the network.
 
-The launcher's own work with no router code after it is the floor under every hook: `sh`, the version probe (one interpreter start) and a second interpreter start. Its p50 moved between 45 and 79 ms over eight runs of 30 on this machine, while its p95 stayed at 83 to 89 ms, so it is bimodal. A bare `python3 -c pass` is a steady 15 to 20 ms p50, which points at the version probe and the `sh` exec as the noisy part. The router's own imports and work are the warm p50 minus the floor: anywhere from about 8 to 55 ms across these runs, so the split between launcher and router is not settled by these numbers.
+Starting `sh` and one interpreter, as the launcher does, with no router code after it takes 43 ms (p50) and 48 ms (p95) here. That is the floor under every hook. Before this change the floor moved between 45 and 79 ms (p50) from run to run; with the version probe gone it stays put. The router's own imports and work add about 11 to 17 ms on top.
 
 Every hook stays far under its timeout in `hooks/hooks.json`: 5 seconds for `user-prompt`, 10 for the rest. Warm p95 moves by 10 to 40 ms from one run to the next on this machine, so treat the p95 column as a range.
+
+### What changed the numbers
+
+The first measurement, on the same machine, had warm hooks at 88 to 94 ms (p50); they are now 54 to 60 ms. Two changes cut about 30 to 40 ms from every warm hook:
+
+- The launcher used to start Python once just to check its version, then again to run the router. Now `model-router.py` checks its own version and exits 87 when it is too old, so a working run starts Python once. Only a failed run pays for the version check, which tells a real error from a broken interpreter such as the Windows Store stub, and then tries the next one.
+- `urllib.request` and `xml.etree`, about 20 ms of imports, now load only for the daily fetch and the changelog parser. A test fails if the hook path imports them again.
+
+The cold column dropped by about 80 to 100 ms too (it was 264 to 276 ms at p50). Most of that drop is the bench's empty cache no longer compiling `urllib`, `http.client`, `email` and `xml` from source, so a real first hook gains less.
 
 ## Mod path
 
@@ -46,14 +55,14 @@ The mod (`hooks/router.ts`) asks the runtime through the same launcher, so each 
 
 | What | When the mod waits for it | Cold p50 | Cold p95 | Warm p50 | Warm p95 |
 | :- | :- | -: | -: | -: | -: |
-| `mod-start` | `session.start`, once per session | 279 | 311 | 92 | 114 |
-| `mod-spawn` | `agent.spawn`, before each agent starts | 275 | 301 | 91 | 95 |
-| `mod-turn` | `turn.start`, before each main-loop prompt runs | 267 | 284 | 93 | 117 |
-| `mod-usage` | `turn.complete`, after the turn, before the handler returns | 263 | 282 | 89 | 120 |
+| `mod-start` | `session.start`, once per session | 183 | 197 | 54 | 64 |
+| `mod-spawn` | `agent.spawn`, before each agent starts | 187 | 197 | 58 | 70 |
+| `mod-turn` | `turn.start`, before each main-loop prompt runs | 186 | 202 | 56 | 59 |
+| `mod-usage` | `turn.complete`, after the turn, before the handler returns | 182 | 194 | 54 | 56 |
 
-Inside those, the decision itself is small. Loading the config, gathering the facts and running `router.decide` take 0.25 ms (p50) and 0.29 ms (p95) in process.
+Inside those, the decision itself is small. Loading the config, gathering the facts and running `router.decide` take 0.26 ms (p50) and 0.29 ms (p95) in process.
 
-The mod's own handlers were also timed in Node with the runtime's answer returned at once. `agent.spawn`, `turn.start` and `turn.step` take 0.001 to 0.002 ms (p50) and at most 0.003 ms (p95). Almost all of the mod path's time is starting Python.
+The mod's own handlers were also timed in Node with the runtime's answer returned at once. `agent.spawn`, `turn.start` and `turn.step` take 0.001 to 0.004 ms (p50) and at most 0.005 ms (p95). Almost all of the mod path's time is starting Python.
 
 ## State size
 
