@@ -31,6 +31,14 @@ class DocsAssets(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("README.md: out of date", err)
 
+    def test_the_version_badge_alt_text_follows_the_plugin_version(self):
+        with mock.patch.object(docs_assets, "version", return_value="9.8.7"), \
+                mock.patch.object(docs_assets, "release_date", return_value="2030-01-01"):
+            files = docs_assets.build()
+        for path in ("README.md", "site/index.html"):
+            self.assertIn('badge-version.svg', files[path], path)
+            self.assertIn('alt="version 9.8.7"', files[path], path)
+
     def test_an_invalid_or_inaccessible_svg_is_reported(self):
         ok = ('<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-label="a"><title>a</title>'
               "<style>@keyframes k{}@media (prefers-reduced-motion: reduce){*{animation:none}}</style></svg>")
