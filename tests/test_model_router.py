@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import datetime
 import io
 import json
 import os
@@ -10,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import time
 import unittest
 from contextlib import redirect_stdout
@@ -3572,6 +3574,22 @@ class ClockAndCleanup(Sandbox):
         copies = sorted(store.data_dir().glob("learned.json.corrupt-*"))
         self.assertEqual(len(copies), store.KEEP_SET_ASIDE)
         self.assertEqual(copies[-1].read_text(), '{"broken": ' + str(store.KEEP_SET_ASIDE + 2))
+
+    def test_set_asides_in_one_clock_tick_each_keep_their_update(self):
+        # Windows' clock on Python 3.9 can hand two set-asides the same microsecond stamp.
+        tick = datetime.datetime(2026, 11, 23, 12, 0, 0, 0, tzinfo=datetime.timezone.utc)
+        frozen = types.SimpleNamespace(timezone=datetime.timezone,
+                                       datetime=types.SimpleNamespace(now=lambda tz=None: tick))
+        learned = store.data_dir() / "learned.json"
+        with mock.patch.object(store, "_dt", frozen):
+            for i in range(store.KEEP_SET_ASIDE + 3):
+                learned.write_text('{"broken": ' + str(i))
+                store.update_dict(learned, lambda data: data.update(ok=True))
+                self.assertNotIn("broken", learned.read_text(), i)  # saved, not left corrupt
+        copies = sorted(store.data_dir().glob("learned.json.corrupt-*"))
+        self.assertEqual(len(copies), store.KEEP_SET_ASIDE)
+        self.assertEqual([c.read_text() for c in copies],
+                         ['{"broken": ' + str(i) for i in range(3, store.KEEP_SET_ASIDE + 3)])
 
 
 class DesignDecisions(unittest.TestCase):

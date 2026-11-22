@@ -11,6 +11,7 @@
 Relicensed under the Apache License 2.0, with routing fixes from the 0.1.1 benchmark and a redesigned README, docs and site. Needs Claude Code 2.1.292 or later.
 
 - Model Router is now licensed under the Apache License 2.0 (SPDX `Apache-2.0`), from this release on. Versions 0.1.0 and 0.1.1 were released under the MIT License and stay available under it.
+- A state file that fails to parse twice in one clock tick, which Windows' clock allows, is set aside both times and the second update is kept, where before the second set-aside's name clashed and that update was dropped.
 - An installed plugin now carries the license text in its own folder, and the marketplace calls the product Model Router, a plugin for Claude Code.
 - Claude no longer hands a task whose result is a file to an agent that can't write one. The architect, reviewer, scout, verifier and docs-researcher descriptions say they write nothing. For the architect, the hard-request note and the stronger-agent check ask for the plan, decision or check and say to make the change yourself. If the architect is still asked to write a file, it gives the file's content for the caller to write.
 - Only research-grade wording (research-grade, open-ended, no known approach, first principles and the like) sends a brief to frontier on Fable. A brief that researches docs or writes a file named RESEARCH.json routes hardest at most.
