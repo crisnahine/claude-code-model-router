@@ -1,6 +1,6 @@
 ---
 name: models
-description: Show which Claude models Model Router can route to in this setup, what each really runs as, which are capped, blocked or unavailable, what the feedback loop has learned, and any new model in the docs that isn't routed to yet.
+description: Shows which Claude models Model Router can route to in this setup, what each really runs as, which are capped, blocked or unavailable, what the feedback loop has learned, and any new model in the docs that isn't routed to yet.
 argument-hint: "[reset]"
 disable-model-invocation: true
 allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" *)

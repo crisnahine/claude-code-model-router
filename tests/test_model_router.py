@@ -165,6 +165,8 @@ class Shipped(unittest.TestCase):
         commands = set(hooks.HANDLERS) | {"policy", "models", "explain", "refresh", "status", "ack", "usage"}
         for path in skills:
             self.assertTrue(frontmatter(path).get("description"), path)
+            # Third person ("Shows ..."): the description is injected into the system prompt.
+            self.assertRegex(frontmatter(path)["description"], r"^[A-Z][a-z]+s\b", path)
             text = path.read_text(encoding="utf-8").split("own repository")[0]
             self.assertNotIn("model-router.py", text, path)
             for used in re.findall(r'model-router\.sh" --data-dir "\$\{CLAUDE_PLUGIN_DATA\}" ([a-z-]+)', text):
