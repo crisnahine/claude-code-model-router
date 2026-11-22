@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -170,25 +171,29 @@ import json, os, sys
 from pathlib import Path
 if "--version" in sys.argv:
     print("9.9.9 (stub)"); sys.exit(0)
+answer = "read_retry_limit in app/settings.py"
 if "--plugin-dir" in sys.argv:
-    data = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "plugins" / "data" / "model-router-inline"
+    root = os.environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR") or str(Path(os.environ["CLAUDE_CONFIG_DIR"]) / "plugins")
+    data = Path(root) / "data" / "model-router-inline"
+    answer += " (had state)" if (data / "learned.json").exists() else " (fresh)"
     data.mkdir(parents=True, exist_ok=True)
     (data / "learned.json").write_text('{"lookup": {"bump": 1}}')
     (data / "ledger.jsonl").write_text("written by the run")
-print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.01, "modelUsage": {}}))
+print(json.dumps({"result": answer, "total_cost_usd": 0.01, "modelUsage": {}}))
 '''
 
 
 @unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class PluginState(unittest.TestCase):
-    """A plugin run can't leave the router's learned state behind for the next run."""
+    """Router runs keep their state in a plugins root of their own, never the one other sessions share."""
 
-    def test_plugin_runs_start_from_the_same_state_and_record_it(self):
+    def test_router_runs_start_fresh_and_never_touch_the_shared_data_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "config"
-            data = home / "plugins" / "data" / "model-router-inline"
-            data.mkdir(parents=True)
-            (data / "learned.json").write_text('{"lookup": {"calls": 2}}')
+            shared = home / "plugins" / "data" / "model-router-inline"
+            shared.mkdir(parents=True)
+            (shared / "learned.json").write_text('{"lookup": {"calls": 2}}')
+            os.utime(shared / "learned.json", (1000, 1000))
             stub = Path(tmp) / "claude"
             stub.write_text(STUB)
             stub.chmod(0o755)
@@ -196,49 +201,35 @@ class PluginState(unittest.TestCase):
             configs = {c["id"]: c for c in run.load_configs()}
             options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
-            with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
-                first = run.run_one(task, configs["plugin"], options, {})
-                second = run.run_one(task, configs["plugin"], options, {})
-                baseline = run.run_one(task, configs["defaults"], options, {})
-            self.assertEqual((data / "learned.json").read_text(), '{"lookup": {"calls": 2}}')
-            self.assertFalse((data / "ledger.jsonl").exists())
+            shared.chmod(0)  # any read or write of the shared folder now fails
+            try:
+                with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
+                    first = run.run_one(task, configs["plugin"], options, {})
+                    second = run.run_one(task, configs["plugin"], options, {})
+                    baseline = run.run_one(task, configs["defaults"], options, {})
+            finally:
+                shared.chmod(0o755)
+            self.assertEqual([p.name for p in shared.iterdir()], ["learned.json"])
+            self.assertEqual((shared / "learned.json").read_text(), '{"lookup": {"calls": 2}}')
+            self.assertEqual((shared / "learned.json").stat().st_mtime, 1000)
             self.assertTrue(first["passed"])
-            self.assertEqual(first["plugin_state"], second["plugin_state"])
-            self.assertIsNotNone(first["plugin_state"]["learned.json"])
-            self.assertIsNone(first["plugin_state"]["state.json"])
+            self.assertIn("(fresh)", first["answer"])
+            self.assertIn("(fresh)", second["answer"])
+            self.assertEqual(first["plugin_state"], {"state.json": None, "learned.json": None})
             self.assertIsNone(baseline["plugin_state"])
             self.assertIn("bench_dirty", first)
 
-    def test_a_symlinked_state_folder_is_put_back_through_the_link(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            real = Path(tmp) / "real"
-            real.mkdir()
-            (real / "learned.json").write_text("before")
-            link = Path(tmp) / "model-router-inline"
-            link.symlink_to(real, target_is_directory=True)
-            with run.state_kept(link):
-                (link / "learned.json").write_text("after")
-                (link / "ledger.jsonl").write_text("new")
-            self.assertTrue(link.is_symlink())
-            self.assertEqual(sorted(p.name for p in real.iterdir()), ["learned.json"])
-            self.assertEqual((real / "learned.json").read_text(), "before")
-            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["model-router-inline", "real"])
-
-    def test_a_backup_left_by_a_crash_is_never_overwritten(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            folder = Path(tmp) / "model-router-inline"
-            folder.mkdir()
-            backup = folder.with_name(folder.name + ".bench-saved")
-            backup.mkdir()
-            (backup / "learned.json").write_text("the real state")
-            with self.assertRaises(RuntimeError):
-                with run.state_kept(folder):
-                    pass
-            self.assertEqual((backup / "learned.json").read_text(), "the real state")
+    def test_every_run_gets_the_same_plugins_root_setting(self):
+        options = {"claude": "claude", "model": "sonnet", "budget": 0.5, "plugin_dir": "/p", "plugins_root": "/s/plugins"}
+        for config in run.load_configs():
+            _, env = run.command("do it", config, options, {"CLAUDE_CODE_PLUGIN_CACHE_DIR": "/elsewhere"})
+            self.assertEqual(env["CLAUDE_CODE_PLUGIN_CACHE_DIR"], "/s/plugins", config["id"])
 
     def test_the_data_folder_is_named_from_the_manifest(self):
         self.assertEqual(run.plugin_data_dir({"CLAUDE_CONFIG_DIR": "/c"}),
                          Path("/c/plugins/data/model-router-inline"))
+        self.assertEqual(run.plugin_data_dir({"CLAUDE_CONFIG_DIR": "/c", "CLAUDE_CODE_PLUGIN_CACHE_DIR": "/s/plugins"}),
+                         Path("/s/plugins/data/model-router-inline"))
 
 
 SESSION_STUB = '''#!/usr/bin/env python3
@@ -303,6 +294,10 @@ class Pilot(unittest.TestCase):
             self.assertIn(f"{stale} run(s) here predate", page)
         self.assertIn("`Bash(tail *)`", page)
         self.assertNotIn("`--no-session-persistence`, `--permission-mode", page)
+        self.assertNotIn("puts it back afterwards", page)
+        borrowed = sum(r.get("plugin_state") is not None and "plugin_data_own" not in r for r in data)
+        if borrowed:
+            self.assertIn(f"{borrowed} router run(s) here borrowed the shared folder", page)
         unsaved = sum("sessions_saved" not in r for r in data)
         if unsaved:
             self.assertIn(f"{unsaved} run(s) here ran with `--no-session-persistence`", page)
