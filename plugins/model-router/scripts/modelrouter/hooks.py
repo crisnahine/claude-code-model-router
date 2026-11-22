@@ -10,7 +10,7 @@ import time
 
 from . import calls, gates, ladder, learn, registry, session, settings, spawn, store, upstream
 from . import config as cfg
-from .profile import _CHANGE, _LOOKUP, _REASONING, profile_prompt, signals
+from .profile import asks_for_work, profile_prompt
 
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
 
@@ -55,23 +55,12 @@ def _receives(body: str, frontmatter: str, count: int) -> bool:
     return any(re.search(rf"(?<!\\)\${re.escape(name)}\b", body) for name in names)
 
 
-def _carries_task(args: str) -> bool:
-    """Whether a skill's arguments say what to do, not only name a target such as "482", "src/auth.py" or a
-    URL: a change, reasoning or lookup verb, a signal word beside another word, or three words or more. A
-    lone token counts only as a verb, so a path's "auth" or a class name's words don't make it a task."""
-    text = args.lower()
-    verb = bool(re.search(_CHANGE, text) or re.search(_REASONING, text) or re.search(_LOOKUP, text))
-    words = len(args.split())
-    if words == 1:
-        return verb and not re.search(r"[/\\.:#]", args)
-    return verb or bool(signals(text)) or words >= 3
-
-
 def _profile_skill(args: object, body: object, rendered: bool) -> dict:
     """A typed skill's profile. A skill whose content takes its arguments (a $ARGUMENTS, $1 or named
     placeholder) and is given a task in them runs that task, so the arguments alone set the level: its own
-    instructions, a pipeline's say, are the same on every use. Otherwise the body is the task, as it is when
-    the arguments only name a target, and the higher of the arguments' level and the body's opening counts. `rendered` is the engine's expansion, where a skill that takes no
+    instructions, a pipeline's say, are the same on every use. Arguments that only name a target leave the
+    task to the body, at most complex. A skill that takes no placeholder, or is typed with no arguments, is
+    its body: the higher of the arguments' level and the body's opening counts. `rendered` is the engine's expansion, where a skill that takes no
     placeholder gets the arguments appended as "ARGUMENTS: ..."; otherwise body is the raw file."""
     args = args.strip() if isinstance(args, str) else ""
     body = (body if isinstance(body, str) else "").lstrip("\ufeff")
@@ -86,9 +75,12 @@ def _profile_skill(args: object, body: object, rendered: bool) -> dict:
         body = head if trailer else body
     else:
         takes_args = bool(args) and _receives(body, front.group(1) if front else "", len(args.split()))
-    if takes_args and _carries_task(args):
+    if takes_args and asks_for_work(args):
         return profile_prompt(args)
     parts = [profile_prompt(text) for text in (args, body[:_SKILL_BODY_CHARS])]
+    if takes_args and cfg.LEVELS.index(parts[1]["level"]) > cfg.LEVELS.index("complex"):
+        # A template that serves any target: its own wording, a pipeline's gates say, isn't one task's depth.
+        parts[1] = {**parts[1], "level": "complex"}
     return max(parts, key=lambda p: cfg.LEVELS.index(p["level"]))
 
 

@@ -2570,7 +2570,9 @@ class SlashSkills(Sandbox):
                "security vulnerabilities: auth bypasses, injection, secrets in code, across the API and worker "
                "services.\n")
         body = "Base directory for this skill: /p/.claude/skills/security-review\n\n" + raw.split("---\n", 2)[2]
-        for target in ("482", "src/auth.py", "https://github.com/acme/api/pull/482", "PaymentService"):
+        for target in ("482", "src/auth.py", "https://github.com/acme/api/pull/482", "PaymentService",
+                       "src/a.py src/b.py src/c.py", "482 --base main", "src/auth.py src/session.py",
+                       "docs/plan.md app/x.py", "auth module", "payments service", "audit"):
             with self.subTest(target=target):
                 self.assertEqual(self.turn("security-review", target, body.replace("$ARGUMENTS", target))["effort"],
                                  "high")
@@ -2580,11 +2582,20 @@ class SlashSkills(Sandbox):
         (skills / "SKILL.md").write_text(raw, encoding="utf-8")
         hooks.user_prompt({"session_id": "s1", "prompt": "/security-review 482", "cwd": str(self.project)})
         self.assertEqual(store.load_entry("prompts", "s1")["level"], "complex")
-        # A task in the arguments still decides, the m3-02 case.
         ship = (PLUGIN / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8").split("---\n", 2)[2]
-        for args in ("fix the typo in README.md", "explain the retry flow", "the README typo near the top"):
+        ship_body = lambda args: ship.replace("$ARGUMENTS", args)  # noqa: E731
+        # A template body serves many targets, so its own wording decides at most complex: an issue number
+        # through ship doesn't take its pipeline's gate text as the task.
+        self.assertEqual(self.turn("model-router:ship", "1234", ship_body("1234")), {"level": "complex",
+                                                                                  "effort": "high"})
+        # A task in the arguments still decides, the m3-02 case.
+        for args in ("fix the typo in README.md", "explain the retry flow", "the README typo near the top",
+                     "fix it"):
             with self.subTest(args=args):
-                self.assertIsNone(self.turn("model-router:ship", args, ship.replace("$ARGUMENTS", args)))
+                self.assertIsNone(self.turn("model-router:ship", args, ship_body(args)))
+        for text, work in (("fix the typo", True), ("audit", False), ("src/a.py src/b.py", False),
+                           ("tidy the imports please", True), ("PaymentService", False)):
+            self.assertEqual(profile.asks_for_work(text), work, text)
 
     def test_only_a_placeholder_that_receives_the_arguments_hands_them_the_task(self):
         hard = self.HARD_BODY.split("\n\n")[1]

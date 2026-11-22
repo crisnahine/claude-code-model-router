@@ -181,3 +181,14 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
         if LEVELS.index(level) > LEVELS.index("standard"):
             level, why = "standard", why + ["search or check agent"]
     return {"level": level, "signals": why}
+
+
+def asks_for_work(text: str) -> bool:
+    """Whether text says what to do rather than only naming a target: once paths, numbers, flags and URLs are
+    set aside, a change, reasoning or lookup verb with an object, or three words or more."""
+    words = [w for w in (text or "").lower().split() if not re.search(r"[/\\.:#]", w) and w[0] not in "-0123456789"]
+    if len(words) >= 3:
+        return True
+    phrase = " ".join(words)
+    return len(words) == 2 and bool(re.search(_CHANGE, phrase) or re.search(_REASONING, phrase)
+                                    or re.search(_LOOKUP, phrase))
