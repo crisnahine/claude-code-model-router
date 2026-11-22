@@ -12,6 +12,7 @@ import datetime
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -29,7 +30,8 @@ CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-revie
 # subagent and effort settings put there, except the provider switches and token auth. A configuration adds its
 # own on top.
 CLEARED = ("CLAUDE_CODE_", "CLAUDECODE", "CLAUDE_PLUGIN_", "CLAUDE_PROJECT_DIR")
-KEPT = ("CLAUDE_CODE_USE_", "CLAUDE_CODE_OAUTH_TOKEN")
+KEPT = ("CLAUDE_CODE_USE_",)
+KEPT_EXACT = ("CLAUDE_CODE_OAUTH_TOKEN",)
 ISOLATION = {"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
 # tail, head and echo let a subagent pipe its test output; every part of a compound command must be allowed.
 TOOLS = ("Read", "Edit", "Write", "Glob", "Grep", "Bash(python3 *)", "Bash(python *)", "Bash(tail *)",
@@ -52,7 +54,7 @@ def load_configs() -> list[dict]:
 
 
 def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[list[str], dict]:
-    env = {k: v for k, v in base_env.items() if k.startswith(KEPT) or not k.startswith(CLEARED)}
+    env = {k: v for k, v in base_env.items() if k in KEPT_EXACT or k.startswith(KEPT) or not k.startswith(CLEARED)}
     env.update(ISOLATION)
     env.update(config.get("env", {}))
     cmd = [options["claude"], "-p", prompt, "--output-format", "json", "--model", options["model"],
@@ -70,9 +72,11 @@ def can_start(spent: float, budget: float, max_total: float) -> bool:
 
 
 def plugin_data_dir(env: dict) -> Path:
-    """Where Claude Code keeps --plugin-dir model-router's data: health, learned raises and the ledger."""
+    """Where Claude Code keeps the --plugin-dir router's data (health, learned raises, the ledger):
+    plugins/data/<id>, the id with anything but letters, digits, _ and - turned into -."""
+    name = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"]
     home = Path(env.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-    return home / "plugins" / "data" / "model-router-inline"
+    return home / "plugins" / "data" / re.sub(r"[^A-Za-z0-9_-]", "-", f"{name}@inline")
 
 
 def state_hashes(folder: Path) -> dict:
@@ -80,20 +84,37 @@ def state_hashes(folder: Path) -> dict:
             for name in STATE_FILES}
 
 
+def _clear(folder: Path) -> None:
+    for child in folder.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
 @contextlib.contextmanager
 def state_kept(folder: Path) -> Iterator[dict]:
-    """Yield the hashes of the router's state, and put the folder back as it was when the block ends."""
-    saved = Path(tempfile.mkdtemp(prefix="mrbench-state-")) / "copy"
+    """Yield the hashes of the router's state, and put the folder back as it was when the block ends. The copy
+    sits next to the folder; one left there by a crashed run holds the real state, so the bench won't start."""
+    backup = folder.with_name(folder.name + ".bench-saved")
+    if backup.exists():
+        raise RuntimeError(f"{backup} holds the router state from an interrupted bench: copy it back to {folder}")
     existed = folder.is_dir()
     if existed:
-        shutil.copytree(folder, saved)
+        shutil.copytree(folder, backup, symlinks=True)
     try:
         yield state_hashes(folder)
     finally:
-        shutil.rmtree(folder, ignore_errors=True)
-        if existed:
-            shutil.copytree(saved, folder)
-        shutil.rmtree(saved.parent, ignore_errors=True)
+        try:
+            if existed:
+                _clear(folder)
+                shutil.copytree(backup, folder, symlinks=True, dirs_exist_ok=True)
+                shutil.rmtree(backup)
+            elif folder.exists():
+                shutil.rmtree(folder)
+        except OSError:
+            print(f"could not restore {folder}; the router state before this run is in {backup}", file=sys.stderr)
+            raise
 
 
 def _text(value) -> str:
@@ -103,6 +124,13 @@ def _text(value) -> str:
 def _git_head() -> str | None:
     res = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True)
     return res.stdout.strip() or None
+
+
+def _git_dirty() -> bool:
+    """Whether bench/ or the plugin has changes HEAD doesn't hold, so bench_commit isn't the code that ran."""
+    res = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "--", "bench", "plugins"],
+                         capture_output=True, text=True)
+    return bool(res.stdout.strip())
 
 
 def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
@@ -134,7 +162,8 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
     return {
         "schema": 1, "task": task["id"], "class": task["class"], "config": config["id"],
         "started_at": started, "claude_version": options["claude_version"], "main_model": options["model"],
-        "budget_usd": options["budget"], "bench_commit": options["commit"], "plugin_state": plugin_state,
+        "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
+        "plugin_state": plugin_state,
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
         # Without a result the cost is unknown; count the whole budget so totals never understate spend.
         "total_cost_usd": cost if isinstance(cost, (int, float)) else options["budget"],
@@ -166,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
     version = subprocess.run([args.claude, "--version"], capture_output=True, text=True).stdout.strip()
     prices = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["prices"]
     options = {"claude": args.claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,
-               "plugin_dir": str(PLUGIN), "claude_version": version, "commit": _git_head()}
+               "plugin_dir": str(PLUGIN), "claude_version": version, "commit": _git_head(), "dirty": _git_dirty()}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     spent = 0.0
     for run_index in range(args.runs):

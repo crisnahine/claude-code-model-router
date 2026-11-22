@@ -131,7 +131,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         for name, count in ((r.get("subagents") or {}).get("by_type") or {}).items():
             agents.setdefault(r["config"], {}).setdefault(name, 0)
             agents[r["config"]][name] += count
-    stale = sum(1 for r in rows if r["config"] == "plugin" and "plugin_state" not in r)
+    stale = sum(1 for r in rows if "plugin_state" not in r)
     per_run = total / len(rows) if rows else 0.0
     planned = len(tasks) * len(configs) * MIN_RUNS
     header = "\n".join([
@@ -182,10 +182,11 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         "starts from the state the folder held when the bench began, and each raw line records hashes of its "
         "`state.json` and `learned.json` in `plugin_state`. Anything another session writes there during a "
         "router run is lost when the folder is put back."
-        + (f" {stale} router run(s) here predate this, with no `plugin_state` in their lines, so each started from "
-           "whatever earlier runs and other sessions had left there. They also predate the `tail`, `head` and "
-           "`echo` rules and the stricter `lookup-retry-limit` check, and their `bench_commit` is the commit the "
-           "harness ran on top of before it was committed." if stale else ""),
+        + (f" {stale} run(s) here predate this: their lines have no `plugin_state`, and their router runs "
+           "started from whatever earlier runs and other sessions had left there. They also predate the `tail`, "
+           "`head` and `echo` rules and the stricter `lookup-retry-limit` check, and their `bench_commit` is the "
+           "commit the harness ran on top of before it was committed. Newer lines carry `bench_dirty`, true when "
+           "`bench/` or the plugin had uncommitted changes." if stale else ""),
         "- Cost is Claude Code's `total_cost_usd`, which includes subagents and is a client-side estimate at list "
         "price, not a bill (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md). Every run is capped with "
         "`--max-budget-usd`, which a run can pass by up to the cost of one response plus anything that subagents "

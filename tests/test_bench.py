@@ -112,8 +112,9 @@ class Runner(unittest.TestCase):
     def test_token_auth_and_test_pipes_still_work(self):
         configs = {c["id"]: c for c in run.load_configs()}
         options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
-        cmd, env = run.command("do it", configs["plugin"], options, {"CLAUDE_CODE_OAUTH_TOKEN": "t"})
-        self.assertEqual(env["CLAUDE_CODE_OAUTH_TOKEN"], "t")
+        cmd, env = run.command("do it", configs["plugin"], options, {"CLAUDE_CODE_OAUTH_TOKEN": "t",
+                                                                     "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "3"})
+        self.assertEqual(env, {"CLAUDE_CODE_OAUTH_TOKEN": "t", **run.ISOLATION})
         for rule in ("Bash(python3 *)", "Bash(tail *)", "Bash(head *)", "Bash(echo *)"):
             self.assertIn(rule, cmd)
 
@@ -156,7 +157,12 @@ class Tasks(unittest.TestCase):
             shutil.copytree(task["dir"] / "repo", work)
             self.assertFalse(self.check(task, work, "app/settings.py: read_retry_limit, read_timeout; "
                                                     "app/backoff.py: retries_left, retry_delay"))
-            self.assertTrue(self.check(task, work, "read_retry_limit in app/settings.py; app/client.py calls it"))
+            for answer in ("read_retry_limit in app/settings.py; app/client.py calls it",
+                           "`read_retry_limit` in `app/settings.py`. `read_timeout` next to it reads REQUEST_TIMEOUT "
+                           "instead.",
+                           "`read_retry_limit` in app/settings.py; `fetch` in app/client.py passes it to "
+                           "`backoff.retries_left`."):
+                self.assertTrue(self.check(task, work, answer), answer)
 
 
 STUB = '''#!/usr/bin/env python3
@@ -201,6 +207,38 @@ class PluginState(unittest.TestCase):
             self.assertIsNotNone(first["plugin_state"]["learned.json"])
             self.assertIsNone(first["plugin_state"]["state.json"])
             self.assertIsNone(baseline["plugin_state"])
+            self.assertIn("bench_dirty", first)
+
+    def test_a_symlinked_state_folder_is_put_back_through_the_link(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp) / "real"
+            real.mkdir()
+            (real / "learned.json").write_text("before")
+            link = Path(tmp) / "model-router-inline"
+            link.symlink_to(real, target_is_directory=True)
+            with run.state_kept(link):
+                (link / "learned.json").write_text("after")
+                (link / "ledger.jsonl").write_text("new")
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(sorted(p.name for p in real.iterdir()), ["learned.json"])
+            self.assertEqual((real / "learned.json").read_text(), "before")
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["model-router-inline", "real"])
+
+    def test_a_backup_left_by_a_crash_is_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "model-router-inline"
+            folder.mkdir()
+            backup = folder.with_name(folder.name + ".bench-saved")
+            backup.mkdir()
+            (backup / "learned.json").write_text("the real state")
+            with self.assertRaises(RuntimeError):
+                with run.state_kept(folder):
+                    pass
+            self.assertEqual((backup / "learned.json").read_text(), "the real state")
+
+    def test_the_data_folder_is_named_from_the_manifest(self):
+        self.assertEqual(run.plugin_data_dir({"CLAUDE_CONFIG_DIR": "/c"}),
+                         Path("/c/plugins/data/model-router-inline"))
 
 
 class Pilot(unittest.TestCase):
@@ -215,11 +253,12 @@ class Pilot(unittest.TestCase):
         self.assertIn(f"{len(data)} runs", page)
         self.assertIn("plus anything that subagents still running", page)
         self.assertIn("margin, not a bound", page)
-        if any(r["config"] == "plugin" and "plugin_state" not in r for r in data):
-            self.assertIn("predate", page)
+        stale = sum("plugin_state" not in r for r in data)
+        if stale:
+            self.assertIn(f"{stale} run(s) here predate", page)
         self.assertIn("`Bash(tail *)`", page)
         for row in data:  # a lookup is graded from its answer alone, so today's check must agree with the record
-            if row["class"] == "lookup":
+            if row["class"] == "lookup" and len(row["answer"]) < 2000:  # the line keeps 2,000 characters
                 with tempfile.TemporaryDirectory() as tmp:
                     answer = Path(tmp) / "answer.txt"
                     answer.write_text(row["answer"], encoding="utf-8")
