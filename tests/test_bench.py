@@ -311,9 +311,11 @@ class PluginState(unittest.TestCase):
 
     def test_every_run_gets_the_same_plugins_root_setting(self):
         options = {"claude": "claude", "model": "sonnet", "budget": 0.5, "plugin_dir": "/p", "plugins_root": "/s/plugins"}
-        for config in run.load_configs():
-            _, env = run.command("do it", config, options, {"CLAUDE_CODE_PLUGIN_CACHE_DIR": "/elsewhere"})
-            self.assertEqual(env["CLAUDE_CODE_PLUGIN_CACHE_DIR"], "/s/plugins", config["id"])
+        # A plugin_ref export needs that commit in the clone, which a shallow CI checkout lacks.
+        with unittest.mock.patch.object(run, "plugin_dir_for", return_value="/p"):
+            for config in run.load_configs():
+                _, env = run.command("do it", config, options, {"CLAUDE_CODE_PLUGIN_CACHE_DIR": "/elsewhere"})
+                self.assertEqual(env["CLAUDE_CODE_PLUGIN_CACHE_DIR"], "/s/plugins", config["id"])
 
     def test_the_data_folder_is_named_from_the_manifest(self):
         self.assertEqual(run.plugin_data_dir({"CLAUDE_CONFIG_DIR": "/c"}),
