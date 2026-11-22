@@ -381,6 +381,23 @@ class Registry(Sandbox):
         self.managed.write_text(json.dumps({"availableModels": ["sonnet"]}))
         self.assertEqual(registry.available(self.config, self.project), ["sonnet"])
 
+    def test_managed_drop_in_files_merge_with_the_managed_file(self):
+        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
+        drop_ins = self.home / "managed-settings.d"
+        drop_ins.mkdir()
+        (drop_ins / "20-models.json").write_text(json.dumps({"availableModels": ["sonnet", "opus"],
+                                                              "deniedModels": ["opus"]}))
+        (drop_ins / ".30-hidden.json").write_text(json.dumps({"availableModels": ["fable"]}))
+        (drop_ins / "40-notes.txt").write_text(json.dumps({"availableModels": ["fable"]}))
+        self.assertEqual(registry.permitted(self.config, self.project), {"sonnet"})
+        self.managed.write_text(json.dumps({"availableModels": ["fable"]}))
+        (drop_ins / "10-more.json").write_text(json.dumps({"availableModels": ["sonnet"]}))
+        self.assertEqual(registry.permitted(self.config, self.project), {"sonnet", "fable"})
+        for path in (self.managed, drop_ins / "10-more.json", drop_ins / "20-models.json"):
+            path.unlink()
+        (drop_ins / "50-empty.json").write_text(json.dumps({"availableModels": []}))
+        self.assertEqual(registry.permitted(self.config, self.project), set())  # an empty drop-in list still applies alone
+
     def test_an_empty_managed_allowlist_permits_nothing(self):
         self.managed.write_text(json.dumps({"availableModels": []}))
         self.assertEqual(registry.permitted(self.config, self.project), set())
