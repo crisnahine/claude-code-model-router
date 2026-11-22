@@ -1485,6 +1485,35 @@ class Gates(Sandbox):
         self.options(verify_gate="true", routing_mode="advise")
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
 
+    def test_edits_outside_the_project_dont_count(self):
+        outside = Path(self.tmp.name) / "cache" / "findings.json"
+        hooks.post_edit({"session_id": "s1", "cwd": str(self.project), "tool_input": {"file_path": str(outside)}})
+        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+        sub = self.project / "pkg"
+        sub.mkdir()
+        hooks.post_edit({"session_id": "s1", "cwd": str(sub), "tool_input": {"file_path": "../../cache/findings.json"}})
+        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+        hooks.post_edit({"session_id": "s1", "cwd": str(sub), "tool_input": {"file_path": "../src/app.py"}})
+        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
+
+    def test_a_symlinked_cwd_matches_the_real_path(self):
+        link = Path(self.tmp.name) / "link"
+        try:
+            os.symlink(self.project, link, target_is_directory=True)
+        except OSError:
+            self.skipTest("no symlink privilege")
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(link)}):
+            hooks.post_edit({"session_id": "s1", "cwd": str(link),
+                             "tool_input": {"file_path": str(self.project / "src" / "app.py")}})
+        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
+
+    def test_an_edit_beside_a_moved_cwd_still_counts(self):
+        sub = self.project / "pkg"
+        sub.mkdir()
+        hooks.post_edit({"session_id": "s1", "cwd": str(sub),
+                         "tool_input": {"file_path": str(self.project / "lib" / "util.py")}})
+        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
+
     def test_docs_only_edits_dont_count(self):
         self.edit("README.md")
         self.assertIsNone(hooks.stop({"session_id": "s1"}))

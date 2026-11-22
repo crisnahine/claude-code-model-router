@@ -123,7 +123,7 @@ A mod could send the main loop's requests to another model, and the first probe 
 - `UserPromptSubmit` profiles each request against the session's model. When the request needs more than that model, Claude is told to hand the hard thinking to a strong subagent. Otherwise the hook says nothing, so a normal prompt carries no extra tokens.
 - `Stop` checks whether that happened. A complex or harder request on a weaker session, with no agent of the needed strength started, blocks the stop once and asks for a strong agent to check the result.
 
-A second check at `Stop` asks for verification once, when code changed and no test, lint, type-check or build command ran after the last edit and no verifier or reviewer was started.
+A second check at `Stop` asks for verification once, when code in the project (under the hook's `cwd` or `CLAUDE_PROJECT_DIR`) changed and no test, lint, type-check or build command ran after the last edit and no verifier or reviewer was started.
 
 ## Discovery and adaptation
 
