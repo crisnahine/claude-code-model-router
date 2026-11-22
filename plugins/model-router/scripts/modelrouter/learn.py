@@ -28,10 +28,6 @@ def raises() -> dict[str, int]:
     return {level: _raise(data.get(level)) for level in LEVELS}
 
 
-def bump(level: str) -> int:
-    return _raise(stats().get(level))
-
-
 def _raise(info: object) -> int:
     try:
         return max(0, min(MAX_BUMP, int(info.get("bump") or 0))) if isinstance(info, dict) else 0

@@ -1153,7 +1153,7 @@ class Feedback(Sandbox):
 
     def test_redoing_routed_calls_on_a_stronger_model_raises_the_level(self):
         self.raise_lookup()
-        self.assertEqual(learn.bump("lookup"), 1)
+        self.assertEqual(learn.raises()["lookup"], 1)
         self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "sonnet")
         self.assertIn("| lookup | sonnet (raised by feedback) |", self.out("policy"))
         self.assertIn("cleared", self.out("models", "--reset"))
@@ -1174,7 +1174,7 @@ class Feedback(Sandbox):
             self.pre("general-purpose", f"list the files under dir{i}")
         for i in range(6):
             self.pre("general-purpose", f"list other things {i}", model="opus")
-        self.assertEqual(learn.bump("lookup"), 0)
+        self.assertEqual(learn.raises()["lookup"], 0)
 
     def test_naming_a_weaker_or_equal_model_is_not_a_vote(self):
         for i in range(10):
@@ -1186,7 +1186,7 @@ class Feedback(Sandbox):
         self.raise_lookup()
         for i in range(6):
             self.pre("general-purpose", f"list the things in {i}", model="haiku")
-        self.assertEqual(learn.bump("lookup"), 0)
+        self.assertEqual(learn.raises()["lookup"], 0)
 
     def test_each_kind_of_spawn_casts_its_own_votes(self):
         config = cfg.load_config()
@@ -1228,13 +1228,14 @@ class Feedback(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": "use opus to list the files in these six folders"})
         for i in range(learn.VOTES_NEEDED):
             self.pre("general-purpose", f"list the files under dir{i}", model="opus")
-        self.assertEqual(learn.bump("lookup"), 0)
+        self.assertEqual(learn.raises()["lookup"], 0)
 
     def test_a_spawn_identifies_its_call_once_and_reuses_the_raises(self):
         with mock.patch.object(calls, "identify", wraps=calls.identify) as identify, \
-                mock.patch.object(learn, "bump", side_effect=AssertionError("re-read the raises")):
+                mock.patch.object(learn, "raises", wraps=learn.raises) as raises:
             self.pre("general-purpose", BUILD, model="haiku")
         self.assertEqual(identify.call_count, 1)
+        self.assertEqual(raises.call_count, 1)
 
 
 class Hooks(Sandbox):
