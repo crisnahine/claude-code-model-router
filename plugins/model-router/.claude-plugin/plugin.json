@@ -58,7 +58,7 @@
     "main_effort": {
       "type": "boolean",
       "title": "Effort for the main conversation",
-      "description": "Raise the main conversation's reasoning effort for a request that looks complex or hardest, for that turn only. It never lowers what you set. It stays off when CLAUDE_CODE_EFFORT_LEVEL is set, and wherever an effort change re-reads the context uncached: on Bedrock, Vertex and Foundry, behind ANTHROPIC_BASE_URL or a Claude apps gateway, with CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS set, and on a session model other than Fable 5.1 or later, Opus 5.5, Sonnet 5.5 or Haiku 5.5. A HIPAA organization can't be detected: turn this off there.",
+      "description": "Raise the main conversation's reasoning effort for a request that looks complex or hardest, for that turn only. It never lowers what you set. It stays off when CLAUDE_CODE_EFFORT_LEVEL is set, and wherever an effort change re-reads the context uncached: on Bedrock, Vertex and Foundry, behind ANTHROPIC_BASE_URL, a Claude apps gateway or another third-party provider, with CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS set, and on a session model other than Fable 5.1 or later, Opus 5.5, Sonnet 5.5 or Haiku 5.5. The router doesn't detect a HIPAA organization: turn this off there.",
       "default": true
     },
     "update_check": {

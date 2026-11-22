@@ -35,6 +35,17 @@ async function ask($: EngineInterface, options: Record<string, string>, command:
   }
 }
 
+// Behind a gateway or a third-party provider an effort change drops the cache, and the
+// session holds no first-party credential. The handle is only looked at, never spent.
+// The desktop app never lends its sign-in to plugins, so there a null says nothing.
+async function hasFirstPartyCredential($: EngineInterface): Promise<boolean | undefined> {
+  const auth = await Promise.resolve().then(() => $.session.authorize()).catch(() => undefined)
+  if (auth === undefined) return undefined
+  if (auth !== null) return true
+  const surfaces = await Promise.resolve().then(() => $.session.surfaces()).catch(() => undefined)
+  return surfaces && !surfaces.includes('desktop') ? false : undefined
+}
+
 function effortRank(effort: ModelEffort | undefined): number {
   return effort === undefined ? -1 : EFFORTS.indexOf(effort)
 }
@@ -91,10 +102,9 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       const model = await Promise.resolve().then(() => $.session.model()).catch(() => undefined)
-      // Null behind a gateway or a third-party provider, where an effort change drops the cache.
-      const auth = await Promise.resolve().then(() => $.session.authorize()).catch(() => undefined)
+      const firstParty = options.main_effort === false ? undefined : await hasFirstPartyCredential($)
       const pick = await ask($, opts, 'mod-turn', {
-        text: e.text, ...(model ? { model } : {}), ...(auth !== undefined ? { first_party: auth !== null } : {}),
+        text: e.text, ...(model ? { model } : {}), ...(firstParty !== undefined ? { first_party: firstParty } : {}),
       })
       if (pick?.effort) remember(turnEffort, e.turnId, pick.effort)
     } else if (!agentEffort.has(e.agentId)) {

@@ -25,6 +25,7 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}) 
     session: {
       model: async () => 'claude-opus-5-5',
       authorize: async (): Promise<{ handle: string; kind: string } | null> => ({ handle: 'h1', kind: 'bearer' }),
+      surfaces: async (): Promise<readonly string[]> => ['terminal'],
     },
     process: {
       hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: 's1', CLAUDE_PLUGIN_DATA: '/tmp/x' }),
@@ -136,6 +137,23 @@ test('the main loop says whether the session holds a first-party credential', as
   mod.$.session.authorize = async () => { throw new Error('denied') }
   await mod.start({ turnId: 't3', text: 'fix the auth migration' })
   assert.equal('first_party' in mod.calls[2]!.stdin, false)
+})
+
+test('a missing credential says nothing in the desktop app, which never lends its sign-in', async () => {
+  const mod = load()
+  mod.$.session.authorize = async () => null
+  mod.$.session.surfaces = async () => ['desktop']
+  await mod.start({ turnId: 't1', text: 'fix the auth migration' })
+  assert.equal('first_party' in mod.calls[0]!.stdin, false)
+})
+
+test('the credential is not asked for when main_effort is off', async () => {
+  const mod = load({}, { main_effort: false })
+  let asked = false
+  mod.$.session.authorize = async () => { asked = true; return null }
+  await mod.start({ turnId: 't1', text: 'fix the auth migration' })
+  assert.equal(asked, false)
+  assert.equal('first_party' in mod.calls[0]!.stdin, false)
 })
 
 test('a lower main loop effort is ignored', async () => {

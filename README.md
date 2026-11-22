@@ -122,7 +122,7 @@ Options, in `/config` under the plugin:
 | `priority` | `balanced` | `balanced`, `quality` or `fast` |
 | `max_tier` | none | The strongest model subagents may run on. Anything stronger is lowered to it |
 | `agent_pins` | `respect` | `respect` keeps the model an agent names for itself. `override` routes those agents by task too |
-| `main_effort` | on | Raises the main conversation's effort for a complex or harder request, for that turn. Off where an effort change would re-read the context uncached: Bedrock, Vertex, Foundry, `ANTHROPIC_BASE_URL`, a Claude apps gateway, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`, and models other than Fable 5.1+, Opus 5.5, Sonnet 5.5 and Haiku 5.5. Turn it off yourself in a HIPAA organization, which the router can't detect |
+| `main_effort` | on | Raises the main conversation's effort for a complex or harder request, for that turn. Off where an effort change would re-read the context uncached: Bedrock, Vertex, Foundry, `ANTHROPIC_BASE_URL`, a Claude apps gateway or another third-party provider, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`, and models other than Fable 5.1+, Opus 5.5, Sonnet 5.5 and Haiku 5.5. Turn it off yourself in a HIPAA organization, which the router doesn't detect |
 | `update_check` | on | The daily check of the changelog, docs index, model list and deprecations |
 | `verify_gate` | on | The two checks before a turn ends |
 
