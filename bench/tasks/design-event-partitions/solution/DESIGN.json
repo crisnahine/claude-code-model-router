@@ -1,0 +1,14 @@
+{
+  "partitions": 30,
+  "key": "order_id",
+  "retention_hours": 80,
+  "replication_factor": 3,
+  "reasons": [
+    "peak after growth is 9,000 x 3 x 2 = 54,000/s, so at least 22 partitions",
+    "replaying 3 days at 18,000/s within 24 hours is 54,000/s on top of 18,000/s live: 72,000/s, so at least 29",
+    "a multiple of 6 brokers within the 40 left: 30 or 36",
+    "order_id keeps each order in order; customer_id would put 30% of the load on one partition",
+    "3 replicas survive one broker down with min.insync.replicas=2",
+    "18,000/s x 1 KB x 3 replicas = 54 MB/s; 16 TB lasts 82.3 hours, so 72 to 82 hours"
+  ]
+}

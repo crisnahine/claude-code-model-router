@@ -8,6 +8,7 @@
 
 ## Unreleased
 
+- The architect's description opens with "Read-only" and says it can't write files, so a task whose result is a file goes to an agent that can write it. A design task told to go to one subagent no longer lands on the architect and then needs an Opus implementer, or ends without its file.
 - The docs now say that a project's `.claude/model-router.json` may raise levels and effort as well as lower them, so a cloned repository can cost more, and that `max_tier` still caps the model it gets. The behavior is unchanged from 0.1.x.
 
 ## 0.1.2 - 2026-11-23
