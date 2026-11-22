@@ -1,5 +1,5 @@
 {
-  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength, speed and cost are relative ranks. A model's name must be an alias the Agent tool accepts (haiku, sonnet, opus, fable). Crew models must match each agent's frontmatter; the tests check that. Levels pair a strength with an effort: on current models effort is the cheaper lever, so complex and hardest share Opus and differ in effort. Prices are USD per million tokens on the Anthropic API, used only to report spend: a key is one model version, or ends in -* to cover every version of a family, and a version with no entry is reported as unpriced. Prices can be added or changed in your own ~/.claude/model-router.json only, not a project's file. cache_write is the five-minute cache write price and cache_write_1h the one-hour one, which is twice input when left out.",
+  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength, speed and cost are relative ranks. A model's name must be an alias the Agent tool accepts (haiku, sonnet, opus, fable). Crew models must match each agent's frontmatter; the tests check that. Levels pair a strength with an effort: on current models effort is the cheaper lever, so complex and hardest share Opus and differ in effort. Prices are USD per million tokens on the Anthropic API, used only to report spend: a key is one model version, or ends in -* to cover every version of a family, and a version with no entry is reported as unpriced. Prices can be added or changed in your own ~/.claude/model-router.json only, not a project's file. cache_write is the five-minute cache write price and cache_write_1h the one-hour one, which is twice input when left out. A shipped long_prompt block holds the prices a request pays when its prompt (input, cache reads and cache writes) is over its `over` tokens; each request is priced on its own (https://platform.claude.com/docs/en/about-claude/pricing.md, Long context pricing).",
   "models": {
     "haiku": {
       "strength": 1,
@@ -149,7 +149,15 @@
       "output": 0.5,
       "cache_read": 0.01,
       "cache_write": 0.125,
-      "cache_write_1h": 0.2
+      "cache_write_1h": 0.2,
+      "long_prompt": {
+        "over": 100000,
+        "input": 0.5,
+        "output": 2.5,
+        "cache_read": 0.05,
+        "cache_write": 0.625,
+        "cache_write_1h": 1
+      }
     },
     "claude-haiku-4-5": {
       "input": 1,

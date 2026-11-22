@@ -368,17 +368,35 @@ def mod_turn(hook_input: dict) -> dict | None:
     return {"level": level, "effort": effort}
 
 
-def mod_usage(hook_input: dict) -> dict | None:
-    usage = hook_input.get("usage")
-    if not isinstance(usage, dict) or not isinstance(usage.get("model"), str):
-        return None
+def _tokens(usage: dict) -> dict:
     tokens = {k: int(usage.get(k) or 0) for k in
               ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
     if "ephemeral_1h_input_tokens" in usage:
         tokens["ephemeral_1h_input_tokens"] = int(usage.get("ephemeral_1h_input_tokens") or 0)
+    return tokens
+
+
+def _usage(value: object) -> bool:
+    return isinstance(value, dict) and isinstance(value.get("model"), str)
+
+
+def mod_usage(hook_input: dict) -> dict | None:
+    """One ledger row per turn, its cost the sum of its requests, each priced on its own."""
+    usage = hook_input.get("usage")
+    if not _usage(usage):
+        return None
+    config = cfg.load_config(hook_input)
+    tokens = _tokens(usage)
+    requests = hook_input.get("requests")
+    requests = [r for r in requests if _usage(r)] if isinstance(requests, list) else []
+    if requests:
+        costs = [registry.cost(config, r["model"], _tokens(r)) for r in requests]
+        spent = None if None in costs else round(sum(costs), 6)
+    else:
+        spent = registry.cost(config, usage["model"], tokens, whole_turn=True)
     store.append_ledger({"event": "usage", "session": hook_input.get("session_id"),
                          "agent_id": hook_input.get("agent_id"), "model": usage["model"], **tokens,
-                         "cost_usd": registry.cost(cfg.load_config(hook_input), usage["model"], tokens)})
+                         "cost_usd": spent})
     return None
 
 

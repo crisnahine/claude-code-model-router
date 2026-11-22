@@ -1,4 +1,4 @@
-import type { EngineInterface, ModelEffort, PluginOptions, Register } from 'claude-code'
+import type { EngineInterface, ModelEffort, PluginOptions, Register, TurnUsage } from 'claude-code'
 
 // The engine's own events, forwarded to the Python runtime the settings hooks use, so
 // one router decides everything. agent.spawn sees every subagent, teammate and workflow
@@ -52,6 +52,8 @@ export const register: Register = (on, options) => {
   const callerEffort = new Map<string, ModelEffort>()
   // A subagent's first request can go out before its spawn hook has the agent's id.
   const promptEffort = new Map<string, ModelEffort>()
+  // Each request's usage by turn: Haiku 5.5 bills a long prompt per request, not per turn.
+  const turnRequests = new Map<string, TurnUsage[]>()
 
   on('tool.call', { tool: 'Agent' }, ($, e, next) => {
     if (e.tool_use_id && typeof e.effort === 'string') remember(callerEffort, e.tool_use_id, e.effort)
@@ -105,15 +107,23 @@ export const register: Register = (on, options) => {
     const want = e.agentId !== undefined ? agentEffort.get(e.agentId) : turnEffort.get(e.turnId)
     const apply = want !== undefined && current !== undefined && want !== current
       && (e.agentId !== undefined || effortRank(want) > effortRank(current))
-    return yield* next(apply ? { ...e, effort: want } : e)
+    const result = yield* next(apply ? { ...e, effort: want } : e)
+    if (result?.usage) {
+      const requests = turnRequests.get(e.turnId)
+      if (requests) requests.push(result.usage)
+      else remember(turnRequests, e.turnId, [result.usage])
+    }
+    return result
   }).catch(async function* ($, e, next) {
     return yield* next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    const requests = turnRequests.get(e.turnId)
+    turnRequests.delete(e.turnId)
     if (e.agentId === undefined) turnEffort.delete(e.turnId)
-    if (e.usage) await ask($, opts, 'mod-usage', { agent_id: e.agentId, usage: e.usage })
+    if (e.usage) await ask($, opts, 'mod-usage', { agent_id: e.agentId, usage: e.usage, ...(requests ? { requests } : {}) })
     return done
   }).catch(($, e, next) => next(e))
 }

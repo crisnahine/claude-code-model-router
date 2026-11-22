@@ -26,9 +26,9 @@ The aim is the lowest cost per finished task at a high quality bar. Every subtas
 | Event | What the mod does |
 | :- | :- |
 | `agent.spawn` | Fires for every subagent, teammate and workflow agent before its model is resolved. The mod asks the router and passes the pick on as `model`. The event names the parent's effective model exactly (`parentModel`), so nothing is guessed from a transcript. Forks and resumed runs are left alone. |
-| `turn.step` | Fires for each model request, the main loop's and each agent's. `agent.spawn` has no effort field, so a routed agent's effort is set here, on each of its requests. The main loop's turn effort is applied here too. |
+| `turn.step` | Fires for each model request, the main loop's and each agent's. `agent.spawn` has no effort field, so a routed agent's effort is set here, on each of its requests. The main loop's turn effort is applied here too. Each request's usage is kept for its turn. |
 | `turn.start` | The main loop's request text, after the settings hooks for the prompt ran. The router picks that turn's effort from it. |
-| `turn.complete` | Each turn's token usage and model, main loop and agents alike, priced and written to the ledger. |
+| `turn.complete` | Each turn's token usage and model, main loop and agents alike, written to the ledger with its cost: the sum of its requests, each priced on its own, because Haiku 5.5 bills a prompt over 100,000 tokens at a higher rate per request (https://platform.claude.com/docs/en/about-claude/pricing.md, Long context pricing). A turn sent without its requests is priced at the base rate. |
 
 The mod calls the same Python runtime the settings hooks use, through `$.process.run` with the plugin's hook environment, so there is one decision procedure and one state store. A spawn decision settled in about 110 ms in live runs, the time to start Python included.
 
@@ -156,8 +156,8 @@ A changelog or docs index that comes back empty, such as an outage page, counts 
 mod  session.start ─ mod-start      marks the session, so PreToolUse stands down
 mod  agent.spawn   ─ mod-spawn      spawn.run for a subagent, teammate or workflow stage
 mod  turn.start    ─ mod-turn       the main loop's effort for this turn
-mod  turn.step                      applies the agent's or the turn's effort to each request
-mod  turn.complete ─ mod-usage      prices the turn's tokens into the ledger
+mod  turn.step                      applies the agent's or the turn's effort to each request; keeps its usage
+mod  turn.complete ─ mod-usage      prices the turn's requests into the ledger
 SessionStart ─┬─ session-start   records options and the session model; explains routing
               └─ refresh-cache   (async) refreshes the upstream cache if older than 24 h
 UserPromptSubmit ─ user-prompt   profiles the request; notes a model the user may be asking for

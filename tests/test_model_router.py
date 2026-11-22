@@ -1261,6 +1261,39 @@ class ModPayloads(Sandbox):
         self.assertEqual((row["event"], row["agent_id"], row["cost_usd"]), ("usage", "a1", 6.0))
 
 
+class LongPromptPricing(Sandbox):
+    """Haiku 5.5 bills a request whose prompt is over 100,000 tokens at 5x, each request on its own:
+    https://platform.claude.com/docs/en/about-claude/pricing.md#long-context-pricing"""
+
+    @staticmethod
+    def haiku(input_tokens=0, output_tokens=0, cache_read=0, cache_write=0) -> dict:
+        return {"model": "claude-haiku-5-5", "input_tokens": input_tokens, "output_tokens": output_tokens,
+                "cache_read_input_tokens": cache_read, "cache_creation_input_tokens": cache_write}
+
+    def cost(self, usage: dict, requests: list | None = None):
+        payload = {"session_id": "s1", "agent_id": "a1", "usage": usage}
+        hooks.mod_usage({**payload, "requests": requests} if requests is not None else payload)
+        return self.ledger()[-1]["cost_usd"]
+
+    def test_a_request_over_100k_pays_the_long_prompt_rate(self):
+        short = self.haiku(input_tokens=10_000, cache_write=20_000, output_tokens=1_000)  # 30K prompt
+        long = self.haiku(input_tokens=5_000, cache_read=90_000, cache_write=10_000, output_tokens=2_000)  # 105K
+        turn = self.haiku(input_tokens=15_000, cache_read=90_000, cache_write=30_000, output_tokens=3_000)
+        # $0.004 at $0.10/$0.125/$0.50, plus $0.01825 at $0.50/$0.05/$0.625/$2.50.
+        self.assertEqual(self.cost(turn, [short, long]), 0.02225)
+
+    def test_requests_under_the_threshold_keep_the_base_rate_even_when_the_turn_is_over(self):
+        self.assertEqual(self.cost(self.haiku(input_tokens=160_000),
+                                   [self.haiku(input_tokens=100_000), self.haiku(input_tokens=60_000)]), 0.016)
+
+    def test_a_turn_sent_without_its_requests_is_priced_at_the_base_rate(self):
+        self.assertEqual(self.cost(self.haiku(input_tokens=160_000)), 0.016)
+
+    def test_a_request_on_an_unpriced_model_leaves_the_turn_unpriced(self):
+        stray = {**self.haiku(input_tokens=1), "model": "claude-unknown-9"}
+        self.assertIsNone(self.cost(self.haiku(input_tokens=2), [self.haiku(input_tokens=1), stray]))
+
+
 class Feedback(Sandbox):
     def setUp(self):
         super().setUp()

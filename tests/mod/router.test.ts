@@ -41,17 +41,17 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}) 
     spawn: (e: object, next: Hook = (x: object) => ({ ...x, agentId: 'a1' })) => hooks['agent.spawn']!($, e, next),
     start: (e: object) => hooks['turn.start']!($, e, same),
     complete: (e: object) => hooks['turn.complete']!($, e, same),
-    async step(e: object): Promise<any> {
+    async step(e: object, result: object = { done: true }): Promise<any> {
       let sent: any
       async function* next(input: any) {
         sent = input
         yield { kind: 'text', text: 'hi' }
-        return { done: true }
+        return result
       }
       const gen = hooks['turn.step']!($, e, next)
       let r = await gen.next()
       while (!r.done) r = await gen.next()
-      assert.deepEqual(r.value, { done: true })
+      assert.deepEqual(r.value, result)
       return sent
     },
   }
@@ -127,6 +127,21 @@ test('a lower main loop effort is ignored', async () => {
   const mod = load({ 'mod-turn': { stdout: JSON.stringify({ level: 'lookup', effort: 'low' }) } })
   await mod.start({ turnId: 't1', text: 'list files' })
   assert.equal((await mod.step(stepEvent({ effort: 'medium' }))).effort, 'medium')
+})
+
+test('a turn sends each request\'s usage, so each is priced on its own', async () => {
+  const mod = load()
+  const request = (input_tokens: number) => ({
+    model: 'claude-haiku-5-5', input_tokens, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+  })
+  await mod.step(stepEvent({ agentId: 'a1' }), { usage: request(10) })
+  await mod.step(stepEvent({ agentId: 'a1', index: 1 }), { usage: null })
+  await mod.step(stepEvent({ turnId: 't2', agentId: 'a2' }), { usage: request(99) })
+  await mod.step(stepEvent({ agentId: 'a1', index: 2 }), { usage: request(20) })
+  await mod.complete(completeEvent({ agentId: 'a1', usage: request(30) }))
+  assert.deepEqual(mod.calls[0]!.stdin.requests, [request(10), request(20)])
+  await mod.complete(completeEvent({ agentId: 'a1', usage: request(30) }))
+  assert.equal(mod.calls[1]!.stdin.requests, undefined)
 })
 
 test('plugin options reach the CLI env', async () => {
@@ -206,6 +221,9 @@ test('each payload the mod sends matches its fixture', async () => {
     subagentType: spawn.tool_input.subagent_type, prompt: spawn.tool_input.prompt, description: spawn.tool_input.description,
   }))
   await mod.start({ turnId: 't1', text: payloads['mod-turn'].text })
+  for (const [index, request] of usage.requests.entries()) {
+    await mod.step(stepEvent({ turnId: 't2', agentId: usage.agent_id, index }), { usage: request })
+  }
   await mod.complete(completeEvent({ turnId: 't2', agentId: usage.agent_id, usage: usage.usage }))
   assert.deepEqual(Object.fromEntries(mod.calls.map(c => [c.command, c.stdin])), payloads)
 })
