@@ -2935,5 +2935,38 @@ class PriceTable(unittest.TestCase):
                                                       "cache_write_1h")), rates, version)
 
 
+class ClockAndCleanup(Sandbox):
+    """A clock moved backwards, and copies of unreadable state files piling up."""
+
+    def test_a_run_stamped_in_the_future_is_not_a_redo(self):
+        store.save_entry("done", "s1", {"k": {"level": "lookup", "at": time.time() + 3600}})
+        self.assertIsNone(calls.finished_run("s1", "k"))
+        store.save_entry("done", "s1", {"k": {"level": "lookup", "at": time.time() - 60}})
+        self.assertEqual(calls.finished_run("s1", "k")["level"], "lookup")
+
+    def test_a_rewrite_stamped_in_the_future_counts_as_refused(self):
+        store.save_entry("pending", "s1", {"k": {"model": "haiku", "at": time.time() + 3600}})
+        self.assertEqual(calls.refused_rewrite("s1", "k")["model"], "haiku")  # passed on untouched, never looped
+        store.save_entry("pending", "s1", {"k": {"model": "haiku", "at": time.time() - 1}})
+        self.assertIsNone(calls.refused_rewrite("s1", "k"))  # a copy issued alongside it
+
+    def test_an_outage_lasts_no_longer_than_its_days_after_the_clock_moves_back(self):
+        now = time.time()
+        registry.update_health("opus", outages=1, unavailable_until=now + 20 * 86400)  # set before a 19-day jump back
+        with mock.patch.object(registry.time, "time", return_value=now):
+            self.assertFalse(registry.healthy("opus"))
+        with mock.patch.object(registry.time, "time", return_value=now + registry.OUTAGE_DAYS[0] * 86400 + 1):
+            self.assertTrue(registry.healthy("opus"))
+
+    def test_only_the_newest_copies_of_an_unreadable_file_are_kept(self):
+        learned = store.data_dir() / "learned.json"
+        for i in range(store.KEEP_SET_ASIDE + 3):
+            learned.write_text('{"broken": ' + str(i))
+            store.update_dict(learned, lambda data: data.update(ok=True))
+        copies = sorted(store.data_dir().glob("learned.json.corrupt-*"))
+        self.assertEqual(len(copies), store.KEEP_SET_ASIDE)
+        self.assertEqual(copies[-1].read_text(), '{"broken": ' + str(store.KEEP_SET_ASIDE + 2))
+
+
 if __name__ == "__main__":
     unittest.main()

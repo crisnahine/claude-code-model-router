@@ -118,15 +118,21 @@ def finished_run(session_id: str | None, key: str) -> dict | None:
     if not isinstance(run, dict) or run.get("level") not in LEVELS:
         return None
     request = store.load_entry("prompts", session_id).get("prompt_id")
-    same = run.get("prompt_id") == request if request else time.time() - (run.get("at") or 0) < REDO_WINDOW
+    same = run.get("prompt_id") == request if request else 0 <= _age(run) < REDO_WINDOW
     return run if same else None
+
+
+def _age(record: dict) -> float:
+    """Seconds since the record was written. A clock moved back makes it negative, which
+    callers read as unknown rather than as recent."""
+    return time.time() - (record.get("at") or 0)
 
 
 def refused_rewrite(session_id: str | None, key: str) -> dict | None:
     """This call's fallback rewrite, when the call shows up again before its result: the
     rewrite didn't run. A rewrite only seconds old is a copy issued alongside it."""
     rewrite = store.load_entry("pending", session_id).get(key)
-    if not isinstance(rewrite, dict) or time.time() - (rewrite.get("at") or 0) < REFUSED_AFTER:
+    if not isinstance(rewrite, dict) or 0 <= _age(rewrite) < REFUSED_AFTER:
         return None
     return rewrite
 
