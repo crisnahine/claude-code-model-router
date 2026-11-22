@@ -28,13 +28,15 @@ _CHANGE_VERB = (r"(?:add|implement|fix|change|update|refactor|rename|remove|dele
 _CHANGE = rf"\b{_CHANGE_VERB}"
 # "Do not change any files" limits a subtask; it doesn't ask for a change. The limit ends with
 # its clause, so "Without changing the API, fix the race" and "Do not stop until X is fixed"
-# keep their task. After "do not" a comma followed by another change verb is still the limit:
-# "do not add, remove or rename files".
+# keep their task. After "do not" a comma carries the limit on only before another list item,
+# a change verb that is "or"/"nor"-joined or ends within three words at a comma or "or"/"nor"
+# ("do not add, remove or rename files"); "do not ask, implement the login flow" keeps its task.
 # "Make sure" isn't here: it introduces the task, so _CHANGE skips it instead.
 _CLAUSE_WORD = r"\b(?:until|unless|before|after|while|once|but|because)\b"
 _CLAUSE = rf"(?:(?!{_CLAUSE_WORD})[^.,;:!?\n])*"
+_LIST_ITEM = rf"\s*(?:(?:or|nor)\s+{_CHANGE}|{_CHANGE}(?:\s+[\w'-]+){{0,3}}?\s*(?:,|\s(?:or|nor)\b))"
 _NEGATED = (rf"\bwithout\b{_CLAUSE}|\b(?:do not|don't|never|no need to)\b(?:\s*,)?{_CLAUSE}"
-            rf"(?:,(?=\s*(?:(?:or|and|nor)\s+)?{_CHANGE}){_CLAUSE})*")
+            rf"(?:,(?={_LIST_ITEM}){_CLAUSE})*")
 _REASONING = (r"\b(?:review|audit|analy[sz]e|debug|diagnos\w*|plan|design|prove|verify the logic|"
               r"investigat\w*|troubleshoot\w*|figure out|root.?caus\w*|reproduc\w*|bisect)\b")
 _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"

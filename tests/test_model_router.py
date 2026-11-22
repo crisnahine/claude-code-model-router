@@ -676,6 +676,15 @@ class Profile(unittest.TestCase):
         self.assertEqual(self.level("The sync job runs without retries, add backoff to the payments client."),
                          "complex")
 
+    def test_a_task_after_a_limit_and_a_comma_is_not_a_list_item(self):
+        for brief in ("Do not ask questions, implement the OAuth2 login flow.",
+                      "Do not change the tests, fix the auth bug in the login handler.",
+                      "Don't touch the public API, fix the race condition in the payments service and add a "
+                      "regression test.",
+                      "Do not commit, write the migration for the payments table.",
+                      "Do not change the tests, fix the auth bug and add a regression test."):
+            self.assertEqual(self.level(brief), "complex", brief)
+
     def test_a_huge_whitespace_run_after_a_limit_stays_fast(self):
         started = time.monotonic()
         self.level("do not" + " " * 64_000 + "x")
