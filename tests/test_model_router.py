@@ -1090,9 +1090,14 @@ class Router(Sandbox):
         self.assertEqual(gates.strong_agent({**config, "crew": {}}, "opus", None, "complex"),
                          'a subagent with model: "opus"')
 
-    def test_the_deep_solver_starts_at_hardest(self):
-        d = self.decide("model-router:deep-solver", LOOKUP)  # a shipped rule sets the level, the ladder the model
+    def test_the_deep_solver_starts_at_hardest_and_can_go_higher(self):
+        d = self.decide("model-router:deep-solver", LOOKUP)  # its name floors the level; the ladder sets the model
         self.assertEqual((d["source"], d["level"], d["model"], d["effort"]), ("router", "hardest", "opus", "high"))
+        frontier = ("Investigate the unknown root cause of intermittent data loss in the payments database across "
+                    "every service and design a fix; there is no known approach.")
+        d = self.decide("model-router:deep-solver", frontier)
+        self.assertEqual((d["level"], d["model"]), ("frontier", "fable"))
+        self.assertNotIn("model-router:deep-solver", cfg.base_config().get("agents") or {})
 
     def test_the_role_agents_are_routed_by_their_brief(self):
         for agent in ("scout", "verifier", "docs-researcher", "implementer"):

@@ -226,9 +226,5 @@
       "role": "Research-grade, open-ended tasks with no known approach"
     }
   },
-  "agents": {
-    "model-router:deep-solver": {
-      "level": "hardest"
-    }
-  }
+  "agents": {}
 }
