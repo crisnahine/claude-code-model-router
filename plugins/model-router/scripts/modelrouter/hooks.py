@@ -294,6 +294,7 @@ def agent_stopped(hook_input: dict) -> dict | None:
     message = hook_input.get("last_assistant_message")
     calls.stopped(hook_input.get("session_id"), hook_input.get("agent_id"),
                   answered=not (isinstance(message, str) and not message.strip()))
+    gates.note_agent_checks(hook_input)
     return None
 
 
