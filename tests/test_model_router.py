@@ -62,8 +62,12 @@ class Sandbox(unittest.TestCase):
             registry, "_settings_files",
             lambda project: [self.home / "settings.json", project / ".claude" / "settings.json"])
         self.no_managed.start()
+        self.managed = self.home / "managed-settings.json"
+        self.managed_file = mock.patch.object(registry, "_managed_file", lambda: self.managed)
+        self.managed_file.start()
 
     def tearDown(self):
+        self.managed_file.stop()
         self.no_managed.stop()
         self.patch.stop()
         self.tmp.cleanup()
@@ -336,9 +340,33 @@ class Registry(Sandbox):
     def test_settings_allowlist_is_discovered(self):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["sonnet", "claude-haiku-5-5"]}))
         self.assertEqual(registry.available(self.config, self.project), ["haiku", "sonnet"])
+        self.managed.write_text(json.dumps({"deniedModels": ["haiku"]}))
+        self.assertEqual(registry.available(self.config, self.project), ["sonnet"])
+
+    def test_allowlists_from_user_and_project_settings_are_concatenated(self):
+        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["opus"]}))
+        (self.project / ".claude").mkdir()
+        (self.project / ".claude" / "settings.json").write_text(json.dumps({"availableModels": ["claude-sonnet-5"]}))
+        self.assertEqual(registry.available(self.config, self.project), ["sonnet", "opus"])
+
+    def test_a_managed_allowlist_applies_alone(self):
+        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["opus"]}))
+        self.managed.write_text(json.dumps({"availableModels": ["sonnet"]}))
+        self.assertEqual(registry.available(self.config, self.project), ["sonnet"])
+
+    def test_an_empty_managed_allowlist_permits_nothing(self):
+        self.managed.write_text(json.dumps({"availableModels": []}))
+        self.assertEqual(registry.permitted(self.config, self.project), set())
+
+    def test_denied_models_match_any_spelling_of_a_family(self):
+        self.managed.write_text(json.dumps({"deniedModels": ["claude-opus-5-5", "best", "default"]}))
+        self.assertEqual(registry.available(self.config, self.project), ["haiku", "sonnet", "fable"])
+
+    def test_denied_models_outside_managed_settings_are_ignored(self):
+        (self.home / "settings.json").write_text(json.dumps({"deniedModels": ["opus"]}))
         (self.project / ".claude").mkdir()
         (self.project / ".claude" / "settings.json").write_text(json.dumps({"deniedModels": ["haiku"]}))
-        self.assertEqual(registry.available(self.config, self.project), ["sonnet"])
+        self.assertEqual(registry.available(self.config, self.project), ["haiku", "sonnet", "opus", "fable"])
 
     def test_an_allowlist_that_excludes_everything_is_ignored(self):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["some-other-model"]}))
