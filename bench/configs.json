@@ -124,6 +124,17 @@
     "price_model": "haiku"
   },
   {
+    "id": "haiku-high",
+    "description": "No plugin: every subagent on haiku at high effort (CLAUDE_CODE_SUBAGENT_EFFORT=high)",
+    "plugin": false,
+    "env": {
+      "CLAUDE_CODE_SUBAGENT_MODEL": "haiku",
+      "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
+      "CLAUDE_CODE_SUBAGENT_EFFORT": "high"
+    },
+    "price_model": "haiku"
+  },
+  {
     "id": "sonnet",
     "description": "No plugin: every subagent on sonnet (CLAUDE_CODE_SUBAGENT_MODEL=sonnet, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1)",
     "plugin": false,
@@ -166,12 +177,34 @@
     "price_model": "opus"
   },
   {
+    "id": "opus-high",
+    "description": "No plugin: every subagent on opus at high effort (CLAUDE_CODE_SUBAGENT_EFFORT=high)",
+    "plugin": false,
+    "env": {
+      "CLAUDE_CODE_SUBAGENT_MODEL": "opus",
+      "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
+      "CLAUDE_CODE_SUBAGENT_EFFORT": "high"
+    },
+    "price_model": "opus"
+  },
+  {
     "id": "fable",
     "description": "No plugin: every subagent on fable (CLAUDE_CODE_SUBAGENT_MODEL=fable, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1); needs Fable access",
     "plugin": false,
     "env": {
       "CLAUDE_CODE_SUBAGENT_MODEL": "fable",
       "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"
+    },
+    "price_model": "fable"
+  },
+  {
+    "id": "fable-high",
+    "description": "No plugin: every subagent on fable at high effort (CLAUDE_CODE_SUBAGENT_EFFORT=high); needs Fable access",
+    "plugin": false,
+    "env": {
+      "CLAUDE_CODE_SUBAGENT_MODEL": "fable",
+      "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
+      "CLAUDE_CODE_SUBAGENT_EFFORT": "high"
     },
     "price_model": "fable"
   },

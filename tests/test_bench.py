@@ -114,6 +114,39 @@ class Analysis(unittest.TestCase):
         self.assertIn("bugfix: FAIL", sonnet_part)
         self.assertNotIn("$0.9000", sonnet_part)
 
+    def test_the_page_reports_latency_cache_level_accuracy_and_escalation(self):
+        real = json.loads((ROOT / "bench" / "results" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
+        usage = {"m": {"inputTokens": 10, "cacheReadInputTokens": 80, "cacheCreationInputTokens": 10}}
+        first = {"agent": "model-router:implementer", "level": "standard", "escalated_from": None}
+        redo = {"agent": "general-purpose", "level": "complex", "escalated_from": "standard"}
+        base = dict(real, main_model="sonnet", models=usage)
+        router = [dict(base, config="plugin", wall_ms=10000, passed=True, routed=[first]),
+                  dict(base, config="plugin", wall_ms=20000, passed=False, routed=[first, redo]),
+                  dict(base, config="plugin", wall_ms=40000, passed=True)]  # recorded before `routed`
+        # Recorded before `wall_ms`: Claude Code's duration_ms alone is not taken as wall time.
+        plain = [dict(base, config="defaults", duration_ms=5000, passed=True) for _ in range(2)]
+        for r in router[2:] + plain:
+            r.pop("routed", None)
+        with tempfile.TemporaryDirectory() as tmp:
+            res = Path(tmp) / "results"
+            res.mkdir()
+            (res / "a-bugfix-2026-11-22.jsonl").write_text("".join(json.dumps(r) + "\n" for r in router + plain))
+            out = Path(tmp) / "page.md"
+            analyze.main([str(res / "a-bugfix-2026-11-22.jsonl"), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        metrics = page.split("### Run metrics")[1].split("##")[0]
+        row = next(line for line in metrics.splitlines() if line.startswith("| bugfix "))
+        # Nearest-rank p50 and p90 of 10, 20 and 40 s; cache reads 80 of 100 input tokens.
+        self.assertIn("p50 20 s, p90 40 s, cache 80%, accuracy by level: standard 1/2 (2 of 3 runs), "
+                      "escalated 1 of 3 spawns", row)
+        self.assertIn("latency n/a, cache 80%, not routed", row)
+        self.assertIn("1 router run(s) here carry no `routed`", page)
+        self.assertIn("2 run(s) here carry no `wall_ms`", page)
+        never = next(line for line in page.splitlines() if line.startswith("Defined in `bench/configs.json` but"))
+        for name in ("`haiku-high`", "`opus-high`", "`fable-high`", "`sonnet-high`"):
+            self.assertIn(name, never)
+        self.assertNotIn("`defaults`", never)
+
     def test_the_page_names_set_aside_runs_agent_spend_and_batches(self):
         real = [json.loads(line) for line in (ROOT / "bench" / "results" / "m6-05-bugfix-2026-11-22.jsonl")
                 .read_text(encoding="utf-8").splitlines() if line]
@@ -461,11 +494,15 @@ class SuiteCoverage(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--model") + 1], "opusplan")
         cmd, env = run.command("x", configs["advisor"], options, {})
         self.assertEqual((cmd[cmd.index("--model") + 1], cmd[cmd.index("--advisor") + 1]), ("sonnet", "opus"))
-        for name, effort in (("sonnet-medium", "medium"), ("sonnet-high", "high")):
+        for name, model, effort in (("sonnet-medium", "sonnet", "medium"), ("sonnet-high", "sonnet", "high"),
+                                    ("haiku-high", "haiku", "high"), ("opus-high", "opus", "high"),
+                                    ("fable-high", "fable", "high")):
             cmd, env = run.command("x", configs[name], options, {})
             self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"],
-                              env["CLAUDE_CODE_SUBAGENT_EFFORT"]), ("sonnet", "1", effort))
+                              env["CLAUDE_CODE_SUBAGENT_EFFORT"]), (model, "1", effort), name)
             self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)  # that one would move the main loop too
+            self.assertNotIn("--plugin-dir", cmd)
+            self.assertEqual(configs[name]["price_model"], model)
         cmd, env = run.command("x", configs["fable"], options, {})
         self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "fable")
         for config in configs.values():
@@ -552,7 +589,9 @@ if "--version" in sys.argv:
     print("9.9.9 (stub)"); sys.exit(0)
 data = Path(os.environ["CLAUDE_CODE_PLUGIN_CACHE_DIR"]) / "data" / "model-router-inline"
 data.mkdir(parents=True)
-rows = [{"event": "spawn", "agent": "model-router:implementer"},
+rows = [{"event": "spawn", "agent": "model-router:implementer", "level": "standard", "model": "sonnet",
+         "effort": "medium", "escalated_from": None, "reason": "standard subtask"},
+        {"event": "spawn", "agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"},
         {"event": "usage", "agent_id": "a1", "cost_usd": 0.05}, {"event": "usage", "agent_id": "a2", "cost_usd": 0.01},
         {"event": "usage", "agent_id": None, "cost_usd": 0.03}, {"event": "usage", "agent_id": "a1", "cost_usd": 0.02}]
 (data / "ledger.jsonl").write_text("\\n".join(json.dumps(r) for r in rows))
@@ -561,7 +600,10 @@ sub = folder / "s1" / "subagents"
 sub.mkdir(parents=True)
 (sub / "agent-a1.meta.json").write_text(json.dumps({"agentType": "model-router:implementer"}))
 (sub / "agent-a2.meta.json").write_text(json.dumps({"agentType": "model-router:verifier"}))
-print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.11, "modelUsage": {}}))
+import time
+time.sleep(0.3)  # Claude Code's own duration_ms can leave time out
+print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.11, "modelUsage": {},
+                  "duration_ms": 1}))
 '''
 
 
@@ -592,6 +634,13 @@ class AgentCosts(unittest.TestCase):
                 row = run.run_one(task, run.load_configs()[0], options, {})
         self.assertEqual(row["agent_costs"], {"model-router:implementer": 0.07, "model-router:verifier": 0.01,
                                               "main": 0.03})
+        self.assertEqual(row["duration_ms"], 1)
+        self.assertGreaterEqual(row["wall_ms"], 300)  # the runner's own clock around the claude process
+        # A spawn row from a router that doesn't log escalated_from keeps it unknown, not None.
+        self.assertEqual(row["routed"], [
+            {"agent": "model-router:implementer", "level": "standard", "model": "sonnet", "effort": "medium",
+             "escalated_from": None},
+            {"agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"}])
 
 
 @unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")

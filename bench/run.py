@@ -173,6 +173,26 @@ def agent_costs(work: Path, env: dict) -> dict | None:
     return spend
 
 
+ROUTED_KEYS = ("agent", "level", "model", "effort", "escalated_from")
+
+
+def routed(env: dict) -> list | None:
+    """A router run's spawn decisions, in order, from its ledger. A key the router didn't log stays out, so an
+    older router's missing escalated_from reads as unknown rather than as no escalation."""
+    ledger = plugin_data_dir(env) / "ledger.jsonl"
+    if not ledger.is_file():
+        return None
+    out = []
+    for line in ledger.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if row.get("event") == "spawn":
+            out.append({k: row[k] for k in ROUTED_KEYS if k in row})
+    return out
+
+
 def _forget_session(folder: Path) -> bool:
     # Only a folder named after one of the bench's own scratch copies is ever removed.
     if "-mrbench-" not in folder.name or not folder.is_dir():
@@ -215,11 +235,14 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
                        {**options, "plugins_root": str(scratch / "plugins")}, dict(os.environ))
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     plugin_state = state_hashes(plugin_data_dir(env)) if config.get("plugin") else None
+    clock = time.monotonic()
     try:
         proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=options["timeout"])
         stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
     except subprocess.TimeoutExpired as exc:
         stdout, stderr, code = _text(exc.stdout), "timed out", None
+    # The run's wall time: Claude Code's own duration_ms can fall short of it.
+    wall_ms = round((time.monotonic() - clock) * 1000)
     try:
         result = json.loads(stdout)
     except ValueError:
@@ -232,6 +255,7 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
     except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
         passed = False
     costs = agent_costs(work, env) if config.get("plugin") else None
+    spawns = routed(env) if config.get("plugin") else None
     kept = None
     if options.get("keep"):
         # The work the run left, its answer, the router's own data and ledger, and the session's transcripts.
@@ -252,13 +276,13 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
         "started_at": started, "claude_version": options["claude_version"],
         "main_model": config.get("model", options["model"]),
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
-        "plugin_state": plugin_state, "agent_costs": costs, "plugin_ref": config.get("plugin_ref"), "plugin_data_own": True, "sessions_saved": True, "session_dir_removed": session_removed,
+        "plugin_state": plugin_state, "agent_costs": costs, "routed": spawns, "plugin_ref": config.get("plugin_ref"), "plugin_data_own": True, "sessions_saved": True, "session_dir_removed": session_removed,
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
         "api_error_status": result.get("api_error_status"),
         # Without a result the cost is unknown; count the whole budget so totals never understate spend.
         "total_cost_usd": cost if isinstance(cost, (int, float)) else options["budget"],
         "cost_known": isinstance(cost, (int, float)),
-        "duration_ms": result.get("duration_ms"), "num_turns": result.get("num_turns"),
+        "duration_ms": result.get("duration_ms"), "wall_ms": wall_ms, "num_turns": result.get("num_turns"),
         "models": models, "prices": {name: prices.get(name) for name in models},
         "subagents": {k: agents.get(k) for k in ("spawned", "completed", "failed", "by_type")},
         "permission_denials": [d.get("tool_name") for d in result.get("permission_denials") or []],
