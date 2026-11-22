@@ -198,7 +198,7 @@ def user_prompt(hook_input: dict) -> dict | None:
     below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
     wanted = named_model(config, prompt)
     store.save_entry("prompts", session_id, {
-        "prompt_id": hook_input.get("prompt_id"), "level": level, "need": need, "need_effort": pick.effort,
+        "prompt_id": hook_input.get("prompt_id"), "level": level, "need": need,
         "below": below,
         "session_tier": current, "named": wanted})
     why = f" (wording suggests: {', '.join(result['signals'])})" if result["signals"] else ""
@@ -210,7 +210,7 @@ def user_prompt(hook_input: dict) -> dict | None:
         notes.append(
             f"This request looks {level}{why}: about {need}-level reasoning, and this conversation runs on "
             f"{current}. Hand the hard thinking (design, root cause, the risky decision) to "
-            f"{gates.strong_agent(config, need, pick.effort, level)} rather than settling it inline"
+            f"{gates.strong_agent(config, need, level)} rather than settling it inline"
             f"{'; you will be asked to before finishing' if options.strong_agent_gate else ''}. "
             "If the code shows the task is simpler, say so instead."
         )

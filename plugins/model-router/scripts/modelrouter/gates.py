@@ -83,14 +83,14 @@ def checks_ran_since(transcript_path: object, since: float) -> bool:
     return False
 
 
-def strong_agent(config: dict, need: str, effort: str | None = None, level: str | None = None) -> str:
-    """The role agent to hand hard thinking to, with the level's model and effort named on the
-    call: the role agents carry neither, and the router keeps both when the caller names them."""
-    named = f'model: "{need}"' + (f' and effort: "{effort}"' if effort else "")
+def strong_agent(config: dict, need: str, level: str | None = None) -> str:
+    """The role agent to hand hard thinking to, by name only: the router routes its brief with the
+    role's floor and a redo still climbs, which a model named on the call would stop. Only with no
+    role agent does the needed model go on the call."""
     name = "deep-solver" if level == "frontier" else "architect"
     if name not in (config.get("crew") or {}):
-        return f"a subagent with {named}"
-    return f"{cfg.PLUGIN_NAME}:{name} with {named}"
+        return f'a subagent with model: "{need}"'
+    return f"{cfg.PLUGIN_NAME}:{name}"
 
 
 def escalation(config: dict, hook_input: dict) -> str | None:
@@ -115,7 +115,7 @@ def escalation(config: dict, hook_input: dict) -> str | None:
     return (
         f"This request was estimated as {entry.get('level')}, which needs about {need}-level reasoning, and "
         f"this conversation runs on {current}. No {need}-level agent has looked at it. Before finishing, give "
-        f"the task and your result to {strong_agent(config, need, entry.get('need_effort'), entry.get('level'))} "
+        f"the task and your result to {strong_agent(config, need, entry.get('level'))} "
         "to check and improve, then give the user "
         "the reconciled answer. If the task turned out to be simple and the estimate was wrong, say so in "
         "one line and finish."
