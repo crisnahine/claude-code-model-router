@@ -153,22 +153,32 @@ def set_aside() -> list[Path]:
     return sorted(data_dir().glob("*.corrupt-*"))
 
 
+def file_status(path: Path) -> str:
+    """How a state file reads: ok, corrupt, newer or unreadable."""
+    return _read_state(path)[1]
+
+
 def newer_files() -> list[Path]:
     """State files a later release wrote, which this one reads but never updates."""
-    return [p for p in sorted(data_dir().glob("*.json")) if _read_state(p)[1] == "newer"]
+    return [p for p in sorted(data_dir().glob("*.json")) if file_status(p) == "newer"]
 
 
-def update_dict(path: Path, change: Callable[[dict], Any]) -> dict:
+def try_update(path: Path, change: Callable[[dict], Any]) -> tuple[dict, bool]:
     """Load one state file, let `change` edit it in place, and save it, under its lock.
     A file that fails to parse is moved aside first; one from a newer release, or one
-    that can't be read or moved, is never written. Saved compact, with its version."""
+    that can't be read or moved, is never written. Saved compact, with its version.
+    Returns the data and whether it was saved."""
     with locked(path):
         data, status = _read_state(path)
         writable = status == "ok" or (status == "corrupt" and _set_aside(path))
         change(data)
         if writable:
             write_atomic(path, json.dumps({**data, "schema": SCHEMA}, separators=(",", ":"), sort_keys=True))
-        return data
+        return data, writable
+
+
+def update_dict(path: Path, change: Callable[[dict], Any]) -> dict:
+    return try_update(path, change)[0]
 
 
 def state_path() -> Path:
