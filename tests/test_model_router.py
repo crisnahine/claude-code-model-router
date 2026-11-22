@@ -2449,5 +2449,28 @@ class MachineReadable(Sandbox):
         self.assertEqual(data["newer_files"], [str(newer)])
 
 
+class PriceTable(unittest.TestCase):
+    """Prices from https://platform.claude.com/docs/en/about-claude/pricing.md (checked 2026-11-22)."""
+
+    # The pricing page lists no rate for this one.
+    UNLISTED = {"claude-mythos-preview"}
+
+    def test_every_model_still_in_service_has_a_price(self):
+        config = cfg.load_config()
+        lifecycle = json.loads((ROOT / "compat" / "baseline.json").read_text(encoding="utf-8"))["lifecycle"]
+        missing = [model for model, info in lifecycle.items()
+                   if info.get("state") in ("Active", "Deprecated") and model not in self.UNLISTED
+                   and registry.price(config, model) is None]
+        self.assertEqual(missing, [])
+
+    def test_mythos_is_priced_like_its_fable_twin(self):
+        config = cfg.load_config()
+        for version, rates in (("5-2", (8, 40, 0.2, 10, 16)), ("5-1", (10, 50, 0.25, 12.5, 20)),
+                               ("5", (10, 50, 1, 12.5, 20))):
+            price = registry.price(config, f"claude-mythos-{version}")
+            self.assertEqual(tuple(price[k] for k in ("input", "output", "cache_read", "cache_write",
+                                                      "cache_write_1h")), rates, version)
+
+
 if __name__ == "__main__":
     unittest.main()
