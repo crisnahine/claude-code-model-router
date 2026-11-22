@@ -220,11 +220,30 @@ The top-level `schema` key is `<shape>/<version>`. A new key keeps the version, 
 | `levels` | Levels the feedback loop has data for: `level`, `routed_calls`, `votes_too_low`, `raised` |
 | `doc_aliases`, `not_in_registry` | Model aliases in the current docs, and the families among them the registry lacks |
 | `set_aside`, `newer_files` | Paths of state files set aside because they could not be read, and of state files a newer release wrote, which are only read (see State) |
+| `newer_config` | Paths of `model-router.json` overrides written for a newer release, of which only the settings this release understands apply (see Compatibility) |
+
+## Compatibility
+
+Every shape a setup or a script depends on carries a version, so a release can change one without breaking what is already written:
+
+| Shape | Version | Where |
+| :- | :- | :- |
+| State files | Top-level `schema`, a whole number | `store.SCHEMA` and `store.MIGRATIONS` (see State) |
+| `config/models.json` and `model-router.json` overrides | Top-level `schema`, a whole number, now 1. A file without it is version 1, the 0.1.0 shape | `config.CONFIG_SCHEMA` |
+| `--json` output | `schema` as `<shape>/<version>` | `report.py` (see Machine-readable output) |
+| Plugin options | The plugin's own version | `userConfig` in `.claude-plugin/plugin.json` |
+
+A breaking change is one that makes an existing file, option or reader behave differently: removing or renaming a key or an option, changing a key's type or meaning, or accepting fewer values. Adding an optional key, option or value is not. A breaking change to the override shape bumps `CONFIG_SCHEMA`, and `config.py` reads every older version into the new one, so old overrides keep working. Dropping an old version is itself a breaking change of the plugin: it needs a new major version and a CHANGELOG entry, and until then every older shape is read.
+
+An override written for a newer release is read, not refused: the settings this release understands apply, the rest are ignored, and `/model-router:models` names the file. Refusing it would be worse, because a newer file that sets `routing_mode: off` would turn routing back on. A state file from a newer release is handled the other way round, read but never written, because writing it would drop what this release can't see.
+
+Plugin options have no version key of their own, since `userConfig` has Claude Code's shape (https://code.claude.com/docs/en/plugins-reference.md). They follow the plugin's version: within a major version an option is never removed or renamed, and the values it accepts only grow.
 
 ## What is out of reach, or left alone on purpose
 
 - The main conversation's model, by choice (see above).
 - Forks. A fork reads its parent's cache and always runs on its parent's model.
+- Skills with `context: fork`. Their subagent starts without an `agent.spawn` event, so it isn't routed. Its model comes from the skill's `model` field, else from its agent type and the session.
 - Agents with no definition on disk that the engine didn't make (command-line agents), unless `agent_pins` is `override`.
 - Answer quality. The profile is an estimate from the brief's wording and the agent's name. Redo escalation and the feedback loop react to what Claude redoes. Neither measures whether an answer was right.
 - Sessions where hooks are disabled by `disableAllHooks` or `allowManagedHooksOnly`. Where an organization doesn't load user mods, routing falls back to the `Agent` call and workflow stages and teammates aren't routed.
@@ -245,5 +264,10 @@ On Claude Code 2.1.330, with the plugin loaded from disk, in headless sessions a
 - In the interactive auto-mode session, no spawn was denied, and each subagent's first request already carried its routed effort.
 - Three copies of one lookup brief, started in one message and run in the background, all ran on Haiku at low effort. The same call re-issued after its background run had finished ran on Sonnet at high.
 - Agent-team teammates: an interactive auto-mode session in tmux, with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` (https://code.claude.com/docs/en/agent-teams.md) and a Haiku lead started as `claude --model haiku --teammate-mode in-process --setting-sources project --plugin-dir <plugin>`, with `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` unset, so an installed copy of the plugin and a forced subagent model stay out. Two teammates with no agent type, one given a file-listing brief and one a race-condition review, reached `agent.spawn` as teammates and ran on Haiku at low effort and on Opus at high. Every request in each teammate's transcript carried that model and effort. Two teammates on this plugin's pinned scout and architect kept their models. The run cost $0.61 at list price, $0.57 of it the two Opus reviews.
+- Skills, plan mode and `disableAllHooks` (2026-11-22, headless `claude -p --model haiku --setting-sources project --plugin-dir <plugin>`, a scratch project with its own skills, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, the parent session's `CLAUDE_CODE_*` variables left out; $0.07 at list price in all). `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` was added after the inline run, so the user's `CLAUDE.md` loaded in that one. The runs shared the plugin data dir that other `--plugin-dir` sessions on the machine use, and their ledger rows were picked out by session id:
+  - An inline skill invoked as `/hard-inline`, whose body asks for a risky concurrency fix, ran every request at the session's default medium effort, per its transcript. The turn's prompt is the command: its transcript row is the `<command-message>` line, which `is_user_prompt` rejects because it starts with `<`, and the bare `/hard-inline` profiles as a lookup, which raises nothing. The skill's body arrives as a separate meta message the router doesn't profile, so a hard inline skill typed as a command gets no main-loop raise.
+  - A skill with `context: fork` and `agent: general-purpose` ran its subagent on the session's model, Haiku, and wrote no spawn row: the engine starts it as a forked slash command without an `agent.spawn` event, so it isn't routed. Its usage is still logged. The skill's own `model` and `effort` fields are what set it (https://code.claude.com/docs/en/skills.md#run-skills-in-a-subagent).
+  - In `--permission-mode plan`, a general-purpose subagent given a file-listing brief was routed as before, to Haiku at low effort, and its transcript shows Haiku. The only permission decisions were the engine's; the router answers none. The main loop ran on Sonnet, the plan-mode upgrade of a Haiku session (https://code.claude.com/docs/en/model-config.md#opusplan-model-setting).
+  - With `"disableAllHooks": true` in the project's `.claude/settings.json`, the debug log says the plugin's hooks module was not loaded ("only managed plugins and built-in plugins run"), no ledger row was written, and the session and its subagent worked on the session's model (https://code.claude.com/docs/en/settings-reference.md#disableallhooks).
 
 On the `Agent` call path: a Sonnet session in default and interactive auto mode routed a lookup to Haiku and a security review to Opus; another installed plugin's agents were routed the same way; a cap of Sonnet lowered a Fable agent; a rejected rewrite ran untouched on the retry; and on 2.1.270 the rewrite applied and the agent ran on Haiku.

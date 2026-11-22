@@ -140,6 +140,8 @@ Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours
 
 Your own file is trusted in full. A project's file can turn routing down to `advise` or `off`, set rules for agents and add models. It can't turn routing on for someone who switched it off, re-rank a model that ships with the plugin or that you defined, or get any model past your cap.
 
+A file may carry `"schema": 1`, the version of this shape; without it, it is read as version 1. A file written for a newer release still loads: the settings this release understands apply, and `/model-router:models` names the file. Older shapes keep working after an update ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#compatibility)).
+
 ## What it can't do
 
 These limits come from what Claude Code lets a plugin do, or from choices made to protect quality and cost.
@@ -165,7 +167,7 @@ Organization allowlists: `availableModels` and `deniedModels` are read the way C
 
 Third-party providers: routing uses the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves for your provider. An alias your provider lacks fails or is substituted, and is then routed around. The main conversation's effort is left alone wherever an effort change re-reads the context uncached: on Bedrock, Vertex and Foundry, behind `ANTHROPIC_BASE_URL`, with `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set, and on a session model it knows is older than Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5. When the model isn't known, as after `/clear`, effort is raised as usual.
 
-Versions: needs Claude Code 2.1.292 for per-call effort. Mods need 2.1.287 and were tested live on 2.1.330: subagents, workflow agents, agent-team teammates (in-process, in an interactive session), effort per request, effort only under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, and the spend log.
+Versions: needs Claude Code 2.1.292 for per-call effort. Mods need 2.1.287 and were tested live on 2.1.330: subagents, workflow agents, agent-team teammates (in-process, in an interactive session), plan mode, effort per request, effort only under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, and the spend log.
 
 Failure handling: every hook and every mod hook fails open. A bug in this plugin can cost routing but can't block a tool call, a spawn or a session. State files are written atomically and under a lock, so agents started together don't overwrite each other's records.
 
