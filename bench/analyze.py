@@ -307,6 +307,42 @@ def _notes(rows: list[dict], files: list[Path]) -> list[str]:
     return lines
 
 
+def _jsonl(paths) -> list[dict]:
+    return [json.loads(line) for p in sorted(paths) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _archived(files: list[Path], rows: list[dict]) -> list[str]:
+    """Each folder of rows kept under results/archive/, which no table reads, and why its rows are left out."""
+    commits = {r.get("bench_commit") for r in rows}
+    revisions = {t["id"]: t.get("revision", 1) for t in run.load_tasks()}
+    lines = []
+    for results in sorted({f.parent for f in files}):
+        archive = results / "archive"
+        folders = sorted({archive, *(p for p in archive.glob("*") if p.is_dir())}) if archive.is_dir() else []
+        for folder in folders:
+            kept = _jsonl(folder.glob("*.jsonl"))
+            if not kept:
+                continue
+            aside = len(_jsonl([*folder.glob("infra/*.jsonl"), *folder.glob("limited/*.jsonl")]))
+            other = [r for r in kept if r.get("bench_commit") not in commits]
+            stale = sorted({r["task"] for r in kept if r.get("task_revision", 1) < revisions.get(r.get("task"), 1)})
+            reasons = []
+            if other:
+                reasons.append(f"{len(other)} ran on {len({r.get('bench_commit') for r in other})} other commits "
+                               "(older builds of the router and the bench)")
+            if stale:
+                n = sum(r.get("task_revision", 1) < revisions.get(r.get("task"), 1) for r in kept)
+                reasons.append(f"{n} on an earlier revision of " + ", ".join(f"`{t}`" for t in stale))
+            unnamed = sum("task_revision" not in r for r in kept)
+            if unnamed:
+                reasons.append(f"{unnamed} were recorded while the run's folder name held its task id")
+            listed = (", ".join(reasons[:-1]) + ", and " + reasons[-1]) if len(reasons) > 1 else "".join(reasons)
+            lines.append(f"- `bench/results/{folder.relative_to(results).as_posix()}/` holds {len(kept)} rows left out "
+                         "of every table" + (f", plus {aside} set-aside line{'s' * (aside != 1)} under its `infra/` and "
+                                             "`limited/`" if aside else "") + (f": {listed}." if listed else "."))
+    return lines + [""] if lines else []
+
+
 def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
     total = sum(r["total_cost_usd"] for r in rows)
     versions = sorted({r["claude_version"] for r in rows})
@@ -417,6 +453,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         "and passes on a reference answer (`tests/test_bench.py`).", "",
         "## Raw data and commands", "",
         *[f"- [`bench/results/{f.name}`](../bench/results/{f.name})" for f in files], "",
+        *_archived(files, rows),
         "```bash",
         "python3 bench/run.py --tasks <ids> --configs <ids> --runs <n> --budget 0.5 --max-total <usd> "
         "--out bench/results/<name>.jsonl",
