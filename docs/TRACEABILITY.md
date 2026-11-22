@@ -1,8 +1,8 @@
 # Requirement traceability
 
-One row per requirement the project holds itself to, numbered by the section of the maintainer's project brief it comes from (Sections 2 to 14). Checked on 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `ea8bf9a`, on Claude Code 2.1.330. The CI evidence is the run on `8ec8eec`; nothing after it has run in CI yet.
+One row per requirement the project holds itself to, numbered by the section of the maintainer's project brief it comes from (Sections 2 to 14). Checked on 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `fcce17a`, on Claude Code 2.1.330. The CI evidence is the run on `8ec8eec`; nothing after it has run in CI yet.
 
-Summary: 119 PASS, 37 PARTIAL, 0 FAIL, 1 BLOCKED, 157 requirements.
+Summary: 124 PASS, 32 PARTIAL, 0 FAIL, 1 BLOCKED, 157 requirements.
 
 The line above is counted by `python3 tools/traceability.py`, never by hand. `tests/test_traceability.py` fails when it disagrees with the rows. After changing a status, run the script and paste its output over that line.
 
@@ -94,8 +94,8 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S5.2 | The mod stays thin and hands every decision to the runtime | Mod forwards events | `hooks/router.ts` | Inspection | One decision stays in the mod: `turn.step` compares effort ranks so the main loop's effort only rises | PARTIAL |
 | S5.3 | The launcher works on `sh` and on Windows | `model-router.sh` | `scripts/model-router.sh` | Unit, CI | `Launcher.test_launcher_runs_hooks_and_commands` passed on windows-latest 3.13 in CI main (log checked) | PASS |
 | S5.4 | Components match `GLOSSARY.md`; a term is added for every named module or concept | Glossary of 33 terms | `GLOSSARY.md` | Inspection | An entry for each module's concept (profile, signal, registry, override file, decision, session model, ladder, pick, pin, cap, priority, routing mode, allowlist, model health, main-loop effort, fork, call, spawn, path, redo, vote, ledger, spend, gate, schema, set aside, upstream) and the benchmark's terms (baseline, pass check, cost per solved task, pilot), each checked against the code | PASS |
-| S5.5 | No dead code, duplicated logic or unjustified abstraction | Dead-code trim before 0.1.0 | `scripts/modelrouter/` | Review | Not rechecked in this pass | PARTIAL |
-| S5.6 | Documented interfaces only; undocumented binary behaviour recorded and covered live | Research doc records binary checks and UNCONFIRMED items | `docs/research/model-control.md` | Inspection, live | `agent.spawn` fields from a binary check, covered by live 2.1.330 on macOS only | PARTIAL |
+| S5.5 | No dead code, duplicated logic or unjustified abstraction | Dead-code trim before 0.1.0; a recheck after the later changes | `scripts/modelrouter/` | Review, script | An AST scan of every module on 2026-11-22 found no top-level name, import or local that nothing uses, and no two functions with the same body. `profile.py`'s word lists now share `_JUDGMENT_VERBS` and `_HUNT_VERBS` instead of repeating them; the old and new module agree on every pattern and on `profile_prompt` and `profile_call` over 22,813 texts (the 219 corpus briefs, the test file's strings and 20,000 generated briefs), and dropping one word from the new lists gave 648 differences. Tests and the corpus line are the same before and after | PASS |
+| S5.6 | Documented interfaces only; undocumented binary behaviour recorded and covered live | Research doc cites the mod API types and records what is still UNCONFIRMED | `docs/research/model-control.md` | Inspection, live | `agent.spawn`'s fields, which keys a rewrite changes and its full-ID `model` now cite `[mod-types]` (`AgentSpawnInput`, `AgentSpawnResult`), and `turn.step`'s model and effort `TurnStepInput`; forked skills are recorded from the live 2.1.330 run. One claim still rests on the binary: a null from `$.session.authorize()` in the desktop app ("Apps gateway"), with no Desktop live run (S3.7) | PARTIAL |
 
 ## Section 6: enterprise and future-proofing
 
@@ -130,9 +130,9 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | ID | Requirement | Implementation | Source | Verification | Evidence | Status |
 | :- | :- | :- | :- | :- | :- | :- |
 | S8.1 | The state documents exist: traceability, release readiness, roadmap | This file, `RELEASE_READINESS.md`, `ROADMAP.md` | `docs/` | Unit | `tests/test_traceability.py` | PASS |
-| S8.2 | Documentation and install steps true to the code | README, ARCHITECTURE, CHANGELOG | repo docs | Inspection | `CHANGELOG.md` 0.1.0 says unit tests ran on Python 3.9, 3.10 and 3.13; `ci.yml` runs 3.9 and 3.13 only | PARTIAL |
+| S8.2 | Documentation and install steps true to the code | README, ARCHITECTURE, CHANGELOG | repo docs | Inspection | `CHANGELOG.md` 0.1.0 now says the unit tests ran on Python 3.9 and 3.13, the `ci.yml` matrix and the release run (TEST_RESULTS "CI on `main`") | PASS |
 | S8.3 | Security and reliability testing repeated after each significant change | Unit tests, among them the skills' permission grants | `tests/` | Unit | `SecurityClaims` class: a repository file keeps only `routing_mode`, `models`, `levels` and `agents`; the weakest `routing_mode` wins; a project model can't take a trusted name or count under a cap; writes land only under the data directory; no tool call is approved; only `upstream.py` opens connections, to the three named hosts; the API key stays out of `repr` and state. It also pins `SkillGrants.test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files` and `Upstream.test_the_api_key_never_follows_a_redirect`. All of it runs in the unit gate on every change | PASS |
-| S8.4 | Dogfood: the team's subagents run through the router and the ledger is read as evidence | Plugin loaded in team sessions | n/a | n/a | The ledger was not read in this pass | PARTIAL |
+| S8.4 | Dogfood: the team's subagents run through the router and the ledger is read as evidence | Plugin loaded in team sessions | `docs/TEST_RESULTS.md` | Ledger | TEST_RESULTS "Dogfood ledger": 400 rows, 16 sessions, 45 spawns on the mod path (40 kept under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` with the role agent's own effort, 5 rewritten), every result on the asked family, no redo, 298 usage rows all priced. No routing error; model choice exercised on 4 calls | PASS |
 
 ## Section 9: quality assurance
 
@@ -163,7 +163,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S10.10 | CI green on the release PR and on the merge commit in `main` before tagging | Release checklist | `RELEASING.md` | CI | PR run 45004814197 passed; main run 45004998622 passed at 08:56 UTC; `v0.1.0` points at `8ec8eec`, released 08:57 UTC | PASS |
 | S10.11 | Reproducible cost and quality results | Benchmark harness and pilot | `bench/`, `docs/BENCHMARKS.md` | Pilot | A 12-run pilot, every row PARTIAL. The full suite, 16 tasks under 10 configurations, 10 runs each: 1,600 runs and about $176 at list price ([BENCHMARKS.md](BENCHMARKS.md) "The full suite"), waits on the maintainer | PARTIAL |
 | S10.12 | A security assessment | [SECURITY.md](SECURITY.md): who can influence routing, the network, credentials, state files, the mod, skills, workflows and open items | `docs/SECURITY.md` | Inspection | Each claim names the module and the function, class or constant it was checked against on 2026-11-22, not a line number | PASS |
-| S10.13 | Professional documentation and install steps, README at release polish with SVG diagrams | README with three SVG diagrams in "How it works" | `README.md`, `docs/assets/` | Unit, inspection | `ReadmeDiagrams` class (6 tests). The 0.1.0 changelog's Python claim still stands (S8.2) | PARTIAL |
+| S10.13 | Professional documentation and install steps, README at release polish with SVG diagrams | README with three SVG diagrams in "How it works" | `README.md`, `docs/assets/` | Unit, inspection | `ReadmeDiagrams` class (6 tests); the changelog's Python claim is corrected (S8.2) | PASS |
 
 ## Section 11: final delivery
 
@@ -228,7 +228,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S13.3 | The launcher is `sh` and harmless without Python | See S5.3, S12.23 | `scripts/model-router.sh` | Unit | `Launcher` class: a too-old or broken interpreter falls through, and with none new enough hooks pass and commands explain; `NoPython` class: with only `sh` on `PATH`, every hook exits 0 and commands explain | PASS |
 | S13.4 | Tests on the oldest and newest Python CI covers, on Linux, macOS and Windows; pin an image rather than drop a version | CI matrix | `.github/workflows/ci.yml` | CI | CI main | PASS |
 | S13.5 | Network only to the hosts the README names, only from the daily check | See S6.10 | `scripts/modelrouter/upstream.py` | Grep | Hosts match README "Install" | PASS |
-| S13.6 | No external project, library, benchmark or tool cited without a primary source | Research doc cites docs | `docs/` | n/a | Not audited in this pass | PARTIAL |
+| S13.6 | No external project, library, benchmark or tool cited without a primary source | Research doc cites docs; one table lists the rest | `docs/README.md`, `docs/research/model-control.md` | Inspection | docs/README "Outside tools and sources": SWE-Bench Pro, the percentile bootstrap, the npm packages, TypeScript, Node.js, the GitHub CLI and tmux, each with a primary source checked 2026-11-22; SWE-Bench Pro is also a source key in the research doc | PASS |
 
 ## Section 14: cost and quality leadership
 

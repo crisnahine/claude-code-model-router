@@ -4,15 +4,13 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 
 ## Next
 
-1. Fix the open defect: the 0.1.0 changelog names Python 3.10, which CI doesn't test. Row S8.2.
-2. Run the cost and quality suite, full or focused, and publish it. The router's whole claim is the lowest cost per solved task at a high pass rate, and only a 12-run pilot measures it. Run every configuration 10 times on the pinned tasks once the maintainer agrees to the cost, add one model at `high` for Haiku, Opus and Fable, fan-outs, cache temperature and router overhead, and claim a win only where the data shows one. Rows S4.1, S4.12 to S4.15, S10.11, S11.8, S11.12, S14.1 to S14.3.
-3. Run live beyond the macOS terminal. Linux and Windows installs; Desktop, VS Code, JetBrains and the Agent SDK; Bedrock, Vertex and Foundry; acceptEdits and bypass modes; `allowManagedHooksOnly`; split-pane teammates. Record each in "Verified live". Rows S3.7 to S3.10, S3.13, S6.1.
-4. Decide how fast mode shows in the spend log. Claude Code doesn't say which requests ran fast, so the only full figure is its own estimate in `/cost`, which a mod can read. Rows S4.8, S10.7.
-5. Measure cache sharing across fan-outs that start from one prefix. Row S4.5.
-6. Rerun `claude plugin eval plugins/model-router --trust-plugin` and record its cost. Rows S4.11, S9.4.
-7. Confirm the CI changes in CI. Actions are pinned to commit SHAs, the mod's tests run on every OS, and the mod and its test are type-checked; none of it has run in CI yet. Rows S6.12, S9.5.
-8. Close the remaining edge cases: a short or unlisted-language brief, and another plugin's mod moving a spawn to another family, which the mod path counts as a substitution (check live whether `AgentSpawnResult.model` tells that from an allowlist substitution). Rows S12.10, S12.14.
-9. Small cleanups: a dead-code recheck and an audit of external citations. Rows S5.5, S13.6.
+1. Run the cost and quality suite, full or focused, and publish it. The router's whole claim is the lowest cost per solved task at a high pass rate, and only a 12-run pilot measures it. Run every configuration 10 times on the pinned tasks once the maintainer agrees to the cost, add one model at `high` for Haiku, Opus and Fable, fan-outs, cache temperature and router overhead, and claim a win only where the data shows one. Rows S4.1, S4.12 to S4.15, S10.11, S11.8, S11.12, S14.1 to S14.3.
+2. Run live beyond the macOS terminal. Linux and Windows installs; Desktop, VS Code, JetBrains and the Agent SDK; Bedrock, Vertex and Foundry; acceptEdits and bypass modes; `allowManagedHooksOnly`; split-pane teammates. Record each in "Verified live". Rows S3.7 to S3.10, S3.13, S6.1.
+3. Decide how fast mode shows in the spend log. Claude Code doesn't say which requests ran fast, so the only full figure is its own estimate in `/cost`, which a mod can read. Rows S4.8, S10.7.
+4. Measure cache sharing across fan-outs that start from one prefix. Row S4.5.
+5. Rerun `claude plugin eval plugins/model-router --trust-plugin` and record its cost. Rows S4.11, S9.4.
+6. Confirm the CI changes in CI. Actions are pinned to commit SHAs, the mod's tests run on every OS, and the mod and its test are type-checked; none of it has run in CI yet. Rows S6.12, S9.5.
+7. Close the remaining edge cases: a short or unlisted-language brief, and another plugin's mod moving a spawn to another family, which the mod path counts as a substitution (check live whether `AgentSpawnResult.model` tells that from an allowlist substitution). Rows S12.10, S12.14.
 
 ## Waiting on a decision
 
@@ -34,7 +32,8 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 - Teammates verified live on 2.1.330. Rows S2.1, S3.2, S10.1.
 - The routing evals' expected routes are checked in the unit gate, on every CI cell. Row S14.4.
 - A benchmark harness and a first pilot, with saved sessions so the router's Stop check can see a run's tests. Row S10.11 (partial).
-- SVG diagrams in the README. Row S10.13 (partial).
+- SVG diagrams in the README, and the 0.1.0 changelog's Python versions corrected. Rows S10.13, S8.2.
+- A dead-code recheck, the dogfood ledger read, every outside source linked, and the `agent.spawn` research re-cited to the mod API types. Rows S5.5, S8.4, S13.6, S5.6 (partial).
 - Briefs in other languages start at standard; a negated limit ends with its clause; teammates' reports no longer raise the lead's effort. Rows S12.10, S12.12, S12.13.
 - A `schema` version on the registry and overrides, and a written compatibility policy. Row S6.15.
 - Inline and forked skills, plan mode and `disableAllHooks` checked live; forked skills stay on the session's model. Rows S3.5, S3.8, S3.13 (partial).

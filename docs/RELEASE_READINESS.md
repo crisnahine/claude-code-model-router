@@ -1,8 +1,8 @@
 # Release readiness
 
-Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `ea8bf9a`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
+Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `fcce17a`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
 
-**Verdict: the next release is not ready.** Of the 13 release gates, 10 pass and 3 are partial. One defect is open, and the cost and quality results are a pilot. Nothing after `8ec8eec` has run in CI yet.
+**Verdict: the next release is not ready.** Of the 13 release gates, 11 pass and 2 are partial. No defect is open, and the cost and quality results are a pilot. Nothing after `8ec8eec` has run in CI yet.
 
 ## Release gates
 
@@ -20,13 +20,13 @@ Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits afte
 | CI green on the release PR and on the merge commit in `main`, before tagging | PASS for 0.1.0 | PR run 45004814197 and main run 45004998622 passed before `v0.1.0` was tagged. Must be redone for the next release (S10.10) |
 | Reproducible cost and quality results | PARTIAL | [BENCHMARKS.md](BENCHMARKS.md): a 12-run pilot with raw data and commands, every row PARTIAL. The full suite waits on the maintainer (S10.11) |
 | A security assessment | PASS | [SECURITY.md](SECURITY.md), each claim cited to the code it was checked against (S10.12) |
-| Professional documentation and install steps | PARTIAL | The README has its SVG diagrams. The 0.1.0 changelog still names a Python version CI doesn't test (S10.13, S8.2) |
+| Professional documentation and install steps | PASS | The README has its SVG diagrams, and the 0.1.0 changelog names the Python versions CI ran (S10.13, S8.2) |
 
 ## Remaining defects and incomplete requirements
 
 ### Open defects
 
-1. `CHANGELOG.md` 0.1.0 says the unit tests run on Python 3.9, 3.10 and 3.13. `ci.yml` runs 3.9 and 3.13, and so did the release run. Row S8.2.
+None.
 
 ### Decisions needed
 
