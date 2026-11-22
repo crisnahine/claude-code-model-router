@@ -3510,6 +3510,17 @@ class DesignDecisions(unittest.TestCase):
             self.assertEqual(result["level"], "standard", prompt)
             self.assertNotIn("load", result["signals"], prompt)
 
+    def test_only_a_millisecond_budget_counts_as_load(self):
+        for prompt in ("Plan the release notes for 2.0; the API answers in 120 ms.",
+                       "Plan the sprint: fix the 300 ms login delay."):
+            result = profile.profile_call({"prompt": prompt}, "general-purpose")
+            self.assertEqual(result["level"], "standard", prompt)
+            self.assertNotIn("load", result["signals"], prompt)
+        for prompt in ("Choose a partitioning scheme for the events table so writes stay under 50 ms at 10,000 per "
+                       "second.", "Design a scheme that keeps p99 under 200 ms.",
+                       "Choose a caching approach with p99 200 ms for reads."):
+            self.assertIn("load", profile.profile_call({"prompt": prompt}, "general-purpose")["signals"], prompt)
+
     def test_a_capacity_or_sizing_decision_keeps_its_load_signal(self):
         for prompt, level in (("Plan the capacity of the queue cluster for 10x traffic: how many brokers do we need?",
                                "complex"),
