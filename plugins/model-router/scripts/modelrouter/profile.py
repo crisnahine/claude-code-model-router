@@ -23,10 +23,11 @@ SIGNALS = {
 }
 # Words that mean the subtask changes something or has to reason its way to an answer.
 # A subtask that does neither is a lookup, whatever it happens to mention.
-_CHANGE = (r"\b(?:add|implement|fix|change|update|refactor|rename|remove|delete|write|create|build|make|"
+_CHANGE = (r"\b(?:add|implement|fix|change|update|refactor|rename|remove|delete|write|create|build|make(?! sure)|"
            r"migrate|convert|upgrade|optimi[sz]e|rewrite|redesign|replace)\b(?!-)")
 # "Do not change any files" limits a subtask; it doesn't ask for a change.
-_NEGATED = r"\b(?:do not|don't|never|without|no need to|make sure)\b[^.\n]*"
+# "Make sure" isn't here: it introduces the task, so _CHANGE skips it instead.
+_NEGATED = r"\b(?:do not|don't|never|without|no need to)\b[^.\n]*"
 _REASONING = (r"\b(?:review|audit|analy[sz]e|debug|diagnos\w*|plan|design|prove|verify the logic|"
               r"investigat\w*|troubleshoot\w*|figure out|root.?caus\w*|reproduc\w*|bisect)\b")
 _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"
