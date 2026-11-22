@@ -9,7 +9,7 @@ Measures what Model Router costs per solved task, and how often tasks get solved
 
 ## Running it
 
-Every run spends real money at list price, or counts against a subscription's usage. `--budget` caps each run with `--max-budget-usd`, and `--max-total` stops the runner before total spend could pass it.
+Every run spends real money at list price, or counts against a subscription's usage. `--budget` caps each run with `--max-budget-usd`, which a run can pass by one response plus what its running subagents spend before they stop. `--max-total` starts a run only with room for twice its cap, a margin rather than a bound.
 
 ```bash
 python3 bench/run.py --tasks lookup-retry-limit bugfix-pagination --configs plugin defaults haiku \
@@ -19,7 +19,7 @@ python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
 
 Leave out `--tasks` or `--configs` to run all of them. `--model` sets the session model, the same for every configuration (default `sonnet`).
 
-Each run gets a fresh copy of the task's files in a temporary directory, never the repository. It loads no user settings, CLAUDE.md, auto memory or MCP servers, and the runner drops any `CLAUDE_CODE_*` variable it inherits except the provider switches (`CLAUDE_CODE_USE_*`). A run that loads the router writes the plugin's state to `~/.claude/plugins/data/model-router-inline/`, as any `--plugin-dir` session does. Reset what it learned afterwards with `/model-router:models reset` in a session started with `--plugin-dir plugins/model-router`.
+Each run gets a fresh copy of the task's files in a temporary directory, never the repository. It loads no user settings, CLAUDE.md, auto memory or MCP servers, and the runner drops any `CLAUDE_CODE_*` variable it inherits except the provider switches (`CLAUDE_CODE_USE_*`) and `CLAUDE_CODE_OAUTH_TOKEN`. A run that loads the router writes the plugin's state to `~/.claude/plugins/data/model-router-inline/`, as any `--plugin-dir` session does, so the runner copies that folder before each router run, puts it back afterwards and records hashes of its `state.json` and `learned.json`. Don't run other `--plugin-dir` sessions during a bench: what they write there during a router run is lost.
 
 ## Adding a task
 

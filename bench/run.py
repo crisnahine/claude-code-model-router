@@ -7,7 +7,9 @@ Example (the pilot):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
+import hashlib
 import json
 import os
 import shutil
@@ -16,6 +18,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Iterator
 
 BENCH = Path(__file__).resolve().parent
 ROOT = BENCH.parent
@@ -23,11 +26,15 @@ PLUGIN = ROOT / "plugins" / "model-router"
 CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research")
 
 # Every run starts from the same environment: nothing a parent Claude Code session, its plugins or the shell's
-# subagent and effort settings put there, except the provider switches. A configuration adds its own on top.
+# subagent and effort settings put there, except the provider switches and token auth. A configuration adds its
+# own on top.
 CLEARED = ("CLAUDE_CODE_", "CLAUDECODE", "CLAUDE_PLUGIN_", "CLAUDE_PROJECT_DIR")
-KEPT = ("CLAUDE_CODE_USE_",)
+KEPT = ("CLAUDE_CODE_USE_", "CLAUDE_CODE_OAUTH_TOKEN")
 ISOLATION = {"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
-TOOLS = ("Read", "Edit", "Write", "Glob", "Grep", "Bash(python3 *)", "Bash(python *)")
+# tail, head and echo let a subagent pipe its test output; every part of a compound command must be allowed.
+TOOLS = ("Read", "Edit", "Write", "Glob", "Grep", "Bash(python3 *)", "Bash(python *)", "Bash(tail *)",
+         "Bash(head *)", "Bash(echo *)")
+STATE_FILES = ("state.json", "learned.json")
 PROMPT = ("Hand the task below to one subagent with the Agent tool and wait for its answer; don't do the work "
           "yourself. When it returns, reply with its final answer.\n\nTask: {brief}")
 
@@ -57,8 +64,36 @@ def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[l
 
 
 def can_start(spent: float, budget: float, max_total: float) -> bool:
-    # A run can pass --max-budget-usd by up to one response, so start one only with room for twice its cap.
+    # A run can pass --max-budget-usd by one response plus what running subagents spend before they stop, so
+    # this leaves room for twice its cap. That is a margin, not a bound.
     return spent + 2 * budget <= max_total
+
+
+def plugin_data_dir(env: dict) -> Path:
+    """Where Claude Code keeps --plugin-dir model-router's data: health, learned raises and the ledger."""
+    home = Path(env.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    return home / "plugins" / "data" / "model-router-inline"
+
+
+def state_hashes(folder: Path) -> dict:
+    return {name: hashlib.sha256((folder / name).read_bytes()).hexdigest()[:16] if (folder / name).is_file() else None
+            for name in STATE_FILES}
+
+
+@contextlib.contextmanager
+def state_kept(folder: Path) -> Iterator[dict]:
+    """Yield the hashes of the router's state, and put the folder back as it was when the block ends."""
+    saved = Path(tempfile.mkdtemp(prefix="mrbench-state-")) / "copy"
+    existed = folder.is_dir()
+    if existed:
+        shutil.copytree(folder, saved)
+    try:
+        yield state_hashes(folder)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+        if existed:
+            shutil.copytree(saved, folder)
+        shutil.rmtree(saved.parent, ignore_errors=True)
 
 
 def _text(value) -> str:
@@ -76,11 +111,12 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
     shutil.copytree(task["dir"] / "repo", work)
     cmd, env = command(PROMPT.format(brief=task["brief"]), config, options, dict(os.environ))
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-    try:
-        proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=options["timeout"])
-        stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
-    except subprocess.TimeoutExpired as exc:
-        stdout, stderr, code = _text(exc.stdout), "timed out", None
+    with state_kept(plugin_data_dir(env)) if config.get("plugin") else contextlib.nullcontext() as plugin_state:
+        try:
+            proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=options["timeout"])
+            stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            stdout, stderr, code = _text(exc.stdout), "timed out", None
     try:
         result = json.loads(stdout)
     except ValueError:
@@ -98,7 +134,7 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
     return {
         "schema": 1, "task": task["id"], "class": task["class"], "config": config["id"],
         "started_at": started, "claude_version": options["claude_version"], "main_model": options["model"],
-        "budget_usd": options["budget"], "bench_commit": options["commit"],
+        "budget_usd": options["budget"], "bench_commit": options["commit"], "plugin_state": plugin_state,
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
         # Without a result the cost is unknown; count the whole budget so totals never understate spend.
         "total_cost_usd": cost if isinstance(cost, (int, float)) else options["budget"],

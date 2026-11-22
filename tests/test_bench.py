@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -108,6 +109,14 @@ class Runner(unittest.TestCase):
             self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", env)
         self.assertEqual(cmd[1:3], ["-p", "do it"])
 
+    def test_token_auth_and_test_pipes_still_work(self):
+        configs = {c["id"]: c for c in run.load_configs()}
+        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        cmd, env = run.command("do it", configs["plugin"], options, {"CLAUDE_CODE_OAUTH_TOKEN": "t"})
+        self.assertEqual(env["CLAUDE_CODE_OAUTH_TOKEN"], "t")
+        for rule in ("Bash(python3 *)", "Bash(tail *)", "Bash(head *)", "Bash(echo *)"):
+            self.assertIn(rule, cmd)
+
     def test_the_runner_stops_before_a_run_could_pass_the_total_cap(self):
         self.assertTrue(run.can_start(spent=2.0, budget=0.5, max_total=3.0))
         self.assertFalse(run.can_start(spent=2.3, budget=0.5, max_total=3.0))
@@ -140,6 +149,60 @@ class Tasks(unittest.TestCase):
                 self.assertTrue(self.check(task, work, task.get("reference_answer", "")))
 
 
+    def test_a_lookup_answer_listing_every_candidate_fails(self):
+        task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "work"
+            shutil.copytree(task["dir"] / "repo", work)
+            self.assertFalse(self.check(task, work, "app/settings.py: read_retry_limit, read_timeout; "
+                                                    "app/backoff.py: retries_left, retry_delay"))
+            self.assertTrue(self.check(task, work, "read_retry_limit in app/settings.py; app/client.py calls it"))
+
+
+STUB = '''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+if "--plugin-dir" in sys.argv:
+    data = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "plugins" / "data" / "model-router-inline"
+    data.mkdir(parents=True, exist_ok=True)
+    (data / "learned.json").write_text('{"lookup": {"bump": 1}}')
+    (data / "ledger.jsonl").write_text("written by the run")
+print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.01, "modelUsage": {}}))
+'''
+
+
+@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
+class PluginState(unittest.TestCase):
+    """A plugin run can't leave the router's learned state behind for the next run."""
+
+    def test_plugin_runs_start_from_the_same_state_and_record_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "config"
+            data = home / "plugins" / "data" / "model-router-inline"
+            data.mkdir(parents=True)
+            (data / "learned.json").write_text('{"lookup": {"calls": 2}}')
+            stub = Path(tmp) / "claude"
+            stub.write_text(STUB)
+            stub.chmod(0o755)
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            configs = {c["id"]: c for c in run.load_configs()}
+            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
+                first = run.run_one(task, configs["plugin"], options, {})
+                second = run.run_one(task, configs["plugin"], options, {})
+                baseline = run.run_one(task, configs["defaults"], options, {})
+            self.assertEqual((data / "learned.json").read_text(), '{"lookup": {"calls": 2}}')
+            self.assertFalse((data / "ledger.jsonl").exists())
+            self.assertTrue(first["passed"])
+            self.assertEqual(first["plugin_state"], second["plugin_state"])
+            self.assertIsNotNone(first["plugin_state"]["learned.json"])
+            self.assertIsNone(first["plugin_state"]["state.json"])
+            self.assertIsNone(baseline["plugin_state"])
+
+
 class Pilot(unittest.TestCase):
     def test_committed_results_match_the_published_table(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
@@ -150,6 +213,19 @@ class Pilot(unittest.TestCase):
             self.assertIn(f"bench/results/{path.name}", page)
         self.assertIn(f"${sum(r['total_cost_usd'] for r in data):.2f}", page)
         self.assertIn(f"{len(data)} runs", page)
+        self.assertIn("plus anything that subagents still running", page)
+        self.assertIn("margin, not a bound", page)
+        if any(r["config"] == "plugin" and "plugin_state" not in r for r in data):
+            self.assertIn("predate", page)
+        self.assertIn("`Bash(tail *)`", page)
+        for row in data:  # a lookup is graded from its answer alone, so today's check must agree with the record
+            if row["class"] == "lookup":
+                with tempfile.TemporaryDirectory() as tmp:
+                    answer = Path(tmp) / "answer.txt"
+                    answer.write_text(row["answer"], encoding="utf-8")
+                    check = ROOT / "bench" / "tasks" / row["task"] / "check.py"
+                    res = subprocess.run([sys.executable, str(check), tmp, str(answer)], capture_output=True)
+                    self.assertEqual(res.returncode == 0, row["passed"], row["config"])
 
 
 if __name__ == "__main__":
