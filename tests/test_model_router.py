@@ -908,6 +908,17 @@ class Profile(unittest.TestCase):
             self.assertEqual(self.level(brief), "lookup", brief)
             self.assertEqual(profile.profile_prompt(brief)["level"], "lookup", brief)
 
+    def test_a_judgment_verb_counts_at_the_start_of_the_prompt_too(self):
+        for call in ({"prompt": "Design a plugin loading strategy for the CLI."},
+                     {"description": "Review CLI flags", "prompt": "Review the proposal for the new CLI flags."}):
+            self.assertEqual(profile.profile_call(call, "general-purpose")["level"], "complex", call)
+        for brief in ("Explain the design of the cache layer.", "What does the design doc say about retries?",
+                      "Review the README for typos."):
+            self.assertEqual(self.level(brief), "standard", brief)
+        # Bare "research" is how people say "look into"; it isn't research-grade wording.
+        self.assertEqual(self.level("Research the trade-offs of switching the database driver and recommend one."),
+                         "complex")
+
     def test_make_sure_keeps_the_task_it_introduces(self):
         self.assertEqual(self.level("Make sure to fix the auth bug in the login handler."), "complex")
         self.assertEqual(self.level("Make sure the payments database migration is safe across all services "

@@ -9,6 +9,9 @@ import re
 
 from .config import LEVELS
 
+# Two or more systems named in a list ("across the API, the web client and ...") are cross-module work.
+_SYSTEM = r"(?:services?|clients?|api|gateway|backend|frontend|workers?|apps?|layers?|modules?)"
+_SYSTEMS = rf"(?:across|touching|between)\s+(?:the\s+)?(?:[\w-]+\s+){{0,2}}?{_SYSTEM},\s+(?:the\s+)?(?:[\w-]+\s+){{0,2}}?{_SYSTEM}"
 SIGNALS = {
     "risk": r"secur\w*|vulnerab\w*|auth|authn|authz|authenticat\w*|authoriz\w*|oauth\w*|passwords?|"
             r"credentials?|secrets?|encrypt\w*|decrypt\w*|payments?|billing|migrat\w*|schemas?|databases?|"
@@ -21,10 +24,10 @@ SIGNALS = {
             r"deprecations|deprecated\s+(?:apis?|calls?|functions?|methods?|settings)",
     "scope": r"across|every (?:service|module|package|file)|all (?:services|modules|packages)|multiple "
              r"(?:services|modules|repos|packages)|entire|whole (?:codebase|system|app)|architect\w*|"
-             r"redesign\w*|rewrit\w*|monorepo|end.to.end|large.scale|system.wide",
+             r"redesign\w*|rewrit\w*|monorepo|end.to.end|large.scale|system.wide|" + _SYSTEMS,
     "ambiguity": r"design|investigat\w*|root.?causes?|intermittent\w*|flaky|figure out|not sure|"
                  r"why (?:does|is|do|are|did)|research|evaluate|trade.?offs?|best (?:way|approach)|"
-                 r"should we|strategy|proposal",
+                 r"should we|strategy|proposal|sometimes|occasionally|(?:find|identify) the cause",
 }
 # Words that mean the subtask changes something or has to reason its way to an answer.
 # A subtask that does neither is a lookup, whatever it happens to mention.
@@ -47,7 +50,12 @@ _CHANGE = rf"\b{_CHANGE_VERB}"
 # often a noun ends it only with an object after it, so "the config and build scripts" doesn't,
 # and no verb ends it as the first half of a compound noun such as "debug logs" or "audit trails".
 _REASONING_WORDS = (r"review|audit|analy[sz]e|debug|diagnos\w*|plan|design|prove|verify the logic|"
-                    r"investigat\w*|troubleshoot\w*|figure out|root.?caus\w*|reproduc\w*|bisect")
+                    r"investigat\w*|troubleshoot\w*|figure out|find out (?:why|how|whether|what caus\w*)|"
+                    r"root.?caus\w*|reproduc\w*|bisect|evaluate|assess|compare|propose|recommend")
+# Asked for a judgment (review it, design it, plan it), not a hunt for a known kind of bug. Only the verb
+# counts, where it starts a sentence or follows and/then/to/please; "the design doc" is a noun.
+_JUDGMENT = (r"(?:^\s*|\n\s*|[.;:!?]\s+|\b(?:and|then|to|please)\s+)"
+             r"(?:review|audit|design|plan|evaluate|assess|propose)\b")
 _TASK_VERB = (r"(?:implement|fix|refactor|rename|migrate|optimi[sz]e|rewrite|convert|upgrade|redesign|debug|"
               r"diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|audit|prove|"
               r"verify the logic|figure out|encrypt|harden|bump)\b(?!-)")
@@ -91,7 +99,8 @@ _OTHER_WORDS = frozenset(
     "el los las del para una por con sin como este esta "
     "il gli della delle nel nella sono di che "
     "der das und ist nicht mit für ein eine den dem zu von auf im "
-    "het een van niet voor não com uma em na ao dos de en".split())
+    "het een van niet voor não com uma em na ao dos de en "
+    "função funções conforme adicione implemente corrija crie remova altere arquivo arquivos".split())
 
 
 # Paths, file names and identifiers ("locales/de.json", "des_encrypt") aren't language evidence.
@@ -147,7 +156,10 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
     if re.search(_CHANGE, asked) or re.search(_REASONING, asked):
         if len(hits) >= 3:
             level = "frontier" if re.search(_FRONTIER, asked) else "hardest"
-        elif len(hits) == 2 or "risk" in hits:
+        elif len(hits) == 2 and re.search(_FRONTIER.replace("research(?:-grade)?", "research-grade"), asked):
+            level = "hardest"  # research-grade wording on broad or open work
+        elif (len(hits) == 2 or "risk" in hits or (hits and re.search(_JUDGMENT, asked))
+              or re.search(rf"\b{_SYSTEMS}\b", asked)):
             level = "complex"
         else:
             level = "standard"

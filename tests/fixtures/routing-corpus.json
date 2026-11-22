@@ -685,8 +685,7 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Empty export file",
-   "prompt": "Investigate why the nightly export job sometimes produces an empty file. Look at jobs/export.py and its logs; find the root cause and propose a fix.",
-   "known_under": "one signal stays standard"
+   "prompt": "Investigate why the nightly export job sometimes produces an empty file. Look at jobs/export.py and its logs; find the root cause and propose a fix."
   },
   {
    "lowest": "complex",
@@ -784,8 +783,7 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Review queue RFC",
-   "prompt": "Review the proposed architecture in docs/rfc/queue.md for scaling to 10x traffic and point out risks.",
-   "known_under": "one signal stays standard"
+   "prompt": "Review the proposed architecture in docs/rfc/queue.md for scaling to 10x traffic and point out risks."
   },
   {
    "lowest": "standard",
@@ -806,8 +804,7 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Rename customerId",
-   "prompt": "Rename the `customerId` field to `accountId` across the API, the web client and the mobile client, keeping the old name accepted in requests for one release.",
-   "known_under": "one signal stays standard"
+   "prompt": "Rename the `customerId` field to `accountId` across the API, the web client and the mobile client, keeping the old name accepted in requests for one release."
   },
   {
    "lowest": "complex",
@@ -948,8 +945,7 @@
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Flaky CI end-to-end",
-   "prompt": "The end-to-end suite fails intermittently only in CI across the API, worker and websocket services. Find out why; we're not sure whether it's a race condition, a timeout or test pollution.",
-   "known_under": "multi-system work scored low"
+   "prompt": "The end-to-end suite fails intermittently only in CI across the API, worker and websocket services. Find out why; we're not sure whether it's a race condition, a timeout or test pollution."
   },
   {
    "lowest": "hardest",
@@ -963,8 +959,7 @@
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Checkout latency doubled",
-   "prompt": "p99 latency for checkout doubled after the last release, touching the cart service, the pricing service and the payments gateway. Find the root cause and fix it without changing the public API.",
-   "known_under": "multi-system work scored low"
+   "prompt": "p99 latency for checkout doubled after the last release, touching the cart service, the pricing service and the payments gateway. Find the root cause and fix it without changing the public API."
   },
   {
    "lowest": "hardest",
@@ -1007,8 +1002,7 @@
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Build farm scheduling",
-   "prompt": "Design a novel scheduling algorithm for our build farm that minimizes total build time across 200 machines with heterogeneous caches. Nothing off the shelf fits; evaluate approaches, prove bounds where you can, and prototype the best one across the scheduler and worker services.",
-   "known_under": "multi-system work scored low"
+   "prompt": "Design a novel scheduling algorithm for our build farm that minimizes total build time across 200 machines with heterogeneous caches. Nothing off the shelf fits; evaluate approaches, prove bounds where you can, and prototype the best one across the scheduler and worker services."
   },
   {
    "lowest": "hardest",
@@ -1036,8 +1030,7 @@
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Research search ranking",
-   "prompt": "Research: find a better ranking approach for search across the product, docs and community indexes. Evaluate learning-to-rank against our heuristics with the click logs, and recommend one with trade-offs.",
-   "known_under": "one signal stays standard"
+   "prompt": "Research: find a better ranking approach for search across the product, docs and community indexes. Evaluate learning-to-rank against our heuristics with the click logs, and recommend one with trade-offs."
   },
   {
    "lowest": "hardest",
@@ -1095,8 +1088,7 @@
    "highest": "complex",
    "agent": "general-purpose",
    "description": "Implementar parse_duration",
-   "prompt": "Implemente a função parse_duration em durations.py conforme a docstring e adicione testes.",
-   "known_under": "other languages capped at standard"
+   "prompt": "Implemente a função parse_duration em durations.py conforme a docstring e adicione testes."
   },
   {
    "lowest": "hardest",
@@ -1512,6 +1504,34 @@
    "agent": "general-purpose",
    "description": "Fix deprecation typo",
    "prompt": "Fix the typo in the deprecation notice."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Explain cache design",
+   "prompt": "Explain the design of the cache layer."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Read design doc",
+   "prompt": "What does the design doc say about retries?"
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find slowest tests",
+   "prompt": "Find out which tests are slowest."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "List cart callers",
+   "prompt": "List the services touching the cart service, the pricing service and the API."
   }
  ]
 }
