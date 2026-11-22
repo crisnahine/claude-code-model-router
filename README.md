@@ -108,9 +108,11 @@ The plugin ships seven agents for work that no better-fitting agent covers: `mod
 | :- | :- |
 | `/model-router:ship <task>` | Plans, builds, verifies and reviews a change end to end |
 | `/model-router:route <task>` | Explains which model a task would get and why, and how to split it |
-| `/model-router:models` | Lists the models in use, what each runs as, what is capped or unavailable, and what was learned. `reset` clears it |
-| `/model-router:usage [days]` | Shows what ran where, and what it cost at list price: agents, levels, models, tokens and dollars |
+| `/model-router:models [reset] [--json]` | Lists the models in use, what each runs as, what is capped or unavailable, and what was learned. `reset` clears it |
+| `/model-router:usage [days] [--json]` | Shows what ran where, and what it cost at list price: agents, levels, models, tokens and dollars |
 | `/model-router:refresh` | Reviews new Claude Code releases, docs changes, model changes and retirements |
+
+With `--json`, `models` and `usage` print one JSON object instead of the tables. Its `schema` key names the shape and its version, `model-router.models/1` and `model-router.usage/1`. A new key keeps the version; a key removed, renamed or changed in meaning bumps it. Scripts can run the same commands without Claude: `sh <plugin>/scripts/model-router.sh --data-dir <plugin data dir> usage 30 --json`. The shapes are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#machine-readable-output).
 
 ## Configuration
 

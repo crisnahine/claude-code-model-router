@@ -1832,5 +1832,60 @@ class Launcher(Sandbox):
         self.assertIn("Subtask level", res.stdout)
 
 
+class MachineReadable(Sandbox):
+    """`--json` on usage and models: one object, a versioned schema, the same facts as the tables."""
+
+    def json_out(self, *argv: str) -> dict:
+        return json.loads(self.out(*argv, "--json"))
+
+    def test_usage_json(self):
+        self.assertEqual(self.json_out("usage"), {
+            "schema": "model-router.usage/1", "days": 7, "agents": [], "models": [], "model_errors": 0,
+            "spend": {"total_usd": 0, "rows": [], "unpriced": []}})
+        self.session_on("claude-opus-5-5")
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku")
+        for agent_id, model in ((None, "claude-opus-5-5"), ("a1", "claude-new-9")):
+            hooks.mod_usage({"session_id": "s1", "agent_id": agent_id, "usage": {
+                "model": model, "input_tokens": 0, "output_tokens": 1_000_000,
+                "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}})
+        data = self.json_out("usage", "30")
+        self.assertEqual(data["days"], 30)
+        self.assertEqual(data["agents"], [{"agent": "general-purpose", "calls": 1, "routed": 1,
+                                           "levels": {"lookup": 1}, "ran_on": {"claude-haiku-5-5": 1}}])
+        self.assertEqual(data["models"], [{"model": "claude-haiku-5-5", "runs": 1, "tokens": 1200}])
+        self.assertEqual(data["spend"], {"total_usd": 20.0, "unpriced": ["claude-new-9"], "rows": [
+            {"loop": "main", "model": "claude-opus-5-5", "turns": 1, "output_tokens": 1_000_000, "usd": 20.0},
+            {"loop": "subagent", "model": "claude-new-9", "turns": 1, "output_tokens": 1_000_000, "usd": 0}]})
+
+    def test_models_json(self):
+        registry.record_result("fable", "claude-opus-5-5", "opus")
+        registry.record_result("fable", "claude-opus-5-5", "opus")
+        registry.record_result("haiku", "claude-haiku-5-5", "haiku")
+        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "opus", "fable"]}))
+        store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga"]}})
+        data = self.json_out("models")
+        self.assertEqual(data["schema"], "model-router.models/1")
+        self.assertEqual((data["cap"], data["priority"], data["strongest_in_use"]), (None, "balanced", "opus"))
+        rows = {m["model"]: m for m in data["models"]}
+        self.assertEqual(list(rows), ["haiku", "sonnet", "opus", "fable"])
+        self.assertEqual(rows["haiku"], {"model": "haiku", "last_ran_as": "claude-haiku-5-5",
+                                         "status": "working", "detail": "working"})
+        self.assertEqual((rows["sonnet"]["status"], rows["sonnet"]["last_ran_as"]), ("not_permitted", None))
+        self.assertEqual(rows["fable"]["status"], "routed_around")
+        self.assertIn("ran as claude-opus-5-5 instead", rows["fable"]["detail"])
+        self.assertEqual(rows["opus"]["status"], "not_used")
+        self.assertEqual((data["doc_aliases"], data["not_in_registry"]), (["haiku", "saga"], ["saga"]))
+        self.assertEqual(data["levels"], [])
+        store.save_json(store.data_dir() / "learned.json", {"complex": {"calls": 4, "votes": 1, "bump": 1}})
+        self.assertEqual(self.json_out("models")["levels"],
+                         [{"level": "complex", "routed_calls": 4, "votes_too_low": 1, "raised": True}])
+        self.assertIn("| complex | 4 | 1 | yes |", self.out("models"))
+        store.update_state(lambda state: state.update(max_tier="sonnet"))
+        rows = {m["model"]: m for m in self.json_out("models")["models"]}
+        self.assertEqual(rows["opus"]["status"], "above_cap")
+        self.assertEqual(json.loads(self.out("models", "--reset", "--json"))["schema"], "model-router.models/1")
+
+
 if __name__ == "__main__":
     unittest.main()

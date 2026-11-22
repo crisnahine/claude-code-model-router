@@ -43,13 +43,17 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     for name in (*hooks.HANDLERS, "policy", "ack"):
         sub.add_parser(name)
-    sub.add_parser("models").add_argument("--reset", action="store_true")
+    p = sub.add_parser("models")
+    p.add_argument("--reset", action="store_true")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("explain")
     p.add_argument("--agent")
     p.add_argument("text", nargs="*")
     sub.add_parser("refresh").add_argument("--force", action="store_true")
     sub.add_parser("status").add_argument("--json", action="store_true")
-    sub.add_parser("usage").add_argument("days", nargs="?", default="7")
+    p = sub.add_parser("usage")
+    p.add_argument("days", nargs="?", default="7")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("upstream-check")
     p.add_argument("--baseline", required=True)
     p.add_argument("--write", action="store_true", help="overwrite the baseline with live data")
@@ -79,8 +83,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.reset:
             store.update_state(lambda state: state.pop("health", None))
             learn.reset()
-            print("Learned availability and feedback cleared.\n")
-        print(report.models(config, options))
+            if not args.json:
+                print("Learned availability and feedback cleared.\n")
+        print(json.dumps(report.models_data(config, options), indent=2) if args.json
+              else report.models(config, options))
     elif args.cmd == "explain":
         print(report.explain(config, options, " ".join(args.text), args.agent))
     elif args.cmd == "refresh":
@@ -95,7 +101,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"Marked Claude Code {version} and the current docs index as reviewed.")
     elif args.cmd == "usage":
-        print(report.usage(int(args.days) if str(args.days).isdigit() else 7))
+        days = int(args.days) if str(args.days).isdigit() else 7
+        print(json.dumps(report.usage_data(days), indent=2) if args.json else report.usage(days))
     elif args.cmd == "upstream-check":
         baseline_path = Path(args.baseline)
         live = upstream.fetch(options)
