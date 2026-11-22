@@ -133,6 +133,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
             agents[r["config"]][name] += count
     stale = sum(1 for r in rows if "plugin_state" not in r)
     unsaved = sum(1 for r in rows if "sessions_saved" not in r)
+    borrowed = sum(1 for r in rows if r.get("plugin_state") is not None and "plugin_data_own" not in r)
     per_run = total / len(rows) if rows else 0.0
     planned = len(tasks) * len(configs) * MIN_RUNS
     header = "\n".join([
@@ -177,12 +178,15 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         "(`CLAUDE_CODE_USE_*`) and `CLAUDE_CODE_OAUTH_TOKEN`, so `CLAUDE_CODE_SUBAGENT_MODEL`, "
         "`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and the effort variables are set only by a configuration. Only the "
         "router configuration passes `--plugin-dir`.",
-        "- The router keeps learned state across sessions (model health, level raises and its ledger) in "
-        "`~/.claude/plugins/data/model-router-inline/`, which every `--plugin-dir` session on the machine shares. "
-        "The runner copies that folder before each router run and puts it back afterwards, so every router run "
-        "starts from the state the folder held when the bench began, and each raw line records hashes of its "
-        "`state.json` and `learned.json` in `plugin_state`. Anything another session writes there during a "
-        "router run is lost when the folder is put back."
+        "- The router keeps learned state across sessions (model health, level raises and its ledger) in its "
+        "plugin data folder, by default `~/.claude/plugins/data/model-router-inline/`, which every `--plugin-dir` "
+        "session on the machine shares. The runner gives each run a plugins root of its own inside its scratch "
+        "copy with `CLAUDE_CODE_PLUGIN_CACHE_DIR` (https://code.claude.com/docs/en/env-vars.md), so every router "
+        "run starts from an empty data folder, never reads or writes the shared one, and its data goes when the "
+        "scratch copy does. Each raw line records `plugin_data_own` and, for router runs, hashes of the "
+        "`state.json` and `learned.json` the run started from in `plugin_state`."
+        + (f" {borrowed} router run(s) here borrowed the shared folder instead: the runner copied it before the "
+           "run and put it back after, which also wiped what other sessions wrote there meanwhile." if borrowed else "")
         + (f" {stale} run(s) here predate this: their lines have no `plugin_state`, and their router runs "
            "started from whatever earlier runs and other sessions had left there. They also predate the `tail`, "
            "`head` and `echo` rules and the stricter `lookup-retry-limit` check, and their `bench_commit` is the "

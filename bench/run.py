@@ -7,7 +7,6 @@ Example (the pilot):
 from __future__ import annotations
 
 import argparse
-import contextlib
 import datetime
 import hashlib
 import json
@@ -19,7 +18,6 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Iterator
 
 BENCH = Path(__file__).resolve().parent
 ROOT = BENCH.parent
@@ -56,6 +54,9 @@ def load_configs() -> list[dict]:
 def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[list[str], dict]:
     env = {k: v for k, v in base_env.items() if k in KEPT_EXACT or k.startswith(KEPT) or not k.startswith(CLEARED)}
     env.update(ISOLATION)
+    if options.get("plugins_root"):
+        # The run's own plugins root, so the router's data never lands in the folder other sessions share.
+        env["CLAUDE_CODE_PLUGIN_CACHE_DIR"] = options["plugins_root"]
     env.update(config.get("env", {}))
     cmd = [options["claude"], "-p", prompt, "--output-format", "json", "--model", options["model"],
            "--max-budget-usd", str(options["budget"]), "--setting-sources", "project", "--strict-mcp-config",
@@ -73,10 +74,11 @@ def can_start(spent: float, budget: float, max_total: float) -> bool:
 
 def plugin_data_dir(env: dict) -> Path:
     """Where Claude Code keeps the --plugin-dir router's data (health, learned raises, the ledger):
-    plugins/data/<id>, the id with anything but letters, digits, _ and - turned into -."""
+    <plugins root>/data/<id>, the id with anything but letters, digits, _ and - turned into -."""
     name = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"]
     home = Path(env.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-    return home / "plugins" / "data" / re.sub(r"[^A-Za-z0-9_-]", "-", f"{name}@inline")
+    root = Path(env.get("CLAUDE_CODE_PLUGIN_CACHE_DIR") or home / "plugins")
+    return root / "data" / re.sub(r"[^A-Za-z0-9_-]", "-", f"{name}@inline")
 
 
 def session_dir(work: Path, env: dict) -> Path:
@@ -99,39 +101,6 @@ def state_hashes(folder: Path) -> dict:
             for name in STATE_FILES}
 
 
-def _clear(folder: Path) -> None:
-    for child in folder.iterdir():
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
-
-
-@contextlib.contextmanager
-def state_kept(folder: Path) -> Iterator[dict]:
-    """Yield the hashes of the router's state, and put the folder back as it was when the block ends. The copy
-    sits next to the folder; one left there by a crashed run holds the real state, so the bench won't start."""
-    backup = folder.with_name(folder.name + ".bench-saved")
-    if backup.exists():
-        raise RuntimeError(f"{backup} holds the router state from an interrupted bench: copy it back to {folder}")
-    existed = folder.is_dir()
-    if existed:
-        shutil.copytree(folder, backup, symlinks=True)
-    try:
-        yield state_hashes(folder)
-    finally:
-        try:
-            if existed:
-                _clear(folder)
-                shutil.copytree(backup, folder, symlinks=True, dirs_exist_ok=True)
-                shutil.rmtree(backup)
-            elif folder.exists():
-                shutil.rmtree(folder)
-        except OSError:
-            print(f"could not restore {folder}; the router state before this run is in {backup}", file=sys.stderr)
-            raise
-
-
 def _text(value) -> str:
     return value.decode("utf-8", "replace") if isinstance(value, bytes) else (value or "")
 
@@ -152,14 +121,15 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
     scratch = Path(tempfile.mkdtemp(prefix=f"mrbench-{task['id']}-{config['id']}-"))
     work = scratch / "work"
     shutil.copytree(task["dir"] / "repo", work)
-    cmd, env = command(PROMPT.format(brief=task["brief"]), config, options, dict(os.environ))
+    cmd, env = command(PROMPT.format(brief=task["brief"]), config,
+                       {**options, "plugins_root": str(scratch / "plugins")}, dict(os.environ))
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-    with state_kept(plugin_data_dir(env)) if config.get("plugin") else contextlib.nullcontext() as plugin_state:
-        try:
-            proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=options["timeout"])
-            stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
-        except subprocess.TimeoutExpired as exc:
-            stdout, stderr, code = _text(exc.stdout), "timed out", None
+    plugin_state = state_hashes(plugin_data_dir(env)) if config.get("plugin") else None
+    try:
+        proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=options["timeout"])
+        stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
+    except subprocess.TimeoutExpired as exc:
+        stdout, stderr, code = _text(exc.stdout), "timed out", None
     try:
         result = json.loads(stdout)
     except ValueError:
@@ -179,7 +149,7 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
         "schema": 1, "task": task["id"], "class": task["class"], "config": config["id"],
         "started_at": started, "claude_version": options["claude_version"], "main_model": options["model"],
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
-        "plugin_state": plugin_state, "sessions_saved": True, "session_dir_removed": session_removed,
+        "plugin_state": plugin_state, "plugin_data_own": True, "sessions_saved": True, "session_dir_removed": session_removed,
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
         # Without a result the cost is unknown; count the whole budget so totals never understate spend.
         "total_cost_usd": cost if isinstance(cost, (int, float)) else options["budget"],
