@@ -302,30 +302,35 @@ class SuiteCoverage(unittest.TestCase):
                     test_file.write_text("import unittest\n", encoding="utf-8")
                 self.assertFalse(self.check(task, work))
 
-    def test_a_security_report_that_names_the_decoy_or_every_line_fails(self):
-        for task in (t for t in run.load_tasks() if t["class"] == "security-review"):
-            with self.subTest(task=task["id"]), tempfile.TemporaryDirectory() as tmp:
-                task, work = self.shipped(task["id"], tmp)
-                self.assertTrue(self.check(task, work, task["reference_answer"]))
-                self.assertFalse(self.check(task, work, task["reference_answer"] + "\nAlso " + task["decoy"]))
+    def test_a_security_finding_given_only_in_the_reply_fails(self):
+        for task_id, reply in (("security-sql-injection", "db/users.py:6 builds the SQL with an f-string."),
+                               ("security-path-traversal", "files/server.py:8 joins the name unresolved.")):
+            with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
+                task, work = self.shipped(task_id, tmp)
+                self.assertFalse(self.check(task, work, reply))
 
-    ANSWERS = {  # task: (answers that must pass, answers that must fail)
+    JSON_ANSWERS = {  # task: (answer files that must pass, answer files that must fail); a str is written as is
         "security-sql-injection": (
-            ["db\\users.py:6 interpolates name into SQL", "`db/users.py`:6 is injectable",
-             "**`db/users.py`**, line 6: f-string SQL", "db/users.py:6 builds the query; app.py:8 calls it",
-             "db/users.py#L6 puts name into the SQL"],
-            ["db/orders.py:3", "db/users.py:6 and db/orders.py:3",
-             "db/users.py:4, db/users.py:5, db/users.py:6, db/users.py:7, app.py:8", "",
-             "db/users.py:6 and db/orders.py:4 both build SQL from caller input",
-             "db/users.py:4, db/users.py:6, db/users.py:11 could be risky.", "db/users.py:6 and db/users.py:7"]),
+            [{"file": "db/users.py", "line": 6}, {"file": "db/users.py", "line": 6, "why": "an f-string builds the SQL"},
+             {"file": "./db/users.py", "line": 6}, {"file": "db\\users.py", "line": 6},
+             {"file": "/tmp/x/work/db/users.py", "line": 6}],
+            [{"file": "db/orders.py", "line": 3}, {"file": "db/users.py", "line": 7}, {"file": "app.py", "line": 8},
+             {"file": "db/users.py", "line": "6 or 7"}, {"file": "db/users.py", "line": [6, 7, 11]},
+             {"file": "db/users.py", "line": "6-11"}, {"file": "db/users.py", "line": "6 to 11"},
+             {"file": "db/users.py", "line": 6, "maybe": [7, 11]}, {"file": "db/users.py", "line": [4, 6, 11]},
+             [{"file": "db/users.py", "line": 6}, {"file": "db/orders.py", "line": 4}],
+             {"file": ["db/users.py", "db/orders.py"], "line": 6}, {"file": "db/users.py", "line": "6"},
+             {"file": "db/users.py", "line": 6.0}, {"file": "db/users.py", "line": 6, "why": ["f-string"]},
+             {"file": "db/users.py"}, "db/users.py:6", ""]),
         "security-path-traversal": (
-            ["files\\server.py:8 joins an unresolved name", "`files/server.py` line 9 opens it",
-             "files/server.py:8, reached from web.py:7", "files/server.py#L8 joins the name unresolved"],
-            ["files/thumbs.py:8", "files/server.py:8 or files/thumbs.py:8", "web.py:7",
-             "files/server.py:8, and files/thumbs.py:9's startswith check can be bypassed",
-             "files/server.py:8, files/server.py:9, web.py:5", "files/server.py:6 or files/server.py:8"]),
-    }
-    JSON_ANSWERS = {
+            [{"file": "files/server.py", "line": 8}, {"file": "files/server.py", "line": 9, "why": "opens it"},
+             {"file": "files\\server.py", "line": 8}, {"file": "/tmp/x/work/files/server.py", "line": 8}],
+            [{"file": "files/server.py", "line": "8 or 9"}, {"file": "files/server.py", "line": [8, 9]},
+             {"file": "files/server.py", "line": "8-9"}, {"file": "files/server.py", "line": 6},
+             {"file": "files/thumbs.py", "line": 8}, {"file": "web.py", "line": 7},
+             {"file": "files/server.py", "line": 8, "also": "web.py:5"},
+             [{"file": "files/server.py", "line": 8}, {"file": "files/thumbs.py", "line": 9}],
+             "files/server.py:8"]),
         "research-changelog": (
             [{"default_changed_in": "v1.3", "configurable_in": "2", "variable": "FETCHKIT_RETRIES",
               "sources": ["/tmp/x/work/docs/changelog/v1.3.md", "changelog\\v2.0.md"]},
@@ -348,18 +353,15 @@ class SuiteCoverage(unittest.TestCase):
     }
 
     def test_checks_take_every_fair_form_of_a_right_answer_and_no_wrong_one(self):
-        for task_id, (right, wrong) in self.ANSWERS.items():
-            for answer, expected in [(a, True) for a in right] + [(a, False) for a in wrong]:
-                with self.subTest(task=task_id, answer=answer), tempfile.TemporaryDirectory() as tmp:
-                    task, work = self.shipped(task_id, tmp)
-                    self.assertEqual(self.check(task, work, answer), expected)
         files = {"research-changelog": "RESEARCH.json", "research-latency": "RESEARCH.json",
-                 "design-cache-invalidation": "DESIGN.json"}
+                 "design-cache-invalidation": "DESIGN.json", "security-sql-injection": "FINDING.json",
+                 "security-path-traversal": "FINDING.json"}
         for task_id, (right, wrong) in self.JSON_ANSWERS.items():
             for answer, expected in [(a, True) for a in right] + [(a, False) for a in wrong]:
                 with self.subTest(task=task_id, answer=answer), tempfile.TemporaryDirectory() as tmp:
                     task, work = self.shipped(task_id, tmp)
-                    (work / files[task_id]).write_text(json.dumps(answer), encoding="utf-8")
+                    text = answer if isinstance(answer, str) else json.dumps(answer)
+                    (work / files[task_id]).write_text(text, encoding="utf-8")
                     self.assertEqual(self.check(task, work), expected)
 
     def test_work_dir_code_cannot_exit_the_check_with_success(self):

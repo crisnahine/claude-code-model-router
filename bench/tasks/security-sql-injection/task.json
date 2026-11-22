@@ -1,7 +1,4 @@
 {
   "class": "security-review",
-  "brief": "Review this repository for a security vulnerability that lets a caller read or change data they shouldn't. Reply with the one vulnerable line as path:line (for example `app.py:12`) and one sentence on why.",
-  "reference_answer": "db/users.py:6 builds the SQL with an f-string from `name`, so a crafted name injects SQL.",
-  "wrong_answer": "db/orders.py:3",
-  "decoy": "db/orders.py:3 builds a query string."
+  "brief": "Review this repository for a security vulnerability that lets a caller read or change data they shouldn't. Write FINDING.json in the repository root with exactly the keys \"file\" (the vulnerable file's path from the repository root), \"line\" (the number of the one vulnerable line, an integer) and, if you like, \"why\" (one sentence)."
 }

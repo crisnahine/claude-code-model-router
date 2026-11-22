@@ -51,8 +51,8 @@ This is a pilot. Every row is PARTIAL because each configuration ran each task t
 - `research-latency` (research): Which deploy first pushed the p95 latency of /search above 300 ms, and which commit did it ship? Use deploys.csv and metrics/, and compute p95 as the nearest-rank 95th percentile of that deploy's /search samples. Write RESEARCH.json in the repository root with the keys "deploy", "commit" and "p95_ms".
 - `rootcause-cart` (root-cause): test_cart.py fails. Find out why and fix the code so every test in it passes. Don't change test_cart.py.
 - `rootcause-ranking` (root-cause): test_ranking.py fails. Find out why and fix the code so every test in it passes. Don't change test_ranking.py.
-- `security-path-traversal` (security-review): Review this repository for a security vulnerability that lets a caller read files they shouldn't. Reply with the one vulnerable line as path:line (for example `app.py:12`) and one sentence on why.
-- `security-sql-injection` (security-review): Review this repository for a security vulnerability that lets a caller read or change data they shouldn't. Reply with the one vulnerable line as path:line (for example `app.py:12`) and one sentence on why.
+- `security-path-traversal` (security-review): Review this repository for a security vulnerability that lets a caller read files they shouldn't. Write FINDING.json in the repository root with exactly the keys "file" (the vulnerable file's path from the repository root), "line" (the number of the one vulnerable line, an integer) and, if you like, "why" (one sentence).
+- `security-sql-injection` (security-review): Review this repository for a security vulnerability that lets a caller read or change data they shouldn't. Write FINDING.json in the repository root with exactly the keys "file" (the vulnerable file's path from the repository root), "line" (the number of the one vulnerable line, an integer) and, if you like, "why" (one sentence).
 
 Each task's files and pass check are under `bench/tasks/<id>/`. Each check fails on the files as shipped and passes on a reference answer (`tests/test_bench.py`).
 
