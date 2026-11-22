@@ -3445,6 +3445,13 @@ class DesignDecisions(unittest.TestCase):
                                                "prompt": "Find where the app loads its config."}, "Explore")["level"],
                          "lookup")
 
+    def test_a_load_word_without_a_design_choice_adds_nothing(self):
+        for prompt in ("Fix the flaky latency test in test_client.py.",
+                       "Review this function for performance issues."):
+            result = profile.profile_call({"prompt": prompt}, "general-purpose")
+            self.assertEqual(result["level"], "standard", prompt)
+            self.assertNotIn("load", result["signals"], prompt)
+
 
 class SolverNames(unittest.TestCase):
     """Only this plugin's own deep-solver is floored at hardest; another plugin's solver is a heavy role, a resolver none."""

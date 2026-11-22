@@ -1566,6 +1566,20 @@
    "agent": "claude",
    "description": "Design catalog price caching",
    "prompt": "Read SPEC.md there and design how the catalog servers cache prices. This is a design decision with data-consistency and performance trade-offs, so read the spec carefully for staleness requirements, load, event/messaging infrastructure, and failure modes, and make sure the numbers you pick are consistent with every constraint in it.\n\nWrite DESIGN.json in the repository root with exactly these keys:\n- \"strategy\": one of \"no_cache\", \"ttl_only\", \"event_invalidation\", \"write_through_from_admin\"\n- \"ttl_seconds\": a number, or null for none\n- \"max_staleness_seconds\": the longest a changed price can still be served (a number)\n- \"reasons\": a list of short strings"
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Fix flaky latency test",
+   "prompt": "Fix the flaky latency test in test_client.py."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Review for performance",
+   "prompt": "Review this function for performance issues."
   }
  ]
 }

@@ -123,8 +123,13 @@ def _not_english(text: str) -> bool:
     return other >= 2 and other > sum(w in _ENGLISH_WORDS for w in words)
 
 
+# A load limit only makes a brief harder when a design or a choice has to be worked out against it.
+_CHOICE = r"\b(?:design\w*|choos\w*|choices?|trade.?offs?|strateg\w*|capacity planning)\b"
+
+
 def signals(text: str) -> list[str]:
-    return [name for name, pattern in SIGNALS.items() if re.search(r"\b(?:%s)\b" % pattern, text)]
+    found = [name for name, pattern in SIGNALS.items() if re.search(r"\b(?:%s)\b" % pattern, text)]
+    return [name for name in found if name != "load" or re.search(_CHOICE, text)]
 
 
 def profile_prompt(prompt: str) -> dict:
