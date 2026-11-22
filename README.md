@@ -186,6 +186,8 @@ plugins/model-router/
 tests/                         unit tests, run on Linux, macOS and Windows
 compat/baseline.json           the Claude Code version, docs index, model list and model status last reviewed
 docs/research/                 the primary-source research the design rests on
+docs/README.md                 index of the project's documents: traceability, readiness, roadmap, test results
+tools/traceability.py          counts the requirement statuses in docs/TRACEABILITY.md
 ```
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the design and the reasons behind it.
