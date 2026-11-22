@@ -9,6 +9,7 @@ import argparse
 import json
 import math
 import random
+import re
 import sys
 from pathlib import Path
 
@@ -53,7 +54,9 @@ def _difference(ours: list[float], theirs: list[float]) -> tuple[float, float]:
 
 
 def _verdict(cells: dict, router: str) -> dict:
-    base = {name: cell for name, cell in cells.items() if name != router}
+    # A router variant (any configuration that loads the plugin) is a rival build, never a baseline.
+    variants = {c["id"] for c in run.load_configs() if c.get("plugin")}
+    base = {name: cell for name, cell in cells.items() if name != router and name not in variants}
     if router not in cells or not base:
         return {"status": "PARTIAL", "rank": None, "best_baseline": None, "reason": "no router or baseline runs"}
     ours = cells[router]
@@ -139,6 +142,58 @@ def estimate(rows: list[dict], tasks: list[dict], configs: list[dict], prices: d
             "factors": factors}
 
 
+def _batch(path: Path) -> str:
+    """A raw file's batch: its name without the date and the task class, so m6-05-bugfix-2026-11-22 is m6-05."""
+    name = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", path.stem)
+    return next((name[:-len(cls) - 1] for cls in run.CLASSES if name.endswith(f"-{cls}")), name)
+
+
+def _notes(rows: list[dict], files: list[Path]) -> list[str]:
+    """Page lines on runs set aside, router spend by agent type, and the batches each configuration's rows pool."""
+    found = [(sub, json.loads(line)) for folder in sorted({f.parent for f in files}) for sub in ("infra", "limited")
+             for path in sorted((folder / sub).glob("*.jsonl")) for line in path.read_text(encoding="utf-8").splitlines()
+             if line.strip()]
+    aside = [row for _, row in found]
+    where = " and ".join(f"`bench/results/{sub}/`" for sub in sorted({sub for sub, _ in found}))
+    lines = []
+    if aside:
+        reasons = [r.get("limited_reason") or ("network" if "infra_reason" in r else "limit") for r in aside]
+        again = sum(any(o["task"] == r["task"] and o["config"] == r["config"] and o["started_at"] > r["started_at"]
+                        for o in rows) for r in aside)
+        parts = [f"{reasons.count('network')} lost the network"] * ("network" in reasons) + \
+                [f"{reasons.count('limit')} hit a rate or usage limit"] * ("limit" in reasons)
+        lines.append(f"- {len(aside)} run(s) are set aside, outside the results, because the API never got to the "
+                     f"task: {', '.join(parts)}. {again} of them were run again later on the same task and "
+                     "configuration, and none counts for or against a configuration. Their raw lines, with the reason, "
+                     f"are under {where}.")
+    spend: dict[str, dict[str, float]] = {}
+    counted: dict[str, int] = {}
+    for r in rows:
+        if isinstance(r.get("agent_costs"), dict):
+            counted[r["config"]] = counted.get(r["config"], 0) + 1
+            for who, usd in r["agent_costs"].items():
+                spend.setdefault(r["config"], {}).setdefault(who, 0.0)
+                spend[r["config"]][who] += usd
+    if spend:
+        def share(config: str) -> str:
+            total = sum(spend[config].values()) or 1
+            order = sorted(spend[config].items(), key=lambda kv: (kv[0] != "main", -kv[1]))
+            runs = counted[config]
+            return f"`{config}` ({runs} run{'s' * (runs != 1)}): " + ", ".join(
+                f"{'main loop' if who == 'main' else f'`{who}`'} ${usd:.4f} ({usd / total:.0%})" for who, usd in order)
+        lines.append("- Router spend by agent type, from the router's ledger (`agent_costs`), over the runs that "
+                     "record it: " + "; ".join(share(c) for c in sorted(spend)) + ".")
+    batches: dict[str, dict[str, int]] = {}
+    for r in rows:
+        batches.setdefault(r["config"], {}).setdefault(r.get("_batch", "?"), 0)
+        batches[r["config"]][r.get("_batch", "?")] += 1
+    lines.append("- Each configuration's runs pool every batch it ran in, on the same machine, so a configuration "
+                 "run in a later batch is compared with the baseline runs of earlier ones. Batches, by configuration: "
+                 + "; ".join(f"`{c}` " + ", ".join(f"{b} ({n})" for b, n in sorted(batches[c].items()))
+                             for c in sorted(batches)) + ".")
+    return lines
+
+
 def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
     total = sum(r["total_cost_usd"] for r in rows)
     versions = sorted({r["claude_version"] for r in rows})
@@ -181,7 +236,8 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         f"of the difference below zero, and its pass rate is not behind beyond noise. FAIL means it is behind on "
         f"either. PARTIAL means a tie, a difference inside the noise, or fewer than {MIN_RUNS} runs per "
         "configuration. The best baseline is the one with the lowest cost per solved task.",
-        "- Rank is the router's place among the configurations by cost per solved task, 1 being cheapest.", "",
+        "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest. A router "
+        "variant (another configuration that loads the plugin) has its own column but is never a baseline.", "",
         "## Setup", "",
         f"- Claude Code: {', '.join(versions) or 'n/a'}. Session model: {', '.join(main) or 'n/a'}, the same for "
         "every configuration except one that sets its own (`opusplan`).",
@@ -192,6 +248,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         "- Agents started, by configuration: "
         + "; ".join(f"`{c}` " + ", ".join(f"{name} x{n}" for name, n in sorted(agents.get(c, {}).items()))
                     for c in used) + ".",
+        *_notes(rows, files),
         "- Shape: a single agent. The session hands each task to one subagent with the Agent tool and relays its "
         "answer, so the subagent is what each configuration changes.",
         "- Each run starts in a fresh copy of the task's files, outside any repository, with "
@@ -275,8 +332,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--router", default="plugin")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
-    rows = [json.loads(line) for path in args.results for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()]
+    rows = [dict(json.loads(line), _batch=_batch(path)) for path in args.results
+            for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     summary = summarize(rows, router=args.router)
     args.out.write_text(render(summary, _page(rows, sorted(args.results), summary)), encoding="utf-8")
     return 0

@@ -82,6 +82,39 @@ class Analysis(unittest.TestCase):
         for line in class_rows:
             self.assertTrue(line.endswith("| PARTIAL |"), line)
 
+    def test_another_router_configuration_is_never_the_baseline(self):
+        n = analyze.MIN_RUNS
+        data = (rows("plugin", "bugfix", [0.3] * n, [True] * n) + rows("plugin-cheap", "bugfix", [0.1] * n, [True] * n)
+                + rows("defaults", "bugfix", [0.2] * n, [True] * n))
+        verdict = self.summary(data)["bugfix"]
+        self.assertEqual(verdict["best_baseline"], "defaults")
+        self.assertEqual(verdict["rank"], 2)
+        self.assertIn("plugin-cheap", verdict["configs"])  # still shown on the page
+
+    def test_the_page_names_set_aside_runs_agent_spend_and_batches(self):
+        real = [json.loads(line) for line in (ROOT / "bench" / "results" / "m6-05-bugfix-2026-11-22.jsonl")
+                .read_text(encoding="utf-8").splitlines() if line]
+        base = dict(real[0], started_at="2026-11-22T10:00:00+00:00")
+        lost = dict(base, config="plugin", task="bugfix-median", started_at="2026-11-22T09:00:00+00:00")
+        with tempfile.TemporaryDirectory() as tmp:
+            res = Path(tmp) / "results"
+            (res / "infra").mkdir(parents=True)
+            (res / "limited").mkdir()
+            write = lambda path, items: path.write_text("".join(json.dumps(r) + "\n" for r in items))  # noqa: E731
+            write(res / "old-bugfix-2026-11-22.jsonl", [dict(base, config="defaults")] * 3)
+            write(res / "new-bugfix-2026-11-22.jsonl", [dict(base, config="plugin", task="bugfix-median",
+                  agent_costs={"main": 0.03, "model-router:implementer": 0.01})] * 2)
+            write(res / "infra" / "new-network.jsonl", [dict(lost, infra_reason="network outage")] * 2)
+            write(res / "limited" / "new-bugfix-2026-11-22.jsonl",
+                  [dict(lost, task="bugfix-pagination", limited_reason="limit")])
+            out = Path(tmp) / "page.md"
+            analyze.main([str(p) for p in sorted(res.glob("*.jsonl"))] + ["--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        self.assertIn("3 run(s) are set aside, outside the results, because the API never got to the task: "
+                      "2 lost the network, 1 hit a rate or usage limit. 2 of them were run again later", page)
+        self.assertIn("`plugin` (2 runs): main loop $0.0600 (75%), `model-router:implementer` $0.0200 (25%)", page)
+        self.assertIn("`defaults` old (3); `plugin` new (2)", page)
+
 
 class Runner(unittest.TestCase):
     def test_each_run_starts_clean_and_only_the_configuration_differs(self):
@@ -539,6 +572,19 @@ class Limits(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in Path(tmp).glob("*.jsonl")), ["out.jsonl"] if out.exists() else [])
             return code, read(out), read(Path(tmp) / "limited" / "out.jsonl"), pauses
 
+    def test_a_later_round_keeps_its_run_number_and_rotation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "claude"
+            stub.write_text(LIMIT_STUB)
+            stub.chmod(0o755)
+            out = Path(tmp) / "out.jsonl"
+            with unittest.mock.patch.dict("os.environ", {"STUB_CALLS": str(Path(tmp) / "calls"), "STUB_LIMITED": "0"}):
+                code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "sonnet", "--runs", "1",
+                                 "--first-run", "1", "--max-total", "3", "--claude", str(stub), "--out", str(out)])
+            rows = [json.loads(line) for line in out.read_text().splitlines()]
+        self.assertEqual(code, 0)
+        self.assertEqual([(r["config"], r["run"]) for r in rows], [("sonnet", 1), ("defaults", 1)])
+
     def test_a_limited_run_pauses_and_is_retried(self):
         code, rows, limited, pauses = self.bench(limited=2)
         self.assertEqual(code, 0)
@@ -627,6 +673,10 @@ class Pilot(unittest.TestCase):
         borrowed = sum(r.get("plugin_state") is not None and "plugin_data_own" not in r for r in data)
         if borrowed:
             self.assertIn(f"{borrowed} router run(s) here borrowed the shared folder", page)
+        aside = sum(1 for sub in ("infra", "limited") for path in (ROOT / "bench" / "results" / sub).glob("*.jsonl")
+                    for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+        if aside:
+            self.assertIn(f"{aside} run(s) are set aside", page)
         unsaved = sum("sessions_saved" not in r for r in data)
         if unsaved:
             self.assertIn(f"{unsaved} run(s) here ran with `--no-session-persistence`", page)

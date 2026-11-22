@@ -88,6 +88,17 @@
     "price_model": "sonnet"
   },
   {
+    "id": "plugin-m6-08-b-nogate",
+    "description": "plugin-m6-08-b with the Stop check's verifier request off (`verify_gate: false`)",
+    "plugin": true,
+    "env": {},
+    "plugin_ref": "810e971",
+    "plugin_options": {
+      "verify_gate": false
+    },
+    "price_model": "sonnet"
+  },
+  {
     "id": "defaults",
     "description": "No plugin: subagents inherit the session model at its default effort",
     "plugin": false,

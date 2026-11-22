@@ -263,6 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tasks", nargs="*", help="task ids (default: all)")
     parser.add_argument("--configs", nargs="*", help="configuration ids (default: all)")
     parser.add_argument("--runs", type=int, default=1, help="runs of each task under each configuration")
+    parser.add_argument("--first-run", type=int, default=0, help="number of the first run, to go on from an earlier round")
     parser.add_argument("--model", default="sonnet", help="the session model, the same for every configuration that sets none")
     parser.add_argument("--budget", type=float, default=0.5, help="--max-budget-usd for each run")
     parser.add_argument("--max-total", type=float, required=True, help="stop before total spend could pass this")
@@ -279,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
                "plugin_dir": str(PLUGIN), "claude_version": version, "commit": _git_head(), "dirty": _git_dirty()}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     spent = 0.0
-    for run_index in range(args.runs):
+    for run_index in range(args.first_run, args.first_run + args.runs):
         # Rotate the order so no configuration always runs first on a cold prompt cache.
         shift = run_index % len(configs)
         for task in tasks:
