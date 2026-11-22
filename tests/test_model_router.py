@@ -2221,7 +2221,9 @@ class RefreshBackoff(Sandbox):
         self.assertEqual(fetch.call_count, 1)
 
     def test_a_corrupt_record_never_blocks_a_fetch(self):
-        for record in ("junk", {"at": "soon", "count": 1}, {"at": 10**15, "count": 1}, {"at": 999_000, "count": -3}):
+        for record in ("junk", {"at": "soon", "count": 1}, {"at": 10**15, "count": 1}, {"at": 999_000, "count": -3},
+                       {"at": 1, "count": float("inf")}, {"at": float("-inf"), "count": 1},
+                       {"at": float("nan"), "count": 2}):
             with self.subTest(record=record):
                 store.save_json(upstream.path(), {"failed": record})
                 self.assertEqual(self.refresh(1_000_000.0, fails=False), 1)
