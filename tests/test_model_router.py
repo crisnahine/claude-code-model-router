@@ -552,6 +552,17 @@ class AgentDiscovery(Sandbox):
         self.assertIsNone(agents.find("acme:helper", self.project)["model"])
         self.assertEqual(agents.find("acme:deep", self.project)["model"], "opus")
         self.assertIsNone(agents.find("other:helper", self.project))
+        self.agent("vendored", "opus", install / "node_modules" / "pkg" / "agents")
+        self.agent("tracked", "opus", install / ".git" / "agents")
+        self.assertIsNone(agents.find("acme:vendored", self.project))  # dependency trees aren't walked
+        self.assertIsNone(agents.find("acme:tracked", self.project))
+        self.agent("kept", "opus", install / "data" / "agents")
+        self.assertEqual(agents.find("acme:kept", self.project)["model"], "opus")
+        (install / "docs").mkdir()
+        for n in range(2000):
+            (install / "docs" / f"{n}.md").write_text("")
+        self.agent("late", "opus", install / "zz" / "agents")
+        self.assertIsNone(agents.find("acme:late", self.project))  # the walk stops at 2000 .md files
 
     def test_other_plugin_by_folder_name(self):
         self.agent("helper", "haiku", self.home / "plugins" / "cache" / "market" / "acme" / "1.0" / "agents")
