@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="330" viewBox="0 0 860 330" role="img" aria-labelledby="title desc">
   <title id="title">The ladder: five levels to a model and an effort</title>
-  <desc id="desc">With balanced priority, lookup runs on Haiku at low effort, standard on Sonnet at high, complex on Opus at high, hardest on Opus at xhigh, and frontier on Fable at high. Quality priority goes one step stronger, fast one step lighter. When the cap, the availableModels or deniedModels settings, or failures rule a model out, the pick moves to the nearest usable model above it, or to the strongest one left.</desc>
+  <desc id="desc">With balanced priority, lookup runs on Haiku at low effort, standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high, and frontier on Fable at high. Quality priority goes one step stronger, fast one step lighter. When the cap, the availableModels or deniedModels settings, or failures rule a model out, the pick moves to the nearest usable model above it, or to the strongest one left.</desc>
   <style>
     .bg { fill: #ffffff; }
     .rule { stroke: #57606a; stroke-width: 0.8; opacity: 0.5; }
@@ -32,15 +32,15 @@
   <rect class="b1" x="380" y="60" width="45" height="16" rx="3"/>
   <text class="m" x="580" y="72">Find, list, summarize, run a command</text>
 
-  <text class="lv" x="24" y="112">standard</text><text x="130" y="112">Sonnet</text><text class="code" x="300" y="112">high</text>
+  <text class="lv" x="24" y="112">standard</text><text x="130" y="112">Sonnet</text><text class="code" x="300" y="112">medium</text>
   <rect class="b2" x="380" y="100" width="90" height="16" rx="3"/>
   <text class="m" x="580" y="112">Implement to a clear spec, write tests</text>
 
-  <text class="lv" x="24" y="152">complex</text><text x="130" y="152">Opus</text><text class="code" x="300" y="152">high</text>
-  <rect class="b3" x="380" y="140" width="135" height="16" rx="3"/>
+  <text class="lv" x="24" y="152">complex</text><text x="130" y="152">Sonnet</text><text class="code" x="300" y="152">high</text>
+  <rect class="b2" x="380" y="140" width="90" height="16" rx="3"/>
   <text class="m" x="580" y="152">Design, review, risky or cross-module</text>
 
-  <text class="lv" x="24" y="192">hardest</text><text x="130" y="192">Opus</text><text class="code" x="300" y="192">xhigh</text>
+  <text class="lv" x="24" y="192">hardest</text><text x="130" y="192">Opus</text><text class="code" x="300" y="192">high</text>
   <rect class="b3" x="380" y="180" width="135" height="16" rx="3"/>
   <text class="m" x="580" y="192">Ambiguous, multi-system and risky</text>
 

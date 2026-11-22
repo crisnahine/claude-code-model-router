@@ -175,8 +175,9 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
         level, why = "standard", why + ["thorough or long brief"]
     name = agent_type.split(":")[-1].lower()
     if re.search(_HEAVY_NAME, name):
-        if LEVELS.index(level) < LEVELS.index("complex"):
-            level, why = "complex", why + ["agent's role"]
+        floor = "hardest" if "solver" in name else "complex"  # a solver is for what the others couldn't do
+        if LEVELS.index(level) < LEVELS.index(floor):
+            level, why = floor, why + ["agent's role"]
     elif re.search(_LIGHT_NAME, name):
         if LEVELS.index(level) > LEVELS.index("standard"):
             level, why = "standard", why + ["search or check agent"]

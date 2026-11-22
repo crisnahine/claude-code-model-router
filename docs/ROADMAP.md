@@ -4,7 +4,7 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 
 ## Next
 
-1. Close the cost gap the benchmark shows. On a Sonnet session the router cost 1.2 to 2.2 times the best baseline in 7 of 8 classes, and the cheap ladder with `main_effort` and `verify_gate` off still cost 12 to 23% more than `defaults`, from its own context in every run. On an Opus 5.5 session, the default for most accounts, the m6-08-b build with the gate off cost 21% less than `defaults` per solved task on 4 runs per cell ([BENCHMARKS.md](BENCHMARKS.md)). The shipped commit with the gate off and a smaller injected context (`a06e5d4`) confirmed it at 1 run per task: 25% less per run, 15 of 16 solved. Next, run both session tables to 10 runs per cell, and find out why the Sonnet `implementer` keeps missing `design-cache-invalidation` (1 of 4) when `defaults` on Opus gets it every time. Then run the baselines still missing (`haiku`, `opus`, `fable`, `opusplan`, the advisor), fan-outs, cache temperature and router overhead. Rows S4.12, S4.13, S4.15, S14.1.
+1. Close the cost gap the benchmark shows. The ladder now starts cheap (standard Sonnet `medium`, complex Sonnet `high`, hardest Opus `high`), and `main_effort` and the verify gate are off by default. On a Sonnet session, measured before the context the plugin adds was cut, that didn't close the gap: the router still cost 12 to 23% more per solved task than `defaults` in the 7 classes it lost, from its own context in every run. On an Opus 5.5 session, the default for most accounts, the m6-08-b build with the gate off cost 21% less than `defaults` per solved task on 4 runs per cell, and the shipped commit `a06e5d4` cost 25% less per run at 15 of 16 solved on 1 run per task ([BENCHMARKS.md](BENCHMARKS.md)). Next, run both session tables on the shipped commit to 10 runs per cell, and find out why the Sonnet `implementer` keeps missing `design-cache-invalidation` (1 of 4) when `defaults` on Opus gets it every time. Then run the baselines still missing (`haiku`, `opus`, `fable`, `opusplan`, the advisor), fan-outs, cache temperature and router overhead. Rows S4.12, S4.13, S4.15, S14.1.
 2. Run live beyond the macOS terminal. Linux and Windows installs; Desktop, VS Code, JetBrains and the Agent SDK; Bedrock, Vertex and Foundry; an API-key login; `allowManagedHooksOnly`; split-pane teammates. Record each in "Verified live". Rows S3.7 to S3.10, S3.13, S6.1.
 3. Decide how fast mode shows in the spend log. Claude Code doesn't say which requests ran fast, so the only full figure is its own estimate in `/cost`, which a mod can read. Rows S4.8, S10.7.
 4. Add a `claude plugin eval` case for the `route` skill. The three routing cases pass with the plugin and fail without it ([TEST_RESULTS.md](TEST_RESULTS.md)), but the skill's own command needs a narrow `--allow-tools` Bash grant to run inside an eval. Rows S4.11, S9.4.
@@ -15,12 +15,12 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 
 - Whether a project's file may raise levels and effort (the open question on project raises). The user decides; 0.1.0 allows raises. Row S6.4.
 - Whether the fallback's one denial, which protects the cap, stays as an exception to "never blocks a spawn". Row S2.25.
-- Whether the standard level runs Sonnet at `high`, as shipped, or at `medium`. In the benchmark `medium` solved as often for less: significantly on implementation, not significantly on known-cause bugfixes. Row S10.11.
 - Whether the Mythos models, priced but not routed, become a routable family. Row S2.15.
 - A live marketplace install with one routed call, which needs the maintainer's login or an API key in a scratch config folder. Row S6.1.
 
 ## Done since 0.1.0
 
+- The ladder starts cheap: standard on Sonnet at `medium`, complex on Sonnet at `high`, hardest on Opus at `high`, and `main_effort` off by default, from the benchmark's cost gap. Rows S4.2, S10.11.
 - The state documents: this file, `TRACEABILITY.md` with its count script, `RELEASE_READINESS.md`, `TEST_RESULTS.md`, the `docs/README.md` index and `CONTRIBUTING.md`.
 - State files carry a version and migrate; one that fails to parse is set aside, and one from a newer release is read but never written. Rows S6.6, S6.7, S12.21.
 - A security assessment in [SECURITY.md](SECURITY.md). Rows S10.12, S11.7.

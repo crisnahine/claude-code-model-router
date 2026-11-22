@@ -1,5 +1,5 @@
 {
-  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength, speed and cost are relative ranks. A model's name must be an alias the Agent tool accepts (haiku, sonnet, opus, fable). Crew models must match each agent's frontmatter; the tests check that. Levels pair a strength with an effort: on current models effort is the cheaper lever, so complex and hardest share Opus and differ in effort. Prices are USD per million tokens on the Anthropic API, used only to report spend: a key is one model version, or ends in -* to cover every version of a family, and a version with no entry is reported as unpriced. Prices can be added or changed in your own ~/.claude/model-router.json only, not a project's file. cache_write is the five-minute cache write price and cache_write_1h the one-hour one, which is twice input when left out. A shipped long_prompt block holds the prices a request pays when its prompt (input, cache reads and cache writes) is over its `over` tokens; each request is priced on its own (https://platform.claude.com/docs/en/about-claude/pricing.md, Long context pricing). `schema` is the version of this shape; an override may carry it too, and docs/ARCHITECTURE.md \"Compatibility\" says what changes it.",
+  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength, speed and cost are relative ranks. A model's name must be an alias the Agent tool accepts (haiku, sonnet, opus, fable). The crew lists the plugin's role agents and their roles; they carry no model or effort of their own, so the router routes each by its brief. Levels pair a strength with an effort: on current models effort is the cheaper lever, so standard and complex share Sonnet and differ in effort. Prices are USD per million tokens on the Anthropic API, used only to report spend: a key is one model version, or ends in -* to cover every version of a family, and a version with no entry is reported as unpriced. Prices can be added or changed in your own ~/.claude/model-router.json only, not a project's file. cache_write is the five-minute cache write price and cache_write_1h the one-hour one, which is twice input when left out. A shipped long_prompt block holds the prices a request pays when its prompt (input, cache reads and cache writes) is over its `over` tokens; each request is priced on its own (https://platform.claude.com/docs/en/about-claude/pricing.md, Long context pricing). `schema` is the version of this shape; an override may carry it too, and docs/ARCHITECTURE.md \"Compatibility\" says what changes it.",
   "schema": 1,
   "models": {
     "haiku": {
@@ -12,7 +12,7 @@
       "strength": 2,
       "speed": 3,
       "cost": 2,
-      "use_for": "Everyday implementation at high effort: features and fixes with a clear spec, tests, refactors inside one module."
+      "use_for": "Everyday implementation at medium effort: features and fixes with a clear spec, tests, refactors inside one module. Design, review and risky or cross-module changes at high."
     },
     "opus": {
       "strength": 3,
@@ -24,7 +24,7 @@
       "strength": 4,
       "speed": 1,
       "cost": 4,
-      "use_for": "Research-grade and open-ended work: ambiguous multi-system problems with no known approach, long investigations, and retries after Opus at xhigh fell short."
+      "use_for": "Research-grade and open-ended work: ambiguous multi-system problems with no known approach, long investigations, and retries after Opus fell short."
     }
   },
   "aliases": {
@@ -51,15 +51,15 @@
     },
     "standard": {
       "needs": 2,
-      "effort": "high"
+      "effort": "medium"
     },
     "complex": {
-      "needs": 3,
+      "needs": 2,
       "effort": "high"
     },
     "hardest": {
       "needs": 3,
-      "effort": "xhigh"
+      "effort": "high"
     },
     "frontier": {
       "needs": 4,
@@ -205,31 +205,24 @@
   },
   "crew": {
     "scout": {
-      "model": "haiku",
       "role": "Read-only search and summary"
     },
     "verifier": {
-      "model": "haiku",
       "role": "Runs tests, lint and type checks and reports results"
     },
     "docs-researcher": {
-      "model": "haiku",
       "role": "Reads current Claude Code docs and changelog"
     },
     "implementer": {
-      "model": "sonnet",
       "role": "Writes code and tests to a clear spec"
     },
     "architect": {
-      "model": "opus",
       "role": "Plans changes and designs systems, read-only"
     },
     "reviewer": {
-      "model": "opus",
       "role": "Adversarial review of a diff"
     },
     "deep-solver": {
-      "model": "fable",
       "role": "Research-grade, open-ended tasks with no known approach"
     }
   },
