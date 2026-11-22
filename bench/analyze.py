@@ -124,8 +124,8 @@ def _newest_price(prices: dict, alias: str) -> dict:
 def estimate(rows: list[dict], tasks: list[dict], configs: list[dict], prices: dict) -> dict:
     """What MIN_RUNS of every task under every configuration would cost. A class's runs cost what its runs
     here cost on average (all runs' mean for a class with none), and a configuration whose subagents run a
-    dearer model than sonnet costs that much more on the whole run, an upper bound since the session stays
-    on sonnet. Cheaper models are never priced down."""
+    dearer model than sonnet costs that much more per token on the whole run. Cheaper models are never priced
+    down. A guide, not a bound: token counts differ by model and the means pool every configuration."""
     overall = sum(r["total_cost_usd"] for r in rows) / len(rows) if rows else 0.0
     by_class: dict[str, list[float]] = {}
     for r in rows:
@@ -160,6 +160,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
     borrowed = sum(1 for r in rows if r.get("plugin_state") is not None and "plugin_data_own" not in r)
     prices = json.loads((run.PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["prices"]
     plan = estimate(rows, tasks, run.load_configs(), prices)
+    budget = max((r.get("budget_usd") or 0.5 for r in rows), default=0.5)
     header = "\n".join([
         "# Benchmarks", "",
         f"Cost and quality of Model Router against Claude Code without it. {len(rows)} runs, "
@@ -183,7 +184,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         "- Rank is the router's place among the configurations by cost per solved task, 1 being cheapest.", "",
         "## Setup", "",
         f"- Claude Code: {', '.join(versions) or 'n/a'}. Session model: {', '.join(main) or 'n/a'}, the same for "
-        "every configuration.",
+        "every configuration except one that sets its own (`opusplan`).",
         "- Configurations run: " + "; ".join(f"`{c}` ({configs.get(c, '?')})" for c in used) + ".",
         "- Models that ran, with Claude Code's list-price cost across all runs: "
         + "; ".join(f"`{name}` ${sum(costs):.4f} over {len(costs)} runs" for name, costs in sorted(models.items()))
@@ -252,9 +253,11 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         "whose subagents run a dearer model than Sonnet is priced up by that model's output price over Sonnet's, "
         "on the whole run: "
         + ", ".join(f"`{cid}` x{factor:g}" for cid, factor in plan["factors"].items() if factor > 1)
-        + ". That is an upper bound for those, since the session stays on Sonnet. The new classes are harder than "
-        "the pilot's, so their runs may cost more than the mean. The full suite needs the maintainer's go-ahead "
-        "before it runs.", "",
+        + ". That scales the price per token only: a dearer model may use more or fewer tokens, the class means "
+        "pool every configuration's runs, and the new classes are harder than the pilot's two, so treat the figure "
+        f"as a guide, not a bound. The hard ceiling is the per-run cap: {plan['runs']} runs x ${budget:g} = "
+        f"${plan['runs'] * budget:,.2f}, plus what a run can overshoot its cap by. The full suite needs the "
+        "maintainer's go-ahead before it runs.", "",
         "Not covered yet: the fan-out, workflow, team and redo shapes; `haiku`, `opus` and `fable` at `high` "
         "effort; a cold and a warm prompt cache measured apart; router overhead per spawn and per turn; and each "
         "`priority` setting. `opusplan` in a headless `dontAsk` run never enters plan mode, so it runs Sonnet "

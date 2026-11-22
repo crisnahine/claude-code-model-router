@@ -67,7 +67,7 @@
   },
   {
     "id": "advisor",
-    "description": "No plugin: a sonnet session with an opus advisor (--advisor opus); needs the Anthropic API or a subscription",
+    "description": "No plugin: a sonnet session with an opus advisor (--advisor opus); needs the Anthropic API, Claude Platform on AWS or Claude Models on Google Cloud, on a subscription or API billing",
     "plugin": false,
     "env": {},
     "args": ["--advisor", "opus"],

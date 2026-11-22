@@ -1,13 +1,13 @@
 """Pass when fetch and upload both make `retries` attempts, read on every call, 3 by default."""
 import importlib
+import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 WORK = Path(sys.argv[1])
-sys.path.insert(0, str(WORK))
-import json
-import os
-import tempfile
+sys.path.insert(0, str(WORK))  # after the stdlib imports, so the work dir can't replace them
 
 
 def attempts(fn):
@@ -29,6 +29,6 @@ try:
             os.environ["APP_CONFIG"] = path
             seen.append((attempts(fetch), attempts(upload)))
     ok = seen == [(3, 3), (5, 5), (1, 1)]
-except Exception:
+except BaseException:  # a SystemExit from work-dir code is a failure
     ok = False
 sys.exit(0 if ok else 1)

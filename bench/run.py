@@ -137,8 +137,11 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
         result = {}
     answer = result.get("result") or ""
     (scratch / "answer.txt").write_text(answer, encoding="utf-8")
-    check = subprocess.run([sys.executable, str(task["dir"] / "check.py"), str(work), str(scratch / "answer.txt")],
-                           capture_output=True, text=True, timeout=120)
+    try:
+        passed = subprocess.run([sys.executable, str(task["dir"] / "check.py"), str(work), str(scratch / "answer.txt")],
+                                capture_output=True, text=True, timeout=120).returncode == 0
+    except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
+        passed = False
     session_removed = _forget_session(session_dir(work, env))
     shutil.rmtree(scratch, ignore_errors=True)
     models = {name: {k: usage.get(k) for k in ("inputTokens", "outputTokens", "cacheReadInputTokens",
@@ -160,7 +163,7 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
         "models": models, "prices": {name: prices.get(name) for name in models},
         "subagents": {k: agents.get(k) for k in ("spawned", "completed", "failed", "by_type")},
         "permission_denials": [d.get("tool_name") for d in result.get("permission_denials") or []],
-        "passed": check.returncode == 0, "answer": answer[:2000],
+        "passed": passed, "answer": answer[:2000],
         "stderr": stderr[-300:] if code else "",
     }
 
@@ -170,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tasks", nargs="*", help="task ids (default: all)")
     parser.add_argument("--configs", nargs="*", help="configuration ids (default: all)")
     parser.add_argument("--runs", type=int, default=1, help="runs of each task under each configuration")
-    parser.add_argument("--model", default="sonnet", help="the session model, the same for every configuration")
+    parser.add_argument("--model", default="sonnet", help="the session model, the same for every configuration that sets none")
     parser.add_argument("--budget", type=float, default=0.5, help="--max-budget-usd for each run")
     parser.add_argument("--max-total", type=float, required=True, help="stop before total spend could pass this")
     parser.add_argument("--timeout", type=int, default=900, help="seconds before a run is killed")

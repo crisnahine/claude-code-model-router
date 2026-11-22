@@ -1,5 +1,6 @@
 """Pass when DESIGN.json picks a shared token bucket per API key at 5/s with a burst of 20."""
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -19,6 +20,13 @@ def reasons(data):
 
 def number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def numeric(value):
+    try:
+        return float(value) if not isinstance(value, bool) else None
+    except (TypeError, ValueError):
+        return None
 
 d = answer("DESIGN.json")
 ok = (d.get("algorithm") == "token_bucket" and d.get("store") == "redis" and d.get("key") == "api_key"

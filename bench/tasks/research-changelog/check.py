@@ -1,5 +1,6 @@
 """Pass when RESEARCH.json gives 1.3, 2.0 and FETCHKIT_RETRIES, citing the two changelogs."""
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -21,14 +22,25 @@ def number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def numeric(value):
+    try:
+        return float(value) if not isinstance(value, bool) else None
+    except (TypeError, ValueError):
+        return None
+
+
 def version(value):
-    text = str(value or "").strip().lower().lstrip("v")
-    return text[:-2] if text.endswith(".0") and text.count(".") == 2 else text
+    parts = [int(n) for n in re.findall(r"\d+", str(value or ""))]
+    if not parts or any(parts[2:]):
+        return str(value)
+    return f"{parts[0]}.{parts[1] if len(parts) > 1 else 0}"
+
+
+def cited(name):
+    return any(str(s).replace("\\", "/").endswith(f"changelog/{name}") for s in d.get("sources") or [])
 
 
 d = answer("RESEARCH.json")
-sources = {str(s).replace("\\", "/").lstrip("./") for s in d.get("sources") or [] if isinstance(s, str)}
 ok = (version(d.get("default_changed_in")) == "1.3" and version(d.get("configurable_in")) == "2.0"
-      and d.get("variable") == "FETCHKIT_RETRIES"
-      and {"docs/changelog/v1.3.md", "docs/changelog/v2.0.md"} <= sources)
+      and d.get("variable") == "FETCHKIT_RETRIES" and cited("v1.3.md") and cited("v2.0.md"))
 sys.exit(0 if ok else 1)

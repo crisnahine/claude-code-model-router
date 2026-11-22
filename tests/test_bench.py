@@ -309,6 +309,63 @@ class SuiteCoverage(unittest.TestCase):
                 self.assertTrue(self.check(task, work, task["reference_answer"]))
                 self.assertFalse(self.check(task, work, task["reference_answer"] + "\nAlso " + task["decoy"]))
 
+    ANSWERS = {  # task: (answers that must pass, answers that must fail)
+        "security-sql-injection": (
+            ["db\\users.py:6 interpolates name into SQL", "`db/users.py`:6 is injectable",
+             "**`db/users.py`**, line 6: f-string SQL", "db/users.py:6 builds the query; app.py:8 calls it"],
+            ["db/orders.py:3", "db/users.py:6 and db/orders.py:3",
+             "db/users.py:4, db/users.py:5, db/users.py:6, db/users.py:7, app.py:8", ""]),
+        "security-path-traversal": (
+            ["files\\server.py:8 joins an unresolved name", "`files/server.py` line 9 opens it",
+             "files/server.py:8, reached from web.py:7"],
+            ["files/thumbs.py:8", "files/server.py:8 or files/thumbs.py:8", "web.py:7"]),
+    }
+    JSON_ANSWERS = {
+        "research-changelog": (
+            [{"default_changed_in": "v1.3", "configurable_in": "2", "variable": "FETCHKIT_RETRIES",
+              "sources": ["/tmp/x/work/docs/changelog/v1.3.md", "changelog\\v2.0.md"]},
+             {"default_changed_in": "1.3.0", "configurable_in": 2, "variable": "FETCHKIT_RETRIES",
+              "sources": ["./docs/changelog/v1.3.md", "docs/changelog/v2.0.md"]}],
+            [{"default_changed_in": "1.4", "configurable_in": "2.0", "variable": "FETCHKIT_RETRIES",
+              "sources": ["docs/changelog/v1.3.md", "docs/changelog/v2.0.md"]},
+             {"default_changed_in": "1.3", "configurable_in": "2.0", "variable": "FETCHKIT_RETRIES",
+              "sources": ["docs/changelog/v2.0.md"]}]),
+        "design-cache-invalidation": (
+            [{"strategy": "event_invalidation", "ttl_seconds": None, "max_staleness_seconds": 1, "reasons": ["bus"]},
+             {"strategy": "event_invalidation", "ttl_seconds": 600, "max_staleness_seconds": 2, "reasons": ["x"]}],
+            [{"strategy": "event_invalidation", "ttl_seconds": 5, "max_staleness_seconds": 1, "reasons": ["x"]},
+             {"strategy": "ttl_only", "ttl_seconds": 5, "max_staleness_seconds": 5, "reasons": ["x"]}]),
+        "research-latency": (
+            [{"deploy": "d3", "commit": "c0912ee", "p95_ms": 310}, {"deploy": "d3", "commit": "c0912ee",
+                                                                     "p95_ms": "310"}],
+            [{"deploy": "d2", "commit": "b77e210", "p95_ms": 280}, {"deploy": "d3", "commit": "c0912ee",
+                                                                     "p95_ms": 330}]),
+    }
+
+    def test_checks_take_every_fair_form_of_a_right_answer_and_no_wrong_one(self):
+        for task_id, (right, wrong) in self.ANSWERS.items():
+            for answer, expected in [(a, True) for a in right] + [(a, False) for a in wrong]:
+                with self.subTest(task=task_id, answer=answer), tempfile.TemporaryDirectory() as tmp:
+                    task, work = self.shipped(task_id, tmp)
+                    self.assertEqual(self.check(task, work, answer), expected)
+        files = {"research-changelog": "RESEARCH.json", "research-latency": "RESEARCH.json",
+                 "design-cache-invalidation": "DESIGN.json"}
+        for task_id, (right, wrong) in self.JSON_ANSWERS.items():
+            for answer, expected in [(a, True) for a in right] + [(a, False) for a in wrong]:
+                with self.subTest(task=task_id, answer=answer), tempfile.TemporaryDirectory() as tmp:
+                    task, work = self.shipped(task_id, tmp)
+                    (work / files[task_id]).write_text(json.dumps(answer), encoding="utf-8")
+                    self.assertEqual(self.check(task, work), expected)
+
+    def test_work_dir_code_cannot_exit_the_check_with_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("rootcause-cart", tmp)
+            (work / "cart.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+            self.assertFalse(self.check(task, work))
+            task, work = self.shipped("cross-retry-setting", Path(tmp) / "b")
+            (work / "json.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+            self.assertFalse(self.check(task, work))
+
     def test_each_new_baseline_sets_what_its_name_says(self):
         configs = {c["id"]: c for c in run.load_configs()}
         options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
