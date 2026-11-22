@@ -38,13 +38,45 @@ def is_user_prompt(prompt: str) -> bool:
 _SKILL_BODY_CHARS = 1500
 
 
-def _profile_skill(args: object, body: object) -> dict:
-    """A typed skill's profile: the higher of its arguments' and its body's opening, without the
-    engine's base-directory line or the file's frontmatter."""
+_FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*\r?\n", re.S)
+
+
+def _receives(body: str, frontmatter: str, count: int) -> bool:
+    """Whether a raw skill file has a placeholder that receives one of `count` arguments: an unescaped
+    $ARGUMENTS, $N or $ARGUMENTS[N] with N below count (0-based), or a declared name the body uses.
+    A $ followed by an amount ($500, $1.00) is prose."""
+    if re.search(r"(?<!\\)\$ARGUMENTS\b(?!\[)", body):
+        return True
+    for index in re.findall(r"(?<!\\)\$(?:ARGUMENTS\[(\d+)\]|(\d+)(?![\d.,]))", body):
+        if int(index[0] or index[1]) < count:
+            return True
+    block = re.search(r"(?ms)^arguments\s*:(.*?)(?=^\S|\Z)", frontmatter)
+    names = re.findall(r"[A-Za-z_]\w*", block.group(1)) if block else []
+    return any(re.search(rf"(?<!\\)\${re.escape(name)}\b", body) for name in names)
+
+
+def _profile_skill(args: object, body: object, rendered: bool) -> dict:
+    """A typed skill's profile. A skill whose content takes its arguments (a $ARGUMENTS, $1 or named
+    placeholder) runs them as its task, so they alone set the level: its own instructions, a pipeline's
+    say, are the same on every use. Otherwise the body is the task, and the higher of the arguments' level
+    and the body's opening counts. `rendered` is the engine's expansion, where a skill that takes no
+    placeholder gets the arguments appended as "ARGUMENTS: ..."; otherwise body is the raw file."""
+    args = args.strip() if isinstance(args, str) else ""
     body = (body if isinstance(body, str) else "").lstrip("\ufeff")
     body = re.sub(r"\A\s*Base directory for this skill: [^\n]*\n", "", body)
-    body = re.sub(r"\A---[ \t]*\r?\n.*?\r?\n---[ \t]*\r?\n", "", body, flags=re.S)
-    parts = [profile_prompt(text) for text in (args if isinstance(args, str) else "", body[:_SKILL_BODY_CHARS])]
+    front = _FRONTMATTER.match(body)
+    body = body[front.end():] if front else body
+    if rendered:
+        # The engine appends the trailer last, so only its last occurrence counts, and any trailer at all
+        # means no placeholder took them: an unexpected format errs toward the higher level.
+        head, trailer, _ = body.rpartition("\nARGUMENTS: ")
+        takes_args = bool(args) and not trailer
+        body = head if trailer else body
+    else:
+        takes_args = bool(args) and _receives(body, front.group(1) if front else "", len(args.split()))
+    if takes_args:
+        return profile_prompt(args)
+    parts = [profile_prompt(text) for text in (args, body[:_SKILL_BODY_CHARS])]
     return max(parts, key=lambda p: cfg.LEVELS.index(p["level"]))
 
 
@@ -62,7 +94,7 @@ def _typed_skill(prompt: str, hook_input: dict) -> dict | None:
             if not path.is_file():  # a FIFO or device would hang or never end
                 continue
             with path.open("rb") as fh:
-                return _profile_skill(args, fh.read(64 * 1024).decode("utf-8", "replace"))
+                return _profile_skill(args, fh.read(64 * 1024).decode("utf-8", "replace"), rendered=False)
         except OSError:
             continue
     return None
@@ -310,6 +342,19 @@ def agent_failed(hook_input: dict) -> dict | None:
     asked = _asked_for(config, tool_input, routed)
     if not asked:
         return None
+    named = tool_input.get("model")
+    newest = None
+    if mod_active(hook_input.get("session_id")) and (not named or str(named).lower() == asked):
+        newest = registry.newest_id(config, asked, settings.resolve(config).provider, cfg.project_dir(hook_input))
+    if newest:
+        # The mod sent the family's newest ID, and this provider refused it: the alias runs
+        # from now on, and the ID is tried again after the outage.
+        registry.record_failure(newest, error, strikes=1)
+        store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
+                             "agent": tool_input.get("subagent_type"), "model": newest})
+        return _context("PostToolUseFailure", (
+            f"{newest} isn't available here. Re-issue this agent call unchanged: it now runs on the "
+            f"'{asked}' alias, as Claude Code resolves it for this provider."))
     fails = registry.record_failure(asked, error)
     store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
                          "agent": tool_input.get("subagent_type"), "model": asked})
@@ -372,9 +417,20 @@ def mod_spawn(hook_input: dict) -> dict | None:
     _mark_mod(hook_input.get("session_id"))
     # The spawn procedure reads agent_id as "the call comes from inside a subagent".
     decision = spawn.run({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, "mod")
-    if decision["action"] != "rewrite":
+    newest = _newest(hook_input, decision)
+    if decision["action"] != "rewrite" and not newest:
         return None
-    return {"model": decision["model"], "effort": decision["effort"], "reason": decision["reason"]}
+    return {"model": newest or decision["model"], "effort": decision["effort"], "reason": decision["reason"]}
+
+
+def _newest(hook_input: dict, decision: dict) -> str | None:
+    """The newest full ID to send in place of the decided family alias, on a provider whose
+    alias lags. Only agent.spawn takes a full ID; the Agent tool's model takes an alias
+    (https://code.claude.com/docs/en/sub-agents.md)."""
+    if decision["action"] == "deny" or decision["version"]:
+        return None
+    config = cfg.load_config(hook_input)
+    return registry.newest_id(config, decision["model"], settings.resolve(config).provider, cfg.project_dir(hook_input))
 
 
 def _effort_keeps_cache(options: settings.Settings, model: object) -> bool:
@@ -412,7 +468,8 @@ def mod_turn(hook_input: dict) -> dict | None:
             or str(hook_input.get("origin")) in MACHINE_ORIGINS
             or not _effort_keeps_cache(options, model)):
         return None
-    level = (_profile_skill(command.get("args"), command.get("body")) if command else profile_prompt(text))["level"]
+    level = (_profile_skill(command.get("args"), command.get("body"), rendered=True) if command
+             else profile_prompt(text))["level"]
     effort = ((config.get("main") or {}).get("effort") or {}).get(level)
     if effort not in cfg.EFFORTS:
         return None

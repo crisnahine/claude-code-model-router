@@ -914,6 +914,17 @@ class Profile(unittest.TestCase):
             self.assertEqual(self.level(brief), "lookup", brief)
             self.assertEqual(profile.profile_prompt(brief)["level"], "lookup", brief)
 
+    def test_a_judgment_verb_counts_at_the_start_of_the_prompt_too(self):
+        for call in ({"prompt": "Design a plugin loading strategy for the CLI."},
+                     {"description": "Review CLI flags", "prompt": "Review the proposal for the new CLI flags."}):
+            self.assertEqual(profile.profile_call(call, "general-purpose")["level"], "complex", call)
+        for brief in ("Explain the design of the cache layer.", "What does the design doc say about retries?",
+                      "Review the README for typos."):
+            self.assertEqual(self.level(brief), "standard", brief)
+        # Bare "research" is how people say "look into"; it isn't research-grade wording.
+        self.assertEqual(self.level("Research the trade-offs of switching the database driver and recommend one."),
+                         "complex")
+
     def test_make_sure_keeps_the_task_it_introduces(self):
         self.assertEqual(self.level("Make sure to fix the auth bug in the login handler."), "complex")
         self.assertEqual(self.level("Make sure the payments database migration is safe across all services "
@@ -1523,6 +1534,92 @@ class Mod(Sandbox):
             self.done("rev", LOOKUP, "claude-opus-5-5")
             hooks.agent_failed({**self.call("rev", LOOKUP), "error": "API Error: 404 not_found_error: model"})
         self.assertEqual(registry.health()["opus"]["fail"], 1)
+
+
+class NewestOnProviders(Sandbox):
+    """Where a provider's alias resolves to an older model (the alias table in
+    https://code.claude.com/docs/en/model-config.md), the mod sends the family's newest full ID."""
+
+    LAGS = {"bedrock": ("sonnet", "haiku"), "vertex": ("sonnet", "haiku"), "foundry": ("opus", "sonnet", "haiku"),
+            "anthropic_aws": ("sonnet", "haiku"), "anthropic_google_cloud": ("haiku",)}
+    NEWEST = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
+
+    def spawn(self, prompt: str, agent: str = "general-purpose", **extra) -> tuple[dict | None, dict]:
+        hook_input = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                      "kind": "subagent",
+                      "tool_input": {"subagent_type": agent, "prompt": prompt, "description": "d", **extra}}
+        return hooks.mod_spawn(hook_input), hook_input
+
+    def model(self, prompt: str, **extra) -> str | None:
+        out = self.spawn(prompt, **extra)[0]
+        return out["model"] if out else None
+
+    def test_the_provider_comes_from_the_documented_switches(self):
+        for flags, want in (((), None), (("bedrock",), "bedrock"), (("vertex",), "vertex"), (("foundry",), "foundry"),
+                            (("anthropic_aws",), "anthropic_aws"),
+                            (("anthropic_google_cloud",), "anthropic_google_cloud"),
+                            (("bedrock", "anthropic_aws"), "bedrock"), (("foundry", "anthropic_aws"), "foundry"),
+                            (("anthropic_google_cloud", "vertex"), "anthropic_google_cloud"),
+                            (("mantle",), None), (("bedrock", "mantle"), None), (("bedrock", "vertex"), None)):
+            with mock.patch.dict(os.environ, {f"CLAUDE_CODE_USE_{f.upper()}": "1" for f in flags}):
+                self.assertEqual(settings.resolve().provider, want, flags)
+
+    def test_each_lagging_alias_gets_its_familys_newest_id(self):
+        for provider, lagging in self.LAGS.items():
+            with mock.patch.dict(os.environ, {f"CLAUDE_CODE_USE_{provider.upper()}": "1"}):
+                for family, prompt in (("opus", HARD), ("sonnet", BUILD), ("haiku", LOOKUP)):
+                    want = self.NEWEST[family] if family in lagging else family
+                    self.assertEqual(self.model(prompt), want, (provider, family))
+        self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "sonnet"))  # the Anthropic API
+
+    def test_the_shipped_ids_belong_to_their_families_and_are_priced(self):
+        config = cfg.base_config()
+        self.assertEqual({p: tuple(f) for p, f in config["older_aliases"].items() if not p.startswith("$")}, self.LAGS)
+        for family, model_id in config["newest"].items():
+            if not family.startswith("$"):
+                self.assertEqual((registry.family(config, model_id), model_id), (family, self.NEWEST[family]))
+                self.assertIsNotNone(registry.price(config, model_id))
+
+    def test_a_pin_an_allowlist_a_denial_or_overrides_keep_the_alias(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "claude-sonnet-5-5"))
+        del os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"]
+        for managed, want in (({"availableModels": ["haiku", "sonnet", "opus"]}, "claude-haiku-5-5"),
+                              ({"availableModels": ["claude-haiku-5", "sonnet"]}, "claude-haiku-5-5"),
+                              ({"availableModels": ["claude-haiku-5", "sonnet"], "availableModelsMatch": "exact"}, "haiku"),
+                              ({"availableModels": ["claude-haiku-4-5", "sonnet", "opus"]}, "haiku"),
+                              ({"deniedModels": ["claude-haiku-5-5"]}, "haiku")):
+            self.managed.write_text(json.dumps(managed))
+            self.assertEqual(self.model(LOOKUP), want, managed)
+        self.managed.unlink()
+        (self.home / "settings.json").write_text(json.dumps({"modelOverrides": {"claude-haiku-4-5": "arn:aws:x"}}))
+        self.assertEqual(self.model(LOOKUP), "haiku")
+
+    def test_a_version_the_caller_or_the_agent_names_is_left_alone(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        self.assertNotEqual(self.model(LOOKUP, model="claude-haiku-4-5"), "claude-haiku-5-5")
+        self.agent("old-haiku", "claude-haiku-4-5")
+        out = self.spawn(LOOKUP, agent="old-haiku")[0]
+        self.assertNotEqual(out and out["model"], "claude-haiku-5-5")
+        self.agent("any-haiku", "haiku")
+        self.assertEqual(self.spawn(LOOKUP, agent="any-haiku")[0]["model"], "claude-haiku-5-5")
+
+    def test_an_id_the_provider_rejects_falls_back_to_the_alias(self):
+        os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
+        out, hook_input = self.spawn(LOOKUP)
+        self.assertEqual(out["model"], "claude-haiku-5-5")
+        failed = hooks.agent_failed({**hook_input, "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})
+        self.assertIn("claude-haiku-5-5", failed["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(self.ledger()[-1]["model"], "claude-haiku-5-5")  # the model_error row names the ID
+        self.assertEqual(self.model(LOOKUP), "haiku")
+        self.assertTrue(registry.healthy("haiku"))
+
+    def test_the_agent_call_fallback_sends_only_aliases(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        hook_input = {"session_id": "s9", "cwd": str(self.project),
+                      "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
+        self.assertEqual(hooks.pre_agent(hook_input)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
 
 
 class ModPayloads(Sandbox):
@@ -2189,6 +2286,52 @@ class Upstream(Sandbox):
         self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
 
 
+class RefreshBackoff(Sandbox):
+    """A failed daily fetch waits before the next try: an hour, doubling to a day."""
+
+    def refresh(self, at: float, fails: bool):
+        effect = OSError("offline") if fails else None
+        result = {"releases": [], "pages": {}, "aliases": ["haiku"], "fetched_at": int(at)}
+        with mock.patch.object(upstream.time, "time", return_value=at), \
+                mock.patch.object(upstream, "fetch", side_effect=effect, return_value=result) as fetch:
+            try:
+                upstream.refresh(settings.Settings(), force=False)
+            except OSError:
+                pass
+        return fetch.call_count
+
+    def test_a_failure_waits_doubling_up_to_a_day_and_a_success_resets(self):
+        t = 1_000_000.0
+        self.assertEqual(self.refresh(t, fails=True), 1)
+        self.assertEqual(self.refresh(t + 1800, fails=True), 0)  # inside the first hour
+        self.assertEqual(self.refresh(t + 3601, fails=True), 1)  # second failure: two hours
+        self.assertEqual(self.refresh(t + 3601 + 7000, fails=True), 0)
+        self.assertEqual(self.refresh(t + 3601 + 7201, fails=False), 1)
+        self.assertNotIn("failed", upstream.load())
+        store.update_dict(upstream.path(), lambda data: data["cache"].update(fetched_at=0))
+        self.assertEqual(self.refresh(t + 20_000, fails=True), 1)  # the window starts over at an hour
+        self.assertEqual(self.refresh(t + 20_000 + 3601, fails=True), 1)
+        store.update_dict(upstream.path(), lambda data: data["failed"].update(count=40))
+        self.assertEqual(self.refresh(t + 20_000 + 3601 + 86_401, fails=True), 1)  # capped at a day
+
+    def test_a_failure_keeps_the_old_cache_and_a_forced_refresh_still_runs(self):
+        store.save_json(upstream.path(), {"cache": {"aliases": ["haiku"], "fetched_at": 0}})
+        self.refresh(1_000_000.0, fails=True)
+        self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
+        with mock.patch.object(upstream, "fetch", side_effect=OSError("offline")) as fetch:
+            with self.assertRaises(OSError):
+                upstream.refresh(settings.Settings(), force=True)
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_a_corrupt_record_never_blocks_a_fetch(self):
+        for record in ("junk", {"at": "soon", "count": 1}, {"at": 10**15, "count": 1}, {"at": 999_000, "count": -3},
+                       {"at": 1, "count": float("inf")}, {"at": float("-inf"), "count": 1},
+                       {"at": float("nan"), "count": 2}):
+            with self.subTest(record=record):
+                store.save_json(upstream.path(), {"failed": record})
+                self.assertEqual(self.refresh(1_000_000.0, fails=False), 1)
+
+
 class Reports(Sandbox):
     def test_policy_shows_levels_cap_and_lowered_crew(self):
         self.assertIn("| complex | opus | high |", self.out("policy"))
@@ -2387,9 +2530,52 @@ class SlashSkills(Sandbox):
 
     def test_a_hard_skill_raises_the_turn_and_a_lookup_does_not(self):
         self.session_on("claude-opus-5-5")
-        self.assertEqual(self.turn("hard", "please check src too", self.HARD_BODY)["effort"], "xhigh")
+        # No placeholder takes the arguments, so the engine appends them (as seen live on 2.1.330).
+        appended = self.HARD_BODY + "\n\n\nARGUMENTS: please check src too"
+        self.assertEqual(self.turn("hard", "please check src too", appended)["effort"], "xhigh")
+        self.assertEqual(self.turn("hard", "", self.HARD_BODY)["effort"], "xhigh")
         self.assertIsNone(self.turn("where", "", self.LOOKUP_BODY))
         self.assertEqual(self.turn("plain", HARD, None), {"level": "complex", "effort": "high"})  # args alone
+
+    def test_a_skill_that_takes_its_arguments_is_profiled_by_them(self):
+        self.session_on("claude-opus-5-5")
+        raw = (PLUGIN / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")
+        body = "Base directory for this skill: /p/skills/ship\n\n" + raw.split("---\n", 2)[2]
+        typo = "fix the typo in README.md"
+        self.assertIsNone(self.turn("model-router:ship", typo, body.replace("$ARGUMENTS", typo)))
+        hard = body.replace("$ARGUMENTS", HARD)
+        self.assertEqual(self.turn("model-router:ship", HARD, hard), {"level": "complex", "effort": "high"})
+        self.assertEqual(self.turn("model-router:ship", "", body.replace("$ARGUMENTS", ""))["level"], "frontier")
+        # The settings hook reads the raw file, where the placeholder is still there.
+        skills = self.project / ".claude" / "skills" / "ship"
+        skills.mkdir(parents=True)
+        (skills / "SKILL.md").write_text(raw, encoding="utf-8")
+        hooks.user_prompt({"session_id": "s1", "prompt": "/ship " + typo, "cwd": str(self.project)})
+        self.assertEqual(store.load_entry("prompts", "s1")["level"], "standard")
+        named = self.project / ".claude" / "skills" / "named"
+        named.mkdir()
+        (named / "SKILL.md").write_text("---\nname: named\narguments: [task]\n---\nRedesign the auth schema across "
+                                        "every service: $task\n", encoding="utf-8")
+        hooks.user_prompt({"session_id": "s1", "prompt": "/named " + typo, "cwd": str(self.project)})
+        self.assertEqual(store.load_entry("prompts", "s1")["level"], "standard")
+
+    def test_only_a_placeholder_that_receives_the_arguments_hands_them_the_task(self):
+        hard = self.HARD_BODY.split("\n\n")[1]
+        rendered = lambda body, args: hooks._profile_skill(args, body, rendered=True)["level"]  # noqa: E731
+        raw = lambda body, args: hooks._profile_skill(args, body, rendered=False)["level"]  # noqa: E731
+        # An earlier ARGUMENTS: line in the body is not the engine's trailer, and any trailer means no placeholder.
+        self.assertEqual(rendered(hard + "\nARGUMENTS: none\nKeep notes.\n\n\nARGUMENTS: src", "src"), "hardest")
+        self.assertEqual(rendered(hard + "\n\n\nARGUMENTS: src  extra", "src extra"), "hardest")
+        self.assertEqual(rendered(hard + "\n\n\nARGUMENTS: line one\nline two", "line one\nline two"), "hardest")
+        for body, args in ((hard + " Refunds over $500 need approval.", "src"),  # an amount, not a placeholder
+                           (hard + " Costs $1.00 a run.", "src"),
+                           (hard + " Compare with $2.", "src"),  # $2 receives nothing from one argument
+                           (hard + " Target: \\$ARGUMENTS", "src"),  # escaped
+                           ("---\narguments: [task]\n---\n" + hard, "src")):  # declared, never used
+            self.assertEqual(raw(body, args), "hardest", body)
+        self.assertEqual(raw(hard + " Target: $0", "src"), "lookup")
+        self.assertEqual(raw(hard + " Target: $ARGUMENTS[0]", "src"), "lookup")
+        self.assertEqual(raw("---\narguments:\n  - task\n---\n" + hard + " On $task.", "src"), "lookup")
 
     def test_a_long_ordinary_skill_body_is_not_a_hard_request(self):
         self.session_on("claude-opus-5-5")

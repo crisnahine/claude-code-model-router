@@ -987,8 +987,7 @@
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Refresh races logout",
-   "prompt": "Token refresh sometimes races with logout in all services that share the session store, leaving revoked tokens usable. Find the cause and fix it everywhere.",
-   "known_under": "multi-system work scored low"
+   "prompt": "Token refresh sometimes races with logout in all services that share the session store, leaving revoked tokens usable. Find the cause and fix it everywhere."
   },
   {
    "lowest": "hardest",
@@ -1532,6 +1531,20 @@
    "agent": "general-purpose",
    "description": "List cart callers",
    "prompt": "List the services touching the cart service, the pricing service and the API."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Show token counts",
+   "prompt": "Show the token counts for each model in the ledger."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Fix token count rounding",
+   "prompt": "Fix the rounding of the token counts in the usage report."
   }
  ]
 }

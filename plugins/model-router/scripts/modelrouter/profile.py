@@ -17,7 +17,8 @@ SIGNALS = {
             r"credentials?|secrets?|encrypt\w*|decrypt\w*|payments?|billing|migrat\w*|schemas?|databases?|"
             r"production|data loss|permissions?|concurren\w*|race conditions?|deadlocks?|public api|"
             r"breaking changes?|backward.?compat\w*|breaking existing|existing clients|"
-            r"(?:session|access|refresh|auth|api|bearer|csrf|id)\s+tokens?|jwts?|injection|xss|"
+            r"(?:session|access|refresh|auth|api|bearer|csrf|id)\s+tokens?|jwts?|(?:token|session)\s+refresh|"
+            r"revoked\s+tokens?|races?\s+with|injection|xss|"
             r"cross.site|role checks?|privileges?|access control|soft.?delet\w*|"
             r"los(?:e|es|ing|t)\s+(?:\w+\s+)?(?:data|drafts?|work|changes|edits|records|messages)|rate.?limit\w*|"
             r"rollouts?|invalidat\w*|thread.?safe\w*|mutex\w*|"
@@ -54,7 +55,7 @@ _REASONING_WORDS = (r"review|audit|analy[sz]e|debug|diagnos\w*|plan|design|prove
                     r"root.?caus\w*|reproduc\w*|bisect|evaluate|assess|compare|propose|recommend")
 # Asked for a judgment (review it, design it, plan it), not a hunt for a known kind of bug. Only the verb
 # counts, where it starts a sentence or follows and/then/to/please; "the design doc" is a noun.
-_JUDGMENT = (r"(?:^|[.;:!?]\s+|\b(?:and|then|to|please)\s+)"
+_JUDGMENT = (r"(?:^\s*|\n\s*|[.;:!?]\s+|\b(?:and|then|to|please)\s+)"
              r"(?:review|audit|design|plan|evaluate|assess|propose)\b")
 _TASK_VERB = (r"(?:implement|fix|refactor|rename|migrate|optimi[sz]e|rewrite|convert|upgrade|redesign|debug|"
               r"diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|audit|prove|"
@@ -157,7 +158,7 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
     if re.search(_CHANGE, asked) or re.search(_REASONING, asked):
         if len(hits) >= 3:
             level = "frontier" if re.search(_FRONTIER, asked) else "hardest"
-        elif len(hits) == 2 and re.search(_FRONTIER, asked):
+        elif len(hits) == 2 and re.search(_FRONTIER.replace("research(?:-grade)?", "research-grade"), asked):
             level = "hardest"  # research-grade wording on broad or open work
         elif (len(hits) == 2 or "risk" in hits or (hits and re.search(_JUDGMENT, asked))
               or re.search(rf"\b{_SYSTEMS}\b", asked)):

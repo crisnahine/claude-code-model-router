@@ -277,6 +277,140 @@ class Sessions(unittest.TestCase):
             self.assertEqual((row["sessions_saved"], row["session_dir_removed"]), (True, True))
 
 
+class SuiteCoverage(unittest.TestCase):
+    """Every task class and baseline the suite claims to cover is there and can't be passed by gaming."""
+
+    def check(self, task, work, answer=""):
+        return Tasks.check(self, task, work, answer)
+
+    def shipped(self, task_id, tmp):
+        task = next(t for t in run.load_tasks() if t["id"] == task_id)
+        work = Path(tmp) / "work"
+        shutil.copytree(task["dir"] / "repo", work)
+        return task, work
+
+    def test_every_task_class_has_two_tasks(self):
+        tasks = run.load_tasks()
+        for cls in run.CLASSES:
+            self.assertGreaterEqual(sum(t["class"] == cls for t in tasks), 2, cls)
+
+    def test_a_root_cause_check_fails_when_the_test_is_edited_to_pass(self):
+        for task in (t for t in run.load_tasks() if t["class"] == "root-cause"):
+            with self.subTest(task=task["id"]), tempfile.TemporaryDirectory() as tmp:
+                task, work = self.shipped(task["id"], tmp)
+                for test_file in work.glob("test_*.py"):
+                    test_file.write_text("import unittest\n", encoding="utf-8")
+                self.assertFalse(self.check(task, work))
+
+    def test_a_security_finding_given_only_in_the_reply_fails(self):
+        for task_id, reply in (("security-sql-injection", "db/users.py:6 builds the SQL with an f-string."),
+                               ("security-path-traversal", "files/server.py:8 joins the name unresolved.")):
+            with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
+                task, work = self.shipped(task_id, tmp)
+                self.assertFalse(self.check(task, work, reply))
+
+    JSON_ANSWERS = {  # task: (answer files that must pass, answer files that must fail); a str is written as is
+        "security-sql-injection": (
+            [{"file": "db/users.py", "line": 6}, {"file": "db/users.py", "line": 6, "why": "an f-string builds the SQL"},
+             {"file": "./db/users.py", "line": 6}, {"file": "db\\users.py", "line": 6},
+             {"file": "/tmp/x/work/db/users.py", "line": 6}],
+            [{"file": "db/orders.py", "line": 3}, {"file": "db/users.py", "line": 7}, {"file": "app.py", "line": 8},
+             {"file": "db/users.py", "line": "6 or 7"}, {"file": "db/users.py", "line": [6, 7, 11]},
+             {"file": "db/users.py", "line": "6-11"}, {"file": "db/users.py", "line": "6 to 11"},
+             {"file": "db/users.py", "line": 6, "maybe": [7, 11]}, {"file": "db/users.py", "line": [4, 6, 11]},
+             [{"file": "db/users.py", "line": 6}, {"file": "db/orders.py", "line": 4}],
+             {"file": ["db/users.py", "db/orders.py"], "line": 6}, {"file": "db/users.py", "line": "6"},
+             {"file": "db/users.py", "line": 6.0}, {"file": "db/users.py", "line": 6, "why": ["f-string"]},
+             {"file": "db/users.py"}, "db/users.py:6", ""]),
+        "security-path-traversal": (
+            [{"file": "files/server.py", "line": 8}, {"file": "files/server.py", "line": 9, "why": "opens it"},
+             {"file": "files\\server.py", "line": 8}, {"file": "/tmp/x/work/files/server.py", "line": 8}],
+            [{"file": "files/server.py", "line": "8 or 9"}, {"file": "files/server.py", "line": [8, 9]},
+             {"file": "files/server.py", "line": "8-9"}, {"file": "files/server.py", "line": 6},
+             {"file": "files/thumbs.py", "line": 8}, {"file": "web.py", "line": 7},
+             {"file": "files/server.py", "line": 8, "also": "web.py:5"},
+             [{"file": "files/server.py", "line": 8}, {"file": "files/thumbs.py", "line": 9}],
+             "files/server.py:8"]),
+        "research-changelog": (
+            [{"default_changed_in": "v1.3", "configurable_in": "2", "variable": "FETCHKIT_RETRIES",
+              "sources": ["/tmp/x/work/docs/changelog/v1.3.md", "changelog\\v2.0.md"]},
+             {"default_changed_in": "1.3.0", "configurable_in": 2, "variable": "FETCHKIT_RETRIES",
+              "sources": ["./docs/changelog/v1.3.md:3", "docs/changelog/v2.0.md#L4"]}],
+            [{"default_changed_in": "1.4", "configurable_in": "2.0", "variable": "FETCHKIT_RETRIES",
+              "sources": ["docs/changelog/v1.3.md", "docs/changelog/v2.0.md"]},
+             {"default_changed_in": "1.3", "configurable_in": "2.0", "variable": "FETCHKIT_RETRIES",
+              "sources": ["docs/changelog/v2.0.md"]}]),
+        "design-cache-invalidation": (
+            [{"strategy": "event_invalidation", "ttl_seconds": None, "max_staleness_seconds": 1, "reasons": ["bus"]},
+             {"strategy": "event_invalidation", "ttl_seconds": 600, "max_staleness_seconds": 2, "reasons": ["x"]}],
+            [{"strategy": "event_invalidation", "ttl_seconds": 5, "max_staleness_seconds": 1, "reasons": ["x"]},
+             {"strategy": "ttl_only", "ttl_seconds": 5, "max_staleness_seconds": 5, "reasons": ["x"]}]),
+        "research-latency": (
+            [{"deploy": "d3", "commit": "c0912ee", "p95_ms": 310}, {"deploy": "d3", "commit": "c0912ee",
+                                                                     "p95_ms": "310"}],
+            [{"deploy": "d2", "commit": "b77e210", "p95_ms": 280}, {"deploy": "d3", "commit": "c0912ee",
+                                                                     "p95_ms": 330}]),
+    }
+
+    def test_checks_take_every_fair_form_of_a_right_answer_and_no_wrong_one(self):
+        files = {"research-changelog": "RESEARCH.json", "research-latency": "RESEARCH.json",
+                 "design-cache-invalidation": "DESIGN.json", "security-sql-injection": "FINDING.json",
+                 "security-path-traversal": "FINDING.json"}
+        for task_id, (right, wrong) in self.JSON_ANSWERS.items():
+            for answer, expected in [(a, True) for a in right] + [(a, False) for a in wrong]:
+                with self.subTest(task=task_id, answer=answer), tempfile.TemporaryDirectory() as tmp:
+                    task, work = self.shipped(task_id, tmp)
+                    text = answer if isinstance(answer, str) else json.dumps(answer)
+                    (work / files[task_id]).write_text(text, encoding="utf-8")
+                    self.assertEqual(self.check(task, work), expected)
+
+    def test_work_dir_code_cannot_exit_the_check_with_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("rootcause-cart", tmp)
+            (work / "cart.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+            self.assertFalse(self.check(task, work))
+            task, work = self.shipped("cross-retry-setting", Path(tmp) / "b")
+            (work / "json.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+            self.assertFalse(self.check(task, work))
+        for task_id, module in (("bugfix-median", "stats"), ("bugfix-pagination", "pages"),
+                                ("impl-parse-duration", "durations"), ("impl-slugify", "text_utils")):
+            with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
+                task, work = self.shipped(task_id, tmp)
+                (work / f"{module}.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+                self.assertFalse(self.check(task, work))
+
+    def test_each_new_baseline_sets_what_its_name_says(self):
+        configs = {c["id"]: c for c in run.load_configs()}
+        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        cmd, env = run.command("x", configs["opusplan"], options, {})
+        self.assertEqual(cmd[cmd.index("--model") + 1], "opusplan")
+        cmd, env = run.command("x", configs["advisor"], options, {})
+        self.assertEqual((cmd[cmd.index("--model") + 1], cmd[cmd.index("--advisor") + 1]), ("sonnet", "opus"))
+        for name, effort in (("sonnet-medium", "medium"), ("sonnet-high", "high")):
+            cmd, env = run.command("x", configs[name], options, {})
+            self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"],
+                              env["CLAUDE_CODE_SUBAGENT_EFFORT"]), ("sonnet", "1", effort))
+            self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)  # that one would move the main loop too
+        cmd, env = run.command("x", configs["fable"], options, {})
+        self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "fable")
+        for config in configs.values():
+            self.assertIn(config.get("price_model"), ("haiku", "sonnet", "opus", "fable"), config["id"])
+
+    def test_the_full_suite_estimate_prices_each_class_and_model(self):
+        data = (rows("defaults", "lookup", [0.04, 0.06], [True, True])
+                + rows("defaults", "bugfix", [0.10], [True]))
+        tasks = [{"id": "l", "class": "lookup"}, {"id": "b", "class": "bugfix"}, {"id": "d", "class": "design"}]
+        configs = [{"id": "a", "price_model": "sonnet"}, {"id": "o", "price_model": "opus"},
+                   {"id": "h", "price_model": "haiku"}]
+        prices = {"claude-sonnet-5-5": {"output": 15}, "claude-opus-5-5": {"output": 75},
+                  "claude-opus-4-1": {"output": 99}, "claude-haiku-5-5": {"output": 5}, "claude-opus-*": {"output": 1}}
+        plan = analyze.estimate(data, tasks, configs, prices)
+        self.assertEqual(plan["runs"], 90)
+        # 10 runs x (0.05 + 0.10 + 0.0667 for design, from the mean of all runs) x (1 + 5 + 1, haiku never priced down)
+        self.assertAlmostEqual(plan["usd"], 10 * (0.05 + 0.10 + 0.2 / 3) * 7, places=6)
+        self.assertEqual(plan["factors"], {"a": 1.0, "o": 5.0, "h": 1.0})
+
+
 class Pilot(unittest.TestCase):
     def test_committed_results_match_the_published_table(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
