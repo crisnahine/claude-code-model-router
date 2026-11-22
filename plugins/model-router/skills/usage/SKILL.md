@@ -10,4 +10,4 @@ allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" *)
 
 !`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" usage $ARGUMENTS`
 
-Show the table above to the user. Then add at most three observations, for example an agent that mostly gets lookups but runs on a strong model because it names one, a level that is often redone on a stronger model, background agents whose model wasn't reported, or where most of the spend went. The dollars are list prices from the registry; for the bill, point them to `/usage` and `/cost`.
+Show the table above to the user. Then add at most three observations, for example an agent that mostly gets lookups but runs on a strong model because it names one, a level that is often redone on a stronger model, background agents whose model wasn't reported, or where most of the spend went. The dollars are list prices from the registry, and requests that ran in fast mode are counted at standard rates, because nothing the router records says a request ran fast. For the bill, point them to `/usage` and `/cost`.

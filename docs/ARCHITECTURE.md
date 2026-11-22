@@ -202,6 +202,7 @@ The user's own `~/.claude/model-router.json` is trusted in full. A repository's 
 - Answer quality. The profile is an estimate from the brief's wording and the agent's name. Redo escalation and the feedback loop react to what Claude redoes. Neither measures whether an answer was right.
 - Sessions where hooks are disabled by `disableAllHooks` or `allowManagedHooksOnly`. Where an organization doesn't load user mods, routing falls back to the `Agent` call and workflow stages and teammates aren't routed.
 - Another installed mod that also sets a spawn's model. Mods run in their own order. The model that ran is in the ledger either way.
+- Fast mode's price. Fast mode runs the same model ID at higher per-token rates (https://code.claude.com/docs/en/fast-mode.md#understand-the-cost-tradeoff), and the usage the mod gets from `turn.step` and `turn.complete` holds only the token counts and the model, so nothing tells a fast request from a standard one. Those requests are logged at standard rates. Claude Code's own estimate in `/cost` includes them.
 
 ## Verified live
 
