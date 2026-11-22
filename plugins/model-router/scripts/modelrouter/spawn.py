@@ -74,20 +74,7 @@ def _record(config: dict, session_id: str | None, key: str, decision: dict, awai
         source = None  # passed through untouched: neither the pick nor the level applied
     earlier = calls.routed(config, session_id, key, runs_on, level=level, effort=decision["effort"],
                            source=source, awaiting=awaiting)
-
-    def power(name: object) -> float:
-        return registry.strength(config, name)
-
-    if source == "router":
-        learn.record_call(level)
-    if source in cfg.LEVEL_SOURCES and level and decision["escalated_from"]:
-        learn.vote_up(decision["escalated_from"])
-    if source == "caller" and level:
-        if earlier and power(runs_on) > power(earlier):
-            learn.vote_up(level, 2)  # the same call again, on a stronger model
-        elif power(runs_on) > power(decision["pick"]):
-            learn.vote_up(level, 1)
-        elif power(runs_on) < power(decision["pick"]):
-            learn.vote_down(level)
+    learn.decided(config, source=source, level=level, pick=decision["pick"], runs_on=runs_on,
+                  earlier=earlier, escalated_from=decision["escalated_from"])
     if gates.is_checker(decision["agent"]):
         gates.note_check(session_id)

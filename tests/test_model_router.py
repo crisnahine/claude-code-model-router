@@ -979,7 +979,7 @@ class Feedback(Sandbox):
 
     def test_the_prompt_note_and_the_stop_gate_follow_a_raised_level(self):
         for _ in range(learn.VOTES_NEEDED):
-            learn.vote_up("complex")
+            learn.decided(cfg.load_config(), source="caller", level="complex", pick="opus", runs_on="fable")
         hooks.user_prompt({"session_id": "s1", "prompt": HARD})  # opus would do, but complex is raised
         entry = store.load_entry("prompts", "s1")
         self.assertEqual((entry["level"], entry["need"], entry["below"]), ("complex", "fable", True))
@@ -1006,6 +1006,25 @@ class Feedback(Sandbox):
             self.pre("general-purpose", f"list the things in {i}", model="haiku")
         self.assertEqual(learn.bump("lookup"), 0)
 
+    def test_each_kind_of_spawn_casts_its_own_votes(self):
+        config = cfg.load_config()
+
+        def votes(**facts) -> dict:
+            learn.reset()
+            learn.decided(config, **{"level": "lookup", "pick": "haiku", "runs_on": "haiku", **facts})
+            return {k: v for k, v in (learn.stats().get("lookup") or {}).items() if v}
+
+        self.assertEqual(votes(source="router"), {"calls": 1})
+        self.assertEqual(votes(source="pin", runs_on="opus"), {})
+        self.assertEqual(votes(source="caller", runs_on="sonnet"), {"votes": 1})
+        self.assertEqual(votes(source="caller", runs_on="sonnet", earlier="haiku"), {"votes": 2})
+        self.assertEqual(votes(source="caller", runs_on="sonnet", earlier="opus"), {"votes": 1})
+        self.assertEqual(votes(source=None, runs_on="opus"), {})
+        learn.reset()
+        learn.decided(config, source="router", level="standard", pick="sonnet", runs_on="sonnet",
+                      escalated_from="lookup")
+        self.assertEqual((learn.stats()["standard"]["calls"], learn.stats()["lookup"]["votes"]), (1, 1))
+
     def test_feedback_never_goes_below_what_ships(self):
         for i in range(30):
             self.pre("general-purpose", f"implement change {i}", model="haiku")
@@ -1013,9 +1032,10 @@ class Feedback(Sandbox):
 
     def test_votes_from_calls_issued_at_once_are_all_counted(self):
         code = ("import sys; sys.path.insert(0, sys.argv[1])\n"
-                "from modelrouter import learn, store\n"
+                "from modelrouter import config, learn, store\n"
                 "store.LOCK_WAIT_SECONDS = 60\n"
-                "for _ in range(10): learn.record_call('lookup')\n")
+                "facts = dict(source='router', level='lookup', pick='haiku', runs_on='haiku')\n"
+                "for _ in range(10): learn.decided(config.load_config(), **facts)\n")
         workers = [subprocess.Popen([sys.executable, "-c", code, str(SCRIPTS)], env={**os.environ})
                    for _ in range(5)]
         for worker in workers:

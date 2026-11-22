@@ -46,7 +46,7 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 | `spawn` | The one procedure both paths call for a spawn: gathers the facts, asks `router.decide`, writes the ledger row, and records the call |
 | `router` | Applies the order of authority and produces one decision per agent, from the facts it is given alone |
 | `calls` | What happened to each call: routed, rewritten and waiting, finished. Answers the redo, refused-rewrite and strongest-spawn questions |
-| `learn` | Counts votes that a level was routed too low, and raises it |
+| `learn` | Decides from each spawn's facts which votes it casts, counts votes that a level was routed too low, and raises it |
 | `agents` | Finds an agent's definition in the project, the user folder, this plugin or another installed plugin |
 | `session` | Tracks the model the conversation itself runs on |
 | `gates` | The two checks before a turn ends |
