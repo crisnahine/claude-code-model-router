@@ -1,0 +1,53 @@
+name: Upstream watch
+
+# Checks the Claude Code changelog and docs index against compat/baseline.json
+# and keeps one open issue listing what changed, so nothing is missed between
+# reviews. It never edits the plugin itself: a person (or /model-router:refresh
+# run inside this repo) reviews the changes and updates the baseline in a PR.
+# An empty changelog or docs index fails the job instead of opening an issue.
+
+on:
+  schedule:
+    - cron: "17 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compare upstream with baseline
+        run: |
+          python plugins/model-router/scripts/model-router.py upstream-check \
+            --baseline compat/baseline.json --json-out changes.json > report.md
+          cat report.md
+      - name: Open or update the review issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pending=$(python -c "import json;print(int(json.load(open('changes.json'))['pending']))")
+          if [ "$pending" != "1" ]; then echo "Nothing to review."; exit 0; fi
+          title="Upstream Claude Code changes to review"
+          {
+            echo "The daily upstream check found changes since \`compat/baseline.json\` was last updated."
+            echo
+            echo '~~~~'
+            cat report.md
+            echo '~~~~'
+            echo
+            echo "To review: open this repo in Claude Code with the plugin enabled and run \`/model-router:refresh\`, or update the plugin by hand, then refresh the baseline with"
+            echo "\`python3 plugins/model-router/scripts/model-router.py upstream-check --baseline compat/baseline.json --write\` in the same PR."
+          } > body.md
+          number=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file body.md
+          else
+            gh issue create --title "$title" --body-file body.md
+          fi

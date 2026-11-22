@@ -1,0 +1,97 @@
+"""Score how much reasoning a request or a subtask needs, from its wording and from
+the agent it is given to. Deterministic and fast: this runs on every agent call.
+
+It is an estimate. Claude sees the code and can overrule it by naming a model on a
+call, and the feedback loop in learn.py corrects levels that keep proving too low."""
+from __future__ import annotations
+
+import re
+
+from .config import LEVELS
+
+SIGNALS = {
+    "risk": r"secur\w*|vulnerab\w*|auth|authn|authz|authenticat\w*|authoriz\w*|oauth\w*|passwords?|"
+            r"credentials?|secrets?|encrypt\w*|decrypt\w*|payments?|billing|migrat\w*|schemas?|databases?|"
+            r"production|data loss|permissions?|concurren\w*|race conditions?|deadlocks?|public api|"
+            r"breaking changes?|backward.?compat\w*",
+    "scope": r"across|every (?:service|module|package|file)|all (?:services|modules|packages)|multiple "
+             r"(?:services|modules|repos|packages)|entire|whole (?:codebase|system|app)|architect\w*|"
+             r"redesign\w*|rewrit\w*|monorepo|end.to.end|large.scale|system.wide",
+    "ambiguity": r"design|investigat\w*|root.?causes?|intermittent\w*|flaky|figure out|not sure|"
+                 r"why (?:does|is|do|are|did)|research|evaluate|trade.?offs?|best (?:way|approach)|"
+                 r"should we|strategy|proposal",
+}
+# Words that mean the subtask changes something or has to reason its way to an answer.
+# A subtask that does neither is a lookup, whatever it happens to mention.
+_CHANGE = (r"\b(?:add|implement|fix|change|update|refactor|rename|remove|delete|write|create|build|make(?! sure)|"
+           r"migrate|convert|upgrade|optimi[sz]e|rewrite|redesign|replace)\b(?!-)")
+# "Do not change any files" limits a subtask; it doesn't ask for a change.
+# "Make sure" isn't here: it introduces the task, so _CHANGE skips it instead.
+_NEGATED = r"\b(?:do not|don't|never|without|no need to)\b[^.\n]*"
+_REASONING = (r"\b(?:review|audit|analy[sz]e|debug|diagnos\w*|plan|design|prove|verify the logic|"
+              r"investigat\w*|troubleshoot\w*|figure out|root.?caus\w*|reproduc\w*|bisect)\b")
+_THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"
+_LOOKUP = (r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|describe|summari[sz]e|"
+           r"is there|does)\b")
+# What an agent is for, read from its name. Names are short and deliberate; descriptions
+# mention too many things in passing to be read this way.
+_HEAVY_NAME = r"architect|review|audit|secur|debug|design|plann|solver"
+_LIGHT_NAME = r"explor|search|scout|find|lookup|locat|fetch|summar|format|lint|runner|verif|docs?[-_]|grep"
+LONG_BRIEF = 4000
+# Open-ended work with no known approach: the only level the ladder gives its strongest model.
+_FRONTIER = (r"\b(?:research(?:-grade)?|open[- ]ended|no known (?:fix|approach|cause|solution)|first principles|"
+             r"novel|unknown (?:root )?cause|long[- ]running investigation|multi[- ]day|unsolved)\b")
+
+
+def signals(text: str) -> list[str]:
+    return [name for name, pattern in SIGNALS.items() if re.search(r"\b(?:%s)\b" % pattern, text)]
+
+
+def profile_prompt(prompt: str) -> dict:
+    """The user's request as a whole. Used to tell whether the conversation's own model
+    is strong enough for it."""
+    text = (prompt or "").lower()
+    hits = signals(text)
+    changes = bool(re.search(_CHANGE, text))
+    if len(text) > 1500 and "scope" not in hits:
+        hits.append("scope")  # a long brief is rarely a small task
+    if len(hits) >= 3:
+        level = "frontier" if re.search(_FRONTIER, text) else "hardest"
+    elif len(hits) == 2:
+        level = "complex"
+    elif changes or hits:
+        level = "standard"
+    elif re.search(_LOOKUP, text) or len(text) < 80:
+        level = "lookup"
+    else:
+        level = "standard"
+    return {"level": level, "signals": hits, "changes": changes}
+
+
+def profile_call(tool_input: dict, agent_type: str) -> dict:
+    """One agent call, judged by its own brief and by what its agent is for."""
+    text = f"{tool_input.get('description') or ''}\n{tool_input.get('prompt') or ''}".lower()
+    asked = re.sub(_NEGATED, "", text)
+    hits = signals(asked)
+    why = list(hits)
+    if re.search(_CHANGE, asked) or re.search(_REASONING, asked):
+        if len(hits) >= 3:
+            level = "frontier" if re.search(_FRONTIER, asked) else "hardest"
+        elif len(hits) == 2 or "risk" in hits:
+            level = "complex"
+        else:
+            level = "standard"
+    elif len(hits) >= 2:
+        level = "standard"  # finds or explains something broad or sensitive, but only reads
+    else:
+        level = "lookup"
+    if level == "lookup" and (re.search(_THOROUGH, text) or len(text) > LONG_BRIEF):
+        level, why = "standard", why + ["thorough or long brief"]
+    name = agent_type.split(":")[-1].lower()
+    if re.search(_HEAVY_NAME, name):
+        if LEVELS.index(level) < LEVELS.index("complex"):
+            level, why = "complex", why + ["agent's role"]
+    elif re.search(_LIGHT_NAME, name):
+        if LEVELS.index(level) > LEVELS.index("standard"):
+            level, why = "standard", why + ["search or check agent"]
+    return {"level": level, "signals": why}

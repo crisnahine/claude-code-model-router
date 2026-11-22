@@ -1,0 +1,211 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import type { On, PluginOptions } from 'claude-code'
+import { register } from '../../plugins/model-router/hooks/router.ts'
+import payloads from '../fixtures/mod-payloads.json' with { type: 'json' }
+
+type Hook = (...args: any[]) => any
+type Reply = { exitCode?: number; stdout: string }
+type Call = { command: string; argv: readonly string[]; stdin: any; env: Record<string, string> }
+
+const same = (e: unknown) => e
+
+function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}) {
+  const hooks: Record<string, Hook> = {}
+  const matchers: Record<string, unknown> = {}
+  const catches: Record<string, Hook> = {}
+  const calls: Call[] = []
+  const on = (event: string, ...rest: unknown[]) => {
+    hooks[event] = rest.pop() as Hook
+    if (rest.length) matchers[event] = rest[0]
+    return { catch: (handler: Hook) => { catches[event] = handler } }
+  }
+  const $ = {
+    plugin: { root: '/plugin' },
+    session: { model: async () => 'claude-opus-5-5' },
+    process: {
+      hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: 's1', CLAUDE_PLUGIN_DATA: '/tmp/x' }),
+      run: async (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) => {
+        const command = argv[2] ?? ''
+        calls.push({ command, argv, stdin: JSON.parse(init.stdin), env: init.env })
+        const reply = replies[command] ?? { stdout: '' }
+        return { exitCode: reply.exitCode ?? 0, stdout: reply.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+      },
+    },
+  }
+  register(on as unknown as On, options)
+  return {
+    hooks, matchers, catches, calls, $,
+    toolCall: (e: object) => hooks['tool.call']!($, e, same),
+    sessionStart: (e: object) => hooks['session.start']!($, e, same),
+    spawn: (e: object, next: Hook = (x: object) => ({ ...x, agentId: 'a1' })) => hooks['agent.spawn']!($, e, next),
+    start: (e: object) => hooks['turn.start']!($, e, same),
+    complete: (e: object) => hooks['turn.complete']!($, e, same),
+    async step(e: object): Promise<any> {
+      let sent: any
+      async function* next(input: any) {
+        sent = input
+        yield { kind: 'text', text: 'hi' }
+        return { done: true }
+      }
+      const gen = hooks['turn.step']!($, e, next)
+      let r = await gen.next()
+      while (!r.done) r = await gen.next()
+      assert.deepEqual(r.value, { done: true })
+      return sent
+    },
+  }
+}
+
+function spawnEvent(extra: object = {}) {
+  return {
+    tool_use_id: 'tu1', prompt: 'list the files under src', description: 'list files', subagentType: 'general-purpose',
+    parentModel: 'claude-opus-5-5', background: false, fork: false, ...extra,
+  }
+}
+
+const stepEvent = (extra: object) => ({ turnId: 't1', model: 'claude-opus-5-5', index: 0, messageCount: 1, ...extra })
+const completeEvent = (extra: object) => ({ turnId: 't1', answer: '', durationMs: 1, isAborted: false, reason: 'answer', ...extra })
+const PICK = { stdout: JSON.stringify({ model: 'haiku', effort: 'low', reason: 'lookup subtask' }) }
+
+test('a spawn passes the pick model to next', async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  let seen: any
+  await mod.spawn(spawnEvent(), (e: any) => { seen = e; return { model: e.model, agentId: 'a1' } })
+  assert.equal(seen.model, 'haiku')
+  assert.deepEqual(mod.calls.map(c => c.argv), [['sh', '/plugin/scripts/model-router.sh', 'mod-spawn']])
+})
+
+test('forks and resumed runs pass through with no CLI call', async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  for (const extra of [{ fork: true }, { resume: { agentId: 'a9' } }]) {
+    const e = spawnEvent(extra)
+    let seen: unknown
+    await mod.spawn(e, (x: unknown) => { seen = x; return { model: 'm' } })
+    assert.equal(seen, e)
+  }
+  assert.equal(mod.calls.length, 0)
+})
+
+test('a routed agent steps at the pick effort', async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  await mod.spawn(spawnEvent())
+  assert.equal((await mod.step(stepEvent({ agentId: 'a1', effort: 'high' }))).effort, 'low')
+})
+
+test('an agent stepping before its spawn resolves still gets the pick effort', async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  let sent: any
+  await mod.spawn(spawnEvent(), async (e: any) => {
+    await mod.start({ turnId: 't1', agentId: 'a1', text: e.prompt })
+    sent = await mod.step(stepEvent({ agentId: 'a1', effort: 'high' }))
+    return { model: e.model }
+  })
+  assert.equal(sent.effort, 'low')
+})
+
+test('an effort on the Agent call reaches mod-spawn', async () => {
+  const mod = load()
+  const call = { tool: 'Agent', tool_use_id: 'tu1', effort: 'high', prompt: 'p' }
+  assert.equal(await mod.toolCall(call), call)
+  assert.deepEqual(mod.matchers['tool.call'], { tool: 'Agent' })
+  await mod.spawn(spawnEvent())
+  assert.equal(mod.calls[0]!.stdin.tool_input.effort, 'high')
+})
+
+test('the main loop effort only raises and ends with the turn', async () => {
+  const mod = load({ 'mod-turn': { stdout: JSON.stringify({ level: 'complex', effort: 'high' }) } })
+  await mod.start({ turnId: 't1', text: 'fix the auth migration' })
+  assert.equal(mod.calls[0]!.stdin.text, 'fix the auth migration')
+  assert.equal((await mod.step(stepEvent({ effort: 'medium' }))).effort, 'high')
+  assert.equal((await mod.step(stepEvent({ effort: 'max' }))).effort, 'max')
+  await mod.complete(completeEvent({}))
+  assert.equal((await mod.step(stepEvent({ effort: 'medium' }))).effort, 'medium')
+})
+
+test('a lower main loop effort is ignored', async () => {
+  const mod = load({ 'mod-turn': { stdout: JSON.stringify({ level: 'lookup', effort: 'low' }) } })
+  await mod.start({ turnId: 't1', text: 'list files' })
+  assert.equal((await mod.step(stepEvent({ effort: 'medium' }))).effort, 'medium')
+})
+
+test('plugin options reach the CLI env', async () => {
+  const mod = load({}, { priority: 'fast', main_effort: false, tiers: ['haiku', 'sonnet'], budget: 3 })
+  await mod.start({ turnId: 't1', text: 'x' })
+  const env = mod.calls[0]!.env
+  assert.equal(env.CLAUDE_PLUGIN_OPTION_PRIORITY, 'fast')
+  assert.equal(env.CLAUDE_PLUGIN_OPTION_MAIN_EFFORT, 'false')
+  assert.equal(env.CLAUDE_PLUGIN_OPTION_TIERS, 'haiku,sonnet')
+  assert.equal(env.CLAUDE_PLUGIN_OPTION_BUDGET, '3')
+  assert.equal(env.CLAUDE_CODE_SESSION_ID, 's1')
+})
+
+test('a failing or garbled CLI leaves every event unchanged', async () => {
+  const bad = [{ exitCode: 1, stdout: PICK.stdout }, { stdout: 'not json' }, { stdout: '' }]
+  for (const reply of bad) {
+    const mod = load({ 'mod-spawn': reply, 'mod-turn': reply, 'mod-start': reply, 'mod-usage': reply })
+    const begin = { source: 'startup' }
+    assert.equal(await mod.sessionStart(begin), begin)
+    const e = spawnEvent()
+    let seen: unknown
+    await mod.spawn(e, (x: unknown) => { seen = x; return { agentId: 'a1' } })
+    assert.equal(seen, e)
+    const start = { turnId: 't1', text: 'fix the auth migration' }
+    assert.equal(await mod.start(start), start)
+    for (const step of [stepEvent({ agentId: 'a1', effort: 'high' }), stepEvent({ effort: 'medium' })]) {
+      assert.equal(await mod.step(step), step)
+    }
+    const done = completeEvent({ usage: payloads['mod-usage'].usage })
+    assert.equal(await mod.complete(done), done)
+    assert.equal(mod.calls.length, 4)
+  }
+})
+
+test('a CLI that throws after next(e) ran does not run next again', async () => {
+  const mod = load()
+  mod.$.process.run = async () => { throw new Error('spawn failed') }
+  const events = [['session.start', { source: 'startup' }], ['turn.complete', completeEvent({ usage: payloads['mod-usage'].usage })]] as const
+  for (const [event, e] of events) {
+    let runs = 0
+    const next = (x: unknown) => { runs++; return x }
+    // The engine runs a hook's .catch when the hook rejects.
+    const result = await Promise.resolve(mod.hooks[event]!(mod.$, e, next)).catch(() => mod.catches[event]!(mod.$, e, next))
+    assert.equal(result, e)
+    assert.equal(runs, 1, event)
+  }
+})
+
+test('every hook falls back to next(e) when it throws', async () => {
+  const mod = load()
+  const events = ['agent.spawn', 'session.start', 'tool.call', 'turn.complete', 'turn.start', 'turn.step']
+  assert.deepEqual(Object.keys(mod.hooks).sort(), events)
+  assert.deepEqual(Object.keys(mod.catches).sort(), events)
+  for (const [event, handler] of Object.entries(mod.catches)) {
+    const e = { any: 'event' }
+    let seen: unknown
+    if (event === 'turn.step') {
+      const stream = handler(mod.$, e, async function* (x: unknown) { seen = x; yield { kind: 'text' }; return 'result' })
+      let step = await stream.next()
+      while (!step.done) step = await stream.next()
+      assert.equal(step.value, 'result')
+    } else {
+      assert.equal(await handler(mod.$, e, (x: unknown) => { seen = x; return 'result' }), 'result')
+    }
+    assert.equal(seen, e)
+  }
+})
+
+test('each payload the mod sends matches its fixture', async () => {
+  const mod = load()
+  const spawn = payloads['mod-spawn']
+  const usage = payloads['mod-usage']
+  await mod.sessionStart({ source: 'startup' })
+  await mod.toolCall({ tool: 'Agent', tool_use_id: 'tu1', effort: spawn.tool_input.effort })
+  await mod.spawn(spawnEvent({
+    cwd: spawn.cwd, parentAgentId: spawn.parent_agent_id, parentModel: spawn.parent_model, model: spawn.tool_input.model,
+    subagentType: spawn.tool_input.subagent_type, prompt: spawn.tool_input.prompt, description: spawn.tool_input.description,
+  }))
+  await mod.start({ turnId: 't1', text: payloads['mod-turn'].text })
+  await mod.complete(completeEvent({ turnId: 't2', agentId: usage.agent_id, usage: usage.usage }))
+  assert.deepEqual(Object.fromEntries(mod.calls.map(c => [c.command, c.stdin])), payloads)
+})

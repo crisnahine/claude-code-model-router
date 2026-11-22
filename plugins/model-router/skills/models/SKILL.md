@@ -1,0 +1,19 @@
+---
+name: models
+description: Shows which Claude models Model Router can route to in this setup, what each really runs as, which are capped, blocked or unavailable, what the feedback loop has learned, and any new model in the docs that isn't routed to yet.
+argument-hint: "[reset]"
+disable-model-invocation: true
+allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" *)
+---
+
+# Models in use
+
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" models`
+
+Arguments: $ARGUMENTS
+
+Show the table above. "Last ran as" is the model Claude Code reported for the most recent agent on that model, so it reflects this account and provider, not a fixed list.
+
+If the argument is `reset`, run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" models --reset` and show the new table. Do this when a model marked "routed around" should be tried again now, or to undo a level the feedback loop raised.
+
+If a model is routed around, explain in one line what that means: calls that would have used it run on the next model down until it is tried again, a day later at first and up to a week if it keeps failing. If a level shows as raised, explain that work at that level kept being redone on a stronger model. If the docs list an alias that isn't in the registry, say that `/model-router:refresh` reviews it, and that adding it is one entry under `models` in `~/.claude/model-router.json` once the installed Claude Code accepts that alias on agent calls.
