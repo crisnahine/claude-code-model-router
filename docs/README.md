@@ -10,13 +10,13 @@ Every delivery item the project keeps, where it lives, and whether it exists yet
 | 4 | Supported Claude Code versions, surfaces, platforms and providers | [README.md](../README.md) "Compatibility", [ARCHITECTURE.md](ARCHITECTURE.md) "Verified live" | Yes |
 | 5 | Install and usage | [README.md](../README.md) "Install" | Yes |
 | 6 | Automated test results | [TEST_RESULTS.md](TEST_RESULTS.md) | Yes |
-| 7 | Security assessment | `SECURITY.md` | Not yet; in progress (m1-08) |
-| 8 | Reproducible cost and quality results, with raw data | `BENCHMARKS.md`, raw data under `evals/results/` | Not yet |
-| 9 | Hook latency and state-size measurements | `BENCHMARKS.md` | Not yet |
+| 7 | Security assessment | `SECURITY.md` | Not yet; in progress |
+| 8 | Reproducible cost and quality results, with raw data | [BENCHMARKS.md](BENCHMARKS.md), raw data under [bench/results/](../bench/results/) | Yes, a pilot only |
+| 9 | Hook latency and state-size measurements | `BENCHMARKS.md` | Not yet; in progress |
 | 10 | Remaining defects and incomplete requirements | [RELEASE_READINESS.md](RELEASE_READINESS.md) "Remaining defects and incomplete requirements" | Yes |
 | 11 | Release-readiness assessment | [RELEASE_READINESS.md](RELEASE_READINESS.md) | Yes |
 | 12 | Roadmap | [ROADMAP.md](ROADMAP.md) "Next" | Yes |
-| 13 | Comparison against the baselines | `BENCHMARKS.md` | Not yet |
+| 13 | Comparison against the baselines | [BENCHMARKS.md](BENCHMARKS.md) | Yes, a pilot only |
 | 14 | Release checklist and changelog | [RELEASING.md](../RELEASING.md), [CHANGELOG.md](../CHANGELOG.md) | Yes |
 
 Also kept:

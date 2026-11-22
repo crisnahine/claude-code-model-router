@@ -21,21 +21,21 @@ The test counts come from each job's log (`gh run view --job <id> --log`). Commi
 
 ## Local
 
-Run 2026-11-22 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0`.
+Run 2026-11-22 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0`, up to `245bf5d` plus the change that updated this file.
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 183 tests OK |
-| Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 12 of 12 pass |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 250 tests OK |
+| Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 17 of 17 pass |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
 | Mod type check, `tsc` 6.0.3 | `tsc -p <dir>/tsconfig.json` | No errors |
-| Mod and its test, `tsc` 6.0.3 | `tsc -p <dir>/tsconfig.json --skipLibCheck`, with `@types/node` 22 | No errors |
+| Mod and its test, `tsc` 6.0.3 | `tsc -p <dir>/tsconfig.json --skipLibCheck`, with `@types/node` 22 | 1 error: `tests/mod/router.test.ts(46,40): error TS2322: Type '(e: unknown) => unknown' is not assignable to type '(x: object) => object'` |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 
-The 183 local tests are CI's 180 plus the 3 in `tests/test_traceability.py`.
+The 250 local tests are 228 in `tests/test_model_router.py`, 19 in `tests/test_bench.py` and 3 in `tests/test_traceability.py`. CI's run on `8ec8eec` had 180.
 
-Not run: `claude plugin eval plugins/model-router --trust-plugin` (it runs live models and spends money, and has not been rerun since the routing evals were written), and live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
+Not run: `claude plugin eval plugins/model-router --trust-plugin` (it runs live models and spends money, and has not been rerun since the routing evals were written), and live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live"). The benchmark's pilot runs are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Type-checking the mod
 
@@ -59,4 +59,4 @@ The tsconfig lives outside the plugin folder, so nothing extra ships. Point `cla
 }
 ```
 
-To check the test as well, add `tests/mod/router.test.ts` to `files`, install `@types/node` next to the tsconfig, set `"types": ["node"]`, and pass `--skipLibCheck`. The 2.1.330 types redeclare `URL`, `URLSearchParams` and other globals in ways `@types/node` rejects, so the library check fails inside the two `.d.ts` files while both `.ts` files are clean.
+To check the test as well, add `tests/mod/router.test.ts` to `files`, install `@types/node` next to the tsconfig, set `"types": ["node"]`, and pass `--skipLibCheck`. The 2.1.330 types redeclare `URL`, `URLSearchParams` and other globals in ways `@types/node` rejects, so the library check fails inside the two `.d.ts` files. With `--skipLibCheck` the mod is clean and the test has the one error above.
