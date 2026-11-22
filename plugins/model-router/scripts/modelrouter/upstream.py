@@ -37,7 +37,7 @@ def load() -> dict:
 
 
 def http_get(url: str, headers: dict | None = None) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": "model-router-plugin/0.2", **(headers or {})})
+    req = urllib.request.Request(url, headers={"User-Agent": "model-router-plugin/0.1", **(headers or {})})
     with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:  # noqa: S310 (fixed https URLs)
         return resp.read().decode("utf-8", "replace")
 
