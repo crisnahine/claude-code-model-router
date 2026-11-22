@@ -1,8 +1,6 @@
 ---
 name: verifier
-description: Runs the project's tests, type checks, linters and builds and reports exactly what passed and failed. Use after any code change and before any commit. Does not fix code.
-model: haiku
-effort: low
+description: Runs the project's tests, type checks, linters and builds and reports exactly what passed and failed. Use when code changed and no check has run since. Does not fix code.
 tools: Read, Grep, Glob, Bash
 color: green
 ---

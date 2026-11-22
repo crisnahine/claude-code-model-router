@@ -89,6 +89,8 @@ Order of authority, strongest first:
 5. `CLAUDE_CODE_SUBAGENT_MODEL`, the user's default for agents without a model.
 6. The router's pick: `ladder.pick(level, priority, usable models)`, which runs `registry.select` on the level's needs plus any learned raise.
 
+The plugin's own role agents (`agents/*.md`) name no model or effort, so step 6 decides them like any agent without a pin. When the session note or the `Stop` check asks for a strong agent, it names the architect, or the deep-solver for the strongest model, with that model on the call (`gates.strong_agent`), and step 2 keeps it.
+
 Then `registry.clamp` lowers the result to the nearest usable model. It never raises.
 
 Effort is set when the router, a rule or the agent's own model decided the model and nobody chose an effort: not the call, not the agent's definition, not `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT`. A pin is about the model, and an agent that pins Opus with no effort would otherwise run at `medium`.

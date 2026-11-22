@@ -1,8 +1,6 @@
 ---
 name: docs-researcher
-description: Reads the current official Claude Code documentation and changelog and reports what changed and what it means for a plugin or configuration. Use when checking a feature against the live docs instead of memory.
-model: haiku
-effort: medium
+description: Reads the current official Claude Code documentation and changelog and reports what changed and what it means for a plugin or configuration. Use when a feature has to be checked against the live docs instead of memory.
 tools: Read, Grep, Glob, WebFetch, WebSearch
 omitClaudeMd: true
 color: blue

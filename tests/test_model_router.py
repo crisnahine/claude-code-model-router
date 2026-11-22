@@ -148,8 +148,18 @@ class Shipped(unittest.TestCase):
         self.assertEqual(set(config["crew"]), set(files))
         for name, agent in config["crew"].items():
             self.assertEqual(files[name].get("name"), name)
-            self.assertEqual(files[name].get("model"), agent["model"], f"model drift for {name}")
-            self.assertIn(agent["model"], config["models"])
+            self.assertTrue(agent.get("role"), name)
+
+    def test_role_agents_leave_model_and_effort_to_the_router(self):
+        config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
+        for path in (PLUGIN / "agents").glob("*.md"):
+            fields = frontmatter(path)
+            self.assertNotIn("model", fields, path.name)
+            self.assertNotIn("effort", fields, path.name)
+            # A description is when Claude delegates (sub-agents docs), so none asks to run on every change.
+            self.assertNotRegex(fields["description"], r"(?i)\b(?:every|any) (?:diff|code change|change)\b", path.name)
+        for name, agent in config["crew"].items():
+            self.assertNotIn("model", agent, name)
 
     def test_levels_and_models_are_complete(self):
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
@@ -696,7 +706,7 @@ class AgentDiscovery(Sandbox):
         self.assertEqual((found["source"], found["model"]), ("project", None))
 
     def test_own_crew(self):
-        self.assertEqual(agents.find("model-router:architect", self.project)["model"], "opus")
+        self.assertIsNone(agents.find("model-router:architect", self.project)["model"])
         self.assertIsNone(agents.find("model-router:nope", self.project))
 
     def test_other_plugin_by_install_record(self):
@@ -1063,12 +1073,22 @@ class Router(Sandbox):
         self.agent("pinned", "opus")
         d = self.decide("pinned", LOOKUP)  # the pin holds the model; effort still follows the subtask
         self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "opus", "pin", "low"))
-        d = self.decide("model-router:deep-solver", LOOKUP)
+        self.agent("deep", "fable", extra="effort: xhigh\n")
+        d = self.decide("deep", LOOKUP)
         self.assertEqual((d["model"], d["effort"]), ("fable", None))  # its own effort: xhigh
         self.options(max_tier="sonnet")
         d = self.decide("pinned", LOOKUP)
         self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", "low"))
-        self.assertEqual(self.decide("model-router:deep-solver", HARD)["model"], "sonnet")
+        self.assertEqual(self.decide("deep", HARD)["model"], "sonnet")
+
+    def test_the_role_agents_are_routed_by_their_brief(self):
+        for agent in ("scout", "verifier", "docs-researcher", "implementer"):
+            d = self.decide(f"model-router:{agent}", LOOKUP)
+            self.assertEqual((d["action"], d["source"], d["model"], d["effort"]), ("rewrite", "router", "haiku", "low"), agent)
+        for agent in ("architect", "reviewer", "deep-solver"):  # their names set a complex floor
+            d = self.decide(f"model-router:{agent}", LOOKUP)
+            self.assertEqual((d["source"], d["level"]), ("router", "complex"), agent)
+        self.assertEqual(self.decide("model-router:implementer", HARD)["source"], "router")
 
     def test_pins_can_be_overridden(self):
         self.agent("pinned", "opus")
@@ -1851,7 +1871,7 @@ class Hooks(Sandbox):
         self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
         self.session_on("claude-haiku-5-5")
         text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
-        self.assertIn("model-router:architect", text)
+        self.assertIn('model-router:architect with model: "opus"', text)  # the agent has no pin of its own
         self.assertTrue(store.load_entry("prompts", "s1")["below"])
 
     def test_machine_written_turns_dont_reset_the_request(self):
@@ -1898,8 +1918,9 @@ class Hooks(Sandbox):
     def test_model_errors_point_to_the_next_model_and_other_errors_dont_count(self):
         failed = {"session_id": "s1", "cwd": str(self.project),
                   "error": "API Error: 404 not_found_error: model: claude-fable-5-2",
-                  "tool_input": {"subagent_type": "model-router:deep-solver", "prompt": "x"}}
-        self.pre("model-router:deep-solver", "x")
+                  "tool_input": {"subagent_type": "deep", "prompt": "x"}}
+        self.agent("deep", "fable")
+        self.pre("deep", "x")
         self.assertIn('model: "opus"', self.text(hooks.agent_failed(failed)))
         self.assertIn("route around", self.text(hooks.agent_failed(failed)))
         self.assertFalse(registry.healthy("fable"))
@@ -2363,7 +2384,7 @@ class Reports(Sandbox):
         text = self.out("policy")
         self.assertIn("Cap: **sonnet**", text)
         self.assertIn("fable (not in use)", text)
-        self.assertIn("| model-router:deep-solver | sonnet (lowered from fable) |", text)
+        self.assertIn("| model-router:deep-solver | Research-grade, open-ended tasks with no known approach |", text)
         self.assertIn("| lookup | sonnet |", text)
 
     def test_models_report(self):

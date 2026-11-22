@@ -84,12 +84,13 @@ def checks_ran_since(transcript_path: object, since: float) -> bool:
 
 
 def strong_agent(config: dict, need: str) -> str:
-    """The role agent that runs on `need`, or a plain instruction when there is none."""
-    crew = config.get("crew") or {}
-    for name in ("deep-solver", "architect"):
-        if registry.family(config, (crew.get(name) or {}).get("model")) == need:
-            return f"{cfg.PLUGIN_NAME}:{name}"
-    return f'a subagent with model: "{need}"'
+    """The role agent to hand hard thinking to, with `need` named on the call: the role agents
+    carry no model of their own, and a model named on a call is kept."""
+    top = registry.by_strength(config)[-1] if registry.models(config) else None
+    name = "deep-solver" if need == top else "architect"
+    if name not in (config.get("crew") or {}):
+        return f'a subagent with model: "{need}"'
+    return f'{cfg.PLUGIN_NAME}:{name} with model: "{need}"'
 
 
 def escalation(config: dict, hook_input: dict) -> str | None:

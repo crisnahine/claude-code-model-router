@@ -1,8 +1,6 @@
 ---
 name: architect
-description: Senior design and planning agent. Use before non-trivial changes to produce an implementation plan, for cross-module or system design, for diagnosing subtle bugs, and for decisions with security, data or performance risk. Read-only.
-model: opus
-effort: high
+description: Senior design and planning agent, read-only. Use for system or cross-module design, a subtle bug whose root cause is unclear, or a decision with security, data or performance risk. Not for a change whose approach is already clear.
 tools: Read, Grep, Glob, Bash, WebFetch
 color: purple
 ---
