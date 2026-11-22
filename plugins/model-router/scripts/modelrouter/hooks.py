@@ -372,6 +372,8 @@ def mod_usage(hook_input: dict) -> dict | None:
         return None
     tokens = {k: int(usage.get(k) or 0) for k in
               ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
+    if "ephemeral_1h_input_tokens" in usage:
+        tokens["ephemeral_1h_input_tokens"] = int(usage.get("ephemeral_1h_input_tokens") or 0)
     store.append_ledger({"event": "usage", "session": hook_input.get("session_id"),
                          "agent_id": hook_input.get("agent_id"), "model": usage["model"], **tokens,
                          "cost_usd": registry.cost(cfg.load_config(hook_input), usage["model"], tokens)})
