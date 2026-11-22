@@ -3510,6 +3510,17 @@ class DesignDecisions(unittest.TestCase):
             self.assertEqual(result["level"], "standard", prompt)
             self.assertNotIn("load", result["signals"], prompt)
 
+    def test_a_decision_already_made_asks_for_none(self):
+        for prompt in ("As decided on Monday, rename the payments column in every service that reads it, across all "
+                       "services.", "We decided on Postgres, so migrate the billing schema in all services to it."):
+            result = profile.profile_call({"prompt": prompt}, "general-purpose")
+            self.assertEqual(result["level"], "complex", prompt)
+            self.assertNotIn("ambiguity", result["signals"], prompt)
+        for prompt in ("Help me decide on a cache for the session store.",
+                       "We need to decide whether to shard the orders table.",
+                       "Choosing between Kafka and SQS for the event bus.", "Weighing the options for the job queue."):
+            self.assertIn("ambiguity", profile.profile_call({"prompt": prompt}, "general-purpose")["signals"], prompt)
+
     def test_only_a_millisecond_budget_counts_as_load(self):
         for prompt in ("Plan the release notes for 2.0; the API answers in 120 ms.",
                        "Plan the sprint: fix the 300 ms login delay."):
