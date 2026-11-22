@@ -88,7 +88,8 @@ export const register: Register = (on, options) => {
 
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
-      const pick = await ask($, opts, 'mod-turn', { text: e.text })
+      const model = await Promise.resolve().then(() => $.session.model()).catch(() => undefined)
+      const pick = await ask($, opts, 'mod-turn', { text: e.text, ...(model ? { model } : {}) })
       if (pick?.effort) remember(turnEffort, e.turnId, pick.effort)
     } else if (!agentEffort.has(e.agentId)) {
       const effort = promptEffort.get(e.text)

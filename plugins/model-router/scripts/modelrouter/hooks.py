@@ -329,17 +329,33 @@ def mod_spawn(hook_input: dict) -> dict | None:
     return {"model": decision["model"], "effort": decision["effort"], "reason": decision["reason"]}
 
 
+def _effort_keeps_cache(options: settings.Settings, model: object) -> bool:
+    """Only these models, on Anthropic's API without a gateway or pre-release betas turned
+    off, keep the prompt cache when effort changes. A model with no known version, as after
+    /clear, gets the benefit of the doubt."""
+    if options.cloud or options.base_url or options.no_betas:
+        return False
+    found = upstream.version_of(model)
+    if not found:
+        return True
+    family, version = found
+    return version >= (5, 1) if family == "fable" else family in ("opus", "sonnet", "haiku") and version == (5, 5)
+
+
 def mod_turn(hook_input: dict) -> dict | None:
     """Effort for one main-loop turn, from the request. Effort is the lever that keeps the
     prompt cache on current models; switching the conversation's model would not."""
-    _mark_mod(hook_input.get("session_id"))
+    session_id = hook_input.get("session_id")
+    _mark_mod(session_id)
     config = cfg.load_config(hook_input)
     options = settings.resolve(config)
     text = hook_input.get("text")
     text = text if isinstance(text, str) else ""
-    # A cloud provider re-reads the whole context uncached whenever effort changes.
+    # The mod's live model, when it is an ID; a record can miss a fallback to another model.
+    model = hook_input.get("model")
+    model = model if upstream.version_of(model) else session.model(session_id)
     if (options.mode != "auto" or not options.main_effort or not is_user_prompt(text)
-            or options.effort_level or options.cloud):
+            or options.effort_level or not _effort_keeps_cache(options, model)):
         return None
     level = profile_prompt(text)["level"]
     effort = ((config.get("main") or {}).get("effort") or {}).get(level)

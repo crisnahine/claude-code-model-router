@@ -56,7 +56,7 @@ class Sandbox(unittest.TestCase):
         self.patch = mock.patch.dict(os.environ, self.env)
         self.patch.start()
         for name in list(os.environ):
-            if name.startswith(("CLAUDE_PLUGIN_OPTION_", "CLAUDE_CODE_SUBAGENT_", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_USE_", "ANTHROPIC_")):
+            if name.startswith(("CLAUDE_PLUGIN_OPTION_", "CLAUDE_CODE_SUBAGENT_", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_USE_", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "ANTHROPIC_")):
                 del os.environ[name]
         self.no_managed = mock.patch.object(
             registry, "_settings_files",
@@ -1060,6 +1060,7 @@ class Mod(Sandbox):
         self.assertEqual((pick["model"], pick["effort"]), (None, "low"))
 
     def test_turn_effort_rises_for_hard_requests_only(self):
+        session.record("s1", "claude-opus-5-5")
         turn = lambda text: hooks.mod_turn({"session_id": "s1", "text": text})  # noqa: E731
         self.assertEqual(turn(HARD), {"level": "complex", "effort": "high"})
         self.assertIsNone(turn(LOOKUP))
@@ -1069,6 +1070,29 @@ class Mod(Sandbox):
             with mock.patch.dict(os.environ):
                 self.options(**{name: value})
                 self.assertIsNone(turn(HARD), name)
+
+    def test_turn_effort_is_left_alone_where_an_effort_change_drops_the_cache(self):
+        turn = lambda: hooks.mod_turn({"session_id": "s1", "text": HARD})  # noqa: E731
+        for model in ("claude-opus-5-5[1m]", "claude-opus-5-5[1M]", "claude-fable-5-1", "claude-fable-5-2",
+                      "claude-fable-6", "claude-sonnet-5-5-20260101", "claude-haiku-5-5"):
+            session.record("s1", model)
+            self.assertEqual(turn(), {"level": "complex", "effort": "high"}, model)
+        for name in ("ANTHROPIC_BASE_URL", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"):
+            with mock.patch.dict(os.environ, {name: "1"}):
+                self.assertIsNone(turn(), name)
+        for model in ("claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-opus-4-7", "claude-opus-5-6"):
+            session.record("s1", model)
+            self.assertIsNone(turn(), model)
+        for model in ("opus", "opus[1m]", None):  # no version to judge, as after /clear: today's behavior
+            store.save_entry("sessions", "s1", {"model": model} if model else {})
+            self.assertEqual(turn(), {"level": "complex", "effort": "high"}, model)
+            with mock.patch.dict(os.environ, {"ANTHROPIC_BASE_URL": "https://gateway"}):
+                self.assertIsNone(turn(), model)
+        live = lambda model: hooks.mod_turn({"session_id": "s1", "text": HARD, "model": model})  # noqa: E731
+        self.assertEqual(live("claude-opus-5-5"), {"level": "complex", "effort": "high"})
+        session.record("s1", "claude-opus-5-5")
+        self.assertIsNone(live("claude-opus-5"))  # the mod's live model beats a stale record
+        self.assertEqual(live("Opus"), {"level": "complex", "effort": "high"})  # not an ID: the record decides
 
     def test_usage_is_priced_from_the_registry(self):
         hooks.mod_usage({"session_id": "s1", "agent_id": "a1", "usage": {
@@ -1133,6 +1157,7 @@ class ModPayloads(Sandbox):
         self.assertTrue(hooks.mod_active("s1"))
 
     def test_turn_picks_an_effort(self):
+        session.record("s1", "claude-opus-5-5")
         self.assertEqual(hooks.mod_turn(self.payloads["mod-turn"]), {"level": "complex", "effort": "high"})
 
     def test_usage_is_logged_for_its_agent(self):

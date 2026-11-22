@@ -31,6 +31,7 @@ class Settings:
     cloud: str | None = None  # bedrock, vertex or foundry, from CLAUDE_CODE_USE_<NAME>
     api_key: str | None = field(default=None, repr=False)  # ANTHROPIC_API_KEY
     base_url: bool = False  # ANTHROPIC_BASE_URL is set
+    no_betas: bool = False  # CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
 
 
 def truthy(value: str | None) -> bool:
@@ -75,6 +76,7 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
         cloud=next((c for c in CLOUDS if truthy(env(f"CLAUDE_CODE_USE_{c.upper()}"))), None),
         api_key=env("ANTHROPIC_API_KEY"),
         base_url=bool(env("ANTHROPIC_BASE_URL")),
+        no_betas=truthy(env("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")),
     )
 
 

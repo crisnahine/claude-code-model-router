@@ -22,6 +22,7 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}) 
   }
   const $ = {
     plugin: { root: '/plugin' },
+    session: { model: async () => 'claude-opus-5-5' },
     process: {
       hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: 's1', CLAUDE_PLUGIN_DATA: '/tmp/x' }),
       run: async (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) => {
