@@ -4,7 +4,7 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 
 ## Next
 
-1. Close the cost gap the benchmark shows. At the same pass rate the router cost 1.2 to 2.2 times the best baseline in 7 of 8 classes; it started 1.4 agents per run against 1.0, a verifier in 28 of 88 runs, and spent 29% of its cost on Opus. The ladder is the Architect's call from [BENCHMARKS.md](BENCHMARKS.md); rerun the same suite after any change. Then run the baselines still missing (`haiku`, `opus`, `fable`, `opusplan`, the advisor), fan-outs, cache temperature and router overhead. Rows S4.12, S4.13, S4.15, S14.1.
+1. Close the cost gap the benchmark shows. At the same pass rate the router cost 1.2 to 2.2 times the best baseline in 7 of 8 classes; it started 1.4 agents per run against 1.0, a verifier in 28 of 88 runs, and spent 29% of its cost on Opus. The ladder now starts cheap (standard Sonnet `medium`, complex Sonnet `high`, hardest Opus `high`) and `main_effort` is off by default; rerun the same suite to measure it. Then run the baselines still missing (`haiku`, `opus`, `fable`, `opusplan`, the advisor), fan-outs, cache temperature and router overhead. Rows S4.12, S4.13, S4.15, S14.1.
 2. Run live beyond the macOS terminal. Linux and Windows installs; Desktop, VS Code, JetBrains and the Agent SDK; Bedrock, Vertex and Foundry; acceptEdits and bypass modes; `allowManagedHooksOnly`; split-pane teammates. Record each in "Verified live". Rows S3.7 to S3.10, S3.13, S6.1.
 3. Decide how fast mode shows in the spend log. Claude Code doesn't say which requests ran fast, so the only full figure is its own estimate in `/cost`, which a mod can read. Rows S4.8, S10.7.
 4. Measure cache sharing across fan-outs that start from one prefix. Row S4.5.
@@ -16,12 +16,12 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 
 - Whether a project's file may raise levels and effort (the open question on project raises). The user decides; 0.1.0 allows raises. Row S6.4.
 - Whether the fallback's one denial, which protects the cap, stays as an exception to "never blocks a spawn". Row S2.25.
-- Whether the standard level runs Sonnet at `high`, as shipped, or at `medium`. In the benchmark `medium` solved as often for less: significantly on implementation, not significantly on known-cause bugfixes. Row S10.11.
 - Whether the Mythos models, priced but not routed, become a routable family. Row S2.15.
 - A live marketplace install with one routed call, which needs the maintainer's login or an API key in a scratch config folder. Row S6.1.
 
 ## Done since 0.1.0
 
+- The ladder starts cheap: standard on Sonnet at `medium`, complex on Sonnet at `high`, hardest on Opus at `high`, and `main_effort` off by default, from the benchmark's cost gap. Rows S4.2, S10.11.
 - The state documents: this file, `TRACEABILITY.md` with its count script, `RELEASE_READINESS.md`, `TEST_RESULTS.md`, the `docs/README.md` index and `CONTRIBUTING.md`.
 - State files carry a version and migrate; one that fails to parse is set aside, and one from a newer release is read but never written. Rows S6.6, S6.7, S12.21.
 - A security assessment in [SECURITY.md](SECURITY.md). Rows S10.12, S11.7.
