@@ -2429,5 +2429,30 @@ class MachineReadable(Sandbox):
         self.assertEqual(data["newer_files"], [str(newer)])
 
 
+@unittest.skipUnless(shutil.which("sh"), "needs sh")
+class OverheadBench(unittest.TestCase):
+    def test_the_overhead_bench_reports_every_hook_and_state_file(self):
+        run = subprocess.run([sys.executable, str(ROOT / "bench" / "overhead.py"), "--runs", "1", "--calls", "40",
+                              "--json"], capture_output=True, text=True, timeout=300)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        report = json.loads(run.stdout)
+        hooks_json = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+        commands = {h["args"][-1] for groups in hooks_json.values() for group in groups for h in group["hooks"]}
+        timed = {row["command"] for row in report["hooks"]}
+        self.assertEqual(timed, commands - {"refresh-cache"})  # async, and it would use the network
+        for row in [report["floor"], *report["hooks"], *report["mod"]]:
+            for key in ("p50_ms", "p95_ms", "runs"):
+                self.assertIn(key, row, row)
+        for row in report["hooks"]:
+            self.assertIn(row["phase"], ("cold", "warm"))
+        files = {row["file"]: row for row in report["state"]}
+        for name in ("ledger.jsonl", "learned.json", "state.json"):
+            self.assertIn(name, files)
+            self.assertIn("bytes_per_1000_calls", files[name])
+            self.assertIs(files[name]["bounded"], True, name)
+        for key in ("python", "platform", "claude_code"):
+            self.assertIn(key, report["machine"])
+
+
 if __name__ == "__main__":
     unittest.main()
