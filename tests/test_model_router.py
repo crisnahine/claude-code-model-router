@@ -685,7 +685,9 @@ class Profile(unittest.TestCase):
                       "Do not change the tests, fix the auth bug and add a regression test.",
                       "Do not ask questions, migrate the database, then run the tests.",
                       "Don't touch the tests, fix the auth bug, then report back.",
-                      "Do not ask questions, implement OAuth2 login, and secure the session cookies."):
+                      "Do not ask questions, implement OAuth2 login, and secure the session cookies.",
+                      "Do not ask questions, fix the auth bug or remove the check.",
+                      "Never guess, fix the flaky auth test or delete it."):
             self.assertEqual(self.level(brief), "complex", brief)
         for brief in ("Do not modify tests, fix the parser, update the docs, and run the suite.",
                       "Do not touch the API, fix it or roll it back."):
@@ -695,13 +697,17 @@ class Profile(unittest.TestCase):
         for brief in ("List the tables. Do not, under any circumstances, write to the database.",
                       "Find the config loader. Never, for any reason, change files.",
                       "Find the retry logic. Do not delete, modify or rename any files.",
-                      "Do not touch, edit or delete files."):
+                      "Do not touch, edit or delete files.",
+                      "Find the schema. Do not edit files, create branches or update the database, or delete "
+                      "anything."):
             self.assertEqual(self.level(brief), "lookup", brief)
 
     def test_a_long_list_after_a_limit_stays_fast(self):
         started = time.monotonic()
         self.level("do not add" + ", add x y" * 20_000 + " or add it")
         self.level("do not add" + ", add x y" * 20_000 + ", then stop")
+        self.level("never x" + ", add never x" * 4_000 + ", then stop")
+        self.level("never, add" + ", add never" * 4_000 + ", then stop")
         self.assertLess(time.monotonic() - started, 0.5)
 
     def test_a_huge_whitespace_run_after_a_limit_stays_fast(self):
