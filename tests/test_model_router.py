@@ -358,9 +358,17 @@ class Registry(Sandbox):
         self.managed.write_text(json.dumps({"availableModels": []}))
         self.assertEqual(registry.permitted(self.config, self.project), set())
 
-    def test_denied_models_match_any_spelling_of_a_family(self):
-        self.managed.write_text(json.dumps({"deniedModels": ["claude-opus-5-5", "best", "default"]}))
+    def test_denied_models_block_a_family_only_when_they_name_it(self):
+        self.managed.write_text(json.dumps({"deniedModels": ["Opus"]}))
         self.assertEqual(registry.available(self.config, self.project), ["haiku", "sonnet", "fable"])
+        # A denied version leaves the alias on the newest permitted one; best, opusplan and default are ignored.
+        self.managed.write_text(json.dumps({"deniedModels": ["claude-opus-5-5", "sonnet[1m]", "best", "opusplan", "default"]}))
+        self.assertEqual(len(registry.available(self.config, self.project)), 4)
+
+    def test_settings_entries_that_are_not_strings_match_nothing(self):
+        self.managed.write_text(json.dumps({"availableModels": ["sonnet", {"id": "claude-opus-5-5"}],
+                                            "deniedModels": [{"id": "sonnet"}]}))
+        self.assertEqual(registry.permitted(self.config, self.project), {"sonnet"})
 
     def test_denied_models_outside_managed_settings_are_ignored(self):
         (self.home / "settings.json").write_text(json.dumps({"deniedModels": ["opus"]}))

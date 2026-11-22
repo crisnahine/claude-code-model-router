@@ -140,11 +140,13 @@ def permitted(config: dict, project: Path) -> set[str]:
     """Registry models that the availableModels and deniedModels settings leave open, read
     the way Claude Code reads them: a managed allowlist applies alone, otherwise the user,
     project and local lists are concatenated; deniedModels counts only in managed settings.
-    An entry matches its family, so claude-opus-5-5 stands for opus."""
+    An allow entry matches its family, so claude-opus-4-6 permits opus. A deny entry blocks a
+    family only when it names the family: Claude Code moves the alias to the newest version
+    still permitted, so a denied version leaves the alias usable."""
     names = set(models(config))
 
     def matches(entries: list) -> set[str]:
-        found = {family(config, str(e)) for e in entries}
+        found = {family(config, e) for e in entries}
         return {n for n in names if n in found}
 
     managed = store.load_dict(_managed_file())
@@ -157,7 +159,9 @@ def permitted(config: dict, project: Path) -> set[str]:
         names = matches(allow)
     deny = managed.get("deniedModels")
     if isinstance(deny, list):
-        names -= matches([e for e in deny if str(e).lower() not in ("best", "opusplan", "default")])
+        aliases = config.get("aliases") or {}
+        names -= {aliases.get(e.lower(), e.lower()) for e in deny
+                  if isinstance(e, str) and e.lower() not in ("best", "opusplan", "default")}
     return names
 
 
