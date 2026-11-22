@@ -14,7 +14,7 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 8. Confirm the CI supply-chain change in CI. Actions are pinned to commit SHAs and the mod's tests run on every OS since 0.1.0; neither has run in CI yet. Row S6.12.
 9. Clean up set-aside state copies after a while, so a run of corrupt files can't grow the data folder for good. Row S12.27.
 10. Close the untested edge cases: an empty brief, a short or unlisted-language brief, compaction, a clock moving backwards, a missing Python, two mods setting one spawn, a renamed event or field. Add property-based tests of the profile and a differential test of the mod path against the fallback. Rows S9.8, S12.7, S12.10, S12.11, S12.14, S12.20, S12.23, S12.26.
-11. Small cleanups: glossary terms for registry, profile, priority, gate, fork and model health; a dead-code recheck; an audit of external citations. Rows S5.4, S5.5, S13.6.
+11. Small cleanups: a dead-code recheck and an audit of external citations. Rows S5.5, S13.6.
 
 ## Waiting on a decision
 
