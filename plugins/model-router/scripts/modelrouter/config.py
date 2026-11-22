@@ -93,7 +93,7 @@ def tool_input(hook_input: dict) -> dict:
 def trusted_models(config: dict) -> list[str]:
     """Models whose strength the shipped registry or the user vouches for. A repository's
     additions carry only the repository's claim, so they don't count under a cap."""
-    user = _clean(store.load_json(store.claude_home() / OVERRIDE_FILE, {}))
+    user = _clean(store.load_dict(store.claude_home() / OVERRIDE_FILE))
     vouched = set(base_config().get("models") or {}) | set(user.get("models") or {})
     return sorted(vouched & set(config.get("models") or {}))
 
@@ -107,8 +107,8 @@ def load_config(hook_input: dict | None = None) -> dict:
     project's .claude/model-router.json. The user's file is trusted in full. A project's
     file may add a model but not re-rank one the user's cap is measured against."""
     base = base_config()
-    user = _clean(store.load_json(store.claude_home() / OVERRIDE_FILE, {}))
-    project = _clean(store.load_json(project_dir(hook_input) / ".claude" / OVERRIDE_FILE, {}))
+    user = _clean(store.load_dict(store.claude_home() / OVERRIDE_FILE))
+    project = _clean(store.load_dict(project_dir(hook_input) / ".claude" / OVERRIDE_FILE))
     trusted = set(base.get("models") or {}) | set(user.get("models") or {})
     if "models" in project:
         project["models"] = {k: v for k, v in project["models"].items() if k not in trusted}

@@ -308,10 +308,6 @@ def refresh_cache(hook_input: dict) -> dict | None:
     return None
 
 
-# hooks/router.ts forwards three engine events here. Its spawn event sees every subagent,
-# teammate and workflow agent, and names the parent's model exactly.
-
-
 def mod_start(hook_input: dict) -> dict | None:
     _mark_mod(hook_input.get("session_id"))
     return None
@@ -333,12 +329,6 @@ def mod_spawn(hook_input: dict) -> dict | None:
     return {"model": decision["model"], "effort": decision["effort"], "reason": decision["reason"]}
 
 
-def _turn_effort_left_alone(options: settings.Settings) -> bool:
-    """The user set effort themselves, or the provider re-reads the whole context
-    uncached whenever effort changes (Bedrock, Vertex, Foundry)."""
-    return bool(options.effort_level or options.cloud)
-
-
 def mod_turn(hook_input: dict) -> dict | None:
     """Effort for one main-loop turn, from the request. Effort is the lever that keeps the
     prompt cache on current models; switching the conversation's model would not."""
@@ -347,8 +337,9 @@ def mod_turn(hook_input: dict) -> dict | None:
     options = settings.resolve(config)
     text = hook_input.get("text")
     text = text if isinstance(text, str) else ""
+    # A cloud provider re-reads the whole context uncached whenever effort changes.
     if (options.mode != "auto" or not options.main_effort or not is_user_prompt(text)
-            or _turn_effort_left_alone(options)):
+            or options.effort_level or options.cloud):
         return None
     level = profile_prompt(text)["level"]
     effort = ((config.get("main") or {}).get("effort") or {}).get(level)

@@ -38,7 +38,7 @@ def truthy(value: str | None) -> bool:
 
 
 def _on(value: str | None) -> bool:
-    return value is None or value not in ("false", "0", "no", "off")
+    return value not in ("false", "0", "no", "off")
 
 
 def resolve(config: dict | None = None, recorded: bool = False) -> Settings:

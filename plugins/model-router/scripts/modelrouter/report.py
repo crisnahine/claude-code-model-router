@@ -18,9 +18,10 @@ def policy(config: dict, settings: Settings) -> str:
     lines = [f"Routing: **{settings.mode}**. Priority: **{settings.priority}**. "
              f"Cap: **{limit or 'none'}**. Strongest model in use: **{usable[-1] if usable else 'none'}**.", "",
              "| Subtask level | Model | Effort |", "| :- | :- | :- |"]
+    raises = learn.raises()
     for level in cfg.LEVELS:
-        pick = ladder.pick(config, level, settings.priority, usable, learn.raises())
-        note = " (raised by feedback)" if learn.bump(level) else ""
+        pick = ladder.pick(config, level, settings.priority, usable, raises)
+        note = " (raised by feedback)" if raises[level] else ""
         lines.append(f"| {level} | {pick.model}{note} | {pick.effort or 'as the agent or session sets it'} |")
     lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
     for name in registry.by_strength(config):

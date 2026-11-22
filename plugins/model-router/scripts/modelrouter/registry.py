@@ -53,8 +53,6 @@ def family(config: dict, model: Any) -> str | None:
     return None
 
 
-
-
 def health() -> dict:
     table = store.load_state().get("health")
     return table if isinstance(table, dict) else {}
@@ -120,8 +118,6 @@ def record_result(name: str, ran_as: str | None, ran_family: str | None) -> None
     edit_health(name, change)
 
 
-
-
 def _settings_files(project: Path) -> list[Path]:
     files = [store.claude_home() / "settings.json", project / ".claude" / "settings.json",
              project / ".claude" / "settings.local.json"]
@@ -138,9 +134,7 @@ def permitted(config: dict, project: Path) -> set[str]:
     """Registry models that the availableModels and deniedModels settings leave open."""
     names = set(models(config))
     for path in _settings_files(project):
-        settings = store.load_json(path, {})
-        if not isinstance(settings, dict):
-            continue
+        settings = store.load_dict(path)
         allow = settings.get("availableModels")
         if isinstance(allow, list) and allow:
             entries = [str(e).lower() for e in allow]
@@ -149,8 +143,6 @@ def permitted(config: dict, project: Path) -> set[str]:
         if isinstance(deny, list):
             names -= {str(e).lower() for e in deny}
     return names
-
-
 
 
 def available(config: dict, project: Path | None = None, cap: str | None = None) -> list[str]:
@@ -213,8 +205,6 @@ def select(config: dict, needs: float, priority: str, usable: list[str]) -> str 
     if priority == "fast":
         return min(qualifying, key=lambda n: (-speed(n), cost(n)))
     return min(qualifying, key=lambda n: (cost(n), -speed(n)))
-
-
 
 
 def price(config: dict, model_id: str) -> dict | None:

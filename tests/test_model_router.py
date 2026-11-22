@@ -428,8 +428,7 @@ class AgentDiscovery(Sandbox):
         self.agent("theirs", None, self.home / "agents", extra="tools: Read, Grep\neffort: high\n")
         self.assertEqual(agents.find("mine", self.project)["model"], "sonnet")
         found = agents.find("theirs", self.project)
-        self.assertEqual((found["source"], found["model"], found["effort"], found["read_only"]),
-                         ("user", None, "high", True))
+        self.assertEqual((found["source"], found["model"], found["effort"]), ("user", None, "high"))
         self.assertEqual(agents.find("Explore", self.project)["source"], "builtin")
         self.assertIsNone(agents.find("nobody", self.project))
 
@@ -457,9 +456,7 @@ class AgentDiscovery(Sandbox):
         self.agent("helper", "haiku", self.home / "plugins" / "cache" / "market" / "acme" / "1.0" / "agents")
         self.assertEqual(agents.find("acme:helper", self.project)["model"], "haiku")
 
-    def test_tools_as_yaml_list_and_quoted_model(self):
-        self.agent("lister", None, extra="tools:\n  - Read\n  - Bash\n")
-        self.assertFalse(agents.find("lister", self.project)["read_only"])
+    def test_quoted_model(self):
         self.agent("quoted", '"opus"  # the strong one')
         self.assertEqual(agents.find("quoted", self.project)["model"], "opus")
 

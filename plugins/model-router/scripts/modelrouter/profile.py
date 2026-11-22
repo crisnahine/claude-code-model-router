@@ -44,14 +44,6 @@ def signals(text: str) -> list[str]:
     return [name for name, pattern in SIGNALS.items() if re.search(r"\b(?:%s)\b" % pattern, text)]
 
 
-def _at_least(level: str, floor: str) -> str:
-    return level if LEVELS.index(level) >= LEVELS.index(floor) else floor
-
-
-def _at_most(level: str, cap: str) -> str:
-    return level if LEVELS.index(level) <= LEVELS.index(cap) else cap
-
-
 def profile_prompt(prompt: str) -> dict:
     """The user's request as a whole. Used to tell whether the conversation's own model
     is strong enough for it."""
@@ -93,9 +85,9 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
         level, why = "standard", why + ["thorough or long brief"]
     name = agent_type.split(":")[-1].lower()
     if re.search(_HEAVY_NAME, name):
-        if _at_least(level, "complex") != level:
+        if LEVELS.index(level) < LEVELS.index("complex"):
             level, why = "complex", why + ["agent's role"]
     elif re.search(_LIGHT_NAME, name):
-        if _at_most(level, "standard") != level:
+        if LEVELS.index(level) > LEVELS.index("standard"):
             level, why = "standard", why + ["search or check agent"]
     return {"level": level, "signals": why}

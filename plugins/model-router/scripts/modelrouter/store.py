@@ -27,15 +27,11 @@ def data_dir() -> Path:
     return path
 
 
-def load_json(path: Path, default: Any) -> Any:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return default
-
-
 def load_dict(path: Path) -> dict:
-    value = load_json(path, {})
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
     return value if isinstance(value, dict) else {}
 
 
@@ -115,8 +111,6 @@ def update_dict(path: Path, change: Callable[[dict], Any]) -> dict:
         return data
 
 
-
-
 def state_path() -> Path:
     return data_dir() / "state.json"
 
@@ -129,8 +123,6 @@ def update_state(change: Callable[[dict], Any]) -> dict:
     return update_dict(state_path(), change)
 
 
-
-
 def _keyed(name: str) -> Path:
     return data_dir() / f"{name}.json"
 
@@ -140,10 +132,11 @@ def load_entry(name: str, key: str | None) -> dict:
     return entry if isinstance(entry, dict) else {}
 
 
-def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any]) -> dict:
-    """Edit one record of a keyed file in place, under the file's lock, and return it.
-    Each file keeps its KEEP_ENTRIES most recently written records."""
-    result: dict = {}
+def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any]) -> None:
+    """Edit one record of a keyed file in place, under the file's lock. Each file keeps
+    its KEEP_ENTRIES most recently written records."""
+    if not key:
+        return
 
     def apply(data: dict) -> None:
         entry = data.get(key)
@@ -156,13 +149,8 @@ def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any]) -> d
                 return data[k].get("_at", 0) if isinstance(data[k], dict) else 0
             for old in sorted(data, key=written)[:len(data) - KEEP_ENTRIES]:
                 del data[old]
-        result.update(entry)
 
-    if key:
-        update_dict(_keyed(name), apply)
-    else:
-        change(result)
-    return result
+    update_dict(_keyed(name), apply)
 
 
 def save_entry(name: str, key: str | None, entry: dict) -> None:
@@ -172,10 +160,8 @@ def save_entry(name: str, key: str | None, entry: dict) -> None:
     mutate_entry(name, key, replace)
 
 
-def update_entry(name: str, key: str | None, **changes: Any) -> dict:
-    return mutate_entry(name, key, lambda entry: entry.update(changes))
-
-
+def update_entry(name: str, key: str | None, **changes: Any) -> None:
+    mutate_entry(name, key, lambda entry: entry.update(changes))
 
 
 def ledger_path() -> Path:

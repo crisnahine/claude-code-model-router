@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from . import config as cfg
-from . import store
+from . import registry, store
 from .settings import Settings
 
 CHANGELOG_RSS = "https://code.claude.com/docs/en/changelog/rss.xml"
@@ -156,6 +156,11 @@ def version_key(version: str) -> tuple:
     return tuple(int(p) if p.isdigit() else 0 for p in re.split(r"[.\-]", str(version)))
 
 
+def _api_lines(cache: dict) -> list[str]:
+    return sorted({i.get("line") for i in (cache.get("api_models") or {}).values()
+                   if isinstance(i, dict) and isinstance(i.get("line"), str)})
+
+
 def fetch(settings: Settings) -> dict:
     releases = parse_rss(http_get(CHANGELOG_RSS))
     pages = parse_llms_index(http_get(DOCS_INDEX))
@@ -198,8 +203,7 @@ def diff(reviewed: dict, live: dict, routed: list[str] | None = None, in_use: li
 
     live_families = model_families(live.get("aliases"))
     known = set(routed) | set(model_families(reviewed.get("aliases"))) | set(reviewed.get("api_lines") or [])
-    lines = sorted({i.get("line") for i in (live.get("api_models") or {}).values()
-                    if isinstance(i, dict) and isinstance(i.get("line"), str)})
+    lines = _api_lines(live)
     lifecycle, was = merged_lifecycle(live), reviewed.get("lifecycle") or {}
 
     def entry(model_id: str) -> dict:
@@ -225,10 +229,8 @@ def diff(reviewed: dict, live: dict, routed: list[str] | None = None, in_use: li
 
 def snapshot(cache: dict) -> dict:
     latest = cache["releases"][0]["version"] if cache.get("releases") else "0"
-    lines = sorted({i.get("line") for i in (cache.get("api_models") or {}).values()
-                    if isinstance(i, dict) and isinstance(i.get("line"), str)})
     return {"claude_code_version": latest, "pages": cache.get("pages", {}), "aliases": cache.get("aliases", []),
-            "lifecycle": merged_lifecycle(cache), "api_lines": lines}
+            "lifecycle": merged_lifecycle(cache), "api_lines": _api_lines(cache)}
 
 
 def refresh(settings: Settings, force: bool = False) -> dict:
@@ -260,7 +262,6 @@ def pending(data: dict | None = None) -> dict | None:
     data = load() if data is None else data
     if not data.get("cache") or not data.get("reviewed"):
         return None
-    from . import registry  # registry imports config, which this module's callers load first
     in_use = [i.get("last_model") for i in registry.health().values() if isinstance(i, dict)]
     return diff(data["reviewed"], data["cache"], in_use=[m for m in in_use if isinstance(m, str)])
 

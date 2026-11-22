@@ -19,10 +19,6 @@ CHECK_COMMAND = re.compile(
 _CHECKERS = ("verifier", "reviewer")
 
 
-def enabled(settings: Settings) -> bool:
-    return settings.mode == "auto" and settings.verify_gate
-
-
 def is_checker(agent_type: object) -> bool:
     return str(agent_type or "").endswith(_CHECKERS)
 
@@ -120,6 +116,6 @@ def unverified_edit(hook_input: dict) -> str | None:
 
 
 def before_stop(hook_input: dict, config: dict, settings: Settings) -> str | None:
-    if hook_input.get("stop_hook_active") or not enabled(settings):
+    if hook_input.get("stop_hook_active") or settings.mode != "auto" or not settings.verify_gate:
         return None
     return escalation(config, hook_input) or unverified_edit(hook_input)

@@ -12,7 +12,6 @@ from . import store
 # Built-ins that run on the conversation's model unless a call says otherwise.
 BUILTIN = ("general-purpose", "Explore", "Plan", "claude")
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---", re.S)
-_WRITE_TOOLS = re.compile(r"\b(?:Edit|Write|NotebookEdit|Bash|PowerShell)\b")
 
 
 def _field(block: str, name: str) -> str | None:
@@ -31,17 +30,12 @@ def parse(path: Path, source: str) -> dict | None:
     if not block:
         return None
     text = block.group(1)
-    tools = _field(text, "tools")
-    if tools is None and re.search(r"^tools:\s*$", text, re.M):  # a YAML list on the next lines
-        tools = " ".join(re.findall(r"^\s+-\s*(\S+)", text.split("tools:", 1)[1], re.M))
     model = _field(text, "model")
     return {
         "source": source,
         "name": _field(text, "name") or path.stem,
         "model": None if (model or "inherit").lower() == "inherit" else model,
         "effort": _field(text, "effort"),
-        "description": _field(text, "description") or "",
-        "read_only": bool(tools) and not _WRITE_TOOLS.search(tools),
     }
 
 
@@ -110,6 +104,5 @@ def find(agent_type: str, project: Path) -> dict | None:
     if found:
         return found
     if agent_type in BUILTIN:
-        return {"source": "builtin", "name": agent_type, "model": None, "effort": None,
-                "description": "", "read_only": agent_type in ("Explore", "Plan")}
+        return {"source": "builtin", "name": agent_type, "model": None, "effort": None}
     return None
