@@ -21,11 +21,11 @@ The test counts come from each job's log (`gh run view --job <id> --log`). Commi
 
 ## Local
 
-Run 2026-11-22 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0`, up to `ea8bf9a` plus the change that updated this file.
+Run 2026-11-22 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0`, up to `fc90093` plus the change that updated this file.
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 296 tests OK |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 297 tests OK |
 | Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 18 of 18 pass |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
@@ -33,9 +33,23 @@ Run 2026-11-22 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 
-The 296 local tests are 262 in `tests/test_model_router.py`, 28 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py` and 3 in `tests/test_traceability.py`. The routing corpus test prints "2 of 219 briefs over-routed (0.9%), budget 2%; 5 known under-routes". CI's run on `8ec8eec` had 180.
+The 297 local tests are 263 in `tests/test_model_router.py`, 28 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py` and 3 in `tests/test_traceability.py`. The routing corpus test prints "2 of 219 briefs over-routed (0.9%), budget 2%; 5 known under-routes". CI's run on `8ec8eec` had 180.
 
 Not run: `claude plugin eval plugins/model-router --trust-plugin` (it runs live models and spends money, and has not been rerun since the routing evals were written), and live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live"). The benchmark's pilot runs are in [BENCHMARKS.md](BENCHMARKS.md).
+
+## Dogfood ledger
+
+The team that works on this repository runs with the plugin loaded, so its own subagents go through the router. Its ledger is `~/.claude/plugins/data/model-router-claude-code-model-router/ledger.jsonl`. It was read from a copy taken 2026-11-22 at 12:07 UTC: 400 rows from 07:16 to 12:06 UTC, across 16 sessions, all of them parsed. Only counts are recorded here, never brief text.
+
+- 45 spawns, all on the mod path (`agent.spawn`). 25 were `model-router:reviewer`, 14 `model-router:verifier`, 4 `general-purpose`, 1 `model-router:docs-researcher` and 1 `web-fetch`.
+- 40 were kept unchanged. These sessions set `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, which pins every subagent's model, and each of these role agents sets its own `effort` (reviewer `high`, verifier `low`, docs-researcher `medium`), so the router had nothing left to set. Their levels: 22 complex, 14 standard, 2 hardest, 1 frontier and 1 lookup.
+- 5 were rewritten. 3 `general-purpose` lookups went from Sonnet to Haiku at `low` and ran on `claude-haiku-5-5`. 1 hardest `general-purpose` call went from Sonnet to Opus at `xhigh`. Under the force setting, 1 `web-fetch` lookup kept its model and got `low` effort.
+- Each call's `result` row named the model it asked for, and Claude Code resolved each one to that family's ID (3 Haiku, 42 Opus). 44 calls ran in the background and 1 in the foreground.
+- No redo: no spawn's reason says it ran a level above an earlier run.
+- 12 main-loop turns were raised: 11 complex turns to `high` and 1 hardest turn to `xhigh`.
+- 298 usage rows, every one priced, $439.99 at list price. The main loops account for $409.30 (246 rows) and subagents for $30.69 (52 rows).
+
+No routing error was found. Most spawns ran under the force setting, so this ledger mostly checks that path. Model choice was exercised on 4 calls only.
 
 ## Type-checking the mod
 

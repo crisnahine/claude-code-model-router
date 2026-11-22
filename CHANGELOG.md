@@ -35,4 +35,4 @@ First release. Reviewed against Claude Code 2.1.330 and the platform docs of the
 - Two checks before a turn ends: verification after code changes inside the project, and a stronger model's review when a hard request was answered by a weaker session model alone.
 - Seven role agents and five skills: `ship`, `route`, `models`, `usage` and `refresh`.
 - A daily check of the Claude Code changelog, docs index, model aliases and model deprecations page, plus the account's Models API list when an Anthropic API key is set, in the plugin and as a GitHub workflow. Models routed calls ran on that are deprecated or retiring are reported at session start.
-- Unit tests on Linux, macOS and Windows with Python 3.9, 3.10 and 3.13, tests of the mod in Node, strict plugin validation in CI, and routing evals.
+- Unit tests on Linux, macOS and Windows with Python 3.9 and 3.13, tests of the mod in Node, strict plugin validation in CI, and routing evals.
