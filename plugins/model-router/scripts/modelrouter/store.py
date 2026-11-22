@@ -173,14 +173,14 @@ def append_ledger(entry: dict) -> None:
     entry = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"), **entry}
     path = ledger_path()
     try:
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry) + "\n")
-        if path.stat().st_size > LEDGER_MAX_BYTES:
-            with locked(path):
-                # Another hook may have trimmed it while this one waited for the lock.
-                if path.stat().st_size > LEDGER_MAX_BYTES:
-                    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-                    write_atomic(path, "".join(lines[len(lines) // 2:]))
+        # The append takes the lock too: a row written between a trim's read and its
+        # replace would land in the file the trim throws away.
+        with locked(path):
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(entry) + "\n")
+            if path.stat().st_size > LEDGER_MAX_BYTES:
+                lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+                write_atomic(path, "".join(lines[len(lines) // 2:]))
     except OSError:
         pass
 
