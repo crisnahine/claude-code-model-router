@@ -333,6 +333,24 @@ class Sessions(unittest.TestCase):
             self.assertTrue((other / "keep.jsonl").is_file())
             self.assertEqual((row["sessions_saved"], row["session_dir_removed"]), (True, True))
 
+    def test_keep_saves_the_scratch_folder_and_the_transcripts_before_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, kept = Path(tmp) / "config", Path(tmp) / "kept"
+            stub = Path(tmp) / "claude"
+            stub.write_text(SESSION_STUB)
+            stub.chmod(0o755)
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60, "keep": str(kept),
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
+                row = run.run_one(task, run.load_configs()[1], options, {})
+            [folder] = list(kept.iterdir())
+            self.assertEqual(row["kept"], str(folder))
+            self.assertTrue((folder / "work" / "app" / "settings.py").is_file())
+            self.assertEqual((folder / "answer.txt").read_text(), "read_retry_limit in app/settings.py")
+            self.assertTrue((folder / "session" / "s1" / "subagents" / "agent-a1.jsonl").is_file())
+            self.assertEqual(list((home / "projects").iterdir()), [])  # the shared folder is still cleaned up
+
 
 class SuiteCoverage(unittest.TestCase):
     """Every task class and baseline the suite claims to cover is there and can't be passed by gaming."""
@@ -674,6 +692,56 @@ class Limits(unittest.TestCase):
         self.assertTrue(run.rate_limited({"is_error": True, "api_error_status": 529, "stderr": "", "answer": ""}))
         self.assertTrue(run.rate_limited({"is_error": False, "exit_code": 1, "api_error_status": None,
                                           "stderr": "Error: API Error: Repeated 529 Overloaded errors", "answer": ""}))
+
+
+CWD_STUB = '''#!/usr/bin/env python3
+import json, os, sys
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+print(json.dumps({"result": os.getcwd(), "total_cost_usd": 0.0, "modelUsage": {}}))
+'''
+
+
+class TaskIdentity(unittest.TestCase):
+    """A run's folder can't hand the router signal words, and a changed task is never pooled silently."""
+
+    @unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
+    def test_no_task_id_or_signal_word_reaches_a_runs_working_directory(self):
+        sys.path.insert(0, str(ROOT / "plugins" / "model-router" / "scripts"))
+        from modelrouter import profile
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "claude"
+            stub.write_text(CWD_STUB)
+            stub.chmod(0o755)
+            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            base = str(Path(tempfile.gettempdir()).resolve())
+            with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
+                for task in run.load_tasks():
+                    with self.subTest(task=task["id"]):
+                        row = run.run_one(task, run.load_configs()[1], options, {})
+                        ours = str(Path(row["answer"]).resolve()).replace(base, "")
+                        self.assertNotIn(task["id"], ours)
+                        self.assertEqual(profile.signals(ours.lower()), [], ours)
+                        self.assertEqual(row["task_revision"], task.get("revision", 1))
+
+    def test_every_task_has_a_revision_and_the_changed_one_moved_on(self):
+        for task in run.load_tasks():
+            self.assertIsInstance(task.get("revision"), int, task["id"])
+            self.assertGreaterEqual(task["revision"], 1, task["id"])
+        tasks = {t["id"]: t for t in run.load_tasks()}
+        self.assertEqual(tasks["design-cache-invalidation"]["revision"], 2)
+
+    def test_the_page_names_each_tasks_revision_and_the_folder_name_bias(self):
+        raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
+        data = [json.loads(line) for path in raw for line in path.read_text(encoding="utf-8").splitlines() if line]
+        page = (ROOT / "docs" / "BENCHMARKS.md").read_text(encoding="utf-8")
+        old = sum(r["task"] == "design-cache-invalidation" and r.get("task_revision", 1) < 2 for r in data)
+        self.assertIn(f"`design-cache-invalidation` is at revision 2; {old} of its runs here ran on an earlier revision",
+                      page)
+        for task_id in ("design-cache-invalidation", "design-rate-limiter", "research-changelog", "research-latency",
+                        "rootcause-cart", "rootcause-ranking", "security-path-traversal", "security-sql-injection"):
+            self.assertIn(f"`{task_id}`", page.split("- Bias: ")[1].split("\n")[0])
 
 
 class Pilot(unittest.TestCase):

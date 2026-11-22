@@ -1100,14 +1100,21 @@ class Router(Sandbox):
         self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", "low"))
         self.assertEqual(self.decide("deep", HARD)["model"], "sonnet")
 
-    def test_a_strong_agent_is_named_with_its_model_and_effort(self):
+    def test_a_strong_agent_is_named_without_a_model_so_its_brief_routes_and_its_redo_climbs(self):
         config = cfg.load_config()
-        self.assertEqual(gates.strong_agent(config, "opus", "high", "hardest"),
-                         'model-router:architect with model: "opus" and effort: "high"')
-        self.assertEqual(gates.strong_agent(config, "fable", "high", "frontier"),
-                         'model-router:deep-solver with model: "fable" and effort: "high"')
-        self.assertEqual(gates.strong_agent({**config, "crew": {}}, "opus", None, "complex"),
-                         'a subagent with model: "opus"')
+        self.assertEqual(gates.strong_agent(config, "sonnet", "complex"), "model-router:architect")
+        self.assertEqual(gates.strong_agent(config, "fable", "frontier"), "model-router:deep-solver")
+        self.assertEqual(gates.strong_agent({**config, "crew": {}}, "opus", "complex"), 'a subagent with model: "opus"')
+        self.session_on("claude-haiku-5-5")
+        brief = "Design the session store migration across the API and worker services."
+        named = self.decide("model-router:architect", brief, model="sonnet", effort="high")  # the old hint
+        self.assertEqual((named["source"], named["model"]), ("caller", "sonnet"))
+        d = self.decide("model-router:architect", brief)
+        self.assertEqual((d["source"], d["level"], d["model"]), ("router", "hardest", "opus"))
+        self.pre("model-router:architect", brief)
+        self.done("model-router:architect", brief, "claude-opus-5-5", model="opus", effort="high")
+        d = self.decide("model-router:architect", brief)
+        self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("frontier", "fable", "hardest"))
 
     def test_the_deep_solver_starts_at_hardest_and_can_go_higher(self):
         d = self.decide("model-router:deep-solver", LOOKUP)  # its name floors the level; the ladder sets the model
@@ -1911,8 +1918,9 @@ class Hooks(Sandbox):
         self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
         self.session_on("claude-haiku-5-5")
         text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
-        # The agent has no pin of its own, so the level's model and effort go on the call.
-        self.assertIn('model-router:architect with model: "opus" and effort: "high"', text)
+        # By name only: the router routes the hand-off's brief, and its redo can climb.
+        self.assertIn("model-router:architect rather than", text)
+        self.assertNotIn('model: "', text)
         self.assertTrue(store.load_entry("prompts", "s1")["below"])
 
     def test_machine_written_turns_dont_reset_the_request(self):
@@ -3421,6 +3429,21 @@ class ClockAndCleanup(Sandbox):
         copies = sorted(store.data_dir().glob("learned.json.corrupt-*"))
         self.assertEqual(len(copies), store.KEEP_SET_ASIDE)
         self.assertEqual(copies[-1].read_text(), '{"broken": ' + str(store.KEEP_SET_ASIDE + 2))
+
+
+class DesignDecisions(unittest.TestCase):
+    """A design decision worked out against load and consistency limits needs the strongest coding level."""
+
+    def test_a_design_against_load_and_consistency_limits_is_hardest(self):
+        brief = ("Read SPEC.md and design how the catalog servers cache prices. This is a design decision with "
+                 "data-consistency and performance trade-offs: honour the staleness limits and the database's "
+                 "capacity. Write DESIGN.json with the strategy, ttl_seconds and max_staleness_seconds.")
+        result = profile.profile_call({"description": "Design catalog price caching", "prompt": brief}, "claude")
+        self.assertEqual((result["level"], sorted(result["signals"])), ("hardest", ["ambiguity", "load", "risk"]))
+        # Loading a file isn't a load limit.
+        self.assertEqual(profile.profile_call({"description": "Find the key load path",
+                                               "prompt": "Find where the app loads its config."}, "Explore")["level"],
+                         "lookup")
 
 
 if __name__ == "__main__":

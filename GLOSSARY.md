@@ -12,7 +12,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Profile**: the step that reads a brief and an agent's name and gives the level, with the reasons for it (`profile.py`). It looks for signals and for words that mean the call changes something or has to reason, and leaves out what a negated limit such as "do not change any files" says.
 
-**Signal**: one kind of difficulty the profile looks for in a brief: risk (security, data, migrations, public APIs), scope (several modules or services) or ambiguity (design, root cause, trade-offs). More signals mean a higher level.
+**Signal**: one kind of difficulty the profile looks for in a brief: risk (security, data and its consistency, migrations, public APIs), scope (several modules or services), load (performance, latency, throughput, staleness and capacity limits) or ambiguity (design, root cause, trade-offs). More signals mean a higher level.
 
 **Registry**: the shipped `config/models.json`, merged with the user's and a project's override files: which models exist and their relative strength, speed and cost, the level table, aliases and list prices (`config.py`, `registry.py`).
 

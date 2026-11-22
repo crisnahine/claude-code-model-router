@@ -204,7 +204,8 @@ def _git_dirty() -> bool:
 
 
 def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
-    scratch = Path(tempfile.mkdtemp(prefix=f"mrbench-{task['id']}-{config['id']}-"))
+    # No task or configuration name: a brief that quotes its working directory would hand the router signal words.
+    scratch = Path(tempfile.mkdtemp(prefix="mrbench-"))
     work = scratch / "work"
     shutil.copytree(task["dir"] / "repo", work)
     if config.get("router_config"):  # a router variant, as the project's own model-router.json
@@ -231,6 +232,13 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
     except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
         passed = False
     costs = agent_costs(work, env) if config.get("plugin") else None
+    kept = None
+    if options.get("keep"):
+        # The work the run left, its answer, the router's own data and ledger, and the session's transcripts.
+        kept = Path(options["keep"]) / scratch.name
+        shutil.copytree(scratch, kept, symlinks=True)
+        if session_dir(work, env).is_dir():
+            shutil.copytree(session_dir(work, env), kept / "session", symlinks=True)
     session_removed = _forget_session(session_dir(work, env))
     shutil.rmtree(scratch, ignore_errors=True)
     models = {name: {k: usage.get(k) for k in ("inputTokens", "outputTokens", "cacheReadInputTokens",
@@ -239,7 +247,8 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
     agents = result.get("subagent_stats") or {}
     cost = result.get("total_cost_usd")
     return {
-        "schema": 1, "task": task["id"], "class": task["class"], "config": config["id"],
+        "schema": 1, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
+        "config": config["id"],
         "started_at": started, "claude_version": options["claude_version"],
         "main_model": config.get("model", options["model"]),
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
@@ -253,7 +262,7 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
         "models": models, "prices": {name: prices.get(name) for name in models},
         "subagents": {k: agents.get(k) for k in ("spawned", "completed", "failed", "by_type")},
         "permission_denials": [d.get("tool_name") for d in result.get("permission_denials") or []],
-        "passed": passed, "answer": answer[:2000],
+        "passed": passed, "answer": answer[:2000], **({"kept": str(kept)} if kept else {}),
         "stderr": stderr[-300:] if code else "",
     }
 
@@ -270,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout", type=int, default=900, help="seconds before a run is killed")
     parser.add_argument("--claude", default="claude")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--keep", type=Path, help="copy each run's scratch folder and transcripts here")
     args = parser.parse_args(argv)
 
     tasks = [t for t in load_tasks() if not args.tasks or t["id"] in args.tasks]
@@ -277,7 +287,8 @@ def main(argv: list[str] | None = None) -> int:
     version = subprocess.run([args.claude, "--version"], capture_output=True, text=True).stdout.strip()
     prices = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["prices"]
     options = {"claude": args.claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,
-               "plugin_dir": str(PLUGIN), "claude_version": version, "commit": _git_head(), "dirty": _git_dirty()}
+               "plugin_dir": str(PLUGIN), "claude_version": version, "commit": _git_head(), "dirty": _git_dirty(),
+               "keep": str(args.keep) if args.keep else None}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     spent = 0.0
     for run_index in range(args.first_run, args.first_run + args.runs):

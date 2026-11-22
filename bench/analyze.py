@@ -16,6 +16,8 @@ from pathlib import Path
 BENCH = Path(__file__).resolve().parent
 sys.path.insert(0, str(BENCH))
 import run  # noqa: E402
+sys.path.insert(0, str(run.PLUGIN / "scripts"))
+from modelrouter import profile  # noqa: E402
 
 MIN_RUNS = 10  # fewer runs per configuration than this and no row is called a win or a loss
 
@@ -209,6 +211,21 @@ def _notes(rows: list[dict], files: list[Path]) -> list[str]:
                 f"{'main loop' if who == 'main' else f'`{who}`'} ${usd:.4f} ({usd / total:.0%})" for who, usd in order)
         lines.append("- Router spend by agent type, from the router's ledger (`agent_costs`), over the runs that "
                      "record it: " + "; ".join(share(c) for c in sorted(spend)) + ".")
+    for task in run.load_tasks():
+        old = sum(r["task"] == task["id"] and r.get("task_revision", 1) < task.get("revision", 1) for r in rows)
+        if old:
+            changes = "; ".join(f"revision {n}: {why}" for n, why in sorted(task.get("revisions", {}).items()))
+            lines.append(f"- `{task['id']}` is at revision {task['revision']}; {old} of its runs here ran on an "
+                         f"earlier revision ({changes}), so they are not comparable with later runs of it.")
+    named = [t["id"] for t in run.load_tasks() if profile.signals(t["id"].lower())]
+    routed = {c["id"] for c in run.load_configs() if c.get("plugin")}
+    early = sum(r["config"] in routed and r["task"] in named and "task_revision" not in r for r in rows)
+    if named and early:
+        lines.append(f"- Bias: {early} router-arm runs of the tasks named here were recorded while each run's "
+                     "folder name held its task id, so a brief that quoted its working directory could give the "
+                     "router signal words from the folder name for " + ", ".join(f"`{t}`" for t in named) +
+                     ". That could only have raised the router's level and cost on those tasks, so on cost those rows understate the router; a "
+                     "pass the higher level bought may not repeat.")
     batches: dict[str, dict[str, int]] = {}
     for r in rows:
         batches.setdefault(r["config"], {}).setdefault(r.get("_batch", "?"), 0)
