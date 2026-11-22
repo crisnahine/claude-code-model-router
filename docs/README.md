@@ -1,4 +1,59 @@
-# Documentation index
+<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<p align="center"><img src="assets/banner-docs.svg" width="880" alt="Documentation: Every page, and the question each one answers"></p>
+
+<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; Previous: <a href="FAQ.md">Questions</a> &nbsp;&middot;&nbsp; Next: <a href="ARCHITECTURE.md">Architecture</a></p>
+<!-- End of page head. -->
+
+# Model Router documentation
+
+Every page about Model Router, the Claude Code plugin that routes each agent to the cheapest Claude model and effort that should do the job. New here? Start with the [README](../README.md) and the [questions](FAQ.md).
+
+<!-- Cards, written by tools/docs_assets.py from its PAGES table. -->
+<table>
+<tr><th colspan="2" align="left">Start here<br><sub>What it is, and the questions people ask first.</sub></th></tr>
+<tr>
+<td width="50%" valign="top"><img src="assets/icon-readme.svg" width="20" height="20" alt=""> <a href="../README.md"><b>Model Router</b></a><br>What does it do, and how do I install it?</td>
+<td width="50%" valign="top"><img src="assets/icon-faq.svg" width="20" height="20" alt=""> <a href="FAQ.md"><b>Questions</b></a><br>What is Model Router, and how does it pick?</td>
+</tr>
+<tr><th colspan="2" align="left">How it works<br><sub>The design, its words and sources, and what it costs to run.</sub></th></tr>
+<tr>
+<td width="50%" valign="top"><img src="assets/icon-architecture.svg" width="20" height="20" alt=""> <a href="ARCHITECTURE.md"><b>Architecture</b></a><br>How do two paths share one router?</td>
+<td width="50%" valign="top"><img src="assets/icon-glossary.svg" width="20" height="20" alt=""> <a href="../GLOSSARY.md"><b>Glossary</b></a><br>What do call, level, pick and redo mean?</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="assets/icon-research.svg" width="20" height="20" alt=""> <a href="research/model-control.md"><b>Research</b></a><br>What can a plugin control in Claude Code?</td>
+<td width="50%" valign="top"><img src="assets/icon-performance.svg" width="20" height="20" alt=""> <a href="PERFORMANCE.md"><b>Performance</b></a><br>What does the router cost in time and disk?</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="assets/icon-security.svg" width="20" height="20" alt=""> <a href="SECURITY.md"><b>Security</b></a><br>What reaches the network, and who can steer it?</td>
+<td width="50%"></td>
+</tr>
+<tr><th colspan="2" align="left">Evidence<br><sub>What was measured and tested, and what is still open.</sub></th></tr>
+<tr>
+<td width="50%" valign="top"><img src="assets/icon-benchmarks.svg" width="20" height="20" alt=""> <a href="BENCHMARKS.md"><b>Benchmarks</b></a><br>What does a solved task cost, with and without it?</td>
+<td width="50%" valign="top"><img src="assets/icon-test-results.svg" width="20" height="20" alt=""> <a href="TEST_RESULTS.md"><b>Test results</b></a><br>What ran last, and what passed?</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="assets/icon-traceability.svg" width="20" height="20" alt=""> <a href="TRACEABILITY.md"><b>Traceability</b></a><br>Where is each requirement, and is it met?</td>
+<td width="50%" valign="top"><img src="assets/icon-release-readiness.svg" width="20" height="20" alt=""> <a href="RELEASE_READINESS.md"><b>Release readiness</b></a><br>Is this release ready, and what is still open?</td>
+</tr>
+<tr><th colspan="2" align="left">The project<br><sub>What comes next, what changed, and how to take part.</sub></th></tr>
+<tr>
+<td width="50%" valign="top"><img src="assets/icon-roadmap.svg" width="20" height="20" alt=""> <a href="ROADMAP.md"><b>Roadmap</b></a><br>What gets built next, and why first?</td>
+<td width="50%" valign="top"><img src="assets/icon-changelog.svg" width="20" height="20" alt=""> <a href="../CHANGELOG.md"><b>Changelog</b></a><br>What changed in each release?</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="assets/icon-contributing.svg" width="20" height="20" alt=""> <a href="../CONTRIBUTING.md"><b>Contributing</b></a><br>How does a change get merged?</td>
+<td width="50%" valign="top"><img src="assets/icon-releasing.svg" width="20" height="20" alt=""> <a href="../RELEASING.md"><b>Releasing</b></a><br>How is a release cut, step by step?</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="assets/icon-brand.svg" width="20" height="20" alt=""> <a href="assets/BRAND.md"><b>Brand</b></a><br>Which colors, type and motion make a page ours?</td>
+<td width="50%"></td>
+</tr>
+</table>
+<!-- End of cards. -->
+
+## Delivery items
 
 Every delivery item the project keeps, where it lives, and whether it exists yet. Checked 2026-11-22.
 
