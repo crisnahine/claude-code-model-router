@@ -1,3 +1,9 @@
+<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<p align="center"><img src="assets/banner-security.svg" width="880" alt="Security: What reaches the network, and who can steer it?"></p>
+
+<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="PERFORMANCE.md">Performance</a> &nbsp;&middot;&nbsp; Next: <a href="BENCHMARKS.md">Benchmarks</a></p>
+<!-- End of page head. -->
+
 # Security
 
 Checked against the code on 2026-11-22 with Claude Code 2.1.330. Code is named by module and function, class or constant rather than line number, so an edit elsewhere in a file doesn't make a reference wrong. Python modules are under `plugins/model-router/scripts/modelrouter/` unless the path says otherwise. `SecurityClaims` in `tests/test_model_router.py` reruns this assessment's claims on every change: the repository-file limits, writes only under the data directory, no approvals, the network surface, the API key and its redirect guard, and the skill grants.

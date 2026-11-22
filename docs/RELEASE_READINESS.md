@@ -1,6 +1,12 @@
+<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<p align="center"><img src="assets/banner-release-readiness.svg" width="880" alt="Release readiness: Is this release ready, and what is still open?"></p>
+
+<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="TRACEABILITY.md">Traceability</a> &nbsp;&middot;&nbsp; Next: <a href="ROADMAP.md">Roadmap</a></p>
+<!-- End of page head. -->
+
 # Release readiness
 
-Checked 2026-11-23 for 0.1.1, against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `e00a9a6`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
+Checked 2026-11-23 for 0.1.1, against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `780ee86` with the docs redesign merged, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
 
 **Verdict: 0.1.1 ships by the maintainer's decision, with one requirement failing (S4.15), 19 partial and 1 blocked; see below.** Of the 13 release gates, 11 pass; the spend ledger is partial, and CI on the release PR and on its merge into `main` waits for the release, which RELEASING.md items 5 and 6 check before the tag. No defect is open. The requirement that fails, measured on the shipped 0.1.1 at 10 runs per class and configuration (S4.15): on an Opus 5.5 session, Claude Code's default for most accounts, the router costs less per solved task than `defaults` in 6 of 8 classes and is level in design and research. On a Sonnet session it wins lookup only, and in the other 7 classes it costs 9 to 72% more per solved task than the best of `defaults`, `sonnet-medium` and `sonnet-high`, at the same pass rate. Nothing after `8ec8eec` has run in CI yet.
 

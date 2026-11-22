@@ -1,3 +1,9 @@
+<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<p align="center"><img src="docs/assets/banner-contributing.svg" width="880" alt="Contributing: How does a change get merged?"></p>
+
+<p align="center"><a href="README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="docs/README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="CHANGELOG.md">Changelog</a> &nbsp;&middot;&nbsp; Next: <a href="RELEASING.md">Releasing</a></p>
+<!-- End of page head. -->
+
 # Contributing
 
 ## Where to work
@@ -15,6 +21,7 @@ claude plugin validate --strict .
 claude plugin validate --strict plugins/model-router
 python3 tools/traceability.py
 sh tests/mod/typecheck.sh
+python3 tools/docs_assets.py --check
 ```
 
 `sh tests/mod/typecheck.sh` type-checks the mod and its test with `tsc` against Claude Code's published mod API types, pinned to a commit, with the tsconfig in `tests/mod`, outside the plugin folder; CI runs it too. To check against the types your installed Claude Code writes, see [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md). A change to routing reruns `claude plugin eval plugins/model-router --trust-plugin`; it runs live models, so record what it cost.
@@ -29,6 +36,7 @@ The routing evals also run free in CI. Each case under `plugins/model-router/eva
 - A claim about Claude Code or a model comes from the newest official docs (`code.claude.com/docs`, `platform.claude.com/docs`) or the installed binary, with the link. Anything without a primary source is marked UNCONFIRMED in `docs/research/` and nothing is built on it.
 - A change updates every document it makes wrong, in the same commit. When it changes a requirement's status, update its row in [docs/TRACEABILITY.md](docs/TRACEABILITY.md), run `python3 tools/traceability.py`, and paste its output over the "Summary:" line. `tests/test_traceability.py` fails until they agree.
 - A new module or concept gets a term in [GLOSSARY.md](GLOSSARY.md).
+- Docs images, page heads, the site's asset copies and `CITATION.cff` come from `tools/docs_assets.py`. Change the script, run it, and keep `--check` passing. [docs/assets/BRAND.md](docs/assets/BRAND.md) has the palette and how to add a banner.
 - A change to the shape of `config/models.json`, a `model-router.json` override, a state file, a `--json` output or a plugin option follows the policy in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#compatibility): a breaking change bumps that shape's version and keeps the old one readable.
 - Code comments explain a reason the code can't show, in a line. No ticket numbers, no history of the change.
 
@@ -42,4 +50,4 @@ The routing evals also run free in CI. Each case under `plugins/model-router/eva
 
 ## Releases
 
-[RELEASING.md](RELEASING.md) is the checklist, worked in order. The version lives only in `plugins/model-router/.claude-plugin/plugin.json`. The maintainer merges, tags and publishes.
+[RELEASING.md](RELEASING.md) is the checklist, worked in order. The version is set only in `plugins/model-router/.claude-plugin/plugin.json`; `python3 tools/docs_assets.py` copies it into the version badge, the site and `CITATION.cff`. The maintainer merges, tags and publishes.
