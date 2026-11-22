@@ -9,7 +9,7 @@ Measures what Model Router costs per solved task, and how often tasks get solved
 
 ## Running it
 
-Every run spends real money at list price, or counts against a subscription's usage. `--budget` caps each run with `--max-budget-usd`, which a run can pass by one response plus what its running subagents spend before they stop. `--max-total` starts a run only with room for twice its cap, a margin rather than a bound. A run the API refuses for a rate or usage limit is not a failed task: the runner pauses (1 minute, then twice as long each time), runs it again, and after 5 pauses stops with exit code 2, keeping every finished run. Limited runs go to `results/limited/`, so their spend is on record but out of the results.
+Every run spends real money at list price, or counts against a subscription's usage. `--budget` caps each run with `--max-budget-usd`, which a run can pass by one response plus what its running subagents spend before they stop. `--max-total` starts a run only with room for twice its cap, a margin rather than a bound. A run the API refuses for a rate or usage limit is not a failed task: the runner pauses (1 minute, then twice as long each time), runs it again, and after 5 pauses stops with exit code 2, keeping every finished run. Limited runs go to `results/limited/`, so their spend is on record but out of the results. `results/archive/` keeps the first pilots, which ran on an older harness (no saved sessions, a plugin data folder shared with other sessions), so they stay out of the comparison.
 
 ```bash
 python3 bench/run.py --tasks lookup-retry-limit bugfix-pagination --configs plugin defaults haiku \
