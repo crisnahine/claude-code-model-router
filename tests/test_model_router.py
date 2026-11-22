@@ -1159,6 +1159,8 @@ class Mod(Sandbox):
         self.assertEqual(self.ledger()[-1]["cost_usd"], 5.0)  # no split reported
         config = cfg.load_config()
         self.assertEqual(registry.price(config, "claude-opus-4-7")["input"], 5)  # one entry covers Opus 4.x
+        self.assertEqual(registry.price(config, "claude-opus-4-1-20250805"),  # except 4.1, at its own list price
+                         {"input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75, "cache_write_1h": 30})
         self.assertEqual(registry.price(config, "claude-haiku-4-5-20251001")["input"], 1)
         self.assertEqual(registry.price(config, "claude-opus-5-5[1m]")["input"], 4)
         self.assertIsNone(registry.price(config, "claude-opus-5-6"))  # a new version is never priced as its neighbour
