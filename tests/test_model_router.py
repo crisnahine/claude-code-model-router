@@ -2564,6 +2564,45 @@ class SlashSkills(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": "/named " + typo, "cwd": str(self.project)})
         self.assertEqual(store.load_entry("prompts", "s1")["level"], "standard")
 
+    def test_an_argument_that_only_names_the_target_leaves_the_task_to_the_body(self):
+        self.session_on("claude-opus-5-5")
+        raw = ("---\nname: security-review\nargument-hint: <pr-number>\n---\nReview pull request #$ARGUMENTS for "
+               "security vulnerabilities: auth bypasses, injection, secrets in code, across the API and worker "
+               "services.\n")
+        body = "Base directory for this skill: /p/.claude/skills/security-review\n\n" + raw.split("---\n", 2)[2]
+        for target in ("482", "src/auth.py", "https://github.com/acme/api/pull/482", "PaymentService",
+                       "src/a.py src/b.py src/c.py", "482 --base main", "src/auth.py src/session.py",
+                       "docs/plan.md app/x.py", "auth module", "payments service", "audit", "the login page",
+                       "PR 482 from Dana", "look at it", "the payments service", "the auth module docs"):
+            with self.subTest(target=target):
+                self.assertEqual(self.turn("security-review", target, body.replace("$ARGUMENTS", target))["effort"],
+                                 "high")
+                self.assertEqual(hooks._profile_skill(target, raw, rendered=False)["level"], "complex")
+        skills = self.project / ".claude" / "skills" / "security-review"
+        skills.mkdir(parents=True)
+        (skills / "SKILL.md").write_text(raw, encoding="utf-8")
+        for typed in ("/security-review 482", "/security-review the login page"):
+            hooks.user_prompt({"session_id": "s1", "prompt": typed, "cwd": str(self.project)})
+            self.assertEqual(store.load_entry("prompts", "s1")["level"], "complex", typed)
+        ship = (PLUGIN / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8").split("---\n", 2)[2]
+        ship_body = lambda args: ship.replace("$ARGUMENTS", args)  # noqa: E731
+        # A template body serves many targets, so its own wording decides at most complex: an issue number
+        # through ship doesn't take its pipeline's gate text as the task.
+        self.assertEqual(self.turn("model-router:ship", "1234", ship_body("1234")), {"level": "complex",
+                                                                                  "effort": "high"})
+        # A task in the arguments still decides, the m3-02 case.
+        for args in ("fix the typo in README.md", "explain the retry flow", "fix it"):
+            with self.subTest(args=args):
+                self.assertIsNone(self.turn("model-router:ship", args, ship_body(args)))
+        # No listed verb: a description without an instruction leaves the task to ship's body, capped at complex.
+        for args in ("the README typo near the top", "tidy the imports please"):
+            with self.subTest(args=args):
+                self.assertEqual(self.turn("model-router:ship", args, ship_body(args))["level"], "complex")
+        for text, work in (("fix the typo", True), ("audit", False), ("src/a.py src/b.py", False),
+                           ("tidy the imports please", False), ("PaymentService", False),
+                           ("the payments service", False), ("please review PR 482", True)):
+            self.assertEqual(profile.asks_for_work(text), work, text)
+
     def test_only_a_placeholder_that_receives_the_arguments_hands_them_the_task(self):
         hard = self.HARD_BODY.split("\n\n")[1]
         rendered = lambda body, args: hooks._profile_skill(args, body, rendered=True)["level"]  # noqa: E731
@@ -2578,9 +2617,10 @@ class SlashSkills(Sandbox):
                            (hard + " Target: \\$ARGUMENTS", "src"),  # escaped
                            ("---\narguments: [task]\n---\n" + hard, "src")):  # declared, never used
             self.assertEqual(raw(body, args), "hardest", body)
-        self.assertEqual(raw(hard + " Target: $0", "src"), "lookup")
-        self.assertEqual(raw(hard + " Target: $ARGUMENTS[0]", "src"), "lookup")
-        self.assertEqual(raw("---\narguments:\n  - task\n---\n" + hard + " On $task.", "src"), "lookup")
+        task = "list the files under src"  # arguments that carry a task of their own
+        self.assertEqual(raw(hard + " Target: $0", task), "lookup")
+        self.assertEqual(raw(hard + " Target: $ARGUMENTS[0]", task), "lookup")
+        self.assertEqual(raw("---\narguments:\n  - task\n---\n" + hard + " On $task.", task), "lookup")
 
     def test_a_long_ordinary_skill_body_is_not_a_hard_request(self):
         self.session_on("claude-opus-5-5")

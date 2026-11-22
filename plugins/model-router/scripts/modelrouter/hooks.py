@@ -10,7 +10,7 @@ import time
 
 from . import calls, gates, ladder, learn, registry, session, settings, spawn, store, upstream
 from . import config as cfg
-from .profile import profile_prompt
+from .profile import asks_for_work, profile_prompt
 
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
 
@@ -57,9 +57,10 @@ def _receives(body: str, frontmatter: str, count: int) -> bool:
 
 def _profile_skill(args: object, body: object, rendered: bool) -> dict:
     """A typed skill's profile. A skill whose content takes its arguments (a $ARGUMENTS, $1 or named
-    placeholder) runs them as its task, so they alone set the level: its own instructions, a pipeline's
-    say, are the same on every use. Otherwise the body is the task, and the higher of the arguments' level
-    and the body's opening counts. `rendered` is the engine's expansion, where a skill that takes no
+    placeholder) and is given a task in them runs that task, so the arguments alone set the level: its own
+    instructions, a pipeline's say, are the same on every use. Arguments that only name a target leave the
+    task to the body, at most complex. A skill that takes no placeholder, or is typed with no arguments, is
+    its body: the higher of the arguments' level and the body's opening counts. `rendered` is the engine's expansion, where a skill that takes no
     placeholder gets the arguments appended as "ARGUMENTS: ..."; otherwise body is the raw file."""
     args = args.strip() if isinstance(args, str) else ""
     body = (body if isinstance(body, str) else "").lstrip("\ufeff")
@@ -74,9 +75,12 @@ def _profile_skill(args: object, body: object, rendered: bool) -> dict:
         body = head if trailer else body
     else:
         takes_args = bool(args) and _receives(body, front.group(1) if front else "", len(args.split()))
-    if takes_args:
+    if takes_args and asks_for_work(args):
         return profile_prompt(args)
     parts = [profile_prompt(text) for text in (args, body[:_SKILL_BODY_CHARS])]
+    if takes_args and cfg.LEVELS.index(parts[1]["level"]) > cfg.LEVELS.index("complex"):
+        # A template that serves any target: its own wording, a pipeline's gates say, isn't one task's depth.
+        parts[1] = {**parts[1], "level": "complex"}
     return max(parts, key=lambda p: cfg.LEVELS.index(p["level"]))
 
 
