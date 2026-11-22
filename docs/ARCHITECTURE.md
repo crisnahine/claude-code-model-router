@@ -100,6 +100,7 @@ Some details of how the rules apply:
 - On the fallback path, inside a subagent and for the built-in Explore and Plan agents, the model a call would inherit isn't known for certain, so the pick is always written onto the call. The mod path knows the parent's model and needs no such guess.
 - A call that names a model outside the registry, such as `inherit` or a gateway's own ID, is left as it is.
 - A model the user names in a prompt is passed to Claude as a reminder to put it on the calls for that request. Words like "opus" appear in ordinary sentences too, so the hook leaves that judgment to Claude and forces nothing. A call on that model casts no feedback votes, since the user chose it, not Claude.
+- On a provider whose alias for the decided family resolves to an older model (`settings.provider`, from the `CLAUDE_CODE_USE_*` switches), the mod sends that family's newest ID in place of the alias (`registry.newest_id`). It doesn't when the user pinned the family with `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`, set `modelOverrides`, or has `availableModels`, `availableModelsMatch` or `deniedModels` ruling the version out, when the caller or the agent named an exact version, or on Mantle, whose aliases aren't documented. A model error on that ID routes around the ID alone, after one failure, so the alias runs until the ID is retried. Only `agent.spawn` takes a full ID: the `Agent` tool's `model` takes an alias (https://code.claude.com/docs/en/sub-agents.md), so the fallback path sends aliases.
 
 ### Redo escalation
 
@@ -130,7 +131,7 @@ A second check at `Stop` asks for verification once, when code in the project (u
 | What | How it is discovered | What happens |
 | :- | :- | :- |
 | The models that exist | `config/models.json`, plus the user's and a project's additions | They are the candidates |
-| New versions of a model | Nothing to discover: routing uses the aliases, and Claude Code moves each alias to the newest version | Picked up the day Claude Code ships them |
+| New versions of a model | Nothing to discover: routing uses the aliases, and Claude Code moves each alias to the newest version. Where a provider's alias lags (`older_aliases` in `config/models.json`, from the alias table in https://code.claude.com/docs/en/model-config.md), the mod sends the family's newest ID from `newest` instead | Picked up the day Claude Code ships them; on a lagging provider, when a release updates `newest` |
 | A setup running behind the newest version | The session's model and what each alias resolved to, against the newest active version of each family in the model status data | Named at session start: a `model` setting that pins a full version, or a Claude Code that hasn't moved its alias yet |
 | The models you allow | The `max_tier` option | Stronger ones are never picked, and pins and explicit choices are lowered |
 | The models your organization allows | `availableModels` from managed settings alone, else user, project and local settings combined; `deniedModels` from managed settings only. An allow entry stands for its family; a deny entry counts when it names a family | Blocked ones are not picked, unless nothing in the registry is left open |

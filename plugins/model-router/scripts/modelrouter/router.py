@@ -30,6 +30,7 @@ class Decision(TypedDict):
     reason: str
     repeat_of: Optional[str]
     escalated_from: Optional[str]
+    version: Optional[str]  # an exact model ID the caller or the agent named, not just a family
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,7 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
     tool_input, agent, definition, usable = facts.tool_input, facts.agent, facts.definition, facts.usable
     out: Decision = {"agent": agent, "action": "keep", "model": None, "effort": None, "level": None,
            "signals": [], "source": None, "pick": None, "was": None, "reason": "", "repeat_of": None,
-           "escalated_from": None}
+           "escalated_from": None, "version": None}
     if agent == "fork":
         out["reason"] = "a fork runs on its conversation's model"
         return out
@@ -123,6 +124,8 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
         elif redo:
             why += ", redone with more effort than the run that came back before"
 
+    named = tool_input.get("model") if source == "caller" else own_model if source == "pin" else None
+    out["version"] = named if isinstance(named, str) and named.lower() != target else None
     final = registry.clamp(config, target, usable)
     if final != target:
         why += f"; {target} is over the cap or unavailable here"

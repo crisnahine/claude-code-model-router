@@ -1519,6 +1519,92 @@ class Mod(Sandbox):
         self.assertEqual(registry.health()["opus"]["fail"], 1)
 
 
+class NewestOnProviders(Sandbox):
+    """Where a provider's alias resolves to an older model (the alias table in
+    https://code.claude.com/docs/en/model-config.md), the mod sends the family's newest full ID."""
+
+    LAGS = {"bedrock": ("sonnet", "haiku"), "vertex": ("sonnet", "haiku"), "foundry": ("opus", "sonnet", "haiku"),
+            "anthropic_aws": ("sonnet", "haiku"), "anthropic_google_cloud": ("haiku",)}
+    NEWEST = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
+
+    def spawn(self, prompt: str, agent: str = "general-purpose", **extra) -> tuple[dict | None, dict]:
+        hook_input = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                      "kind": "subagent",
+                      "tool_input": {"subagent_type": agent, "prompt": prompt, "description": "d", **extra}}
+        return hooks.mod_spawn(hook_input), hook_input
+
+    def model(self, prompt: str, **extra) -> str | None:
+        out = self.spawn(prompt, **extra)[0]
+        return out["model"] if out else None
+
+    def test_the_provider_comes_from_the_documented_switches(self):
+        for flags, want in (((), None), (("bedrock",), "bedrock"), (("vertex",), "vertex"), (("foundry",), "foundry"),
+                            (("anthropic_aws",), "anthropic_aws"),
+                            (("anthropic_google_cloud",), "anthropic_google_cloud"),
+                            (("bedrock", "anthropic_aws"), "bedrock"), (("foundry", "anthropic_aws"), "foundry"),
+                            (("anthropic_google_cloud", "vertex"), "anthropic_google_cloud"),
+                            (("mantle",), None), (("bedrock", "mantle"), None), (("bedrock", "vertex"), None)):
+            with mock.patch.dict(os.environ, {f"CLAUDE_CODE_USE_{f.upper()}": "1" for f in flags}):
+                self.assertEqual(settings.resolve().provider, want, flags)
+
+    def test_each_lagging_alias_gets_its_familys_newest_id(self):
+        for provider, lagging in self.LAGS.items():
+            with mock.patch.dict(os.environ, {f"CLAUDE_CODE_USE_{provider.upper()}": "1"}):
+                for family, prompt in (("opus", HARD), ("sonnet", BUILD), ("haiku", LOOKUP)):
+                    want = self.NEWEST[family] if family in lagging else family
+                    self.assertEqual(self.model(prompt), want, (provider, family))
+        self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "sonnet"))  # the Anthropic API
+
+    def test_the_shipped_ids_belong_to_their_families_and_are_priced(self):
+        config = cfg.base_config()
+        self.assertEqual({p: tuple(f) for p, f in config["older_aliases"].items() if not p.startswith("$")}, self.LAGS)
+        for family, model_id in config["newest"].items():
+            if not family.startswith("$"):
+                self.assertEqual((registry.family(config, model_id), model_id), (family, self.NEWEST[family]))
+                self.assertIsNotNone(registry.price(config, model_id))
+
+    def test_a_pin_an_allowlist_a_denial_or_overrides_keep_the_alias(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "claude-sonnet-5-5"))
+        del os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"]
+        for managed, want in (({"availableModels": ["haiku", "sonnet", "opus"]}, "claude-haiku-5-5"),
+                              ({"availableModels": ["claude-haiku-5", "sonnet"]}, "claude-haiku-5-5"),
+                              ({"availableModels": ["claude-haiku-5", "sonnet"], "availableModelsMatch": "exact"}, "haiku"),
+                              ({"availableModels": ["claude-haiku-4-5", "sonnet", "opus"]}, "haiku"),
+                              ({"deniedModels": ["claude-haiku-5-5"]}, "haiku")):
+            self.managed.write_text(json.dumps(managed))
+            self.assertEqual(self.model(LOOKUP), want, managed)
+        self.managed.unlink()
+        (self.home / "settings.json").write_text(json.dumps({"modelOverrides": {"claude-haiku-4-5": "arn:aws:x"}}))
+        self.assertEqual(self.model(LOOKUP), "haiku")
+
+    def test_a_version_the_caller_or_the_agent_names_is_left_alone(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        self.assertNotEqual(self.model(LOOKUP, model="claude-haiku-4-5"), "claude-haiku-5-5")
+        self.agent("old-haiku", "claude-haiku-4-5")
+        out = self.spawn(LOOKUP, agent="old-haiku")[0]
+        self.assertNotEqual(out and out["model"], "claude-haiku-5-5")
+        self.agent("any-haiku", "haiku")
+        self.assertEqual(self.spawn(LOOKUP, agent="any-haiku")[0]["model"], "claude-haiku-5-5")
+
+    def test_an_id_the_provider_rejects_falls_back_to_the_alias(self):
+        os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
+        out, hook_input = self.spawn(LOOKUP)
+        self.assertEqual(out["model"], "claude-haiku-5-5")
+        failed = hooks.agent_failed({**hook_input, "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})
+        self.assertIn("claude-haiku-5-5", failed["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(self.ledger()[-1]["model"], "claude-haiku-5-5")  # the model_error row names the ID
+        self.assertEqual(self.model(LOOKUP), "haiku")
+        self.assertTrue(registry.healthy("haiku"))
+
+    def test_the_agent_call_fallback_sends_only_aliases(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        hook_input = {"session_id": "s9", "cwd": str(self.project),
+                      "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
+        self.assertEqual(hooks.pre_agent(hook_input)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
+
+
 class ModPayloads(Sandbox):
     """tests/fixtures/mod-payloads.json holds what hooks/router.ts sends; tests/mod checks the other side."""
 
