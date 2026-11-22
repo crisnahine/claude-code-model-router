@@ -14,6 +14,10 @@ LEDGER_MAX_BYTES = 4 * 1024 * 1024
 KEEP_ENTRIES = 200
 LOCK_WAIT_SECONDS = 2.0
 LOCK_STALE_SECONDS = 10.0
+# The version written into every state file. MIGRATIONS[n] turns a version-n file into
+# version n + 1; 0.1.0 wrote no version, and its files already have today's shape.
+SCHEMA = 1
+MIGRATIONS: dict[int, Callable[[dict], dict]] = {0: lambda data: data}
 
 
 def claude_home() -> Path:
@@ -102,13 +106,60 @@ def locked(path: Path) -> Iterator[None]:
                     break
 
 
+def _read_state(path: Path) -> tuple[dict, str]:
+    """One state file, migrated to SCHEMA, without its version key, and how it read:
+    ok, corrupt, newer (written by a later release) or unreadable."""
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return {}, "ok"
+    except OSError:
+        return {}, "unreadable"
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return {}, "corrupt"
+    if not isinstance(data, dict):
+        return {}, "corrupt"
+    version = data.pop("schema", 0)
+    if type(version) is not int or version < 0:
+        return {}, "corrupt"
+    if version > SCHEMA:
+        return data, "newer"
+    while version < SCHEMA:
+        data = MIGRATIONS[version](data)
+        version += 1
+    return data, "ok"
+
+
+def load_state_file(path: Path) -> dict:
+    return _read_state(path)[0]
+
+
+def _set_aside(path: Path) -> bool:
+    stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    try:
+        os.replace(path, path.with_name(f"{path.name}.corrupt-{stamp}"))
+        return True
+    except OSError:
+        return False
+
+
+def set_aside() -> list[Path]:
+    """State files that failed to parse and were moved out of the way."""
+    return sorted(data_dir().glob("*.corrupt-*"))
+
+
 def update_dict(path: Path, change: Callable[[dict], Any]) -> dict:
-    """Load one JSON object, let `change` edit it in place, and save it, under its lock.
-    These are the plugin's own state files, so they are written compact."""
+    """Load one state file, let `change` edit it in place, and save it, under its lock.
+    A file that fails to parse is moved aside first; one from a newer release, or one
+    that can't be read or moved, is never written. Saved compact, with its version."""
     with locked(path):
-        data = load_dict(path)
+        data, status = _read_state(path)
+        writable = status == "ok" or (status == "corrupt" and _set_aside(path))
         change(data)
-        write_atomic(path, json.dumps(data, separators=(",", ":"), sort_keys=True))
+        if writable:
+            write_atomic(path, json.dumps({**data, "schema": SCHEMA}, separators=(",", ":"), sort_keys=True))
         return data
 
 
@@ -117,7 +168,7 @@ def state_path() -> Path:
 
 
 def load_state() -> dict:
-    return load_dict(state_path())
+    return load_state_file(state_path())
 
 
 def update_state(change: Callable[[dict], Any]) -> dict:
@@ -129,7 +180,7 @@ def _keyed(name: str) -> Path:
 
 
 def load_entry(name: str, key: str | None) -> dict:
-    entry = load_dict(_keyed(name)).get(key) if key else None
+    entry = load_state_file(_keyed(name)).get(key) if key else None
     return entry if isinstance(entry, dict) else {}
 
 

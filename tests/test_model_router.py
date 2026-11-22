@@ -247,7 +247,7 @@ class Store(Sandbox):
             for i, key in enumerate(("zz", "aa", "mm", "bb")):
                 with mock.patch.object(store.time, "time", return_value=1000.0 + i):
                     store.save_entry("prompts", key, {"n": i})
-        self.assertEqual(sorted(store.load_dict(self.data / "prompts.json")), ["aa", "bb", "mm"])
+        self.assertEqual(sorted(store.load_state_file(self.data / "prompts.json")), ["aa", "bb", "mm"])
 
     def test_ledger_survives_junk_lines(self):
         store.append_ledger({"event": "spawn"})
@@ -281,7 +281,7 @@ class Store(Sandbox):
         with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
             store.update_dict(path, lambda data: data.update(b=2))
         self.assertLess(time.monotonic() - started, 2)
-        self.assertEqual(store.load_dict(path), {"a": 1, "b": 2})
+        self.assertEqual(store.load_state_file(path), {"a": 1, "b": 2})
         self.assertTrue(lock.exists())  # not ours to remove
 
     def test_state_files_are_written_compact(self):
@@ -1818,6 +1818,66 @@ class Reports(Sandbox):
         other.mkdir()
         store.save_json(other / "state.json", {"max_tier": "haiku"})
         self.assertIn("Cap: **haiku**", self.out("--data-dir", str(other), "policy"))
+
+
+class StateFiles(Sandbox):
+    def learned(self) -> Path:
+        return store.data_dir() / "learned.json"
+
+    def count_call(self) -> None:
+        def change(data: dict) -> None:
+            info = data.setdefault("lookup", {})
+            info["calls"] = info.get("calls", 0) + 1
+        store.update_dict(self.learned(), change)
+
+    def test_state_files_carry_a_schema_version_that_reads_never_see(self):
+        store.update_state(lambda state: state.update(max_tier="opus"))
+        store.save_entry("prompts", "s1", {"level": "lookup"})
+        self.assertEqual(json.loads((self.data / "state.json").read_text())["schema"], store.SCHEMA)
+        self.assertEqual(json.loads((self.data / "prompts.json").read_text())["schema"], store.SCHEMA)
+        self.assertEqual(store.load_state(), {"max_tier": "opus"})
+        self.assertEqual(sorted(store.load_state_file(self.data / "prompts.json")), ["s1"])
+
+    def test_a_file_from_before_versioning_is_migrated_and_kept(self):
+        self.learned().write_text(json.dumps({"lookup": {"calls": 4, "votes": 1, "bump": 1}}))
+        self.assertEqual(learn.raises()["lookup"], 1)
+        self.count_call()
+        saved = json.loads(self.learned().read_text())
+        self.assertEqual((saved["schema"], saved["lookup"]["calls"], saved["lookup"]["bump"]), (store.SCHEMA, 5, 1))
+
+    def test_a_file_that_fails_to_parse_is_set_aside_before_it_is_replaced(self):
+        self.learned().write_text('{"lookup": {"calls": 4,')  # half-written
+        self.assertEqual(learn.raises()["lookup"], 0)  # routing goes on
+        self.count_call()
+        aside = list(self.data.glob("learned.json.corrupt-*"))
+        self.assertEqual(len(aside), 1)
+        self.assertRegex(aside[0].name, r"^learned\.json\.corrupt-\d{8}T\d{6}Z$")
+        self.assertEqual(aside[0].read_text(), '{"lookup": {"calls": 4,')
+        self.assertEqual(learn.stats()["lookup"]["calls"], 1)
+        text = self.out("models")
+        self.assertIn("Set aside because it could not be read", text)
+        self.assertIn(str(aside[0]), text)
+
+    def test_a_file_that_is_not_an_object_is_set_aside(self):
+        store.state_path().write_text("[1, 2]")
+        store.update_state(lambda state: state.update(max_tier="opus"))
+        self.assertEqual(len(list(self.data.glob("state.json.corrupt-*"))), 1)
+        self.assertEqual(store.load_state(), {"max_tier": "opus"})
+
+    def test_a_file_from_a_newer_version_is_read_but_never_overwritten(self):
+        newer = json.dumps({"schema": store.SCHEMA + 1, "lookup": {"calls": 9, "bump": 1}})
+        self.learned().write_text(newer)
+        self.assertEqual(learn.raises()["lookup"], 1)
+        self.count_call()
+        self.assertEqual(self.learned().read_text(), newer)
+        self.assertEqual(list(self.data.glob("learned.json.corrupt-*")), [])
+
+    def test_a_broken_settings_file_is_never_moved(self):
+        (self.home / "model-router.json").write_text("{oops")
+        cfg.load_config()
+        store.update_state(lambda state: state.update(max_tier="opus"))
+        self.assertEqual((self.home / "model-router.json").read_text(), "{oops")
+        self.assertEqual(list(self.home.glob("*.corrupt-*")), [])
 
 
 @unittest.skipUnless(shutil.which("sh"), "needs sh")

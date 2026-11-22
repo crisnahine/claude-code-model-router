@@ -19,7 +19,7 @@ def _path() -> Path:
 
 
 def stats() -> dict:
-    return store.load_dict(_path())
+    return store.load_state_file(_path())
 
 
 def raises() -> dict[str, int]:
