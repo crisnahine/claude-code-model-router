@@ -3,7 +3,8 @@ name: models
 description: Shows which Claude models Model Router can route to in this setup, what each really runs as, which are capped, blocked or unavailable, what the feedback loop has learned, and any new model in the docs that isn't routed to yet.
 argument-hint: "[reset] [--json]"
 disable-model-invocation: true
-allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" *)
+allowed-tools:
+  - Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" models *)
 ---
 
 # Models in use

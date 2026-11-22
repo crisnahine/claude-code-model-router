@@ -252,6 +252,49 @@ class OptionText(unittest.TestCase):
             self.assertIn(gap, text)
 
 
+class SkillGrants(unittest.TestCase):
+    """A skill's allowed-tools run without a prompt for its turn, so each grant covers only the
+    launcher commands that skill runs. Matching follows
+    https://code.claude.com/docs/en/permissions.md#wildcard-patterns."""
+
+    LAUNCHER = 'sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh"'
+    PREFIX = LAUNCHER + ' --data-dir "${CLAUDE_PLUGIN_DATA}"'
+    SKILLS = ("route", "models", "usage", "refresh")
+
+    def rules(self, text: str) -> list[str]:
+        block = re.search(r"^allowed-tools:(.*?)(?=^\S|^---)", text, re.M | re.S)
+        return re.findall(r"Bash\(([^)]*)\)", block.group(1)) if block else []
+
+    def allowed(self, rules: list[str], command: str) -> bool:
+        for rule in rules:
+            if rule.endswith(" *"):
+                self.assertNotIn("*", rule[:-2], rule)
+                if command == rule[:-2] or command.startswith(rule[:-1]):
+                    return True
+            elif "*" not in rule and command == rule:
+                return True
+        return False
+
+    def test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files(self):
+        writes = [f"{self.PREFIX} upstream-check --baseline /tmp/x --write",
+                  f"{self.PREFIX} upstream-check --baseline /tmp/x --json-out /tmp/y",
+                  f"{self.LAUNCHER} upstream-check --baseline /tmp/x --write"]
+        for name in self.SKILLS:
+            text = (PLUGIN / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+            rules = self.rules(text)
+            runs = re.findall(r"`(%s[^`]*)`" % re.escape(self.LAUNCHER), text)
+            self.assertTrue(runs, name)
+            for command in runs:
+                command = command.replace("<the brief>", "list the files").replace("$ARGUMENTS", "30 --json")
+                self.assertTrue(self.allowed(rules, command), f"{name} can't run: {command}")
+            for command in writes:
+                self.assertFalse(self.allowed(rules, command), f"{name} pre-approves: {command}")
+            if name != "models":
+                self.assertFalse(self.allowed(rules, f"{self.PREFIX} models --reset"), name)
+            if name != "refresh":
+                self.assertFalse(self.allowed(rules, f"{self.PREFIX} ack"), name)
+
+
 class Store(Sandbox):
     def test_keyed_files_drop_the_least_recently_written(self):
         with mock.patch.object(store, "KEEP_ENTRIES", 3):
