@@ -2098,6 +2098,50 @@ class Upstream(Sandbox):
         self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
 
 
+class RefreshBackoff(Sandbox):
+    """A failed daily fetch waits before the next try: an hour, doubling to a day."""
+
+    def refresh(self, at: float, fails: bool):
+        effect = OSError("offline") if fails else None
+        result = {"releases": [], "pages": {}, "aliases": ["haiku"], "fetched_at": int(at)}
+        with mock.patch.object(upstream.time, "time", return_value=at), \
+                mock.patch.object(upstream, "fetch", side_effect=effect, return_value=result) as fetch:
+            try:
+                upstream.refresh(settings.Settings(), force=False)
+            except OSError:
+                pass
+        return fetch.call_count
+
+    def test_a_failure_waits_doubling_up_to_a_day_and_a_success_resets(self):
+        t = 1_000_000.0
+        self.assertEqual(self.refresh(t, fails=True), 1)
+        self.assertEqual(self.refresh(t + 1800, fails=True), 0)  # inside the first hour
+        self.assertEqual(self.refresh(t + 3601, fails=True), 1)  # second failure: two hours
+        self.assertEqual(self.refresh(t + 3601 + 7000, fails=True), 0)
+        self.assertEqual(self.refresh(t + 3601 + 7201, fails=False), 1)
+        self.assertNotIn("failed", upstream.load())
+        store.update_dict(upstream.path(), lambda data: data["cache"].update(fetched_at=0))
+        self.assertEqual(self.refresh(t + 20_000, fails=True), 1)  # the window starts over at an hour
+        self.assertEqual(self.refresh(t + 20_000 + 3601, fails=True), 1)
+        store.update_dict(upstream.path(), lambda data: data["failed"].update(count=40))
+        self.assertEqual(self.refresh(t + 20_000 + 3601 + 86_401, fails=True), 1)  # capped at a day
+
+    def test_a_failure_keeps_the_old_cache_and_a_forced_refresh_still_runs(self):
+        store.save_json(upstream.path(), {"cache": {"aliases": ["haiku"], "fetched_at": 0}})
+        self.refresh(1_000_000.0, fails=True)
+        self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
+        with mock.patch.object(upstream, "fetch", side_effect=OSError("offline")) as fetch:
+            with self.assertRaises(OSError):
+                upstream.refresh(settings.Settings(), force=True)
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_a_corrupt_record_never_blocks_a_fetch(self):
+        for record in ("junk", {"at": "soon", "count": 1}, {"at": 10**15, "count": 1}, {"at": 999_000, "count": -3}):
+            with self.subTest(record=record):
+                store.save_json(upstream.path(), {"failed": record})
+                self.assertEqual(self.refresh(1_000_000.0, fails=False), 1)
+
+
 class Reports(Sandbox):
     def test_policy_shows_levels_cap_and_lowered_crew(self):
         self.assertIn("| complex | opus | high |", self.out("policy"))

@@ -19,6 +19,7 @@ MODEL_CONFIG_PAGE = "https://code.claude.com/docs/en/model-config.md"
 DEPRECATIONS_PAGE = "https://platform.claude.com/docs/en/about-claude/model-deprecations.md"
 MODELS_API = "https://api.anthropic.com/v1/models?limit=1000"
 CACHE_TTL_SECONDS = 24 * 3600
+FAILED_RETRY_SECONDS = 3600  # after a failed fetch; doubles with each failure in a row, to a day
 HTTP_TIMEOUT = 10  # per request: each socket wait, and the body's download as a whole
 # The whole fetch, every phase of every request. Claude Code doesn't time out an async hook, so
 # this is what ends a refresh stuck on a slow server.
@@ -281,13 +282,38 @@ def snapshot(cache: dict) -> dict:
             "lifecycle": merged_lifecycle(cache), "api_lines": _api_lines(cache)}
 
 
+def _failures(failed: object) -> int:
+    """Failed fetches in a row, or 0 for no record or one that doesn't make sense."""
+    if not isinstance(failed, dict) or not cfg._number(failed.get("at")) or not cfg._number(failed.get("count")):
+        return 0
+    return max(0, int(failed["count"]))
+
+
+def _retry_wait(failed: object, now: float) -> float:
+    """Seconds left before a failed fetch may be tried again: an hour, doubling with each
+    failure in a row to a day. A record from the future, after a clock change, holds nothing."""
+    count = _failures(failed)
+    if not count or float(failed["at"]) > now:
+        return 0
+    return float(failed["at"]) + min(FAILED_RETRY_SECONDS * 2 ** min(count - 1, 10), CACHE_TTL_SECONDS) - now
+
+
 def refresh(settings: Settings, force: bool = False) -> dict:
-    cache = load().get("cache") or {}
-    if not force and time.time() - (cache.get("fetched_at") or 0) < CACHE_TTL_SECONDS:
-        return load()
-    fresh = fetch(settings)  # slow, so outside the lock
+    data = load()
+    now = time.time()
+    if not force and (now - ((data.get("cache") or {}).get("fetched_at") or 0) < CACHE_TTL_SECONDS
+                      or _retry_wait(data.get("failed"), now) > 0):
+        return data
+    try:
+        fresh = fetch(settings)  # slow, so outside the lock
+    except Exception:
+        def failed(data: dict) -> None:
+            data["failed"] = {"at": int(now), "count": _failures(data.get("failed")) + 1}
+        store.update_dict(path(), failed)
+        raise
 
     def apply(data: dict) -> None:
+        data.pop("failed", None)
         data["cache"] = fresh
         if "reviewed" not in data:
             # First run: treat the present as reviewed so users aren't flooded with history.
