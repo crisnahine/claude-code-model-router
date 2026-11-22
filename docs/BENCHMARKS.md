@@ -1,18 +1,30 @@
 # Benchmarks
 
-Cost and quality of Model Router against Claude Code without it. 12 runs, $0.85 at list price, on 2026-11-22.
+Cost and quality of Model Router against Claude Code without it. 336 runs, $27.68 at list price, on 2026-11-22.
 
-This is a pilot. Every row is PARTIAL because each configuration ran each task too few times to tell a difference from noise. Claim nothing from it beyond what the raw data shows.
+Claim "cheapest" or "best" only for a PASS row, and link its raw data.
 
 ## Results
 
-| Task class | plugin | defaults | haiku | Rank | Status |
-| :- | :- | :- | :- | -: | :- |
-| lookup | 1 of 1 solved (100%; 100% to 100%); $0.0421 per solved ($0.0421 to $0.0421) | 1 of 1 solved (100%; 100% to 100%); $0.0654 per solved ($0.0654 to $0.0654) | 1 of 1 solved (100%; 100% to 100%); $0.0355 per solved ($0.0355 to $0.0355) | 2 | PARTIAL |
-| bugfix | 4 of 4 solved (100%; 100% to 100%); $0.0944 per solved ($0.0778 to $0.1117) | 4 of 4 solved (100%; 100% to 100%); $0.0719 per solved ($0.0671 to $0.0765) | 1 of 1 solved (100%; 100% to 100%); $0.0383 per solved ($0.0383 to $0.0383) | 3 | PARTIAL |
+| Task class | plugin | defaults | sonnet-high | sonnet-medium | Rank | Status |
+| :- | :- | :- | :- | :- | -: | :- |
+| lookup | 11 of 11 solved (100%; 100% to 100%); $0.0382 per solved ($0.0364 to $0.0398) | 10 of 10 solved (100%; 100% to 100%); $0.0516 per solved ($0.0490 to $0.0548) | 11 of 11 solved (100%; 100% to 100%); $0.0511 per solved ($0.0471 to $0.0557) | 10 of 10 solved (100%; 100% to 100%); $0.0491 per solved ($0.0460 to $0.0520) | 1 | PASS |
+| implementation | 11 of 11 solved (100%; 100% to 100%); $0.1364 per solved ($0.1125 to $0.1612) | 10 of 10 solved (100%; 100% to 100%); $0.0671 per solved ($0.0634 to $0.0711) | 11 of 11 solved (100%; 100% to 100%); $0.0808 per solved ($0.0750 to $0.0884) | 10 of 10 solved (100%; 100% to 100%); $0.0713 per solved ($0.0680 to $0.0744) | 4 | FAIL |
+| bugfix | 11 of 11 solved (100%; 100% to 100%); $0.0868 per solved ($0.0769 to $0.0967) | 10 of 10 solved (100%; 100% to 100%); $0.0569 per solved ($0.0536 to $0.0609) | 11 of 11 solved (100%; 100% to 100%); $0.0630 per solved ($0.0581 to $0.0688) | 10 of 10 solved (100%; 100% to 100%); $0.0573 per solved ($0.0543 to $0.0607) | 4 | FAIL |
+| cross-module | 11 of 11 solved (100%; 100% to 100%); $0.1694 per solved ($0.1412 to $0.2002) | 10 of 10 solved (100%; 100% to 100%); $0.0864 per solved ($0.0827 to $0.0899) | 11 of 11 solved (100%; 100% to 100%); $0.0925 per solved ($0.0877 to $0.0972) | 10 of 10 solved (100%; 100% to 100%); $0.0872 per solved ($0.0845 to $0.0889) | 4 | FAIL |
+| security-review | 11 of 11 solved (100%; 100% to 100%); $0.1393 per solved ($0.1300 to $0.1509) | 10 of 10 solved (100%; 100% to 100%); $0.0638 per solved ($0.0613 to $0.0664) | 11 of 11 solved (100%; 100% to 100%); $0.0683 per solved ($0.0653 to $0.0724) | 10 of 10 solved (100%; 100% to 100%); $0.0632 per solved ($0.0590 to $0.0670) | 4 | FAIL |
+| root-cause | 11 of 11 solved (100%; 100% to 100%); $0.0819 per solved ($0.0744 to $0.0902) | 10 of 10 solved (100%; 100% to 100%); $0.0697 per solved ($0.0683 to $0.0710) | 11 of 11 solved (100%; 100% to 100%); $0.0665 per solved ($0.0629 to $0.0701) | 10 of 10 solved (100%; 100% to 100%); $0.0691 per solved ($0.0669 to $0.0715) | 4 | FAIL |
+| design | 11 of 11 solved (100%; 100% to 100%); $0.1490 per solved ($0.1385 to $0.1609) | 10 of 10 solved (100%; 100% to 100%); $0.0759 per solved ($0.0692 to $0.0826) | 10 of 11 solved (91%; 73% to 100%); $0.0842 per solved ($0.0705 to $0.1144) | 7 of 10 solved (70%; 40% to 100%); $0.1078 per solved ($0.0735 to $0.1965) | 4 | FAIL |
+| research | 11 of 11 solved (100%; 100% to 100%); $0.1279 per solved ($0.1092 to $0.1500) | 10 of 10 solved (100%; 100% to 100%); $0.0785 per solved ($0.0740 to $0.0847) | 11 of 11 solved (100%; 100% to 100%); $0.0827 per solved ($0.0784 to $0.0879) | 10 of 10 solved (100%; 100% to 100%); $0.0838 per solved ($0.0741 to $0.0995) | 4 | FAIL |
 
-- lookup: PARTIAL, too few runs (plugin 1, haiku 1; 10 needed).
-- bugfix: PARTIAL, too few runs (plugin 4, haiku 1; 10 needed).
+- lookup: PASS, cost per solved task below sonnet-medium's; 95% interval of the difference $-0.0142 to $-0.0075.
+- implementation: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0451 to $0.0942.
+- bugfix: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0190 to $0.0405.
+- cross-module: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0546 to $0.1137.
+- security-review: FAIL, cost per solved task above sonnet-medium's; 95% interval of the difference $0.0660 to $0.0881.
+- root-cause: FAIL, cost per solved task above sonnet-high's; 95% interval of the difference $0.0073 to $0.0247.
+- design: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0605 to $0.0864.
+- research: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0287 to $0.0717.
 
 ## How to read it
 
@@ -25,13 +37,13 @@ This is a pilot. Every row is PARTIAL because each configuration ran each task t
 ## Setup
 
 - Claude Code: 2.1.330 (Claude Code). Session model: sonnet, the same for every configuration except one that sets its own (`opusplan`).
-- Configurations run: `defaults` (No plugin: subagents inherit the session model at its default effort); `haiku` (No plugin: every subagent on haiku (CLAUDE_CODE_SUBAGENT_MODEL=haiku, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1)); `plugin` (Model Router loaded with --plugin-dir).
-- Models that ran, with Claude Code's list-price cost across all runs: `claude-haiku-5-5` $0.0094 over 5 runs; `claude-sonnet-5-5` $0.8371 over 12 runs. Each run's raw line also carries the registry's prices for those models.
-- Agents started, by configuration: `defaults` Explore x1, general-purpose x4; `haiku` Explore x1, general-purpose x1; `plugin` model-router:implementer x4, model-router:scout x1, model-router:verifier x2.
+- Configurations run: `defaults` (No plugin: subagents inherit the session model at its default effort); `plugin` (Model Router loaded with --plugin-dir); `sonnet-high` (No plugin: every subagent on sonnet at high effort (CLAUDE_CODE_SUBAGENT_EFFORT=high)); `sonnet-medium` (No plugin: every subagent on sonnet at medium effort (CLAUDE_CODE_SUBAGENT_EFFORT=medium)).
+- Models that ran, with Claude Code's list-price cost across all runs: `claude-haiku-5-5` $0.0547 over 39 runs; `claude-opus-5-5` $2.9349 over 35 runs; `claude-sonnet-5-5` $24.6873 over 336 runs. Each run's raw line also carries the registry's prices for those models.
+- Agents started, by configuration: `defaults` Explore x7, general-purpose x73; `plugin` general-purpose x42, model-router:architect x1, model-router:implementer x36, model-router:reviewer x8, model-router:scout x11, model-router:verifier x28; `sonnet-high` Explore x11, general-purpose x77; `sonnet-medium` Explore x8, general-purpose x72.
 - Shape: a single agent. The session hands each task to one subagent with the Agent tool and relays its answer, so the subagent is what each configuration changes.
 - Each run starts in a fresh copy of the task's files, outside any repository, with `--setting-sources project`, `--strict-mcp-config`, `--permission-mode dontAsk`, `--allowedTools` `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Bash(python3 *)`, `Bash(python *)`, `Bash(tail *)`, `Bash(head *)`, `Bash(echo *)` (every part of a compound command must match, so `tail`, `head` and `echo` let a subagent pipe its test output), `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Every inherited `CLAUDE_CODE_*`, `CLAUDECODE` and `CLAUDE_PLUGIN_*` variable is dropped except the provider switches (`CLAUDE_CODE_USE_*`) and `CLAUDE_CODE_OAUTH_TOKEN`, so `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and the effort variables are set only by a configuration. Only the router configuration passes `--plugin-dir`.
-- The router keeps learned state across sessions (model health, level raises and its ledger) in its plugin data folder, by default `~/.claude/plugins/data/model-router-inline/`, which every `--plugin-dir` session on the machine shares. The runner gives each run a plugins root of its own inside its scratch copy with `CLAUDE_CODE_PLUGIN_CACHE_DIR` (https://code.claude.com/docs/en/env-vars.md), so every router run starts from an empty data folder, never reads or writes the shared one, and its data goes when the scratch copy does. Each raw line records `plugin_data_own` and, for router runs, hashes of the `state.json` and `learned.json` the run started from in `plugin_state`. 3 router run(s) here borrowed the shared folder instead: the runner copied it before the run and put it back after, which also wiped what other sessions wrote there meanwhile. 6 run(s) here predate this: their lines have no `plugin_state`, and their router runs started from whatever earlier runs and other sessions had left there. They also predate the `tail`, `head` and `echo` rules and the stricter `lookup-retry-limit` check, and their `bench_commit` is the commit the harness ran on top of before it was committed. Newer lines carry `bench_dirty`, true when `bench/` or the plugin had uncommitted changes.
-- Sessions are saved, as Claude Code saves them by default, so the router's Stop check can read the transcripts and see a test run, the subagents' included. After each run the runner deletes that run's folder under `~/.claude/projects/` (the one named after its scratch copy) and nothing else, and each raw line records `sessions_saved` and `session_dir_removed`. 6 run(s) here ran with `--no-session-persistence`, which saves no transcript, so the Stop check could never see a test run and asked for a verifier after every edit; their lines have no `sessions_saved`.
+- The router keeps learned state across sessions (model health, level raises and its ledger) in its plugin data folder, by default `~/.claude/plugins/data/model-router-inline/`, which every `--plugin-dir` session on the machine shares. The runner gives each run a plugins root of its own inside its scratch copy with `CLAUDE_CODE_PLUGIN_CACHE_DIR` (https://code.claude.com/docs/en/env-vars.md), so every router run starts from an empty data folder, never reads or writes the shared one, and its data goes when the scratch copy does. Each raw line records `plugin_data_own` and, for router runs, hashes of the `state.json` and `learned.json` the run started from in `plugin_state`.
+- Sessions are saved, as Claude Code saves them by default, so the router's Stop check can read the transcripts and see a test run, the subagents' included. After each run the runner deletes that run's folder under `~/.claude/projects/` (the one named after its scratch copy) and nothing else, and each raw line records `sessions_saved` and `session_dir_removed`.
 - Cost is Claude Code's `total_cost_usd`, which includes subagents and is a client-side estimate at list price, not a bill (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md). Every run is capped with `--max-budget-usd`, which a run can pass by up to the cost of one response plus anything that subagents still running at that moment spend before they stop (https://code.claude.com/docs/en/agent-sdk/agent-loop.md#budget-headroom). The runner starts a run only with room for twice its cap under the total, which is a margin, not a bound.
 - The prompt cache is shared across runs, so later runs of a configuration may read what earlier ones wrote. The runner rotates the configuration order on each run, and every raw line records its cache tokens.
 
@@ -58,8 +70,15 @@ Each task's files and pass check are under `bench/tasks/<id>/`. Each check fails
 
 ## Raw data and commands
 
-- [`bench/results/pilot-2026-11-22.jsonl`](../bench/results/pilot-2026-11-22.jsonl)
-- [`bench/results/sessions-2026-11-22.jsonl`](../bench/results/sessions-2026-11-22.jsonl)
+- [`bench/results/m6-bugfix-2026-11-22.jsonl`](../bench/results/m6-bugfix-2026-11-22.jsonl)
+- [`bench/results/m6-cross-module-2026-11-22.jsonl`](../bench/results/m6-cross-module-2026-11-22.jsonl)
+- [`bench/results/m6-design-2026-11-22.jsonl`](../bench/results/m6-design-2026-11-22.jsonl)
+- [`bench/results/m6-implementation-2026-11-22.jsonl`](../bench/results/m6-implementation-2026-11-22.jsonl)
+- [`bench/results/m6-lookup-2026-11-22.jsonl`](../bench/results/m6-lookup-2026-11-22.jsonl)
+- [`bench/results/m6-probe-2026-11-22.jsonl`](../bench/results/m6-probe-2026-11-22.jsonl)
+- [`bench/results/m6-research-2026-11-22.jsonl`](../bench/results/m6-research-2026-11-22.jsonl)
+- [`bench/results/m6-root-cause-2026-11-22.jsonl`](../bench/results/m6-root-cause-2026-11-22.jsonl)
+- [`bench/results/m6-security-review-2026-11-22.jsonl`](../bench/results/m6-security-review-2026-11-22.jsonl)
 
 ```bash
 python3 bench/run.py --tasks <ids> --configs <ids> --runs <n> --budget 0.5 --max-total <usd> --out bench/results/<name>.jsonl
@@ -68,6 +87,6 @@ python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
 
 ## The full suite
 
-A run of the whole current task set under every configuration in `bench/configs.json`, 10 times each, is 16 tasks x 10 configurations x 10 runs = 1600 runs, about $175.70 at list price. Each class is priced at its own mean per run here (bugfix $0.0782, lookup $0.0477), and a class with no runs yet at the mean of all runs ($0.0705). A configuration whose subagents run a dearer model than Sonnet is priced up by that model's output price over Sonnet's, on the whole run: `plugin` x2, `opus` x2, `fable` x4, `advisor` x2. That scales the price per token only: a dearer model may use more or fewer tokens, the class means pool every configuration's runs, and the new classes are harder than the pilot's two, so treat the figure as a guide, not a bound. At the per-run cap the pilot used, 1600 runs x $0.5 come to $800.00 before overshoot, which has no fixed limit; only `--max-total` stops spend. The full suite needs the maintainer's go-ahead before it runs.
+A run of the whole current task set under every configuration in `bench/configs.json`, 10 times each, is 16 tasks x 10 configurations x 10 runs = 1600 runs, about $210.87 at list price. Each class is priced at its own mean per run here (bugfix $0.0664, cross-module $0.1099, design $0.0951, implementation $0.0898, lookup $0.0474, research $0.0938, root-cause $0.0719, security-review $0.0846), and a class with no runs yet at the mean of all runs ($0.0824). A configuration whose subagents run a dearer model than Sonnet is priced up by that model's output price over Sonnet's, on the whole run: `plugin` x2, `opus` x2, `fable` x4, `advisor` x2. That scales the price per token only: a dearer model may use more or fewer tokens, the class means pool every configuration's runs, and the new classes are harder than the pilot's two, so treat the figure as a guide, not a bound. At the per-run cap the pilot used, 1600 runs x $1 come to $1,600.00 before overshoot, which has no fixed limit; only `--max-total` stops spend. The full suite needs the maintainer's go-ahead before it runs.
 
 Not covered yet: the fan-out, workflow, team and redo shapes; `haiku`, `opus` and `fable` at `high` effort; a cold and a warm prompt cache measured apart; router overhead per spawn and per turn; and each `priority` setting. `opusplan` in a headless `dontAsk` run never enters plan mode, so it runs Sonnet throughout (https://code.claude.com/docs/en/model-config.md#opusplan-model-setting, https://code.claude.com/docs/en/permission-modes.md). The advisor needs the Anthropic API, Claude Platform on AWS or Claude Models on Google Cloud (https://code.claude.com/docs/en/advisor.md), and the `fable` configuration needs Fable access.

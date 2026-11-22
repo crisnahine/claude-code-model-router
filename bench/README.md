@@ -9,7 +9,7 @@ Measures what Model Router costs per solved task, and how often tasks get solved
 
 ## Running it
 
-Every run spends real money at list price, or counts against a subscription's usage. `--budget` caps each run with `--max-budget-usd`, which a run can pass by one response plus what its running subagents spend before they stop. `--max-total` starts a run only with room for twice its cap, a margin rather than a bound.
+Every run spends real money at list price, or counts against a subscription's usage. `--budget` caps each run with `--max-budget-usd`, which a run can pass by one response plus what its running subagents spend before they stop. `--max-total` starts a run only with room for twice its cap, a margin rather than a bound. A run the API refuses for a rate or usage limit is not a failed task: the runner pauses (1 minute, then twice as long each time), runs it again, and after 5 pauses stops with exit code 2, keeping every finished run. Limited runs go to `results/limited/`, so their spend is on record but out of the results. `results/archive/` keeps the first pilots, which ran on an older harness (no saved sessions, a plugin data folder shared with other sessions), so they stay out of the comparison.
 
 ```bash
 python3 bench/run.py --tasks lookup-retry-limit bugfix-pagination --configs plugin defaults haiku \
@@ -22,6 +22,8 @@ Leave out `--tasks` or `--configs` to run all of them. `--model` sets the sessio
 Each run gets a fresh copy of the task's files in a temporary directory, never the repository. It loads no user settings, CLAUDE.md, auto memory or MCP servers, and the runner drops any `CLAUDE_CODE_*` variable it inherits except the provider switches (`CLAUDE_CODE_USE_*`) and `CLAUDE_CODE_OAUTH_TOKEN`. Each run also gets a plugins root of its own in that temporary directory (`CLAUDE_CODE_PLUGIN_CACHE_DIR`), so the router starts every run from an empty data folder and never reads or writes `~/.claude/plugins/data/model-router-inline/`, which other `--plugin-dir` sessions share. Its data goes with the temporary directory.
 
 Sessions are saved, as Claude Code saves them by default, because the router's Stop check reads the transcripts to see whether a test ran. After each run the runner deletes that run's folder under `~/.claude/projects/`, the one named after its scratch copy, and nothing else.
+
+Each raw line records `bench_commit`, the HEAD it ran on, and `bench_dirty`, whether `bench/` or the plugin had changes HEAD doesn't hold. When the `m6-*` files were recorded, the check also counted the bench's own output under `bench/results/`, so once the first results file of a session was written, every later line said `bench_dirty: true`. That is why the 320 main rows of the `m6-*` files carry it while the 16 probe rows before them don't. The code that ran for all of them is `499d046`; the check now leaves `bench/results/` out.
 
 ## Adding a task
 
