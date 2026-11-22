@@ -20,16 +20,20 @@ def raises(fn, *args):
     return False
 
 
-slugify = load("text_utils").slugify
-cases = {
-    "Hello, World!": "hello-world",
-    "  Café au lait  ": "cafe-au-lait",
-    "a--b__c": "a-b-c",
-    "!!!": "",
-    "": "",
-    "Ünïcödé 2024": "unicode-2024",
-    "日本 abc": "abc",
-    "Already-a-slug": "already-a-slug",
-    "MiXeD 42 Case": "mixed-42-case",
-}
-sys.exit(0 if all(slugify(text) == want for text, want in cases.items()) else 1)
+try:
+    slugify = load("text_utils").slugify
+    cases = {
+        "Hello, World!": "hello-world",
+        "  Café au lait  ": "cafe-au-lait",
+        "a--b__c": "a-b-c",
+        "!!!": "",
+        "": "",
+        "Ünïcödé 2024": "unicode-2024",
+        "日本 abc": "abc",
+        "Already-a-slug": "already-a-slug",
+        "MiXeD 42 Case": "mixed-42-case",
+    }
+    ok = all(slugify(text) == want for text, want in cases.items())
+except BaseException:  # a SystemExit from work-dir code is a failure
+    ok = False
+sys.exit(0 if ok else 1)

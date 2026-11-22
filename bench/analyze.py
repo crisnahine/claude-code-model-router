@@ -255,9 +255,9 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         + ", ".join(f"`{cid}` x{factor:g}" for cid, factor in plan["factors"].items() if factor > 1)
         + ". That scales the price per token only: a dearer model may use more or fewer tokens, the class means "
         "pool every configuration's runs, and the new classes are harder than the pilot's two, so treat the figure "
-        f"as a guide, not a bound. The hard ceiling is the per-run cap: {plan['runs']} runs x ${budget:g} = "
-        f"${plan['runs'] * budget:,.2f}, plus what a run can overshoot its cap by. The full suite needs the "
-        "maintainer's go-ahead before it runs.", "",
+        f"as a guide, not a bound. At the per-run cap the pilot used, {plan['runs']} runs x ${budget:g} come to "
+        f"${plan['runs'] * budget:,.2f} before overshoot, which has no fixed limit; only `--max-total` stops "
+        "spend. The full suite needs the maintainer's go-ahead before it runs.", "",
         "Not covered yet: the fan-out, workflow, team and redo shapes; `haiku`, `opus` and `fable` at `high` "
         "effort; a cold and a warm prompt cache measured apart; router overhead per spawn and per turn; and each "
         "`priority` setting. `opusplan` in a headless `dontAsk` run never enters plan mode, so it runs Sonnet "

@@ -314,18 +314,20 @@ class SuiteCoverage(unittest.TestCase):
             ["db\\users.py:6 interpolates name into SQL", "`db/users.py`:6 is injectable",
              "**`db/users.py`**, line 6: f-string SQL", "db/users.py:6 builds the query; app.py:8 calls it"],
             ["db/orders.py:3", "db/users.py:6 and db/orders.py:3",
-             "db/users.py:4, db/users.py:5, db/users.py:6, db/users.py:7, app.py:8", ""]),
+             "db/users.py:4, db/users.py:5, db/users.py:6, db/users.py:7, app.py:8", "",
+             "db/users.py:6 and db/orders.py:4 both build SQL from caller input"]),
         "security-path-traversal": (
             ["files\\server.py:8 joins an unresolved name", "`files/server.py` line 9 opens it",
              "files/server.py:8, reached from web.py:7"],
-            ["files/thumbs.py:8", "files/server.py:8 or files/thumbs.py:8", "web.py:7"]),
+            ["files/thumbs.py:8", "files/server.py:8 or files/thumbs.py:8", "web.py:7",
+             "files/server.py:8, and files/thumbs.py:9's startswith check can be bypassed"]),
     }
     JSON_ANSWERS = {
         "research-changelog": (
             [{"default_changed_in": "v1.3", "configurable_in": "2", "variable": "FETCHKIT_RETRIES",
               "sources": ["/tmp/x/work/docs/changelog/v1.3.md", "changelog\\v2.0.md"]},
              {"default_changed_in": "1.3.0", "configurable_in": 2, "variable": "FETCHKIT_RETRIES",
-              "sources": ["./docs/changelog/v1.3.md", "docs/changelog/v2.0.md"]}],
+              "sources": ["./docs/changelog/v1.3.md:3", "docs/changelog/v2.0.md#L4"]}],
             [{"default_changed_in": "1.4", "configurable_in": "2.0", "variable": "FETCHKIT_RETRIES",
               "sources": ["docs/changelog/v1.3.md", "docs/changelog/v2.0.md"]},
              {"default_changed_in": "1.3", "configurable_in": "2.0", "variable": "FETCHKIT_RETRIES",
@@ -365,6 +367,12 @@ class SuiteCoverage(unittest.TestCase):
             task, work = self.shipped("cross-retry-setting", Path(tmp) / "b")
             (work / "json.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
             self.assertFalse(self.check(task, work))
+        for task_id, module in (("bugfix-median", "stats"), ("bugfix-pagination", "pages"),
+                                ("impl-parse-duration", "durations"), ("impl-slugify", "text_utils")):
+            with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
+                task, work = self.shipped(task_id, tmp)
+                (work / f"{module}.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+                self.assertFalse(self.check(task, work))
 
     def test_each_new_baseline_sets_what_its_name_says(self):
         configs = {c["id"]: c for c in run.load_configs()}

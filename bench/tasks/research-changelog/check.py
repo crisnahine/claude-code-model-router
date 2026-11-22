@@ -37,7 +37,8 @@ def version(value):
 
 
 def cited(name):
-    return any(str(s).replace("\\", "/").endswith(f"changelog/{name}") for s in d.get("sources") or [])
+    return any(re.sub(r"(?::\d+|#.*)$", "", str(s).replace("\\", "/")).endswith(f"changelog/{name}")
+               for s in d.get("sources") or [])
 
 
 d = answer("RESEARCH.json")
