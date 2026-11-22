@@ -276,6 +276,24 @@ class Sessions(unittest.TestCase):
             self.assertTrue((other / "keep.jsonl").is_file())
             self.assertEqual((row["sessions_saved"], row["session_dir_removed"]), (True, True))
 
+    def test_keep_saves_the_scratch_folder_and_the_transcripts_before_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, kept = Path(tmp) / "config", Path(tmp) / "kept"
+            stub = Path(tmp) / "claude"
+            stub.write_text(SESSION_STUB)
+            stub.chmod(0o755)
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60, "keep": str(kept),
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
+                row = run.run_one(task, run.load_configs()[1], options, {})
+            [folder] = list(kept.iterdir())
+            self.assertEqual(row["kept"], str(folder))
+            self.assertTrue((folder / "work" / "app" / "settings.py").is_file())
+            self.assertEqual((folder / "answer.txt").read_text(), "read_retry_limit in app/settings.py")
+            self.assertTrue((folder / "session" / "s1" / "subagents" / "agent-a1.jsonl").is_file())
+            self.assertEqual(list((home / "projects").iterdir()), [])  # the shared folder is still cleaned up
+
 
 class SuiteCoverage(unittest.TestCase):
     """Every task class and baseline the suite claims to cover is there and can't be passed by gaming."""
