@@ -25,6 +25,7 @@ class Settings:
     main_effort: bool = False
     update_check: bool = True
     verify_gate: bool = False
+    strong_agent_gate: bool = True
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
     force: bool = False  # CLAUDE_CODE_SUBAGENT_MODEL_FORCE
     subagent_effort: str | None = None  # CLAUDE_CODE_SUBAGENT_EFFORT
@@ -84,6 +85,7 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
         main_effort=truthy(option("main_effort")),
         update_check=_on(option("update_check")),
         verify_gate=truthy(option("verify_gate")),
+        strong_agent_gate=_on(option("strong_agent_gate")),
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),
         force=truthy(env("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")),
         subagent_effort=env("CLAUDE_CODE_SUBAGENT_EFFORT"),
@@ -102,6 +104,7 @@ def record(settings: Settings) -> None:
     options = {"routing_mode": settings.routing_mode, "priority": settings.priority,
                "max_tier": settings.cap or "", "agent_pins": settings.pins,
                "main_effort": flag[settings.main_effort], "update_check": flag[settings.update_check],
-               "verify_gate": flag[settings.verify_gate]}
+               "verify_gate": flag[settings.verify_gate],
+               "strong_agent_gate": flag[settings.strong_agent_gate]}
     if any(store.load_state().get(k) != v for k, v in options.items()):
         store.update_state(lambda state: state.update(options))

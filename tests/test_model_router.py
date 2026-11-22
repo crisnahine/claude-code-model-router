@@ -643,7 +643,8 @@ class Options(Sandbox):
 
     def test_skill_commands_read_options_recorded_at_session_start(self):
         values = {"max_tier": "haiku", "priority": "quality", "agent_pins": "override", "routing_mode": "advise",
-                  "main_effort": "false", "update_check": "off", "verify_gate": "0"}
+                  "main_effort": "false", "update_check": "off", "verify_gate": "1",
+                  "strong_agent_gate": "false"}
         self.options(**values)
         hooks.session_start({"session_id": "s1"})
         for name in values:
@@ -652,7 +653,7 @@ class Options(Sandbox):
         self.assertEqual(settings.resolve(config), settings.Settings())
         self.assertEqual(settings.resolve(config, recorded=True), settings.Settings(
             mode="advise", routing_mode="advise", priority="quality", cap="haiku", pins="override",
-            main_effort=False, update_check=False, verify_gate=False))
+            main_effort=False, update_check=False, verify_gate=True, strong_agent_gate=False))
         self.assertIn("Cap: **haiku**", self.out("policy"))
 
     def test_policy_shows_the_routing_mode_the_user_set(self):
@@ -1967,22 +1968,46 @@ class Hooks(Sandbox):
 
 
 class GatesDefault(Sandbox):
-    def test_the_checks_before_a_turn_ends_are_off_by_default(self):
-        self.assertFalse(settings.resolve().verify_gate)
+    """verify_gate (the test-run check) is off by default; strong_agent_gate (the stronger-agent
+    check) is on."""
+
+    def hard_on_weak_session(self) -> None:
         self.session_on("claude-haiku-5-5")
         hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
+
+    def edited(self) -> None:
+        self.session_on("claude-opus-5-5")
         hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": "src/app.py"}})
+
+    def test_the_defaults(self):
+        s = settings.resolve()
+        self.assertEqual((s.verify_gate, s.strong_agent_gate), (False, True))
+
+    def test_the_stronger_agent_check_runs_by_default_and_can_be_turned_off(self):
+        self.hard_on_weak_session()
+        self.assertIn("model-router:architect", hooks.stop({"session_id": "s1"})["reason"])
+        self.options(strong_agent_gate="false")
+        self.hard_on_weak_session()
+        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+
+    def test_the_test_run_check_waits_for_verify_gate(self):
+        self.edited()
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
         self.options(verify_gate="true")
-        self.assertIsNotNone(hooks.stop({"session_id": "s1"}))
+        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
 
-    def test_the_prompt_note_promises_a_check_only_when_the_gate_is_on(self):
+    def test_turning_one_check_off_leaves_the_other(self):
+        self.options(verify_gate="true", strong_agent_gate="false")
+        self.edited()
+        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
+
+    def test_the_prompt_note_promises_a_check_only_when_the_stronger_agent_check_is_on(self):
         self.session_on("claude-haiku-5-5")
         note = lambda: self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))  # noqa: E731
         self.assertIn("model-router:architect", note())
-        self.assertNotIn("before finishing", note())
-        self.options(verify_gate="true")
         self.assertIn("you will be asked to before finishing", note())
+        self.options(strong_agent_gate="false")
+        self.assertNotIn("before finishing", note())
 
     def text(self, out):
         return out["hookSpecificOutput"]["additionalContext"]

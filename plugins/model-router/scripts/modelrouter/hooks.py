@@ -211,7 +211,7 @@ def user_prompt(hook_input: dict) -> dict | None:
             f"This request looks {level}{why}: about {need}-level reasoning, and this conversation runs on "
             f"{current}. Hand the hard thinking (design, root cause, the risky decision) to "
             f"{gates.strong_agent(config, need, pick.effort, level)} rather than settling it inline"
-            f"{'; you will be asked to before finishing' if options.verify_gate else ''}. "
+            f"{'; you will be asked to before finishing' if options.strong_agent_gate else ''}. "
             "If the code shows the task is simpler, say so instead."
         )
     if wanted and mode == "auto":

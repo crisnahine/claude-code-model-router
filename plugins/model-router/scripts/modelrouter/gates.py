@@ -144,6 +144,7 @@ def unverified_edit(hook_input: dict) -> str | None:
 
 
 def before_stop(hook_input: dict, config: dict, settings: Settings) -> str | None:
-    if hook_input.get("stop_hook_active") or settings.mode != "auto" or not settings.verify_gate:
+    if hook_input.get("stop_hook_active") or settings.mode != "auto":
         return None
-    return escalation(config, hook_input) or unverified_edit(hook_input)
+    return ((escalation(config, hook_input) if settings.strong_agent_gate else None)
+            or (unverified_edit(hook_input) if settings.verify_gate else None))
