@@ -1,0 +1,5 @@
+{
+  "class": "root-cause",
+  "revision": 1,
+  "brief": "test_ranking.py fails. Find out why and fix the code so every test in it passes. Don't change test_ranking.py."
+}

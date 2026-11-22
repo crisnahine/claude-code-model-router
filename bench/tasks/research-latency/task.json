@@ -1,0 +1,5 @@
+{
+  "class": "research",
+  "revision": 1,
+  "brief": "Which deploy first pushed the p95 latency of /search above 300 ms, and which commit did it ship? Use deploys.csv and metrics/, and compute p95 as the nearest-rank 95th percentile of that deploy's /search samples. Write RESEARCH.json in the repository root with the keys \"deploy\", \"commit\" and \"p95_ms\"."
+}

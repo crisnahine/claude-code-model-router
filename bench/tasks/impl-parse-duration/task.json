@@ -1,0 +1,5 @@
+{
+  "class": "implementation",
+  "revision": 1,
+  "brief": "Implement parse_duration in durations.py exactly as its docstring specifies, using the standard library only."
+}

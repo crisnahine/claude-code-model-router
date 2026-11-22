@@ -12,6 +12,7 @@ from . import store
 from .config import MODES, PRIORITIES, parse_mode
 
 CLOUDS = ("bedrock", "vertex", "foundry")
+PROVIDERS = (*CLOUDS, "anthropic_aws", "anthropic_google_cloud", "mantle")
 
 
 @dataclass(frozen=True)
@@ -21,14 +22,16 @@ class Settings:
     priority: str = "balanced"
     cap: str | None = None  # max_tier, when it names a registry model
     pins: str = "respect"  # agent_pins: respect or override
-    main_effort: bool = True
+    main_effort: bool = False
     update_check: bool = True
-    verify_gate: bool = True
+    verify_gate: bool = False
+    strong_agent_gate: bool = True
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
     force: bool = False  # CLAUDE_CODE_SUBAGENT_MODEL_FORCE
     subagent_effort: str | None = None  # CLAUDE_CODE_SUBAGENT_EFFORT
     effort_level: str | None = None  # CLAUDE_CODE_EFFORT_LEVEL
     cloud: str | None = None  # bedrock, vertex or foundry, from CLAUDE_CODE_USE_<NAME>
+    provider: str | None = None  # the one provider the CLAUDE_CODE_USE_<NAME> switches select, if clear
     api_key: str | None = field(default=None, repr=False)  # ANTHROPIC_API_KEY
     base_url: bool = False  # ANTHROPIC_BASE_URL is set
     no_betas: bool = False  # CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
@@ -40,6 +43,19 @@ def truthy(value: str | None) -> bool:
 
 def _on(value: str | None) -> bool:
     return value not in ("false", "0", "no", "off")
+
+
+def _provider(on: set) -> str | None:
+    """Bedrock and Foundry win over Claude Platform on AWS, and Claude Models on Google Cloud
+    over Agent Platform (claude-platform-on-aws.md, claude-models-on-google-cloud-anthropic-managed.md).
+    Mantle, or any other mix, has no documented alias table, so it counts as unknown."""
+    if "mantle" in on:
+        return None
+    if on & {"bedrock", "foundry"}:
+        on = on - {"anthropic_aws"}
+    if "anthropic_google_cloud" in on:
+        on = on - {"vertex"}
+    return next(iter(on)) if len(on) == 1 else None
 
 
 def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
@@ -66,14 +82,16 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
         priority=option("priority") if option("priority") in PRIORITIES else "balanced",
         cap=cap if cap in (config.get("models") or {}) else None,
         pins="override" if option("agent_pins") == "override" else "respect",
-        main_effort=_on(option("main_effort")),
+        main_effort=truthy(option("main_effort")),
         update_check=_on(option("update_check")),
-        verify_gate=_on(option("verify_gate")),
+        verify_gate=truthy(option("verify_gate")),
+        strong_agent_gate=_on(option("strong_agent_gate")),
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),
         force=truthy(env("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")),
         subagent_effort=env("CLAUDE_CODE_SUBAGENT_EFFORT"),
         effort_level=env("CLAUDE_CODE_EFFORT_LEVEL"),
         cloud=next((c for c in CLOUDS if truthy(env(f"CLAUDE_CODE_USE_{c.upper()}"))), None),
+        provider=_provider({p for p in PROVIDERS if truthy(env(f"CLAUDE_CODE_USE_{p.upper()}"))}),
         api_key=env("ANTHROPIC_API_KEY"),
         base_url=bool(env("ANTHROPIC_BASE_URL")),
         no_betas=truthy(env("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")),
@@ -86,6 +104,7 @@ def record(settings: Settings) -> None:
     options = {"routing_mode": settings.routing_mode, "priority": settings.priority,
                "max_tier": settings.cap or "", "agent_pins": settings.pins,
                "main_effort": flag[settings.main_effort], "update_check": flag[settings.update_check],
-               "verify_gate": flag[settings.verify_gate]}
+               "verify_gate": flag[settings.verify_gate],
+               "strong_agent_gate": flag[settings.strong_agent_gate]}
     if any(store.load_state().get(k) != v for k, v in options.items()):
         store.update_state(lambda state: state.update(options))

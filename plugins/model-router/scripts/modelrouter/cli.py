@@ -4,11 +4,11 @@
              post-edit, stop, model-switch, refresh-cache
   policy     the routing policy as it stands for this user and project
   models     what each registry model really runs as, and what is unavailable
-             (--reset forgets learned availability and feedback)
+             (--reset forgets learned availability and feedback; --json prints model-router.models/1)
   explain    what the router would make of a task: explain [--agent NAME] TEXT
   refresh    fetch upstream (--force) and show what changed; status shows the cache;
              ack marks it reviewed
-  usage      the ledger by agent and model: usage [DAYS]
+  usage      the ledger by agent and model: usage [DAYS] [--json for model-router.usage/1]
   upstream-check --baseline FILE [--write]   CI: compare live upstream with a baseline
 """
 from __future__ import annotations
@@ -37,19 +37,48 @@ def _well_formed(hook_input: object) -> dict:
             if key not in _TEXT_FIELDS or isinstance(value, str)}
 
 
+_NEWER = "left as is: {} was written by a newer Model Router release."
+
+
+def _reset_health() -> str:
+    removed: list = []
+    try:
+        status = store.try_update(store.state_path(), lambda state: removed.append(state.pop("health", None)))[1]
+    except OSError:
+        status = "unreadable"
+    if status == "saved":
+        return "Learned availability cleared." if removed and removed[0] else "No learned availability to clear."
+    if status == "newer":
+        return "Learned availability " + _NEWER.format("state.json")
+    return "Learned availability left as is: state.json could not be read or written."
+
+
+def _reset_feedback() -> str:
+    status = learn.reset()
+    if status in ("removed", "missing"):
+        return "Feedback cleared." if status == "removed" else "No feedback to clear."
+    if status == "newer":
+        return "Feedback " + _NEWER.format("learned.json")
+    return "Feedback left as is: learned.json could not be read or removed."
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="model-router")
     parser.add_argument("--data-dir", help="plugin data directory; skills pass ${CLAUDE_PLUGIN_DATA}")
     sub = parser.add_subparsers(dest="cmd", required=True)
     for name in (*hooks.HANDLERS, "policy", "ack"):
         sub.add_parser(name)
-    sub.add_parser("models").add_argument("--reset", action="store_true")
+    p = sub.add_parser("models")
+    p.add_argument("--reset", action="store_true")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("explain")
     p.add_argument("--agent")
     p.add_argument("text", nargs="*")
     sub.add_parser("refresh").add_argument("--force", action="store_true")
     sub.add_parser("status").add_argument("--json", action="store_true")
-    sub.add_parser("usage").add_argument("days", nargs="?", default="7")
+    p = sub.add_parser("usage")
+    p.add_argument("days", nargs="?", default="7")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("upstream-check")
     p.add_argument("--baseline", required=True)
     p.add_argument("--write", action="store_true", help="overwrite the baseline with live data")
@@ -77,10 +106,11 @@ def main(argv: list[str] | None = None) -> int:
         print(report.policy(config, options))
     elif args.cmd == "models":
         if args.reset:
-            store.update_state(lambda state: state.pop("health", None))
-            learn.reset()
-            print("Learned availability and feedback cleared.\n")
-        print(report.models(config, options))
+            cleared = f"{_reset_health()}\n{_reset_feedback()}\n"
+            if not args.json:
+                print(cleared)
+        print(json.dumps(report.models_data(config, options), indent=2) if args.json
+              else report.models(config, options))
     elif args.cmd == "explain":
         print(report.explain(config, options, " ".join(args.text), args.agent))
     elif args.cmd == "refresh":
@@ -95,7 +125,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"Marked Claude Code {version} and the current docs index as reviewed.")
     elif args.cmd == "usage":
-        print(report.usage(int(args.days) if str(args.days).isdigit() else 7))
+        days = int(args.days) if str(args.days).isdigit() else 7
+        print(json.dumps(report.usage_data(days), indent=2) if args.json else report.usage(days))
     elif args.cmd == "upstream-check":
         baseline_path = Path(args.baseline)
         live = upstream.fetch(options)

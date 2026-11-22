@@ -1,0 +1,5 @@
+{
+  "file": "files/server.py",
+  "line": 8,
+  "why": "It joins the caller's name onto ROOT without resolving it, so ../ reads any file."
+}

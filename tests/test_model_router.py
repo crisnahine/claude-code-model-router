@@ -29,6 +29,7 @@ from modelrouter import config as cfg  # noqa: E402
 LOOKUP = "list the files under src"
 BUILD = "implement the parser change"
 HARD = "fix the auth migration across every service"
+HARDEST = "investigate why auth is flaky and redesign it across every service"
 
 
 def frontmatter(path: Path) -> dict:
@@ -41,6 +42,9 @@ def frontmatter(path: Path) -> dict:
             fields[key.strip()] = value.strip()
     return fields
 
+
+# Slow CI runners take about twice as long as a laptop; the quadratic negation regex took 32 s on 64 KB.
+LINEAR_SECONDS = 2
 
 class Sandbox(unittest.TestCase):
     """A private data dir, Claude home and project for each test, and a clean environment."""
@@ -147,8 +151,27 @@ class Shipped(unittest.TestCase):
         self.assertEqual(set(config["crew"]), set(files))
         for name, agent in config["crew"].items():
             self.assertEqual(files[name].get("name"), name)
-            self.assertEqual(files[name].get("model"), agent["model"], f"model drift for {name}")
-            self.assertIn(agent["model"], config["models"])
+            self.assertTrue(agent.get("role"), name)
+
+    def test_the_costly_role_agents_say_when_not_to_use_them(self):
+        # Claude delegates from descriptions, so these limits keep the costliest agents for the work they're for.
+        for name, limit in (("architect", "Not for a change whose approach is already clear."),
+                            ("reviewer", "A small, tested change doesn't need one."),
+                            ("deep-solver", "Not for ordinary hard coding.")):
+            self.assertIn(limit, frontmatter(PLUGIN / "agents" / f"{name}.md")["description"], name)
+
+    # Always-cheap agents keep a model, so they stay cheap when the router isn't routing; the rest are routed.
+    PINNED = {"scout": ("haiku", "low"), "verifier": ("haiku", "low"), "docs-researcher": ("haiku", "medium")}
+
+    def test_only_the_always_cheap_role_agents_carry_a_model(self):
+        config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
+        for path in (PLUGIN / "agents").glob("*.md"):
+            fields = frontmatter(path)
+            self.assertEqual((fields.get("model"), fields.get("effort")), self.PINNED.get(path.stem, (None, None)),
+                             path.name)
+            self.assertEqual(config["crew"][path.stem].get("model"), fields.get("model"), path.name)
+            # A description is when Claude delegates (sub-agents docs), so none asks to run on every change.
+            self.assertNotRegex(fields["description"], r"(?i)\b(?:every|any) (?:diff|code change|change)\b", path.name)
 
     def test_levels_and_models_are_complete(self):
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
@@ -202,8 +225,8 @@ class Shipped(unittest.TestCase):
             self.assertNotIn("options", option)  # not accepted by the oldest supported Claude Code
 
     def test_ci_tests_the_oldest_python_the_launcher_accepts(self):
-        launcher = (SCRIPTS / "model-router.sh").read_text(encoding="utf-8")
-        floor = "%s.%s" % re.search(r"sys\.version_info < \((\d+), (\d+)\)", launcher).groups()
+        entry = (SCRIPTS / "model-router.py").read_text(encoding="utf-8")
+        floor = "%s.%s" % re.search(r"sys\.version_info < \((\d+), (\d+)\)", entry).groups()
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         matrix = re.findall(r'"(\d+\.\d+)"', re.search(r"python: \[([^\]]*)\]", ci).group(1))
         self.assertEqual(min(matrix, key=lambda v: tuple(map(int, v.split(".")))), floor)
@@ -241,13 +264,101 @@ class Shipped(unittest.TestCase):
         self.assertEqual([h.get("async", False) for h in stop], [False])
 
 
+class OptionText(unittest.TestCase):
+    def test_main_effort_names_every_case_it_stays_off(self):
+        manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        text = manifest["userConfig"]["main_effort"]["description"]
+        for case in ("CLAUDE_CODE_EFFORT_LEVEL", "Bedrock", "Vertex", "Foundry", "ANTHROPIC_BASE_URL",
+                     "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "Fable 5.1", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5"):
+            self.assertIn(case, text)
+        for gap in ("HIPAA", "Claude Desktop"):  # cases the router can't detect, so the user is told
+            self.assertIn(gap, text)
+
+
+class SkillGrants(unittest.TestCase):
+    """A skill's allowed-tools run without a prompt for its turn, so each grant covers only the
+    launcher commands that skill runs. Matching follows
+    https://code.claude.com/docs/en/permissions.md#wildcard-patterns."""
+
+    LAUNCHER = 'sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh"'
+    PREFIX = LAUNCHER + ' --data-dir "${CLAUDE_PLUGIN_DATA}"'
+    SKILLS = ("route", "models", "usage", "refresh")
+
+    def rules(self, text: str) -> list[str]:
+        block = re.search(r"^allowed-tools:(.*?)(?=^\S|^---)", text, re.M | re.S)
+        return re.findall(r"Bash\(([^)]*)\)", block.group(1)) if block else []
+
+    def allowed(self, rules: list[str], command: str) -> bool:
+        for rule in rules:
+            if rule.endswith(" *"):
+                self.assertNotIn("*", rule[:-2], rule)
+                if command == rule[:-2] or command.startswith(rule[:-1]):
+                    return True
+            elif "*" not in rule and command == rule:
+                return True
+        return False
+
+    def test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files(self):
+        writes = [f"{self.PREFIX} upstream-check --baseline /tmp/x --write",
+                  f"{self.PREFIX} upstream-check --baseline /tmp/x --json-out /tmp/y",
+                  f"{self.LAUNCHER} upstream-check --baseline /tmp/x --write"]
+        for name in self.SKILLS:
+            text = (PLUGIN / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+            rules = self.rules(text)
+            runs = re.findall(r"`(%s[^`]*)`" % re.escape(self.LAUNCHER), text)
+            self.assertTrue(runs, name)
+            for command in runs:
+                command = command.replace("<the brief>", "list the files").replace("$ARGUMENTS", "30 --json")
+                self.assertTrue(self.allowed(rules, command), f"{name} can't run: {command}")
+            for command in writes:
+                self.assertFalse(self.allowed(rules, command), f"{name} pre-approves: {command}")
+            if name != "models":
+                self.assertFalse(self.allowed(rules, f"{self.PREFIX} models --reset"), name)
+            if name != "refresh":
+                self.assertFalse(self.allowed(rules, f"{self.PREFIX} ack"), name)
+
+
+class DeliveredMessages(Sandbox):
+    """A teammate's report or another session's message reaching the main loop isn't the user's request."""
+
+    def setUp(self):
+        super().setUp()
+        self.options(main_effort="true")  # off by default
+
+    def delivered(self, tag: str = "teammate-message") -> str:
+        return (f'Another Claude session sent a message:\n<{tag} teammate_id="auditor" color="blue">\n'
+                f"{HARD}\n</{tag}>")
+
+    def test_a_delivered_message_raises_no_effort(self):
+        session.record("s1", "claude-opus-5-5")
+        for tag in ("teammate-message", "cross-session-message"):
+            self.assertFalse(hooks.is_user_prompt(self.delivered(tag)), tag)
+            self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": self.delivered(tag)}), tag)
+        self.assertEqual(hooks.mod_turn({"session_id": "s1", "text": HARD}), {"level": "complex", "effort": "high"})
+        self.assertTrue(hooks.is_user_prompt("Another Claude session sent a message: is that how they phrase it?"))
+
+    def test_a_delivered_message_leaves_the_users_request_alone(self):
+        self.session_on("claude-haiku-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": LOOKUP})
+        self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": self.delivered()}))
+        self.assertEqual(store.load_entry("prompts", "s1")["level"], "lookup")
+
+    def test_a_machine_origin_from_the_mod_raises_no_effort(self):
+        session.record("s1", "claude-opus-5-5")
+        turn = lambda origin: hooks.mod_turn({"session_id": "s1", "text": HARD, "origin": origin})  # noqa: E731
+        for origin in ("task-notification", "peer", "peer-send-message"):
+            self.assertIsNone(turn(origin), origin)
+        for origin in ("composer", "bridge", "sdk", "unclassified", "coordinator", "a-kind-from-a-later-build"):
+            self.assertEqual(turn(origin), {"level": "complex", "effort": "high"}, origin)
+
+
 class Store(Sandbox):
     def test_keyed_files_drop_the_least_recently_written(self):
         with mock.patch.object(store, "KEEP_ENTRIES", 3):
             for i, key in enumerate(("zz", "aa", "mm", "bb")):
                 with mock.patch.object(store.time, "time", return_value=1000.0 + i):
                     store.save_entry("prompts", key, {"n": i})
-        self.assertEqual(sorted(store.load_dict(self.data / "prompts.json")), ["aa", "bb", "mm"])
+        self.assertEqual(sorted(store.load_state_file(self.data / "prompts.json")), ["aa", "bb", "mm"])
 
     def test_ledger_survives_junk_lines(self):
         store.append_ledger({"event": "spawn"})
@@ -281,7 +392,7 @@ class Store(Sandbox):
         with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
             store.update_dict(path, lambda data: data.update(b=2))
         self.assertLess(time.monotonic() - started, 2)
-        self.assertEqual(store.load_dict(path), {"a": 1, "b": 2})
+        self.assertEqual(store.load_state_file(path), {"a": 1, "b": 2})
         self.assertTrue(lock.exists())  # not ours to remove
 
     def test_state_files_are_written_compact(self):
@@ -491,7 +602,7 @@ class Registry(Sandbox):
         self.assertEqual(config["levels"]["lookup"], {"needs": 1, "effort": "low"})
         self.assertEqual(config["levels"]["complex"]["effort"], "max")
         self.assertNotIn("bogus", config["levels"])
-        self.assertEqual(config["agents"], {"a": {}})
+        self.assertEqual({k: v for k, v in config["agents"].items() if k in ("a", "b")}, {"a": {}})
         self.assertEqual(settings.resolve(config).mode, "auto")
         (self.project / ".claude" / "model-router.json").write_text("{not json")
         self.assertEqual(len(cfg.load_config()["models"]), 4)
@@ -531,13 +642,14 @@ class Options(Sandbox):
         os.environ.update(ANTHROPIC_API_KEY="sk-test", ANTHROPIC_BASE_URL="https://gateway.example")
         s = settings.resolve(cfg.load_config())
         self.assertEqual((s.subagent_model, s.force, s.cloud, s.cap, s.main_effort, s.verify_gate),
-                         ("opus", True, "vertex", None, False, True))
+                         ("opus", True, "vertex", None, False, False))
         self.assertEqual((s.api_key, s.base_url), ("sk-test", True))
         self.assertNotIn("sk-test", repr(s))
 
     def test_skill_commands_read_options_recorded_at_session_start(self):
         values = {"max_tier": "haiku", "priority": "quality", "agent_pins": "override", "routing_mode": "advise",
-                  "main_effort": "false", "update_check": "off", "verify_gate": "0"}
+                  "main_effort": "false", "update_check": "off", "verify_gate": "1",
+                  "strong_agent_gate": "false"}
         self.options(**values)
         hooks.session_start({"session_id": "s1"})
         for name in values:
@@ -546,7 +658,7 @@ class Options(Sandbox):
         self.assertEqual(settings.resolve(config), settings.Settings())
         self.assertEqual(settings.resolve(config, recorded=True), settings.Settings(
             mode="advise", routing_mode="advise", priority="quality", cap="haiku", pins="override",
-            main_effort=False, update_check=False, verify_gate=False))
+            main_effort=False, update_check=False, verify_gate=True, strong_agent_gate=False))
         self.assertIn("Cap: **haiku**", self.out("policy"))
 
     def test_policy_shows_the_routing_mode_the_user_set(self):
@@ -554,6 +666,41 @@ class Options(Sandbox):
         hooks.session_start({"session_id": "s1"})
         del os.environ["CLAUDE_PLUGIN_OPTION_ROUTING_MODE"]
         self.assertIn("Routing: **off**", self.out("policy"))
+
+
+class ConfigSchema(Sandbox):
+    """config/models.json and model-router.json overrides carry a `schema` version; see
+    docs/ARCHITECTURE.md "Compatibility"."""
+
+    def test_the_shipped_config_has_the_current_schema_and_validates(self):
+        base = cfg.base_config()
+        self.assertEqual(base["schema"], cfg.CONFIG_SCHEMA)
+        cleaned = cfg._clean(base)
+        for name in base["models"]:
+            self.assertEqual(set(cleaned["models"][name]), {"strength", "speed", "cost"}, name)
+        for name, spec in base["levels"].items():
+            self.assertEqual(cleaned["levels"][name], spec, name)
+        self.assertEqual(cfg._prices(base["prices"]).keys(), base["prices"].keys())
+
+    def test_an_override_without_a_schema_still_loads(self):
+        self.override({"levels": {"complex": {"effort": "xhigh"}}}, user=True)
+        self.override({"agents": {"my-agent": {"level": "lookup"}}})
+        config = cfg.load_config()
+        self.assertEqual((config["levels"]["complex"]["effort"], config["agents"]["my-agent"]["level"]),
+                         ("xhigh", "lookup"))
+        self.assertEqual(cfg.newer_overrides(), [])
+
+    def test_an_override_from_a_newer_release_is_read_as_far_as_it_is_understood_and_named(self):
+        self.override({"schema": cfg.CONFIG_SCHEMA + 1, "routing_mode": "off",
+                       "levels": {"complex": {"effort": "xhigh"}}, "a_future_key": {"x": 1}}, user=True)
+        self.override({"schema": cfg.CONFIG_SCHEMA + 1, "agents": {"my-agent": {"level": "lookup"}}})
+        config = cfg.load_config()
+        self.assertEqual((config["routing_mode"], config["levels"]["complex"]["effort"]), ("off", "xhigh"))
+        self.assertEqual(config["agents"]["my-agent"]["level"], "lookup")
+        newer = [str(self.home / "model-router.json"), str(self.project / ".claude" / "model-router.json")]
+        self.assertEqual([str(p) for p in cfg.newer_overrides()], newer)
+        self.assertEqual(json.loads(self.out("models", "--json"))["newer_config"], newer)
+        self.assertIn("newer Model Router", self.out("models"))
 
 
 class AgentDiscovery(Sandbox):
@@ -572,7 +719,8 @@ class AgentDiscovery(Sandbox):
         self.assertEqual((found["source"], found["model"]), ("project", None))
 
     def test_own_crew(self):
-        self.assertEqual(agents.find("model-router:architect", self.project)["model"], "opus")
+        self.assertIsNone(agents.find("model-router:architect", self.project)["model"])
+        self.assertEqual(agents.find("model-router:scout", self.project)["model"], "haiku")
         self.assertIsNone(agents.find("model-router:nope", self.project))
 
     def test_other_plugin_by_install_record(self):
@@ -637,7 +785,179 @@ class Profile(unittest.TestCase):
         self.assertEqual(self.level("which plugins support hooks?"), "lookup")
         self.assertEqual(self.level("read the update-check option"), "lookup")
         self.assertEqual(self.level("list the routes. Make sure to include the line numbers"), "lookup")
-        self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "standard")
+        # The limit names what the fix must work around, so its risk counts.
+        self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "complex")
+
+    def test_a_limit_ends_with_its_clause_and_keeps_the_task_after_it(self):
+        self.assertEqual(self.level("Without changing the public API, fix the race condition in the payments "
+                                    "service and add a regression test."), "complex")
+        self.assertEqual(self.level("Never guess: debug why the auth token refresh fails intermittently across "
+                                    "services, find the root cause and fix it."), "hardest")
+        self.assertEqual(self.level("Do not stop until the database migration across all services is fixed "
+                                    "and verified."), "standard")
+        self.assertEqual(self.level("No need to ask questions, just implement the OAuth2 login flow and secure "
+                                    "the session cookies."), "complex")
+
+    def test_a_task_joined_to_a_limit_by_and_keeps_what_it_is_about(self):
+        for brief, signals in (
+                ("Do not touch tests and implement the payment retry.", ["risk"]),
+                ("Don't break the public API and fix the authentication bug in the login service.", ["risk"]),
+                ("Never log secrets and refactor the credentials loader across all services.", ["risk", "scope"]),
+                ("Do not use any new dependencies and migrate the database schema to the new billing tables.",
+                 ["risk"])):
+            result = profile.profile_call({"prompt": brief}, "general-purpose")
+            self.assertEqual((result["level"], result["signals"]), ("complex", signals), brief)
+        # A risk named only inside the limit still says what the work touches.
+        self.assertEqual(self.level("Rename the session helper without touching the auth tokens."), "complex")
+        self.assertEqual(self.level("Find the config loader. Do not touch the database."), "lookup")
+        # A limit's scope and ambiguity words don't count, so guardrails can't push a small edit to hardest.
+        self.assertEqual(self.level("Fix the typo in docs/setup.md. Do not touch the database schema, do not make "
+                                    "changes across other modules, and do not try to figure out the flaky CI job."),
+                         "complex")
+        # "And" ends a limit only before a verb that takes an object.
+        for brief in ("Find X. Do not add and remove files.", "List the routes; don't review and fix anything.",
+                      "Explain Y. Never plan and design new modules.",
+                      "List the CI jobs. Do not edit the Dockerfile and build scripts.",
+                      "Find the deploy script. Do not touch the production config and build scripts.",
+                      "Show the migration files. Do not touch the schema and update scripts."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+
+    def test_and_or_then_before_a_task_verb_ends_a_limit_without_an_article(self):
+        for brief in ("Do not touch tests and implement payment retries.",
+                      "Don't break the API and fix auth token refresh in the login service.",
+                      "Never log secrets and refactor credentials loading.",
+                      "Do not touch tests then implement the payment retry.",
+                      "Don't touch the UI and also fix the race condition in the payments worker.",
+                      "Never edit generated code and instead fix the auth bug in the source.",
+                      "Do not touch tests and just fix the auth bug.",
+                      "Do not touch tests and please fix the auth bug.",
+                      "Do not touch tests and debug why payments fail intermittently."):
+            self.assertEqual(self.level(brief), "complex", brief)
+        # A verb that is often a noun ends the limit only with an object after it.
+        for brief in ("List the CI jobs. Do not edit the Dockerfile and build scripts.",
+                      "Find the deploy script. Do not touch the production config and build scripts.",
+                      "Show the migration files. Do not touch the schema and update scripts."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+        # So does a task verb in a compound noun such as "debug logs" or "audit trails".
+        for brief in ("List the endpoints. Do not touch the auth module and debug logs.",
+                      "Find the config. Do not delete the settings and audit logs.",
+                      "Show the release notes. Do not edit the changelog and upgrade notes.",
+                      "Find the tests. Do not edit the auth fixtures and debug output.",
+                      "Explain the logger. Do not touch production and audit trails."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+        # Scripts, builds, records, paths and tools are what these verbs take as an object, not compounds.
+        for brief in ("Do not touch tests and fix scripts that rotate the production credentials.",
+                      "Never log secrets and migrate records in the billing database.",
+                      "Do not change the UI and fix builds that leak secrets.",
+                      "Do not touch tests and refactor tools that handle payments.",
+                      "Do not touch tests and fix paths in the auth middleware."):
+            result = profile.profile_call({"prompt": brief}, "general-purpose")
+            self.assertEqual((result["level"], result["signals"]), ("complex", ["risk"]), brief)
+
+    def test_joins_inside_a_limit_stay_fast(self):
+        started = time.monotonic()
+        self.level("do not touch" + " tests and fix" * 20_000)
+        self.level("do not add" + " and remove" * 20_000 + " files")
+        self.level("never x" + " and then just" * 20_000 + " fix it")
+        self.level("do not touch tests" + " " * 64_000 + "and fix it")
+        self.assertLess(time.monotonic() - started, LINEAR_SECONDS)
+
+    def test_a_hyphenated_word_before_and_still_ends_a_limit(self):
+        # "edit-mode" and "review-ready" are nouns, not the limit verbs edit and review.
+        for brief in ("Do not touch the edit-mode and fix the bug.", "Do not touch the review-ready and fix the crash."):
+            self.assertEqual(self.level(brief), "standard", brief)
+
+    def test_a_long_hyphen_or_apostrophe_run_after_a_limit_stays_fast(self):
+        for run in ("a-" * 32_000, "a'" * 32_000):  # 64 KB, such as a pasted token or a kebab-case list
+            started = time.monotonic()
+            self.level("do not " + run)
+            self.assertLess(time.monotonic() - started, LINEAR_SECONDS, run[:4])
+
+    def test_a_limit_over_a_list_of_single_verbs_stays_a_limit(self):
+        for brief in ("Find where the retry logic lives. Do not add, remove or rename files.",
+                      "Find where the retry logic lives. Do not edit, delete or create any files.",
+                      "Explain how sessions are stored. Don't write, change or delete anything.",
+                      "List the routes; do not change, fix or refactor anything.",
+                      "Explain the cache. Never, ever change files.",
+                      "Find where the retry logic lives. Do not add, remove, or rename files.",
+                      "Find where the retry logic lives. Do not edit files, create branches or update the database."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+
+    def test_a_comma_before_the_task_ends_the_limit(self):
+        self.assertEqual(self.level("No need to ask, just implement the OAuth2 login flow and secure the session "
+                                    "cookies."), "complex")
+        self.assertEqual(self.level("Never guess, debug why the auth token refresh fails intermittently across "
+                                    "services."), "hardest")
+        self.assertEqual(self.level("The sync job runs without retries, add backoff to the payments client."),
+                         "complex")
+
+    def test_a_task_after_a_limit_and_a_comma_is_not_a_list_item(self):
+        for brief in ("Do not ask questions, implement the OAuth2 login flow.",
+                      "Do not change the tests, fix the auth bug in the login handler.",
+                      "Don't touch the public API, fix the race condition in the payments service and add a "
+                      "regression test.",
+                      "Do not commit, write the migration for the payments table.",
+                      "Do not change the tests, fix the auth bug and add a regression test.",
+                      "Do not ask questions, migrate the database, then run the tests.",
+                      "Don't touch the tests, fix the auth bug, then report back.",
+                      "Do not ask questions, implement OAuth2 login, and secure the session cookies.",
+                      "Do not ask questions, fix the auth bug or remove the check.",
+                      "Never guess, fix the flaky auth test or delete it."):
+            self.assertEqual(self.level(brief), "complex", brief)
+        for brief in ("Do not modify tests, fix the parser, update the docs, and run the suite.",
+                      "Do not touch the API, fix it or roll it back."):
+            self.assertEqual(self.level(brief), "standard", brief)
+
+    def test_a_limit_keeps_an_aside_and_list_verbs_outside_the_change_words(self):
+        for brief in ("List the tables. Do not, under any circumstances, write to the database.",
+                      "Find the config loader. Never, for any reason, change files.",
+                      "Find the retry logic. Do not delete, modify or rename any files.",
+                      "Do not touch, edit or delete files.",
+                      "Find the schema. Do not edit files, create branches or update the database, or delete "
+                      "anything."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+
+    def test_a_long_list_after_a_limit_stays_fast(self):
+        started = time.monotonic()
+        self.level("do not add" + ", add x y" * 20_000 + " or add it")
+        self.level("do not add" + ", add x y" * 20_000 + ", then stop")
+        self.level("never x" + ", add never x" * 4_000 + ", then stop")
+        self.level("never, add" + ", add never" * 4_000 + ", then stop")
+        self.assertLess(time.monotonic() - started, LINEAR_SECONDS)
+
+    def test_a_huge_whitespace_run_after_a_limit_stays_fast(self):
+        started = time.monotonic()
+        self.level("do not" + " " * 64_000 + "x")
+        self.assertLess(time.monotonic() - started, LINEAR_SECONDS)
+
+    def test_a_brief_in_another_language_starts_at_standard(self):
+        for brief in ("Corrige le bug de sécurité dans le module de paiement.",
+                      "Corrige le bug dans le module de paiement et ajoute un test pour la validation.",
+                      "Diseña una migración de OAuth2 para todos los servicios y encuentra la causa raíz del fallo.",
+                      "Behebe den Fehler in der Zahlungsfunktion und füge einen Test für die Validierung hinzu.",
+                      "Correggi il bug nella funzione di pagamento e aggiungi un test per la validazione.",
+                      "Corrija o erro na função de pagamento e adicione um teste para a validação.",
+                      "Los de fout in de betaalmodule op en voeg een test toe voor de validatie.",
+                      "すべてのサービスでOAuth2への移行を設計し、断続的な障害の根本原因を見つけてください。",
+                      "Найди, где определена функция retry."):
+            self.assertEqual(self.level(brief), "standard", brief)
+            self.assertNotEqual(profile.profile_prompt(brief)["level"], "lookup", brief)
+        for brief in ("grep TODO src/*.py", "list the files under src", "ls -la src/", "cat README.md",
+                      "List i18n files: locales/de.json, locales/en.json, locales/es.json",
+                      "grep -rn 'des_encrypt' lib/des/ lib/des.c"):
+            self.assertEqual(self.level(brief), "lookup", brief)
+            self.assertEqual(profile.profile_prompt(brief)["level"], "lookup", brief)
+
+    def test_a_judgment_verb_counts_at_the_start_of_the_prompt_too(self):
+        for call in ({"prompt": "Design a plugin loading strategy for the CLI."},
+                     {"description": "Review CLI flags", "prompt": "Review the proposal for the new CLI flags."}):
+            self.assertEqual(profile.profile_call(call, "general-purpose")["level"], "complex", call)
+        for brief in ("Explain the design of the cache layer.", "What does the design doc say about retries?",
+                      "Review the README for typos."):
+            self.assertEqual(self.level(brief), "standard", brief)
+        # Bare "research" is how people say "look into"; it isn't research-grade wording.
+        self.assertEqual(self.level("Research the trade-offs of switching the database driver and recommend one."),
+                         "complex")
 
     def test_make_sure_keeps_the_task_it_introduces(self):
         self.assertEqual(self.level("Make sure to fix the auth bug in the login handler."), "complex")
@@ -664,10 +984,41 @@ class Profile(unittest.TestCase):
         self.assertIn("scope", profile.profile_prompt("x " * 900)["signals"])
 
 
+class RoutingEvals(Sandbox):
+    """Each `claude plugin eval` case routes as its expected_outcome says, with no model call, so a
+    routing regression fails CI instead of waiting for a paid eval run."""
+
+    def test_each_eval_case_routes_as_expected(self):
+        cases = sorted((PLUGIN / "evals").glob("*/prompt.md"))
+        self.assertGreaterEqual(len(cases), 2)
+        config = cfg.load_config()
+        options = settings.resolve(config)
+        for path in cases:
+            name = path.parent.name
+            want = re.fullmatch(r"['\"]?level (\w+), model (\w+), effort (\w+)['\"]?",
+                                frontmatter(path).get("expected_outcome", ""))
+            self.assertTrue(want, f"{name}: expected_outcome must read 'level L, model M, effort E'")
+            body = path.read_text(encoding="utf-8").split("\n---\n", 1)[1].strip()
+            # A case that hands a subagent an exact brief is about how that call routes.
+            quoted = re.search(r'this exact prompt: "([^"]+)"', body)
+            got = (report.explain(config, options, quoted[1], "general-purpose") if quoted
+                   else report.explain(config, options, body))
+            self.assertIn(f"Level: **{want[1]}**", got, name)
+            self.assertIn(f"Model: **{want[2]}**, effort: {want[3]}.", got, name)
+
+
 class Router(Sandbox):
     def setUp(self):
         super().setUp()
         self.session_on("claude-opus-5-5")
+
+    def test_the_cheap_role_agents_keep_their_pin_and_the_rest_are_routed(self):
+        self.session_on("claude-fable-5-2")
+        for brief in (LOOKUP, HARDEST):
+            d = self.decide("model-router:scout", brief)
+            self.assertEqual((d["model"] or "haiku", d["effort"] or "low"), ("haiku", "low"), brief)
+        self.assertEqual(self.decide("model-router:architect", HARDEST)["model"], "opus")
+        self.assertEqual(self.decide("model-router:deep-solver", LOOKUP)["model"], "opus")  # routed, never Fable by pin
 
     def test_agents_without_a_model_get_the_one_their_subtask_needs(self):
         self.agent("helper")
@@ -676,9 +1027,9 @@ class Router(Sandbox):
             self.assertEqual((d["action"], d["model"], d["effort"], d["source"]),
                              ("rewrite", "haiku", "low", "router"), agent)
         d = self.decide("helper", BUILD)
-        self.assertEqual((d["model"], d["effort"]), ("sonnet", "high"))
+        self.assertEqual((d["model"], d["effort"]), ("sonnet", "medium"))
         d = self.decide("helper", HARD)
-        self.assertEqual((d["model"], d["effort"]), ("opus", "high"))
+        self.assertEqual((d["model"], d["effort"]), ("sonnet", "high"))
 
     def test_a_rewrite_changes_two_fields_and_approves_nothing(self):
         out = self.pre("general-purpose", LOOKUP, description="d", run_in_background=True)
@@ -744,12 +1095,100 @@ class Router(Sandbox):
         self.agent("pinned", "opus")
         d = self.decide("pinned", LOOKUP)  # the pin holds the model; effort still follows the subtask
         self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "opus", "pin", "low"))
-        d = self.decide("model-router:deep-solver", LOOKUP)
+        self.agent("deep", "fable", extra="effort: xhigh\n")
+        d = self.decide("deep", LOOKUP)
         self.assertEqual((d["model"], d["effort"]), ("fable", None))  # its own effort: xhigh
         self.options(max_tier="sonnet")
         d = self.decide("pinned", LOOKUP)
         self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", "low"))
-        self.assertEqual(self.decide("model-router:deep-solver", HARD)["model"], "sonnet")
+        self.assertEqual(self.decide("deep", HARD)["model"], "sonnet")
+
+    def test_a_hand_off_to_the_strong_role_agents_runs_at_least_at_the_requests_level(self):
+        self.session_on("claude-sonnet-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": (
+            "Our order service double-charges customers under concurrent retries across the payments API and "
+            "the worker queue. Find the root cause and design a fix that keeps backward compatibility.")})
+        self.assertEqual(store.load_entry("prompts", "s1")["level"], "hardest")
+        plan = "Plan a fix for the double-charge bug described above."
+        self.assertEqual(self.decide("model-router:scout", plan.replace("Plan a fix for", "List the files of"))["model"],
+                         "haiku")  # the floor is only for the two strong role agents
+        d = self.decide("model-router:architect", plan)
+        self.assertEqual((d["level"], d["model"], d["effort"]), ("hardest", "opus", "high"))
+        self.pre("model-router:architect", plan)
+        self.done("model-router:architect", plan, "claude-opus-5-5", model="opus", effort="high")
+        d = self.decide("model-router:architect", plan)
+        self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("frontier", "fable", "hardest"))
+        check = "Check this proposed fix for the duplicate charge problem and improve it: add a lock."
+        self.assertEqual(self.decide("model-router:architect", check, model="sonnet")["model"], "sonnet")
+        store.update_entry("prompts", "s1", level="frontier")
+        self.assertEqual(self.decide("model-router:deep-solver", check)["level"], "frontier")
+        self.options(max_tier="sonnet")
+        self.assertEqual(self.decide("model-router:architect", check)["model"], "sonnet")
+
+    def test_a_hand_off_while_handling_another_sessions_message_routes_on_its_brief(self):
+        self.session_on("claude-sonnet-5-5")
+        hard = ("Our order service double-charges customers under concurrent retries across the payments API and "
+                "the worker queue. Find the root cause and design a fix that keeps backward compatibility.")
+        rename = "Review this one-line rename of a config field."
+        for message in ("Another Claude session sent a message:\n<cross-session-message from=\"peer\">"
+                        "Rename the field</cross-session-message>",
+                        "Another Claude session sent a message:\n<teammate-message teammate_id=\"dev\">"
+                        "Rename the field</teammate-message>"):
+            hooks.user_prompt({"session_id": "s1", "prompt": hard})
+            hooks.user_prompt({"session_id": "s1", "prompt": message})
+            d = self.decide("model-router:architect", rename)
+            self.assertEqual((d["level"], d["model"]), ("complex", "sonnet"), message)
+            self.assertEqual(store.load_entry("prompts", "s1")["level"], "hardest")  # the Stop check still sees it
+
+    def test_a_task_notification_keeps_the_requests_floor(self):
+        self.session_on("claude-sonnet-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": (
+            "Our order service double-charges customers under concurrent retries across the payments API and "
+            "the worker queue. Find the root cause and design a fix that keeps backward compatibility.")})
+        hooks.user_prompt({"session_id": "s1", "prompt": "<task-notification>done</task-notification>"})
+        d = self.decide("model-router:architect", "Review this one-line rename of a config field.")
+        self.assertEqual((d["level"], d["model"]), ("hardest", "opus"))
+
+    def test_with_no_request_level_the_brief_decides_the_hand_off(self):
+        self.session_on("claude-sonnet-5-5")
+        d = self.decide("model-router:architect", "Plan a fix for the double-charge bug described above.")
+        self.assertEqual((d["level"], d["model"]), ("complex", "sonnet"))
+
+    def test_a_strong_agent_is_named_without_a_model_so_its_brief_routes_and_its_redo_climbs(self):
+        config = cfg.load_config()
+        self.assertEqual(gates.strong_agent(config, "sonnet", "complex"), "model-router:architect")
+        self.assertEqual(gates.strong_agent(config, "fable", "frontier"), "model-router:deep-solver")
+        self.assertEqual(gates.strong_agent({**config, "crew": {}}, "opus", "complex"), 'a subagent with model: "opus"')
+        self.session_on("claude-haiku-5-5")
+        brief = "Design the session store migration across the API and worker services."
+        named = self.decide("model-router:architect", brief, model="sonnet", effort="high")  # the old hint
+        self.assertEqual((named["source"], named["model"]), ("caller", "sonnet"))
+        d = self.decide("model-router:architect", brief)
+        self.assertEqual((d["source"], d["level"], d["model"]), ("router", "hardest", "opus"))
+        self.pre("model-router:architect", brief)
+        self.done("model-router:architect", brief, "claude-opus-5-5", model="opus", effort="high")
+        d = self.decide("model-router:architect", brief)
+        self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("frontier", "fable", "hardest"))
+
+    def test_the_deep_solver_starts_at_hardest_and_can_go_higher(self):
+        d = self.decide("model-router:deep-solver", LOOKUP)  # its name floors the level; the ladder sets the model
+        self.assertEqual((d["source"], d["level"], d["model"], d["effort"]), ("router", "hardest", "opus", "high"))
+        frontier = ("Investigate the unknown root cause of intermittent data loss in the payments database across "
+                    "every service and design a fix; there is no known approach.")
+        d = self.decide("model-router:deep-solver", frontier)
+        self.assertEqual((d["level"], d["model"]), ("frontier", "fable"))
+        self.assertNotIn("model-router:deep-solver", cfg.base_config().get("agents") or {})
+
+    def test_the_role_agents_are_routed_by_their_brief(self):
+        d = self.decide("model-router:implementer", LOOKUP)
+        self.assertEqual((d["action"], d["source"], d["model"], d["effort"]), ("rewrite", "router", "haiku", "low"))
+        for agent in ("scout", "verifier", "docs-researcher"):  # pinned to Haiku, their own effort kept
+            d = self.decide(f"model-router:{agent}", HARDEST)
+            self.assertEqual((d["action"], d["source"], d["model"]), ("keep", "pin", "haiku"), agent)
+        for agent in ("architect", "reviewer"):  # their names set a complex floor
+            d = self.decide(f"model-router:{agent}", LOOKUP)
+            self.assertEqual((d["source"], d["level"]), ("router", "complex"), agent)
+        self.assertEqual(self.decide("model-router:implementer", HARD)["source"], "router")
 
     def test_pins_can_be_overridden(self):
         self.agent("pinned", "opus")
@@ -806,16 +1245,17 @@ class Router(Sandbox):
         self.options(priority="fast")
         self.assertEqual(self.decide("general-purpose", BUILD)["model"], "haiku")
         d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["model"], d["effort"]), ("sonnet", None))
+        self.assertEqual((d["model"], d["effort"]), ("haiku", None))
         self.assertEqual(self.decide("general-purpose", LOOKUP)["effort"], "low")
 
     def test_an_unavailable_model_is_routed_around(self):
-        registry.update_health("opus", unavailable_until=time.time() + 999)
+        registry.update_health("sonnet", unavailable_until=time.time() + 999)
         self.session_on("claude-sonnet-5-5")
-        self.assertEqual(self.decide("general-purpose", HARD)["model"], "fable")  # the next one strong enough
+        self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")  # the next one strong enough
         registry.update_health("fable", unavailable_until=time.time() + 999)
+        registry.update_health("opus", unavailable_until=time.time() + 999)
         self.agent("pinned", "opus")
-        self.assertEqual(self.decide("pinned", LOOKUP)["model"], "sonnet")  # a named model is only ever lowered
+        self.assertEqual(self.decide("pinned", LOOKUP)["model"], "haiku")  # a named model is only ever lowered
 
     def test_rules_in_override_files(self):
         self.override({"agents": {"general-purpose": {"model": "sonnet"}, "Explore": {"route": False},
@@ -880,7 +1320,7 @@ class RepeatGuard(Sandbox):
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
         again = self.decide("general-purpose", LOOKUP)
-        self.assertEqual((again["level"], again["model"], again["effort"]), ("standard", "sonnet", "high"))
+        self.assertEqual((again["level"], again["model"], again["effort"]), ("standard", "sonnet", "medium"))
         self.assertIn("one level above the lookup run", again["reason"])
         self.pre("general-purpose", LOOKUP)
         self.assertEqual(learn.stats()["lookup"]["votes"], 1)
@@ -899,11 +1339,11 @@ class RepeatGuard(Sandbox):
         self.options(max_tier="opus")
         hard = "investigate why auth is flaky and redesign it across every service"
         first = self.decide("general-purpose", hard)
-        self.assertEqual((first["level"], first["model"], first["effort"]), ("hardest", "opus", "xhigh"))
+        self.assertEqual((first["level"], first["model"], first["effort"]), ("hardest", "opus", "high"))
         self.pre("general-purpose", hard)
-        self.done("general-purpose", hard, "claude-opus-5-5", model="opus", effort="xhigh")
+        self.done("general-purpose", hard, "claude-opus-5-5", model="opus", effort="high")
         again = self.decide("general-purpose", hard)
-        self.assertEqual((again["level"], again["model"], again["effort"]), ("frontier", "opus", "max"))
+        self.assertEqual((again["level"], again["model"], again["effort"]), ("frontier", "opus", "xhigh"))
 
     def test_redo_escalation_stops_at_the_top_and_skips_named_models(self):
         hard = "research a novel fix for the auth migration across every service, root cause unknown"
@@ -915,6 +1355,13 @@ class RepeatGuard(Sandbox):
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
         named = self.decide("general-purpose", LOOKUP, model="haiku")
         self.assertEqual((named["source"], named["escalated_from"]), ("caller", None))
+
+    def test_the_ledger_names_the_level_a_redo_climbed_from(self):
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
+        self.pre("general-purpose", LOOKUP)
+        spawns = [r for r in self.ledger() if r.get("event") == "spawn"]
+        self.assertEqual([(r["level"], r["escalated_from"]) for r in spawns], [("lookup", None), ("standard", "lookup")])
 
     def test_an_error_also_settles_the_call(self):
         self.pre("general-purpose", LOOKUP)
@@ -1070,7 +1517,7 @@ class Mod(Sandbox):
     def test_spawns_are_routed_from_the_parents_exact_model(self):
         self.assertEqual(self.spawn("general-purpose", LOOKUP), {"model": "haiku", "effort": "low",
                                                                  "reason": "lookup subtask"})
-        self.assertEqual(self.spawn("general-purpose", HARD)["model"], "opus")
+        self.assertEqual(self.spawn("general-purpose", HARD)["model"], "sonnet")
         self.assertIsNone(self.spawn("general-purpose", BUILD, model="sonnet", effort="high"))
         self.assertEqual(self.ledger()[-1]["via"], "mod")
 
@@ -1124,7 +1571,7 @@ class Mod(Sandbox):
         self.assertEqual(self.spawn("pinned", LOOKUP)["effort"], "low")
         self.done("pinned", LOOKUP, "claude-opus-5-5")
         pick = self.spawn("pinned", LOOKUP)
-        self.assertEqual((pick["model"], pick["effort"]), ("opus", "high"))
+        self.assertEqual((pick["model"], pick["effort"]), ("opus", "medium"))
 
     def test_workflow_stages_and_teammate_roles_without_a_file_are_routed(self):
         for kind, agent in (("workflow", "workflow-subagent"), ("teammate", "helper-two")):
@@ -1138,7 +1585,21 @@ class Mod(Sandbox):
         pick = self.spawn("general-purpose", LOOKUP)
         self.assertEqual((pick["model"], pick["effort"]), (None, "low"))
 
+    def test_turn_effort_stays_off_without_a_first_party_credential(self):
+        self.options(main_effort="true")  # off by default
+        session.record("s1", "claude-opus-5-5")
+        turn = lambda **extra: hooks.mod_turn({"session_id": "s1", "text": HARD, **extra})  # noqa: E731
+        self.assertIsNone(turn(first_party=False))  # a gateway: an effort change re-reads the context
+        self.assertEqual(turn(first_party=True), {"level": "complex", "effort": "high"})
+        self.assertEqual(turn(), {"level": "complex", "effort": "high"})  # not known: raised as before
+
+    def test_turn_effort_is_off_by_default(self):
+        session.record("s1", "claude-opus-5-5")
+        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": HARD}))
+        self.assertFalse(settings.resolve().main_effort)
+
     def test_turn_effort_rises_for_hard_requests_only(self):
+        self.options(main_effort="true")  # off by default
         session.record("s1", "claude-opus-5-5")
         turn = lambda text: hooks.mod_turn({"session_id": "s1", "text": text})  # noqa: E731
         self.assertEqual(turn(HARD), {"level": "complex", "effort": "high"})
@@ -1153,6 +1614,7 @@ class Mod(Sandbox):
                 self.assertIsNone(turn(HARD), name)
 
     def test_turn_effort_is_left_alone_where_an_effort_change_drops_the_cache(self):
+        self.options(main_effort="true")  # off by default
         turn = lambda: hooks.mod_turn({"session_id": "s1", "text": HARD})  # noqa: E731
         for model in ("claude-opus-5-5[1m]", "claude-opus-5-5[1M]", "claude-fable-5-1", "claude-fable-5-2",
                       "claude-fable-6", "claude-sonnet-5-5-20260101", "claude-haiku-5-5"):
@@ -1223,12 +1685,99 @@ class Mod(Sandbox):
         self.assertEqual(registry.health()["opus"]["fail"], 1)
 
 
+class NewestOnProviders(Sandbox):
+    """Where a provider's alias resolves to an older model (the alias table in
+    https://code.claude.com/docs/en/model-config.md), the mod sends the family's newest full ID."""
+
+    LAGS = {"bedrock": ("sonnet", "haiku"), "vertex": ("sonnet", "haiku"), "foundry": ("opus", "sonnet", "haiku"),
+            "anthropic_aws": ("sonnet", "haiku"), "anthropic_google_cloud": ("haiku",)}
+    NEWEST = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
+
+    def spawn(self, prompt: str, agent: str = "general-purpose", **extra) -> tuple[dict | None, dict]:
+        hook_input = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                      "kind": "subagent",
+                      "tool_input": {"subagent_type": agent, "prompt": prompt, "description": "d", **extra}}
+        return hooks.mod_spawn(hook_input), hook_input
+
+    def model(self, prompt: str, **extra) -> str | None:
+        out = self.spawn(prompt, **extra)[0]
+        return out["model"] if out else None
+
+    def test_the_provider_comes_from_the_documented_switches(self):
+        for flags, want in (((), None), (("bedrock",), "bedrock"), (("vertex",), "vertex"), (("foundry",), "foundry"),
+                            (("anthropic_aws",), "anthropic_aws"),
+                            (("anthropic_google_cloud",), "anthropic_google_cloud"),
+                            (("bedrock", "anthropic_aws"), "bedrock"), (("foundry", "anthropic_aws"), "foundry"),
+                            (("anthropic_google_cloud", "vertex"), "anthropic_google_cloud"),
+                            (("mantle",), None), (("bedrock", "mantle"), None), (("bedrock", "vertex"), None)):
+            with mock.patch.dict(os.environ, {f"CLAUDE_CODE_USE_{f.upper()}": "1" for f in flags}):
+                self.assertEqual(settings.resolve().provider, want, flags)
+
+    def test_each_lagging_alias_gets_its_familys_newest_id(self):
+        for provider, lagging in self.LAGS.items():
+            with mock.patch.dict(os.environ, {f"CLAUDE_CODE_USE_{provider.upper()}": "1"}):
+                for family, prompt in (("opus", HARDEST), ("sonnet", BUILD), ("haiku", LOOKUP)):
+                    want = self.NEWEST[family] if family in lagging else family
+                    self.assertEqual(self.model(prompt), want, (provider, family))
+        self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "sonnet"))  # the Anthropic API
+
+    def test_the_shipped_ids_belong_to_their_families_and_are_priced(self):
+        config = cfg.base_config()
+        self.assertEqual({p: tuple(f) for p, f in config["older_aliases"].items() if not p.startswith("$")}, self.LAGS)
+        for family, model_id in config["newest"].items():
+            if not family.startswith("$"):
+                self.assertEqual((registry.family(config, model_id), model_id), (family, self.NEWEST[family]))
+                self.assertIsNotNone(registry.price(config, model_id))
+
+    def test_a_pin_an_allowlist_a_denial_or_overrides_keep_the_alias(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "claude-sonnet-5-5"))
+        del os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"]
+        for managed, want in (({"availableModels": ["haiku", "sonnet", "opus"]}, "claude-haiku-5-5"),
+                              ({"availableModels": ["claude-haiku-5", "sonnet"]}, "claude-haiku-5-5"),
+                              ({"availableModels": ["claude-haiku-5", "sonnet"], "availableModelsMatch": "exact"}, "haiku"),
+                              ({"availableModels": ["claude-haiku-4-5", "sonnet", "opus"]}, "haiku"),
+                              ({"deniedModels": ["claude-haiku-5-5"]}, "haiku")):
+            self.managed.write_text(json.dumps(managed))
+            self.assertEqual(self.model(LOOKUP), want, managed)
+        self.managed.unlink()
+        (self.home / "settings.json").write_text(json.dumps({"modelOverrides": {"claude-haiku-4-5": "arn:aws:x"}}))
+        self.assertEqual(self.model(LOOKUP), "haiku")
+
+    def test_a_version_the_caller_or_the_agent_names_is_left_alone(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        self.assertNotEqual(self.model(LOOKUP, model="claude-haiku-4-5"), "claude-haiku-5-5")
+        self.agent("old-haiku", "claude-haiku-4-5")
+        out = self.spawn(LOOKUP, agent="old-haiku")[0]
+        self.assertNotEqual(out and out["model"], "claude-haiku-5-5")
+        self.agent("any-haiku", "haiku")
+        self.assertEqual(self.spawn(LOOKUP, agent="any-haiku")[0]["model"], "claude-haiku-5-5")
+
+    def test_an_id_the_provider_rejects_falls_back_to_the_alias(self):
+        os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
+        out, hook_input = self.spawn(LOOKUP)
+        self.assertEqual(out["model"], "claude-haiku-5-5")
+        failed = hooks.agent_failed({**hook_input, "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})
+        self.assertIn("claude-haiku-5-5", failed["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(self.ledger()[-1]["model"], "claude-haiku-5-5")  # the model_error row names the ID
+        self.assertEqual(self.model(LOOKUP), "haiku")
+        self.assertTrue(registry.healthy("haiku"))
+
+    def test_the_agent_call_fallback_sends_only_aliases(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        hook_input = {"session_id": "s9", "cwd": str(self.project),
+                      "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
+        self.assertEqual(hooks.pre_agent(hook_input)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
+
+
 class ModPayloads(Sandbox):
     """tests/fixtures/mod-payloads.json holds what hooks/router.ts sends; tests/mod checks the other side."""
 
     def setUp(self):
         super().setUp()
         self.payloads = json.loads((FIXTURES / "mod-payloads.json").read_text(encoding="utf-8"))
+        self.options(main_effort="true")  # off by default
 
     def test_each_command_has_a_handler(self):
         self.assertEqual(set(self.payloads), {name for name in hooks.HANDLERS if name.startswith("mod-")})
@@ -1261,6 +1810,39 @@ class ModPayloads(Sandbox):
         self.assertEqual((row["event"], row["agent_id"], row["cost_usd"]), ("usage", "a1", 6.0))
 
 
+class LongPromptPricing(Sandbox):
+    """Haiku 5.5 bills a request whose prompt is over 100,000 tokens at 5x, each request on its own:
+    https://platform.claude.com/docs/en/about-claude/pricing.md#long-context-pricing"""
+
+    @staticmethod
+    def haiku(input_tokens=0, output_tokens=0, cache_read=0, cache_write=0) -> dict:
+        return {"model": "claude-haiku-5-5", "input_tokens": input_tokens, "output_tokens": output_tokens,
+                "cache_read_input_tokens": cache_read, "cache_creation_input_tokens": cache_write}
+
+    def cost(self, usage: dict, requests: list | None = None):
+        payload = {"session_id": "s1", "agent_id": "a1", "usage": usage}
+        hooks.mod_usage({**payload, "requests": requests} if requests is not None else payload)
+        return self.ledger()[-1]["cost_usd"]
+
+    def test_a_request_over_100k_pays_the_long_prompt_rate(self):
+        short = self.haiku(input_tokens=10_000, cache_write=20_000, output_tokens=1_000)  # 30K prompt
+        long = self.haiku(input_tokens=5_000, cache_read=90_000, cache_write=10_000, output_tokens=2_000)  # 105K
+        turn = self.haiku(input_tokens=15_000, cache_read=90_000, cache_write=30_000, output_tokens=3_000)
+        # $0.004 at $0.10/$0.125/$0.50, plus $0.01825 at $0.50/$0.05/$0.625/$2.50.
+        self.assertEqual(self.cost(turn, [short, long]), 0.02225)
+
+    def test_requests_under_the_threshold_keep_the_base_rate_even_when_the_turn_is_over(self):
+        self.assertEqual(self.cost(self.haiku(input_tokens=160_000),
+                                   [self.haiku(input_tokens=100_000), self.haiku(input_tokens=60_000)]), 0.016)
+
+    def test_a_turn_sent_without_its_requests_is_priced_at_the_base_rate(self):
+        self.assertEqual(self.cost(self.haiku(input_tokens=160_000)), 0.016)
+
+    def test_a_request_on_an_unpriced_model_leaves_the_turn_unpriced(self):
+        stray = {**self.haiku(input_tokens=1), "model": "claude-unknown-9"}
+        self.assertIsNone(self.cost(self.haiku(input_tokens=2), [self.haiku(input_tokens=1), stray]))
+
+
 class Feedback(Sandbox):
     def setUp(self):
         super().setUp()
@@ -1280,14 +1862,16 @@ class Feedback(Sandbox):
         self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "haiku")
 
     def test_the_prompt_note_and_the_stop_gate_follow_a_raised_level(self):
+        self.options(verify_gate="true")  # off by default
+        self.session_on("claude-sonnet-5-5")
         for _ in range(learn.VOTES_NEEDED):
-            learn.decided(cfg.load_config(), source="caller", level="complex", pick="opus", runs_on="fable")
-        hooks.user_prompt({"session_id": "s1", "prompt": HARD})  # opus would do, but complex is raised
+            learn.decided(cfg.load_config(), source="caller", level="complex", pick="sonnet", runs_on="opus")
+        hooks.user_prompt({"session_id": "s1", "prompt": HARD})  # sonnet would do, but complex is raised
         entry = store.load_entry("prompts", "s1")
-        self.assertEqual((entry["level"], entry["need"], entry["below"]), ("complex", "fable", True))
-        self.assertIn("fable-level reasoning", hooks.stop({"session_id": "s1"})["reason"])
+        self.assertEqual((entry["level"], entry["need"], entry["below"]), ("complex", "opus", True))
+        self.assertIn("opus-level reasoning", hooks.stop({"session_id": "s1"})["reason"])
         text = hooks.user_prompt({"session_id": "s1", "prompt": HARD})["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("about fable-level reasoning, and this conversation runs on opus", text)
+        self.assertIn("about opus-level reasoning, and this conversation runs on sonnet", text)
 
     def test_a_few_overrides_among_many_calls_change_nothing(self):
         for i in range(40):
@@ -1367,7 +1951,7 @@ class Hooks(Sandbox):
         text = self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))
         self.assertIn("Model Router is on", text)
         self.assertIn("strongest model in use: opus", text)
-        self.assertIn("model-router:deep-solver", text)
+        self.assertNotIn("model-router:deep-solver", text)  # the Agent tool lists the role agents already
         self.assertIn("re-issue the same call unchanged", text)
         self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", text)
         self.assertEqual(session.model("s1"), "claude-sonnet-5-5")
@@ -1392,10 +1976,12 @@ class Hooks(Sandbox):
 
     def test_user_prompt_is_silent_unless_the_session_is_too_weak(self):
         self.session_on("claude-opus-5-5")
-        self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARD}))
+        self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
         self.session_on("claude-haiku-5-5")
-        text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARD}))
-        self.assertIn("model-router:architect", text)
+        text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
+        # By name only: the router routes the hand-off's brief, and its redo can climb.
+        self.assertIn("model-router:architect rather than", text)
+        self.assertNotIn('model: "', text)
         self.assertTrue(store.load_entry("prompts", "s1")["below"])
 
     def test_machine_written_turns_dont_reset_the_request(self):
@@ -1417,7 +2003,7 @@ class Hooks(Sandbox):
         text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": "use haiku to refactor the auth module"}))
         self.assertIn('model: "haiku"', text)
         self.assertIn("If the user is asking", text)
-        self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")  # nothing is forced
+        self.assertEqual(self.decide("general-purpose", HARD)["model"], "sonnet")  # nothing is forced
         config = cfg.load_config()
         self.assertEqual(hooks.named_model(config, "Use Opus for the review"), "opus")
         self.assertEqual(hooks.named_model(config, "run this on claude fable please"), "fable")
@@ -1442,8 +2028,9 @@ class Hooks(Sandbox):
     def test_model_errors_point_to_the_next_model_and_other_errors_dont_count(self):
         failed = {"session_id": "s1", "cwd": str(self.project),
                   "error": "API Error: 404 not_found_error: model: claude-fable-5-2",
-                  "tool_input": {"subagent_type": "model-router:deep-solver", "prompt": "x"}}
-        self.pre("model-router:deep-solver", "x")
+                  "tool_input": {"subagent_type": "deep", "prompt": "x"}}
+        self.agent("deep", "fable")
+        self.pre("deep", "x")
         self.assertIn('model: "opus"', self.text(hooks.agent_failed(failed)))
         self.assertIn("route around", self.text(hooks.agent_failed(failed)))
         self.assertFalse(registry.healthy("fable"))
@@ -1462,7 +2049,57 @@ class Hooks(Sandbox):
         self.assertTrue(registry.healthy("opus"))
 
 
+class GatesDefault(Sandbox):
+    """verify_gate (the test-run check) is off by default; strong_agent_gate (the stronger-agent
+    check) is on."""
+
+    def hard_on_weak_session(self) -> None:
+        self.session_on("claude-haiku-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
+
+    def edited(self) -> None:
+        self.session_on("claude-opus-5-5")
+        hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": "src/app.py"}})
+
+    def test_the_defaults(self):
+        s = settings.resolve()
+        self.assertEqual((s.verify_gate, s.strong_agent_gate), (False, True))
+
+    def test_the_stronger_agent_check_runs_by_default_and_can_be_turned_off(self):
+        self.hard_on_weak_session()
+        self.assertIn("model-router:architect", hooks.stop({"session_id": "s1"})["reason"])
+        self.options(strong_agent_gate="false")
+        self.hard_on_weak_session()
+        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+
+    def test_the_test_run_check_waits_for_verify_gate(self):
+        self.edited()
+        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+        self.options(verify_gate="true")
+        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
+
+    def test_turning_one_check_off_leaves_the_other(self):
+        self.options(verify_gate="true", strong_agent_gate="false")
+        self.edited()
+        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
+
+    def test_the_prompt_note_promises_a_check_only_when_the_stronger_agent_check_is_on(self):
+        self.session_on("claude-haiku-5-5")
+        note = lambda: self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))  # noqa: E731
+        self.assertIn("model-router:architect", note())
+        self.assertIn("you will be asked to before finishing", note())
+        self.options(strong_agent_gate="false")
+        self.assertNotIn("before finishing", note())
+
+    def text(self, out):
+        return out["hookSpecificOutput"]["additionalContext"]
+
+
 class Gates(Sandbox):
+    def setUp(self):
+        super().setUp()
+        self.options(verify_gate="true")  # off by default
+
     def transcript(self, command: str, stamp: str = "2099-01-01T00:00:00Z") -> str:
         path = Path(self.tmp.name) / "t.jsonl"
         path.write_text(json.dumps({"timestamp": stamp, "message": {"content": [
@@ -1545,7 +2182,7 @@ class Gates(Sandbox):
 
     def test_hard_request_on_a_weak_session_needs_a_strong_agent(self):
         self.session_on("claude-haiku-5-5")
-        hooks.user_prompt({"session_id": "s1", "prompt": HARD})
+        hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
         self.assertIn("model-router:architect", hooks.stop({"session_id": "s1"})["reason"])
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
 
@@ -1557,8 +2194,8 @@ class Gates(Sandbox):
 
     def test_agents_started_together_cant_hide_the_strong_one(self):
         self.session_on("claude-haiku-5-5")
-        hooks.user_prompt({"session_id": "s1", "prompt": HARD})
-        self.pre("general-purpose", HARD)
+        hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
+        self.pre("general-purpose", HARDEST)
         self.pre("general-purpose", LOOKUP)
         self.assertEqual(calls.strongest("s1"), "opus")
 
@@ -1569,6 +2206,35 @@ class Gates(Sandbox):
         self.session_on("claude-fable-5-2")
         hooks.user_prompt({"session_id": "s1", "prompt": HARD})
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
+
+
+class SubagentChecks(Sandbox):
+    """A subagent's commands are in its own transcript (SubagentStop's agent_transcript_path)."""
+
+    def setUp(self):
+        super().setUp()
+        self.options(verify_gate="true")  # off by default
+
+    def transcript(self, name: str, command: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(json.dumps({"timestamp": "2099-01-01T00:00:00Z", "message": {"content": [
+            {"type": "tool_use", "name": "Bash", "input": {"command": command}}]}}) + "\n")
+        return str(path)
+
+    def subagent_fixes_and_stops(self, command: str) -> dict:
+        hooks.post_edit({"session_id": "s1", "agent_id": "a1", "agent_type": "model-router:implementer",
+                         "tool_input": {"file_path": "pages.py"}})
+        hooks.agent_stopped({"session_id": "s1", "agent_id": "a1", "agent_type": "model-router:implementer",
+                             "agent_transcript_path": self.transcript("agent-a1.jsonl", command),
+                             "last_assistant_message": "Fixed the start index."})
+        return {"session_id": "s1", "transcript_path": self.transcript("main.jsonl", "ls")}
+
+    def test_a_test_run_inside_the_subagent_that_edited_satisfies_the_stop_check(self):
+        self.assertIsNone(hooks.stop(self.subagent_fixes_and_stops("python3 -m pytest test_pages.py | tail -15")))
+
+    def test_a_subagent_that_ran_no_check_still_gets_one_asked_for(self):
+        stopped = hooks.stop(self.subagent_fixes_and_stops("cat pages.py"))
+        self.assertIn("model-router:verifier", json.dumps(stopped))
 
 
 class Upstream(Sandbox):
@@ -1760,6 +2426,67 @@ class Upstream(Sandbox):
             server.shutdown()
             server.server_close()
 
+    def dripping_server(self, bodies: dict, delay: float, raw: dict | None = None):
+        """Serves each path's body one byte at a time, `delay` seconds apart. A `raw` path
+        drips its bytes with no status line or headers of the server's own."""
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path not in (raw or {}):
+                    self.send_response(200)
+                    self.end_headers()
+                try:
+                    for byte in (raw or {}).get(self.path) or bodies.get(self.path, b"x" * 1000):
+                        self.wfile.write(bytes([byte]))
+                        self.wfile.flush()
+                        time.sleep(delay)
+                except OSError:
+                    pass  # the client gave up
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    def test_a_request_that_keeps_dripping_stops_at_its_deadline(self):
+        base = self.dripping_server({}, delay=0.05)
+        started = time.monotonic()
+        with mock.patch.object(upstream, "HTTP_TIMEOUT", 0.5), self.assertRaises(OSError):
+            upstream.http_get(base + "/slow")
+        self.assertLess(time.monotonic() - started, 2)
+
+    def test_the_whole_fetch_stops_at_its_budget(self):
+        # The left-over worker's one request fails at its own 5 s deadline, so it never moves on
+        # to the real URLs once the patch is gone.
+        base = self.dripping_server({}, delay=0.02)
+        started = time.monotonic()
+        with mock.patch.multiple(upstream, FETCH_BUDGET=0.7, HTTP_TIMEOUT=5, CHANGELOG_RSS=base + "/rss"), \
+                self.assertRaises(OSError):
+            upstream.fetch(settings.Settings())
+        self.assertLess(time.monotonic() - started, 2)
+
+    def test_the_budget_covers_a_dripped_status_line_too(self):
+        # Headers that never end: the left-over worker fails when the server hangs up.
+        base = self.dripping_server({}, delay=0.05, raw={"/rss": b"HTTP/1.0 200 OK\r\nX-Pad: " + b"x" * 200})
+        started = time.monotonic()
+        with mock.patch.multiple(upstream, FETCH_BUDGET=0.7, HTTP_TIMEOUT=5, CHANGELOG_RSS=base + "/rss"), \
+                self.assertRaises(OSError):
+            upstream.fetch(settings.Settings())
+        self.assertLess(time.monotonic() - started, 2)
+
+    def test_a_body_cut_short_is_a_failed_request(self):
+        import http.client
+        base = self.dripping_server({}, delay=0, raw={"/cut": b"HTTP/1.0 200 OK\r\nContent-Length: 100\r\n\r\n"
+                                                              + b"x" * 10})
+        with self.assertRaises(http.client.IncompleteRead):
+            upstream.http_get(base + "/cut")
+
     def test_a_failed_fetch_leaves_the_cache_alone(self):
         store.save_json(upstream.path(), {"cache": {"fetched_at": 1, "aliases": ["haiku"]}})
         with mock.patch.object(upstream, "http_get", side_effect=OSError("offline")):
@@ -1768,14 +2495,62 @@ class Upstream(Sandbox):
         self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
 
 
+class RefreshBackoff(Sandbox):
+    """A failed daily fetch waits before the next try: an hour, doubling to a day."""
+
+    def refresh(self, at: float, fails: bool):
+        effect = OSError("offline") if fails else None
+        result = {"releases": [], "pages": {}, "aliases": ["haiku"], "fetched_at": int(at)}
+        with mock.patch.object(upstream.time, "time", return_value=at), \
+                mock.patch.object(upstream, "fetch", side_effect=effect, return_value=result) as fetch:
+            try:
+                upstream.refresh(settings.Settings(), force=False)
+            except OSError:
+                pass
+        return fetch.call_count
+
+    def test_a_failure_waits_doubling_up_to_a_day_and_a_success_resets(self):
+        t = 1_000_000.0
+        self.assertEqual(self.refresh(t, fails=True), 1)
+        self.assertEqual(self.refresh(t + 1800, fails=True), 0)  # inside the first hour
+        self.assertEqual(self.refresh(t + 3601, fails=True), 1)  # second failure: two hours
+        self.assertEqual(self.refresh(t + 3601 + 7000, fails=True), 0)
+        self.assertEqual(self.refresh(t + 3601 + 7201, fails=False), 1)
+        self.assertNotIn("failed", upstream.load())
+        store.update_dict(upstream.path(), lambda data: data["cache"].update(fetched_at=0))
+        self.assertEqual(self.refresh(t + 20_000, fails=True), 1)  # the window starts over at an hour
+        self.assertEqual(self.refresh(t + 20_000 + 3601, fails=True), 1)
+        store.update_dict(upstream.path(), lambda data: data["failed"].update(count=40))
+        self.assertEqual(self.refresh(t + 20_000 + 3601 + 86_401, fails=True), 1)  # capped at a day
+
+    def test_a_failure_keeps_the_old_cache_and_a_forced_refresh_still_runs(self):
+        store.save_json(upstream.path(), {"cache": {"aliases": ["haiku"], "fetched_at": 0}})
+        self.refresh(1_000_000.0, fails=True)
+        self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
+        with mock.patch.object(upstream, "fetch", side_effect=OSError("offline")) as fetch:
+            with self.assertRaises(OSError):
+                upstream.refresh(settings.Settings(), force=True)
+        self.assertEqual(fetch.call_count, 1)
+
+    def test_a_corrupt_record_never_blocks_a_fetch(self):
+        for record in ("junk", {"at": "soon", "count": 1}, {"at": 10**15, "count": 1}, {"at": 999_000, "count": -3},
+                       {"at": 1, "count": float("inf")}, {"at": float("-inf"), "count": 1},
+                       {"at": float("nan"), "count": 2}):
+            with self.subTest(record=record):
+                store.save_json(upstream.path(), {"failed": record})
+                self.assertEqual(self.refresh(1_000_000.0, fails=False), 1)
+
+
 class Reports(Sandbox):
-    def test_policy_shows_levels_cap_and_lowered_crew(self):
-        self.assertIn("| complex | opus | high |", self.out("policy"))
+    def test_policy_shows_levels_cap_and_the_crew(self):
+        self.assertIn("| complex | sonnet | high |", self.out("policy"))
         store.update_state(lambda state: state.update(max_tier="sonnet", priority="quality"))
         text = self.out("policy")
         self.assertIn("Cap: **sonnet**", text)
         self.assertIn("fable (not in use)", text)
-        self.assertIn("| model-router:deep-solver | sonnet (lowered from fable) |", text)
+        self.assertIn("| model-router:deep-solver | routed by brief | Research-grade, open-ended tasks with no known approach |",
+                      text)
+        self.assertIn("| model-router:scout | haiku | Read-only search and summary |", text)
         self.assertIn("| lookup | sonnet |", text)
 
     def test_models_report(self):
@@ -1820,6 +2595,286 @@ class Reports(Sandbox):
         self.assertIn("Cap: **haiku**", self.out("--data-dir", str(other), "policy"))
 
 
+class StateFiles(Sandbox):
+    def learned(self) -> Path:
+        return store.data_dir() / "learned.json"
+
+    def count_call(self) -> None:
+        def change(data: dict) -> None:
+            info = data.setdefault("lookup", {})
+            info["calls"] = info.get("calls", 0) + 1
+        store.update_dict(self.learned(), change)
+
+    def test_state_files_carry_a_schema_version_that_reads_never_see(self):
+        store.update_state(lambda state: state.update(max_tier="opus"))
+        store.save_entry("prompts", "s1", {"level": "lookup"})
+        self.assertEqual(json.loads((self.data / "state.json").read_text())["schema"], store.SCHEMA)
+        self.assertEqual(json.loads((self.data / "prompts.json").read_text())["schema"], store.SCHEMA)
+        self.assertEqual(store.load_state(), {"max_tier": "opus"})
+        self.assertEqual(sorted(store.load_state_file(self.data / "prompts.json")), ["s1"])
+
+    def test_a_file_from_before_versioning_is_migrated_and_kept(self):
+        self.learned().write_text(json.dumps({"lookup": {"calls": 4, "votes": 1, "bump": 1}}))
+        self.assertEqual(learn.raises()["lookup"], 1)
+        self.count_call()
+        saved = json.loads(self.learned().read_text())
+        self.assertEqual((saved["schema"], saved["lookup"]["calls"], saved["lookup"]["bump"]), (store.SCHEMA, 5, 1))
+
+    def test_a_file_that_fails_to_parse_is_set_aside_before_it_is_replaced(self):
+        self.learned().write_text('{"lookup": {"calls": 4,')  # half-written
+        self.assertEqual(learn.raises()["lookup"], 0)  # routing goes on
+        self.count_call()
+        aside = list(self.data.glob("learned.json.corrupt-*"))
+        self.assertEqual(len(aside), 1)
+        self.assertRegex(aside[0].name, r"^learned\.json\.corrupt-\d{8}T\d{12}Z$")
+        self.assertEqual(aside[0].read_text(), '{"lookup": {"calls": 4,')
+        self.assertEqual(learn.stats()["lookup"]["calls"], 1)
+        text = self.out("models")
+        self.assertIn("Set aside because it could not be read", text)
+        self.assertIn(str(aside[0]), text)
+
+    def test_a_file_that_is_not_an_object_is_set_aside(self):
+        store.state_path().write_text("[1, 2]")
+        store.update_state(lambda state: state.update(max_tier="opus"))
+        self.assertEqual(len(list(self.data.glob("state.json.corrupt-*"))), 1)
+        self.assertEqual(store.load_state(), {"max_tier": "opus"})
+
+    def test_a_file_from_a_newer_version_is_read_but_never_overwritten(self):
+        newer = json.dumps({"schema": store.SCHEMA + 1, "lookup": {"calls": 9, "bump": 1}})
+        self.learned().write_text(newer)
+        self.assertEqual(learn.raises()["lookup"], 1)
+        self.count_call()
+        self.assertEqual(self.learned().read_text(), newer)
+        self.assertEqual(list(self.data.glob("learned.json.corrupt-*")), [])
+        self.assertIn(f"only read and never updated: {self.learned()}", self.out("models"))
+
+    def test_a_bad_schema_value_counts_as_unreadable(self):
+        for value in (True, -1, "1", 1.0):
+            with self.subTest(value=value):
+                self.learned().write_text(json.dumps({"schema": value, "lookup": {"calls": 4}}))
+                self.count_call()
+                self.assertEqual(learn.stats(), {"lookup": {"calls": 1}})
+                for aside in self.data.glob("learned.json.corrupt-*"):
+                    aside.unlink()
+
+    def test_a_file_that_cant_be_set_aside_is_left_as_it_is(self):
+        self.learned().write_text("{oops")
+        with mock.patch.object(store.os, "replace", side_effect=PermissionError("in use")):
+            self.count_call()
+        self.assertEqual(self.learned().read_text(), "{oops")
+
+    def test_every_older_version_has_a_migration_step(self):
+        self.assertEqual(set(store.MIGRATIONS), set(range(store.SCHEMA)))
+
+    def test_a_broken_settings_file_is_never_moved(self):
+        (self.home / "model-router.json").write_text("{oops")
+        cfg.load_config()
+        store.update_state(lambda state: state.update(max_tier="opus"))
+        self.assertEqual((self.home / "model-router.json").read_text(), "{oops")
+        self.assertEqual(list(self.home.glob("*.corrupt-*")), [])
+
+
+class ResetCommand(Sandbox):
+    """`models --reset` says what it cleared and what it had to leave."""
+
+    NEWER = {"schema": 99, "health": {"opus": {"fail": 2}}, "lookup": {"calls": 3, "bump": 1}}
+
+    def setUp(self):
+        super().setUp()
+        store.data_dir()
+
+    def reset(self) -> str:
+        return self.out("models", "--reset").split("\n\n")[0]
+
+    def test_clears_both_when_it_can(self):
+        registry.record_failure("opus", "404 model not found")
+        store.save_json(self.data / "learned.json", {"lookup": {"calls": 3, "bump": 1}})
+        self.assertEqual(self.reset(), "Learned availability cleared.\nFeedback cleared.")
+        self.assertNotIn("health", store.load_state())
+        self.assertFalse((self.data / "learned.json").exists())
+        self.assertEqual(self.reset(), "No learned availability to clear.\nNo feedback to clear.")
+
+    def test_leaves_files_a_newer_release_wrote(self):
+        for name in ("state.json", "learned.json"):
+            (self.data / name).write_text(json.dumps(self.NEWER))
+        self.assertEqual(self.reset(),
+                         "Learned availability left as is: state.json was written by a newer Model Router release.\n"
+                         "Feedback left as is: learned.json was written by a newer Model Router release.")
+        for name in ("state.json", "learned.json"):
+            self.assertEqual(json.loads((self.data / name).read_text()), self.NEWER)
+
+    def test_leaves_files_it_cannot_read(self):
+        for name in ("state.json", "learned.json"):
+            (self.data / name).mkdir()
+        self.assertEqual(self.reset(),
+                         "Learned availability left as is: state.json could not be read or written.\n"
+                         "Feedback left as is: learned.json could not be read or removed.")
+        self.assertTrue((self.data / "learned.json").is_dir())
+
+    def test_update_reports_whether_it_wrote(self):
+        path = self.data / "learned.json"
+        self.assertEqual(store.try_update(path, lambda data: data.update(a=1)), ({"a": 1}, "saved"))
+        path.write_text(json.dumps({"schema": 99, "a": 1}))
+        self.assertEqual(store.try_update(path, lambda data: data.update(a=2)), ({"a": 2}, "newer"))
+        self.assertEqual(json.loads(path.read_text()), {"schema": 99, "a": 1})
+
+    def test_corrupt_files_are_set_aside_not_deleted(self):
+        for name in ("state.json", "learned.json"):
+            (self.data / name).write_text('{"half": ')
+        self.assertEqual(self.reset(), "No learned availability to clear.\nFeedback cleared.")
+        self.assertEqual(len(list(self.data.glob("state.json.corrupt-*"))), 1)
+        self.assertEqual(len(list(self.data.glob("learned.json.corrupt-*"))), 1)
+        self.assertFalse((self.data / "learned.json").exists())
+
+
+class SlashSkills(Sandbox):
+    """A skill typed as /name is profiled by what it asks for: its arguments and its body."""
+
+    def setUp(self):
+        super().setUp()
+        self.options(main_effort="true")  # off by default
+
+    HARD_BODY = ("Base directory for this skill: /p/.claude/skills/hard\n\nInvestigate the race condition in the "
+                 "auth migration across every service, find the root cause and redesign the locking.")
+    LOOKUP_BODY = "Base directory for this skill: /p/.claude/skills/where\n\nList the files under src."
+    LINE = "<command-message>{0}</command-message>\n<command-name>/{0}</command-name>\n<command-args>{1}</command-args>"
+
+    def turn(self, name: str, args: str, body: str | None, **extra) -> dict | None:
+        command = {"name": name, "args": args, **({"body": body} if body is not None else {})}
+        return hooks.mod_turn({"session_id": "s1", "text": self.LINE.format(name, args), "command": command, **extra})
+
+    def test_a_hard_skill_raises_the_turn_and_a_lookup_does_not(self):
+        self.session_on("claude-opus-5-5")
+        # No placeholder takes the arguments, so the engine appends them (as seen live on 2.1.330).
+        appended = self.HARD_BODY + "\n\n\nARGUMENTS: please check src too"
+        self.assertEqual(self.turn("hard", "please check src too", appended)["effort"], "xhigh")
+        self.assertEqual(self.turn("hard", "", self.HARD_BODY)["effort"], "xhigh")
+        self.assertIsNone(self.turn("where", "", self.LOOKUP_BODY))
+        self.assertEqual(self.turn("plain", HARD, None), {"level": "complex", "effort": "high"})  # args alone
+
+    def test_a_skill_that_takes_its_arguments_is_profiled_by_them(self):
+        self.session_on("claude-opus-5-5")
+        raw = (PLUGIN / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")
+        body = "Base directory for this skill: /p/skills/ship\n\n" + raw.split("---\n", 2)[2]
+        typo = "fix the typo in README.md"
+        self.assertIsNone(self.turn("model-router:ship", typo, body.replace("$ARGUMENTS", typo)))
+        hard = body.replace("$ARGUMENTS", HARD)
+        self.assertEqual(self.turn("model-router:ship", HARD, hard), {"level": "complex", "effort": "high"})
+        self.assertEqual(self.turn("model-router:ship", "", body.replace("$ARGUMENTS", ""))["level"], "frontier")
+        # The settings hook reads the raw file, where the placeholder is still there.
+        skills = self.project / ".claude" / "skills" / "ship"
+        skills.mkdir(parents=True)
+        (skills / "SKILL.md").write_text(raw, encoding="utf-8")
+        hooks.user_prompt({"session_id": "s1", "prompt": "/ship " + typo, "cwd": str(self.project)})
+        self.assertEqual(store.load_entry("prompts", "s1")["level"], "standard")
+        named = self.project / ".claude" / "skills" / "named"
+        named.mkdir()
+        (named / "SKILL.md").write_text("---\nname: named\narguments: [task]\n---\nRedesign the auth schema across "
+                                        "every service: $task\n", encoding="utf-8")
+        hooks.user_prompt({"session_id": "s1", "prompt": "/named " + typo, "cwd": str(self.project)})
+        self.assertEqual(store.load_entry("prompts", "s1")["level"], "standard")
+
+    def test_an_argument_that_only_names_the_target_leaves_the_task_to_the_body(self):
+        self.session_on("claude-opus-5-5")
+        raw = ("---\nname: security-review\nargument-hint: <pr-number>\n---\nReview pull request #$ARGUMENTS for "
+               "security vulnerabilities: auth bypasses, injection, secrets in code, across the API and worker "
+               "services.\n")
+        body = "Base directory for this skill: /p/.claude/skills/security-review\n\n" + raw.split("---\n", 2)[2]
+        for target in ("482", "src/auth.py", "https://github.com/acme/api/pull/482", "PaymentService",
+                       "src/a.py src/b.py src/c.py", "482 --base main", "src/auth.py src/session.py",
+                       "docs/plan.md app/x.py", "auth module", "payments service", "audit", "the login page",
+                       "PR 482 from Dana", "look at it", "the payments service", "the auth module docs"):
+            with self.subTest(target=target):
+                self.assertEqual(self.turn("security-review", target, body.replace("$ARGUMENTS", target))["effort"],
+                                 "high")
+                self.assertEqual(hooks._profile_skill(target, raw, rendered=False)["level"], "complex")
+        skills = self.project / ".claude" / "skills" / "security-review"
+        skills.mkdir(parents=True)
+        (skills / "SKILL.md").write_text(raw, encoding="utf-8")
+        for typed in ("/security-review 482", "/security-review the login page"):
+            hooks.user_prompt({"session_id": "s1", "prompt": typed, "cwd": str(self.project)})
+            self.assertEqual(store.load_entry("prompts", "s1")["level"], "complex", typed)
+        ship = (PLUGIN / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8").split("---\n", 2)[2]
+        ship_body = lambda args: ship.replace("$ARGUMENTS", args)  # noqa: E731
+        # A template body serves many targets, so its own wording decides at most complex: an issue number
+        # through ship doesn't take its pipeline's gate text as the task.
+        self.assertEqual(self.turn("model-router:ship", "1234", ship_body("1234")), {"level": "complex",
+                                                                                  "effort": "high"})
+        # A task in the arguments still decides, the m3-02 case.
+        for args in ("fix the typo in README.md", "explain the retry flow", "fix it"):
+            with self.subTest(args=args):
+                self.assertIsNone(self.turn("model-router:ship", args, ship_body(args)))
+        # No listed verb: a description without an instruction leaves the task to ship's body, capped at complex.
+        for args in ("the README typo near the top", "tidy the imports please"):
+            with self.subTest(args=args):
+                self.assertEqual(self.turn("model-router:ship", args, ship_body(args))["level"], "complex")
+        for text, work in (("fix the typo", True), ("audit", False), ("src/a.py src/b.py", False),
+                           ("tidy the imports please", False), ("PaymentService", False),
+                           ("the payments service", False), ("please review PR 482", True)):
+            self.assertEqual(profile.asks_for_work(text), work, text)
+
+    def test_only_a_placeholder_that_receives_the_arguments_hands_them_the_task(self):
+        hard = self.HARD_BODY.split("\n\n")[1]
+        rendered = lambda body, args: hooks._profile_skill(args, body, rendered=True)["level"]  # noqa: E731
+        raw = lambda body, args: hooks._profile_skill(args, body, rendered=False)["level"]  # noqa: E731
+        # An earlier ARGUMENTS: line in the body is not the engine's trailer, and any trailer means no placeholder.
+        self.assertEqual(rendered(hard + "\nARGUMENTS: none\nKeep notes.\n\n\nARGUMENTS: src", "src"), "hardest")
+        self.assertEqual(rendered(hard + "\n\n\nARGUMENTS: src  extra", "src extra"), "hardest")
+        self.assertEqual(rendered(hard + "\n\n\nARGUMENTS: line one\nline two", "line one\nline two"), "hardest")
+        for body, args in ((hard + " Refunds over $500 need approval.", "src"),  # an amount, not a placeholder
+                           (hard + " Costs $1.00 a run.", "src"),
+                           (hard + " Compare with $2.", "src"),  # $2 receives nothing from one argument
+                           (hard + " Target: \\$ARGUMENTS", "src"),  # escaped
+                           ("---\narguments: [task]\n---\n" + hard, "src")):  # declared, never used
+            self.assertEqual(raw(body, args), "hardest", body)
+        task = "list the files under src"  # arguments that carry a task of their own
+        self.assertEqual(raw(hard + " Target: $0", task), "lookup")
+        self.assertEqual(raw(hard + " Target: $ARGUMENTS[0]", task), "lookup")
+        self.assertEqual(raw("---\narguments:\n  - task\n---\n" + hard + " On $task.", task), "lookup")
+
+    def test_a_long_ordinary_skill_body_is_not_a_hard_request(self):
+        self.session_on("claude-opus-5-5")
+        body = "Never commit secrets or credentials. " + "Write a clear commit message for the staged change. " * 40
+        self.assertGreater(len(body), 1500)
+        self.assertIsNone(self.turn("commit", "", body))
+        self.assertIsNone(self.turn("commit", "", "Review the staged diff in production style.\n" + body))
+        # The cut only works while the opening is too short for profile_prompt's own length rule.
+        self.assertNotIn("scope", profile.profile_prompt("note " * (hooks._SKILL_BODY_CHARS // 5))["signals"])
+
+    def test_a_teammate_message_still_does_not_raise(self):
+        self.session_on("claude-opus-5-5")
+        self.assertIsNone(self.turn("hard", "", self.HARD_BODY, origin="peer"))
+        delivered = "Another Claude session sent a message:\n<cross-session-message from=\"x\">\n" + HARD
+        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": delivered}))
+        # A command left over from a submit whose turn never started can't stand in for another turn's text.
+        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": delivered,
+                                          "command": {"name": "rename", "args": HARD}}))
+        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": self.LINE.format("other", ""),
+                                          "command": {"name": "rename", "args": HARD}}))
+
+    def test_the_settings_hook_reads_a_project_or_user_skill_it_can_find(self):
+        self.session_on("claude-haiku-5-5")
+        skills = self.project / ".claude" / "skills" / "hard"
+        skills.mkdir(parents=True)
+        (skills / "SKILL.md").write_text("---\nname: hard\ndescription: x\n---\n" + self.HARD_BODY.split("\n\n")[1])
+        commands = self.home / "commands"
+        commands.mkdir(parents=True)
+        (commands / "where.md").write_text("List the files under src.")
+        level = lambda prompt: (hooks.user_prompt({"session_id": "s1", "prompt": prompt, "cwd": str(self.project)}),  # noqa: E731
+                                store.load_entry("prompts", "s1")["level"])[1]
+        self.assertEqual(level("/hard please check src too"), "hardest")
+        self.assertEqual(level("/where"), "lookup")
+        self.assertEqual(level("/elsewhere:unknown " + LOOKUP), "lookup")  # not found: the typed line is profiled
+        (skills / "SKILL.md").write_bytes("\ufeff---\r\nname: hard\r\ndescription: secrets schema production\r\n---\r\n"
+                                          "List the files under src.\r\n".encode("utf-8"))
+        self.assertEqual(level("/hard"), "lookup")  # a BOM and CRLF frontmatter is still left out
+        if hasattr(os, "mkfifo"):
+            fifo = self.project / ".claude" / "skills" / "pipe"
+            fifo.mkdir()
+            os.mkfifo(fifo / "SKILL.md")
+            self.assertEqual(level("/pipe " + LOOKUP), "lookup")  # never opened, so the hook can't hang
+
+
 @unittest.skipUnless(shutil.which("sh"), "needs sh")
 class Launcher(Sandbox):
     def test_launcher_runs_hooks_and_commands(self):
@@ -1830,6 +2885,686 @@ class Launcher(Sandbox):
         self.assertEqual(json.loads(res.stdout)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
         res = subprocess.run(["sh", launcher, "policy"], capture_output=True, text=True, env={**os.environ})
         self.assertIn("Subtask level", res.stdout)
+
+    def fake_pythons(self, python3: str, python: str) -> dict:
+        """A PATH whose python3 and python are scripts that log each start and then run `real`
+        (the interpreter running this test) or exit as a too-old one would."""
+        folder = Path(self.tmp.name) / "bin"
+        folder.mkdir()
+        log = folder / "starts.log"
+        real = Path(sys.executable).as_posix()
+        bodies = {"real": f'exec "{real}" "$@"', "old": "exit 87",
+                  "broken": "echo 'Python was not found' >&2; exit 49"}  # a Store stub or an unset shim
+        for name, kind in (("python3", python3), ("python", python)):
+            body = bodies[kind]
+            script = folder / name
+            script.write_bytes(f'#!/bin/sh\necho {name} >> "{log.as_posix()}"\n{body}\n'.encode())
+            script.chmod(0o755)
+        env = {**os.environ, "PATH": f"{folder}{os.pathsep}/usr/bin{os.pathsep}/bin"}
+        return {"env": env, "log": log}
+
+    def test_a_hook_starts_python_once(self):
+        self.session_on("claude-opus-5-5")
+        fake = self.fake_pythons("real", "real")
+        res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), "pre-agent"],
+                             input=json.dumps(self.call("general-purpose", LOOKUP)), capture_output=True,
+                             text=True, env=fake["env"])
+        self.assertEqual(json.loads(res.stdout)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
+        self.assertEqual(fake["log"].read_text().split(), ["python3"])
+
+    def test_a_too_old_or_broken_python3_falls_through_to_python(self):
+        self.session_on("claude-opus-5-5")
+        for kind in ("old", "broken"):
+            with self.subTest(python3=kind):
+                fake = self.fake_pythons(kind, "real")
+                res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), "pre-agent"],
+                                     input=json.dumps(self.call("general-purpose", LOOKUP)), capture_output=True,
+                                     text=True, env=fake["env"])
+                self.assertEqual(json.loads(res.stdout)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
+                shutil.rmtree(fake["log"].parent)
+
+    def test_with_no_new_enough_python_hooks_pass_and_commands_explain(self):
+        launcher = (SCRIPTS / "model-router.sh").as_posix()
+        for kind in ("old", "broken"):
+            with self.subTest(pythons=kind):
+                fake = self.fake_pythons(kind, kind)
+                hook = subprocess.run(["sh", launcher, "pre-agent"], input="{}", capture_output=True, text=True,
+                                      env=fake["env"])
+                self.assertEqual((hook.returncode, hook.stdout), (0, ""))
+                command = subprocess.run(["sh", launcher, "policy"], capture_output=True, text=True,
+                                         env=fake["env"])
+                self.assertEqual(command.returncode, 0)
+                self.assertIn("needs Python 3.9 or later", command.stdout)
+                shutil.rmtree(fake["log"].parent)
+
+    def test_a_real_command_error_keeps_its_exit_code(self):
+        fake = self.fake_pythons("real", "real")
+        res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), "--no-such-flag"],
+                             capture_output=True, text=True, env=fake["env"])
+        self.assertEqual(res.returncode, 2)  # argparse's code, not the fallback's 0
+        self.assertEqual(fake["log"].read_text().split(), ["python3", "python3"])  # the run, then the probe
+
+    def test_hooks_dont_load_the_network_or_xml_modules(self):
+        probe = ("import sys; sys.path.insert(0, sys.argv[1]); import modelrouter.cli; "
+                 "print(sorted(m for m in ('urllib.request', 'http.client', 'xml.etree.ElementTree') if m in sys.modules))")
+        res = subprocess.run([sys.executable, "-c", probe, str(SCRIPTS)], capture_output=True, text=True)
+        self.assertEqual(res.stdout.strip(), "[]", res.stderr)
+
+    def test_the_entry_point_exits_87_on_an_old_python_before_importing_anything(self):
+        source = (SCRIPTS / "model-router.py").read_text(encoding="utf-8")
+        head = source.split("from pathlib")[0]
+        self.assertIn("sys.version_info < (3, 9)", head)
+        self.assertIn("87", head)
+        # An old Python compiles the whole file before the check runs: any newer syntax would
+        # exit 1, which the launcher reads as a real error rather than "try the next one".
+        code = "\n".join(line.split("#")[0] for line in source.splitlines() if not line.lstrip().startswith(('"""', "#")))
+        self.assertTrue(source.isascii())
+        self.assertNotRegex(code, r"""\bf["']|:=|->|\w+\s*:\s*\w+\s*=""")
+
+
+class ReadmeDiagrams(unittest.TestCase):
+    SVG = "{http://www.w3.org/2000/svg}"
+    NAMES = ("two-paths.svg", "ladder.svg", "redo-escalation.svg")
+
+    def parse(self, name: str):
+        import xml.etree.ElementTree as ET
+        return ET.parse(ROOT / "docs" / "assets" / name).getroot()
+
+    def test_each_diagram_is_valid_titled_svg_linked_from_the_readme(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for name in self.NAMES:
+            root = self.parse(name)
+            self.assertEqual(root.tag, f"{self.SVG}svg", name)
+            for attr in ("viewBox", "width", "height"):
+                self.assertTrue(root.get(attr), f"{name} has no {attr}")
+            title = root.find(f"{self.SVG}title")
+            self.assertTrue(title is not None and (title.text or "").strip(), f"{name} has no title")
+            self.assertIn(f"](docs/assets/{name})", readme)
+            source = (ROOT / "docs" / "assets" / name).read_text(encoding="utf-8")
+            self.assertNotIn("var(", source, f"{name}: librsvg and some viewers render CSS variables black")
+            self.assertIn("prefers-color-scheme: dark", source, name)
+
+    def text(self, name: str) -> str:
+        return " ".join((cell.text or "").strip() for cell in self.parse(name).iter(f"{self.SVG}text"))
+
+    def test_the_two_paths_diagram_names_every_settings_hook(self):
+        events = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+        words = self.text("two-paths.svg").split()
+        for event in events:
+            self.assertIn(event, words)
+
+    def test_the_redo_diagram_states_the_learning_thresholds(self):
+        text = self.text("redo-escalation.svg")
+        self.assertIn(f"{learn.VOTES_NEEDED} votes", text)
+        self.assertIn(f"{round(learn.SHARE_NEEDED * 100)}%", text)
+
+    def test_the_ladder_diagram_matches_the_registry(self):
+        config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
+        by_strength = {m["strength"]: name for name, m in config["models"].items()}
+        text = self.text("ladder.svg").lower()
+        for level, spec in config["levels"].items():
+            row = f"{level} {by_strength[spec['needs']]} {spec['effort']}"
+            self.assertIn(row, text)
+
+    def test_the_ladder_note_says_where_a_ruled_out_model_moves_the_pick(self):
+        from modelrouter import ladder
+        config = cfg.base_config()
+        self.assertEqual(ladder.pick(config, "lookup", "balanced", ["sonnet", "opus", "fable"], {}).model, "sonnet")
+        self.assertEqual(ladder.pick(config, "complex", "balanced", ["haiku", "sonnet"], {}).model, "sonnet")
+        text = self.text("ladder.svg")
+        self.assertIn("the pick moves to the nearest usable model above it, or to the strongest one left", text)
+        self.assertNotIn("never raised", text)
+
+    def test_the_redo_note_names_each_step_of_the_ladder(self):
+        levels = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["levels"]
+        steps = list(zip(levels, list(levels)[1:]))
+        stronger = [a for a, b in steps if levels[b]["needs"] > levels[a]["needs"]]
+        text = self.text("redo-escalation.svg").lower()
+        self.assertIn(f"{', '.join(stronger[:-1])} and {stronger[-1]} move to a stronger model", text)
+        for a, b in steps:
+            if levels[b]["needs"] == levels[a]["needs"]:
+                self.assertIn(f"{a} stays on", text)
+
+
+class MachineReadable(Sandbox):
+    """`--json` on usage and models: one object, a versioned schema, the same facts as the tables."""
+
+    def json_out(self, *argv: str) -> dict:
+        return json.loads(self.out(*argv, "--json"))
+
+    def test_usage_json(self):
+        self.assertEqual(self.json_out("usage"), {
+            "schema": "model-router.usage/1", "days": 7, "agents": [], "models": [], "model_errors": 0,
+            "spend": {"total_usd": 0, "rows": [], "unpriced": []}})
+        self.assertIsInstance(self.json_out("usage")["spend"]["total_usd"], float)
+        self.session_on("claude-opus-5-5")
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku")
+        for agent_id, model in ((None, "claude-opus-5-5"), ("a1", "claude-new-9")):
+            hooks.mod_usage({"session_id": "s1", "agent_id": agent_id, "usage": {
+                "model": model, "input_tokens": 0, "output_tokens": 1_000_000,
+                "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}})
+        data = self.json_out("usage", "30")
+        self.assertEqual(data["days"], 30)
+        self.assertEqual(data["agents"], [{"agent": "general-purpose", "calls": 1, "routed": 1,
+                                           "levels": {"lookup": 1}, "ran_on": {"claude-haiku-5-5": 1}}])
+        self.assertEqual(data["models"], [{"model": "claude-haiku-5-5", "runs": 1, "tokens": 1200}])
+        self.assertEqual(data["spend"], {"total_usd": 20.0, "unpriced": ["claude-new-9"], "rows": [
+            {"loop": "main", "model": "claude-opus-5-5", "turns": 1, "output_tokens": 1_000_000, "usd": 20.0},
+            {"loop": "subagent", "model": "claude-new-9", "turns": 1, "output_tokens": 1_000_000, "usd": 0}]})
+
+    def test_models_json(self):
+        registry.record_result("fable", "claude-opus-5-5", "opus")
+        registry.record_result("fable", "claude-opus-5-5", "opus")
+        registry.record_result("haiku", "claude-haiku-5-5", "haiku")
+        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "opus", "fable"]}))
+        store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga"]}})
+        data = self.json_out("models")
+        self.assertEqual(data["schema"], "model-router.models/1")
+        self.assertEqual((data["cap"], data["priority"], data["strongest_in_use"]), (None, "balanced", "opus"))
+        rows = {m["model"]: m for m in data["models"]}
+        self.assertEqual(list(rows), ["haiku", "sonnet", "opus", "fable"])
+        self.assertEqual(rows["haiku"], {"model": "haiku", "last_ran_as": "claude-haiku-5-5",
+                                         "status": "working", "detail": "working"})
+        self.assertEqual((rows["sonnet"]["status"], rows["sonnet"]["last_ran_as"]), ("not_permitted", None))
+        self.assertEqual(rows["fable"]["status"], "routed_around")
+        self.assertIn("ran as claude-opus-5-5 instead", rows["fable"]["detail"])
+        self.assertEqual(rows["opus"]["status"], "not_used")
+        self.assertEqual((data["doc_aliases"], data["not_in_registry"]), (["haiku", "saga"], ["saga"]))
+        self.assertEqual(data["levels"], [])
+        store.save_json(store.data_dir() / "learned.json", {"complex": {"calls": 4, "votes": 1, "bump": 1}})
+        self.assertEqual(self.json_out("models")["levels"],
+                         [{"level": "complex", "routed_calls": 4, "votes_too_low": 1, "raised": True}])
+        self.assertIn("| complex | 4 | 1 | yes |", self.out("models"))
+        store.update_state(lambda state: state.update(max_tier="sonnet"))
+        rows = {m["model"]: m for m in self.json_out("models")["models"]}
+        self.assertEqual(rows["opus"]["status"], "above_cap")
+        self.assertEqual(json.loads(self.out("models", "--reset", "--json"))["schema"], "model-router.models/1")
+        store.save_json(upstream.path(), {"cache": {"aliases": "saga"}})  # a corrupt cache lists nothing
+        self.assertEqual(self.json_out("models")["not_in_registry"], [])
+
+    def test_models_json_names_state_files_set_aside_or_left_read_only(self):
+        data = self.json_out("models")
+        self.assertEqual((data["set_aside"], data["newer_files"]), ([], []))
+        learned = store.data_dir() / "learned.json"
+        learned.write_text('{"lookup": {"calls": 4,')
+        store.update_dict(learned, lambda data: None)
+        newer = store.data_dir() / "prompts.json"
+        newer.write_text(json.dumps({"schema": store.SCHEMA + 1}))
+        data = self.json_out("models")
+        self.assertEqual(data["set_aside"], [str(p) for p in store.set_aside()])
+        self.assertRegex(data["set_aside"][0], r"learned\.json\.corrupt-")
+        self.assertEqual(data["newer_files"], [str(newer)])
+
+
+@unittest.skipUnless(shutil.which("sh"), "needs sh")
+class OverheadBench(unittest.TestCase):
+    def test_the_overhead_bench_reports_every_hook_and_state_file(self):
+        run = subprocess.run([sys.executable, str(ROOT / "bench" / "overhead.py"), "--runs", "1", "--calls", "40",
+                              "--json"], capture_output=True, text=True, timeout=300)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        report = json.loads(run.stdout)
+        hooks_json = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+        commands = {h["args"][-1] for groups in hooks_json.values() for group in groups for h in group["hooks"]}
+        timed = {row["command"] for row in report["hooks"]}
+        self.assertEqual(timed, commands - {"refresh-cache"})  # async, and it would use the network
+        for row in [report["floor"], *report["hooks"], *report["mod"]]:
+            for key in ("p50_ms", "p95_ms", "runs"):
+                self.assertIn(key, row, row)
+        for row in report["hooks"]:
+            self.assertIn(row["phase"], ("cold", "warm"))
+        files = {row["file"]: row for row in report["state"]}
+        for name in ("ledger.jsonl", "learned.json", "state.json"):
+            self.assertIn(name, files)
+            self.assertIn("bytes_per_1000_calls", files[name])
+            self.assertIs(files[name]["bounded"], True, name)
+        for key in ("python", "platform", "claude_code"):
+            self.assertIn(key, report["machine"])
+
+
+class PriceTable(unittest.TestCase):
+    """Prices from https://platform.claude.com/docs/en/about-claude/pricing.md (checked 2026-11-22)."""
+
+    # The pricing page lists no rate for this one.
+    UNLISTED = {"claude-mythos-preview"}
+
+    def test_every_model_still_in_service_has_a_price(self):
+        config = cfg.load_config()
+        lifecycle = json.loads((ROOT / "compat" / "baseline.json").read_text(encoding="utf-8"))["lifecycle"]
+        missing = [model for model, info in lifecycle.items()
+                   if info.get("state") in ("Active", "Deprecated") and model not in self.UNLISTED
+                   and registry.price(config, model) is None]
+        self.assertEqual(missing, [])
+
+    def test_mythos_is_priced_like_its_fable_twin(self):
+        config = cfg.load_config()
+        for version, rates in (("5-2", (8, 40, 0.2, 10, 16)), ("5-1", (10, 50, 0.25, 12.5, 20)),
+                               ("5", (10, 50, 1, 12.5, 20))):
+            price = registry.price(config, f"claude-mythos-{version}")
+            self.assertEqual(tuple(price[k] for k in ("input", "output", "cache_read", "cache_write",
+                                                      "cache_write_1h")), rates, version)
+
+
+import random  # noqa: E402
+import timeit  # noqa: E402
+
+
+class SecurityClaims(Sandbox):
+    """Each claim in docs/SECURITY.md's assessment, rerun on every change (S8.3)."""
+
+    def test_a_repository_file_keeps_only_routing_mode_models_levels_and_agents(self):
+        cleaned = cfg._clean({"routing_mode": "advise", "models": {"saga": {"strength": 1}},
+                              "levels": {"lookup": {"effort": "low"}}, "agents": {"x": {"level": "lookup"}},
+                              "prices": {"claude-saga-1": {"input": 1}}, "newest": {"opus": "claude-x"},
+                              "older_aliases": {"bedrock": ["opus"]}, "crew": {"x": {}}, "main": {}})
+        self.assertEqual(set(cleaned), {"routing_mode", "models", "levels", "agents"})
+        self.override({"prices": {"claude-opus-5-5": {"output": 0}}, "newest": {"opus": "claude-evil-1"}})
+        config = cfg.load_config()
+        self.assertEqual(config["newest"], cfg.base_config()["newest"])
+        self.assertEqual(config["prices"]["claude-opus-5-5"], cfg.base_config()["prices"]["claude-opus-5-5"])
+
+    def test_the_weakest_routing_mode_wins(self):
+        for user, project, want in (("auto", "off", "off"), ("off", "auto", "off"), ("advise", "auto", "advise")):
+            with self.subTest(user=user, project=project):
+                self.override({"routing_mode": user}, user=True)
+                self.override({"routing_mode": project})
+                self.assertEqual(settings.resolve(cfg.load_config()).mode, want)
+
+    def test_a_project_model_cannot_take_a_trusted_name_or_count_under_a_cap(self):
+        self.override({"models": {"opus-fast": {"strength": 9}, "pus": {"strength": 9}, "saga": {"strength": 0.1}}})
+        config = cfg.load_config()
+        self.assertNotIn("opus-fast", config["models"])
+        self.assertNotIn("pus", config["models"])
+        self.assertIn("saga", registry.available(config))
+        self.assertNotIn("saga", registry.available(config, cap="sonnet"))
+
+    def test_it_writes_only_under_its_data_directory(self):
+        outside = [self.home, self.project]
+        before = {p: p.stat().st_mtime_ns for root in outside for p in root.rglob("*")}
+        self.session_on("claude-opus-5-5")
+        hooks.session_start({"session_id": "s1", "source": "startup", "model": "claude-opus-5-5",
+                             "cwd": str(self.project)})
+        hooks.user_prompt({"session_id": "s1", "prompt": HARD, "cwd": str(self.project)})
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
+        for argv in (("policy",), ("models",), ("usage",), ("status",), ("explain", HARD)):
+            self.out(*argv)
+        after = {p: p.stat().st_mtime_ns for root in outside for p in root.rglob("*")}
+        self.assertEqual(after, before)
+        self.assertTrue(any(self.data.iterdir()))
+
+    def test_it_never_approves_a_tool_call(self):
+        self.session_on("claude-opus-5-5")
+        outputs = [hooks.pre_agent(self.call(agent, brief, **extra)) for agent, brief, extra in (
+            ("general-purpose", LOOKUP, {}), ("general-purpose", HARD, {}), (None, BUILD, {"model": "opus"}),
+            ("Explore", LOOKUP, {"model": "fable"}))]
+        for out in outputs:
+            decision = ((out or {}).get("hookSpecificOutput") or {}).get("permissionDecision")
+            self.assertIn(decision, (None, "deny"))
+
+    def test_only_upstream_opens_connections(self):
+        for path in (SCRIPTS / "modelrouter").glob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            if path.name != "upstream.py":
+                self.assertIsNone(re.search(r"^\s*(?:import|from)\s+(?:urllib|http|socket|ssl)\b", text, re.M), path)
+        hosts = set(re.findall(r"https://([^/\"']+)/", (SCRIPTS / "modelrouter" / "upstream.py").read_text()))
+        self.assertLessEqual(hosts, {"code.claude.com", "platform.claude.com", "api.anthropic.com"})
+
+    def test_the_api_key_stays_out_of_repr_and_state(self):
+        os.environ["ANTHROPIC_API_KEY"] = "sk-secret-123"
+        options = settings.resolve(cfg.load_config())
+        self.assertNotIn("sk-secret-123", repr(options))
+        settings.record(options)
+        hooks.session_start({"session_id": "s1", "source": "startup", "cwd": str(self.project)})
+        for path in self.data.rglob("*"):
+            if path.is_file():
+                self.assertNotIn("sk-secret-123", path.read_text(encoding="utf-8", errors="replace"), path)
+
+    def test_the_redirect_guard_and_skill_grants_have_their_own_tests(self):
+        names = {name for cls in (Upstream, SkillGrants) for name in dir(cls) if name.startswith("test_")}
+        self.assertIn("test_the_api_key_never_follows_a_redirect", names)
+        self.assertIn("test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files", names)
+
+
+class ProfileProperties(unittest.TestCase):
+    """Property tests of profile.py with a fixed seed (S9.8)."""
+
+    VERBS = ["fix", "add", "list", "find", "review", "explain", "update", "investigate", "show", "write"]
+    NOUNS = ["the parser", "the cache", "the readme", "src", "the config loader", "the retry logic", "a test",
+             "the login page", "the docs", "the build"]
+    SIGNALS = ["security", "the database schema", "across every service", "a race condition", "production",
+               "the payments flow", "the root cause", "the public API"]
+    LIMITS = ["Do not change any files.", "Don't touch the tests.", "Never edit the README.",
+              "Without changing the public API.", "No need to ask questions."]
+    AGENTS = ["general-purpose", "Explore", "acme:code-reviewer", "helper"]
+
+    def briefs(self, count=300):
+        rng = random.Random(7)
+        for _ in range(count):
+            words = [rng.choice(self.VERBS), rng.choice(self.NOUNS)]
+            if rng.random() < 0.4:
+                words += ["and", rng.choice(self.VERBS), rng.choice(self.NOUNS)]
+            yield " ".join(words) + ".", rng.choice(self.AGENTS), rng
+
+    def level(self, text, agent):
+        return cfg.LEVELS.index(profile.profile_call({"prompt": text}, agent)["level"])
+
+    def test_adding_a_signal_word_never_lowers_the_level(self):
+        for brief, agent, rng in self.briefs():
+            signal = rng.choice(self.SIGNALS)
+            with self.subTest(brief=brief, signal=signal, agent=agent):
+                self.assertGreaterEqual(self.level(f"{brief} It touches {signal}.", agent), self.level(brief, agent))
+
+    def test_a_limit_never_lowers_what_the_brief_gets_without_it(self):
+        for brief, agent, rng in self.briefs():
+            limit = rng.choice(self.LIMITS)
+            with self.subTest(brief=brief, limit=limit, agent=agent):
+                self.assertGreaterEqual(self.level(f"{brief} {limit}", agent), self.level(brief, agent))
+
+    def test_time_grows_linearly_with_length(self):
+        rng = random.Random(11)
+        words = self.VERBS + [w for n in self.NOUNS + self.SIGNALS for w in n.split()] + ["do", "not", ",", "or"]
+        text = " ".join(rng.choice(words) for _ in range(4000))
+
+        def took(t):
+            return min(timeit.repeat(lambda: profile.profile_call({"prompt": t}, "x"), number=1, repeat=3))
+        small, large = took(text), took(text * 8)
+        self.assertLess(large, small * 8 * 4 + 0.05)  # linear, with room for noise; quadratic would be 64x
+
+
+class SpawnPaths(Sandbox):
+    """The mod path and the Agent-call fallback decide the same spawn the same way (S9.8, differential)."""
+
+    def test_mod_spawn_and_pre_agent_pick_the_same_model_effort_and_level(self):
+        cases = [("general-purpose", LOOKUP, {}), ("general-purpose", BUILD, {}), ("general-purpose", HARD, {}),
+                 ("Explore", HARD, {}), (None, "investigate why the checkout test is flaky", {}),
+                 ("general-purpose", LOOKUP, {"model": "opus"}), ("general-purpose", HARD, {"effort": "low"})]
+        for index, (agent, brief, extra) in enumerate(cases):
+            with self.subTest(agent=agent, brief=brief, extra=extra):
+                fallback_session, mod_session = f"f{index}", f"m{index}"
+                self.session_on("claude-opus-5-5", fallback_session)
+                self.session_on("claude-opus-5-5", mod_session)
+                out = hooks.pre_agent(self.call(agent, brief, session_id=fallback_session, **extra))
+                fallback = ((out or {}).get("hookSpecificOutput") or {}).get("updatedInput") or {}
+                tool_input = {"prompt": brief, **extra, **({"subagent_type": agent} if agent else {})}
+                mod = hooks.mod_spawn({"session_id": mod_session, "cwd": str(self.project),
+                                       "parent_model": "claude-opus-5-5", "kind": "subagent",
+                                       "tool_input": tool_input}) or {}
+                # What runs: the fallback returns the whole call, the mod only what it changes.
+                ran = lambda pick: (pick.get("model") or extra.get("model"), pick.get("effort") or extra.get("effort"))  # noqa: E731
+                self.assertEqual(ran(fallback), ran(mod))
+                levels = {r["session"]: r.get("level") for r in self.ledger() if r.get("event") == "spawn"}
+                self.assertEqual(levels.get(fallback_session), levels.get(mod_session))
+
+
+class EdgeCases(Sandbox):
+    """Compaction, empty briefs and a spawn another mod changed (S12.7, S12.11, S12.14)."""
+
+    def test_a_compaction_keeps_the_request_and_routed_calls_and_the_model(self):
+        self.session_on("claude-sonnet-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": HARD, "cwd": str(self.project)})
+        self.pre("general-purpose", LOOKUP)
+        state = {name: store.load_entry(name, "s1") for name in ("prompts", "pending", "sessions")}
+        self.assertTrue(all(state.values()), state)
+        out = hooks.session_start({"session_id": "s1", "source": "compact", "cwd": str(self.project)})
+        self.assertEqual({name: store.load_entry(name, "s1") for name in state}, state)  # no model: kept as is
+        self.assertIn("Model Router is on", json.dumps(out))  # compaction drops the old note, so it is sent again
+        hooks.session_start({"session_id": "s1", "source": "compact", "model": "claude-opus-5-5",
+                             "cwd": str(self.project)})
+        self.assertEqual(session.model("s1"), "claude-opus-5-5")
+        self.assertEqual(store.load_entry("pending", "s1"), state["pending"])
+
+    def test_an_empty_or_blank_brief_is_a_lookup_and_fails_open(self):
+        for prompt in ("", "   ", "\n\t \n"):
+            with self.subTest(prompt=repr(prompt)):
+                self.assertEqual(profile.profile_call({"prompt": prompt}, "general-purpose")["level"], "lookup")
+                self.assertEqual(profile.profile_call({"prompt": prompt, "description": None}, "x")["level"],
+                                 "lookup")
+        self.session_on("claude-opus-5-5")
+        for tool_input in ({"prompt": ""}, {"prompt": "   "}, {}, {"prompt": None}, {"description": ""}):
+            with self.subTest(tool_input=tool_input):
+                out = hooks.pre_agent({"session_id": "s1", "cwd": str(self.project), "tool_input": tool_input})
+                decision = ((out or {}).get("hookSpecificOutput") or {}).get("permissionDecision")
+                self.assertIsNone(decision)  # nothing to route on: the call goes through untouched
+        self.assertEqual(self.out_hook("pre-agent", {"session_id": "s1", "tool_input": {"prompt": ""}})[0], 0)
+
+    def out_hook(self, command, payload):
+        res = subprocess.run([sys.executable, str(SCRIPT), command], input=json.dumps(payload), capture_output=True,
+                             text=True, env={**os.environ})
+        return res.returncode, res.stdout
+
+    def test_a_result_on_another_model_is_logged_as_the_model_that_ran(self):
+        self.session_on("claude-opus-5-5")
+        # The fallback path routed a lookup to haiku; the provider ran it on sonnet: a substitution.
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-sonnet-5-5")
+        rows = [r for r in self.ledger() if r.get("event") == "result"]
+        self.assertEqual((rows[-1]["asked"], rows[-1]["resolved_model"]), ("haiku", "claude-sonnet-5-5"))
+        self.assertEqual(registry.health()["haiku"]["substituted"], 1)
+        # A model that ran as asked clears it, so one stray change never takes a model out of rotation.
+        self.pre("general-purpose", LOOKUP + " again")
+        self.done("general-purpose", LOOKUP + " again", "claude-haiku-5-5")
+        self.assertEqual(registry.health()["haiku"]["substituted"], 0)
+        # Under CLAUDE_CODE_SUBAGENT_MODEL_FORCE every agent runs on the forced model: never a substitution.
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+        self.pre("general-purpose", LOOKUP + " forced")
+        self.done("general-purpose", LOOKUP + " forced", "claude-opus-5-5")
+        self.assertEqual(registry.health()["haiku"]["substituted"], 0)
+        self.assertEqual([r for r in self.ledger() if r.get("event") == "result"][-1]["resolved_model"],
+                         "claude-opus-5-5")
+
+
+@unittest.skipUnless(os.name == "posix" and shutil.which("sh"), "needs a POSIX sh to isolate")
+class NoPython(Sandbox):
+    """With no python3 or python on PATH at all, hooks pass and commands explain (S12.23, S13.3)."""
+
+    def test_every_hook_exits_0_and_a_command_explains(self):
+        folder = Path(self.tmp.name) / "only-sh"
+        folder.mkdir()
+        sh = Path(shutil.which("sh")).resolve()
+        (folder / "sh").symlink_to(sh)
+        env = {"PATH": str(folder), "HOME": str(self.home), "CLAUDE_PLUGIN_DATA": str(self.data)}
+        launcher = (SCRIPTS / "model-router.sh").as_posix()
+        probe = subprocess.run([str(sh), "-c", "command -v python3 || command -v python || echo none"],
+                               capture_output=True, text=True, env=env)
+        self.assertEqual(probe.stdout.strip(), "none")
+        for command in sorted(hooks.HANDLERS):
+            with self.subTest(hook=command):
+                res = subprocess.run([str(sh), launcher, command], input='{"session_id": "s1"}', capture_output=True,
+                                     text=True, env=env)
+                self.assertEqual((res.returncode, res.stdout), (0, ""), res.stderr)
+        for command in ("policy", "models", "usage"):
+            res = subprocess.run([str(sh), launcher, command], capture_output=True, text=True, env=env)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertIn("needs Python 3.9 or later", res.stdout)
+
+
+def _mod_types() -> Path | None:
+    """The installed Claude Code's mod API types, when they can be found."""
+    named = os.environ.get("MODEL_ROUTER_MOD_TYPES")
+    if named:
+        return Path(named) if Path(named).is_file() else None
+    claude = shutil.which("claude")
+    if not claude:
+        return None
+    try:
+        version = subprocess.run([claude, "--version"], capture_output=True, text=True, timeout=20).stdout.split()[0]
+    except (OSError, subprocess.SubprocessError, IndexError):
+        return None
+    roots = {Path(tempfile.gettempdir()), Path("/tmp"), Path("/private/tmp")}
+    uid = os.getuid() if hasattr(os, "getuid") else None
+    for root in roots:
+        for base in ([root / f"claude-{uid}"] if uid is not None else []) + [root]:
+            found = sorted(base.glob(f"bundled-skills/{version}/*/plugin-authoring/types/claude-code.d.ts"))
+            if found:
+                return found[0]
+    return None
+
+
+class ModApiTypes(unittest.TestCase):
+    """Every event and field hooks/router.ts uses exists in the installed Claude Code's mod types (S12.26)."""
+
+    def type_fields(self, types: str, name: str, seen: set) -> set:
+        if name in seen:
+            return set()
+        seen.add(name)
+        match = re.search(rf"\b(?:export )?type {re.escape(name)}(?:<[^>]*>)? = ", types)
+        if not match:
+            return set()
+        depth, i, body = 0, match.end(), []
+        while i < len(types):
+            ch = types[i]
+            depth += ch in "{(<"
+            depth -= ch in "})>"
+            body.append(ch)
+            if (ch == ";" and depth <= 0) or depth < 0:
+                break
+            i += 1
+        text = "".join(body)
+        fields = set(re.findall(r"^\s*(?:readonly\s+)?(\w+)\??:", text, re.M))
+        for ref in set(re.findall(r"\b([A-Z]\w+)\b", text)) - {name}:
+            fields |= self.type_fields(types, ref, seen)
+        return fields
+
+    def test_router_ts_uses_only_events_and_fields_the_types_declare(self):
+        path = _mod_types()
+        if path is None:
+            self.skipTest("the installed Claude Code's mod types weren't found (set MODEL_ROUTER_MOD_TYPES)")
+        types = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(encoding="utf-8"), flags=re.S)  # docs hold braces
+        router = (PLUGIN / "hooks" / "router.ts").read_text(encoding="utf-8")
+        blocks = re.split(r"\n  on\('", router)[1:]
+        self.assertGreaterEqual(len(blocks), 7)
+        for block in blocks:
+            event = block.split("'", 1)[0]
+            with self.subTest(event=event):
+                # The event maps name an input, a result and a stream chunk type; the input is the payload.
+                names = re.findall(rf"'{re.escape(event)}': (\w+);", types)
+                self.assertTrue(names, f"{event} is not an event in {path}")
+                declared = next((n for n in names if n.endswith("Input")), names[0])
+                if event == "tool.call":
+                    continue  # its fields are the called tool's input, typed per tool
+                fields = self.type_fields(types, declared, set())
+                used = set(re.findall(r"\be\.(\w+)", block))
+                missing = sorted(f for f in used if f not in fields)
+                self.assertEqual(missing, [], f"{event} ({declared}) lacks {missing}")
+
+
+class ClockAndCleanup(Sandbox):
+    """A clock moved backwards, and copies of unreadable state files piling up."""
+
+    def test_a_run_stamped_in_the_future_is_not_a_redo(self):
+        store.save_entry("done", "s1", {"k": {"level": "lookup", "at": time.time() + 3600}})
+        self.assertIsNone(calls.finished_run("s1", "k"))
+        store.save_entry("done", "s1", {"k": {"level": "lookup", "at": time.time() - 60}})
+        self.assertEqual(calls.finished_run("s1", "k")["level"], "lookup")
+
+    def test_a_rewrite_stamped_in_the_future_counts_as_refused(self):
+        store.save_entry("pending", "s1", {"k": {"model": "haiku", "at": time.time() + 3600}})
+        self.assertEqual(calls.refused_rewrite("s1", "k")["model"], "haiku")  # passed on untouched, never looped
+        store.save_entry("pending", "s1", {"k": {"model": "haiku", "at": time.time() - 1}})
+        self.assertIsNone(calls.refused_rewrite("s1", "k"))  # a copy issued alongside it
+
+    def test_a_copy_after_a_small_step_back_is_still_a_copy(self):
+        # A fan-out's copies, with the clock stepped back a few seconds between their hooks (an NTP correction).
+        written = time.time()
+        store.save_entry("pending", "s1", {"k": {"model": "haiku", "at": written}})
+        for back in (0.5, 3, calls.REFUSED_AFTER - 0.5):
+            with mock.patch.object(calls.time, "time", return_value=written - back):
+                self.assertIsNone(calls.refused_rewrite("s1", "k"), back)
+        with mock.patch.object(calls.time, "time", return_value=written + 1):
+            self.assertIsNone(calls.refused_rewrite("s1", "k"))
+
+    def test_an_outage_lasts_no_longer_than_its_days_after_the_clock_moves_back(self):
+        now = time.time()
+        registry.update_health("opus", outages=1, unavailable_until=now + 20 * 86400)  # set before a 19-day jump back
+        with mock.patch.object(registry.time, "time", return_value=now):
+            self.assertFalse(registry.healthy("opus"))
+        with mock.patch.object(registry.time, "time", return_value=now + registry.OUTAGE_DAYS[0] * 86400 + 1):
+            self.assertTrue(registry.healthy("opus"))
+
+    def test_only_the_newest_copies_of_an_unreadable_file_are_kept(self):
+        learned = store.data_dir() / "learned.json"
+        for i in range(store.KEEP_SET_ASIDE + 3):
+            learned.write_text('{"broken": ' + str(i))
+            store.update_dict(learned, lambda data: data.update(ok=True))
+        copies = sorted(store.data_dir().glob("learned.json.corrupt-*"))
+        self.assertEqual(len(copies), store.KEEP_SET_ASIDE)
+        self.assertEqual(copies[-1].read_text(), '{"broken": ' + str(store.KEEP_SET_ASIDE + 2))
+
+
+class DesignDecisions(unittest.TestCase):
+    """A design decision worked out against load and consistency limits needs the strongest coding level."""
+
+    def test_a_design_against_load_and_consistency_limits_is_hardest(self):
+        brief = ("Read SPEC.md and design how the catalog servers cache prices. This is a design decision with "
+                 "data-consistency and performance trade-offs: honour the staleness limits and the database's "
+                 "capacity. Write DESIGN.json with the strategy, ttl_seconds and max_staleness_seconds.")
+        result = profile.profile_call({"description": "Design catalog price caching", "prompt": brief}, "claude")
+        self.assertEqual((result["level"], sorted(result["signals"])), ("hardest", ["ambiguity", "load", "risk"]))
+        # Loading a file isn't a load limit.
+        self.assertEqual(profile.profile_call({"description": "Find the key load path",
+                                               "prompt": "Find where the app loads its config."}, "Explore")["level"],
+                         "lookup")
+
+    def test_a_load_word_without_a_design_choice_adds_nothing(self):
+        for prompt in ("Fix the flaky latency test in test_client.py.",
+                       "Review this function for performance issues."):
+            result = profile.profile_call({"prompt": prompt}, "general-purpose")
+            self.assertEqual(result["level"], "standard", prompt)
+            self.assertNotIn("load", result["signals"], prompt)
+
+    def test_a_decision_already_made_asks_for_none(self):
+        for prompt in ("As decided on Monday, rename the payments column in every service that reads it, across all "
+                       "services.", "We decided on Postgres, so migrate the billing schema in all services to it."):
+            result = profile.profile_call({"prompt": prompt}, "general-purpose")
+            self.assertEqual(result["level"], "complex", prompt)
+            self.assertNotIn("ambiguity", result["signals"], prompt)
+        for prompt in ("Help me decide on a cache for the session store.",
+                       "We need to decide whether to shard the orders table.",
+                       "Choosing between Kafka and SQS for the event bus.", "Weighing the options for the job queue."):
+            self.assertIn("ambiguity", profile.profile_call({"prompt": prompt}, "general-purpose")["signals"], prompt)
+
+    def test_a_reported_plan_or_choice_lets_no_load_word_count(self):
+        for prompt in ("As planned, rename the payments column in every service, across all services, to keep latency "
+                       "low.", "We decided on Postgres to handle 10,000 writes per second; migrate the billing schema "
+                       "in all services to it."):
+            result = profile.profile_call({"prompt": prompt}, "general-purpose")
+            self.assertEqual(result["level"], "complex", prompt)
+            self.assertNotIn("load", result["signals"], prompt)
+
+    def test_only_a_millisecond_budget_counts_as_load(self):
+        for prompt in ("Plan the release notes for 2.0; the API answers in 120 ms.",
+                       "Plan the sprint: fix the 300 ms login delay."):
+            result = profile.profile_call({"prompt": prompt}, "general-purpose")
+            self.assertEqual(result["level"], "standard", prompt)
+            self.assertNotIn("load", result["signals"], prompt)
+        for prompt in ("Choose a partitioning scheme for the events table so writes stay under 50 ms at 10,000 per "
+                       "second.", "Design a scheme that keeps p99 under 200 ms.",
+                       "Choose a caching approach with p99 200 ms for reads."):
+            self.assertIn("load", profile.profile_call({"prompt": prompt}, "general-purpose")["signals"], prompt)
+
+    def test_a_capacity_or_sizing_decision_keeps_its_load_signal(self):
+        for prompt, level in (("Plan the capacity of the queue cluster for 10x traffic: how many brokers do we need?",
+                               "complex"),
+                              ("Size the connection pool so the billing service meets its latency target under "
+                               "peak load.", "standard")):
+            result = profile.profile_call({"prompt": prompt}, "general-purpose")
+            self.assertEqual(result["level"], level, prompt)
+            self.assertIn("load", result["signals"], prompt)
+
+
+class SolverNames(unittest.TestCase):
+    """Only this plugin's own deep-solver is floored at hardest; another plugin's solver is a heavy role, a resolver none."""
+
+    def level(self, agent: str) -> str:
+        return profile.profile_call({"prompt": "List the files in ./puzzles."}, agent)["level"]
+
+    def test_only_the_deep_solver_starts_at_hardest(self):
+        self.assertEqual(self.level("model-router:deep-solver"), "hardest")
+        self.assertEqual(self.level("sudoku-solver"), "complex")
+        self.assertEqual(self.level("acme:equation-solver"), "complex")
+        self.assertEqual(self.level("dependency-resolver"), "lookup")
+        self.assertEqual(self.level("acme:deep-solver"), "complex")
 
 
 if __name__ == "__main__":

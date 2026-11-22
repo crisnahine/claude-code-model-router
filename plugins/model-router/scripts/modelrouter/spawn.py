@@ -31,9 +31,15 @@ def facts(hook_input: dict, config: dict, options: settings.Settings,
     else:
         parent = registry.family(config, session.model(hook_input.get("session_id"),
                                                        hook_input.get("transcript_path")))
+    # A hand-off brief often reads simpler than the request it serves, so the strong role
+    # agents start no lower than the request's level; a redo still climbs from there.
+    strong = agent in (f"{cfg.PLUGIN_NAME}:architect", f"{cfg.PLUGIN_NAME}:deep-solver")
+    request = store.load_entry("prompts", hook_input.get("session_id")) if strong else {}
+    floor = None if request.get("floor_off") else request.get("level")
     return router.Facts(agent=agent, tool_input=tool_input, usable=registry.available(config, project, options.cap),
                         definition=definition, parent=parent,
-                        earlier=calls.finished_run(hook_input.get("session_id"), key), raises=learn.raises())
+                        earlier=calls.finished_run(hook_input.get("session_id"), key), raises=learn.raises(),
+                        floor=floor)
 
 
 def run(hook_input: dict, via: str, guard: Guard | None = None) -> dict:
@@ -52,7 +58,7 @@ def run(hook_input: dict, via: str, guard: Guard | None = None) -> dict:
            "level": decision["level"], "signals": decision["signals"],
            "model": None if action == "deny" else decision["model"] or decision["was"],
            "was": decision["was"], "effort": decision["effort"], "source": decision["source"],
-           "reason": decision["reason"], "description": str(found.tool_input.get("description") or "")[:120]}
+           "escalated_from": decision["escalated_from"], "reason": decision["reason"], "description": str(found.tool_input.get("description") or "")[:120]}
     if via == "mod":
         row["kind"] = hook_input.get("kind") or "subagent"
     store.append_ledger(row)

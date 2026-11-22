@@ -1,4 +1,4 @@
-import type { EngineInterface, ModelEffort, PluginOptions, Register } from 'claude-code'
+import type { EngineInterface, ModelEffort, PluginOptions, Register, TurnUsage } from 'claude-code'
 
 // The engine's own events, forwarded to the Python runtime the settings hooks use, so
 // one router decides everything. agent.spawn sees every subagent, teammate and workflow
@@ -35,6 +35,17 @@ async function ask($: EngineInterface, options: Record<string, string>, command:
   }
 }
 
+// Behind a gateway or a third-party provider an effort change drops the cache, and the
+// session holds no first-party credential. The handle is only looked at, never spent.
+// The desktop app never lends its sign-in to plugins, so there a null says nothing.
+async function hasFirstPartyCredential($: EngineInterface): Promise<boolean | undefined> {
+  const auth = await Promise.resolve().then(() => $.session.authorize()).catch(() => undefined)
+  if (auth === undefined) return undefined
+  if (auth !== null) return true
+  const surfaces = await Promise.resolve().then(() => $.session.surfaces()).catch(() => undefined)
+  return surfaces && !surfaces.includes('desktop') ? false : undefined
+}
+
 function effortRank(effort: ModelEffort | undefined): number {
   return effort === undefined ? -1 : EFFORTS.indexOf(effort)
 }
@@ -52,6 +63,8 @@ export const register: Register = (on, options) => {
   const callerEffort = new Map<string, ModelEffort>()
   // A subagent's first request can go out before its spawn hook has the agent's id.
   const promptEffort = new Map<string, ModelEffort>()
+  // Each request's usage by turn: Haiku 5.5 bills a long prompt per request, not per turn.
+  const turnRequests = new Map<string, TurnUsage[]>()
 
   on('tool.call', { tool: 'Agent' }, ($, e, next) => {
     if (e.tool_use_id && typeof e.effort === 'string') remember(callerEffort, e.tool_use_id, e.effort)
@@ -86,10 +99,46 @@ export const register: Register = (on, options) => {
     return started
   }).catch(($, e, next) => next(e))
 
+  // Where the prompt that starts the next main-loop turn came from: a teammate's report or
+  // a notification is not the person's request. Set before next(e), since the turn starts
+  // inside it; taken once, and a turn with no submit sends none.
+  let idleOrigin: string | undefined
+  // A typed /skill turn starts with a <command-message> line; what it asks for is the
+  // command's arguments and the body skill.prompt renders for it before the turn starts.
+  let idleCommand: { name: string; args: string; body?: string } | undefined
+  on('prompt.submit', async ($, e, next) => {
+    const idle = e.turnId === undefined
+    const kind = idle && typeof e.origin?.kind === 'string' ? e.origin.kind : undefined
+    if (kind) idleOrigin = kind
+    if (idle) idleCommand = e.command ? { name: e.command.name, args: e.command.args } : undefined
+    const entered = await next(e)
+    if (idle && typeof (entered as { drop?: unknown } | undefined)?.drop === 'string') {
+      idleOrigin = undefined
+      idleCommand = undefined
+    }
+    return entered
+  }).catch(($, e, next) => next(e))
+
+  on('skill.prompt', async ($, e, next) => {
+    const rendered = await next(e)
+    if (idleCommand && idleCommand.body === undefined && idleCommand.name === e.skill) {
+      idleCommand.body = rendered.text
+    }
+    return rendered
+  }).catch(($, e, next) => next(e))
+
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
+      const origin = idleOrigin
+      const command = idleCommand
+      idleOrigin = undefined
+      idleCommand = undefined
       const model = await Promise.resolve().then(() => $.session.model()).catch(() => undefined)
-      const pick = await ask($, opts, 'mod-turn', { text: e.text, ...(model ? { model } : {}) })
+      const firstParty = options.main_effort === false ? undefined : await hasFirstPartyCredential($)
+      const pick = await ask($, opts, 'mod-turn', {
+        text: e.text, ...(model ? { model } : {}), ...(firstParty !== undefined ? { first_party: firstParty } : {}),
+        ...(origin ? { origin } : {}), ...(command && e.text.trimStart().startsWith('<command-') ? { command } : {}),
+      })
       if (pick?.effort) remember(turnEffort, e.turnId, pick.effort)
     } else if (!agentEffort.has(e.agentId)) {
       const effort = promptEffort.get(e.text)
@@ -105,15 +154,23 @@ export const register: Register = (on, options) => {
     const want = e.agentId !== undefined ? agentEffort.get(e.agentId) : turnEffort.get(e.turnId)
     const apply = want !== undefined && current !== undefined && want !== current
       && (e.agentId !== undefined || effortRank(want) > effortRank(current))
-    return yield* next(apply ? { ...e, effort: want } : e)
+    const result = yield* next(apply ? { ...e, effort: want } : e)
+    if (result?.usage) {
+      const requests = turnRequests.get(e.turnId)
+      if (requests) requests.push(result.usage)
+      else remember(turnRequests, e.turnId, [result.usage])
+    }
+    return result
   }).catch(async function* ($, e, next) {
     return yield* next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    const requests = turnRequests.get(e.turnId)
+    turnRequests.delete(e.turnId)
     if (e.agentId === undefined) turnEffort.delete(e.turnId)
-    if (e.usage) await ask($, opts, 'mod-usage', { agent_id: e.agentId, usage: e.usage })
+    if (e.usage) await ask($, opts, 'mod-usage', { agent_id: e.agentId, usage: e.usage, ...(requests ? { requests } : {}) })
     return done
   }).catch(($, e, next) => next(e))
 }

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
+import threading
 import time
-import urllib.request
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from . import config as cfg
@@ -20,7 +20,11 @@ MODEL_CONFIG_PAGE = "https://code.claude.com/docs/en/model-config.md"
 DEPRECATIONS_PAGE = "https://platform.claude.com/docs/en/about-claude/model-deprecations.md"
 MODELS_API = "https://api.anthropic.com/v1/models?limit=1000"
 CACHE_TTL_SECONDS = 24 * 3600
-HTTP_TIMEOUT = 10
+FAILED_RETRY_SECONDS = 3600  # after a failed fetch; doubles with each failure in a row, to a day
+HTTP_TIMEOUT = 10  # per request: each socket wait, and the body's download as a whole
+# The whole fetch, every phase of every request. Claude Code doesn't time out an async hook, so
+# this is what ends a refresh stuck on a slow server.
+FETCH_BUDGET = 25
 # Docs pages that describe the surfaces this plugin is built on.
 WATCHED_PAGES = ("plugins", "sub-agents", "hooks", "skills", "model-config", "workflows",
                  "plugin-evals", "mcp", "settings", "agent-teams", "costs", "permission-modes")
@@ -33,22 +37,35 @@ def path() -> Path:
 
 
 def load() -> dict:
-    return store.load_dict(path())
-
-
-class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
-        return None  # urllib copies Authorization onto the next host
+    return store.load_state_file(path())
 
 
 def http_get(url: str, headers: dict | None = None) -> str:
+    import http.client
+    import urllib.request  # about 20 ms, so only the daily fetch pays it
+
+    class RefuseRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None  # urllib copies Authorization onto the next host
+
     req = urllib.request.Request(url, headers={"User-Agent": "model-router-plugin/0.1", **(headers or {})})
-    handlers = [_RefuseRedirect] if "Authorization" in (headers or {}) else []
+    handlers = [RefuseRedirect] if "Authorization" in (headers or {}) else []
+    deadline = time.monotonic() + HTTP_TIMEOUT
+    # urllib's timeout covers each socket read, so a server that drips bytes never trips it.
     with urllib.request.build_opener(*handlers).open(req, timeout=HTTP_TIMEOUT) as resp:  # noqa: S310 (fixed https URLs)
-        return resp.read().decode("utf-8", "replace")
+        chunks = []
+        while time.monotonic() < deadline:
+            chunk = resp.read1(65536)
+            if not chunk:
+                if resp.length:  # read1 ends a short Content-Length body quietly; read() would raise
+                    raise http.client.IncompleteRead(b"".join(chunks), resp.length)
+                return b"".join(chunks).decode("utf-8", "replace")
+            chunks.append(chunk)
+        raise TimeoutError(f"{url} took longer than {HTTP_TIMEOUT} s")
 
 
 def parse_rss(xml_text: str, limit: int = 30) -> list[dict]:
+    import xml.etree.ElementTree as ET
     items = []
     for item in ET.fromstring(xml_text).iter("item"):
         content = ""
@@ -168,6 +185,27 @@ def _api_lines(cache: dict) -> list[str]:
 
 
 def fetch(settings: Settings) -> dict:
+    """All of it within FETCH_BUDGET or nothing: a worker thread bounds DNS, connecting and
+    dripped headers too, and a fetch cut off mid-way never stores a half-empty cache."""
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            box["value"] = _fetch(settings)
+        except Exception as exc:  # noqa: BLE001 - re-raised below, in the caller's thread
+            box["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)  # the hook process exits without it
+    worker.start()
+    worker.join(FETCH_BUDGET)
+    if worker.is_alive():
+        raise TimeoutError(f"the upstream fetch took longer than {FETCH_BUDGET} s")
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
+def _fetch(settings: Settings) -> dict:
     releases = parse_rss(http_get(CHANGELOG_RSS))
     pages = parse_llms_index(http_get(DOCS_INDEX))
     if not releases or not pages:
@@ -245,13 +283,39 @@ def snapshot(cache: dict) -> dict:
             "lifecycle": merged_lifecycle(cache), "api_lines": _api_lines(cache)}
 
 
+def _failures(failed: object) -> int:
+    """Failed fetches in a row, or 0 for no record or one that doesn't make sense."""
+    if not isinstance(failed, dict) or not all(
+            cfg._number(failed.get(key)) and math.isfinite(failed[key]) for key in ("at", "count")):
+        return 0
+    return max(0, int(failed["count"]))
+
+
+def _retry_wait(failed: object, now: float) -> float:
+    """Seconds left before a failed fetch may be tried again: an hour, doubling with each
+    failure in a row to a day. A record from the future, after a clock change, holds nothing."""
+    count = _failures(failed)
+    if not count or float(failed["at"]) > now:
+        return 0
+    return float(failed["at"]) + min(FAILED_RETRY_SECONDS * 2 ** min(count - 1, 10), CACHE_TTL_SECONDS) - now
+
+
 def refresh(settings: Settings, force: bool = False) -> dict:
-    cache = load().get("cache") or {}
-    if not force and time.time() - (cache.get("fetched_at") or 0) < CACHE_TTL_SECONDS:
-        return load()
-    fresh = fetch(settings)  # slow, so outside the lock
+    data = load()
+    now = time.time()
+    if not force and (now - ((data.get("cache") or {}).get("fetched_at") or 0) < CACHE_TTL_SECONDS
+                      or _retry_wait(data.get("failed"), now) > 0):
+        return data
+    try:
+        fresh = fetch(settings)  # slow, so outside the lock
+    except Exception:
+        def failed(data: dict) -> None:
+            data["failed"] = {"at": int(now), "count": _failures(data.get("failed")) + 1}
+        store.update_dict(path(), failed)
+        raise
 
     def apply(data: dict) -> None:
+        data.pop("failed", None)
         data["cache"] = fresh
         if "reviewed" not in data:
             # First run: treat the present as reviewed so users aren't flooded with history.

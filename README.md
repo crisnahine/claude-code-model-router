@@ -1,18 +1,18 @@
 # Claude Code Model Router: autonomous multi-model orchestration plugin for Claude Code
 
-Claude Code Model Router is a Claude Code plugin for autonomous multi-model orchestration. Whenever something in your session starts a subagent, a teammate or a workflow agent, the plugin sets the Claude model and reasoning effort that fit the work: Haiku for lookups, Sonnet at high effort for everyday implementation, Opus for design, review and hard coding, Fable for research-grade problems. It also raises the main conversation's effort for a hard request. It works with any plugin, skill or agent, and you never pick a model by hand.
+Claude Code Model Router is a Claude Code plugin for autonomous multi-model orchestration. Whenever something in your session starts a subagent, a teammate or a workflow agent, the plugin sets the Claude model and reasoning effort that fit the work: Haiku for lookups, Sonnet at medium effort for everyday implementation, Sonnet at high for design, review and risky changes, Opus for the hardest work, Fable for research-grade problems. With the `main_effort` option on, it also raises the main conversation's effort for a hard request. It works with any plugin, skill or agent, and you never pick a model by hand.
 
 The goal is the lowest cost per finished task at a high quality bar. Each subtask starts on the cheapest model and effort that should do it, and moves up only when the work comes back for a redo.
 
 What this Claude Code model router does:
 
 - Sets the model and effort of every subagent, teammate and workflow agent as it starts, whichever agent, skill or plugin starts it. The agent the caller chose stays the same.
-- Raises the main conversation's effort for one turn when the request looks complex or harder. It never lowers what you set, and it leaves the model alone, so the prompt cache is kept.
-- Escalates on a redo. When Claude re-issues a call that already came back, that call runs one level higher: more effort first, then a stronger model.
+- With the `main_effort` option on (it's off by default), raises the main conversation's effort for one turn when the request looks complex or harder. It never lowers what you set, and it leaves the model alone, so the prompt cache is kept.
+- Escalates on a redo. When Claude re-issues a call that already came back, that call runs one level higher on the ladder: a stronger model, or more effort when it stays on the same model.
 - Treats models as data. A registry ranks each model by strength, speed and cost, and the router works out which of them your setup can use from your settings, from the model each agent ran on, and from failures.
 - Logs what each turn cost at list price, main conversation and subagents apart, in `/model-router:usage`.
 - Leans toward quality, speed or cost with one `priority` option, and caps the strongest model allowed with another.
-- Asks for a test run after code changes, and for a stronger model's check when a hard request was answered by a weak session model alone.
+- Asks for a stronger model's check when a hard request was answered by a weak session model alone, and, with the `verify_gate` option on (it's off by default), for a test run after code changes.
 - Checks the official changelog, docs index, model aliases and model deprecations once a day, plus your account's model list when an Anthropic API key is set, and reports releases, docs changes, new models and models it routes to that are retiring.
 
 ## Install
@@ -40,32 +40,25 @@ There is nothing to configure. Claude model routing is on from the first session
 
 ## How it works
 
-```text
-any agent starts ──► profile the subtask ──► select model + effort ──► written on the spawn ──► agent runs
-(subagent, teammate,  the brief's wording     cheapest strong enough,   by the plugin's mod
- workflow stage)      and the agent's name    by priority, cap,         (or on the Agent call
-                                              availability              on older setups)
-                            ▲                        ▲
-                     redo escalation           model registry
-                   (same call again runs     (strength, speed, cost,
-                     one level higher)         prices; what runs here)
-```
+![Two control paths, one router: engine events reach the mod, settings hooks are the fallback, and both call one Python runtime](docs/assets/two-paths.svg)
 
 The plugin has two parts. A mod (a hooks module, `hooks/router.ts`) hooks Claude Code's own events: `agent.spawn` for every subagent, teammate and workflow agent, `turn.step` for effort on each model request, and `turn.start` and `turn.complete` for the main conversation and the spend log. Settings hooks (`hooks/hooks.json`) do the rest: the checks before a turn ends, availability tracking, and routing through the `Agent` tool call when mods aren't available. Both call the same Python runtime, so one router decides everything.
 
 ### 1. Profile the subtask
 
-Each subtask is scored from its own brief. The profile looks for risk (security, data, migrations, public APIs), scope (several modules or services) and ambiguity (design, root cause, trade-offs). It also checks whether the subtask changes or reasons about something or only reads, and what the agent's name says the agent is for: a reviewer or an architect needs more than a search agent. The result is one of five levels.
+Each subtask is scored from its own brief. The profile looks for risk (security, data and its consistency, migrations, public APIs), scope (several modules or services), load (performance, latency, throughput, staleness and capacity limits, counted only when the brief also asks for a design or a choice) and ambiguity (design, a decision between approaches, root cause, trade-offs). It also checks whether the subtask changes or reasons about something or only reads, and what the agent's name says the agent is for: a reviewer or an architect needs more than a search agent. The result is one of five levels.
 
 | Level | Typical subtask | Model (balanced) | Effort |
 | :- | :- | :- | :- |
 | lookup | Find, list, summarize, run a command | Haiku | low |
-| standard | Implement to a clear spec, write tests | Sonnet | high |
-| complex | Design, review, risky or cross-module change | Opus | high |
-| hardest | Ambiguous, multi-system and risky at once | Opus | xhigh |
+| standard | Implement to a clear spec, write tests | Sonnet | medium |
+| complex | Design, review, risky or cross-module change | Sonnet | high |
+| hardest | Ambiguous, multi-system and risky at once | Opus | high |
 | frontier | All of that, with no known approach: research, open-ended investigation | Fable | high |
 
-The ladder follows Anthropic's published cost-per-solved-task numbers. Sonnet at its Claude Code default of `medium` scores about 7 points lower on coding than at `high`, so standard work runs at `high`. On the same coding problems Opus 5.5 at `high` came within a point of Fable 5.2 at `high` (95.5% against 96.3%) for under a quarter of the cost, so hard coding stays on Opus, with `xhigh` for the hardest, and Fable is kept for research-grade work.
+![The ladder: lookup on Haiku at low, standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high, frontier on Fable at high](docs/assets/ladder.svg)
+
+The ladder starts cheap and relies on redo escalation to catch what falls short, the policy Anthropic measured as cheapest for a high pass rate. In this repository's benchmark the earlier, stronger ladder (standard at `high`, complex on Opus) cost 1.2 to 2.2 times as much per solved task as Claude Code's defaults on 7 of 8 task classes, at the same pass rate, on a Sonnet session ([BENCHMARKS.md](docs/BENCHMARKS.md)). On an Opus 5.5 session, the default model for every account type but Microsoft Foundry (https://code.claude.com/docs/en/model-config.md), the router with the test-run check off cost $0.123 per solved task against $0.156 for the defaults over all 16 tasks (21% less; 95% interval of the difference -$0.048 to -$0.019), solving 32 of 32 against 32 of 32. That is 4 runs per task class, under the 10 the benchmark needs to call a class a win. The shipped build's check, one run per task, cost $0.124 against $0.156 and solved 15 of 16, inside the noise. So standard work runs Sonnet at `medium`, Claude Code's own default for it, and complex work Sonnet at `high`. Opus 5.5 at `high` came within a point of Fable 5.2 at `high` on coding (95.5% against 96.3%) for under a quarter of the cost, so the hardest work runs on Opus and Fable is kept for research-grade work.
 
 ### 2. Select a model
 
@@ -79,7 +72,9 @@ The plugin never approves a tool call. Your permission rules and auto mode revie
 
 ### 4. Escalate and learn
 
-A call Claude re-issues after its result came back runs one level higher. That is the cheapest policy Anthropic measured for a high pass rate: start low and re-run what fails at a higher setting. That beat starting every task high on both cost and pass rate. Each redo also counts as a vote that the level was routed too low, and enough votes raise the level for good. Copies of one brief started together are not redos, and a background agent's call counts as finished when the agent stops.
+![Redo escalation: a call routed at standard comes back, the same call again runs at complex, and counts as a vote that standard was too low](docs/assets/redo-escalation.svg)
+
+A call Claude re-issues after its result came back runs one level higher. That is the cheapest policy Anthropic measured for a high pass rate: start low and re-run what fails at a higher setting. That beat starting every task high on both cost and pass rate. Each redo also counts as a vote that the level was routed too low. At least 6 votes that are also at least 30% of the level's calls raise it one step, and a raise that keeps being overruled with a weaker model is undone the same way. Copies of one brief started together are not redos, and a background agent's call counts as finished when the agent stops.
 
 The model each agent ran on is recorded. A model is routed around for a day, and then retried, after two calls on it fail with a model error, run as a different model, or are rejected by the `Agent` tool. If the trouble comes back, the wait grows to three days and then a week. `/model-router:models` shows all of this and can reset it.
 
@@ -94,11 +89,11 @@ In order, strongest first:
 5. `CLAUDE_CODE_SUBAGENT_MODEL`, your default for agents without a model.
 6. The router's pick.
 
-Whatever wins is then lowered, never raised, to fit your cap and what is available. Effort is left alone when the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` already sets it.
+Whatever wins then has to be usable: inside your cap, allowed by your settings and known to work. If it isn't, the strongest usable model below it runs, or the weakest usable one when none is below it. Effort is left alone when the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` already sets it.
 
 ## Role agents and `/model-router:ship`
 
-The plugin ships seven agents for work that no better-fitting agent covers: `model-router:scout`, `verifier` and `docs-researcher` on Haiku, `implementer` on Sonnet at high effort, `architect` and `reviewer` on Opus, and `deep-solver` on Fable. They are ordinary agents with their own models, and their calls go through the same router as every other agent's.
+The plugin ships seven agents for work that no better-fitting agent covers: `model-router:scout`, `verifier`, `docs-researcher`, `implementer`, `architect`, `reviewer` and `deep-solver`. The scout and verifier run on Haiku at low effort and the docs-researcher on Haiku at medium, from their own definitions, so they stay cheap even when the router isn't routing: with `routing_mode` at `advise` or `off`, without Python, or with hooks turned off. The other four name no model or effort, so the router routes each by its brief like any other agent; the architect and reviewer start no lower than complex because of their names, and the deep-solver's name floors it at hardest, so a frontier brief can still take it to the strongest model. When the router isn't routing, those four run on `CLAUDE_CODE_SUBAGENT_MODEL` if it's set, else on the conversation's own model, as any agent without a model does (https://code.claude.com/docs/en/sub-agents.md#choose-a-model). Their descriptions say when each is the right tool, such as the reviewer for a risky or cross-module diff, rather than a step to run on every change, since Claude decides when to delegate from those descriptions (https://code.claude.com/docs/en/sub-agents.md).
 
 `/model-router:ship <task or issue>` runs a full loop with them: understand, plan, build, verify, review, fix, and commit on a branch. It stops before pushing, merging or deploying.
 
@@ -108,9 +103,11 @@ The plugin ships seven agents for work that no better-fitting agent covers: `mod
 | :- | :- |
 | `/model-router:ship <task>` | Plans, builds, verifies and reviews a change end to end |
 | `/model-router:route <task>` | Explains which model a task would get and why, and how to split it |
-| `/model-router:models` | Lists the models in use, what each runs as, what is capped or unavailable, and what was learned. `reset` clears it |
-| `/model-router:usage [days]` | Shows what ran where, and what it cost at list price: agents, levels, models, tokens and dollars |
+| `/model-router:models [reset] [--json]` | Lists the models in use, what each runs as, what is capped or unavailable, and what was learned. `reset` clears it |
+| `/model-router:usage [days] [--json]` | Shows what ran where, and what it cost at list price: agents, levels, models, tokens and dollars |
 | `/model-router:refresh` | Reviews new Claude Code releases, docs changes, model changes and retirements |
+
+With `--json`, `models` and `usage` print one JSON object instead of the tables. Its `schema` key names the shape and its version, `model-router.models/1` and `model-router.usage/1`. A new key keeps the version; a key removed, renamed or changed in meaning bumps it. Scripts can run the same commands without Claude: `sh <plugin>/scripts/model-router.sh --data-dir <plugin data dir> usage 30 --json`. The shapes are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#machine-readable-output).
 
 ## Configuration
 
@@ -122,9 +119,10 @@ Options, in `/config` under the plugin:
 | `priority` | `balanced` | `balanced`, `quality` or `fast` |
 | `max_tier` | none | The strongest model subagents may run on. Anything stronger is lowered to it |
 | `agent_pins` | `respect` | `respect` keeps the model an agent names for itself. `override` routes those agents by task too |
-| `main_effort` | on | Raises the main conversation's effort for a complex or harder request, for that turn |
+| `main_effort` | off | When on, raises the main conversation's effort for a complex or harder request, for that turn. Off where an effort change would re-read the context uncached: Bedrock, Vertex, Foundry, `ANTHROPIC_BASE_URL`, a Claude apps gateway or another third-party provider, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`, and models other than Fable 5.1+, Opus 5.5, Sonnet 5.5 and Haiku 5.5. Leave it off in a HIPAA organization, which the router doesn't detect, or if Claude Desktop reaches Claude through a Claude apps gateway, which it can't tell from a subscription there |
 | `update_check` | on | The daily check of the changelog, docs index, model list and deprecations |
-| `verify_gate` | on | The two checks before a turn ends |
+| `verify_gate` | off | Asks for a test run before a turn ends when code changed and nothing checked it. It adds turns and often an agent, so it's off unless you want a check before every finish |
+| `strong_agent_gate` | on | Asks for a stronger agent's check before a turn ends when a weak session model answered a hard request alone. It rarely fires on a strong session model |
 
 Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours and applies everywhere. `.claude/model-router.json` belongs to a project. Both have the same shape:
 
@@ -143,17 +141,20 @@ Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours
 
 Your own file is trusted in full. A project's file can turn routing down to `advise` or `off`, set rules for agents and add models. It can't turn routing on for someone who switched it off, re-rank a model that ships with the plugin or that you defined, or get any model past your cap.
 
+A file may carry `"schema": 1`, the version of this shape; without it, it is read as version 1. A file written for a newer release still loads: the settings this release understands apply, and `/model-router:models` names the file. Older shapes keep working after an update ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#compatibility)).
+
 ## What it can't do
 
 These limits come from what Claude Code lets a plugin do, or from choices made to protect quality and cost.
 
-- It doesn't switch the main conversation's model. A mod could, but each model keeps its own prompt cache, so a switch re-reads the whole conversation uncached. It changes the main conversation's effort instead, which keeps the cache on current models, and when a request looks harder than the session's model, Claude is told to hand the hard thinking to a strong subagent and is asked once before finishing if it didn't.
+- It doesn't switch the main conversation's model. A mod could, but each model keeps its own prompt cache, so a switch re-reads the whole conversation uncached. It changes the main conversation's effort instead, which keeps the cache on current models, and when a request looks harder than the session's model, Claude is told to hand the hard thinking to a strong subagent, and is asked once before finishing if it didn't, unless `strong_agent_gate` is off.
 - It leaves forks alone. A fork reads its parent's cache and always runs on its parent's model.
 - It leaves alone an agent whose definition it can't read, such as an agent defined on the command line, unless `agent_pins` is `override`. That agent may have a model its author chose. Workflow stages and teammate roles, which the engine makes, are routed.
 - It doesn't judge answers. The profile reads the wording of the brief and the agent's name, never the code, so it is an estimate. Claude can overrule it on any call, and redo escalation and the feedback loop correct levels that prove too low.
+- The profile reads English wording. A brief written mostly in another script, such as Japanese or Cyrillic, or with enough common French, Spanish, Portuguese, Italian, German or Dutch words, starts at standard (Sonnet at medium effort) instead of lookup. A very short brief, or one in another language, may still score lookup, and a redo moves it up.
 - It doesn't route to a new model family on its own. A new alias in the docs is reported within a day, and it is routed to once it has an entry under `models`. New versions inside a family need nothing: the router uses aliases, and Claude Code moves each alias to the newest version. When your session's model or an alias still runs an older version than the newest of its family, session start says so: usually a `model` setting naming a full version, or Claude Code waiting for an update.
 - It does nothing when hooks are switched off, by `disableAllHooks` or by `allowManagedHooksOnly` in a managed setup. Where an organization blocks user mods, routing falls back to the `Agent` call.
-- Spend figures are list prices from the registry's `prices` table, per turn. They don't include Haiku's higher rate for prompts over 100K tokens, and a model with no price is listed as such. Add a missing price under `prices` in your own `~/.claude/model-router.json`; a project's file can't set prices. Your bill is in `/usage` and `/cost`.
+- Spend figures are list prices from the registry's `prices` table. Each model request is priced on its own and a turn's figure is the sum, so Haiku 5.5's higher rate for a prompt over 100K tokens applies to exactly the requests that cross it. Fast mode requests are counted at standard rates, because the usage Claude Code reports doesn't say which requests ran fast. A model with no price is listed as such. Add a missing price under `prices` in your own `~/.claude/model-router.json`; a project's file can't set prices. Your bill is in `/usage` and `/cost`.
 
 ## Compatibility
 
@@ -165,11 +166,15 @@ Refused rewrites: on the `Agent` call fallback, if a rewritten call comes back w
 
 Organization allowlists: `availableModels` and `deniedModels` are read the way Claude Code reads them. A managed `availableModels` list applies alone; otherwise the lists in user, project and local settings are combined. `deniedModels` counts only in managed settings. Only the file-based managed policy is read: `managed-settings.json` and the `*.json` files in `managed-settings.d/` beside it, merged with their lists combined. MDM and server-managed policies are not read. An allow entry stands for its family, so `claude-opus-4-6` permits `opus`. A deny entry blocks a family only when it names it, since Claude Code moves an alias off a denied version to the newest permitted one. Blocked models are not picked, unless the settings leave no registry model open, in which case they are ignored. If a model is substituted anyway, two substitutions take it out of rotation.
 
-Third-party providers: routing uses the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves for your provider. An alias your provider lacks fails or is substituted, and is then routed around. The main conversation's effort is left alone wherever an effort change re-reads the context uncached: on Bedrock, Vertex and Foundry, behind `ANTHROPIC_BASE_URL`, with `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set, and on a session model it knows is older than Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5. When the model isn't known, as after `/clear`, effort is raised as usual.
+Third-party providers: routing uses the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves for your provider. An alias your provider lacks fails or is substituted, and is then routed around. Some providers resolve aliases to older models ([alias table](https://code.claude.com/docs/en/model-config.md#model-aliases)). On Bedrock and Google Cloud's Agent Platform, `sonnet` runs Sonnet 4.5 and `haiku` runs Haiku 4.5; on Microsoft Foundry, `opus` runs Opus 4.6, `sonnet` Sonnet 4.5 and `haiku` Haiku 4.5; on Claude Platform on AWS, `sonnet` runs Sonnet 4.6 and `haiku` Haiku 4.5; on Claude Models on Google Cloud, `haiku` runs Haiku 4.5. Sonnet 4.5 retires on the Claude API and Foundry on November 30, 2026, and Bedrock and Agent Platform set their own dates ([model deprecations](https://platform.claude.com/docs/en/about-claude/model-deprecations.md)). So on those providers the mod starts routed work for those families on the newest model instead: it sends `claude-opus-5-5`, `claude-sonnet-5-5` or `claude-haiku-5-5`, which Bedrock and Agent Platform map to their own IDs and Foundry sends as the deployment name. If the provider refuses it, the call runs on the alias from then on, and the newest model is tried again after a day (then three days, then a week, if it keeps failing). To keep the alias for a family, set its `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` variable to the version you want; `modelOverrides`, or an `availableModels` or `deniedModels` setting that rules the newest version out, keeps the alias too. Where mods don't load, the `Agent` call fallback can only pass an alias. The main conversation's effort is left alone wherever an effort change re-reads the context uncached: on Bedrock, Vertex and Foundry, behind `ANTHROPIC_BASE_URL`, with `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set, and on a session model it knows is older than Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5. When the model isn't known, as after `/clear`, effort is raised as usual.
 
-Versions: needs Claude Code 2.1.292 for per-call effort. Mods need 2.1.287 and were tested live on 2.1.330: subagents, workflow agents, effort per request, effort only under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, and the spend log.
+Versions: needs Claude Code 2.1.292 for per-call effort. Mods need 2.1.287 and were tested live on 2.1.330: subagents, workflow agents, agent-team teammates (in-process, in an interactive session), plan mode, effort per request, effort only under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, the spend log, a hard skill typed as a slash command, and a background agent's `SubagentHandback` in auto mode. The slash-skill raise reads the mod's `skill.prompt` event, which the Claude Code changelog first names in 2.1.299; on an older build that raise may not happen.
 
-Failure handling: every hook and every mod hook fails open. A bug in this plugin can cost routing but can't block a tool call, a spawn or a session. State files are written atomically and under a lock, so agents started together don't overwrite each other's records.
+Failure handling: every hook and every mod hook fails open. A bug in this plugin can cost routing but can't block a tool call, a spawn or a session. State files are written atomically, and under a lock when it can be had within two seconds, so agents started together don't overwrite each other's records. A write that would wait longer goes ahead without the lock, so a hook never hangs, and can then lose one update.
+
+## Security
+
+Model Router fetches four fixed docs pages and, with an API key, the Models API. It sends no prompt or code anywhere and keeps its state in its own data directory. A repository's `.claude/model-router.json` can't set prices or get past your cap. [docs/SECURITY.md](docs/SECURITY.md) has the threat model, what reaches the network, the API key path and the open items. To report a problem, read its "Reporting a problem" section first: there is no private channel yet, so never put details in a public issue.
 
 ## Repository layout
 
@@ -189,6 +194,10 @@ plugins/model-router/
 tests/                         unit tests, run on Linux, macOS and Windows
 compat/baseline.json           the Claude Code version, docs index, model list and model status last reviewed
 docs/research/                 the primary-source research the design rests on
+docs/README.md                 index of the project's documents: traceability, readiness, roadmap, test results
+tools/traceability.py          counts the requirement statuses in docs/TRACEABILITY.md
+docs/BENCHMARKS.md             cost and quality results against Claude Code without the plugin
+bench/                         the benchmark: pinned tasks, configurations, runner and analysis (not shipped)
 ```
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the design and the reasons behind it.
@@ -198,6 +207,7 @@ docs/research/                 the primary-source research the design rests on
 ```bash
 python3 -m unittest discover -s tests
 node --experimental-strip-types --test "tests/mod/*.test.ts"
+sh tests/mod/typecheck.sh
 claude plugin validate --strict .
 claude plugin validate --strict plugins/model-router
 claude plugin eval plugins/model-router --trust-plugin

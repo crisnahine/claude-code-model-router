@@ -1,0 +1,7 @@
+{
+  "class": "lookup",
+  "revision": 1,
+  "brief": "How many `# TODO` comments are there in the .py files under src/, subfolders included? Reply with the number.",
+  "reference_answer": "4",
+  "wrong_answer": "5"
+}

@@ -26,9 +26,9 @@ The aim is the lowest cost per finished task at a high quality bar. Every subtas
 | Event | What the mod does |
 | :- | :- |
 | `agent.spawn` | Fires for every subagent, teammate and workflow agent before its model is resolved. The mod asks the router and passes the pick on as `model`. The event names the parent's effective model exactly (`parentModel`), so nothing is guessed from a transcript. Forks and resumed runs are left alone. |
-| `turn.step` | Fires for each model request, the main loop's and each agent's. `agent.spawn` has no effort field, so a routed agent's effort is set here, on each of its requests. The main loop's turn effort is applied here too. |
-| `turn.start` | The main loop's request text, after the settings hooks for the prompt ran. The router picks that turn's effort from it. |
-| `turn.complete` | Each turn's token usage and model, main loop and agents alike, priced and written to the ledger. |
+| `turn.step` | Fires for each model request, the main loop's and each agent's. `agent.spawn` has no effort field, so a routed agent's effort is set here, on each of its requests. The main loop's turn effort is applied here too. Each request's usage is kept for its turn. |
+| `turn.start` | The main loop's request text, after the settings hooks for the prompt ran. The router picks that turn's effort from it. For a typed `/skill`, whose turn text is a `<command-message>` line, the mod sends the command's arguments from `prompt.submit` and the body `skill.prompt` rendered for it instead. |
+| `turn.complete` | Each turn's token usage and model, main loop and agents alike, written to the ledger with its cost: the sum of its requests, each priced on its own, because Haiku 5.5 bills a prompt over 100,000 tokens at a higher rate per request (https://platform.claude.com/docs/en/about-claude/pricing.md, Long context pricing). A turn sent without its requests is priced at the base rate. |
 
 The mod calls the same Python runtime the settings hooks use, through `$.process.run` with the plugin's hook environment, so there is one decision procedure and one state store. A spawn decision settled in about 110 ms in live runs, the time to start Python included.
 
@@ -61,15 +61,15 @@ All of it is standard-library Python, plus the one TypeScript file the engine ru
 | Level | Needs | Model (balanced) | Effort |
 | :- | -: | :- | :- |
 | lookup | 1 | Haiku | low |
-| standard | 2 | Sonnet | high |
-| complex | 3 | Opus | high |
-| hardest | 3 | Opus | xhigh |
+| standard | 2 | Sonnet | medium |
+| complex | 2 | Sonnet | high |
+| hardest | 3 | Opus | high |
 | frontier | 4 | Fable | high |
 
 Each step is set from the measurements in the research notes:
 
-- Standard work runs Sonnet at `high`. Claude Code's default for Sonnet 5.5 is `medium`, which scored about 7 points lower on coding.
-- Complex and hardest share Opus and differ in effort. Effort is the cheaper lever: on current models it keeps the prompt cache, and Opus 5.5 at `high` came within a point of Fable 5.2 at `high` for under a quarter of the cost.
+- The ladder starts cheap and relies on redo escalation. The earlier ladder (standard at `high`, complex on Opus, hardest at `xhigh`) cost 1.2 to 2.2 times as much per solved task as Claude Code's defaults on 7 of 8 task classes at the same pass rate ([BENCHMARKS.md](BENCHMARKS.md)).
+- Standard and complex share Sonnet and differ in effort: `medium`, Claude Code's own default for Sonnet 5.5, then `high`. Effort is the cheaper lever: on current models it keeps the prompt cache. Hardest runs on Opus at `high`, which came within a point of Fable 5.2 at `high` for under a quarter of the cost.
 - Fable is kept for frontier work, where the brief is hardest and also open-ended or research-grade, and for redos of hardest work.
 
 A level's `needs` is a strength. `ladder.pick` adds any learned raise, and `registry.select` takes the cheapest usable model at or above it, so a cap or an unavailable model moves the pick without any level naming a model.
@@ -89,6 +89,8 @@ Order of authority, strongest first:
 5. `CLAUDE_CODE_SUBAGENT_MODEL`, the user's default for agents without a model.
 6. The router's pick: `ladder.pick(level, priority, usable models)`, which runs `registry.select` on the level's needs plus any learned raise.
 
+The scout and verifier pin Haiku at low effort and the docs-researcher Haiku at medium in their own definitions, so step 4 keeps them, and they stay on Haiku where the router doesn't route (`advise`, `off`, or no hooks). The implementer, architect, reviewer and deep-solver name no model or effort, so step 6 decides them like any agent without a pin, and where the router doesn't route they run on `CLAUDE_CODE_SUBAGENT_MODEL` if it's set, else on the conversation's model (https://code.claude.com/docs/en/sub-agents.md#choose-a-model). Their names set a floor in the profile: complex for the architect and reviewer, hardest for this plugin's own `model-router:deep-solver` only (`profile.profile_call`); another agent named for a role, such as `sudoku-solver`, gets complex, and a `resolver` none. A brief that profiles higher keeps its level. When the session note or the `Stop` check asks for a strong agent, it names the architect, or the deep-solver for a frontier request, by name only (`gates.strong_agent`), and a call to either starts no lower than the request's level from `UserPromptSubmit` (`spawn.facts`), since a hand-off brief often reads simpler than the request (not while Claude handles a teammate's or another session's message, which isn't the user's request); a redo still climbs from there, which a model named on the call would stop at step 2.
+
 Then `registry.clamp` lowers the result to the nearest usable model. It never raises.
 
 Effort is set when the router, a rule or the agent's own model decided the model and nobody chose an effort: not the call, not the agent's definition, not `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT`. A pin is about the model, and an agent that pins Opus with no effort would otherwise run at `medium`.
@@ -100,10 +102,11 @@ Some details of how the rules apply:
 - On the fallback path, inside a subagent and for the built-in Explore and Plan agents, the model a call would inherit isn't known for certain, so the pick is always written onto the call. The mod path knows the parent's model and needs no such guess.
 - A call that names a model outside the registry, such as `inherit` or a gateway's own ID, is left as it is.
 - A model the user names in a prompt is passed to Claude as a reminder to put it on the calls for that request. Words like "opus" appear in ordinary sentences too, so the hook leaves that judgment to Claude and forces nothing. A call on that model casts no feedback votes, since the user chose it, not Claude.
+- On a provider whose alias for the decided family resolves to an older model (`settings.provider`, from the `CLAUDE_CODE_USE_*` switches), the mod sends that family's newest ID in place of the alias (`registry.newest_id`). It doesn't when the user pinned the family with `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`, set `modelOverrides`, or has `availableModels`, `availableModelsMatch` or `deniedModels` ruling the version out, when the caller or the agent named an exact version, or on Mantle, whose aliases aren't documented. A model error on that ID routes around the ID alone, after one failure, so the alias runs until the ID is retried. Only `agent.spawn` takes a full ID: the `Agent` tool's `model` takes an alias (https://code.claude.com/docs/en/sub-agents.md), so the fallback path sends aliases.
 
 ### Redo escalation
 
-When an agent's result comes back, the call is remembered with the level it ran at (`done`, per session). For an agent that runs in the background the `Agent` call returns as soon as the agent has launched, so its call waits under the agent's id (`launched`) and counts as finished when the agent stops with an answer. Copies of one brief started together therefore all run at the brief's own level. The `post-agent` hook runs before Claude's next step, so a redo always finds the record. If the same call is issued again, the first answer wasn't good enough, so it runs one level higher, and the redo is a vote that its first level was too low. Up the ladder that means more effort first (complex to hardest), then a stronger model (standard to complex, hardest to frontier). A redo of a frontier run, with no level above it, runs at one step more effort. A call that names its own model is never escalated: the caller has decided.
+When an agent's result comes back, the call is remembered with the level it ran at (`done`, per session). For an agent that runs in the background the `Agent` call returns as soon as the agent has launched, so its call waits under the agent's id (`launched`) and counts as finished when the agent stops with an answer. Copies of one brief started together therefore all run at the brief's own level. The `post-agent` hook runs before Claude's next step, so a redo always finds the record. If the same call is issued again, the first answer wasn't good enough, so it runs one level higher, and the redo is a vote that its first level was too low. On the shipped ladder (`levels` in `config/models.json`), lookup to standard, complex to hardest and hardest to frontier move to a stronger model, and standard to complex stays on Sonnet and raises effort to high. Any redo that stays on the model of the run it replaces, as standard to complex does, or under a cap that holds it there, or for a frontier run with no level above it, runs at least one step more effort than that run (`router._above_earlier`). A call that names its own model is never escalated: the caller has decided.
 
 ### Rewrites that don't take
 
@@ -119,23 +122,23 @@ Neither path approves anything. The hook returns `updatedInput` and a one-line n
 
 A mod could send the main loop's requests to another model, and the first probe of this design did. The router doesn't, by choice. Each model keeps its own prompt cache, so a switch re-reads the whole conversation uncached, and switching back does it again. Effort keeps the cache on current models with an API key or a subscription, so the main loop gets effort instead:
 
-- `turn.start` profiles the request. A complex, hardest or frontier request raises that turn's effort (`main.effort` in the registry). It only raises: a level below what the session already asks for is left alone, so `/effort`, `ultrathink` and the user's own settings win. It is skipped when `CLAUDE_CODE_EFFORT_LEVEL` is set, when the `main_effort` option is off, and wherever an effort change breaks the cache (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level): on Bedrock, Vertex and Foundry, behind `ANTHROPIC_BASE_URL` (a gateway), with `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set, and when the session's model is known and isn't Fable 5.1 or later, Opus 5.5, Sonnet 5.5 or Haiku 5.5. An unknown model, as after `/clear` when SessionStart sends none, is raised as before. The model is the mod's `$.session.model()` when that is a model ID, else what SessionStart or PostModelSwitch recorded.
+- `turn.start` profiles the request. A complex, hardest or frontier request raises that turn's effort (`main.effort` in the registry). It only raises: a level below what the session already asks for is left alone, so `/effort`, `ultrathink` and the user's own settings win. It is skipped when `CLAUDE_CODE_EFFORT_LEVEL` is set, when the `main_effort` option is off, and wherever an effort change breaks the cache (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level): on Bedrock, Vertex and Foundry, behind `ANTHROPIC_BASE_URL` (a gateway), when the mod's `$.session.authorize()` finds no first-party credential (a Claude apps gateway or a third-party provider; a null in the desktop app, which never lends its sign-in to plugins, counts as unknown), with `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set, and when the session's model is known and isn't Fable 5.1 or later, Opus 5.5, Sonnet 5.5 or Haiku 5.5. An unknown model, as after `/clear` when SessionStart sends none, is raised as before. A turn that starts from a teammate's report, another session's message or a background notification is not the person's request, and is skipped when its framing or origin shows it. Both `turn.start` and `UserPromptSubmit` skip text framed as "Another Claude session sent a message:" with a `<teammate-message>` or `<cross-session-message>` below it, so such a turn doesn't raise effort, replace the request's profile or add a note. The mod also reads the origin `prompt.submit` gives a prompt that starts a turn from idle, and skips `task-notification`, `peer`, `peer-send-message` and the observer kinds. `unclassified` and `coordinator` are routed: a same-user socket's typed prompt arrives as `unclassified`, and a coordinator's hand-off is a worker session's real task. The model is the mod's `$.session.model()` when that is a model ID, else what SessionStart or PostModelSwitch recorded. A skill typed as `/name` is profiled by what it asks for. When its content takes the arguments through a placeholder (`$ARGUMENTS`, `$1` or a declared `arguments` name, https://code.claude.com/docs/en/skills.md#available-string-substitutions), and the arguments say what to do (once paths, numbers, flags and URLs are set aside, a change, reasoning or lookup verb with at least one other word; `profile.asks_for_work`; length or a signal word alone isn't an instruction), they are the task and set the level alone, so `/model-router:ship fix a typo` routes as a typo fix and not as the pipeline its instructions describe. Arguments that only name targets (`482`, `src/a.py src/b.py`, a URL, `the payments service`, `the login page`, a lone `audit`) leave the task to the body, at most complex, since a template body serves any target: `/security-review 482` routes complex on the review its instructions describe, and `/model-router:ship 1234` complex rather than frontier from ship's gate wording. When nothing takes them, the engine appends them as `ARGUMENTS: ...` and the body is the task: the higher of the arguments' level and that of the body's first 1,500 characters counts, as it does for a skill typed with no arguments. The mod reads that from the rendered body (any `ARGUMENTS:` trailer means no placeholder took them). The settings hook reads it from the raw file: an unescaped `$ARGUMENTS`, a `$N` or `$ARGUMENTS[N]` whose 0-based index has an argument, or a declared name the body uses. A `$` before an amount such as `$500` is prose. The two paths can still disagree where the engine's own substitution differs from that reading, such as quoted arguments. A body is standing instructions, so its length never reads as scope. Command output a skill renders near the top of its body (`` !`cmd` ``) still counts when the body does. On the mod path those come from `prompt.submit`'s `command` and the `skill.prompt` text that follows it, before the turn starts. A plugin's skill is named `plugin:skill` in both. The command goes only to a turn that opens with its `<command-message>` line, so a command whose turn never started can't stand in for a later turn's text. `UserPromptSubmit` sees only the typed line (https://code.claude.com/docs/en/hooks.md#userpromptsubmit-input), so it reads the body from the project's or user's `SKILL.md` or command file, a regular file of at most 64 KB. A plugin's skill isn't found there, and its typed line is profiled. A `/skill` typed while a turn is running is queued, and the mod doesn't profile it yet.
 - `UserPromptSubmit` profiles each request against the session's model. When the request needs more than that model, Claude is told to hand the hard thinking to a strong subagent. Otherwise the hook says nothing, so a normal prompt carries no extra tokens.
-- `Stop` checks whether that happened. A complex or harder request on a weaker session, with no agent of the needed strength started, blocks the stop once and asks for a strong agent to check the result.
+- With the `strong_agent_gate` option on, its default, `Stop` checks whether that happened. A complex or harder request on a weaker session, with no agent of the needed strength started, blocks the stop once and asks for a strong agent to check the result.
 
-A second check at `Stop` asks for verification once, when code in the project (under the hook's `cwd` or `CLAUDE_PROJECT_DIR`) changed and no test, lint, type-check or build command ran after the last edit and no verifier or reviewer was started.
+A second check at `Stop`, under the `verify_gate` option, which is off by default, asks for verification once, when code in the project (under the hook's `cwd` or `CLAUDE_PROJECT_DIR`) changed and no test, lint, type-check or build command ran after the last edit and no verifier or reviewer was started. A command counts whether the conversation ran it or a subagent did: a subagent's commands are in its own transcript, which `SubagentStop` names (`agent_transcript_path`), so a subagent that fixes code and runs the tests doesn't trigger a second agent to run them again.
 
 ## Discovery and adaptation
 
 | What | How it is discovered | What happens |
 | :- | :- | :- |
 | The models that exist | `config/models.json`, plus the user's and a project's additions | They are the candidates |
-| New versions of a model | Nothing to discover: routing uses the aliases, and Claude Code moves each alias to the newest version | Picked up the day Claude Code ships them |
+| New versions of a model | Nothing to discover: routing uses the aliases, and Claude Code moves each alias to the newest version. Where a provider's alias lags (`older_aliases` in `config/models.json`, from the alias table in https://code.claude.com/docs/en/model-config.md), the mod sends the family's newest ID from `newest` instead | Picked up the day Claude Code ships them; on a lagging provider, when a release updates `newest` |
 | A setup running behind the newest version | The session's model and what each alias resolved to, against the newest active version of each family in the model status data | Named at session start: a `model` setting that pins a full version, or a Claude Code that hasn't moved its alias yet |
 | The models you allow | The `max_tier` option | Stronger ones are never picked, and pins and explicit choices are lowered |
 | The models your organization allows | `availableModels` from managed settings alone, else user, project and local settings combined; `deniedModels` from managed settings only. An allow entry stands for its family; a deny entry counts when it names a family | Blocked ones are not picked, unless nothing in the registry is left open |
 | The model a name resolves to | `resolvedModel` in the `Agent` tool's result, and the model on each turn's usage | Shown in `/model-router:models` and `/model-router:usage` |
-| A model that isn't served here | A model error from the `Agent` tool, twice | Routed around for a day, then retried. Repeat trouble extends the wait to three days, then seven |
+| A model that isn't served here | A model error from the `Agent` tool, twice | Routed around for a day, then retried. Repeat trouble extends the wait to three days, then seven. A clock moved back can't stretch a wait past its own days from now |
 | A model that is silently replaced | The model a call was routed to, or the one it named, against `resolvedModel`, twice. Not counted while `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is set | Same |
 | A model name the `Agent` tool rejects | A rewrite to it comes back without having run, twice | Same |
 | A level routed too low | A redo of a routed call, or Claude naming a stronger model than the pick | Redos run one level up at once. After 6 votes that amount to 30% of that level's calls, the level is raised for good |
@@ -148,7 +151,7 @@ A new model family is reported but not routed to until it has a strength rating.
 
 With `ANTHROPIC_API_KEY` in the environment and no `ANTHROPIC_BASE_URL` or cloud provider in between, the daily check also reads the Models API (`GET /v1/models`). Its `line`, `lifecycle` and `retires_at` for each model the account can call take precedence over the public page, and a new `line` is reported as a new model family. The key is sent to `api.anthropic.com` alone, and that request follows no redirect. A subscription login gives hooks no key, so those setups rely on the public page.
 
-A changelog or docs index that comes back empty, such as an outage page, counts as a failed fetch. The last cache stays as it was, and the repo's daily workflow fails instead of opening an issue.
+A changelog or docs index that comes back empty, such as an outage page, counts as a failed fetch. The last cache stays as it was, and the repo's daily workflow fails instead of opening an issue. So does a body cut short of its `Content-Length`, and a fetch that runs too long. A request's body gets 10 seconds as a whole, not per socket read, and the whole fetch, connecting and headers included, gets 25 seconds or fails as one. Claude Code doesn't time out an async hook ([hooks docs](https://code.claude.com/docs/en/hooks.md#run-hooks-in-the-background)), so these limits are what end a refresh stuck on a slow server. After a failed fetch, session starts don't try again for an hour, then two, doubling with each failure in a row up to a day; a success resets the wait, and `/model-router:refresh` always tries.
 
 ## Hook flow
 
@@ -156,15 +159,17 @@ A changelog or docs index that comes back empty, such as an outage page, counts 
 mod  session.start ─ mod-start      marks the session, so PreToolUse stands down
 mod  agent.spawn   ─ mod-spawn      spawn.run for a subagent, teammate or workflow stage
 mod  turn.start    ─ mod-turn       the main loop's effort for this turn
-mod  turn.step                      applies the agent's or the turn's effort to each request
-mod  turn.complete ─ mod-usage      prices the turn's tokens into the ledger
+mod  turn.step                      applies the agent's or the turn's effort to each request; keeps its usage
+mod  turn.complete ─ mod-usage      prices the turn's requests into the ledger
 SessionStart ─┬─ session-start   records options and the session model; explains routing
-              └─ refresh-cache   (async) refreshes the upstream cache if older than 24 h
+              └─ refresh-cache   (async) refreshes the upstream cache if older than 24 h,
+                                 waiting 1 h to a day after a failed fetch
 UserPromptSubmit ─ user-prompt   profiles the request; notes a model the user may be asking for
 PostModelSwitch ─ model-switch   records the session's new model
 PreToolUse (Agent|Task) ─ pre-agent      fallback: spawn.run, returns updatedInput
 PostToolUse (Agent|Task) ─ post-agent    the model that ran; a returned result finishes the call for redos
-SubagentStop ─ agent-stopped    a background agent's result is back; finishes its call for redos
+SubagentStop ─ agent-stopped    a background agent's result is back; finishes its call for redos;
+                                counts the checks the agent ran
 PostToolUseFailure (Agent|Task) ─ agent-failed   counts model errors
 PostToolUse (Edit|Write|NotebookEdit) ─ post-edit   notes that code changed
 Stop ─ stop                      the two checks
@@ -186,20 +191,70 @@ In `${CLAUDE_PLUGIN_DATA}`:
 
 Writes are atomic, and the state files are written as compact JSON. Each read-modify-write cycle takes a lock file, because agents started in one message run their hooks at the same moment. A lock that can't be had within two seconds is skipped, so a hook never hangs a session.
 
+Each JSON state file carries a top-level `schema` version, which reads strip. `store.MIGRATIONS` is the one place an older version is brought up to date, one version per step; files from 0.1.0 have no version and are read as version 0. A file from a newer release is read but never written or removed, `/model-router:models` names it, and `models --reset` leaves it and says so. A file that fails to parse, isn't a JSON object, or has a `schema` that isn't a whole number of 0 or more is moved aside as `<name>.corrupt-<UTC timestamp>` before the next write replaces it, routing carries on with that state empty, and `/model-router:models` lists the files set aside. Only the three newest copies of each file are kept. A file that can't be read, or can't be moved aside, is left as it is and not written. Your own settings and `model-router.json` files are only ever read, never moved. The ledger is a log of independent lines, so it has no version: a line that doesn't parse is skipped.
+
 Nothing about your work leaves the machine. The only network access is the daily fetch from `code.claude.com` and `platform.claude.com`, and from `api.anthropic.com` when an Anthropic API key is set.
 
 ## Trust
 
 The user's own `~/.claude/model-router.json` is trusted in full. A repository's `.claude/model-router.json` is read like any project file. It can turn routing down to `advise` or `off`, set rules for agents, and add models. It can't switch routing on for a user who turned it off, and it can't change the strength of a model that ships or that the user defined. A name it adds that sits inside one of those names, or contains one, is dropped, and the names it adds are matched against a model ID last, so a name like `claude` can't claim the shipped models' IDs. Models it adds are ignored while the user has a cap set, since their rank is only the repository's claim.
 
+## Machine-readable output
+
+`models --json` and `usage --json` (and the two skills with `--json`) print one JSON object, built from the same data as the tables, so the two can't disagree. `status --json` prints the upstream changes the daily check found and carries no schema key.
+
+The top-level `schema` key is `<shape>/<version>`. A new key keeps the version, so readers ignore keys they don't know. Removing or renaming a key, or changing what one means, bumps the version. The constants are `USAGE_SCHEMA` and `MODELS_SCHEMA` in `report.py`.
+
+`model-router.usage/1`:
+
+| Key | Contents |
+| :- | :- |
+| `days` | The window read from the ledger |
+| `agents` | One entry per agent type, most calls first: `agent` (`?` when the call named none), `calls`, `routed` (calls whose model the router set), `levels` (level to count), `ran_on` (reported model to count) |
+| `models` | One entry per reported model, by name: `model`, `runs`, `tokens`. A background agent whose model wasn't reported counts under `background (not reported)`, here and in `ran_on` |
+| `model_errors` | Agent calls that failed with a model error |
+| `spend` | `total_usd`, `rows` (most spend first: `loop` as `main` or `subagent`, `model`, `turns`, `output_tokens`, `usd` at list price) and `unpriced` (models with no price, counted as 0) |
+
+`model-router.models/1`:
+
+| Key | Contents |
+| :- | :- |
+| `cap`, `strongest_in_use`, `priority` | The cap (`null` for none), the strongest usable model (`null` if none) and the priority |
+| `models` | One entry per registry model, weakest first: `model`, `last_ran_as` (`null` if never reported), `status` and `detail` (the table's text). `status` is `working`, `not_used`, `above_cap`, `project_model_under_cap`, `not_permitted` or `routed_around` |
+| `levels` | Levels the feedback loop has data for: `level`, `routed_calls`, `votes_too_low`, `raised` |
+| `doc_aliases`, `not_in_registry` | Model aliases in the current docs, and the families among them the registry lacks |
+| `set_aside`, `newer_files` | Paths of state files set aside because they could not be read, and of state files a newer release wrote, which are only read (see State) |
+| `newer_config` | Paths of `model-router.json` overrides written for a newer release, of which only the settings this release understands apply (see Compatibility) |
+
+## Compatibility
+
+Every shape a setup or a script depends on carries a version, so a release can change one without breaking what is already written:
+
+| Shape | Version | Where |
+| :- | :- | :- |
+| State files | Top-level `schema`, a whole number | `store.SCHEMA` and `store.MIGRATIONS` (see State) |
+| `config/models.json` and `model-router.json` overrides | Top-level `schema`, a whole number, now 1. A file without it is version 1, the 0.1.0 shape | `config.CONFIG_SCHEMA` |
+| `--json` output | `schema` as `<shape>/<version>` | `report.py` (see Machine-readable output) |
+| Plugin options | The plugin's own version | `userConfig` in `.claude-plugin/plugin.json` |
+
+A breaking change is one that makes an existing file, option or reader behave differently: removing or renaming a key or an option, changing a key's type or meaning, or accepting fewer values. Adding an optional key, option or value is not. A breaking change to the override shape bumps `CONFIG_SCHEMA`, and `config.py` reads every older version into the new one, so old overrides keep working. Dropping an old version is itself a breaking change of the plugin: it needs a new major version and a CHANGELOG entry, and until then every older shape is read.
+
+An override written for a newer release is read, not refused: the settings this release understands apply, the rest are ignored, and `/model-router:models` names the file. Refusing it would be worse, because a newer file that sets `routing_mode: off` would turn routing back on. A state file from a newer release is handled the other way round, read but never written, because writing it would drop what this release can't see.
+
+Plugin options have no version key of their own, since `userConfig` has Claude Code's shape (https://code.claude.com/docs/en/plugins-reference.md). They follow the plugin's version: within a major version an option is never removed or renamed, and the values it accepts only grow.
+
 ## What is out of reach, or left alone on purpose
 
 - The main conversation's model, by choice (see above).
 - Forks. A fork reads its parent's cache and always runs on its parent's model.
+- Skills with `context: fork`. Their subagent starts without an `agent.spawn` event, so it isn't routed. Its model comes from the skill's `model` field, else from its agent type and the session.
 - Agents with no definition on disk that the engine didn't make (command-line agents), unless `agent_pins` is `override`.
 - Answer quality. The profile is an estimate from the brief's wording and the agent's name. Redo escalation and the feedback loop react to what Claude redoes. Neither measures whether an answer was right.
 - Sessions where hooks are disabled by `disableAllHooks` or `allowManagedHooksOnly`. Where an organization doesn't load user mods, routing falls back to the `Agent` call and workflow stages and teammates aren't routed.
 - Another installed mod that also sets a spawn's model. Mods run in their own order. The model that ran is in the ledger either way.
+- A HIPAA organization. An effort change there re-reads the context uncached (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level), but the router finds no reliable sign that the configuration applies, so with `main_effort` on the main conversation's effort is still raised. Leave `main_effort` off, its default, in such an organization.
+- A Claude apps gateway reached through the Claude Desktop app. Desktop never lends its sign-in to plugins, so `$.session.authorize()` is null there whether the session signed in to a subscription or a gateway, and the router treats it as unknown and keeps the raise when `main_effort` is on. Desktop reads the gateway URL from its own managed configuration (https://code.claude.com/docs/en/claude-apps-gateway.md#deliver-policy-to-claude-desktop-sessions), which a hook can't read either. Leave `main_effort` off, its default, if Desktop reaches Claude through a gateway.
+- Fast mode's price. Fast mode runs the same model ID at higher per-token rates (https://code.claude.com/docs/en/fast-mode.md#understand-the-cost-tradeoff), and the usage the mod gets from `turn.step` and `turn.complete` holds only the token counts and the model, so nothing tells a fast request from a standard one. Those requests are logged at standard rates. Claude Code's own estimate in `/cost` includes them.
 
 ## Verified live
 
@@ -207,10 +262,28 @@ On Claude Code 2.1.330, with the plugin loaded from disk, in headless sessions a
 
 - A Sonnet session started a lookup and a security review in one message. The mod sent the lookup to Haiku at low effort and the review to Opus at xhigh, and raised the main turn's effort for the hard request. Every turn's spend was logged.
 - A workflow script's one stage, started from a Sonnet session, ran on Haiku at low effort.
+- A hard inline skill typed as `/hard-inline please check src too` in a headless Haiku session (`--setting-sources project`, the skill in the project's `.claude/skills/`) raised that turn to xhigh: the ledger's turn row says `hardest`, `xhigh`, `command: hard-inline`, and every main-loop request carried xhigh. An event probe showed the engine's order: `prompt.submit` with `command`, then `skill.prompt` with the body, then `turn.start` with the `<command-message>` line. For a plugin's skill both events named it `plugin:skill`. $0.09 at list price, most of it the Opus architect the request's note asked for.
 - Per-request effort: a complex request raised the main loop from medium to high on each of its requests, and a Haiku lookup subagent ran at low on each of its own.
 - With `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` pinning Opus, a lookup subagent stayed on Opus at low effort, and the session-start note said why.
 - An agent that pins its model kept it and took its own frontmatter effort.
 - In the interactive auto-mode session, no spawn was denied, and each subagent's first request already carried its routed effort.
 - Three copies of one lookup brief, started in one message and run in the background, all ran on Haiku at low effort. The same call re-issued after its background run had finished ran on Sonnet at high.
+- In an interactive auto-mode session on Haiku (`--permission-mode auto`, a plugins root of its own), a background `general-purpose` agent delivered its report through `SubagentHandback`, which auto mode gives local subagents other than forks (https://code.claude.com/docs/en/tools-reference.md). Its `SubagentStop` input had `last_assistant_message: null`, the closing text and not the report (https://code.claude.com/docs/en/hooks.md#subagentstop-input). The router counted the run as finished, and the same call re-issued afterwards ran as standard on Sonnet at high, up from lookup on Haiku at low. $0.08 at list price.
+- Agent-team teammates: an interactive auto-mode session in tmux, with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` (https://code.claude.com/docs/en/agent-teams.md) and a Haiku lead started as `claude --model haiku --teammate-mode in-process --setting-sources project --plugin-dir <plugin>`, with `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` unset, so an installed copy of the plugin and a forced subagent model stay out. Two teammates with no agent type, one given a file-listing brief and one a race-condition review, reached `agent.spawn` as teammates and ran on Haiku at low effort and on Opus at high. Every request in each teammate's transcript carried that model and effort. Two teammates on this plugin's pinned scout and architect kept their models. The run cost $0.61 at list price, $0.57 of it the two Opus reviews.
+- Skills, plan mode and `disableAllHooks` (2026-11-22, headless `claude -p --model haiku --setting-sources project --plugin-dir <plugin>`, a scratch project with its own skills, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, the parent session's `CLAUDE_CODE_*` variables left out; $0.07 at list price in all). `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` was added after the inline run, so the user's `CLAUDE.md` loaded in that one. The runs shared the plugin data dir that other `--plugin-dir` sessions on the machine use, and their ledger rows were picked out by session id:
+  - Before the slash-skill change above: an inline skill invoked as `/hard-inline`, whose body asks for a risky concurrency fix, ran every request at the session's default medium effort, per its transcript. The turn's prompt is the command: its transcript row is the `<command-message>` line, which `is_user_prompt` rejects because it starts with `<`, and the bare `/hard-inline` profiles as a lookup, which raises nothing. The skill's body arrives as a separate meta message the router doesn't profile, so a hard inline skill typed as a command gets no main-loop raise.
+  - A skill with `context: fork` and `agent: general-purpose` ran its subagent on the session's model, Haiku, and wrote no spawn row: the engine starts it as a forked slash command without an `agent.spawn` event, so it isn't routed. Its usage is still logged. The skill's own `model` and `effort` fields are what set it (https://code.claude.com/docs/en/skills.md#run-skills-in-a-subagent).
+  - In `--permission-mode plan`, a general-purpose subagent given a file-listing brief was routed as before, to Haiku at low effort, and its transcript shows Haiku. The only permission decisions were the engine's; the router answers none. The main loop ran on Sonnet, the plan-mode upgrade of a Haiku session (https://code.claude.com/docs/en/model-config.md#opusplan-model-setting).
+  - With `"disableAllHooks": true` in the project's `.claude/settings.json`, the debug log says the plugin's hooks module was not loaded ("only managed plugins and built-in plugins run"), no ledger row was written, and the session and its subagent worked on the session's model (https://code.claude.com/docs/en/settings-reference.md#disableallhooks).
+
+Rerun of the set, 2026-11-22, Claude Code 2.1.330, macOS, the plugin from disk with a plugins root of its own (`CLAUDE_CODE_PLUGIN_CACHE_DIR`), Haiku sessions unless noted, `--setting-sources project`, the parent session's `CLAUDECODE` and `CLAUDE_CODE_*` variables left out, `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`, learned stats reset with `models --reset` before the interactive part, and every ledger row read back by session id. $0.93 at list price in all, on a claude.ai subscription: the `stream-json` init event reports `apiKeySource: "none"`, which means no API key, the session authenticating another way such as a claude.ai login (https://code.claude.com/docs/en/agent-sdk/typescript.md, `ApiKeySource`), and no cloud provider or token was set.
+
+- Headless, `--permission-mode acceptEdits` and `--permission-mode bypassPermissions`: a lookup subagent was routed to Haiku at low effort (`source: router`) and ran at low on every request; the result's `permission_denials` was empty and the router answered no permission question.
+- Headless, three copies of one lookup brief started in one message in the background ran on Haiku at low. The ledger's usage rows hold per-turn totals, so these figures are each subagent's first request, read from its transcript: the first copy wrote 3,359 cache tokens over 8,405 it read, and the second and third each read 11,764 and wrote none. The same call re-issued after they finished escalated to Sonnet at high; its first request read nothing from that cache and wrote 11,744, since each model keeps its own cache (https://code.claude.com/docs/en/prompt-caching.md).
+- Headless, a lookup and a security review started in one message: Haiku at low and Opus at high. That prompt profiled as `standard`, so the main turn stayed at medium; a two-signal question on its own raised the turn to high (turn row `complex`, `high`) on each of its requests.
+- Headless, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` with Opus: the lookup stayed on Opus at low, and the session-start note named the pin. The plugin's pinned `scout`, called from a Sonnet session with a risky brief, kept Haiku at its frontmatter's low (`action: keep`, `source: pin`). A one-stage workflow ran its stage on Haiku at low (`kind: workflow`).
+- Headless, `/hard-inline please check src too` raised its turn to `complex`, `high` with `command: hard-inline`, and 12 of the 14 main-loop requests ran at high. The record above, `hardest`, `xhigh`, used another scratch project's `hard-inline` skill, whose text isn't in the repository. This skill's body carries two signals, risk and scope, so it profiles as `complex` at every commit since the skill profiling landed (`hooks._profile_skill`); the difference is the skill's wording, not a code change. It takes no placeholder, so the cap that holds a template's body at complex doesn't apply. A `context: fork` skill, plan mode and `disableAllHooks` behaved as recorded below.
+- Interactive auto mode in tmux, with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` and `--teammate-mode in-process`: a background lookup and review ran on Haiku at low and Opus at high, the lookup re-issued after its run ran on Sonnet at high, and each subagent's first request already carried its effort. No spawn or call was denied. Two teammates with no agent type ran on Haiku at low (a listing) and Opus at high (a review). No lead turn was raised by their reports: all 25 of the lead's requests stayed at medium.
+- Not rerun: the `Agent` call fallback path, which runs only where mods don't load.
 
 On the `Agent` call path: a Sonnet session in default and interactive auto mode routed a lookup to Haiku and a security review to Opus; another installed plugin's agents were routed the same way; a cap of Sonnet lowered a Fable agent; a rejected rewrite ran untouched on the retry; and on 2.1.270 the rewrite applied and the agent ran on Haiku.

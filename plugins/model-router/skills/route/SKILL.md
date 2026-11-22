@@ -1,9 +1,11 @@
 ---
 name: route
-description: Explains which Claude model Model Router would give a task and why, and how to split the work. Use when the user asks which model should do something, why an agent ran on a particular model, or how to delegate a large task.
+description: Explains which model Model Router would give a task and why, and how to split the work. Use when the user asks which model should do something or why an agent ran on a model.
 when_to_use: Which model should do this, why did that agent run on haiku, how should I split this up, is this routed right.
 argument-hint: "[task description]"
-allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" *)
+allowed-tools:
+  - Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" policy)
+  - Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" explain *)
 ---
 
 # How this task would be routed
@@ -41,7 +43,7 @@ Judge the task on these signals. The router reads the same ones from each brief'
 - Give each agent a complete brief: goal, files, constraints, how to verify, what to report. The brief is what the model is chosen from, so say what makes a piece hard (the security angle, the cross-service reach) in the brief itself.
 - Use the agent that fits the work, from any plugin or the project. When none fits, the role agents in the policy above cover search, build, verify, plan, review and research-grade problems.
 - If the estimate is wrong for a reason only you can see, pass `model` on that call. It is kept, within the cap.
-- If a result isn't good enough, re-issue the same call unchanged: it runs one level higher, more effort first and then a stronger model. Name a `model` only when you need that exact one. The router learns from both.
+- If a result isn't good enough, re-issue the same call unchanged: it runs one level higher, on a stronger model or, when it stays on the same one, at more effort. Name a `model` only when you need that exact one. The router learns from both.
 - Have code changes verified, and reviewed when they are more than trivial.
 
 ## Output
