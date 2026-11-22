@@ -22,7 +22,7 @@ When Claude issues the same call again in the same request after its result came
 
 ## What does Model Router cost?
 
-The plugin is free under the MIT license, and it adds 728 tokens to each request's context, measured on a headless Haiku run. Each of its hooks takes about 54 to 60 ms warm on the measuring machine, and a spawn decision settled in about 110 ms in live runs, starting Python included ([PERFORMANCE.md](PERFORMANCE.md)). The models it routes to are billed by your Claude plan or API account as usual. `/model-router:usage` shows what each turn cost at list price, main conversation and subagents apart.
+The plugin is free under the MIT license, and it adds 683 tokens to each request's context, measured on a headless Sonnet run. Each of its hooks takes about 54 to 60 ms warm on the measuring machine, and a spawn decision settled in about 110 ms in live runs, starting Python included ([PERFORMANCE.md](PERFORMANCE.md)). The models it routes to are billed by your Claude plan or API account as usual. `/model-router:usage` shows what each turn cost at list price, main conversation and subagents apart.
 
 ## Does Model Router reduce Claude Code cost?
 

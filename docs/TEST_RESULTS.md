@@ -27,21 +27,22 @@ The test counts come from each job's log (`gh run view --job <id> --log`). Commi
 
 ## Local
 
-Run 2026-11-23 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0`, up to `e00a9a6` plus the change that updated this file.
+Run 2026-11-23 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0`, up to `780ee86` with the docs redesign merged, plus the change that updated this file.
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 361 tests OK |
-| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 361 tests OK |
-| Unit tests, Python 3.15.2 | `python3.15 -m unittest discover -s tests` | 361 tests OK |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 376 tests OK |
+| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 376 tests OK |
+| Unit tests, Python 3.15.2 | `python3.15 -m unittest discover -s tests` | 376 tests OK |
 | Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 18 of 18 pass |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
+| Docs assets | `python3 tools/docs_assets.py --check` | Every generated asset, page head and site block matches the script |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 | Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78; run 2026-11-23 on `9b27510` |
 
-The 361 local tests are 309 in `tests/test_model_router.py`, 46 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py` and 3 in `tests/test_traceability.py`. The routing corpus test prints "2 of 243 briefs over-routed (0.8%), budget 2%; 5 known under-routes" on each of the three interpreters. CI's run on `8ec8eec` had 180.
+The 376 local tests are 319 in `tests/test_model_router.py`, 48 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 3 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 246 briefs over-routed (0.8%), budget 2%; 5 known under-routes" on each of the three interpreters. CI's run on `8ec8eec` had 180.
 
 Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
 
@@ -56,7 +57,7 @@ CLAUDE_CODE_PLUGIN_CACHE_DIR=<scratch>/plugins claude plugin eval plugins/model-
   --ablation with-without --runs 3 -j 2 --max-cost-usd 2 --no-publish --output-dir <scratch>/out --json <scratch>/result.json
 ```
 
-The export is needed because the CLI refuses a plugin folder whose git directory registers more linked worktrees than it can screen, and this repository's checkout has many. The three eval briefs profile the same at `9b27510` and at `e00a9a6` (lookup and complex), so the result holds for the release tip.
+The export is needed because the CLI refuses a plugin folder whose git directory registers more linked worktrees than it can screen, and this repository's checkout has many. The three eval briefs profile the same at `9b27510` and at `780ee86` (lookup and complex), so the result holds for the release tip.
 
 Same clean environment as below. Each case tells Claude to make one `Agent` call with an exact brief and no model, and a `regex` grader reads the run's trace for the `resolvedModel` Claude Code reports on that call's result. Without the router, a subagent with no model runs on the session's model, so the no-plugin arm fails by design. No `--allow-tools` grant is needed: routing runs in the plugin's hooks and mod, which start their own processes, not through the Bash tool.
 
