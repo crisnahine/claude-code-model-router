@@ -14,7 +14,7 @@
 - The plugin adds 683 tokens to a Sonnet session's context where it added 728: the session-start note no longer names the strongest model in use, and the `route` skill drops a `when_to_use` line that repeated its description.
 - The `architect` agent's and the `usage` skill's frontmatter is valid YAML again, so GitHub and other strict YAML readers no longer reject it: their descriptions are quoted, since an unquoted `: ` broke the block.
 - Only research-grade wording (research-grade, open-ended, no known approach, first principles and the like) sends a brief to frontier on Fable. A brief that researches docs or writes a file named RESEARCH.json routes hardest at most.
-- A doc called a migration guide no longer counts as a migration, and a file named RESEARCH.json no longer counts as research, so a docs lookup that mentions them routes on Sonnet at the level it needs.
+- A doc called a migration guide no longer counts as a migration, and a file named RESEARCH.json no longer counts as research, so a docs lookup that mentions them routes on Sonnet at the level it needs. The labeled corpus now holds 246 briefs.
 
 ## 0.1.1 - 2026-11-23
 
@@ -28,7 +28,7 @@ Reviewed against Claude Code 2.1.330 and the platform docs of the same day. Test
 - The plugin adds less to every request's context: 728 tokens where it added 1,215, on a headless Haiku run, from a shorter session-start note, shorter role-agent descriptions and a shorter `route` skill description.
 - On Bedrock, Google Cloud's Agent Platform, Microsoft Foundry, Claude Platform on AWS and Claude Models on Google Cloud, where an alias runs an older model, the mod starts routed work on that family's newest model and falls back to the alias if the provider refuses it. Setting `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` keeps the alias.
 - A hard skill typed as a slash command raises that turn's effort, and a skill that takes its arguments is judged by them, so a small job given to a large pipeline skill stays at standard. An argument that only names a target, such as a file, leaves the level to the skill's own body.
-- Briefs are profiled more accurately: other languages start at standard instead of lookup, a negated limit ends with its clause, and judgment verbs such as design and review, named systems and more risk words count. A labeled corpus of 246 briefs checks it.
+- Briefs are profiled more accurately: other languages start at standard instead of lookup, a negated limit ends with its clause, and judgment verbs such as design and review, named systems and more risk words count. A labeled corpus of 243 briefs checks it.
 - A brief that asks for a decision (decide how, choose a scheme, weigh the options, which library should we use) counts as reasoning and ambiguity, so a decision weighed against risk, scope or load routes like the same brief asking for a design; a load limit can be a per-second rate or a millisecond budget.
 - Teammates' reports and messages from other sessions no longer raise the lead's effort.
 - Each hook starts Python once and leaves the network modules unloaded, about 30 to 40 ms faster per warm hook.
