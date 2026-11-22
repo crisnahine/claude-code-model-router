@@ -41,7 +41,7 @@ _SKILL_BODY_CHARS = 1500
 def _profile_skill(args: object, body: object) -> dict:
     """A typed skill's profile: the higher of its arguments' and its body's opening, without the
     engine's base-directory line or the file's frontmatter."""
-    body = (body if isinstance(body, str) else "").lstrip("﻿")
+    body = (body if isinstance(body, str) else "").lstrip("\ufeff")
     body = re.sub(r"\A\s*Base directory for this skill: [^\n]*\n", "", body)
     body = re.sub(r"\A---[ \t]*\r?\n.*?\r?\n---[ \t]*\r?\n", "", body, flags=re.S)
     parts = [profile_prompt(text) for text in (args if isinstance(args, str) else "", body[:_SKILL_BODY_CHARS])]
@@ -58,9 +58,9 @@ def _typed_skill(prompt: str, hook_input: dict) -> dict | None:
     project, home = cfg.project_dir(hook_input) / ".claude", store.claude_home()
     for path in (project / "skills" / name / "SKILL.md", home / "skills" / name / "SKILL.md",
                  project / "commands" / f"{name}.md", home / "commands" / f"{name}.md"):
-        if not path.is_file():  # a FIFO or device would hang or never end
-            continue
         try:
+            if not path.is_file():  # a FIFO or device would hang or never end
+                continue
             with path.open("rb") as fh:
                 return _profile_skill(args, fh.read(64 * 1024).decode("utf-8", "replace"))
         except OSError:
@@ -400,7 +400,8 @@ def mod_turn(hook_input: dict) -> dict | None:
     text = text if isinstance(text, str) else ""
     # Only a turn that opens with the command's own line is that command's turn.
     command = hook_input.get("command")
-    command = command if isinstance(command, dict) and text.lstrip().startswith("<command-") else None
+    command = command if (isinstance(command, dict) and text.lstrip().startswith("<command-")
+                          and f"<command-name>/{command.get('name')}</command-name>" in text) else None
     asked = command is not None or is_user_prompt(text)
     # The mod's live model, when it is an ID; a record can miss a fallback to another model.
     model = hook_input.get("model")

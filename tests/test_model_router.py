@@ -2228,6 +2228,8 @@ class SlashSkills(Sandbox):
         self.assertGreater(len(body), 1500)
         self.assertIsNone(self.turn("commit", "", body))
         self.assertIsNone(self.turn("commit", "", "Review the staged diff in production style.\n" + body))
+        # The cut only works while the opening is too short for profile_prompt's own length rule.
+        self.assertNotIn("scope", profile.profile_prompt("note " * (hooks._SKILL_BODY_CHARS // 5))["signals"])
 
     def test_a_teammate_message_still_does_not_raise(self):
         self.session_on("claude-opus-5-5")
@@ -2236,6 +2238,8 @@ class SlashSkills(Sandbox):
         self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": delivered}))
         # A command left over from a submit whose turn never started can't stand in for another turn's text.
         self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": delivered,
+                                          "command": {"name": "rename", "args": HARD}}))
+        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": self.LINE.format("other", ""),
                                           "command": {"name": "rename", "args": HARD}}))
 
     def test_the_settings_hook_reads_a_project_or_user_skill_it_can_find(self):
@@ -2251,8 +2255,8 @@ class SlashSkills(Sandbox):
         self.assertEqual(level("/hard please check src too"), "hardest")
         self.assertEqual(level("/where"), "lookup")
         self.assertEqual(level("/elsewhere:unknown " + LOOKUP), "lookup")  # not found: the typed line is profiled
-        (skills / "SKILL.md").write_text("﻿---\r\nname: hard\r\ndescription: secrets schema production\r\n---\r\n"
-                                         "List the files under src.\r\n")
+        (skills / "SKILL.md").write_bytes("\ufeff---\r\nname: hard\r\ndescription: secrets schema production\r\n---\r\n"
+                                          "List the files under src.\r\n".encode("utf-8"))
         self.assertEqual(level("/hard"), "lookup")  # a BOM and CRLF frontmatter is still left out
         if hasattr(os, "mkfifo"):
             fifo = self.project / ".claude" / "skills" / "pipe"
