@@ -80,8 +80,6 @@ def decided(config: dict, *, source: str | None, level: str | None, pick: str | 
         _update(level, down=1)
 
 
-def reset() -> None:
-    try:
-        _path().unlink()
-    except OSError:
-        pass
+def reset() -> str:
+    """Forget what was learned: removed, missing, or left as newer or unreadable."""
+    return store.remove_state_file(_path())

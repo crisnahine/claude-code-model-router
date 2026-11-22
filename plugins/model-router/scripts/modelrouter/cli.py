@@ -37,6 +37,31 @@ def _well_formed(hook_input: object) -> dict:
             if key not in _TEXT_FIELDS or isinstance(value, str)}
 
 
+_NEWER = "left as is: {} was written by a newer Model Router release."
+
+
+def _reset_health() -> str:
+    removed: list = []
+    try:
+        status = store.try_update(store.state_path(), lambda state: removed.append(state.pop("health", None)))[1]
+    except OSError:
+        status = "unreadable"
+    if status == "saved":
+        return "Learned availability cleared." if removed and removed[0] else "No learned availability to clear."
+    if status == "newer":
+        return "Learned availability " + _NEWER.format("state.json")
+    return "Learned availability left as is: state.json could not be read or written."
+
+
+def _reset_feedback() -> str:
+    status = learn.reset()
+    if status in ("removed", "missing"):
+        return "Feedback cleared." if status == "removed" else "No feedback to clear."
+    if status == "newer":
+        return "Feedback " + _NEWER.format("learned.json")
+    return "Feedback left as is: learned.json could not be read or removed."
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="model-router")
     parser.add_argument("--data-dir", help="plugin data directory; skills pass ${CLAUDE_PLUGIN_DATA}")
@@ -77,9 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         print(report.policy(config, options))
     elif args.cmd == "models":
         if args.reset:
-            store.update_state(lambda state: state.pop("health", None))
-            learn.reset()
-            print("Learned availability and feedback cleared.\n")
+            print(f"{_reset_health()}\n{_reset_feedback()}\n")
         print(report.models(config, options))
     elif args.cmd == "explain":
         print(report.explain(config, options, " ".join(args.text), args.agent))

@@ -1941,6 +1941,59 @@ class StateFiles(Sandbox):
         self.assertEqual(list(self.home.glob("*.corrupt-*")), [])
 
 
+class ResetCommand(Sandbox):
+    """`models --reset` says what it cleared and what it had to leave."""
+
+    NEWER = {"schema": 99, "health": {"opus": {"fail": 2}}, "lookup": {"calls": 3, "bump": 1}}
+
+    def setUp(self):
+        super().setUp()
+        store.data_dir()
+
+    def reset(self) -> str:
+        return self.out("models", "--reset").split("\n\n")[0]
+
+    def test_clears_both_when_it_can(self):
+        registry.record_failure("opus", "404 model not found")
+        store.save_json(self.data / "learned.json", {"lookup": {"calls": 3, "bump": 1}})
+        self.assertEqual(self.reset(), "Learned availability cleared.\nFeedback cleared.")
+        self.assertNotIn("health", store.load_state())
+        self.assertFalse((self.data / "learned.json").exists())
+        self.assertEqual(self.reset(), "No learned availability to clear.\nNo feedback to clear.")
+
+    def test_leaves_files_a_newer_release_wrote(self):
+        for name in ("state.json", "learned.json"):
+            (self.data / name).write_text(json.dumps(self.NEWER))
+        self.assertEqual(self.reset(),
+                         "Learned availability left as is: state.json was written by a newer Model Router release.\n"
+                         "Feedback left as is: learned.json was written by a newer Model Router release.")
+        for name in ("state.json", "learned.json"):
+            self.assertEqual(json.loads((self.data / name).read_text()), self.NEWER)
+
+    def test_leaves_files_it_cannot_read(self):
+        for name in ("state.json", "learned.json"):
+            (self.data / name).mkdir()
+        self.assertEqual(self.reset(),
+                         "Learned availability left as is: state.json could not be read or written.\n"
+                         "Feedback left as is: learned.json could not be read or removed.")
+        self.assertTrue((self.data / "learned.json").is_dir())
+
+    def test_update_reports_whether_it_wrote(self):
+        path = self.data / "learned.json"
+        self.assertEqual(store.try_update(path, lambda data: data.update(a=1)), ({"a": 1}, "saved"))
+        path.write_text(json.dumps({"schema": 99, "a": 1}))
+        self.assertEqual(store.try_update(path, lambda data: data.update(a=2)), ({"a": 2}, "newer"))
+        self.assertEqual(json.loads(path.read_text()), {"schema": 99, "a": 1})
+
+    def test_corrupt_files_are_set_aside_not_deleted(self):
+        for name in ("state.json", "learned.json"):
+            (self.data / name).write_text('{"half": ')
+        self.assertEqual(self.reset(), "No learned availability to clear.\nFeedback cleared.")
+        self.assertEqual(len(list(self.data.glob("state.json.corrupt-*"))), 1)
+        self.assertEqual(len(list(self.data.glob("learned.json.corrupt-*"))), 1)
+        self.assertFalse((self.data / "learned.json").exists())
+
+
 @unittest.skipUnless(shutil.which("sh"), "needs sh")
 class Launcher(Sandbox):
     def test_launcher_runs_hooks_and_commands(self):
