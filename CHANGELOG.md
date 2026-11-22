@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Claude no longer hands a task whose result is a file to an agent that can't write one. The architect, reviewer, scout, verifier and docs-researcher descriptions say they write nothing. For the architect, the hard-request note and the stronger-agent check ask for the plan, decision or check and say to make the change yourself. If the architect is still asked to write a file, it gives the file's content for the caller to write.
+- The plugin adds 683 tokens to a Sonnet session's context where it added 728: the session-start note no longer names the strongest model in use, and the `route` skill drops a `when_to_use` line that repeated its description.
 - The `architect` agent's and the `usage` skill's frontmatter is valid YAML again, so GitHub and other strict YAML readers no longer reject it: their descriptions are quoted, since an unquoted `: ` broke the block.
 - Only research-grade wording (research-grade, open-ended, no known approach, first principles and the like) sends a brief to frontier on Fable. A brief that researches docs or writes a file named RESEARCH.json routes hardest at most.
 
