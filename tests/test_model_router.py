@@ -2410,6 +2410,24 @@ class SlashSkills(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": "/named " + typo, "cwd": str(self.project)})
         self.assertEqual(store.load_entry("prompts", "s1")["level"], "standard")
 
+    def test_only_a_placeholder_that_receives_the_arguments_hands_them_the_task(self):
+        hard = self.HARD_BODY.split("\n\n")[1]
+        rendered = lambda body, args: hooks._profile_skill(args, body, rendered=True)["level"]  # noqa: E731
+        raw = lambda body, args: hooks._profile_skill(args, body, rendered=False)["level"]  # noqa: E731
+        # An earlier ARGUMENTS: line in the body is not the engine's trailer, and any trailer means no placeholder.
+        self.assertEqual(rendered(hard + "\nARGUMENTS: none\nKeep notes.\n\n\nARGUMENTS: src", "src"), "hardest")
+        self.assertEqual(rendered(hard + "\n\n\nARGUMENTS: src  extra", "src extra"), "hardest")
+        self.assertEqual(rendered(hard + "\n\n\nARGUMENTS: line one\nline two", "line one\nline two"), "hardest")
+        for body, args in ((hard + " Refunds over $500 need approval.", "src"),  # an amount, not a placeholder
+                           (hard + " Costs $1.00 a run.", "src"),
+                           (hard + " Compare with $2.", "src"),  # $2 receives nothing from one argument
+                           (hard + " Target: \\$ARGUMENTS", "src"),  # escaped
+                           ("---\narguments: [task]\n---\n" + hard, "src")):  # declared, never used
+            self.assertEqual(raw(body, args), "hardest", body)
+        self.assertEqual(raw(hard + " Target: $0", "src"), "lookup")
+        self.assertEqual(raw(hard + " Target: $ARGUMENTS[0]", "src"), "lookup")
+        self.assertEqual(raw("---\narguments:\n  - task\n---\n" + hard + " On $task.", "src"), "lookup")
+
     def test_a_long_ordinary_skill_body_is_not_a_hard_request(self):
         self.session_on("claude-opus-5-5")
         body = "Never commit secrets or credentials. " + "Write a clear commit message for the staged change. " * 40

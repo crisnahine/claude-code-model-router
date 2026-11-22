@@ -41,6 +41,20 @@ _SKILL_BODY_CHARS = 1500
 _FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*\r?\n", re.S)
 
 
+def _receives(body: str, frontmatter: str, count: int) -> bool:
+    """Whether a raw skill file has a placeholder that receives one of `count` arguments: an unescaped
+    $ARGUMENTS, $N or $ARGUMENTS[N] with N below count (0-based), or a declared name the body uses.
+    A $ followed by an amount ($500, $1.00) is prose."""
+    if re.search(r"(?<!\\)\$ARGUMENTS\b(?!\[)", body):
+        return True
+    for index in re.findall(r"(?<!\\)\$(?:ARGUMENTS\[(\d+)\]|(\d+)(?![\d.,]))", body):
+        if int(index[0] or index[1]) < count:
+            return True
+    block = re.search(r"(?ms)^arguments\s*:(.*?)(?=^\S|\Z)", frontmatter)
+    names = re.findall(r"[A-Za-z_]\w*", block.group(1)) if block else []
+    return any(re.search(rf"(?<!\\)\${re.escape(name)}\b", body) for name in names)
+
+
 def _profile_skill(args: object, body: object, rendered: bool) -> dict:
     """A typed skill's profile. A skill whose content takes its arguments (a $ARGUMENTS, $1 or named
     placeholder) runs them as its task, so they alone set the level: its own instructions, a pipeline's
@@ -53,12 +67,13 @@ def _profile_skill(args: object, body: object, rendered: bool) -> dict:
     front = _FRONTMATTER.match(body)
     body = body[front.end():] if front else body
     if rendered:
-        trailer = re.search(r"\n\s*ARGUMENTS: (.*?)\s*\Z", body, re.S)
-        takes_args = bool(args) and not (trailer and trailer.group(1).strip() == args)
-        body = body[:trailer.start()] if trailer else body
+        # The engine appends the trailer last, so only its last occurrence counts, and any trailer at all
+        # means no placeholder took them: an unexpected format errs toward the higher level.
+        head, trailer, _ = body.rpartition("\nARGUMENTS: ")
+        takes_args = bool(args) and not trailer
+        body = head if trailer else body
     else:
-        takes_args = bool(args) and bool(re.search(r"(?<!\\)\$(?:ARGUMENTS\b|\d)", body)
-                                         or (front and re.search(r"(?m)^arguments\s*:", front.group(1))))
+        takes_args = bool(args) and _receives(body, front.group(1) if front else "", len(args.split()))
     if takes_args:
         return profile_prompt(args)
     parts = [profile_prompt(text) for text in (args, body[:_SKILL_BODY_CHARS])]
