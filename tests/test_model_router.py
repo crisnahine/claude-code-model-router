@@ -2381,9 +2381,34 @@ class SlashSkills(Sandbox):
 
     def test_a_hard_skill_raises_the_turn_and_a_lookup_does_not(self):
         self.session_on("claude-opus-5-5")
-        self.assertEqual(self.turn("hard", "please check src too", self.HARD_BODY)["effort"], "xhigh")
+        # No placeholder takes the arguments, so the engine appends them (as seen live on 2.1.330).
+        appended = self.HARD_BODY + "\n\n\nARGUMENTS: please check src too"
+        self.assertEqual(self.turn("hard", "please check src too", appended)["effort"], "xhigh")
+        self.assertEqual(self.turn("hard", "", self.HARD_BODY)["effort"], "xhigh")
         self.assertIsNone(self.turn("where", "", self.LOOKUP_BODY))
         self.assertEqual(self.turn("plain", HARD, None), {"level": "complex", "effort": "high"})  # args alone
+
+    def test_a_skill_that_takes_its_arguments_is_profiled_by_them(self):
+        self.session_on("claude-opus-5-5")
+        raw = (PLUGIN / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")
+        body = "Base directory for this skill: /p/skills/ship\n\n" + raw.split("---\n", 2)[2]
+        typo = "fix the typo in README.md"
+        self.assertIsNone(self.turn("model-router:ship", typo, body.replace("$ARGUMENTS", typo)))
+        hard = body.replace("$ARGUMENTS", HARD)
+        self.assertEqual(self.turn("model-router:ship", HARD, hard), {"level": "complex", "effort": "high"})
+        self.assertEqual(self.turn("model-router:ship", "", body.replace("$ARGUMENTS", ""))["level"], "frontier")
+        # The settings hook reads the raw file, where the placeholder is still there.
+        skills = self.project / ".claude" / "skills" / "ship"
+        skills.mkdir(parents=True)
+        (skills / "SKILL.md").write_text(raw, encoding="utf-8")
+        hooks.user_prompt({"session_id": "s1", "prompt": "/ship " + typo, "cwd": str(self.project)})
+        self.assertEqual(store.load_entry("prompts", "s1")["level"], "standard")
+        named = self.project / ".claude" / "skills" / "named"
+        named.mkdir()
+        (named / "SKILL.md").write_text("---\nname: named\narguments: [task]\n---\nRedesign the auth schema across "
+                                        "every service: $task\n", encoding="utf-8")
+        hooks.user_prompt({"session_id": "s1", "prompt": "/named " + typo, "cwd": str(self.project)})
+        self.assertEqual(store.load_entry("prompts", "s1")["level"], "standard")
 
     def test_a_long_ordinary_skill_body_is_not_a_hard_request(self):
         self.session_on("claude-opus-5-5")

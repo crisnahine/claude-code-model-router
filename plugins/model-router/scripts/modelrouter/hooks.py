@@ -38,13 +38,30 @@ def is_user_prompt(prompt: str) -> bool:
 _SKILL_BODY_CHARS = 1500
 
 
-def _profile_skill(args: object, body: object) -> dict:
-    """A typed skill's profile: the higher of its arguments' and its body's opening, without the
-    engine's base-directory line or the file's frontmatter."""
+_FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*\r?\n", re.S)
+
+
+def _profile_skill(args: object, body: object, rendered: bool) -> dict:
+    """A typed skill's profile. A skill whose content takes its arguments (a $ARGUMENTS, $1 or named
+    placeholder) runs them as its task, so they alone set the level: its own instructions, a pipeline's
+    say, are the same on every use. Otherwise the body is the task, and the higher of the arguments' level
+    and the body's opening counts. `rendered` is the engine's expansion, where a skill that takes no
+    placeholder gets the arguments appended as "ARGUMENTS: ..."; otherwise body is the raw file."""
+    args = args.strip() if isinstance(args, str) else ""
     body = (body if isinstance(body, str) else "").lstrip("\ufeff")
     body = re.sub(r"\A\s*Base directory for this skill: [^\n]*\n", "", body)
-    body = re.sub(r"\A---[ \t]*\r?\n.*?\r?\n---[ \t]*\r?\n", "", body, flags=re.S)
-    parts = [profile_prompt(text) for text in (args if isinstance(args, str) else "", body[:_SKILL_BODY_CHARS])]
+    front = _FRONTMATTER.match(body)
+    body = body[front.end():] if front else body
+    if rendered:
+        trailer = re.search(r"\n\s*ARGUMENTS: (.*?)\s*\Z", body, re.S)
+        takes_args = bool(args) and not (trailer and trailer.group(1).strip() == args)
+        body = body[:trailer.start()] if trailer else body
+    else:
+        takes_args = bool(args) and bool(re.search(r"(?<!\\)\$(?:ARGUMENTS\b|\d)", body)
+                                         or (front and re.search(r"(?m)^arguments\s*:", front.group(1))))
+    if takes_args:
+        return profile_prompt(args)
+    parts = [profile_prompt(text) for text in (args, body[:_SKILL_BODY_CHARS])]
     return max(parts, key=lambda p: cfg.LEVELS.index(p["level"]))
 
 
@@ -62,7 +79,7 @@ def _typed_skill(prompt: str, hook_input: dict) -> dict | None:
             if not path.is_file():  # a FIFO or device would hang or never end
                 continue
             with path.open("rb") as fh:
-                return _profile_skill(args, fh.read(64 * 1024).decode("utf-8", "replace"))
+                return _profile_skill(args, fh.read(64 * 1024).decode("utf-8", "replace"), rendered=False)
         except OSError:
             continue
     return None
@@ -412,7 +429,8 @@ def mod_turn(hook_input: dict) -> dict | None:
             or str(hook_input.get("origin")) in MACHINE_ORIGINS
             or not _effort_keeps_cache(options, model)):
         return None
-    level = (_profile_skill(command.get("args"), command.get("body")) if command else profile_prompt(text))["level"]
+    level = (_profile_skill(command.get("args"), command.get("body"), rendered=True) if command
+             else profile_prompt(text))["level"]
     effort = ((config.get("main") or {}).get("effort") or {}).get(level)
     if effort not in cfg.EFFORTS:
         return None
