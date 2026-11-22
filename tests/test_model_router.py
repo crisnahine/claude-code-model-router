@@ -22,7 +22,7 @@ SCRIPT = SCRIPTS / "model-router.py"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, cli, gates, hooks, learn, profile, registry, router, session, store, upstream  # noqa: E402
+from modelrouter import agents, cli, gates, hooks, learn, profile, registry, report, router, session, store, upstream  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 
 LOOKUP = "list the files under src"
@@ -55,7 +55,7 @@ class Sandbox(unittest.TestCase):
         self.patch = mock.patch.dict(os.environ, self.env)
         self.patch.start()
         for name in list(os.environ):
-            if name.startswith(("CLAUDE_PLUGIN_OPTION_", "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL")):
+            if name.startswith(("CLAUDE_PLUGIN_OPTION_", "CLAUDE_CODE_SUBAGENT_", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_USE_", "ANTHROPIC_")):
                 del os.environ[name]
         self.no_managed = mock.patch.object(
             registry, "_settings_files",
@@ -157,6 +157,11 @@ class Shipped(unittest.TestCase):
                     self.assertEqual(hook["command"], "sh")
                     self.assertEqual(hook["args"][0], "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh")
                     commands.add(hook["args"][1])
+        self.assertEqual(data["modules"], ["./router.ts"])
+        module = (PLUGIN / "hooks" / "router.ts").read_text(encoding="utf-8")
+        self.assertIn("scripts/model-router.sh", module)
+        commands |= set(re.findall(r"ask\(\$, opts, '([a-z-]+)'", module))
+        self.assertEqual(module.count("await ask($"), module.count("await ask($, opts, '"))
         self.assertEqual(commands, set(hooks.HANDLERS))
         self.assertTrue((SCRIPTS / "model-router.sh").exists())
 
@@ -478,7 +483,7 @@ class Router(Sandbox):
             self.assertEqual((d["action"], d["model"], d["effort"], d["source"]),
                              ("rewrite", "haiku", "low", "router"), agent)
         d = self.decide("helper", BUILD)
-        self.assertEqual((d["model"], d["effort"]), ("sonnet", None))
+        self.assertEqual((d["model"], d["effort"]), ("sonnet", "high"))
         d = self.decide("helper", HARD)
         self.assertEqual((d["model"], d["effort"]), ("opus", "high"))
 
@@ -492,6 +497,7 @@ class Router(Sandbox):
 
     def test_no_output_when_the_model_would_be_the_same(self):
         self.session_on("claude-sonnet-5-5")
+        self.override({"levels": {"standard": {"effort": None}}})
         self.assertIsNone(self.pre("general-purpose", BUILD))
         self.assertEqual(self.ledger()[-1]["action"], "keep")
 
@@ -521,11 +527,13 @@ class Router(Sandbox):
 
     def test_agents_that_name_a_model_keep_it_within_the_cap(self):
         self.agent("pinned", "opus")
-        self.assertEqual(self.decide("pinned", LOOKUP)["action"], "keep")
-        self.assertEqual(self.decide("model-router:deep-solver", LOOKUP)["action"], "keep")
+        d = self.decide("pinned", LOOKUP)  # the pin holds the model; effort still follows the subtask
+        self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "opus", "pin", "low"))
+        d = self.decide("model-router:deep-solver", LOOKUP)
+        self.assertEqual((d["model"], d["effort"]), ("fable", None))  # its own effort: xhigh
         self.options(max_tier="sonnet")
         d = self.decide("pinned", LOOKUP)
-        self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", None))
+        self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", "low"))
         self.assertEqual(self.decide("model-router:deep-solver", HARD)["model"], "sonnet")
 
     def test_pins_can_be_overridden(self):
@@ -548,6 +556,18 @@ class Router(Sandbox):
         self.assertEqual(out["updatedInput"]["effort"], "high")
         self.options(CLAUDE_CODE_EFFORT_LEVEL="medium")
         self.assertIsNone(self.decide("general-purpose", "list the tests")["effort"])
+
+    def test_a_forced_subagent_model_still_gets_its_effort(self):
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="claude-opus-5-5[1m]", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+        out = self.pre("general-purpose", LOOKUP)
+        self.assertEqual(out["updatedInput"], {"prompt": LOOKUP, "subagent_type": "general-purpose", "effort": "low"})
+        self.assertIn("effort to low", out["additionalContext"])
+        self.assertEqual(self.decide("general-purpose", HARD)["effort"], "high")
+        self.options(priority="fast")
+        self.assertIsNone(self.decide("general-purpose", HARD)["effort"])
+        self.assertEqual(self.decide("general-purpose", LOOKUP)["effort"], "low")
+        self.options(CLAUDE_CODE_SUBAGENT_EFFORT="medium")
+        self.assertEqual(self.decide("general-purpose", LOOKUP)["action"], "keep")
 
     def test_the_users_environment_settings_win(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
@@ -584,7 +604,7 @@ class Router(Sandbox):
 
     def test_rules_in_override_files(self):
         self.override({"agents": {"general-purpose": {"model": "sonnet"}, "Explore": {"route": False},
-                                  "Plan": {"level": "hardest"}}})
+                                  "Plan": {"level": "frontier"}}})
         self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "sonnet")
         self.assertEqual(self.decide("Explore", LOOKUP)["action"], "keep")
         self.assertEqual(self.decide("Plan", LOOKUP)["model"], "fable")
@@ -600,7 +620,7 @@ class Router(Sandbox):
         path.write_text("".join(json.dumps(r) + "\n" for r in rows))
         hook_input = {**self.call("general-purpose", BUILD), "transcript_path": str(path)}
         d = router.decide(hook_input, cfg.load_config())
-        self.assertEqual((d["action"], d["was"]), ("keep", "sonnet"))  # not the recorded opus, not the subagent's haiku
+        self.assertEqual((d["model"], d["was"]), ("sonnet", "sonnet"))  # not the recorded opus, not the subagent's haiku
 
     def test_hooks_never_break_on_garbage(self):
         payloads = ("", "not json", "[]", json.dumps({"tool_input": "x"}),
@@ -632,6 +652,46 @@ class RepeatGuard(Sandbox):
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
         self.assertIsNotNone(self.pre("general-purpose", LOOKUP))
+
+    def test_a_call_redone_after_its_result_runs_one_level_up(self):
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
+        again = self.decide("general-purpose", LOOKUP)
+        self.assertEqual((again["level"], again["model"], again["effort"]), ("standard", "sonnet", "high"))
+        self.assertIn("one level above the lookup run", again["reason"])
+        self.pre("general-purpose", LOOKUP)
+        self.assertEqual(learn.stats()["lookup"]["votes"], 1)
+
+    def test_redo_counts_only_within_the_same_request(self):
+        hooks.user_prompt({"session_id": "s1", "prompt": "check the repo", "prompt_id": "p1"})
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
+        hooks.user_prompt({"session_id": "s1", "prompt": "check the repo again", "prompt_id": "p2"})
+        self.assertEqual(self.decide("general-purpose", LOOKUP)["level"], "lookup")  # a loop, not a redo
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
+        self.assertEqual(self.decide("general-purpose", LOOKUP)["level"], "standard")
+
+    def test_a_redo_held_on_the_same_model_by_the_cap_gets_more_effort(self):
+        self.options(max_tier="opus")
+        hard = "investigate why auth is flaky and redesign it across every service"
+        first = self.decide("general-purpose", hard)
+        self.assertEqual((first["level"], first["model"], first["effort"]), ("hardest", "opus", "xhigh"))
+        self.pre("general-purpose", hard)
+        self.done("general-purpose", hard, "claude-opus-5-5", model="opus", effort="xhigh")
+        again = self.decide("general-purpose", hard)
+        self.assertEqual((again["level"], again["model"], again["effort"]), ("frontier", "opus", "max"))
+
+    def test_redo_escalation_stops_at_the_top_and_skips_named_models(self):
+        hard = "research a novel fix for the auth migration across every service, root cause unknown"
+        self.assertEqual(self.decide("general-purpose", hard)["level"], "frontier")
+        self.pre("general-purpose", hard)
+        self.done("general-purpose", hard, "claude-fable-5-2", model="fable", effort="high")
+        self.assertEqual(self.decide("general-purpose", hard)["level"], "frontier")
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
+        named = self.decide("general-purpose", LOOKUP, model="haiku")
+        self.assertEqual((named["source"], named["escalated_from"]), ("caller", None))
 
     def test_an_error_also_settles_the_call(self):
         self.pre("general-purpose", LOOKUP)
@@ -673,6 +733,81 @@ class RepeatGuard(Sandbox):
         self.pre("general-purpose", LOOKUP)
         hooks.user_prompt({"session_id": "s1", "prompt": "try that again"})
         self.assertIsNone(self.pre("general-purpose", LOOKUP))
+
+
+class Mod(Sandbox):
+    """The calls hooks/router.ts makes for agent.spawn, turn.start and turn.complete."""
+
+    def spawn(self, agent: str, prompt: str, parent: str = "claude-opus-5-5", **extra) -> dict | None:
+        tool_input = {"subagent_type": agent, "prompt": prompt, "description": "d", **extra}
+        return hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": parent,
+                                "kind": "subagent", "tool_input": tool_input})
+
+    def test_spawns_are_routed_from_the_parents_exact_model(self):
+        self.assertEqual(self.spawn("general-purpose", LOOKUP), {"model": "haiku", "effort": "low",
+                                                                 "reason": "lookup subtask"})
+        self.assertEqual(self.spawn("general-purpose", HARD)["model"], "opus")
+        self.assertIsNone(self.spawn("general-purpose", BUILD, model="sonnet", effort="high"))
+        self.assertEqual(self.ledger()[-1]["via"], "mod")
+
+    def test_the_settings_hook_stands_down_once_the_mod_is_running(self):
+        self.session_on("claude-opus-5-5")
+        self.assertIsNotNone(self.pre("general-purpose", LOOKUP))
+        hooks.mod_start({"session_id": "s1"})
+        count = len(self.ledger())
+        self.assertIsNone(self.pre("general-purpose", "list the tests"))
+        self.assertEqual(len(self.ledger()), count)
+
+    def test_a_spawn_redone_after_its_result_runs_one_level_up(self):
+        self.spawn("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
+        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "sonnet")
+
+    def test_turns_and_spawns_keep_the_mod_marked_after_a_clear(self):
+        self.assertFalse(hooks.mod_active("s2"))
+        hooks.mod_turn({"session_id": "s2", "text": LOOKUP})
+        self.assertTrue(hooks.mod_active("s2"))
+        hooks.mod_spawn({"session_id": "s3", "parent_model": "claude-opus-5-5", "tool_input": {"prompt": LOOKUP}})
+        self.assertTrue(hooks.mod_active("s3"))
+
+    def test_a_pinned_agent_redone_gets_more_effort(self):
+        self.agent("pinned", "opus")
+        self.assertEqual(self.spawn("pinned", LOOKUP)["effort"], "low")
+        self.done("pinned", LOOKUP, "claude-opus-5-5")
+        pick = self.spawn("pinned", LOOKUP)
+        self.assertEqual((pick["model"], pick["effort"]), ("opus", "high"))
+
+    def test_workflow_stages_and_teammate_roles_without_a_file_are_routed(self):
+        for kind, agent in (("workflow", "workflow-subagent"), ("teammate", "helper-two")):
+            pick = hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                                    "kind": kind, "tool_input": {"subagent_type": agent, "prompt": LOOKUP}})
+            self.assertEqual((pick["model"], pick["effort"]), ("haiku", "low"), kind)
+        self.assertIsNone(self.spawn("no-such-agent", LOOKUP))
+
+    def test_forced_subagent_model_gets_effort_only(self):
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+        pick = self.spawn("general-purpose", LOOKUP)
+        self.assertEqual((pick["model"], pick["effort"]), (None, "low"))
+
+    def test_turn_effort_rises_for_hard_requests_only(self):
+        turn = lambda text: hooks.mod_turn({"session_id": "s1", "text": text})  # noqa: E731
+        self.assertEqual(turn(HARD), {"level": "complex", "effort": "high"})
+        self.assertIsNone(turn(LOOKUP))
+        self.assertIsNone(turn("<task-notification>done</task-notification>"))
+        for name, value in (("CLAUDE_CODE_EFFORT_LEVEL", "low"), ("CLAUDE_CODE_USE_BEDROCK", "1"),
+                            ("main_effort", "false")):
+            with mock.patch.dict(os.environ):
+                self.options(**{name: value})
+                self.assertIsNone(turn(HARD), name)
+
+    def test_usage_is_priced_from_the_registry(self):
+        hooks.mod_usage({"session_id": "s1", "agent_id": "a1", "usage": {
+            "model": "claude-opus-5-5", "input_tokens": 1_000_000, "output_tokens": 100_000,
+            "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}})
+        row = self.ledger()[-1]
+        self.assertEqual((row["event"], row["cost_usd"]), ("usage", 6.0))
+        self.assertIsNone(registry.cost(cfg.load_config(), "claude-unknown-9", {"input_tokens": 1}))
+        self.assertEqual(registry.price(cfg.load_config(), "claude-opus-4-7")["input"], 5)
 
 
 class Feedback(Sandbox):
@@ -739,7 +874,12 @@ class Hooks(Sandbox):
         self.assertIn("Model Router is on", text)
         self.assertIn("strongest model in use: opus", text)
         self.assertIn("model-router:deep-solver", text)
+        self.assertIn("re-issue the same call unchanged", text)
+        self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", text)
         self.assertEqual(session.model("s1"), "claude-sonnet-5-5")
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+        text = self.text(hooks.session_start({"session_id": "s1"}))
+        self.assertIn("pins every subagent to opus, so Model Router sets only their effort", text)
 
     def test_session_start_is_silent_when_off_and_nothing_is_pending(self):
         self.options(routing_mode="off")
@@ -901,6 +1041,24 @@ class Upstream(Sandbox):
         self.assertTrue(releases and releases[0]["version"])
         pages = upstream.parse_llms_index((FIXTURES / "llms.txt").read_text(encoding="utf-8"))
         self.assertTrue(any(url.endswith("hooks.md") for url in pages))
+        life = upstream.parse_deprecations((FIXTURES / "model-deprecations.md").read_text(encoding="utf-8"))
+        self.assertEqual(life["claude-opus-5-5"]["state"], "Active")
+        self.assertEqual(life["claude-sonnet-4-5-20250929"],
+                         {"state": "Deprecated", "deprecated": "September 30, 2026", "retires": "November 30, 2026",
+                          "replacement": "claude-sonnet-5-5"})
+
+    def test_retiring_models_are_flagged_when_new_or_in_use(self):
+        old = {"lifecycle": {"claude-sonnet-4-5-20250929": {"state": "Active"}, "claude-opus-5-5": {"state": "Active"}}}
+        new = {"lifecycle": {"claude-sonnet-4-5-20250929": {"state": "Deprecated", "retires": "November 30, 2026"},
+                             "claude-opus-5-5": {"state": "Active"}}}
+        changes = upstream.diff(old, new, in_use=["claude-sonnet-4-5-20250929", "claude-opus-5-5[1m]"])
+        self.assertEqual([m["model"] for m in changes["newly_deprecated"]], ["claude-sonnet-4-5-20250929"])
+        self.assertEqual([m["model"] for m in changes["deprecated_in_use"]], ["claude-sonnet-4-5-20250929"])
+        self.assertTrue(upstream.has_pending(changes))
+        self.assertIn("retires November 30, 2026", report.status(changes))
+        self.assertEqual(upstream.diff({}, new)["newly_deprecated"], [])  # a first review floods nothing
+        in_use_only = upstream.diff(new, new, in_use=["claude-sonnet-4-5-20250929"])
+        self.assertFalse(upstream.has_pending(in_use_only))  # said at session start on its own line
 
     def test_aliases_and_families(self):
         aliases = upstream.parse_model_aliases(self.TABLE)
@@ -939,6 +1097,35 @@ class Upstream(Sandbox):
         with mock.patch.object(upstream, "http_get", side_effect=AssertionError("network used")):
             upstream.refresh(force=False)
 
+    def test_models_api_is_read_only_with_a_direct_api_key(self):
+        reply = json.dumps({"data": [
+            {"id": "claude-opus-5-5", "line": "opus", "lifecycle": "active", "retires_at": None},
+            {"id": "claude-sonnet-4-5-20250929", "line": "sonnet", "lifecycle": "deprecated",
+             "retires_at": "2026-11-30T00:00:00Z"},
+            {"id": "claude-mythos-5-2", "line": "mythos", "lifecycle": "active", "retires_at": None}]})
+        calls = []
+
+        def fake_get(url, headers=None):
+            calls.append((url, headers))
+            return reply
+
+        with mock.patch.object(upstream, "http_get", side_effect=fake_get):
+            self.assertEqual(upstream.api_models(), {})  # no key, no request
+            os.environ.update(ANTHROPIC_API_KEY="sk-test", ANTHROPIC_BASE_URL="https://gateway.example")
+            self.assertEqual(upstream.api_models(), {})  # a gateway would get the key
+            del os.environ["ANTHROPIC_BASE_URL"]
+            models = upstream.api_models()
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][0].startswith("https://api.anthropic.com/v1/models"))
+        self.assertEqual(calls[0][1]["Authorization"], "Bearer sk-test")
+        self.assertEqual(models["claude-sonnet-4-5-20250929"]["retires_at"], "2026-11-30")
+        live = {"api_models": models, "lifecycle": {}}
+        changes = upstream.diff({"lifecycle": {"claude-sonnet-4-5-20250929": {"state": "Active"}}}, live,
+                                in_use=["claude-sonnet-4-5-20250929"])
+        self.assertEqual(changes["new_model_families"], ["mythos"])
+        self.assertEqual(changes["deprecated_in_use"][0]["retires"], "2026-11-30")
+        self.assertEqual(upstream.diff(upstream.snapshot(live), live)["new_model_families"], [])
+
     def test_a_failed_fetch_leaves_the_cache_alone(self):
         store.save_json(upstream.path(), {"cache": {"fetched_at": 1, "aliases": ["haiku"]}})
         with mock.patch.object(upstream, "http_get", side_effect=OSError("offline")):
@@ -976,13 +1163,21 @@ class Reports(Sandbox):
         self.assertIn("wasn't found", self.out("explain", "--agent", "mystery:agent", "list", "files"))
 
     def test_usage_report(self):
-        self.assertIn("No subagent activity", self.out("usage"))
+        self.assertIn("No activity", self.out("usage"))
         self.session_on("claude-opus-5-5")
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku")
         text = self.out("usage", "30")
         self.assertIn("| general-purpose | 1 | 1 | lookup x1 | claude-haiku-5-5 x1 |", text)
         self.assertIn("| claude-haiku-5-5 | 1 | 1,200 |", text)
+        for agent_id, model in ((None, "claude-opus-5-5"), ("a1", "claude-haiku-5-5"), ("a2", "claude-new-9")):
+            hooks.mod_usage({"session_id": "s1", "agent_id": agent_id, "usage": {
+                "model": model, "input_tokens": 0, "output_tokens": 1_000_000,
+                "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}})
+        text = self.out("usage", "30")
+        self.assertIn("Spend at list price: $20.50", text)
+        self.assertIn("| main | claude-opus-5-5 | 1 | 1,000,000 | 20.00 |", text)
+        self.assertIn("No price in the registry for: claude-new-9", text)
 
     def test_data_dir_flag(self):
         other = Path(self.tmp.name) / "other"

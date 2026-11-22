@@ -18,7 +18,7 @@ $ARGUMENTS
 
 ## What the router does on its own
 
-Every agent call gets its model and reasoning effort set automatically from its brief. You don't choose a model per call. Your part is the split and the briefs.
+Every subagent, teammate and workflow agent gets its model and reasoning effort set automatically from its brief, starting on the cheapest that should do the job. You don't choose a model per call. Your part is the split and the briefs.
 
 To see what the router makes of a piece of work, run:
 
@@ -39,9 +39,9 @@ Judge the task on these signals. The router reads the same ones from each brief'
 - Don't delegate what takes you one or two tool calls.
 - Split into independent pieces and start them in one message so they run in parallel, when they don't touch the same files.
 - Give each agent a complete brief: goal, files, constraints, how to verify, what to report. The brief is what the model is chosen from, so say what makes a piece hard (the security angle, the cross-service reach) in the brief itself.
-- Use the agent that fits the work, from any plugin or the project. When none fits, the role agents in the policy above cover search, build, verify, plan, review and the hardest problems.
+- Use the agent that fits the work, from any plugin or the project. When none fits, the role agents in the policy above cover search, build, verify, plan, review and research-grade problems.
 - If the estimate is wrong for a reason only you can see, pass `model` on that call. It is kept, within the cap.
-- If a result isn't good enough, re-issue the call with a stronger `model` rather than the same brief on the same model. The router learns from that.
+- If a result isn't good enough, re-issue the same call unchanged: it runs one level higher, more effort first and then a stronger model. Name a `model` only when you need that exact one. The router learns from both.
 - Have code changes verified, and reviewed when they are more than trivial.
 
 ## Output

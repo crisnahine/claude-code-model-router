@@ -1,6 +1,6 @@
 ---
 name: deep-solver
-description: The most capable and most expensive agent, for the hardest work. Use for ambiguous multi-system problems, large migrations, research-grade debugging, long-running autonomous tasks, or a task that already failed once on an opus agent.
+description: The most capable and most expensive agent, for research-grade work. Use for open-ended problems with no known approach, ambiguous multi-system investigations, long-running autonomous tasks, or a task that already fell short on an opus agent at xhigh effort. Ordinary hard coding goes to opus.
 model: fable
 effort: xhigh
 color: orange

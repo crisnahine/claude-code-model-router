@@ -2,7 +2,7 @@
 name: implementer
 description: Writes and edits code and tests to a clear spec. Use for features and bug fixes once the approach is decided, refactors inside a module, and fixing failures a verifier or reviewer reported.
 model: sonnet
-effort: medium
+effort: high
 color: yellow
 ---
 

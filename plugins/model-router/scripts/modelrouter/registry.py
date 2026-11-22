@@ -214,3 +214,28 @@ def select(config: dict, needs: float, priority: str, usable: list[str]) -> str 
     if priority == "fast":
         return min(qualifying, key=lambda n: (-speed(n), cost(n)))
     return min(qualifying, key=lambda n: (cost(n), -speed(n)))
+
+
+# --------------------------------------------------------------------------- prices
+
+
+def price(config: dict, model_id: str) -> dict | None:
+    """List prices for a full model ID: the longest `prices` key it starts with."""
+    table = config.get("prices") or {}
+    model_id = (model_id or "").lower().split("[")[0]
+    keys = [k for k in table if model_id.startswith(k)]
+    return table[max(keys, key=len)] if keys else None
+
+
+def cost(config: dict, model_id: str, tokens: dict) -> float | None:
+    """USD for one turn's tokens at list price, or None for a model with no price."""
+    rates = price(config, model_id)
+    if not rates:
+        return None
+    # shortcut: Haiku's 5x rate past a 100K prompt is per request, and a turn sums its
+    # requests, so it isn't applied here; read cost from the transcript if that matters.
+    total = (tokens.get("input_tokens", 0) * rates.get("input", 0)
+             + tokens.get("output_tokens", 0) * rates.get("output", 0)
+             + tokens.get("cache_read_input_tokens", 0) * rates.get("cache_read", 0)
+             + tokens.get("cache_creation_input_tokens", 0) * rates.get("cache_write", 0))
+    return round(total / 1_000_000, 6)

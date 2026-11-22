@@ -5,6 +5,7 @@ The plugin never approves a tool call. It rewrites two fields of agent calls, an
 denies only to hold the user's own cap when a lowering rewrite didn't take."""
 from __future__ import annotations
 
+import os
 import re
 import time
 
@@ -59,17 +60,26 @@ def session_start(hook_input: dict) -> dict | None:
         crew = ", ".join(f"{name}:{agent} ({spec.get('role', '').lower()})"
                          for agent, spec in (config.get("crew") or {}).items())
         parts.append(
-            "Model Router is on. It sets the model and reasoning effort of every subagent you start, from "
-            f"the subtask's brief, whichever agent, skill or plugin starts it (strongest model in use: {top}). "
-            "So: don't pass `model` on Agent calls unless the user asked for a specific model or you know "
-            "something the brief doesn't show; a model you name is kept. Write complete briefs and say what "
-            "makes a subtask hard (security, several modules, an unclear root cause), since the brief is "
-            "what the model is chosen from. Delegate reading-heavy and independent work, in parallel where "
-            "it doesn't touch the same files, and don't delegate what takes you one or two tool calls. If a "
-            "delegated result isn't good enough, re-issue the call with a stronger `model`; the router "
-            f"learns from that. Role agents exist for when no better-fitting agent does: {crew}. "
-            f"/{name}:ship runs a full plan, build, verify and review loop."
+            "Model Router is on. It sets the model and reasoning effort of every subagent, teammate and "
+            "workflow agent, from the subtask's brief, whichever agent, skill or plugin starts it (strongest "
+            f"model in use: {top}). It starts each one on the cheapest model and effort that should do the job. "
+            "So: don't pass `model` or `effort` on Agent calls unless the user asked for a specific model or "
+            "you know something the brief doesn't show; what you name is kept. Write complete briefs and say "
+            "what makes a subtask hard (security, several modules, an unclear root cause), since the brief is "
+            "what the model is chosen from. Delegate reading-heavy and independent work, in parallel where it "
+            "doesn't touch the same files, and don't delegate what takes you one or two tool calls. Check "
+            "delegated results. If one isn't good enough, re-issue the same call unchanged: it runs one level "
+            "higher (more effort, then a stronger model), and the router learns from it. Role agents exist "
+            f"for when no better-fitting agent does: {crew}. /{name}:ship runs a full plan, build, verify and "
+            "review loop."
         )
+        if cfg.truthy(os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")):
+            pinned = os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL") or "one model"
+            parts.append(
+                f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent to {pinned}, so Model Router sets only "
+                "their effort. Tell the user once: removing CLAUDE_CODE_SUBAGENT_MODEL_FORCE from their settings "
+                "lets the router put each subtask on the cheapest model strong enough for it."
+            )
     elif mode == "advise":
         parts.append(
             "Model Router is in advise mode: it estimates the model each request needs and tells you, but "
@@ -81,6 +91,10 @@ def session_start(hook_input: dict) -> dict | None:
             parts.append("New Claude model alias in the docs that isn't in Model Router's registry yet: "
                          + ", ".join(changes["new_model_families"]) + f". Tell the user once; /{name}:refresh "
                          "reviews it.")
+        if changes and changes.get("deprecated_in_use"):
+            parts.append("Models this setup routes to are deprecated or retiring: " + "; ".join(
+                f"{m['model']} retires {m['retires']}" for m in changes["deprecated_in_use"])
+                + ". Tell the user once; the model aliases move on by themselves, but a pinned full ID won't.")
         if upstream.has_pending(changes):
             parts.append(
                 f"Upstream: {len(changes['new_releases'])} Claude Code release(s) and "
@@ -130,7 +144,13 @@ def user_prompt(hook_input: dict) -> dict | None:
     return _context("UserPromptSubmit", " ".join(notes)) if notes else None
 
 
+def mod_active(session_id: str | None) -> bool:
+    return bool(store.load_entry("mod", session_id).get("active"))
+
+
 def pre_agent(hook_input: dict) -> dict | None:
+    if mod_active(hook_input.get("session_id")):
+        return None  # the plugin's mod routes this call when it spawns
     config = cfg.load_config(hook_input)
     tool_input = _tool_input(hook_input)
     decision = router.decide(hook_input, config)
@@ -169,7 +189,8 @@ def _record(config: dict, session_id: str | None, tool_input: dict, decision: di
 
     if action == "rewrite":
         def remember(pending: dict) -> None:
-            pending[key] = {"model": decision["model"], "at": time.time()}
+            pending[key] = {"model": decision["model"], "level": level, "effort": decision.get("effort"),
+                            "at": time.time()}
             calls = [k for k in pending if isinstance(pending[k], dict) and k != "_at"]
             for old in sorted(calls, key=lambda k: pending[k].get("at", 0))[:-PENDING_KEPT]:
                 del pending[old]
@@ -180,8 +201,11 @@ def _record(config: dict, session_id: str | None, tool_input: dict, decision: di
         registry.record_failure(repeat_of, "a call rewritten to this model came back without having run")
 
     picked = source == "router" and not repeat_of
+    kept = source in ("router", "pin", "rule") and not repeat_of and level
     if picked:
         learn.record_call(level)
+    if kept and decision.get("escalated_from"):
+        learn.vote_up(decision["escalated_from"])
     current = store.load_entry("prompts", session_id)
     routed_before = current.get("routed") if isinstance(current.get("routed"), dict) else {}
     earlier = routed_before.get(key)
@@ -192,10 +216,14 @@ def _record(config: dict, session_id: str | None, tool_input: dict, decision: di
         if picked:
             routed[key] = runs_on
             entry["routed"] = dict(list(routed.items())[-100:])
+        if kept:
+            levels = entry.get("levels") if isinstance(entry.get("levels"), dict) else {}
+            levels[key] = {"level": level, "model": runs_on, "effort": decision.get("effort")}
+            entry["levels"] = dict(list(levels.items())[-100:])
         if power(runs_on) > power(entry.get("top_spawn")):
             entry["top_spawn"] = runs_on
 
-    if session_id and (picked or power(runs_on) > power(current.get("top_spawn"))):
+    if session_id and (kept or power(runs_on) > power(current.get("top_spawn"))):
         store.mutate_entry("prompts", session_id, update)
     if source == "caller" and level:
         if earlier and power(runs_on) > power(earlier):
@@ -208,14 +236,25 @@ def _record(config: dict, session_id: str | None, tool_input: dict, decision: di
         gates.note_check(session_id)
 
 
-def _settle(hook_input: dict) -> None:
-    """A result or an error came back for this call, so its rewrite was accepted."""
+def _settle(hook_input: dict, finished: bool = False) -> None:
+    """A result or an error came back for this call, so its rewrite was accepted. A
+    finished call is remembered, so the same call issued again is seen as a redo."""
     session_id = hook_input.get("session_id")
     tool_input = _tool_input(hook_input)
     agent = tool_input.get("subagent_type")
     key = router.call_key(agent if isinstance(agent, str) and agent else "general-purpose", tool_input)
-    if key in store.load_entry("pending", session_id):
+    earlier = store.load_entry("pending", session_id).get(key)
+    if earlier is not None:
         store.mutate_entry("pending", session_id, lambda pending: pending.pop(key, None))
+    prompt = store.load_entry("prompts", session_id)
+    ran = earlier if isinstance(earlier, dict) and earlier.get("level") else (prompt.get("levels") or {}).get(key)
+    if finished and isinstance(ran, dict) and ran.get("level") in cfg.LEVELS:
+        def remember(done: dict) -> None:
+            done[key] = {"level": ran["level"], "model": ran.get("model"), "effort": ran.get("effort"),
+                         "prompt_id": prompt.get("prompt_id"), "at": time.time()}
+            for old in sorted(done, key=lambda k: (done[k] or {}).get("at", 0) if isinstance(done[k], dict) else 0)[:-PENDING_KEPT]:
+                del done[old]
+        store.mutate_entry("done", session_id, remember)
 
 
 def _asked_for(config: dict, hook_input: dict) -> str | None:
@@ -239,7 +278,7 @@ def post_agent(hook_input: dict) -> dict | None:
     ran_as = response.get("resolvedModel")
     asked = _asked_for(config, hook_input)
     try:
-        _settle(hook_input)
+        _settle(hook_input, finished=True)
         if asked and registry.family(config, ran_as):
             registry.record_result(asked, ran_as, registry.family(config, ran_as))
     except OSError:
@@ -298,7 +337,88 @@ def refresh_cache(hook_input: dict) -> dict | None:
     return None
 
 
+# ------------------------------------------------------------------ the mod's calls
+# hooks/router.ts forwards three engine events here. Its spawn event sees every subagent,
+# teammate and workflow agent, and names the parent's model exactly.
+
+SPAWN_PROMPT_KEPT = 20000
+
+
+def mod_start(hook_input: dict) -> dict | None:
+    store.save_entry("mod", hook_input.get("session_id"), {"active": True, "at": time.time()})
+    return None
+
+
+def _mark_mod(session_id: str | None) -> None:
+    """The mod's session.start fires once per process, never after /clear, so every
+    turn and spawn says the mod is running."""
+    if session_id and not mod_active(session_id):
+        store.save_entry("mod", session_id, {"active": True, "at": time.time()})
+
+
+def mod_spawn(hook_input: dict) -> dict | None:
+    _mark_mod(hook_input.get("session_id"))
+    config = cfg.load_config(hook_input)
+    tool_input = _tool_input(hook_input)
+    decision = router.decide(hook_input, config)
+    session_id = hook_input.get("session_id")
+    if decision["action"] == "deny":
+        decision.update(action="keep", model=None, effort=None)
+    store.append_ledger({
+        "event": "spawn", "via": "mod", "kind": hook_input.get("kind") or "subagent", "session": session_id,
+        "agent": decision["agent"], "action": decision["action"], "level": decision["level"],
+        "signals": decision["signals"], "model": decision["model"] or decision["was"], "was": decision["was"],
+        "effort": decision["effort"], "source": decision["source"], "reason": decision["reason"],
+        "description": str(tool_input.get("description") or "")[:120]})
+    try:
+        _record(config, session_id, tool_input, {**decision, "action": "spawn"})
+    except OSError:
+        pass
+    if decision["action"] != "rewrite":
+        return None
+    return {"model": decision["model"], "effort": decision["effort"], "reason": decision["reason"]}
+
+
+def _turn_effort_left_alone() -> bool:
+    """The user set effort themselves, or the provider re-reads the whole context
+    uncached whenever effort changes (Bedrock, Vertex, Foundry)."""
+    return bool(os.environ.get("CLAUDE_CODE_EFFORT_LEVEL")) or any(
+        cfg.truthy(os.environ.get(f"CLAUDE_CODE_USE_{name}")) for name in ("BEDROCK", "VERTEX", "FOUNDRY"))
+
+
+def mod_turn(hook_input: dict) -> dict | None:
+    """Effort for one main-loop turn, from the request. Effort is the lever that keeps the
+    prompt cache on current models; switching the conversation's model would not."""
+    _mark_mod(hook_input.get("session_id"))
+    config = cfg.load_config(hook_input)
+    text = hook_input.get("text")
+    text = text if isinstance(text, str) else ""
+    if (cfg.mode(config) != "auto" or not cfg.flag("MAIN_EFFORT") or not is_user_prompt(text)
+            or _turn_effort_left_alone()):
+        return None
+    level = profile_prompt(text)["level"]
+    effort = ((config.get("main") or {}).get("effort") or {}).get(level)
+    if effort not in cfg.EFFORTS:
+        return None
+    store.append_ledger({"event": "turn", "session": hook_input.get("session_id"), "level": level,
+                         "effort": effort})
+    return {"level": level, "effort": effort}
+
+
+def mod_usage(hook_input: dict) -> dict | None:
+    usage = hook_input.get("usage")
+    if not isinstance(usage, dict) or not isinstance(usage.get("model"), str):
+        return None
+    tokens = {k: int(usage.get(k) or 0) for k in
+              ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
+    store.append_ledger({"event": "usage", "session": hook_input.get("session_id"),
+                         "agent_id": hook_input.get("agent_id"), "model": usage["model"], **tokens,
+                         "cost_usd": registry.cost(cfg.load_config(hook_input), usage["model"], tokens)})
+    return None
+
+
 HANDLERS = {
+    "mod-start": mod_start, "mod-spawn": mod_spawn, "mod-turn": mod_turn, "mod-usage": mod_usage,
     "session-start": session_start, "user-prompt": user_prompt, "pre-agent": pre_agent,
     "post-agent": post_agent, "agent-failed": agent_failed, "post-edit": post_edit, "stop": stop,
     "model-switch": model_switch, "refresh-cache": refresh_cache,

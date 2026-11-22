@@ -82,7 +82,7 @@ def escalation(config: dict, hook_input: dict) -> str | None:
     agent of that strength: ask once for a stronger model to check the result."""
     session_id = hook_input.get("session_id")
     entry = store.load_entry("prompts", session_id)
-    if entry.get("escalation_asked") or entry.get("level") not in ("complex", "hardest"):
+    if entry.get("escalation_asked") or entry.get("level") not in ("complex", "hardest", "frontier"):
         return None
     need = entry.get("need")
     # On a session's first prompt the model isn't known yet; by now the transcript has it.

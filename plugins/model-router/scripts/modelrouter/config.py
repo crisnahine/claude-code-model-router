@@ -12,7 +12,7 @@ PLUGIN_ROOT = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or Path(__file__).resolv
 OVERRIDE_FILE = "model-router.json"
 MODES = ("off", "advise", "auto")
 PRIORITIES = ("fast", "balanced", "quality")
-LEVELS = ("lookup", "standard", "complex", "hardest")
+LEVELS = ("lookup", "standard", "complex", "hardest", "frontier")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 

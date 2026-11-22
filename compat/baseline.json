@@ -11,6 +11,140 @@
     "sonnet[1m]"
   ],
   "claude_code_version": "2.1.330",
+  "lifecycle": {
+    "claude-3-5-haiku-20241022": {
+      "deprecated": "December 19, 2025",
+      "replacement": "claude-haiku-4-5-20251001",
+      "retires": "February 19, 2026",
+      "state": "Retired"
+    },
+    "claude-3-7-sonnet-20250219": {
+      "deprecated": "October 28, 2025",
+      "replacement": "claude-sonnet-5-5",
+      "retires": "February 19, 2026",
+      "state": "Retired"
+    },
+    "claude-3-haiku-20240307": {
+      "deprecated": "February 19, 2026",
+      "replacement": "claude-haiku-4-5-20251001",
+      "retires": "April 20, 2026",
+      "state": "Retired"
+    },
+    "claude-fable-5": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than June 9, 2027",
+      "state": "Active"
+    },
+    "claude-fable-5-1": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than September 1, 2027",
+      "state": "Active"
+    },
+    "claude-fable-5-2": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than November 9, 2027",
+      "state": "Active"
+    },
+    "claude-haiku-4-5-20251001": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than October 15, 2026",
+      "state": "Active"
+    },
+    "claude-haiku-5-5": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than October 7, 2027",
+      "state": "Active"
+    },
+    "claude-mythos-5": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than June 9, 2027",
+      "state": "Active"
+    },
+    "claude-mythos-5-1": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than September 1, 2027",
+      "state": "Active"
+    },
+    "claude-mythos-5-2": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than November 9, 2027",
+      "state": "Active"
+    },
+    "claude-mythos-preview": {
+      "deprecated": "June 9, 2026",
+      "retires": "To be announced",
+      "state": "Deprecated"
+    },
+    "claude-opus-4-1-20250805": {
+      "deprecated": "June 5, 2026",
+      "replacement": "claude-opus-4-8",
+      "retires": "August 5, 2026",
+      "state": "Retired"
+    },
+    "claude-opus-4-20250514": {
+      "deprecated": "April 14, 2026",
+      "replacement": "claude-opus-4-8",
+      "retires": "June 15, 2026",
+      "state": "Retired"
+    },
+    "claude-opus-4-5-20251101": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than November 24, 2026",
+      "state": "Active"
+    },
+    "claude-opus-4-6": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than February 5, 2027",
+      "state": "Active"
+    },
+    "claude-opus-4-7": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than April 16, 2027",
+      "state": "Active"
+    },
+    "claude-opus-4-8": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than May 28, 2027",
+      "state": "Active"
+    },
+    "claude-opus-5": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than July 24, 2027",
+      "state": "Active"
+    },
+    "claude-opus-5-5": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than September 22, 2027",
+      "state": "Active"
+    },
+    "claude-sonnet-4-20250514": {
+      "deprecated": "April 14, 2026",
+      "replacement": "claude-sonnet-5-5",
+      "retires": "June 15, 2026",
+      "state": "Retired"
+    },
+    "claude-sonnet-4-5-20250929": {
+      "deprecated": "September 30, 2026",
+      "replacement": "claude-sonnet-5-5",
+      "retires": "November 30, 2026",
+      "state": "Deprecated"
+    },
+    "claude-sonnet-4-6": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than February 17, 2027",
+      "state": "Active"
+    },
+    "claude-sonnet-5": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than June 30, 2027",
+      "state": "Active"
+    },
+    "claude-sonnet-5-5": {
+      "deprecated": "N/A",
+      "retires": "Not sooner than September 28, 2027",
+      "state": "Active"
+    }
+  },
   "pages": {
     "https://code.claude.com/docs/_llms/de.txt": "3a7af6835a992a7e",
     "https://code.claude.com/docs/_llms/es.txt": "dcd3afa6cc8e165d",

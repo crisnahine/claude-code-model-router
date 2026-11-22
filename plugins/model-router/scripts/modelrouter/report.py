@@ -124,6 +124,12 @@ def status(changes: dict | None) -> str:
                    + ", ".join(changes["new_model_families"]))
     if changes.get("removed_model_families"):
         out.append("\nRegistry models the docs no longer list: " + ", ".join(changes["removed_model_families"]))
+    for label, key in (("Models routed calls ran on that are deprecated or retired", "deprecated_in_use"),
+                       ("Models deprecated or retired since the last review", "newly_deprecated")):
+        if changes.get(key):
+            out.append(f"\n{label}:")
+            out += [f"- {m['model']}: {m['state']}, retires {m['retires']}"
+                    + (f", replacement {m['replacement']}" if m.get("replacement") else "") for m in changes[key]]
     if changes["watched_pages_touched"]:
         out.append("\nHigh impact (pages this plugin is built on):")
         out += [f"- {u}" for u in changes["watched_pages_touched"]]
@@ -134,8 +140,8 @@ def usage(days: int) -> str:
     rows = store.read_ledger(days)
     spawns = [r for r in rows if r.get("event") == "spawn"]
     results = [r for r in rows if r.get("event") == "result"]
-    if not spawns and not results:
-        return f"No subagent activity recorded in the last {days} days."
+    if not spawns and not results and not any(r.get("event") == "usage" for r in rows):
+        return f"No activity recorded in the last {days} days."
     by_agent: dict[str, dict] = {}
 
     def row(agent: object) -> dict:
@@ -167,5 +173,27 @@ def usage(days: int) -> str:
     errors = sum(1 for r in rows if r.get("event") == "model_error")
     if errors:
         lines += ["", f"Agent calls that failed with a model error: {errors}."]
-    lines += ["", "Dollar totals are in /usage and /cost; this ledger shows what was routed where."]
+    spend: dict[tuple[str, str], dict] = {}
+    unpriced = set()
+    for r in rows:
+        if r.get("event") != "usage":
+            continue
+        who = "subagent" if r.get("agent_id") else "main"
+        s_row = spend.setdefault((who, str(r.get("model"))), {"turns": 0, "usd": 0.0, "out": 0})
+        s_row["turns"] += 1
+        s_row["out"] += int(r.get("output_tokens") or 0)
+        if isinstance(r.get("cost_usd"), (int, float)):
+            s_row["usd"] += r["cost_usd"]
+        else:
+            unpriced.add(str(r.get("model")))
+    if spend:
+        total = sum(v["usd"] for v in spend.values())
+        lines += ["", f"Spend at list price: ${total:,.2f}", "",
+                  "| Loop | Model | Turns | Output tokens | USD |", "| :- | :- | -: | -: | -: |"]
+        lines += [f"| {who} | {m} | {v['turns']} | {v['out']:,} | {v['usd']:,.2f} |"
+                  for (who, m), v in sorted(spend.items(), key=lambda kv: -kv[1]["usd"])]
+        if unpriced:
+            lines.append(f"\nNo price in the registry for: {', '.join(sorted(unpriced))}. Add one under `prices`.")
+    else:
+        lines += ["", "Dollar totals are in /usage and /cost; this ledger shows what was routed where."]
     return "\n".join(lines)

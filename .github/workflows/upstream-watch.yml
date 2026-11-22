@@ -31,7 +31,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          pending=$(python -c "import json;c=json.load(open('changes.json'));print(int(bool(c['new_releases'] or c['watched_pages_touched'] or c['new_model_families'] or c['removed_model_families'])))")
+          pending=$(python -c "import json;c=json.load(open('changes.json'));print(int(bool(c['new_releases'] or c['watched_pages_touched'] or c['new_model_families'] or c['removed_model_families'] or c['newly_deprecated'])))")
           if [ "$pending" != "1" ]; then echo "Nothing to review."; exit 0; fi
           title="Upstream Claude Code changes to review"
           {

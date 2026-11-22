@@ -20,7 +20,7 @@ Run this pipeline yourself as the coordinator. Delegate each stage to the named 
 
 ## 1. Plan
 
-Send the task, the relevant files and the constraints to `model-router:architect`. Use `model-router:deep-solver` instead when the task is ambiguous, spans several systems and is risky all at once.
+Send the task, the relevant files and the constraints to `model-router:architect`. Use `model-router:deep-solver` instead only when the task is research-grade: no known approach, open-ended, across several systems. Hard but well-understood work stays with the architect, which costs a fraction as much.
 
 Show the user the plan summary in a few lines. If the plan changes a public API, a data schema, security behavior or dependencies, stop and ask the user to confirm before building. Otherwise continue.
 
@@ -36,7 +36,7 @@ Run `model-router:verifier` on the result and wait for it before starting the re
 
 Save the full diff against the base branch, including new files, to a file in the session's scratchpad (for example `git add -N . && git diff <base> > <scratchpad>/review.diff`), then run `model-router:reviewer` with that path and the task's acceptance criteria. Send blocking and should-fix findings back to the implementer, then verify again.
 
-Limit steps 3 and 4 to **2 fix loops** in total. If problems remain after that, escalate the remaining problem once to `model-router:architect` for a diagnosis, apply its fix, and verify. If it still fails, stop and report.
+Limit steps 3 and 4 to **2 fix loops** in total. If problems remain after that, escalate the remaining problem once to `model-router:architect` for a diagnosis, apply its fix, and verify. If it still fails, give the problem and both attempts to `model-router:deep-solver` once. If that fails too, stop and report.
 
 ## 5. Deliver
 

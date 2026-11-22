@@ -35,6 +35,10 @@ _LOOKUP = (r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|
 _HEAVY_NAME = r"architect|review|audit|secur|debug|design|plann|solver"
 _LIGHT_NAME = r"explor|search|scout|find|lookup|locat|fetch|summar|format|lint|runner|verif|docs?[-_]|grep"
 LONG_BRIEF = 4000
+# Open-ended work with no known approach. On ordinary hard coding Opus comes within a point
+# of Fable for under a quarter of the cost, so Fable is kept for this.
+_FRONTIER = (r"\b(?:research(?:-grade)?|open[- ]ended|no known (?:fix|approach|cause|solution)|first principles|"
+             r"novel|unknown (?:root )?cause|long[- ]running investigation|multi[- ]day|unsolved)\b")
 
 
 def signals(text: str) -> list[str]:
@@ -58,7 +62,7 @@ def profile_prompt(prompt: str) -> dict:
     if len(text) > 1500 and "scope" not in hits:
         hits.append("scope")  # a long brief is rarely a small task
     if len(hits) >= 3:
-        level = "hardest"
+        level = "frontier" if re.search(_FRONTIER, text) else "hardest"
     elif len(hits) == 2:
         level = "complex"
     elif changes or hits:
@@ -77,7 +81,7 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
     why = list(hits)
     if re.search(_CHANGE, text) or re.search(_REASONING, text):
         if len(hits) >= 3:
-            level = "hardest"
+            level = "frontier" if re.search(_FRONTIER, text) else "hardest"
         elif len(hits) == 2 or "risk" in hits:
             level = "complex"
         else:
