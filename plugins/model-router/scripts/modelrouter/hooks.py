@@ -17,8 +17,10 @@ _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bn
 
 def is_user_prompt(prompt: str) -> bool:
     """UserPromptSubmit also fires for background-task notifications and similar
-    machine-written turns. Those must not reset what is known about the user's request."""
-    return not (prompt or "").lstrip().startswith("<")
+    machine-written turns. Those must not reset what is known about the user's request.
+    Pasted text is the user's, though it arrives wrapped in a <pasted_content> tag."""
+    prompt = (prompt or "").lstrip()
+    return not prompt.startswith("<") or prompt.startswith("<pasted_content")
 
 
 def named_model(config: dict, prompt: str) -> str | None:
