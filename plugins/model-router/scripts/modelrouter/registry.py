@@ -153,16 +153,15 @@ def permitted(config: dict, project: Path) -> set[str]:
 # ---------------------------------------------------------------------- selection
 
 
-def available(config: dict, project: Path | None = None, from_state: bool = False) -> list[str]:
+def available(config: dict, project: Path | None = None, cap: str | None = None) -> list[str]:
     """Usable models, weakest first: inside the cap, permitted by settings, and healthy.
     The settings and health filters are dropped rather than leave nothing to route to."""
     names = by_strength(config)
-    limit = cfg.cap(config, from_state)
-    if limit:
+    if cap:
         # Under a cap, only models whose strength the user vouches for count: a model a
         # repository added carries the repository's own claim about its rank.
         trusted = config.get("_trusted") or names
-        names = [n for n in names if n in trusted and strength(config, n) <= strength(config, limit)]
+        names = [n for n in names if n in trusted and strength(config, n) <= strength(config, cap)]
     if project is not None:
         allowed = permitted(config, project)
         names = [n for n in names if n in allowed] or names
@@ -170,8 +169,8 @@ def available(config: dict, project: Path | None = None, from_state: bool = Fals
     return [n for n in names if healthy(n, table)] or names
 
 
-def ceiling(config: dict, project: Path | None = None, from_state: bool = False) -> str | None:
-    names = available(config, project, from_state)
+def ceiling(config: dict, project: Path | None = None, cap: str | None = None) -> str | None:
+    names = available(config, project, cap)
     return names[-1] if names else None
 
 

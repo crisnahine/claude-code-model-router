@@ -22,7 +22,7 @@ SCRIPT = SCRIPTS / "model-router.py"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, cli, gates, hooks, learn, profile, registry, report, router, session, store, upstream  # noqa: E402
+from modelrouter import agents, cli, gates, hooks, learn, profile, registry, report, router, session, settings, store, upstream  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 
 LOOKUP = "list the files under src"
@@ -91,7 +91,8 @@ class Sandbox(unittest.TestCase):
 
     def decide(self, agent: str | None, prompt: str, **extra) -> dict:
         hook_input = self.call(agent, prompt, **extra)
-        return router.decide(hook_input, cfg.load_config(hook_input))
+        config = cfg.load_config(hook_input)
+        return router.decide(hook_input, config, settings.resolve(config))
 
     def pre(self, agent: str | None, prompt: str, **extra) -> dict | None:
         out = hooks.pre_agent(self.call(agent, prompt, **extra))
@@ -279,10 +280,8 @@ class Registry(Sandbox):
         self.assertEqual(registry.select(config, 2, "fast", usable), "swift")  # the quickest that qualifies
 
     def test_cap_limits_available_models(self):
-        self.options(max_tier="sonnet")
-        self.assertEqual(registry.available(self.config), ["haiku", "sonnet"])
-        self.assertEqual(registry.ceiling(self.config), "sonnet")
-        self.options(max_tier="none")
+        self.assertEqual(registry.available(self.config, cap="sonnet"), ["haiku", "sonnet"])
+        self.assertEqual(registry.ceiling(self.config, cap="sonnet"), "sonnet")
         self.assertEqual(registry.ceiling(self.config), "fable")
 
     def test_clamp_never_raises_above_what_was_asked(self):
@@ -334,8 +333,7 @@ class Registry(Sandbox):
         config = cfg.load_config()
         self.assertEqual(config["models"]["fable"]["strength"], 4)
         self.assertIn("saga", registry.available(config))
-        self.options(max_tier="sonnet")
-        self.assertEqual(registry.available(config), ["haiku", "sonnet"])
+        self.assertEqual(registry.available(config, cap="sonnet"), ["haiku", "sonnet"])
 
     def test_the_users_own_file_is_trusted(self):
         self.override({"models": {"saga": {"strength": 1.5, "speed": 3, "cost": 1.5}, "opus": {"strength": 3.5}}},
@@ -343,8 +341,7 @@ class Registry(Sandbox):
         self.override({"models": {"saga": {"strength": 9}}})  # a project can't re-rank the user's model
         config = cfg.load_config()
         self.assertEqual((config["models"]["saga"]["strength"], config["models"]["opus"]["strength"]), (1.5, 3.5))
-        self.options(max_tier="sonnet")
-        self.assertEqual(registry.available(config), ["haiku", "saga", "sonnet"])
+        self.assertEqual(registry.available(config, cap="sonnet"), ["haiku", "saga", "sonnet"])
 
     def test_malformed_override_files_are_ignored(self):
         self.override({"models": "nope", "levels": {"lookup": {"needs": "x", "effort": "ludicrous"},
@@ -356,38 +353,62 @@ class Registry(Sandbox):
         self.assertEqual(config["levels"]["complex"]["effort"], "max")
         self.assertNotIn("bogus", config["levels"])
         self.assertEqual(config["agents"], {"a": {}})
-        self.assertEqual(cfg.mode(config), "auto")
+        self.assertEqual(settings.resolve(config).mode, "auto")
         (self.project / ".claude" / "model-router.json").write_text("{not json")
         self.assertEqual(len(cfg.load_config()["models"]), 4)
 
 
 class Options(Sandbox):
+    def mode(self) -> str:
+        return settings.resolve(cfg.load_config()).mode
+
+    def test_defaults(self):
+        self.assertEqual(settings.resolve(cfg.load_config()), settings.Settings())
+
     def test_mode_defaults_to_auto(self):
-        self.assertEqual(cfg.mode(cfg.load_config()), "auto")
+        self.assertEqual(self.mode(), "auto")
         for value, expected in (("advise", "advise"), ("off", "off"), ("AUTO ", "auto"), ("nonsense", "auto")):
             self.options(routing_mode=value)
-            self.assertEqual(cfg.mode(cfg.load_config()), expected)
+            self.assertEqual(self.mode(), expected)
 
     def test_files_can_weaken_but_not_strengthen_the_mode(self):
         self.override({"routing_mode": "off"})
-        self.assertEqual(cfg.mode(cfg.load_config()), "off")
+        self.assertEqual(self.mode(), "off")
         self.override({"routing_mode": "auto"})
         self.override({"routing_mode": "advise"}, user=True)
-        self.assertEqual(cfg.mode(cfg.load_config()), "advise")
+        self.assertEqual(self.mode(), "advise")
         self.options(routing_mode="off")
-        self.assertEqual(cfg.mode(cfg.load_config()), "off")
+        self.assertEqual(self.mode(), "off")
+
+    def test_environment_facts(self):
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="yes",
+                     CLAUDE_CODE_USE_VERTEX="1", max_tier="nonsense", main_effort="false")
+        os.environ.update(ANTHROPIC_API_KEY="sk-test", ANTHROPIC_BASE_URL="https://gateway.example")
+        s = settings.resolve(cfg.load_config())
+        self.assertEqual((s.subagent_model, s.force, s.cloud, s.cap, s.main_effort, s.verify_gate),
+                         ("opus", True, "vertex", None, False, True))
+        self.assertEqual((s.api_key, s.base_url), ("sk-test", True))
+        self.assertNotIn("sk-test", repr(s))
 
     def test_skill_commands_read_options_recorded_at_session_start(self):
-        self.options(max_tier="haiku", priority="quality", agent_pins="override")
+        values = {"max_tier": "haiku", "priority": "quality", "agent_pins": "override", "routing_mode": "advise",
+                  "main_effort": "false", "update_check": "off", "verify_gate": "0"}
+        self.options(**values)
         hooks.session_start({"session_id": "s1"})
-        for name in ("MAX_TIER", "PRIORITY", "AGENT_PINS"):
-            del os.environ[f"CLAUDE_PLUGIN_OPTION_{name}"]
+        for name in values:
+            del os.environ[f"CLAUDE_PLUGIN_OPTION_{name.upper()}"]
         config = cfg.load_config()
-        self.assertIsNone(cfg.cap(config))
-        self.assertEqual(cfg.cap(config, from_state=True), "haiku")
-        self.assertEqual(cfg.priority(from_state=True), "quality")
-        self.assertEqual(cfg.pins(from_state=True), "override")
+        self.assertEqual(settings.resolve(config), settings.Settings())
+        self.assertEqual(settings.resolve(config, recorded=True), settings.Settings(
+            mode="advise", routing_mode="advise", priority="quality", cap="haiku", pins="override",
+            main_effort=False, update_check=False, verify_gate=False))
         self.assertIn("Cap: **haiku**", self.out("policy"))
+
+    def test_policy_shows_the_routing_mode_the_user_set(self):
+        self.options(routing_mode="off")
+        hooks.session_start({"session_id": "s1"})
+        del os.environ["CLAUDE_PLUGIN_OPTION_ROUTING_MODE"]
+        self.assertIn("Routing: **off**", self.out("policy"))
 
 
 class AgentDiscovery(Sandbox):
@@ -510,7 +531,7 @@ class Router(Sandbox):
     def test_inside_a_subagent_the_pick_is_always_written_out(self):
         self.session_on("claude-sonnet-5-5")
         hook_input = {**self.call("general-purpose", BUILD), "agent_id": "agent-1", "agent_type": "helper"}
-        d = router.decide(hook_input, cfg.load_config())
+        d = router.decide(hook_input, cfg.load_config(), settings.Settings())
         self.assertEqual((d["action"], d["model"], d["was"]), ("rewrite", "sonnet", None))
 
     def test_fork_is_never_touched(self):
@@ -619,7 +640,7 @@ class Router(Sandbox):
                 {"type": "assistant", "isSidechain": True, "message": {"role": "assistant", "model": "claude-haiku-5-5"}}]
         path.write_text("".join(json.dumps(r) + "\n" for r in rows))
         hook_input = {**self.call("general-purpose", BUILD), "transcript_path": str(path)}
-        d = router.decide(hook_input, cfg.load_config())
+        d = router.decide(hook_input, cfg.load_config(), settings.Settings())
         self.assertEqual((d["model"], d["was"]), ("sonnet", "sonnet"))  # not the recorded opus, not the subagent's haiku
 
     def test_hooks_never_break_on_garbage(self):
@@ -1094,7 +1115,7 @@ class Upstream(Sandbox):
 
     def test_first_refresh_marks_the_present_as_reviewed_then_ack(self):
         with mock.patch.object(upstream, "http_get", side_effect=self.fake):
-            data = upstream.refresh(force=True)
+            data = upstream.refresh(settings.Settings(), force=True)
         self.assertFalse(upstream.has_pending(upstream.pending(data)))
         data["reviewed"]["claude_code_version"] = "2.0.0"
         store.save_json(upstream.path(), data)
@@ -1105,7 +1126,7 @@ class Upstream(Sandbox):
     def test_cache_ttl_skips_the_network(self):
         store.save_json(upstream.path(), {"cache": {"fetched_at": 10**12}})
         with mock.patch.object(upstream, "http_get", side_effect=AssertionError("network used")):
-            upstream.refresh(force=False)
+            upstream.refresh(settings.Settings(), force=False)
 
     def test_models_api_is_read_only_with_a_direct_api_key(self):
         reply = json.dumps({"data": [
@@ -1119,12 +1140,12 @@ class Upstream(Sandbox):
             calls.append((url, headers))
             return reply
 
+        keyed = settings.Settings(api_key="sk-test")
         with mock.patch.object(upstream, "http_get", side_effect=fake_get):
-            self.assertEqual(upstream.api_models(), {})  # no key, no request
-            os.environ.update(ANTHROPIC_API_KEY="sk-test", ANTHROPIC_BASE_URL="https://gateway.example")
-            self.assertEqual(upstream.api_models(), {})  # a gateway would get the key
-            del os.environ["ANTHROPIC_BASE_URL"]
-            models = upstream.api_models()
+            self.assertEqual(upstream.api_models(settings.Settings()), {})  # no key, no request
+            for between in ({"base_url": True}, {"cloud": "bedrock"}):  # either would get the key
+                self.assertEqual(upstream.api_models(settings.Settings(api_key="sk-test", **between)), {})
+            models = upstream.api_models(keyed)
         self.assertEqual(len(calls), 1)
         self.assertTrue(calls[0][0].startswith("https://api.anthropic.com/v1/models"))
         self.assertEqual(calls[0][1]["Authorization"], "Bearer sk-test")
@@ -1140,7 +1161,7 @@ class Upstream(Sandbox):
         store.save_json(upstream.path(), {"cache": {"fetched_at": 1, "aliases": ["haiku"]}})
         with mock.patch.object(upstream, "http_get", side_effect=OSError("offline")):
             with self.assertRaises(OSError):
-                upstream.refresh(force=True)
+                upstream.refresh(settings.Settings(), force=True)
         self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
 
 

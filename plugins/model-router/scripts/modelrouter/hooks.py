@@ -5,11 +5,10 @@ The plugin never approves a tool call. It rewrites two fields of agent calls, an
 denies only to hold the user's own cap when a lowering rewrite didn't take."""
 from __future__ import annotations
 
-import os
 import re
 import time
 
-from . import agents, gates, ladder, learn, registry, router, session, store, upstream
+from . import agents, gates, ladder, learn, registry, router, session, settings, store, upstream
 from . import config as cfg
 from .profile import profile_prompt
 
@@ -48,15 +47,14 @@ def _tool_input(hook_input: dict) -> dict:
 
 def session_start(hook_input: dict) -> dict | None:
     config = cfg.load_config(hook_input)
-    options = {"max_tier": cfg.cap(config) or "", "priority": cfg.priority(), "agent_pins": cfg.pins()}
-    if any(store.load_state().get(k) != v for k, v in options.items()):
-        store.update_state(lambda state: state.update(options))
+    options = settings.resolve(config)
+    settings.record(options)
     session.record(hook_input.get("session_id"), hook_input.get("model"))
     parts = []
-    mode = cfg.mode(config)
+    mode = options.mode
     name = cfg.PLUGIN_NAME
     if mode == "auto":
-        top = registry.ceiling(config, cfg.project_dir(hook_input))
+        top = registry.ceiling(config, cfg.project_dir(hook_input), options.cap)
         crew = ", ".join(f"{name}:{agent} ({spec.get('role', '').lower()})"
                          for agent, spec in (config.get("crew") or {}).items())
         parts.append(
@@ -73,8 +71,8 @@ def session_start(hook_input: dict) -> dict | None:
             f"for when no better-fitting agent does: {crew}. /{name}:ship runs a full plan, build, verify and "
             "review loop."
         )
-        if cfg.truthy(os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")):
-            pinned = os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL") or "one model"
+        if options.force:
+            pinned = options.subagent_model or "one model"
             parts.append(
                 f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent to {pinned}, so Model Router sets only "
                 "their effort. Tell the user once: removing CLAUDE_CODE_SUBAGENT_MODEL_FORCE from their settings "
@@ -85,7 +83,7 @@ def session_start(hook_input: dict) -> dict | None:
             "Model Router is in advise mode: it estimates the model each request needs and tells you, but "
             "changes nothing. Pass `model` on Agent calls to match the estimate."
         )
-    if cfg.flag("UPDATE_CHECK"):
+    if options.update_check:
         changes = upstream.pending()
         if changes and changes["new_model_families"]:
             parts.append("New Claude model alias in the docs that isn't in Model Router's registry yet: "
@@ -108,16 +106,17 @@ def user_prompt(hook_input: dict) -> dict | None:
     """Size up the request against the conversation's own model. Says nothing when there
     is nothing Claude needs to do differently, so an ordinary prompt costs no tokens."""
     config = cfg.load_config(hook_input)
-    mode = cfg.mode(config)
+    options = settings.resolve(config)
+    mode = options.mode
     prompt = hook_input.get("prompt")
     prompt = prompt if isinstance(prompt, str) else ""
     if mode == "off" or not is_user_prompt(prompt):
         return None
     session_id = hook_input.get("session_id")
-    usable = registry.available(config, cfg.project_dir(hook_input))
+    usable = registry.available(config, cfg.project_dir(hook_input), options.cap)
     result = profile_prompt(prompt)
     level = result["level"]
-    need = ladder.pick(config, level, cfg.priority(), usable).model
+    need = ladder.pick(config, level, options.priority, usable).model
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
     below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
     store.save_entry("prompts", session_id, {
@@ -152,7 +151,7 @@ def pre_agent(hook_input: dict) -> dict | None:
         return None  # the plugin's mod routes this call when it spawns
     config = cfg.load_config(hook_input)
     tool_input = _tool_input(hook_input)
-    decision = router.decide(hook_input, config)
+    decision = router.decide(hook_input, config, settings.resolve(config))
     session_id = hook_input.get("session_id")
     action = decision["action"]
     store.append_ledger({
@@ -306,7 +305,8 @@ def agent_failed(hook_input: dict) -> dict | None:
     fails = registry.record_failure(asked, error)
     store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
                          "agent": _tool_input(hook_input).get("subagent_type"), "model": asked})
-    usable = [n for n in registry.available(config, cfg.project_dir(hook_input)) if n != asked]
+    cap = settings.resolve(config).cap
+    usable = [n for n in registry.available(config, cfg.project_dir(hook_input), cap) if n != asked]
     if not usable:
         return None
     return _context("PostToolUseFailure", (
@@ -321,7 +321,8 @@ def post_edit(hook_input: dict) -> dict | None:
 
 
 def stop(hook_input: dict) -> dict | None:
-    reason = gates.before_stop(hook_input, cfg.load_config(hook_input))
+    config = cfg.load_config(hook_input)
+    reason = gates.before_stop(hook_input, config, settings.resolve(config))
     return {"decision": "block", "reason": reason} if reason else None
 
 
@@ -331,8 +332,9 @@ def model_switch(hook_input: dict) -> dict | None:
 
 
 def refresh_cache(hook_input: dict) -> dict | None:
-    if cfg.flag("UPDATE_CHECK"):
-        upstream.refresh(force=False)
+    options = settings.resolve()
+    if options.update_check:
+        upstream.refresh(options, force=False)
     return None
 
 
@@ -359,7 +361,7 @@ def mod_spawn(hook_input: dict) -> dict | None:
     _mark_mod(hook_input.get("session_id"))
     config = cfg.load_config(hook_input)
     tool_input = _tool_input(hook_input)
-    decision = router.decide(hook_input, config)
+    decision = router.decide(hook_input, config, settings.resolve(config))
     session_id = hook_input.get("session_id")
     if decision["action"] == "deny":
         decision.update(action="keep", model=None, effort=None)
@@ -378,11 +380,10 @@ def mod_spawn(hook_input: dict) -> dict | None:
     return {"model": decision["model"], "effort": decision["effort"], "reason": decision["reason"]}
 
 
-def _turn_effort_left_alone() -> bool:
+def _turn_effort_left_alone(options: settings.Settings) -> bool:
     """The user set effort themselves, or the provider re-reads the whole context
     uncached whenever effort changes (Bedrock, Vertex, Foundry)."""
-    return bool(os.environ.get("CLAUDE_CODE_EFFORT_LEVEL")) or any(
-        cfg.truthy(os.environ.get(f"CLAUDE_CODE_USE_{name}")) for name in ("BEDROCK", "VERTEX", "FOUNDRY"))
+    return bool(options.effort_level or options.cloud)
 
 
 def mod_turn(hook_input: dict) -> dict | None:
@@ -390,10 +391,11 @@ def mod_turn(hook_input: dict) -> dict | None:
     prompt cache on current models; switching the conversation's model would not."""
     _mark_mod(hook_input.get("session_id"))
     config = cfg.load_config(hook_input)
+    options = settings.resolve(config)
     text = hook_input.get("text")
     text = text if isinstance(text, str) else ""
-    if (cfg.mode(config) != "auto" or not cfg.flag("MAIN_EFFORT") or not is_user_prompt(text)
-            or _turn_effort_left_alone()):
+    if (options.mode != "auto" or not options.main_effort or not is_user_prompt(text)
+            or _turn_effort_left_alone(options)):
         return None
     level = profile_prompt(text)["level"]
     effort = ((config.get("main") or {}).get("effort") or {}).get(level)

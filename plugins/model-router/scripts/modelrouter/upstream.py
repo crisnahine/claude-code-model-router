@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import time
 import urllib.request
@@ -13,6 +12,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import store
+from .settings import Settings
 
 CHANGELOG_RSS = "https://code.claude.com/docs/en/changelog/rss.xml"
 DOCS_INDEX = "https://code.claude.com/docs/llms.txt"
@@ -83,14 +83,13 @@ def parse_deprecations(markdown: str) -> dict[str, dict]:
     return out
 
 
-def api_models() -> dict[str, dict]:
+def api_models(settings: Settings) -> dict[str, dict]:
     """The models this account can call, from the Models API. Only with an Anthropic API key
     and no gateway or cloud provider in between: the key goes nowhere but api.anthropic.com."""
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if not key or os.environ.get("ANTHROPIC_BASE_URL") or any(
-            cfg.truthy(os.environ.get(f"CLAUDE_CODE_USE_{name}")) for name in ("BEDROCK", "VERTEX", "FOUNDRY")):
+    if not settings.api_key or settings.base_url or settings.cloud:
         return {}
-    data = json.loads(http_get(MODELS_API, {"Authorization": f"Bearer {key}", "anthropic-version": "2026-10-21"}))
+    data = json.loads(http_get(MODELS_API, {"Authorization": f"Bearer {settings.api_key}",
+                                            "anthropic-version": "2026-10-21"}))
     out = {}
     for model in data.get("data") or []:
         if isinstance(model, dict) and isinstance(model.get("id"), str):
@@ -121,7 +120,7 @@ def version_key(version: str) -> tuple:
     return tuple(int(p) if p.isdigit() else 0 for p in re.split(r"[.\-]", str(version)))
 
 
-def fetch() -> dict:
+def fetch(settings: Settings) -> dict:
     releases = parse_rss(http_get(CHANGELOG_RSS))
     pages = parse_llms_index(http_get(DOCS_INDEX))
     try:
@@ -133,7 +132,7 @@ def fetch() -> dict:
     except Exception:  # noqa: BLE001 - a bonus too
         lifecycle = {}
     try:
-        account = api_models()
+        account = api_models(settings)
     except Exception:  # noqa: BLE001 - and this
         account = {}
     return {"aliases": aliases, "lifecycle": lifecycle, "api_models": account, "fetched_at": int(time.time()),
@@ -196,11 +195,11 @@ def snapshot(cache: dict) -> dict:
             "lifecycle": merged_lifecycle(cache), "api_lines": lines}
 
 
-def refresh(force: bool = False) -> dict:
+def refresh(settings: Settings, force: bool = False) -> dict:
     cache = load().get("cache") or {}
     if not force and time.time() - (cache.get("fetched_at") or 0) < CACHE_TTL_SECONDS:
         return load()
-    fresh = fetch()  # slow, so outside the lock
+    fresh = fetch(settings)  # slow, so outside the lock
 
     def apply(data: dict) -> None:
         data["cache"] = fresh

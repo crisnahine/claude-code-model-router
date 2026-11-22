@@ -1,28 +1,25 @@
-"""The tables the skills print. Skills run through the Bash tool, so options come from
-what the last SessionStart recorded."""
+"""The tables the skills print. Skills run through the Bash tool, so the settings passed in
+fall back to what the last SessionStart recorded."""
 from __future__ import annotations
 
 from . import agents, ladder, learn, registry, store, upstream
 from . import config as cfg
 from .profile import profile_call, profile_prompt
+from .settings import Settings
 
 
-def _usable(config: dict) -> list[str]:
-    return registry.available(config, cfg.project_dir(), from_state=True)
+def _usable(config: dict, settings: Settings) -> list[str]:
+    return registry.available(config, cfg.project_dir(), settings.cap)
 
 
-def _pick(config: dict, level: str, usable: list[str]) -> ladder.Pick:
-    return ladder.pick(config, level, cfg.priority(from_state=True), usable)
-
-
-def policy(config: dict) -> str:
-    usable = _usable(config)
-    limit = cfg.cap(config, from_state=True)
-    lines = [f"Routing: **{cfg.mode(config)}**. Priority: **{cfg.priority(from_state=True)}**. "
+def policy(config: dict, settings: Settings) -> str:
+    usable = _usable(config, settings)
+    limit = settings.cap
+    lines = [f"Routing: **{settings.mode}**. Priority: **{settings.priority}**. "
              f"Cap: **{limit or 'none'}**. Strongest model in use: **{usable[-1] if usable else 'none'}**.", "",
              "| Subtask level | Model | Effort |", "| :- | :- | :- |"]
     for level in cfg.LEVELS:
-        pick = _pick(config, level, usable)
+        pick = ladder.pick(config, level, settings.priority, usable)
         note = " (raised by feedback)" if learn.bump(level) else ""
         lines.append(f"| {level} | {pick.model}{note} | {pick.effort or 'as the agent or session sets it'} |")
     lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
@@ -42,13 +39,13 @@ def policy(config: dict) -> str:
     return "\n".join(lines)
 
 
-def models(config: dict) -> str:
+def models(config: dict, settings: Settings) -> str:
     table = registry.health()
-    limit = cfg.cap(config, from_state=True)
-    usable = _usable(config)
+    limit = settings.cap
+    usable = _usable(config, settings)
     allowed = registry.permitted(config, cfg.project_dir())
     lines = [f"Cap: **{limit or 'none'}**. Strongest model in use: **{usable[-1] if usable else 'none'}**. "
-             f"Priority: **{cfg.priority(from_state=True)}**.",
+             f"Priority: **{settings.priority}**.",
              "", "| Model | Last ran as | Status |", "| :- | :- | :- |"]
     for name in registry.by_strength(config):
         info = table.get(name) if isinstance(table.get(name), dict) else {}
@@ -82,22 +79,22 @@ def models(config: dict) -> str:
     return "\n".join(lines)
 
 
-def explain(config: dict, text: str, agent: str | None = None) -> str:
+def explain(config: dict, settings: Settings, text: str, agent: str | None = None) -> str:
     """What the router would make of this task, and why."""
-    usable = _usable(config)
+    usable = _usable(config, settings)
     result = profile_call({"prompt": text}, agent) if agent else profile_prompt(text)
     level = result["level"]
-    pick = _pick(config, level, usable)
+    pick = ladder.pick(config, level, settings.priority, usable)
     why = ", ".join(result["signals"]) or "no risk, scope or ambiguity wording"
     out = [f"Level: **{level}** ({why}).",
            f"Model: **{pick.model}**, effort: {pick.effort or 'unchanged'}.",
-           f"Priority {cfg.priority(from_state=True)}; models in use: {', '.join(usable)}."]
+           f"Priority {settings.priority}; models in use: {', '.join(usable)}."]
     if agent:
         definition = agents.find(agent, cfg.project_dir())
         pinned = (definition or {}).get("model")
         if definition is None:
             out.append(f"The definition of `{agent}` wasn't found, so its calls are left alone.")
-        elif pinned and cfg.pins(from_state=True) == "respect":
+        elif pinned and settings.pins == "respect":
             out.append(f"`{agent}` names its own model ({pinned}), which is kept within the cap.")
     return "\n".join(out)
 

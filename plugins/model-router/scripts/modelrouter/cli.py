@@ -19,7 +19,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import hooks, learn, report, store, upstream
+from . import hooks, learn, report, settings, store, upstream
 from . import config as cfg
 
 
@@ -72,18 +72,19 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = cfg.load_config()
+    options = settings.resolve(config, recorded=True)
     if args.cmd == "policy":
-        print(report.policy(config))
+        print(report.policy(config, options))
     elif args.cmd == "models":
         if args.reset:
             store.update_state(lambda state: state.pop("health", None))
             learn.reset()
             print("Learned availability and feedback cleared.\n")
-        print(report.models(config))
+        print(report.models(config, options))
     elif args.cmd == "explain":
-        print(report.explain(config, " ".join(args.text), args.agent))
+        print(report.explain(config, options, " ".join(args.text), args.agent))
     elif args.cmd == "refresh":
-        print(report.status(upstream.pending(upstream.refresh(force=args.force))))
+        print(report.status(upstream.pending(upstream.refresh(options, force=args.force))))
     elif args.cmd == "status":
         changes = upstream.pending()
         print(json.dumps(changes, indent=2) if args.json else report.status(changes))
@@ -97,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         print(report.usage(int(args.days) if str(args.days).isdigit() else 7))
     elif args.cmd == "upstream-check":
         baseline_path = Path(args.baseline)
-        live = upstream.fetch()
+        live = upstream.fetch(options)
         if args.write:
             baseline = upstream.snapshot(live)
             store.save_json(baseline_path, baseline)

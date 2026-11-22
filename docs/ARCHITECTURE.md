@@ -49,7 +49,8 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 | `session` | Tracks the model the conversation itself runs on |
 | `gates` | The two checks before a turn ends |
 | `upstream` | Compares releases, the docs index, model aliases and model status with what was last reviewed |
-| `hooks`, `cli`, `report`, `store`, `config` | Handlers for settings hooks and mod calls, commands, tables, files and options |
+| `settings` | The plugin's options and the environment facts routing depends on, resolved once per hook call or command |
+| `hooks`, `cli`, `report`, `store`, `config` | Handlers for settings hooks and mod calls, commands, tables, state files, and the registry and override files |
 
 All of it is standard-library Python, plus the one TypeScript file the engine runs. No module names a model: the shipped models are entries in `config/models.json`.
 
@@ -168,7 +169,7 @@ In `${CLAUDE_PLUGIN_DATA}`:
 
 | File | Contents |
 | :- | :- |
-| `state.json` | Recorded options and model health |
+| `state.json` | Every plugin option as SessionStart recorded it, for skill commands, which run without them; and model health |
 | `upstream.json` | The upstream cache and what was last reviewed |
 | `learned.json` | Calls and votes per level, and which levels are raised |
 | `sessions.json`, `prompts.json`, `edits.json`, `pending.json`, `done.json`, `mod.json` | Per session: its model, the current request's profile and routed calls, edit and check times, rewrites waiting for a result, finished calls for redo escalation, and whether the mod is running. The 200 most recently written sessions are kept |

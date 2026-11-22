@@ -16,12 +16,12 @@ This module only reads. hooks.py records what was decided."""
 from __future__ import annotations
 
 import hashlib
-import os
 import time
 
 from . import agents, ladder, registry, session, store
 from . import config as cfg
 from .profile import profile_call
+from .settings import Settings
 
 
 # Without a request id to compare, a call seen again within this long counts as a redo.
@@ -34,7 +34,7 @@ def call_key(agent: str, tool_input: dict) -> str:
     return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
 
 
-def decide(hook_input: dict, config: dict) -> dict:
+def decide(hook_input: dict, config: dict, settings: Settings) -> dict:
     tool_input = hook_input.get("tool_input")
     tool_input = tool_input if isinstance(tool_input, dict) else {}
     agent = tool_input.get("subagent_type")
@@ -48,7 +48,7 @@ def decide(hook_input: dict, config: dict) -> dict:
 
     project = cfg.project_dir(hook_input)
     session_id = hook_input.get("session_id")
-    usable = registry.available(config, project)
+    usable = registry.available(config, project, settings.cap)
     # Inside a subagent, an agent without a model runs on that subagent's model, which
     # we can't see. Treat it as unknown so the pick is always written onto the call.
     nested = bool(hook_input.get("agent_id"))
@@ -66,8 +66,7 @@ def decide(hook_input: dict, config: dict) -> dict:
         definition = {"name": agent, "source": hook_input["kind"], "model": None}
     own_model = (definition or {}).get("model")
     pinned = registry.family(config, own_model)
-    env_default = registry.family(config, os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL"))
-    forced = cfg.truthy(os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE"))
+    env_default = registry.family(config, settings.subagent_model)
     # The built-in Explore and Plan have had their own default model in some versions,
     # so what they would run on isn't assumed.
     special = bool(definition) and definition["source"] == "builtin" and agent in ("Explore", "Plan")
@@ -89,28 +88,27 @@ def decide(hook_input: dict, config: dict) -> dict:
         above = cfg.LEVELS.index(done["level"]) + 1
         if above < len(cfg.LEVELS) and cfg.LEVELS.index(level) < above:
             level, out["escalated_from"] = cfg.LEVELS[above], done["level"]
-    pick, level_effort = ladder.pick(config, level, cfg.priority(), usable)
+    pick, level_effort = ladder.pick(config, level, settings.priority, usable)
     out.update(level=level, signals=profile["signals"], pick=pick)
 
-    mode = cfg.mode(config)
-    if mode != "auto" or not usable:
-        out["reason"] = f"routing is {mode}"
+    if settings.mode != "auto" or not usable:
+        out["reason"] = f"routing is {settings.mode}"
         return out
     if rule.get("route") is False:
         out["reason"] = "a rule in model-router.json leaves this agent alone"
         return out
-    if forced:
+    if settings.force:
         # The user pinned every subagent's model. Effort is still free to set, and on a
         # pinned strong model it is the only lever left on cost.
         out.update(was=env_default or parent, reason="CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent's model")
-        effort = None if _effort_decided(tool_input, definition) else level_effort
+        effort = None if _effort_decided(tool_input, definition, settings) else level_effort
         if effort and not tool_input.get("model"):
             out.update(action="rewrite", effort=effort, source="router",
                        reason=f"{level} subtask; the model is pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE, so only effort is set")
         return out
 
     rule_model = registry.family(config, rule.get("model"))
-    override = cfg.pins() == "override"
+    override = settings.pins == "override"
     if requested:
         target, source, why = requested, "caller", "the call names a model"
     elif rule_model:
@@ -137,7 +135,7 @@ def decide(hook_input: dict, config: dict) -> dict:
     effort = None
     # Effort is set whenever nobody chose it, a pinned agent included: the pin is about
     # the model, and on current models effort is the cheaper lever for quality.
-    if source in ("router", "pin", "rule") and not _effort_decided(tool_input, definition):
+    if source in ("router", "pin", "rule") and not _effort_decided(tool_input, definition, settings):
         effort = level_effort
     if out.get("escalated_from") and isinstance(done, dict):
         effort = _above_earlier(config, effort, final, done)
@@ -149,7 +147,7 @@ def decide(hook_input: dict, config: dict) -> dict:
     if isinstance(earlier, dict):
         # We rewrote this very call before and no result came back: the rewrite wasn't
         # accepted, or something else stopped the call. Rewriting it again could loop.
-        limit = cfg.cap(config)
+        limit = settings.cap
         if limit and registry.strength(config, target) > registry.strength(config, limit):
             out.update(action="deny", reason=(
                 f"Model Router: subagents are capped at {limit} by the user, and this call would run on "
@@ -175,10 +173,10 @@ def _above_earlier(config: dict, effort: str | None, model: str | None, done: di
     return effort if effort in cfg.EFFORTS and cfg.EFFORTS.index(effort) >= cfg.EFFORTS.index(floor) else floor
 
 
-def _effort_decided(tool_input: dict, definition: dict | None) -> bool:
+def _effort_decided(tool_input: dict, definition: dict | None, settings: Settings) -> bool:
     """Someone already chose this call's effort: the caller, the agent, or the user's environment."""
     return bool("effort" in tool_input or (definition or {}).get("effort")
-                or os.environ.get("CLAUDE_CODE_EFFORT_LEVEL") or os.environ.get("CLAUDE_CODE_SUBAGENT_EFFORT"))
+                or settings.effort_level or settings.subagent_effort)
 
 
 def rewritten_input(tool_input: dict, decision: dict) -> dict:

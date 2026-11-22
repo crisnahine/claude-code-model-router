@@ -1,4 +1,4 @@
-"""The registry file, the user's and a project's overrides, and the plugin's options."""
+"""The registry file and the user's and a project's override files, merged."""
 from __future__ import annotations
 
 import os
@@ -14,17 +14,6 @@ MODES = ("off", "advise", "auto")
 PRIORITIES = ("fast", "balanced", "quality")
 LEVELS = ("lookup", "standard", "complex", "hardest", "frontier")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-
-
-def truthy(value: str | None) -> bool:
-    return (value or "").strip().lower() in ("1", "true", "yes", "on")
-
-
-def flag(name: str, default: bool = True) -> bool:
-    value = os.environ.get(f"CLAUDE_PLUGIN_OPTION_{name}")
-    if value is None or not value.strip():
-        return default
-    return value.strip().lower() not in ("false", "0", "no", "off")
 
 
 def project_dir(hook_input: dict | None = None) -> Path:
@@ -118,41 +107,3 @@ def load_config(hook_input: dict | None = None) -> dict:
     if file_modes:
         config["routing_mode"] = min(file_modes, key=MODES.index)
     return config
-
-
-def _option(name: str, from_state: bool) -> str | None:
-    """Hooks get plugin options in the environment. Skill commands run through the Bash
-    tool, which doesn't, so they read what the last SessionStart recorded."""
-    value = os.environ.get(f"CLAUDE_PLUGIN_OPTION_{name.upper()}")
-    if not value and from_state:
-        value = store.load_state().get(name)
-    return value.strip().lower() if isinstance(value, str) and value.strip() else None
-
-
-def cap(config: dict, from_state: bool = False) -> str | None:
-    """The user's cap: a model name, or None for no cap."""
-    value = _option("max_tier", from_state)
-    return value if value in (config.get("models") or {}) else None
-
-
-def priority(from_state: bool = False) -> str:
-    value = _option("priority", from_state)
-    return value if value in PRIORITIES else "balanced"
-
-
-def pins(from_state: bool = False) -> str:
-    """respect (default): an agent that names its own model keeps it. override: route it too."""
-    return "override" if _option("agent_pins", from_state) == "override" else "respect"
-
-
-def mode(config: dict | None = None) -> str:
-    """auto (default): set the model and effort of every agent call. advise: only tell
-    Claude what the estimate is. off: do nothing but keep the ledger.
-
-    An override file may set routing_mode too. The weakest setting wins, so a
-    repository can opt out but can't switch routing on for its users."""
-    user = _mode(os.environ.get("CLAUDE_PLUGIN_OPTION_ROUTING_MODE")) or "auto"
-    from_files = _mode((config or {}).get("routing_mode"))
-    if from_files and MODES.index(from_files) < MODES.index(user):
-        return from_files
-    return user

@@ -9,6 +9,7 @@ import time
 
 from . import registry, session, store
 from . import config as cfg
+from .settings import Settings
 
 _NON_CODE = (".md", ".mdx", ".txt", ".rst", ".adoc", ".csv", ".log")
 CHECK_COMMAND = re.compile(
@@ -19,8 +20,8 @@ CHECK_COMMAND = re.compile(
 _CHECKERS = ("verifier", "reviewer")
 
 
-def enabled(config: dict) -> bool:
-    return cfg.mode(config) == "auto" and cfg.flag("VERIFY_GATE")
+def enabled(settings: Settings) -> bool:
+    return settings.mode == "auto" and settings.verify_gate
 
 
 def is_checker(agent_type: object) -> bool:
@@ -126,7 +127,7 @@ def unverified_edit(hook_input: dict) -> str | None:
     )
 
 
-def before_stop(hook_input: dict, config: dict) -> str | None:
-    if hook_input.get("stop_hook_active") or not enabled(config):
+def before_stop(hook_input: dict, config: dict, settings: Settings) -> str | None:
+    if hook_input.get("stop_hook_active") or not enabled(settings):
         return None
     return escalation(config, hook_input) or unverified_edit(hook_input)
