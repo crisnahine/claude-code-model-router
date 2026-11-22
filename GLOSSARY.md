@@ -40,11 +40,11 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Main-loop effort**: the effort of the conversation's own turn. The mod raises it for one turn when the request profiles as complex or harder, never lowers it, and leaves it alone wherever an effort change would re-read the context uncached.
 
-**Fork**: an agent that starts from its parent's conversation, as a forked subagent or a skill with `context: fork`. It runs on its parent's model and reads its parent's cache, so the router leaves it alone.
+**Fork**: an agent that starts from its parent's conversation. It runs on its parent's model and reads its parent's cache, so the router leaves it alone. A skill with `context: fork` is not a fork, despite the name ([skills](https://code.claude.com/docs/en/skills.md#run-skills-in-a-subagent)). It starts a new subagent of its `agent` type without an `agent.spawn` event, so it isn't routed either, and its model comes from the skill's `model` field, else from its agent type and the session.
 
 **Redo**: the same call issued again in the same request after its result came back. A redo runs one level higher and counts as a vote that its first level was too low.
 
-**Vote**: evidence that a level was routed too low: a redo, or Claude naming a stronger model than the pick. Enough votes raise the level for good.
+**Vote**: evidence that a level was routed too low: a redo, or Claude naming a stronger model than the pick. Enough votes raise the level one step, and a raise that keeps being overruled with a weaker model is undone the same way.
 
 **Request**: one prompt from the user and the turns it starts. Redos count only within one request.
 
@@ -52,7 +52,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Spend**: a request's tokens priced at list price from the registry, summed per turn. A model with no price is counted as unpriced, never priced as its neighbour.
 
-**Gate**: a check before a turn ends (`gates.py`). One asks for a test run when code in the project changed and nothing checked it. The other asks for a stronger agent's review when a weak session model answered a hard request alone. Each asks once and then lets go (`verify_gate`).
+**Gate**: a check before a turn ends (`gates.py`). One asks for a test run when code in the project changed and nothing checked it. The other asks for a stronger agent's review when a weak session model answered a hard request alone. Each asks once and then lets go. The `verify_gate` option turns both off.
 
 **Schema**: the version number written into every state file and allowed in override files. An older file is upgraded as it is read and saved at the current version on its next write. A file from a newer release is read but never overwritten.
 
