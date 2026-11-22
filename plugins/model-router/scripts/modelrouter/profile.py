@@ -12,11 +12,12 @@ from .config import LEVELS, PLUGIN_NAME
 # Two or more systems named in a list ("across the API, the web client and ...") are cross-module work.
 _SYSTEM = r"(?:services?|clients?|api|gateway|backend|frontend|workers?|apps?|layers?|modules?)"
 _SYSTEMS = rf"(?:across|touching|between)\s+(?:the\s+)?(?:[\w-]+\s+){{0,2}}?{_SYSTEM},\s+(?:the\s+)?(?:[\w-]+\s+){{0,2}}?{_SYSTEM}"
-# Asked to make a choice, not to pick an item: decide how, choose a scheme, weigh options, which ... should we.
-_DECISION = (r"(?:decid\w*|choos\w*|pick|weigh)\s+(?:how|which|whether|between|what|on|among)|"
-             r"(?:choos\w*|pick)\s+(?:a|an|the)\s+(?:[\w-]+\s+){0,2}"
+# Asked to make a choice, not to pick an item or report one made: decide how, choose a scheme, weigh options.
+_DECISION = (r"(?:decid(?:e|es|ing)|choos(?:e|es|ing)|pick(?:s|ing)?|weigh(?:s|ing)?)\s+"
+             r"(?:how|which|whether|between|what|on|among)|"
+             r"(?:choos(?:e|es|ing)|pick(?:s|ing)?)\s+(?:a|an|the)\s+(?:[\w-]+\s+){0,2}"
              r"(?:schemes?|strateg\w*|approach\w*|architectures?|algorithms?|data models?|layouts?|protocols?)|"
-             r"weigh\s+(?:the\s+)?(?:options|alternatives|trade.?offs?)|"
+             r"weigh(?:s|ing)?\s+(?:the\s+)?(?:options|alternatives|trade.?offs?)|"
              r"which\s+(?:[\w-]+\s+){1,3}should\s+(?:we|i|it|they)\s+(?:use|adopt|pick|choose|go with)")
 SIGNALS = {
     "risk": r"secur\w*|vulnerab\w*|auth|authn|authz|authenticat\w*|authoriz\w*|oauth\w*|passwords?|"
