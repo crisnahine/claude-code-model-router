@@ -204,7 +204,8 @@ def _git_dirty() -> bool:
 
 
 def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
-    scratch = Path(tempfile.mkdtemp(prefix=f"mrbench-{task['id']}-{config['id']}-"))
+    # No task or configuration name: a brief that quotes its working directory would hand the router signal words.
+    scratch = Path(tempfile.mkdtemp(prefix="mrbench-"))
     work = scratch / "work"
     shutil.copytree(task["dir"] / "repo", work)
     if config.get("router_config"):  # a router variant, as the project's own model-router.json
@@ -246,7 +247,8 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
     agents = result.get("subagent_stats") or {}
     cost = result.get("total_cost_usd")
     return {
-        "schema": 1, "task": task["id"], "class": task["class"], "config": config["id"],
+        "schema": 1, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
+        "config": config["id"],
         "started_at": started, "claude_version": options["claude_version"],
         "main_model": config.get("model", options["model"]),
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
