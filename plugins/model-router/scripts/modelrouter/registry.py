@@ -248,11 +248,6 @@ def available(config: dict, project: Path | None = None, cap: str | None = None)
     return [n for n in names if healthy(n, table)] or names
 
 
-def ceiling(config: dict, project: Path | None = None, cap: str | None = None) -> str | None:
-    names = available(config, project, cap)
-    return names[-1] if names else None
-
-
 def clamp(config: dict, name: str, usable: list[str]) -> str:
     """The usable model closest to `name` without exceeding it, else the weakest usable."""
     if name in usable or not usable:

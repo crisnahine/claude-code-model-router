@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Reviews a risky or cross-module diff (security, data, a public API, concurrency) adversarially and read-only, or when the user asks for a review. A small, tested change doesn't need one.
+description: Reviews a risky or cross-module diff (security, data, a public API, concurrency) or one the user names; reports and writes nothing. A small, tested change doesn't need one.
 tools: Read, Grep, Glob
 color: red
 ---

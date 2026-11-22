@@ -93,6 +93,11 @@ def strong_agent(config: dict, need: str, level: str | None = None) -> str:
     return f"{cfg.PLUGIN_NAME}:{name}"
 
 
+def writes_nothing(agent: str) -> bool:
+    """The architect has no Write or Edit tool, so a task whose deliverable is a file fails there."""
+    return agent == f"{cfg.PLUGIN_NAME}:architect"
+
+
 def escalation(config: dict, hook_input: dict) -> str | None:
     """A request estimated above the conversation's own model, answered without any
     agent of that strength: ask once for a stronger model to check the result."""
@@ -112,13 +117,14 @@ def escalation(config: dict, hook_input: dict) -> str | None:
         store.update_entry("prompts", session_id, escalation_asked=True, session_tier=current)
     except OSError:
         return None
+    agent = strong_agent(config, need, entry.get("level"))
+    act = ("to check; it writes nothing, so apply what it finds yourself" if writes_nothing(agent)
+           else "to check and improve")
     return (
         f"This request was estimated as {entry.get('level')}, which needs about {need}-level reasoning, and "
         f"this conversation runs on {current}. No {need}-level agent has looked at it. Before finishing, give "
-        f"the task and your result to {strong_agent(config, need, entry.get('level'))} "
-        "to check and improve, then give the user "
-        "the reconciled answer. If the task turned out to be simple and the estimate was wrong, say so in "
-        "one line and finish."
+        f"the task and your result to {agent} {act}, then give the user the reconciled answer. If the task "
+        "turned out to be simple and the estimate was wrong, say so in one line and finish."
     )
 
 
