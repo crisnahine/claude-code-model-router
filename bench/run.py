@@ -69,15 +69,21 @@ def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[l
 
 LIMIT_RETRIES = 5
 LIMIT_PAUSE = 60  # seconds before the first retry; each later pause is twice as long
-_LIMIT_WORDS = re.compile(r"rate.?limit|usage limit|overloaded|too many requests", re.I)
+# The messages Claude Code prints when the API refuses for a limit (https://code.claude.com/docs/en/errors.md).
+_LIMIT_MESSAGE = (r"API Error: (?:Repeated )?(?:429|529)\b|API Error: Repeated 529 Overloaded|Request rejected \(429\)|"
+                  r"Server is temporarily limiting requests|You've hit your (?:session|weekly|Opus|Sonnet) limit")
 
 
 def rate_limited(row: dict) -> bool:
     """A run the API refused for a rate or usage limit: no measurement, not a failed task. Only an errored run
-    counts, since a good answer can talk about rate limits."""
+    counts, and only on the API's status or Claude Code's own limit message: at the start of the answer, which
+    is then that message, or in stderr. Task text that talks about rate limits is never read as one."""
     if not (row.get("is_error") or row.get("exit_code")):
         return False
-    return row.get("api_error_status") in (429, 529) or bool(_LIMIT_WORDS.search(f"{row['answer']} {row['stderr']}"))
+    if row.get("api_error_status") in (429, 529):
+        return True
+    answer, stderr = str(row.get("answer") or ""), str(row.get("stderr") or "")
+    return bool(re.match(rf"\s*(?:{_LIMIT_MESSAGE})", answer) or re.search(_LIMIT_MESSAGE, stderr))
 
 
 def can_start(spent: float, budget: float, max_total: float) -> bool:
