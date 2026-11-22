@@ -99,16 +99,30 @@ _LIMIT_MESSAGE = (r"API Error: (?:Repeated )?(?:429|529)\b|API Error: Repeated 5
                   r"Server is temporarily limiting requests|You've hit your (?:session|weekly|Opus|Sonnet) limit")
 
 
-def rate_limited(row: dict) -> bool:
-    """A run the API refused for a rate or usage limit: no measurement, not a failed task. Only an errored run
-    counts, and only on the API's status or Claude Code's own limit message: at the start of the answer, which
-    is then that message, or in stderr. Task text that talks about rate limits is never read as one."""
+# What Claude Code printed when the network went away (2026-11-22): an API Error naming a network code, or a
+# dropped connection.
+_NETWORK_MESSAGE = (r"API Error: [^\n]*\((?:ENOTFOUND|ENETUNREACH|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN)\)|"
+                    r"API Error: (?:Can't reach the API server|No internet route)|Connection lost")
+
+
+def refusal(row: dict) -> str | None:
+    """Why the API never got to the task: "limit" or "network", else None. Only an errored run counts, and only
+    on the API's status or Claude Code's own message, at the start of the answer (which is then that message) or
+    in stderr. Task text that talks about limits or network codes is never read as one."""
     if not (row.get("is_error") or row.get("exit_code")):
-        return False
+        return None
     if row.get("api_error_status") in (429, 529):
-        return True
+        return "limit"
     answer, stderr = str(row.get("answer") or ""), str(row.get("stderr") or "")
-    return bool(re.match(rf"\s*(?:{_LIMIT_MESSAGE})", answer) or re.search(_LIMIT_MESSAGE, stderr))
+    for reason, message in (("limit", _LIMIT_MESSAGE), ("network", _NETWORK_MESSAGE)):
+        if re.match(rf"\s*(?:{message})", answer) or re.search(message, stderr):
+            return reason
+    return None
+
+
+def rate_limited(row: dict) -> bool:
+    """A run refused for a rate or usage limit or a lost network: no measurement, not a failed task."""
+    return refusal(row) is not None
 
 
 def can_start(spent: float, budget: float, max_total: float) -> bool:
@@ -280,6 +294,7 @@ def main(argv: list[str] | None = None) -> int:
                     spent += row["total_cost_usd"]
                     if not rate_limited(row):
                         break
+                    row["limited_reason"] = refusal(row)
                     # Kept apart, outside results/*.jsonl, so the spend is on record but never a failed task.
                     limited = args.out.parent / "limited" / args.out.name
                     limited.parent.mkdir(parents=True, exist_ok=True)

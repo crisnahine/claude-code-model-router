@@ -80,6 +80,14 @@
     "price_model": "sonnet"
   },
   {
+    "id": "plugin-m6-08-b",
+    "description": "Model Router at commit 810e971 (m6-08-b): the cheap-first ladder and main_effort off as shipped defaults, role agents that pin no model or effort, a reviewer asked for only on risky or cross-module changes",
+    "plugin": true,
+    "env": {},
+    "plugin_ref": "810e971",
+    "price_model": "sonnet"
+  },
+  {
     "id": "defaults",
     "description": "No plugin: subagents inherit the session model at its default effort",
     "plugin": false,

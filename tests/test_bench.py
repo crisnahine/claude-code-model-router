@@ -553,6 +553,22 @@ class Limits(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertEqual(len(limited), run.LIMIT_RETRIES + 1)
 
+    def test_a_lost_network_is_retried_like_a_limit(self):
+        # The answers Claude Code gave during the 2026-11-22 outage, plus a dropped connection.
+        for answer in ("API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+                       "API Error: No internet route — check your connection or VPN (ENETUNREACH)",
+                       "Connection lost"):
+            row = {"is_error": True, "exit_code": 1, "api_error_status": None, "stderr": "", "answer": answer}
+            self.assertTrue(run.rate_limited(row), answer)
+            self.assertEqual(run.refusal(row), "network", answer)
+        self.assertEqual(run.refusal({"is_error": True, "exit_code": 1, "api_error_status": 429, "stderr": "",
+                                      "answer": ""}), "limit")
+        for row in ({"is_error": True, "exit_code": 1, "api_error_status": None, "stderr": "",
+                     "answer": "The fix fails: socket code raises ENOTFOUND when DNS is down."},
+                    {"is_error": False, "exit_code": 0, "api_error_status": None, "stderr": "",
+                     "answer": "Connection lost errors come from the retry wrapper."}):
+            self.assertFalse(run.rate_limited(row), row["answer"])
+
     def test_an_answer_about_rate_limits_is_not_a_limit(self):
         self.assertFalse(run.rate_limited({"is_error": False, "api_error_status": None, "stderr": "",
                                            "answer": "Use a token bucket rate limiter; on the usage limit, return 429."}))
