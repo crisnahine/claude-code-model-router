@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from itertools import islice
 from pathlib import Path
 
 from . import config as cfg
@@ -52,6 +53,18 @@ def _search(folders: list[tuple[str, Path]], name: str) -> dict | None:
     return None
 
 
+_SKIP_DIRS = ("node_modules", ".git", "__pycache__")
+
+
+def _markdown_files(root: Path):
+    """The .md files under `root` in a stable order, skipping dependency and VCS trees."""
+    for current, dirs, files in os.walk(root):
+        dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS)
+        for name in sorted(files):
+            if name.lower().endswith(".md"):
+                yield Path(current) / name
+
+
 def _plugin_roots(plugin: str) -> list[Path]:
     """Install folders of a plugin, from Claude Code's own install record, then by name."""
     base = store.claude_home() / "plugins"
@@ -67,7 +80,7 @@ def _plugin_roots(plugin: str) -> list[Path]:
         return roots
     seen = 0
     for current, dirs, files in os.walk(base):
-        dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "data", "__pycache__")]
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS + ("data",)]
         seen += len(files) + 1
         if seen > 20000:
             break
@@ -91,7 +104,7 @@ def find(agent_type: str, project: Path) -> dict | None:
         # A plugin may keep its agents somewhere other than agents/.
         for root in roots:
             try:
-                paths = [p for p in sorted(root.rglob("*.md"))[:2000] if "agents" in p.parts]
+                paths = [p for p in islice(_markdown_files(root), 2000) if "agents" in p.parts]
             except OSError:
                 continue
             for path in paths:
