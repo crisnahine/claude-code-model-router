@@ -1,0 +1,7 @@
+{
+  "class": "security-review",
+  "brief": "Review this repository for a security vulnerability that lets a caller read files they shouldn't. Reply with the one vulnerable line as path:line (for example `app.py:12`) and one sentence on why.",
+  "reference_answer": "files/server.py:8 joins the caller's name onto ROOT without resolving it, so `../` reads any file.",
+  "wrong_answer": "files/thumbs.py:8",
+  "decoy": "files/thumbs.py:8 joins a name onto THUMBS."
+}

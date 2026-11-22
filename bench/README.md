@@ -3,7 +3,7 @@
 Measures what Model Router costs per solved task, and how often tasks get solved, against Claude Code without it. Results go to [docs/BENCHMARKS.md](../docs/BENCHMARKS.md). Standard-library Python only. Nothing here ships with the plugin.
 
 - `tasks/<id>/`: one task each. `task.json` gives its class and brief, `repo/` is the fixed set of files a run starts from, and `check.py <workdir> <answer-file>` exits 0 only when the task was solved. `solution/` (for tasks that change code) or `reference_answer` (for lookups) is a known-good result; `tests/test_bench.py` checks that each pass check fails on `repo/` as shipped and passes on that result.
-- `configs.json`: the configurations. `plugin` loads the router with `--plugin-dir`. `defaults` runs Claude Code with no plugin. `haiku`, `sonnet` and `opus` force every subagent onto one model with `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`.
+- `configs.json`: the configurations. `plugin` loads the router with `--plugin-dir`. `defaults` runs Claude Code with no plugin. `haiku`, `sonnet`, `opus` and `fable` force every subagent onto one model with `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`. `sonnet-medium` and `sonnet-high` also set `CLAUDE_CODE_SUBAGENT_EFFORT`. `opusplan` sets the session model (`model`), and `advisor` adds `--advisor opus` (`args`). `price_model` names the model the full-suite estimate prices each configuration's runs at.
 - `run.py`: runs each task under each configuration with `claude -p --output-format json`, checks the result, and appends one JSON line per run to `results/`.
 - `analyze.py`: computes pass rate and cost per solved task with 95% bootstrap intervals and writes `docs/BENCHMARKS.md`.
 

@@ -277,6 +277,70 @@ class Sessions(unittest.TestCase):
             self.assertEqual((row["sessions_saved"], row["session_dir_removed"]), (True, True))
 
 
+class SuiteCoverage(unittest.TestCase):
+    """Every task class and baseline the suite claims to cover is there and can't be passed by gaming."""
+
+    def check(self, task, work, answer=""):
+        return Tasks.check(self, task, work, answer)
+
+    def shipped(self, task_id, tmp):
+        task = next(t for t in run.load_tasks() if t["id"] == task_id)
+        work = Path(tmp) / "work"
+        shutil.copytree(task["dir"] / "repo", work)
+        return task, work
+
+    def test_every_task_class_has_two_tasks(self):
+        tasks = run.load_tasks()
+        for cls in run.CLASSES:
+            self.assertGreaterEqual(sum(t["class"] == cls for t in tasks), 2, cls)
+
+    def test_a_root_cause_check_fails_when_the_test_is_edited_to_pass(self):
+        for task in (t for t in run.load_tasks() if t["class"] == "root-cause"):
+            with self.subTest(task=task["id"]), tempfile.TemporaryDirectory() as tmp:
+                task, work = self.shipped(task["id"], tmp)
+                for test_file in work.glob("test_*.py"):
+                    test_file.write_text("import unittest\n", encoding="utf-8")
+                self.assertFalse(self.check(task, work))
+
+    def test_a_security_report_that_names_the_decoy_or_every_line_fails(self):
+        for task in (t for t in run.load_tasks() if t["class"] == "security-review"):
+            with self.subTest(task=task["id"]), tempfile.TemporaryDirectory() as tmp:
+                task, work = self.shipped(task["id"], tmp)
+                self.assertTrue(self.check(task, work, task["reference_answer"]))
+                self.assertFalse(self.check(task, work, task["reference_answer"] + "\nAlso " + task["decoy"]))
+
+    def test_each_new_baseline_sets_what_its_name_says(self):
+        configs = {c["id"]: c for c in run.load_configs()}
+        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        cmd, env = run.command("x", configs["opusplan"], options, {})
+        self.assertEqual(cmd[cmd.index("--model") + 1], "opusplan")
+        cmd, env = run.command("x", configs["advisor"], options, {})
+        self.assertEqual((cmd[cmd.index("--model") + 1], cmd[cmd.index("--advisor") + 1]), ("sonnet", "opus"))
+        for name, effort in (("sonnet-medium", "medium"), ("sonnet-high", "high")):
+            cmd, env = run.command("x", configs[name], options, {})
+            self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"],
+                              env["CLAUDE_CODE_SUBAGENT_EFFORT"]), ("sonnet", "1", effort))
+            self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)  # that one would move the main loop too
+        cmd, env = run.command("x", configs["fable"], options, {})
+        self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "fable")
+        for config in configs.values():
+            self.assertIn(config.get("price_model"), ("haiku", "sonnet", "opus", "fable"), config["id"])
+
+    def test_the_full_suite_estimate_prices_each_class_and_model(self):
+        data = (rows("defaults", "lookup", [0.04, 0.06], [True, True])
+                + rows("defaults", "bugfix", [0.10], [True]))
+        tasks = [{"id": "l", "class": "lookup"}, {"id": "b", "class": "bugfix"}, {"id": "d", "class": "design"}]
+        configs = [{"id": "a", "price_model": "sonnet"}, {"id": "o", "price_model": "opus"},
+                   {"id": "h", "price_model": "haiku"}]
+        prices = {"claude-sonnet-5-5": {"output": 15}, "claude-opus-5-5": {"output": 75},
+                  "claude-opus-4-1": {"output": 99}, "claude-haiku-5-5": {"output": 5}, "claude-opus-*": {"output": 1}}
+        plan = analyze.estimate(data, tasks, configs, prices)
+        self.assertEqual(plan["runs"], 90)
+        # 10 runs x (0.05 + 0.10 + 0.0667 for design, from the mean of all runs) x (1 + 5 + 1, haiku never priced down)
+        self.assertAlmostEqual(plan["usd"], 10 * (0.05 + 0.10 + 0.2 / 3) * 7, places=6)
+        self.assertEqual(plan["factors"], {"a": 1.0, "o": 5.0, "h": 1.0})
+
+
 class Pilot(unittest.TestCase):
     def test_committed_results_match_the_published_table(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))

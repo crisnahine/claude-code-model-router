@@ -1,0 +1,9 @@
+{
+  "strategy": "event_invalidation",
+  "ttl_seconds": 3600,
+  "max_staleness_seconds": 1,
+  "reasons": [
+    "the bus already carries every change",
+    "a 5 s TTL would need about 240,000 database reads per second"
+  ]
+}

@@ -58,12 +58,13 @@ def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[l
         # The run's own plugins root, so the router's data never lands in the folder other sessions share.
         env["CLAUDE_CODE_PLUGIN_CACHE_DIR"] = options["plugins_root"]
     env.update(config.get("env", {}))
-    cmd = [options["claude"], "-p", prompt, "--output-format", "json", "--model", options["model"],
+    cmd = [options["claude"], "-p", prompt, "--output-format", "json",
+           "--model", config.get("model", options["model"]),
            "--max-budget-usd", str(options["budget"]), "--setting-sources", "project", "--strict-mcp-config",
            "--permission-mode", "dontAsk"]
     if config.get("plugin"):
         cmd += ["--plugin-dir", options["plugin_dir"]]
-    return cmd + ["--allowedTools", *TOOLS], env
+    return cmd + list(config.get("args", [])) + ["--allowedTools", *TOOLS], env
 
 
 def can_start(spent: float, budget: float, max_total: float) -> bool:
@@ -147,7 +148,8 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
     cost = result.get("total_cost_usd")
     return {
         "schema": 1, "task": task["id"], "class": task["class"], "config": config["id"],
-        "started_at": started, "claude_version": options["claude_version"], "main_model": options["model"],
+        "started_at": started, "claude_version": options["claude_version"],
+        "main_model": config.get("model", options["model"]),
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
         "plugin_state": plugin_state, "plugin_data_own": True, "sessions_saved": True, "session_dir_removed": session_removed,
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
