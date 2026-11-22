@@ -52,7 +52,7 @@ def run(hook_input: dict, via: str, guard: Guard | None = None) -> dict:
            "level": decision["level"], "signals": decision["signals"],
            "model": None if action == "deny" else decision["model"] or decision["was"],
            "was": decision["was"], "effort": decision["effort"], "source": decision["source"],
-           "reason": decision["reason"], "description": str(found.tool_input.get("description") or "")[:120]}
+           "escalated_from": decision["escalated_from"], "reason": decision["reason"], "description": str(found.tool_input.get("description") or "")[:120]}
     if via == "mod":
         row["kind"] = hook_input.get("kind") or "subagent"
     store.append_ledger(row)

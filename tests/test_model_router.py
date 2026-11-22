@@ -1302,6 +1302,13 @@ class RepeatGuard(Sandbox):
         named = self.decide("general-purpose", LOOKUP, model="haiku")
         self.assertEqual((named["source"], named["escalated_from"]), ("caller", None))
 
+    def test_the_ledger_names_the_level_a_redo_climbed_from(self):
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
+        self.pre("general-purpose", LOOKUP)
+        spawns = [r for r in self.ledger() if r.get("event") == "spawn"]
+        self.assertEqual([(r["level"], r["escalated_from"]) for r in spawns], [("lookup", None), ("standard", "lookup")])
+
     def test_an_error_also_settles_the_call(self):
         self.pre("general-purpose", LOOKUP)
         hooks.agent_failed({**self.call("general-purpose", LOOKUP, model="haiku"), "error": "timed out"})

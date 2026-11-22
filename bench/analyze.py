@@ -17,7 +17,8 @@ BENCH = Path(__file__).resolve().parent
 sys.path.insert(0, str(BENCH))
 import run  # noqa: E402
 sys.path.insert(0, str(run.PLUGIN / "scripts"))
-from modelrouter import profile  # noqa: E402
+from modelrouter import config as mrconfig, profile  # noqa: E402
+from overhead import percentile  # noqa: E402
 
 MIN_RUNS = 10  # fewer runs per configuration than this and no row is called a win or a loss
 
@@ -123,7 +124,7 @@ def render(summary: list[dict], meta: dict) -> str:
     return "\n".join([head, "", "## Results", "", *_table(summary), "", meta.get("body", "")]).rstrip() + "\n"
 
 
-def sessions(rows: list[dict], router: str | None = None) -> list[tuple[str, str, list[dict]]]:
+def sessions(rows: list[dict], router: str | None = None) -> list[tuple[str, str, list[dict], list[dict]]]:
     """One summary per session model, since a configuration costs differently on each. Its router is `router`,
     or else the first configuration in configs.json that loads the plugin and ran on that session model."""
     groups: dict[str, list[dict]] = {}
@@ -133,15 +134,70 @@ def sessions(rows: list[dict], router: str | None = None) -> list[tuple[str, str
     for model, group in sorted(groups.items()):
         ran = {r["config"] for r in group}
         chosen = router or next((c["id"] for c in run.load_configs() if c.get("plugin") and c["id"] in ran), "plugin")
-        out.append((model, chosen, summarize(group, router=chosen)))
+        out.append((model, chosen, summarize(group, router=chosen), group))
     return out
 
 
-def render_sessions(parts: list[tuple[str, str, list[dict]]], meta: dict) -> str:
+def _cache_share(rows: list[dict]) -> float | None:
+    """Cache reads over all input tokens, which are input plus cache reads plus cache writes."""
+    read = total = 0
+    for r in rows:
+        for u in (r.get("models") or {}).values():
+            read += u.get("cacheReadInputTokens") or 0
+            total += ((u.get("inputTokens") or 0) + (u.get("cacheReadInputTokens") or 0)
+                      + (u.get("cacheCreationInputTokens") or 0))
+    return read / total if total else None
+
+
+def _metric_text(cell: list[dict], routed: bool) -> str:
+    secs = [r["wall_ms"] / 1000 for r in cell if isinstance(r.get("wall_ms"), (int, float))]
+    parts = [f"p50 {percentile(secs, 0.5):.0f} s, p90 {percentile(secs, 0.9):.0f} s"
+             + (f" ({len(secs)} of {len(cell)} runs)" if len(secs) < len(cell) else "") if secs else "latency n/a"]
+    share = _cache_share(cell)
+    parts.append("cache n/a" if share is None else f"cache {share:.0%}")
+    if not routed:
+        return ", ".join(parts + ["not routed"])
+    known = [r for r in cell if isinstance(r.get("routed"), list)]
+    # A run's level is the one its first subagent got: the bench hands each task to one subagent.
+    first = [(r["routed"][0]["level"], bool(r.get("passed"))) for r in known if r["routed"] and r["routed"][0].get("level")]
+    levels: dict[str, list[int]] = {}
+    for level, ok in first:
+        levels.setdefault(level, [0, 0])
+        levels[level][0] += ok
+        levels[level][1] += 1
+    if levels:
+        order = sorted(levels, key=lambda lv: mrconfig.LEVELS.index(lv) if lv in mrconfig.LEVELS else len(mrconfig.LEVELS))
+        text = ", ".join(f"{lv} {levels[lv][0]}/{levels[lv][1]}" for lv in order)
+        parts.append(f"accuracy by level: {text}" + (f" ({len(first)} of {len(cell)} runs)" if len(first) < len(cell) else ""))
+    else:
+        parts.append("accuracy by level n/a")
+    spawns = [s for r in known for s in r["routed"] if "escalated_from" in s]
+    parts.append(f"escalated {sum(bool(s['escalated_from']) for s in spawns)} of {len(spawns)} spawns" if spawns
+                 else "escalation n/a")
+    return ", ".join(parts)
+
+
+def _metrics(summary: list[dict], rows: list[dict]) -> list[str]:
+    configs = []
+    for row in summary:
+        configs += [c for c in row["configs"] if c not in configs]
+    plugin = {c["id"] for c in run.load_configs() if c.get("plugin")}
+    lines = ["### Run metrics", "", "| Task class | " + " | ".join(configs) + " |",
+             "| :- | " + " | ".join(":-" for _ in configs) + " |"]
+    for row in summary:
+        cells = []
+        for c in configs:
+            cell = [r for r in rows if r["class"] == row["class"] and r["config"] == c]
+            cells.append(_metric_text(cell, c in plugin) if cell else "not run")
+        lines.append(f"| {row['class']} | " + " | ".join(cells) + " |")
+    return lines
+
+
+def render_sessions(parts: list[tuple[str, str, list[dict], list[dict]]], meta: dict) -> str:
     body = []
-    for model, router, summary in parts:
+    for model, router, summary, rows in parts:
         body += [f"## Results: session model `{model}`", "", f"Every run here had `{model}` as its session model; "
-                 f"router: `{router}`.", "", *_table(summary), ""]
+                 f"router: `{router}`.", "", *_table(summary), "", *_metrics(summary, rows), ""]
     return "\n".join([meta.get("header", "# Benchmarks"), "", *body, meta.get("body", "")]).rstrip() + "\n"
 
 
@@ -226,6 +282,20 @@ def _notes(rows: list[dict], files: list[Path]) -> list[str]:
                      "router signal words from the folder name for " + ", ".join(f"`{t}`" for t in named) +
                      ". That could only have raised the router's level and cost on those tasks, so on cost those rows understate the router; a "
                      "pass the higher level bought may not repeat.")
+    unclocked = sum(1 for r in rows if not isinstance(r.get("wall_ms"), (int, float)))
+    if unclocked:
+        lines.append(f"- {unclocked} run(s) here carry no `wall_ms`, the runner's own clock around the `claude` "
+                     "process, so their latency is n/a. Their `duration_ms` is Claude Code's figure, and it isn't "
+                     "taken as wall time: the docs list the wait for background subagents in `duration_api_ms`, not "
+                     "in `duration_ms` (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md), and on many "
+                     "rows here it falls well short of the gap to the next run's start (measured in "
+                     "`docs/TEST_RESULTS.md`).")
+    plugin = {c["id"] for c in run.load_configs() if c.get("plugin")}
+    unrouted = sum(1 for r in rows if r["config"] in plugin and not isinstance(r.get("routed"), list))
+    if unrouted:
+        lines.append(f"- {unrouted} router run(s) here carry no `routed`, the router's spawn decisions: they were "
+                     "recorded before the runner kept them. Their accuracy by level and escalation count as n/a, "
+                     "not as zero.")
     batches: dict[str, dict[str, int]] = {}
     for r in rows:
         batches.setdefault(r["config"], {}).setdefault(r.get("_batch", "?"), 0)
@@ -280,7 +350,14 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         f"either. PARTIAL means a tie, a difference inside the noise, or fewer than {MIN_RUNS} runs per "
         "configuration. The best baseline is the one with the lowest cost per solved task.",
         "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest. A router "
-        "variant (another configuration that loads the plugin) has its own column but is never a baseline.", "",
+        "variant (another configuration that loads the plugin) has its own column but is never a baseline.",
+        "- Run metrics, per class and configuration: p50 and p90 are nearest-rank percentiles of each run's wall "
+        "time (`wall_ms`, the runner's clock around the `claude` process). Cache is cache-read tokens over all input tokens, which are input plus cache reads "
+        "plus cache writes (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md), summed over "
+        "every model that ran. For a router configuration, accuracy by level is the pass rate of its runs grouped by "
+        "the level the router gave the run's first subagent. Escalated counts the spawns the router moved one level "
+        "up because the same call came back for a redo, over the spawns whose ledger row says either way. Both "
+        "come from the run's `routed` line, and n/a means no run in the cell has it.", "",
         "## Setup", "",
         f"- Claude Code: {', '.join(versions) or 'n/a'}. Session models: {', '.join(main) or 'n/a'} (`--model`), "
         "one results table each. Inside a table every configuration ran on that session model, except one that "
@@ -359,13 +436,14 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         f"as a guide, not a bound. At the per-run cap the pilot used, {plan['runs']} runs x ${budget:g} come to "
         f"${plan['runs'] * budget:,.2f} before overshoot, which has no fixed limit; only `--max-total` stops "
         "spend. The full suite needs the maintainer's go-ahead before it runs.", "",
-        "Not covered yet: the fan-out, workflow, team and redo shapes; `haiku`, `opus` and `fable` at `high` "
-        "effort; a cold and a warm prompt cache measured apart; router overhead per spawn and per turn; and each "
-        "`priority` setting. `opusplan` in a headless `dontAsk` run never enters plan mode, so it runs Sonnet "
+        "Defined in `bench/configs.json` but not run here: "
+        + (", ".join(f"`{c['id']}`" for c in run.load_configs() if c["id"] not in used) or "none") + ".", "",
+        "Not covered yet: the fan-out, workflow, team and redo shapes; a cold and a warm prompt cache measured "
+        "apart; router overhead per spawn and per turn; and each `priority` setting. `opusplan` in a headless `dontAsk` run never enters plan mode, so it runs Sonnet "
         "throughout (https://code.claude.com/docs/en/model-config.md#opusplan-model-setting, "
         "https://code.claude.com/docs/en/permission-modes.md). The advisor needs the Anthropic API, Claude "
         "Platform on AWS or Claude Models on Google Cloud (https://code.claude.com/docs/en/advisor.md), and the "
-        "`fable` configuration needs Fable access.",
+        "`fable` and `fable-high` configurations need Fable access.",
     ])
     return {"header": header, "body": body}
 
@@ -380,7 +458,7 @@ def main(argv: list[str] | None = None) -> int:
     rows = [dict(json.loads(line), _batch=_batch(path)) for path in args.results
             for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     parts = sessions(rows, router=args.router)
-    summary = [row for _, _, part in parts for row in part]
+    summary = [row for _, _, part, _ in parts for row in part]
     args.out.write_text(render_sessions(parts, _page(rows, sorted(args.results), summary)), encoding="utf-8")
     return 0
 
