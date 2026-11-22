@@ -149,7 +149,7 @@ A new model family is reported but not routed to until it has a strength rating.
 
 With `ANTHROPIC_API_KEY` in the environment and no `ANTHROPIC_BASE_URL` or cloud provider in between, the daily check also reads the Models API (`GET /v1/models`). Its `line`, `lifecycle` and `retires_at` for each model the account can call take precedence over the public page, and a new `line` is reported as a new model family. The key is sent to `api.anthropic.com` alone, and that request follows no redirect. A subscription login gives hooks no key, so those setups rely on the public page.
 
-A changelog or docs index that comes back empty, such as an outage page, counts as a failed fetch. The last cache stays as it was, and the repo's daily workflow fails instead of opening an issue. So does a body cut short of its `Content-Length`, and a fetch that runs too long. A request's body gets 10 seconds as a whole, not per socket read, and the whole fetch, connecting and headers included, gets 25 seconds or fails as one. Claude Code doesn't time out an async hook ([hooks docs](https://code.claude.com/docs/en/hooks.md#run-hooks-in-the-background)), so these limits are what end a refresh stuck on a slow server.
+A changelog or docs index that comes back empty, such as an outage page, counts as a failed fetch. The last cache stays as it was, and the repo's daily workflow fails instead of opening an issue. So does a body cut short of its `Content-Length`, and a fetch that runs too long. A request's body gets 10 seconds as a whole, not per socket read, and the whole fetch, connecting and headers included, gets 25 seconds or fails as one. Claude Code doesn't time out an async hook ([hooks docs](https://code.claude.com/docs/en/hooks.md#run-hooks-in-the-background)), so these limits are what end a refresh stuck on a slow server. After a failed fetch, session starts don't try again for an hour, then two, doubling with each failure in a row up to a day; a success resets the wait, and `/model-router:refresh` always tries.
 
 ## Hook flow
 
@@ -160,7 +160,8 @@ mod  turn.start    ─ mod-turn       the main loop's effort for this turn
 mod  turn.step                      applies the agent's or the turn's effort to each request; keeps its usage
 mod  turn.complete ─ mod-usage      prices the turn's requests into the ledger
 SessionStart ─┬─ session-start   records options and the session model; explains routing
-              └─ refresh-cache   (async) refreshes the upstream cache if older than 24 h
+              └─ refresh-cache   (async) refreshes the upstream cache if older than 24 h,
+                                 waiting 1 h to a day after a failed fetch
 UserPromptSubmit ─ user-prompt   profiles the request; notes a model the user may be asking for
 PostModelSwitch ─ model-switch   records the session's new model
 PreToolUse (Agent|Task) ─ pre-agent      fallback: spawn.run, returns updatedInput
