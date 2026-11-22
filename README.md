@@ -93,7 +93,7 @@ Each subtask is scored from its own brief. The profile looks for risk (security,
 
 ![The ladder: lookup on Haiku at low effort, standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high, frontier on Fable at high. A call climbs one rung each time it comes back for a redo.](docs/assets/ladder.svg)
 
-The ladder starts cheap and relies on redo escalation to catch what falls short, the policy Anthropic measured as cheapest for a high pass rate. In this repository's benchmark the earlier, stronger ladder (standard at `high`, complex on Opus) cost 1.2 to 2.2 times as much per solved task as Claude Code's defaults on 7 of 8 task classes, at the same pass rate, on a Sonnet session ([BENCHMARKS.md](docs/BENCHMARKS.md)). So standard work runs Sonnet at `medium`, Claude Code's own default for it, and complex work Sonnet at `high`. Opus 5.5 at `high` came within a point of Fable 5.2 at `high` on coding (95.5% against 96.3%) for under a quarter of the cost, so the hardest work runs on Opus and Fable is kept for research-grade work.
+The ladder starts cheap and relies on redo escalation to catch what falls short, the policy Anthropic measured as cheapest for a high pass rate. In this repository's benchmark the earlier, stronger ladder (standard at `high`, complex on Opus) cost 1.2 to 2.2 times as much per solved task as Claude Code's defaults on 7 of 8 task classes, at the same pass rate, on a Sonnet session (raw data in [bench/results/archive/pre-0.1.1](bench/results/archive/pre-0.1.1/)). So standard work runs Sonnet at `medium`, Claude Code's own default for it, and complex work Sonnet at `high`. Opus 5.5 at `high` came within a point of Fable 5.2 at `high` on coding (95.5% against 96.3%) for under a quarter of the cost, so the hardest work runs on Opus and Fable is kept for research-grade work.
 
 ### 2. Select a model
 
@@ -143,13 +143,15 @@ With `verify_gate` on (off by default), Claude is asked once for a test run when
 <p align="center">
   <picture>
     <source media="(max-width: 600px)" srcset="docs/assets/benchmark-phone.svg">
-    <img src="docs/assets/benchmark.svg" width="100%" alt="Cost per solved task on an Opus 5.5 session, by task class, from docs/BENCHMARKS.md. In all eight classes the router with the test-run check off cost less per solved task than Claude Code's defaults, with every run solved for both, for example lookup $0.0679 against $0.1222 and research $0.1335 against $0.1805. The router's defaults at commit a06e5d4, on 2 runs per class, cost less in seven classes and more in design, where it solved 1 of 2. Every row is PARTIAL.">
+    <img src="docs/assets/benchmark.svg" width="100%" alt="Cost per solved task by task class, from docs/BENCHMARKS.md, 10 runs per class and configuration. On an Opus 5.5 session the router cost less than Claude Code's defaults in all eight classes, with every run solved for both, for example lookup $0.0642 against $0.0989 and research $0.1498 against $0.1697. The difference is outside the noise in six classes (PASS) and inside it in design and research (PARTIAL). On a Sonnet session the router is cheapest only in lookup ($0.0366 against $0.0479, PASS) and costs more than the best baseline in the other seven (FAIL), from 9% more in root cause to 72% more in research.">
   </picture>
 </p>
 
-On an Opus 5.5 session, the default model for every account type but Microsoft Foundry (https://code.claude.com/docs/en/model-config.md), the router with the test-run check off cost $0.123 per solved task against $0.156 for the defaults over all 16 tasks (21% less; 95% interval of the difference -$0.048 to -$0.019), solving 32 of 32 against 32 of 32. That is 4 runs per task class, under the 10 the benchmark needs to call a class a win, so every class row is PARTIAL. The shipped build's check, one run per task, cost $0.124 against $0.156 and solved 15 of 16, inside the noise.
+On an Opus 5.5 session, the default model for every account type but Microsoft Foundry (https://code.claude.com/docs/en/model-config.md), the router cost less per solved task than Claude Code's defaults in all 8 task classes, with all 80 runs solved for both. The difference is outside the noise in 6 classes, which are PASS: lookup 35% less, implementation 31%, bugfix 22%, security review 19%, root cause 18% and cross-module 17%. Design (9% less) and research (12% less) are inside the noise, so PARTIAL. Over all 80 runs it cost $0.122 per solved task against $0.152.
 
-On a Sonnet session, earlier builds beat the best baseline on lookup only and cost more per solved task in the other seven classes. Closing that gap is first on the [roadmap](docs/ROADMAP.md), and the shipped build still has to run on both session models at 10 runs per class. [BENCHMARKS.md](docs/BENCHMARKS.md) has every table, the raw data and the commands to rerun it.
+On a Sonnet session the router is behind. It is cheapest only in lookup (24% less than the defaults, PASS), and in the other 7 classes it costs more per solved task than the best baseline at the same pass rate, from 9% more in root cause to 72% more in research (FAIL). It runs the same model there, but writes more cache tokens per run, which fits the context it adds to every request, and 3 of 10 design runs and 2 of 10 research runs climbed to Opus and Fable. Closing that gap is first on the [roadmap](docs/ROADMAP.md).
+
+Both sessions ran the shipped 0.1.1, 10 runs per class and configuration. [BENCHMARKS.md](docs/BENCHMARKS.md) has every table, the raw data and the commands to rerun it.
 
 ## Role agents and `/model-router:ship`
 
@@ -230,6 +232,8 @@ Third-party providers: routing uses the aliases `haiku`, `sonnet`, `opus` and `f
 
 Versions: needs Claude Code 2.1.292 for per-call effort. Mods need 2.1.287 and were tested live on 2.1.330: subagents, workflow agents, agent-team teammates (in-process, in an interactive session), plan mode, effort per request, effort only under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, the spend log, a hard skill typed as a slash command, and a background agent's `SubagentHandback` in auto mode. The slash-skill raise reads the mod's `skill.prompt` event, which the Claude Code changelog first names in 2.1.299; on an older build that raise may not happen.
 
+Operating systems: installed and run live on macOS. The unit tests also run on Linux and Windows in CI.
+
 Failure handling: every hook and every mod hook fails open. A bug in this plugin can cost routing but can't block a tool call, a spawn or a session. State files are written atomically, and under a lock when it can be had within two seconds, so agents started together don't overwrite each other's records. A write that would wait longer goes ahead without the lock, so a hook never hangs, and can then lose one update.
 
 ## Security
@@ -298,3 +302,5 @@ A daily GitHub workflow compares live Claude Code releases, docs, model aliases 
 ## License
 
 MIT
+
+Model Router is an independent project, not made or endorsed by Anthropic.

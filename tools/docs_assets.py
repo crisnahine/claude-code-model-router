@@ -879,97 +879,125 @@ def diagram_stop_checks() -> str:
 
 # ---------------------------------------------------------------- the benchmark chart
 
-BENCH_SESSION = "claude-opus-5-5"
-BENCH_SERIES = [  # config id in docs/BENCHMARKS.md, legend label, rung class
-    ("defaults", "Claude Code defaults", "faintbar"),
-    ("plugin-m6-08-b-nogate", "Model Router, test-run check off", "r2"),
-    ("plugin-m6-10", "Model Router defaults at a06e5d4", "r4"),
-]
+BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(config id, legend label, color class)])
+    "claude-opus-5-5": ("Opus 5.5 session", [
+        ("plugin", "Model Router", "rt"),
+        ("defaults", "Claude Code defaults", "faintbar"),
+    ]),
+    "sonnet": ("Sonnet 5.5 session", [
+        ("plugin", "Model Router", "rt"),
+        ("defaults", "Claude Code defaults", "faintbar"),
+        ("sonnet-medium", "All subagents on Sonnet, medium", "r2"),
+        ("sonnet-high", "All subagents on Sonnet, high", "r3"),
+    ]),
+}
 CELL = re.compile(r"(\d+) of (\d+) solved .*?\$([\d.]+) per solved")
 
 
 def bench_data():
     page = (ROOT / "docs" / "BENCHMARKS.md").read_text(encoding="utf-8")
     head = re.search(r"(\d[\d,]*) runs, \$[\d.]+ at list price, on ([\d-]+)", page)
-    section = page.split(f"## Results: session model `{BENCH_SESSION}`", 1)
-    if len(section) < 2:
-        raise SystemExit(f"docs/BENCHMARKS.md has no results table for {BENCH_SESSION}")
-    table = [ln for ln in section[1].split("\n## ")[0].split("### ")[0].splitlines() if ln.startswith("|")]
-    cols = [c.strip() for c in table[0].strip("|").split("|")]
-    rows = []
-    for line in table[2:]:
-        cells = [c.strip() for c in line.strip("|").split("|")]
-        values = []
-        for config, _, _ in BENCH_SERIES:
-            if config not in cols:
-                raise SystemExit(f"docs/BENCHMARKS.md has no {config} column; update BENCH_SERIES")
-            m = CELL.search(cells[cols.index(config)])
-            values.append((int(m.group(1)), int(m.group(2)), float(m.group(3))) if m else None)
-        rows.append((cells[0], values, cells[-1]))
-    return rows, head.group(1), head.group(2)
+    sessions = []
+    for session, (heading, series) in BENCH_SERIES.items():
+        section = page.split(f"## Results: session model `{session}`", 1)
+        if len(section) < 2:
+            raise SystemExit(f"docs/BENCHMARKS.md has no results table for {session}")
+        table = [ln for ln in section[1].split("\n## ")[0].split("### ")[0].splitlines() if ln.startswith("|")]
+        cols = [c.strip() for c in table[0].strip("|").split("|")]
+        rows = []
+        for line in table[2:]:
+            cells = [c.strip() for c in line.strip("|").split("|")]
+            values = []
+            for config, _, _ in series:
+                if config not in cols:
+                    raise SystemExit(f"docs/BENCHMARKS.md has no {config} column for {session}; update BENCH_SERIES")
+                m = CELL.search(cells[cols.index(config)])
+                values.append((int(m.group(1)), int(m.group(2)), float(m.group(3))) if m else None)
+            rows.append((cells[0], values, cells[-1]))
+        sessions.append((heading, series, rows))
+    return sessions, head.group(1), head.group(2)
+
+
+def status_summary(rows) -> str:
+    counts = {}
+    for _, _, status in rows:
+        counts[status] = counts.get(status, 0) + 1
+    return ", ".join(f"{status} in {n} of {len(rows)}" for status, n in counts.items())
 
 
 def bench_chart(phone=False) -> str:
-    rows, runs, date = bench_data()
-    peak = max(v[2] for _, vals, _ in rows for v in vals if v)
+    sessions, runs, date = bench_data()
+    peak = max(v[2] for _, _, rows in sessions for _, vals, _ in rows for v in vals if v)
     axis = max(0.1, -(-peak // 0.1) * 0.1)
     w = 520 if phone else 920
     label_w = 0 if phone else 150
     bar_x = 32 + label_w
     bar_w = w - bar_x - (150 if phone else 160)
     bh, gap = (12, 4) if phone else (11, 3)
-    row_h = (3 * bh + 2 * gap) + (40 if phone else 22)
-    top = 190 if phone else 132
-    h = top + len(rows) * row_h + (150 if phone else 84)
-    out = [frame(w, h), text(32, 42, "Cost per solved task", "ink b", 18 if phone else 17),
-           text(32, 66, "Opus 5.5 session. Lower is cheaper. Every row is PARTIAL.", "mut", 14 if phone else 13.5)]
-    lx, ly = 32, 96
-    for k, (_, name, cls) in enumerate(BENCH_SERIES):
-        if phone:
-            ly = 100 + k * 24
-            lx = 32
-        out.append(f'<rect x="{lx}" y="{ly - 10}" width="14" height="10" rx="3" class="{cls}"/>')
-        out.append(text(lx + 20, ly, name, "ink", 14 if phone else 13))
-        if not phone:
-            lx += 40 + width_of(name, 13)
-    for k in range(0, int(round(axis / 0.1)) + 1):
-        gx = bar_x + bar_w * (k * 0.1) / axis
-        out.append(f'<path d="M{gx:.1f} {top - 6}V{top + len(rows) * row_h - 10}" class="ln" stroke-width="1"/>')
-        out.append(text(gx, top + len(rows) * row_h + 8, f"${k * 0.1:.2f}", "mono mut", 11.5, "middle"))
+    out = ["", text(32, 42, "Cost per solved task", "ink b", 18 if phone else 17),
+           text(32, 66, "Lower is cheaper. Each status compares the router with the best baseline.", "mut",
+                14 if phone else 13.5)]
     css = ".faintbar{fill:#9AA6B8}@media (prefers-color-scheme: dark){.faintbar{fill:#5B6880}}"
     css += ".bar{transform-box:fill-box;transform-origin:0% 50%;animation:grow 1.1s cubic-bezier(.2,.7,.2,1) both}"
     css += keyframes("grow", [(0, "transform:scaleX(0)"), (100, "transform:scaleX(1)")])
-    for r, (cls_name, vals, status) in enumerate(rows):
-        y = top + r * row_h
-        if phone:
-            out.append(text(32, y + 4, cls_name, "ink b", 15))
-            y += 14
-        else:
-            out.append(text(32, y + 22, cls_name, "ink b", 13.5))
-            room("benchmark.svg: class name", 32 + width_of(cls_name, 13.5, bold=True), bar_x - 8)
-        for k, v in enumerate(vals):
-            by = y + k * (bh + gap)
-            if not v:
-                out.append(text(bar_x, by + bh - 1, "not run", "mono mut", 11))
-                continue
-            solved, n, cost = v
-            bw = max(2.0, bar_w * cost / axis)
-            out.append(f'<rect x="{bar_x}" y="{by}" width="{bw:.1f}" height="{bh}" rx="3" '
-                       f'class="{BENCH_SERIES[k][2]} bar" style="animation-delay:{r * 0.06 + k * 0.05:.2f}s"/>')
-            out.append(text(bar_x + bw + 8, by + bh - 1.5, f"${cost:.4f} ({solved} of {n})", "mono mut",
-                            12.5 if phone else 11))
-    note_y = top + len(rows) * row_h + 40
-    note = (f"Runs per class: 4 for the defaults and the router with the check off, 2 for a06e5d4. A class needs "
-            f"10 to count as a win. Source: docs/BENCHMARKS.md, {runs} runs on {date}.")
+    y0, delay, runs_per_cell, parts = 104, 0, set(), []
+    for heading, series, rows in sessions:
+        out.append(text(32, y0, f"{heading}: {status_summary(rows)} classes", "ink b", 16 if phone else 15))
+        ly = y0 + 28
+        lx = 32
+        for k, (_, name, cls) in enumerate(series):
+            if phone:
+                ly = y0 + 28 + k * 24
+            elif lx + 20 + width_of(name, 13) > w - 32:
+                lx, ly = 32, ly + 22
+            out.append(f'<rect x="{lx}" y="{ly - 10}" width="14" height="10" rx="3" class="{cls}"/>')
+            out.append(text(lx + 20, ly, name, "ink", 14 if phone else 13))
+            if not phone:
+                lx += 40 + width_of(name, 13)
+        n = len(series)
+        row_h = (n * bh + (n - 1) * gap) + (40 if phone else 22)
+        top = ly + (34 if phone else 30)
+        bottom = top + len(rows) * row_h - 10
+        for k in range(0, int(round(axis / 0.1)) + 1):
+            gx = bar_x + bar_w * (k * 0.1) / axis
+            out.append(f'<path d="M{gx:.1f} {top - 6}V{bottom}" class="ln" stroke-width="1"/>')
+            out.append(text(gx, bottom + 18, f"${k * 0.1:.2f}", "mono mut", 11.5, "middle"))
+        for r, (cls_name, vals, status) in enumerate(rows):
+            y = top + r * row_h
+            if phone:
+                out.append(text(32, y + 4, f"{cls_name}  {status}", "ink b", 15))
+                y += 14
+            else:
+                out.append(text(32, y + 16, cls_name, "ink b", 13.5))
+                out.append(text(32, y + 33, status, "mono mut", 11.5))
+                room("benchmark.svg: class name", 32 + width_of(cls_name, 13.5, bold=True), bar_x - 8)
+            for k, v in enumerate(vals):
+                by = y + k * (bh + gap)
+                if not v:
+                    out.append(text(bar_x, by + bh - 1, "not run", "mono mut", 11))
+                    continue
+                solved, total, cost = v
+                runs_per_cell.add(total)
+                bw = max(2.0, bar_w * cost / axis)
+                out.append(f'<rect x="{bar_x}" y="{by}" width="{bw:.1f}" height="{bh}" rx="3" '
+                           f'class="{series[k][2]} bar" style="animation-delay:{delay * 0.04 + k * 0.05:.2f}s"/>')
+                out.append(text(bar_x + bw + 8, by + bh - 1.5, f"${cost:.4f} ({solved} of {total})", "mono mut",
+                                12.5 if phone else 11))
+            delay += 1
+            bits = [f"{series[k][1]} ${v[2]:.4f} ({v[0]} of {v[1]} solved)" for k, v in enumerate(vals) if v]
+            parts.append(f"{heading}, {cls_name}, {status}: " + ", ".join(bits))
+        y0 = bottom + 80
+    each = " or ".join(str(n) for n in sorted(runs_per_cell))
+    note = (f"{each} runs per class and configuration. PASS means cheaper per solved task than the best baseline, "
+            f"with the whole 95% interval of the difference below zero, at a pass rate not behind it. Source: docs/BENCHMARKS.md, "
+            f"{runs} runs on {date}.")
     size = 14 if phone else 12.5
-    out.append(lines(32, note_y, wrap(note, size, w - 64), "mut", size, round(size * 1.45)))
-    title = "Cost per solved task on an Opus 5.5 session, by task class"
-    parts = []
-    for cls_name, vals, status in rows:
-        bits = [f"{BENCH_SERIES[k][1]} ${v[2]:.4f} ({v[0]} of {v[1]} solved)" for k, v in enumerate(vals) if v]
-        parts.append(f"{cls_name}: " + ", ".join(bits))
-    label = ("Cost per solved task on an Opus 5.5 session, from docs/BENCHMARKS.md. " + "; ".join(parts)
-             + ". Every row is PARTIAL: too few runs to call a winner.")
+    note_lines = wrap(note, size, w - 64)
+    out.append(lines(32, y0 - 30, note_lines, "mut", size, round(size * 1.45)))
+    h = int(y0 - 30 + len(note_lines) * round(size * 1.45) + 24)
+    out[0] = frame(w, h)
+    title = "Cost per solved task on Opus 5.5 and Sonnet 5.5 sessions, by task class"
+    label = ("Cost per solved task, from docs/BENCHMARKS.md, lower is cheaper. " + "; ".join(parts) + ".")
     return svg(w, h, title, label, "".join(out), css)
 
 
