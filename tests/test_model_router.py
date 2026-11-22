@@ -3255,6 +3255,16 @@ class ClockAndCleanup(Sandbox):
         store.save_entry("pending", "s1", {"k": {"model": "haiku", "at": time.time() - 1}})
         self.assertIsNone(calls.refused_rewrite("s1", "k"))  # a copy issued alongside it
 
+    def test_a_copy_after_a_small_step_back_is_still_a_copy(self):
+        # A fan-out's copies, with the clock stepped back a few seconds between their hooks (an NTP correction).
+        written = time.time()
+        store.save_entry("pending", "s1", {"k": {"model": "haiku", "at": written}})
+        for back in (0.5, 3, calls.REFUSED_AFTER - 0.5):
+            with mock.patch.object(calls.time, "time", return_value=written - back):
+                self.assertIsNone(calls.refused_rewrite("s1", "k"), back)
+        with mock.patch.object(calls.time, "time", return_value=written + 1):
+            self.assertIsNone(calls.refused_rewrite("s1", "k"))
+
     def test_an_outage_lasts_no_longer_than_its_days_after_the_clock_moves_back(self):
         now = time.time()
         registry.update_health("opus", outages=1, unavailable_until=now + 20 * 86400)  # set before a 19-day jump back

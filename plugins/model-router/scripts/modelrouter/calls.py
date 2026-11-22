@@ -123,16 +123,18 @@ def finished_run(session_id: str | None, key: str) -> dict | None:
 
 
 def _age(record: dict) -> float:
-    """Seconds since the record was written. A clock moved back makes it negative, which
-    callers read as unknown rather than as recent."""
+    """Seconds since the record was written. A clock moved back makes it negative, and each
+    caller decides which side of its test that unknown age falls on."""
     return time.time() - (record.get("at") or 0)
 
 
 def refused_rewrite(session_id: str | None, key: str) -> dict | None:
     """This call's fallback rewrite, when the call shows up again before its result: the
-    rewrite didn't run. A rewrite only seconds old is a copy issued alongside it."""
+    rewrite didn't run. A rewrite only seconds from now, either way, is a copy issued alongside
+    it: a clock stepped back a little mustn't pass a fan-out's copies through unrouted, and one
+    stamped far ahead still counts as refused, so a big jump back can't loop a rewrite."""
     rewrite = store.load_entry("pending", session_id).get(key)
-    if not isinstance(rewrite, dict) or 0 <= _age(rewrite) < REFUSED_AFTER:
+    if not isinstance(rewrite, dict) or abs(_age(rewrite)) < REFUSED_AFTER:
         return None
     return rewrite
 
