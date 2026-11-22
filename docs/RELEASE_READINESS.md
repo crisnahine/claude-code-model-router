@@ -1,6 +1,6 @@
 # Release readiness
 
-Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `245bf5d`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
+Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `5049780`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
 
 **Verdict: the next release is not ready.** Of the 13 release gates, 9 pass and 4 are partial. Two defects are open, and the cost and quality results are a pilot. Nothing after `8ec8eec` has run in CI yet.
 
@@ -43,14 +43,13 @@ Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits afte
 
 ### Not implemented (FAIL)
 
-- Versioned options and config file shapes with a compatibility policy (in progress). Row S6.15.
 - Hook latency and state-size measurements (in progress). Row S11.9.
 - A clean type check of the mod's Node test (open defect 2). Row S9.5.
 
 ### Incomplete or not verified enough (PARTIAL)
 
-- In progress on branches not merged yet: the security assessment (S8.3, S10.12, S11.7); hook latency and state size (S4.10, S11.9); live runs of inline and forked skills, plan mode and `disableAllHooks` (S3.4, S3.5, S3.8, S3.13); the main loop's effort for a hard skill typed as a slash command (S3.4); the full benchmark, with saved sessions so the router's Stop check can see test runs (S4.1, S4.12 to S4.15, S10.11, S11.8, S11.12, S14.1 to S14.3); a schema version on the config shapes (S6.15). CI actions are pinned to SHAs but that hasn't run in CI yet (S6.12).
-- No live run: Desktop, VS Code, JetBrains and the Agent SDK (S3.7); plan, acceptEdits and bypass modes (S3.8); which login each run used (S3.9); Bedrock, Vertex and Foundry (S3.10); `disableAllHooks` and `allowManagedHooksOnly` (S3.13); Linux and Windows installs (S6.1); undocumented binary behaviour beyond macOS (S5.6); no full live rerun since 0.1.0 (S9.6).
-- Edge cases without a test or with a known gap: inline skills (S3.4); forked skills on the mod path (S3.5); compaction (S12.7); a short brief, or a language outside the profile's list (S12.10); an empty brief (S12.11); two mods setting one spawn (S12.14); a clock moving backwards (S12.20); a missing Python (S12.23, S13.3); a Claude Code rename of an event or field (S12.26); the upstream workflow, which hasn't run on `main` yet (S6.16).
+- In progress on branches not merged yet: the security assessment (S8.3, S10.12, S11.7); hook latency and state size (S4.10, S11.9); the main loop's effort for a hard skill typed as a slash command, which ran at the session's default effort live (S3.4); the full benchmark, with saved sessions so the router's Stop check can see test runs (S4.1, S4.12 to S4.15, S10.11, S11.8, S11.12, S14.1 to S14.3). CI actions are pinned to SHAs but that hasn't run in CI yet (S6.12).
+- No live run: Desktop, VS Code, JetBrains and the Agent SDK (S3.7); acceptEdits and bypass modes (S3.8); which login each run used (S3.9); Bedrock, Vertex and Foundry (S3.10); `allowManagedHooksOnly` (S3.13); Linux and Windows installs (S6.1); undocumented binary behaviour beyond macOS (S5.6); no full live rerun since 0.1.0 (S9.6).
+- Edge cases without a test or with a known gap: compaction (S12.7); a short brief, or a language outside the profile's list (S12.10); an empty brief (S12.11); two mods setting one spawn (S12.14); a clock moving backwards (S12.20); a missing Python (S12.23, S13.3); a Claude Code rename of an event or field (S12.26); the upstream workflow, which hasn't run on `main` yet (S6.16).
 - Not measured, or only in the pilot: cache sharing across fan-outs (S4.5); hook latency against the timeouts (S4.10); `claude plugin eval` not rerun (S4.11, S9.4); cost per solved task and the baselines (S4.1, S4.12 to S4.15, S10.11, S11.8, S11.12, S14.1 to S14.3).
 - Design and process: the cap denial (S2.25); the mod's effort check (S5.2, S13.2); agents with no definition on disk are left alone (S3.6); the user's decision on project raises (S6.4); missing glossary terms (S5.4); no recheck for dead code (S5.5); the changelog's Python claim (S8.2, S10.13); security testing after each change (S8.3); the dogfood ledger not read (S8.4); no property-based or differential tests (S9.8); fast mode in the spend ledger (S10.7); set-aside state copies never cleaned up (S12.27); external citations not audited (S13.6).

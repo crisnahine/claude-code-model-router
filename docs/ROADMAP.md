@@ -6,11 +6,11 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 
 1. Fix the open defects. The 0.1.0 changelog names Python 3.10, which CI doesn't test, and the mod's Node test fails a strict type check in its `submit` helper. Rows S8.2, S9.5.
 2. Run the full cost and quality suite and publish it. The router's whole claim is the lowest cost per solved task at a high pass rate, and only a 6-run pilot measures it. Run every configuration 10 times on the pinned tasks once the maintainer agrees to the cost, add the missing baselines (one model at `high`, `opusplan`, the advisor), fan-outs, cache temperature and router overhead, and claim a win only where the data shows one (in progress: saved sessions, so the router's Stop check can see test runs). Rows S4.1, S4.12 to S4.15, S10.11, S11.8, S11.12, S14.1 to S14.3.
-3. Run live beyond the macOS terminal. Linux and Windows installs; Desktop, VS Code, JetBrains and the Agent SDK; Bedrock, Vertex and Foundry; acceptEdits and bypass modes; split-pane teammates (in progress: inline and forked skills, plan mode and `disableAllHooks`). Record each in "Verified live". Rows S3.4, S3.5, S3.7 to S3.10, S3.13, S6.1.
+3. Run live beyond the macOS terminal. Linux and Windows installs; Desktop, VS Code, JetBrains and the Agent SDK; Bedrock, Vertex and Foundry; acceptEdits and bypass modes; `allowManagedHooksOnly`; split-pane teammates. Record each in "Verified live". Rows S3.7 to S3.10, S3.13, S6.1.
 4. Decide how fast mode shows in the spend log. Claude Code doesn't say which requests ran fast, so the only full figure is its own estimate in `/cost`, which a mod can read. Rows S4.8, S10.7.
 5. A security assessment in `docs/SECURITY.md` (in progress). Rows S8.3, S10.12, S11.7.
 6. Measure hook latency and state size, against the hook timeouts and after long use (in progress). Rows S4.5, S4.10, S11.9.
-7. A compatibility policy for options and config file shapes, with a version on each shape (in progress). Row S6.15.
+7. Raise the main loop's effort for a hard skill typed as a slash command, which ran at the session's default effort live (in progress). Row S3.4.
 8. Rerun `claude plugin eval plugins/model-router --trust-plugin` and record its cost. Rows S4.11, S9.4.
 9. Confirm the CI supply-chain change in CI. Actions are pinned to commit SHAs and the mod's tests run on every OS since 0.1.0; neither has run in CI yet. Row S6.12.
 10. Clean up set-aside state copies after a while, so a run of corrupt files can't grow the data folder for good. Row S12.27.
@@ -35,4 +35,6 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 - A benchmark harness and a first pilot. Row S10.11 (partial).
 - SVG diagrams in the README. Row S10.13 (partial).
 - Briefs in other languages start at standard; a negated limit ends with its clause; teammates' reports no longer raise the lead's effort. Rows S12.10, S12.12, S12.13.
+- A `schema` version on the registry and overrides, and a written compatibility policy. Row S6.15.
+- Inline and forked skills, plan mode and `disableAllHooks` checked live; forked skills stay on the session's model. Rows S3.5, S3.8, S3.13 (partial).
 - Skills pre-approve only their own commands; the daily fetch has a deadline; the Stop check counts test runs inside subagents. Rows S12.29, S10.6, S2.23.
