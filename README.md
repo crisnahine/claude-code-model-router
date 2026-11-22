@@ -165,11 +165,15 @@ Refused rewrites: on the `Agent` call fallback, if a rewritten call comes back w
 
 Organization allowlists: `availableModels` and `deniedModels` are read the way Claude Code reads them. A managed `availableModels` list applies alone; otherwise the lists in user, project and local settings are combined. `deniedModels` counts only in managed settings. Only the file-based managed policy is read: `managed-settings.json` and the `*.json` files in `managed-settings.d/` beside it, merged with their lists combined. MDM and server-managed policies are not read. An allow entry stands for its family, so `claude-opus-4-6` permits `opus`. A deny entry blocks a family only when it names it, since Claude Code moves an alias off a denied version to the newest permitted one. Blocked models are not picked, unless the settings leave no registry model open, in which case they are ignored. If a model is substituted anyway, two substitutions take it out of rotation.
 
-Third-party providers: routing uses the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves for your provider. An alias your provider lacks fails or is substituted, and is then routed around. The main conversation's effort is left alone wherever an effort change re-reads the context uncached: on Bedrock, Vertex and Foundry, behind `ANTHROPIC_BASE_URL`, with `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set, and on a session model it knows is older than Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5. When the model isn't known, as after `/clear`, effort is raised as usual.
+Third-party providers: routing uses the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves for your provider. An alias your provider lacks fails or is substituted, and is then routed around. Some providers resolve aliases to older models ([alias table](https://code.claude.com/docs/en/model-config.md#model-aliases)). On Bedrock and Google Cloud's Agent Platform, `sonnet` runs Sonnet 4.5 and `haiku` runs Haiku 4.5; on Microsoft Foundry, `opus` runs Opus 4.6, `sonnet` Sonnet 4.5 and `haiku` Haiku 4.5. Sonnet 4.5 retires on the Claude API and Foundry on November 30, 2026, and Bedrock and Agent Platform set their own dates ([model deprecations](https://platform.claude.com/docs/en/about-claude/model-deprecations.md)). Where your provider serves the newer models, set `ANTHROPIC_DEFAULT_SONNET_MODEL` and `ANTHROPIC_DEFAULT_HAIKU_MODEL` (and on Foundry `ANTHROPIC_DEFAULT_OPUS_MODEL`) to its newest IDs, so routed work runs on them. The main conversation's effort is left alone wherever an effort change re-reads the context uncached: on Bedrock, Vertex and Foundry, behind `ANTHROPIC_BASE_URL`, with `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set, and on a session model it knows is older than Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5. When the model isn't known, as after `/clear`, effort is raised as usual.
 
 Versions: needs Claude Code 2.1.292 for per-call effort. Mods need 2.1.287 and were tested live on 2.1.330: subagents, workflow agents, agent-team teammates (in-process, in an interactive session), plan mode, effort per request, effort only under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, and the spend log.
 
-Failure handling: every hook and every mod hook fails open. A bug in this plugin can cost routing but can't block a tool call, a spawn or a session. State files are written atomically and under a lock, so agents started together don't overwrite each other's records.
+Failure handling: every hook and every mod hook fails open. A bug in this plugin can cost routing but can't block a tool call, a spawn or a session. State files are written atomically, and under a lock when it can be had within two seconds, so agents started together don't overwrite each other's records. A write that would wait longer goes ahead without the lock, so a hook never hangs, and can then lose one update.
+
+## Security
+
+Model Router fetches four fixed docs pages and, with an API key, the Models API. It sends no prompt or code anywhere and keeps its state in its own data directory. A repository's `.claude/model-router.json` can't set prices or get past your cap. [docs/SECURITY.md](docs/SECURITY.md) has the threat model, what reaches the network, the API key path and the open items. To report a problem, read its "Reporting a problem" section first: there is no private channel yet, so never put details in a public issue.
 
 ## Repository layout
 
@@ -189,6 +193,8 @@ plugins/model-router/
 tests/                         unit tests, run on Linux, macOS and Windows
 compat/baseline.json           the Claude Code version, docs index, model list and model status last reviewed
 docs/research/                 the primary-source research the design rests on
+docs/README.md                 index of the project's documents: traceability, readiness, roadmap, test results
+tools/traceability.py          counts the requirement statuses in docs/TRACEABILITY.md
 docs/BENCHMARKS.md             cost and quality results against Claude Code without the plugin
 bench/                         the benchmark: pinned tasks, configurations, runner and analysis (not shipped)
 ```
@@ -200,6 +206,7 @@ bench/                         the benchmark: pinned tasks, configurations, runn
 ```bash
 python3 -m unittest discover -s tests
 node --experimental-strip-types --test "tests/mod/*.test.ts"
+sh tests/mod/typecheck.sh
 claude plugin validate --strict .
 claude plugin validate --strict plugins/model-router
 claude plugin eval plugins/model-router --trust-plugin
