@@ -50,16 +50,16 @@ _CHANGE = rf"\b{_CHANGE_VERB}"
 # word before it is a limit verb too ("do not add and remove files" is a list). A verb that is
 # often a noun ends it only with an object after it, so "the config and build scripts" doesn't,
 # and no verb ends it as the first half of a compound noun such as "debug logs" or "audit trails".
-_REASONING_WORDS = (r"review|audit|analy[sz]e|debug|diagnos\w*|plan|design|prove|verify the logic|"
-                    r"investigat\w*|troubleshoot\w*|figure out|find out (?:why|how|whether|what caus\w*)|"
-                    r"root.?caus\w*|reproduc\w*|bisect|evaluate|assess|compare|propose|recommend")
+_JUDGMENT_VERBS = r"review|audit|design|plan|evaluate|assess|propose"
+_HUNT_VERBS = (r"debug|diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|prove|"
+               r"verify the logic|figure out")
+_REASONING_WORDS = (rf"{_JUDGMENT_VERBS}|{_HUNT_VERBS}|find out (?:why|how|whether|what caus\w*)|root.?caus\w*|"
+                    r"compare|recommend")
 # Asked for a judgment (review it, design it, plan it), not a hunt for a known kind of bug. Only the verb
 # counts, where it starts a sentence or follows and/then/to/please; "the design doc" is a noun.
-_JUDGMENT = (r"(?:^\s*|\n\s*|[.;:!?]\s+|\b(?:and|then|to|please)\s+)"
-             r"(?:review|audit|design|plan|evaluate|assess|propose)\b")
-_TASK_VERB = (r"(?:implement|fix|refactor|rename|migrate|optimi[sz]e|rewrite|convert|upgrade|redesign|debug|"
-              r"diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|audit|prove|"
-              r"verify the logic|figure out|encrypt|harden|bump)\b(?!-)")
+_JUDGMENT = rf"(?:^\s*|\n\s*|[.;:!?]\s+|\b(?:and|then|to|please)\s+)(?:{_JUDGMENT_VERBS})\b"
+_TASK_VERB = (r"(?:implement|fix|refactor|rename|migrate|optimi[sz]e|rewrite|convert|upgrade|redesign|audit|"
+              rf"{_HUNT_VERBS}|encrypt|harden|bump)\b(?!-)")
 _NOUN_VERB = (r"(?:build|update|change|design|plan|review|add|write|create|delete|remove|replace|make(?! sure)|"
               r"root.?caus\w*|port|limit|secure|escape)\b(?!-)")
 # Only nouns that form a compound with these verbs; scripts, builds, records and the like are their objects.

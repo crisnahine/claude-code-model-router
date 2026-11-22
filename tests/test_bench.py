@@ -556,6 +556,38 @@ class Limits(unittest.TestCase):
     def test_an_answer_about_rate_limits_is_not_a_limit(self):
         self.assertFalse(run.rate_limited({"is_error": False, "api_error_status": None, "stderr": "",
                                            "answer": "Use a token bucket rate limiter; on the usage limit, return 429."}))
+        # An errored run whose task text talks about limits failed the task; it wasn't refused by the API.
+        for answer in ("Draft: a token bucket rate limiter keyed per client, 429 when over.",
+                       "Too many requests hit the cache; the overloaded node needs a usage limit."):
+            self.assertFalse(run.rate_limited({"is_error": True, "exit_code": 1, "api_error_status": None,
+                                               "stderr": "", "answer": answer}), answer)
+
+    @unittest.skipUnless(shutil.which("git"), "needs git")
+    def test_the_bench_s_own_results_do_not_make_the_code_dirty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / "bench" / "results").mkdir(parents=True)
+            (repo / "bench" / "run.py").write_text("x = 1\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm",
+                            "base"], check=True)
+            with unittest.mock.patch.object(run, "ROOT", repo):
+                (repo / "bench" / "results" / "m6-lookup.jsonl").write_text("{}\n", encoding="utf-8")
+                self.assertFalse(run._git_dirty())
+                (repo / "bench" / "run.py").write_text("x = 2\n", encoding="utf-8")
+                self.assertTrue(run._git_dirty())
+
+    def test_the_messages_claude_code_prints_for_a_limit_are_limits(self):
+        # https://code.claude.com/docs/en/errors.md, the usage-limit and server-error rows.
+        for answer in ("API Error: Repeated 529 Overloaded errors", "Request rejected (429)",
+                       "Server is temporarily limiting requests", "You've hit your session limit · resets 3pm",
+                       "You've hit your weekly limit", "You've hit your Sonnet limit"):
+            self.assertTrue(run.rate_limited({"is_error": True, "exit_code": 1, "api_error_status": None,
+                                              "stderr": "", "answer": answer}), answer)
+        self.assertTrue(run.rate_limited({"is_error": True, "api_error_status": 529, "stderr": "", "answer": ""}))
+        self.assertTrue(run.rate_limited({"is_error": False, "exit_code": 1, "api_error_status": None,
+                                          "stderr": "Error: API Error: Repeated 529 Overloaded errors", "answer": ""}))
 
 
 class Pilot(unittest.TestCase):

@@ -1,6 +1,6 @@
 # Security
 
-Checked against the code on 2026-11-22 with Claude Code 2.1.330. Code is named by module and function, class or constant rather than line number, so an edit elsewhere in a file doesn't make a reference wrong. Python modules are under `plugins/model-router/scripts/modelrouter/` unless the path says otherwise.
+Checked against the code on 2026-11-22 with Claude Code 2.1.330. Code is named by module and function, class or constant rather than line number, so an edit elsewhere in a file doesn't make a reference wrong. Python modules are under `plugins/model-router/scripts/modelrouter/` unless the path says otherwise. `SecurityClaims` in `tests/test_model_router.py` reruns this assessment's claims on every change: the repository-file limits, writes only under the data directory, no approvals, the network surface, the API key and its redirect guard, and the skill grants.
 
 ## Reporting a problem
 

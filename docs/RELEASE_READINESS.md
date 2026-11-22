@@ -1,8 +1,8 @@
 # Release readiness
 
-Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `ea8bf9a`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
+Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `fcce17a`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
 
-**Verdict: the next release is not ready.** Of the 13 release gates, 11 pass and 2 are partial. One defect is open. The benchmark shows the router costing more per solved task than Claude Code's defaults in 7 of 8 task classes, at the same pass rate (S4.15). Nothing after `8ec8eec` has run in CI yet.
+**Verdict: the next release is not ready.** Of the 13 release gates, 11 pass and 2 are partial. No defect is open. One requirement fails: the benchmark shows the router costing more per solved task than the best baseline in 7 of 8 task classes, at the same pass rate (S4.15). Nothing after `8ec8eec` has run in CI yet.
 
 ## Release gates
 
@@ -20,13 +20,13 @@ Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits afte
 | CI green on the release PR and on the merge commit in `main`, before tagging | PASS for 0.1.0 | PR run 45004814197 and main run 45004998622 passed before `v0.1.0` was tagged. Must be redone for the next release (S10.10) |
 | Reproducible cost and quality results | PASS | [BENCHMARKS.md](BENCHMARKS.md): 336 runs of the router, `defaults`, `sonnet-medium` and `sonnet-high` on all 16 tasks, raw data and commands committed, $27.68 at list price. 1 PASS row (lookup) and 7 FAIL (S10.11) |
 | A security assessment | PASS | [SECURITY.md](SECURITY.md), each claim cited to the code it was checked against (S10.12) |
-| Professional documentation and install steps | PARTIAL | The README has its SVG diagrams. The 0.1.0 changelog still names a Python version CI doesn't test (S10.13, S8.2) |
+| Professional documentation and install steps | PASS | The README has its SVG diagrams, and the 0.1.0 changelog names the Python versions CI ran (S10.13, S8.2) |
 
 ## Remaining defects and incomplete requirements
 
 ### Open defects
 
-1. `CHANGELOG.md` 0.1.0 says the unit tests run on Python 3.9, 3.10 and 3.13. `ci.yml` runs 3.9 and 3.13, and so did the release run. Row S8.2.
+None.
 
 ### Decisions needed
 
@@ -51,7 +51,7 @@ Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits afte
 ### Incomplete or not verified enough (PARTIAL)
 
 - The `haiku`, `opus`, `fable`, `opusplan` and advisor baselines haven't been run (S14.1). CI actions are pinned to SHAs, and CI now type-checks the mod, but neither has run in CI yet (S6.12, S9.5).
-- No live run: Desktop, VS Code, JetBrains and the Agent SDK (S3.7); acceptEdits and bypass modes (S3.8); which login each run used (S3.9); Bedrock, Vertex and Foundry (S3.10); `allowManagedHooksOnly` (S3.13); Linux and Windows installs (S6.1); undocumented binary behaviour beyond macOS (S5.6); no full live rerun since 0.1.0 (S9.6).
-- Edge cases without a test or with a known gap: compaction (S12.7); a short brief, or a language outside the profile's list (S12.10); an empty brief (S12.11); two mods setting one spawn (S12.14); a clock moving backwards (S12.20); no Python on PATH at all (S12.23, S13.3); a Claude Code rename of an event or field (S12.26); the upstream workflow, which hasn't run on `main` yet (S6.16).
-- Not measured: cache sharing across fan-outs (S4.5); `claude plugin eval` not rerun (S4.11, S9.4); accuracy per level, escalation rate, latency and cache hit rate in the benchmark report (S4.12); fan-out, workflow, team and redo shapes, cache temperature and `priority` (S4.13).
-- Design and process: the cap denial (S2.25); the mod's effort check (S5.2, S13.2); agents with no definition on disk are left alone (S3.6); the user's decision on project raises (S6.4); no recheck for dead code (S5.5); the changelog's Python claim (S8.2, S10.13); security testing after each change (S8.3); the dogfood ledger not read (S8.4); no property-based or differential tests (S9.8); fast mode in the spend ledger (S10.7); set-aside state copies never cleaned up (S12.27); external citations not audited (S13.6).
+- No live run: Desktop, VS Code, JetBrains and the Agent SDK (S3.7); an API-key login: the subscription login is recorded, and the API-key half needs a key (S3.9); Bedrock, Vertex and Foundry (S3.10); `allowManagedHooksOnly` (S3.13); Linux and Windows installs (S6.1); undocumented binary behaviour beyond macOS (S5.6).
+- Edge cases without a test or with a known gap: a short brief, or a language outside the profile's list (S12.10); on the mod path, a spawn another plugin's mod moves to another family counts as a substitution (S12.14); the upstream workflow, which hasn't run on `main` yet (S6.16).
+- Not measured: accuracy per level, escalation rate, latency and cache hit rate in the benchmark report (S4.12); fan-out, workflow, team and redo shapes, cache temperature and `priority` (S4.13).
+- Design and process: the cap denial (S2.25); the mod's effort check (S5.2, S13.2); agents with no definition on disk are left alone (S3.6); the user's decision on project raises (S6.4); fast mode in the spend ledger (S10.7).

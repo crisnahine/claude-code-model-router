@@ -23,6 +23,8 @@ Each run gets a fresh copy of the task's files in a temporary directory, never t
 
 Sessions are saved, as Claude Code saves them by default, because the router's Stop check reads the transcripts to see whether a test ran. After each run the runner deletes that run's folder under `~/.claude/projects/`, the one named after its scratch copy, and nothing else.
 
+Each raw line records `bench_commit`, the HEAD it ran on, and `bench_dirty`, whether `bench/` or the plugin had changes HEAD doesn't hold. When the `m6-*` files were recorded, the check also counted the bench's own output under `bench/results/`, so once the first results file of a session was written, every later line said `bench_dirty: true`. That is why the 320 main rows of the `m6-*` files carry it while the 16 probe rows before them don't. The code that ran for all of them is `499d046`; the check now leaves `bench/results/` out.
+
 ## Adding a task
 
 Make `tasks/<id>/` with `task.json` (`class` is one of the names in `run.CLASSES`), `repo/`, `check.py`, and `solution/` or `reference_answer`, plus a `wrong_answer` for an answer given in the reply. A task whose answer is one choice among candidates, such as a security review naming the vulnerable line, asks for a JSON file with fixed keys instead of a reply, so the check reads one value and a list, a range or a second finding fails. Run `python3 -m unittest tests.test_bench`. A check must be deterministic: the same files and answer always give the same exit code. A check that imports the run's code imports its own standard-library modules first and counts a `SystemExit` as a failure; it assumes the run isn't trying to fool it, since code that kills the checker process from inside could still exit it with 0.
