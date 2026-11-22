@@ -65,7 +65,21 @@ def health() -> dict:
 
 def healthy(name: str, table: dict | None = None) -> bool:
     info = (health() if table is None else table).get(name)
-    return not (isinstance(info, dict) and (info.get("unavailable_until") or 0) > time.time())
+    if not isinstance(info, dict):
+        return True
+    now, until = time.time(), info.get("unavailable_until") or 0
+    if until <= now:
+        return True
+    # A clock moved back would stretch the outage: it lasts at most its own days from now.
+    latest = now + _outage_days(info) * 86400
+    if until > latest:
+        update_health(name, unavailable_until=latest)
+    return False
+
+
+def _outage_days(info: dict) -> int:
+    outages = int(info.get("outages") or 0)
+    return OUTAGE_DAYS[min(max(outages, 1), len(OUTAGE_DAYS)) - 1]
 
 
 def edit_health(name: str, change: Callable[[dict], Any]) -> dict:
@@ -88,9 +102,8 @@ def update_health(name: str, **changes: Any) -> dict:
 
 
 def _route_around(info: dict) -> None:
-    outages = int(info.get("outages") or 0) + 1
-    days = OUTAGE_DAYS[min(outages, len(OUTAGE_DAYS)) - 1]
-    info.update(outages=outages, unavailable_until=time.time() + days * 86400)
+    info["outages"] = int(info.get("outages") or 0) + 1
+    info["unavailable_until"] = time.time() + _outage_days(info) * 86400
 
 
 def record_failure(name: str, error: str, strikes: int = 2) -> int:

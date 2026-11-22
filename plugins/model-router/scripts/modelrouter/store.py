@@ -12,6 +12,7 @@ from typing import Any, Callable, Iterator
 
 LEDGER_MAX_BYTES = 4 * 1024 * 1024
 KEEP_ENTRIES = 200
+KEEP_SET_ASIDE = 3  # copies of an unreadable state file kept for a person to look at
 LOCK_WAIT_SECONDS = 2.0
 LOCK_STALE_SECONDS = 10.0
 # The version written into every state file. MIGRATIONS[n] turns a version-n file into
@@ -143,9 +144,15 @@ def _set_aside(path: Path) -> bool:
         return False
     try:
         os.replace(path, target)
-        return True
     except OSError:
         return False
+    # Stamps sort by time, so the oldest copies come first.
+    for old in sorted(path.parent.glob(f"{path.name}.corrupt-*"))[:-KEEP_SET_ASIDE]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return True
 
 
 def set_aside() -> list[Path]:
