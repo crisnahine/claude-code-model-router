@@ -16,9 +16,9 @@ _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bn
 
 
 # Where the mod saw a turn's prompt come from (prompt.submit's origin.kind) when it wasn't
-# the person. A kind a later build adds counts as the person's, so routing never goes quiet.
-MACHINE_ORIGINS = {"task-notification", "peer", "peer-send-message", "projects-relay", "coordinator",
-                   "observer", "observer-activity", "unclassified"}
+# the person. Left out: unclassified, which a same-user socket's typed prompt also gets, and
+# a coordinator's hand-off, which is a worker's real task. An unknown kind counts as the person's.
+MACHINE_ORIGINS = {"task-notification", "peer", "peer-send-message", "observer", "observer-activity"}
 _DELIVERED = "Another Claude session sent a message:"
 
 

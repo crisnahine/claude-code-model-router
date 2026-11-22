@@ -100,12 +100,14 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   // Where the prompt that starts the next main-loop turn came from: a teammate's report or
-  // a notification is not the person's request. Taken once; a turn with no submit sends none.
+  // a notification is not the person's request. Set before next(e), since the turn starts
+  // inside it; taken once, and a turn with no submit sends none.
   let idleOrigin: string | undefined
   on('prompt.submit', async ($, e, next) => {
+    const kind = e.turnId === undefined && typeof e.origin?.kind === 'string' ? e.origin.kind : undefined
+    if (kind) idleOrigin = kind
     const entered = await next(e)
-    const dropped = typeof entered === 'object' && entered !== null && 'drop' in entered
-    if (e.turnId === undefined && !dropped) idleOrigin = typeof e.origin?.kind === 'string' ? e.origin.kind : undefined
+    if (kind && typeof (entered as { drop?: unknown } | undefined)?.drop === 'string') idleOrigin = undefined
     return entered
   }).catch(($, e, next) => next(e))
 

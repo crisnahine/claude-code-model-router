@@ -276,9 +276,9 @@ class DeliveredMessages(Sandbox):
     def test_a_machine_origin_from_the_mod_raises_no_effort(self):
         session.record("s1", "claude-opus-5-5")
         turn = lambda origin: hooks.mod_turn({"session_id": "s1", "text": HARD, "origin": origin})  # noqa: E731
-        for origin in ("unclassified", "task-notification", "peer", "peer-send-message", "coordinator"):
+        for origin in ("task-notification", "peer", "peer-send-message"):
             self.assertIsNone(turn(origin), origin)
-        for origin in ("composer", "bridge", "sdk", "a-kind-from-a-later-build"):
+        for origin in ("composer", "bridge", "sdk", "unclassified", "coordinator", "a-kind-from-a-later-build"):
             self.assertEqual(turn(origin), {"level": "complex", "effort": "high"}, origin)
 
 
