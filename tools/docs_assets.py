@@ -396,7 +396,7 @@ BADGES = [
     ("claude-code", "claude code", "2.1.292 or later"),
     ("python", "python", "3.9 or later"),
     ("dependencies", "dependencies", "none"),
-    ("license", "license", "MIT"),
+    ("license", "license", "Apache-2.0"),
 ]
 
 
@@ -1134,7 +1134,7 @@ authors:
     family-names: Nahine
 version: "{v}"
 date-released: "{release_date(v)}"
-license: MIT
+license: Apache-2.0
 repository-code: "{REPO}"
 url: "{REPO}"
 keywords:

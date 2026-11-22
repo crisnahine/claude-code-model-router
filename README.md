@@ -12,7 +12,7 @@
   <a href="#install-the-claude-code-plugin"><img src="docs/assets/badge-claude-code.svg" height="28" alt="Claude Code 2.1.292 or later"></a>
   <a href="#install-the-claude-code-plugin"><img src="docs/assets/badge-python.svg" height="28" alt="Python 3.9 or later"></a>
   <a href="CONTRIBUTING.md#rules-for-a-change"><img src="docs/assets/badge-dependencies.svg" height="28" alt="dependencies: none, standard library only"></a>
-  <a href="LICENSE"><img src="docs/assets/badge-license.svg" height="28" alt="license: MIT"></a>
+  <a href="LICENSE"><img src="docs/assets/badge-license.svg" height="28" alt="license: Apache-2.0"></a>
 </p>
 
 <p align="center">
@@ -301,6 +301,8 @@ A daily GitHub workflow compares live Claude Code releases, docs, model aliases 
 
 ## License
 
-MIT
+Apache-2.0. See [LICENSE](LICENSE). Versions 0.1.0 and 0.1.1 were released under MIT.
+
+Copyright 2026 Cris Nahine.
 
 Model Router is an independent project, not made or endorsed by Anthropic.

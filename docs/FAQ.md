@@ -10,7 +10,7 @@ Short answers about Model Router, the Claude Code plugin with the id `model-rout
 
 ## What is Model Router?
 
-Model Router is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts, and moves a call one level up when its work comes back for a redo. It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages. The agent the caller chose, its prompt and its tools stay as they were. It is MIT licensed and needs Claude Code 2.1.292 or later and Python 3.9 or later ([README](../README.md#install-the-claude-code-plugin)).
+Model Router is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts, and moves a call one level up when its work comes back for a redo. It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages. The agent the caller chose, its prompt and its tools stay as they were. It is Apache-2.0 licensed and needs Claude Code 2.1.292 or later and Python 3.9 or later ([README](../README.md#install-the-claude-code-plugin)).
 
 ## How does Model Router pick a model for a subagent?
 
@@ -22,7 +22,7 @@ When Claude issues the same call again in the same request after its result came
 
 ## What does Model Router cost?
 
-The plugin is free under the MIT license, and it adds 683 tokens to each request's context, measured on a headless Sonnet run. Each of its hooks takes about 54 to 60 ms warm on the measuring machine, and a spawn decision settled in about 110 ms in live runs, starting Python included ([PERFORMANCE.md](PERFORMANCE.md)). The models it routes to are billed by your Claude plan or API account as usual. `/model-router:usage` shows what each turn cost at list price, main conversation and subagents apart.
+The plugin is free under the Apache-2.0 license, and it adds 683 tokens to each request's context, measured on a headless Sonnet run. Each of its hooks takes about 54 to 60 ms warm on the measuring machine, and a spawn decision settled in about 110 ms in live runs, starting Python included ([PERFORMANCE.md](PERFORMANCE.md)). The models it routes to are billed by your Claude plan or API account as usual. `/model-router:usage` shows what each turn cost at list price, main conversation and subagents apart.
 
 ## Does Model Router reduce Claude Code cost?
 
