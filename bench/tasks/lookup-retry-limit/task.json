@@ -1,5 +1,6 @@
 {
   "class": "lookup",
+  "revision": 1,
   "brief": "In this repository, which function reads the retry limit from the environment, and in which file is it defined? Answer with the file path and the function name.",
   "reference_answer": "app/settings.py, read_retry_limit",
   "wrong_answer": "app/client.py, fetch"

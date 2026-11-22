@@ -21,11 +21,14 @@ SIGNALS = {
             r"revoked\s+tokens?|races?\s+with|injection|xss|"
             r"cross.site|role checks?|privileges?|access control|soft.?delet\w*|"
             r"los(?:e|es|ing|t)\s+(?:\w+\s+)?(?:data|drafts?|work|changes|edits|records|messages)|rate.?limit\w*|"
-            r"rollouts?|invalidat\w*|thread.?safe\w*|mutex\w*|"
+            r"rollouts?|invalidat\w*|thread.?safe\w*|mutex\w*|(?:data.)?consistency|data.correctness|stale (?:data|reads?)|"
             r"deprecations|deprecated\s+(?:apis?|calls?|functions?|methods?|settings)",
     "scope": r"across|every (?:service|module|package|file)|all (?:services|modules|packages)|multiple "
              r"(?:services|modules|repos|packages)|entire|whole (?:codebase|system|app)|architect\w*|"
              r"redesign\w*|rewrit\w*|monorepo|end.to.end|large.scale|system.wide|" + _SYSTEMS,
+    # Capacity, freshness and speed limits a choice has to be worked out against, not just honoured in passing.
+    "load": r"performance|throughput|latency|capacity|staleness|freshness|(?:reads?|writes?|requests?|queries) "
+            r"(?:per|a|/) ?(?:second|sec|s)|qps|rps|bottlenecks?|under (?:heavy |peak )?load",
     "ambiguity": r"design|investigat\w*|root.?causes?|intermittent\w*|flaky|figure out|not sure|"
                  r"why (?:does|is|do|are|did)|research|evaluate|trade.?offs?|best (?:way|approach)|"
                  r"should we|strategy|proposal|sometimes|occasionally|(?:find|identify) the cause",

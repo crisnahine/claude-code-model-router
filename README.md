@@ -46,7 +46,7 @@ The plugin has two parts. A mod (a hooks module, `hooks/router.ts`) hooks Claude
 
 ### 1. Profile the subtask
 
-Each subtask is scored from its own brief. The profile looks for risk (security, data, migrations, public APIs), scope (several modules or services) and ambiguity (design, root cause, trade-offs). It also checks whether the subtask changes or reasons about something or only reads, and what the agent's name says the agent is for: a reviewer or an architect needs more than a search agent. The result is one of five levels.
+Each subtask is scored from its own brief. The profile looks for risk (security, data and its consistency, migrations, public APIs), scope (several modules or services), load (performance, latency, throughput, staleness and capacity limits) and ambiguity (design, root cause, trade-offs). It also checks whether the subtask changes or reasons about something or only reads, and what the agent's name says the agent is for: a reviewer or an architect needs more than a search agent. The result is one of five levels.
 
 | Level | Typical subtask | Model (balanced) | Effort |
 | :- | :- | :- | :- |
