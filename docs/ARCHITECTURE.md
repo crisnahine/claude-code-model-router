@@ -219,6 +219,24 @@ The top-level `schema` key is `<shape>/<version>`. A new key keeps the version, 
 | `levels` | Levels the feedback loop has data for: `level`, `routed_calls`, `votes_too_low`, `raised` |
 | `doc_aliases`, `not_in_registry` | Model aliases in the current docs, and the families among them the registry lacks |
 | `set_aside`, `newer_files` | Paths of state files set aside because they could not be read, and of state files a newer release wrote, which are only read (see State) |
+| `newer_config` | Paths of `model-router.json` overrides written for a newer release, of which only the settings this release understands apply (see Compatibility) |
+
+## Compatibility
+
+Every shape a setup or a script depends on carries a version, so a release can change one without breaking what is already written:
+
+| Shape | Version | Where |
+| :- | :- | :- |
+| State files | Top-level `schema`, a whole number | `store.SCHEMA` and `store.MIGRATIONS` (see State) |
+| `config/models.json` and `model-router.json` overrides | Top-level `schema`, a whole number, now 1. A file without it is version 1, the 0.1.0 shape | `config.CONFIG_SCHEMA` |
+| `--json` output | `schema` as `<shape>/<version>` | `report.py` (see Machine-readable output) |
+| Plugin options | The plugin's own version | `userConfig` in `.claude-plugin/plugin.json` |
+
+A breaking change is one that makes an existing file, option or reader behave differently: removing or renaming a key or an option, changing a key's type or meaning, or accepting fewer values. Adding an optional key, option or value is not. A breaking change to the override shape bumps `CONFIG_SCHEMA`, and `config.py` reads every older version into the new one, so old overrides keep working. Dropping an old version is itself a breaking change of the plugin: it needs a new major version and a CHANGELOG entry, and until then every older shape is read.
+
+An override written for a newer release is read, not refused: the settings this release understands apply, the rest are ignored, and `/model-router:models` names the file. Refusing it would be worse, because a newer file that sets `routing_mode: off` would turn routing back on. A state file from a newer release is handled the other way round, read but never written, because writing it would drop what this release can't see.
+
+Plugin options have no version key of their own, since `userConfig` has Claude Code's shape (https://code.claude.com/docs/en/plugins-reference.md). They follow the plugin's version: within a major version an option is never removed or renamed, and the values it accepts only grow.
 
 ## What is out of reach, or left alone on purpose
 

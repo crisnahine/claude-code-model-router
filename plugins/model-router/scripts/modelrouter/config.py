@@ -10,6 +10,9 @@ from . import store
 PLUGIN_NAME = "model-router"
 PLUGIN_ROOT = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or Path(__file__).resolve().parent.parent.parent)
 OVERRIDE_FILE = "model-router.json"
+# The shape of config/models.json and model-router.json; a file without `schema` is version 1,
+# the 0.1.0 shape. docs/ARCHITECTURE.md "Compatibility" says when it changes.
+CONFIG_SCHEMA = 1
 MODES = ("off", "advise", "auto")
 PRIORITIES = ("fast", "balanced", "quality")
 LEVELS = ("lookup", "standard", "complex", "hardest", "frontier")
@@ -106,6 +109,18 @@ def trusted_models(config: dict) -> list[str]:
     user = _clean(store.load_dict(store.claude_home() / OVERRIDE_FILE))
     vouched = set(base_config().get("models") or {}) | set(user.get("models") or {})
     return sorted(vouched & set(config.get("models") or {}))
+
+
+def newer_overrides(hook_input: dict | None = None) -> list[Path]:
+    """Override files written for a newer release. They are still read, as far as _clean
+    understands them: refusing one would drop its `routing_mode: off` and turn routing back on."""
+    paths = [store.claude_home() / OVERRIDE_FILE, project_dir(hook_input) / ".claude" / OVERRIDE_FILE]
+    found = []
+    for path in paths:
+        version = store.load_dict(path).get("schema")
+        if isinstance(version, int) and not isinstance(version, bool) and version > CONFIG_SCHEMA:
+            found.append(path)
+    return found
 
 
 def base_config() -> dict:

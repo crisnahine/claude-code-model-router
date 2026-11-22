@@ -140,6 +140,8 @@ Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours
 
 Your own file is trusted in full. A project's file can turn routing down to `advise` or `off`, set rules for agents and add models. It can't turn routing on for someone who switched it off, re-rank a model that ships with the plugin or that you defined, or get any model past your cap.
 
+A file may carry `"schema": 1`, the version of this shape; without it, it is read as version 1. A file written for a newer release still loads: the settings this release understands apply, and `/model-router:models` names the file. Older shapes keep working after an update ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#compatibility)).
+
 ## What it can't do
 
 These limits come from what Claude Code lets a plugin do, or from choices made to protect quality and cost.

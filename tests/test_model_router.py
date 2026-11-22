@@ -610,6 +610,41 @@ class Options(Sandbox):
         self.assertIn("Routing: **off**", self.out("policy"))
 
 
+class ConfigSchema(Sandbox):
+    """config/models.json and model-router.json overrides carry a `schema` version; see
+    docs/ARCHITECTURE.md "Compatibility"."""
+
+    def test_the_shipped_config_has_the_current_schema_and_validates(self):
+        base = cfg.base_config()
+        self.assertEqual(base["schema"], cfg.CONFIG_SCHEMA)
+        cleaned = cfg._clean(base)
+        for name in base["models"]:
+            self.assertEqual(set(cleaned["models"][name]), {"strength", "speed", "cost"}, name)
+        for name, spec in base["levels"].items():
+            self.assertEqual(cleaned["levels"][name], spec, name)
+        self.assertEqual(cfg._prices(base["prices"]).keys(), base["prices"].keys())
+
+    def test_an_override_without_a_schema_still_loads(self):
+        self.override({"levels": {"complex": {"effort": "xhigh"}}}, user=True)
+        self.override({"agents": {"my-agent": {"level": "lookup"}}})
+        config = cfg.load_config()
+        self.assertEqual((config["levels"]["complex"]["effort"], config["agents"]["my-agent"]["level"]),
+                         ("xhigh", "lookup"))
+        self.assertEqual(cfg.newer_overrides(), [])
+
+    def test_an_override_from_a_newer_release_is_read_as_far_as_it_is_understood_and_named(self):
+        self.override({"schema": cfg.CONFIG_SCHEMA + 1, "routing_mode": "off",
+                       "levels": {"complex": {"effort": "xhigh"}}, "a_future_key": {"x": 1}}, user=True)
+        self.override({"schema": cfg.CONFIG_SCHEMA + 1, "agents": {"my-agent": {"level": "lookup"}}})
+        config = cfg.load_config()
+        self.assertEqual((config["routing_mode"], config["levels"]["complex"]["effort"]), ("off", "xhigh"))
+        self.assertEqual(config["agents"]["my-agent"]["level"], "lookup")
+        newer = [str(self.home / "model-router.json"), str(self.project / ".claude" / "model-router.json")]
+        self.assertEqual([str(p) for p in cfg.newer_overrides()], newer)
+        self.assertEqual(json.loads(self.out("models", "--json"))["newer_config"], newer)
+        self.assertIn("newer Model Router", self.out("models"))
+
+
 class AgentDiscovery(Sandbox):
     def test_project_user_and_builtin_agents(self):
         self.agent("mine", "sonnet")

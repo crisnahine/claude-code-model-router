@@ -85,6 +85,7 @@ def models_data(config: dict, settings: Settings) -> dict:
         "not_in_registry": [f for f in upstream.model_families(aliases) if f not in registry.models(config)],
         "set_aside": [str(p) for p in store.set_aside()],
         "newer_files": [str(p) for p in store.newer_files()],
+        "newer_config": [str(p) for p in cfg.newer_overrides()],
     }
 
 
@@ -108,6 +109,9 @@ def models(config: dict, settings: Settings) -> str:
     if data["newer_files"]:
         lines += ["", "Written by a newer Model Router, so only read and never updated: "
                   + ", ".join(data["newer_files"]) + ". Update the plugin, or delete them to start fresh."]
+    if data["newer_config"]:
+        lines += ["", "Written for a newer Model Router, so only the settings this release understands apply: "
+                  + ", ".join(data["newer_config"]) + ". Update the plugin to use the rest."]
     return "\n".join(lines)
 
 
