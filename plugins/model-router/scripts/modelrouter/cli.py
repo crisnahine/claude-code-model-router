@@ -4,11 +4,11 @@
              post-edit, stop, model-switch, refresh-cache
   policy     the routing policy as it stands for this user and project
   models     what each registry model really runs as, and what is unavailable
-             (--reset forgets learned availability and feedback)
+             (--reset forgets learned availability and feedback; --json prints model-router.models/1)
   explain    what the router would make of a task: explain [--agent NAME] TEXT
   refresh    fetch upstream (--force) and show what changed; status shows the cache;
              ack marks it reviewed
-  usage      the ledger by agent and model: usage [DAYS]
+  usage      the ledger by agent and model: usage [DAYS] [--json for model-router.usage/1]
   upstream-check --baseline FILE [--write]   CI: compare live upstream with a baseline
 """
 from __future__ import annotations

@@ -1842,6 +1842,7 @@ class MachineReadable(Sandbox):
         self.assertEqual(self.json_out("usage"), {
             "schema": "model-router.usage/1", "days": 7, "agents": [], "models": [], "model_errors": 0,
             "spend": {"total_usd": 0, "rows": [], "unpriced": []}})
+        self.assertIsInstance(self.json_out("usage")["spend"]["total_usd"], float)
         self.session_on("claude-opus-5-5")
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku")
@@ -1885,6 +1886,8 @@ class MachineReadable(Sandbox):
         rows = {m["model"]: m for m in self.json_out("models")["models"]}
         self.assertEqual(rows["opus"]["status"], "above_cap")
         self.assertEqual(json.loads(self.out("models", "--reset", "--json"))["schema"], "model-router.models/1")
+        store.save_json(upstream.path(), {"cache": {"aliases": "saga"}})  # a corrupt cache lists nothing
+        self.assertEqual(self.json_out("models")["not_in_registry"], [])
 
 
 if __name__ == "__main__":

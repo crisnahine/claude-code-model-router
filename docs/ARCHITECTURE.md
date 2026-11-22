@@ -203,8 +203,8 @@ The top-level `schema` key is `<shape>/<version>`. A new key keeps the version, 
 | Key | Contents |
 | :- | :- |
 | `days` | The window read from the ledger |
-| `agents` | One entry per agent type, most calls first: `agent`, `calls`, `routed` (calls whose model the router set), `levels` (level to count), `ran_on` (reported model to count) |
-| `models` | One entry per reported model, by name: `model`, `runs`, `tokens` |
+| `agents` | One entry per agent type, most calls first: `agent` (`?` when the call named none), `calls`, `routed` (calls whose model the router set), `levels` (level to count), `ran_on` (reported model to count) |
+| `models` | One entry per reported model, by name: `model`, `runs`, `tokens`. A background agent whose model wasn't reported counts under `background (not reported)`, here and in `ran_on` |
 | `model_errors` | Agent calls that failed with a model error |
 | `spend` | `total_usd`, `rows` (most spend first: `loop` as `main` or `subagent`, `model`, `turns`, `output_tokens`, `usd` at list price) and `unpriced` (models with no price, counted as 0) |
 

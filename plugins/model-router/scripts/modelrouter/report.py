@@ -72,7 +72,8 @@ def models_data(config: dict, settings: Settings) -> dict:
     levels = [{"level": level, "routed_calls": info.get("calls", 0), "votes_too_low": info.get("votes", 0),
                "raised": bool(info.get("bump"))}
               for level, info in ((lv, learned.get(lv)) for lv in cfg.LEVELS) if isinstance(info, dict)]
-    aliases = list((upstream.load().get("cache") or {}).get("aliases") or [])
+    aliases = (upstream.load().get("cache") or {}).get("aliases")
+    aliases = aliases if isinstance(aliases, list) else []
     return {
         "schema": MODELS_SCHEMA,
         "cap": limit or None,
@@ -153,8 +154,9 @@ def status(changes: dict | None) -> str:
     return "\n".join(out)
 
 
-def usage_data(days: int) -> dict:
-    """What the ledger shows for the last `days` days, in the `model-router.usage/1` shape."""
+def usage_data(days: int, exact: bool = False) -> dict:
+    """What the ledger shows for the last `days` days, in the `model-router.usage/1` shape.
+    Dollars are rounded to six places unless `exact`, which the table uses."""
     rows = store.read_ledger(days)
     by_agent: dict[str, dict] = {}
 
@@ -192,22 +194,24 @@ def usage_data(days: int) -> dict:
             s_row["usd"] += r["cost_usd"]
         else:
             unpriced.add(model)
-    for s_row in spend.values():
-        s_row["usd"] = round(s_row["usd"], 6)
+    spend_rows = sorted(spend.values(), key=lambda v: -v["usd"])
+    total = sum((v["usd"] for v in spend_rows), 0.0)
+    if not exact:
+        total = round(total, 6)
+        for s_row in spend_rows:
+            s_row["usd"] = round(s_row["usd"], 6)
     return {
         "schema": USAGE_SCHEMA,
         "days": days,
         "agents": sorted(by_agent.values(), key=lambda a: -a["calls"]),
         "models": [by_model[m] for m in sorted(by_model)],
         "model_errors": sum(1 for r in rows if r.get("event") == "model_error"),
-        "spend": {"total_usd": round(sum(v["usd"] for v in spend.values()), 6),
-                  "rows": sorted(spend.values(), key=lambda v: -v["usd"]),
-                  "unpriced": sorted(unpriced)},
+        "spend": {"total_usd": total, "rows": spend_rows, "unpriced": sorted(unpriced)},
     }
 
 
 def usage(days: int) -> str:
-    data = usage_data(days)
+    data = usage_data(days, exact=True)
     spend = data["spend"]
     if not data["agents"] and not spend["rows"]:
         return f"No activity recorded in the last {days} days."
