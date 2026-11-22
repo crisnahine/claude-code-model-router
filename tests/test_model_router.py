@@ -682,8 +682,27 @@ class Profile(unittest.TestCase):
                       "Don't touch the public API, fix the race condition in the payments service and add a "
                       "regression test.",
                       "Do not commit, write the migration for the payments table.",
-                      "Do not change the tests, fix the auth bug and add a regression test."):
+                      "Do not change the tests, fix the auth bug and add a regression test.",
+                      "Do not ask questions, migrate the database, then run the tests.",
+                      "Don't touch the tests, fix the auth bug, then report back.",
+                      "Do not ask questions, implement OAuth2 login, and secure the session cookies."):
             self.assertEqual(self.level(brief), "complex", brief)
+        for brief in ("Do not modify tests, fix the parser, update the docs, and run the suite.",
+                      "Do not touch the API, fix it or roll it back."):
+            self.assertEqual(self.level(brief), "standard", brief)
+
+    def test_a_limit_keeps_an_aside_and_list_verbs_outside_the_change_words(self):
+        for brief in ("List the tables. Do not, under any circumstances, write to the database.",
+                      "Find the config loader. Never, for any reason, change files.",
+                      "Find the retry logic. Do not delete, modify or rename any files.",
+                      "Do not touch, edit or delete files."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+
+    def test_a_long_list_after_a_limit_stays_fast(self):
+        started = time.monotonic()
+        self.level("do not add" + ", add x y" * 20_000 + " or add it")
+        self.level("do not add" + ", add x y" * 20_000 + ", then stop")
+        self.assertLess(time.monotonic() - started, 0.5)
 
     def test_a_huge_whitespace_run_after_a_limit_stays_fast(self):
         started = time.monotonic()
