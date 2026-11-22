@@ -241,6 +241,51 @@ class PluginState(unittest.TestCase):
                          Path("/c/plugins/data/model-router-inline"))
 
 
+SESSION_STUB = '''#!/usr/bin/env python3
+import json, os, re, sys
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+folder = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(Path.cwd().resolve()))
+(folder / "s1" / "subagents").mkdir(parents=True)
+(folder / "s1.jsonl").write_text("{}")
+(folder / "s1" / "subagents" / "agent-a1.jsonl").write_text("{}")
+print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.01, "modelUsage": {}}))
+'''
+
+
+@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
+class Sessions(unittest.TestCase):
+    """Runs keep their transcripts, as real sessions do, and the bench removes only its own afterwards."""
+
+    def test_runs_save_their_sessions(self):
+        cmd, _ = run.command("do it", run.load_configs()[0], {"claude": "claude", "model": "sonnet", "budget": 0.5,
+                                                             "plugin_dir": "/p"}, {})
+        self.assertNotIn("--no-session-persistence", cmd)
+
+    def test_a_folder_is_named_as_claude_code_names_it(self):
+        self.assertEqual(run.session_dir(Path("/private/var/folders/ab/x_y.z/T/mrbench-a-b/work"), {"CLAUDE_CONFIG_DIR": "/c"}),
+                         Path("/c/projects/-private-var-folders-ab-x-y-z-T-mrbench-a-b-work"))
+
+    def test_only_the_runs_own_transcripts_are_removed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "config"
+            other = home / "projects" / "-Users-someone-project"
+            other.mkdir(parents=True)
+            (other / "keep.jsonl").write_text("{}")
+            stub = Path(tmp) / "claude"
+            stub.write_text(SESSION_STUB)
+            stub.chmod(0o755)
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
+                row = run.run_one(task, run.load_configs()[1], options, {})
+            self.assertEqual([p.name for p in (home / "projects").iterdir()], ["-Users-someone-project"])
+            self.assertTrue((other / "keep.jsonl").is_file())
+            self.assertEqual((row["sessions_saved"], row["session_dir_removed"]), (True, True))
+
+
 class Pilot(unittest.TestCase):
     def test_committed_results_match_the_published_table(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
@@ -257,6 +302,10 @@ class Pilot(unittest.TestCase):
         if stale:
             self.assertIn(f"{stale} run(s) here predate", page)
         self.assertIn("`Bash(tail *)`", page)
+        self.assertNotIn("`--no-session-persistence`, `--permission-mode", page)
+        unsaved = sum("sessions_saved" not in r for r in data)
+        if unsaved:
+            self.assertIn(f"{unsaved} run(s) here ran with `--no-session-persistence`", page)
         for row in data:  # a lookup is graded from its answer alone, so today's check must agree with the record
             if row["class"] == "lookup" and len(row["answer"]) < 2000:  # the line keeps 2,000 characters
                 with tempfile.TemporaryDirectory() as tmp:

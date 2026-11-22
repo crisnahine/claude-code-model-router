@@ -132,6 +132,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
             agents.setdefault(r["config"], {}).setdefault(name, 0)
             agents[r["config"]][name] += count
     stale = sum(1 for r in rows if "plugin_state" not in r)
+    unsaved = sum(1 for r in rows if "sessions_saved" not in r)
     per_run = total / len(rows) if rows else 0.0
     planned = len(tasks) * len(configs) * MIN_RUNS
     header = "\n".join([
@@ -168,7 +169,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         "- Shape: a single agent. The session hands each task to one subagent with the Agent tool and relays its "
         "answer, so the subagent is what each configuration changes.",
         "- Each run starts in a fresh copy of the task's files, outside any repository, with "
-        "`--setting-sources project`, `--strict-mcp-config`, `--no-session-persistence`, "
+        "`--setting-sources project`, `--strict-mcp-config`, "
         "`--permission-mode dontAsk`, `--allowedTools` " + ", ".join(f"`{t}`" for t in run.TOOLS) + " (every "
         "part of a compound command must match, so `tail`, `head` and `echo` let a subagent pipe its test output), "
         "`CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Every inherited "
@@ -187,6 +188,13 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
            "`head` and `echo` rules and the stricter `lookup-retry-limit` check, and their `bench_commit` is the "
            "commit the harness ran on top of before it was committed. Newer lines carry `bench_dirty`, true when "
            "`bench/` or the plugin had uncommitted changes." if stale else ""),
+        "- Sessions are saved, as Claude Code saves them by default, so the router's Stop check can read the "
+        "transcripts and see a test run, the subagents' included. After each run the runner deletes that run's "
+        "folder under `~/.claude/projects/` (the one named after its scratch copy) and nothing else, and each "
+        "raw line records `sessions_saved` and `session_dir_removed`."
+        + (f" {unsaved} run(s) here ran with `--no-session-persistence`, which saves no transcript, so the Stop "
+           "check could never see a test run and asked for a verifier after every edit; their lines have no "
+           "`sessions_saved`." if unsaved else ""),
         "- Cost is Claude Code's `total_cost_usd`, which includes subagents and is a client-side estimate at list "
         "price, not a bill (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md). Every run is capped with "
         "`--max-budget-usd`, which a run can pass by up to the cost of one response plus anything that subagents "
