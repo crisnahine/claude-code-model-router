@@ -99,7 +99,7 @@ _HEAVY_NAME = r"architect|review|audit|secur|debug|design|plann|(?:^|[-_])solver
 _LIGHT_NAME = r"explor|search|scout|find|lookup|locat|fetch|summar|format|lint|runner|verif|docs?[-_]|grep"
 LONG_BRIEF = 4000
 # Open-ended work with no known approach: the only level the ladder gives its strongest model.
-_FRONTIER = (r"\b(?:research(?:-grade)?|open[- ]ended|no known (?:fix|approach|cause|solution)|first principles|"
+_FRONTIER = (r"\b(?:research-grade|open[- ]ended|no known (?:fix|approach|cause|solution)|first principles|"
              r"novel|unknown (?:root )?cause|long[- ]running investigation|multi[- ]day|unsolved)\b")
 
 
@@ -179,7 +179,7 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
     if re.search(_CHANGE, asked) or re.search(_REASONING, asked) or re.search(rf"\b(?:{_DECISION})\b", asked):
         if len(hits) >= 3:
             level = "frontier" if re.search(_FRONTIER, asked) else "hardest"
-        elif len(hits) == 2 and re.search(_FRONTIER.replace("research(?:-grade)?", "research-grade"), asked):
+        elif len(hits) == 2 and re.search(_FRONTIER, asked):
             level = "hardest"  # research-grade wording on broad or open work
         elif (len(hits) == 2 or "risk" in hits or (hits and re.search(_JUDGMENT, asked))
               or re.search(rf"\b{_SYSTEMS}\b", asked)):
