@@ -411,6 +411,62 @@ class SuiteCoverage(unittest.TestCase):
         self.assertEqual(plan["factors"], {"a": 1.0, "o": 5.0, "h": 1.0})
 
 
+LIMIT_STUB = '''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+calls = Path(os.environ["STUB_CALLS"])
+n = int(calls.read_text()) if calls.exists() else 0
+calls.write_text(str(n + 1))
+if n < int(os.environ["STUB_LIMITED"]):
+    print(json.dumps({"is_error": True, "subtype": "error_during_execution", "api_error_status": 429,
+                      "result": "API Error: 429 rate limit reached", "total_cost_usd": 0.001, "modelUsage": {}}))
+    sys.exit(1)
+print(json.dumps({"is_error": False, "subtype": "success", "api_error_status": None, "total_cost_usd": 0.01,
+                  "result": "read_retry_limit in app/settings.py; a rate limit design is off topic", "modelUsage": {}}))
+'''
+
+
+@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
+class Limits(unittest.TestCase):
+    """A rate or usage limit pauses the bench and retries the run; it is never recorded as a failed task."""
+
+    def bench(self, limited: int) -> tuple[int, list[dict], list[dict], list[float]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "claude"
+            stub.write_text(LIMIT_STUB)
+            stub.chmod(0o755)
+            out = Path(tmp) / "out.jsonl"
+            env = {"STUB_CALLS": str(Path(tmp) / "calls"), "STUB_LIMITED": str(limited)}
+            pauses: list[float] = []
+            with unittest.mock.patch.dict("os.environ", env), \
+                    unittest.mock.patch.object(run.time, "sleep", pauses.append):
+                code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "1",
+                                 "--max-total", "3", "--claude", str(stub), "--out", str(out)])
+            read = lambda p: [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []  # noqa: E731
+            self.assertEqual(sorted(p.name for p in Path(tmp).glob("*.jsonl")), ["out.jsonl"] if out.exists() else [])
+            return code, read(out), read(Path(tmp) / "limited" / "out.jsonl"), pauses
+
+    def test_a_limited_run_pauses_and_is_retried(self):
+        code, rows, limited, pauses = self.bench(limited=2)
+        self.assertEqual(code, 0)
+        self.assertEqual([r["passed"] for r in rows], [True])
+        self.assertEqual([r["api_error_status"] for r in limited], [429, 429])
+        self.assertEqual(len(pauses), 2)
+        self.assertLess(pauses[0], pauses[1])
+
+    def test_a_limit_that_does_not_lift_stops_the_bench_cleanly(self):
+        code, rows, limited, pauses = self.bench(limited=99)
+        self.assertEqual(code, 2)
+        self.assertEqual(rows, [])
+        self.assertEqual(len(limited), run.LIMIT_RETRIES + 1)
+
+    def test_an_answer_about_rate_limits_is_not_a_limit(self):
+        self.assertFalse(run.rate_limited({"is_error": False, "api_error_status": None, "stderr": "",
+                                           "answer": "Use a token bucket rate limiter; on the usage limit, return 429."}))
+
+
 class Pilot(unittest.TestCase):
     def test_committed_results_match_the_published_table(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))

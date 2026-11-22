@@ -67,6 +67,19 @@ def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[l
     return cmd + list(config.get("args", [])) + ["--allowedTools", *TOOLS], env
 
 
+LIMIT_RETRIES = 5
+LIMIT_PAUSE = 60  # seconds before the first retry; each later pause is twice as long
+_LIMIT_WORDS = re.compile(r"rate.?limit|usage limit|overloaded|too many requests", re.I)
+
+
+def rate_limited(row: dict) -> bool:
+    """A run the API refused for a rate or usage limit: no measurement, not a failed task. Only an errored run
+    counts, since a good answer can talk about rate limits."""
+    if not (row.get("is_error") or row.get("exit_code")):
+        return False
+    return row.get("api_error_status") in (429, 529) or bool(_LIMIT_WORDS.search(f"{row['answer']} {row['stderr']}"))
+
+
 def can_start(spent: float, budget: float, max_total: float) -> bool:
     # A run can pass --max-budget-usd by one response plus what running subagents spend before they stop, so
     # this leaves room for twice its cap. That is a margin, not a bound.
@@ -156,6 +169,7 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
         "plugin_state": plugin_state, "plugin_data_own": True, "sessions_saved": True, "session_dir_removed": session_removed,
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
+        "api_error_status": result.get("api_error_status"),
         # Without a result the cost is unknown; count the whole budget so totals never understate spend.
         "total_cost_usd": cost if isinstance(cost, (int, float)) else options["budget"],
         "cost_known": isinstance(cost, (int, float)),
@@ -198,9 +212,23 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
                     return 1
                 begin = time.time()
-                row = run_one(task, config, options, prices)
-                row["run"] = run_index
-                spent += row["total_cost_usd"]
+                for attempt in range(LIMIT_RETRIES + 1):
+                    row = run_one(task, config, options, prices)
+                    row["run"] = run_index
+                    spent += row["total_cost_usd"]
+                    if not rate_limited(row):
+                        break
+                    # Kept apart, outside results/*.jsonl, so the spend is on record but never a failed task.
+                    limited = args.out.parent / "limited" / args.out.name
+                    limited.parent.mkdir(parents=True, exist_ok=True)
+                    with limited.open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps(row, sort_keys=True) + "\n")
+                    if attempt == LIMIT_RETRIES:
+                        print(f"stopped: still rate or usage limited after {LIMIT_RETRIES} pauses, "
+                              f"${spent:.4f} spent", file=sys.stderr)
+                        return 2
+                    print(f"{task['id']} {config['id']}: rate or usage limited, pausing", file=sys.stderr)
+                    time.sleep(LIMIT_PAUSE * 2 ** attempt)
                 with args.out.open("a", encoding="utf-8") as fh:
                     fh.write(json.dumps(row, sort_keys=True) + "\n")
                 print(f"{task['id']} {config['id']} run {run_index}: passed={row['passed']} "
