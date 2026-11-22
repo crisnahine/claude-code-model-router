@@ -12,7 +12,7 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 6. Rerun `claude plugin eval plugins/model-router --trust-plugin` and record its cost. Rows S4.11, S9.4.
 7. Confirm the CI changes in CI. Actions are pinned to commit SHAs, the mod's tests run on every OS, and the mod and its test are type-checked; none of it has run in CI yet. Rows S6.12, S9.5.
 8. Clean up set-aside state copies after a while, so a run of corrupt files can't grow the data folder for good. Row S12.27.
-9. Close the untested edge cases: an empty brief, a short or unlisted-language brief, compaction, a clock moving backwards, no Python on PATH at all, two mods setting one spawn, a renamed event or field. Add property-based tests of the profile and a differential test of the mod path against the fallback. Rows S9.8, S12.7, S12.10, S12.11, S12.14, S12.20, S12.23, S12.26.
+9. Close the remaining edge cases: a short or unlisted-language brief, a clock moving backwards, and another plugin's mod moving a spawn to another family, which the mod path counts as a substitution (check live whether `AgentSpawnResult.model` tells that from an allowlist substitution). Rows S12.10, S12.14, S12.20.
 10. Small cleanups: a dead-code recheck and an audit of external citations. Rows S5.5, S13.6.
 
 ## Waiting on a decision
