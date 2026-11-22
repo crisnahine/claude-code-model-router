@@ -1,6 +1,6 @@
 ---
 name: refresh
-description: Check the live Claude Code changelog and documentation for releases, new features, model updates and breaking changes since the last review, and report what they mean for this plugin and the user's setup.
+description: Checks the live Claude Code changelog and documentation for releases, new features, model updates and breaking changes since the last review, and reports what they mean for this plugin and the user's setup.
 disable-model-invocation: true
 allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" *)
 ---

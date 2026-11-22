@@ -1,6 +1,6 @@
 ---
 name: usage
-description: Show how Model Router routed work recently: which agents ran, at what level, on which models, how many tokens each model used, and what it cost at list price.
+description: Shows how Model Router routed work recently: which agents ran, at what level, on which models, how many tokens each model used, and what it cost at list price.
 argument-hint: "[days, default 7]"
 disable-model-invocation: true
 allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" *)

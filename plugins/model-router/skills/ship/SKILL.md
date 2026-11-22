@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Take a task from request to reviewed, verified change with multi-model orchestration. Plans and reviews on a strong model, builds on a mid one, verifies on a cheap one, loops on failures, and stops before anything irreversible.
+description: Takes a task from request to reviewed, verified change with multi-model orchestration. Plans and reviews on a strong model, builds on a mid one, verifies on a cheap one, loops on failures, and stops before anything irreversible.
 argument-hint: "[task, issue URL or issue number]"
 disable-model-invocation: true
 ---
