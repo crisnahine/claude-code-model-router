@@ -241,6 +241,15 @@ class Shipped(unittest.TestCase):
         self.assertEqual([h.get("async", False) for h in stop], [False])
 
 
+class OptionText(unittest.TestCase):
+    def test_main_effort_names_every_case_it_stays_off(self):
+        manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        text = manifest["userConfig"]["main_effort"]["description"]
+        for case in ("CLAUDE_CODE_EFFORT_LEVEL", "Bedrock", "Vertex", "Foundry", "ANTHROPIC_BASE_URL",
+                     "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "Fable 5.1", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5"):
+            self.assertIn(case, text)
+
+
 class Store(Sandbox):
     def test_keyed_files_drop_the_least_recently_written(self):
         with mock.patch.object(store, "KEEP_ENTRIES", 3):
