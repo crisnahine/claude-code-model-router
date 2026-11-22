@@ -188,7 +188,7 @@ def usage(days: int) -> str:
         lines += [f"| {who} | {m} | {v['turns']} | {v['out']:,} | {v['usd']:,.2f} |"
                   for (who, m), v in sorted(spend.items(), key=lambda kv: -kv[1]["usd"])]
         if unpriced:
-            lines.append(f"\nNo price in the registry for: {', '.join(sorted(unpriced))}. Add one under `prices`.")
+            lines.append(f"\nNo price in the registry for: {', '.join(sorted(unpriced))}. Add one under `prices` in ~/.claude/model-router.json.")
     else:
         lines += ["", "Dollar totals are in /usage and /cost; this ledger shows what was routed where."]
     return "\n".join(lines)

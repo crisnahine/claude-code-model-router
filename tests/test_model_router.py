@@ -466,6 +466,20 @@ class Registry(Sandbox):
         self.assertEqual((config["models"]["saga"]["strength"], config["models"]["opus"]["strength"]), (1.5, 3.5))
         self.assertEqual(registry.available(config, cap="sonnet"), ["haiku", "saga", "sonnet"])
 
+    def test_only_the_users_own_file_can_add_prices(self):
+        self.override({"prices": {"Claude-Saga-1": {"input": 2, "output": 10, "cache_read": "x"},
+                                  "claude-opus-5-5": {"output": 30}, "bad": 5}}, user=True)
+        self.override({"prices": {"claude-haiku-5-5": {"input": 999}, "claude-proj-1": {"input": 1}}})
+        config = cfg.load_config()
+        self.assertEqual(registry.price(config, "claude-saga-1"), {"input": 2, "output": 10})
+        self.assertEqual(registry.price(config, "claude-opus-5-5")["output"], 30)
+        self.assertEqual(registry.price(config, "claude-opus-5-5")["input"],  # merged key by key
+                         cfg.base_config()["prices"]["claude-opus-5-5"]["input"])
+        self.assertNotIn("bad", config["prices"])
+        self.assertEqual(registry.price(config, "claude-haiku-5-5")["input"],
+                         cfg.base_config()["prices"]["claude-haiku-5-5"]["input"])
+        self.assertIsNone(registry.price(config, "claude-proj-1"))
+
     def test_malformed_override_files_are_ignored(self):
         self.override({"models": "nope", "levels": {"lookup": {"needs": "x", "effort": "ludicrous"},
                                                     "complex": {"effort": "max"}, "bogus": {"needs": 9}},
