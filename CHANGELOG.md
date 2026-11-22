@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- On Bedrock, Google Cloud's Agent Platform, Microsoft Foundry, Claude Platform on AWS and Claude Models on Google Cloud, where an alias runs an older model, the mod starts routed work on that family's newest model and falls back to the alias if the provider refuses it. Setting `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` keeps the alias.
+- A hard skill typed as a slash command raises that turn's effort, and a skill that takes its arguments is judged by them, so a small job given to a large pipeline skill stays at standard.
+- Briefs are profiled more accurately: other languages start at standard instead of lookup, a negated limit ends with its clause, and judgment verbs such as design and review, named systems and more risk words count. A labeled corpus of 219 briefs checks it.
+- Teammates' reports and messages from other sessions no longer raise the lead's effort.
+- Each hook starts Python once and leaves the network modules unloaded, about 30 to 40 ms faster per warm hook.
+- The daily check has a deadline per request and an overall budget, and after a failure waits an hour, doubling to a day, before trying again.
+- State files carry a version and migrate. A file that fails to parse is set aside, one from a newer release is read but never written, and `models --reset` says what it cleared.
+- `usage` and `models` take `--json`, with versioned schemas.
+- Haiku 5.5's prompts over 100K tokens are priced at their own rate per request, and the Mythos models are priced. Fast-mode requests are logged at standard rates, which the README now says.
+- The main conversation's effort is left alone behind a Claude apps gateway, where a change drops the cache.
+- The Stop check counts test runs inside subagents before asking for a verifier.
+- Skills pre-approve only the commands they run.
+- The registry and override files carry a `schema` version, with a written compatibility policy.
+- New docs: a security assessment, hook latency and state-size measurements, a benchmark pilot with its raw data, diagrams in the README, and a glossary.
+
 ## 0.1.0 - 2026-11-22
 
 First release. Reviewed against Claude Code 2.1.330 and the platform docs of the same day; the research is in `docs/research/model-control.md`. Tested live on 2.1.330, headless and in an interactive terminal in auto mode. Needs Claude Code 2.1.292 or later.

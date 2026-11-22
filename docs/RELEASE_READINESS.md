@@ -1,6 +1,6 @@
 # Release readiness
 
-Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `76bddd9`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
+Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `cdd820c`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
 
 **Verdict: the next release is not ready.** Of the 13 release gates, 10 pass and 3 are partial. One defect is open, and the cost and quality results are a pilot. Nothing after `8ec8eec` has run in CI yet.
 
@@ -32,7 +32,10 @@ Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits afte
 
 - Waiting on the user: whether a project's `.claude/model-router.json` may raise levels and effort, or only lower them (the open question on project raises). 0.1.0 allows raises. Row S6.4.
 - Fast mode in the spend log: Claude Code's own estimate in `/cost` includes fast mode, and a mod can read it. Logging it beside the router's list-price figure would change the ledger and the usage report. Rows S4.8, S10.7.
-- The full benchmark: every configuration on the current six tasks, 10 times each, is 300 runs and about $21 at the pilot's mean, more with Opus. Rows S4.1, S10.11, S14.1 to S14.3.
+- The benchmark: the full suite, every configuration on every task 10 times, or a focused run on the questions that matter most first. On the current six tasks the full suite is 300 runs and about $21 at the pilot's mean, more with Opus. Rows S4.1, S10.11, S14.1 to S14.3.
+- The standard level's effort: Sonnet at `high` (shipped) or at `medium`, Claude Code's default for Sonnet. The benchmark is what would settle it. Row S10.11.
+- Whether the Mythos models become a routable family. They are priced in the registry, so their spend is logged, but no level routes to them. Row S2.15.
+- A live install check: installing from the marketplace into a scratch config folder and running one routed call. A scratch config folder has its own login, so the run needs the maintainer's login or an API key. Row S6.1.
 - Requirement against design: the requirements say the router never blocks a spawn. On the fallback path, a repeated call whose untouched model would break the user's cap is denied, with the model to use (`docs/ARCHITECTURE.md`, "Rewrites that don't take"). Either the requirements make an exception for the cap or the design changes. Row S2.25.
 - The mod's one decision: `turn.step` compares effort ranks so the main loop's effort only rises. The requirements say the mod holds no routing logic. Rows S5.2, S13.2.
 
@@ -42,12 +45,12 @@ Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits afte
 
 ### Not implemented (FAIL)
 
-- Hook latency and state-size measurements (in progress). Row S11.9.
+None.
 
 ### Incomplete or not verified enough (PARTIAL)
 
-- In progress on branches not merged yet: hook latency and state size (S4.10, S11.9); the main loop's effort for a hard skill typed as a slash command, which ran at the session's default effort live (S3.4). CI actions are pinned to SHAs but that hasn't run in CI yet (S6.12).
+- In review, not merged yet: more benchmark task classes and baselines (S14.1 to S14.3), and a timing fix in the profile's limit rule. CI actions are pinned to SHAs, and CI now type-checks the mod, but neither has run in CI yet (S6.12, S9.5).
 - No live run: Desktop, VS Code, JetBrains and the Agent SDK (S3.7); acceptEdits and bypass modes (S3.8); which login each run used (S3.9); Bedrock, Vertex and Foundry (S3.10); `allowManagedHooksOnly` (S3.13); Linux and Windows installs (S6.1); undocumented binary behaviour beyond macOS (S5.6); no full live rerun since 0.1.0 (S9.6).
-- Edge cases without a test or with a known gap: compaction (S12.7); a short brief, or a language outside the profile's list (S12.10); an empty brief (S12.11); two mods setting one spawn (S12.14); a clock moving backwards (S12.20); a missing Python (S12.23, S13.3); a Claude Code rename of an event or field (S12.26); the upstream workflow, which hasn't run on `main` yet (S6.16).
-- Not measured, or only in the pilot: cache sharing across fan-outs (S4.5); hook latency against the timeouts (S4.10); `claude plugin eval` not rerun (S4.11, S9.4); cost per solved task and the baselines (S4.1, S4.12 to S4.15, S10.11, S11.8, S11.12, S14.1 to S14.3).
+- Edge cases without a test or with a known gap: compaction (S12.7); a short brief, or a language outside the profile's list (S12.10); an empty brief (S12.11); two mods setting one spawn (S12.14); a clock moving backwards (S12.20); no Python on PATH at all (S12.23, S13.3); a Claude Code rename of an event or field (S12.26); the upstream workflow, which hasn't run on `main` yet (S6.16).
+- Not measured, or only in the pilot: cache sharing across fan-outs (S4.5); `claude plugin eval` not rerun (S4.11, S9.4); cost per solved task and the baselines (S4.1, S4.12 to S4.15, S10.11, S11.8, S11.12, S14.1 to S14.3).
 - Design and process: the cap denial (S2.25); the mod's effort check (S5.2, S13.2); agents with no definition on disk are left alone (S3.6); the user's decision on project raises (S6.4); no recheck for dead code (S5.5); the changelog's Python claim (S8.2, S10.13); security testing after each change (S8.3); the dogfood ledger not read (S8.4); no property-based or differential tests (S9.8); fast mode in the spend ledger (S10.7); set-aside state copies never cleaned up (S12.27); external citations not audited (S13.6).
