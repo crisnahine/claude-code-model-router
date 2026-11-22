@@ -1,0 +1,4 @@
+{
+  "class": "implementation",
+  "brief": "Implement slugify in text_utils.py exactly as its docstring specifies, using the standard library only."
+}

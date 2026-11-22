@@ -27,3 +27,9 @@ The words this plugin's code, docs and reviews use for its own domain.
 **Ledger**: the append-only log of every spawn, result, turn effort and turn's spend, with the reason for each decision.
 
 **Upstream**: the public feeds the plugin compares against what was last reviewed: Claude Code releases, the docs index, model aliases and model status.
+
+**Baseline**: a way of running Claude Code without the router that the benchmark compares it against, such as Claude Code's defaults or every subagent forced onto one model.
+
+**Pass check**: a benchmark task's script that decides, from the files and the answer a run left, whether the task was solved.
+
+**Cost per solved task**: a configuration's total spend on a set of runs divided by the runs whose pass check passed. It is the benchmark's measure of cost.
