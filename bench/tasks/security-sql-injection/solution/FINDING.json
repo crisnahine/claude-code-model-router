@@ -1,0 +1,5 @@
+{
+  "file": "db/users.py",
+  "line": 6,
+  "why": "It builds the SQL with an f-string from name, so a crafted name injects SQL."
+}

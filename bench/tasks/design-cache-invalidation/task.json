@@ -1,0 +1,4 @@
+{
+  "class": "design",
+  "brief": "Read SPEC.md and design how the catalog servers cache prices. Write DESIGN.json in the repository root with exactly these keys: \"strategy\" (one of \"no_cache\", \"ttl_only\", \"event_invalidation\", \"write_through_from_admin\"), \"ttl_seconds\" (a number, or null for none), \"max_staleness_seconds\" (the longest a changed price can still be served, a number) and \"reasons\" (a list of short strings)."
+}

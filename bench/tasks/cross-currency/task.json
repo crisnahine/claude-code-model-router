@@ -1,0 +1,4 @@
+{
+  "class": "cross-module",
+  "brief": "Add a `currency` argument (an ISO code, default \"USD\") to format_price in pricing/money.py. It must use the symbol from SYMBOLS in pricing/symbols.py and the number of decimals from DECIMALS there (2 for a currency DECIMALS doesn't list), so format_price(1234, \"EUR\") is \"€12.34\" and format_price(1234, \"JPY\") is \"¥1234\". Then make Invoice.total_line in billing/invoice.py and summary_line in reports/summary.py format in their own currency. Output in USD must not change."
+}

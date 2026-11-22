@@ -1,0 +1,4 @@
+{
+  "class": "research",
+  "brief": "Using only the files under docs/ in this repository, answer: in which fetchkit version did the default of Client.retry change from 3 to 5, in which version could it first be set through an environment variable, and what is that variable? Write RESEARCH.json in the repository root with the keys \"default_changed_in\" and \"configurable_in\" (version numbers such as \"1.0\"), \"variable\", and \"sources\" (the paths of the files that state these facts)."
+}

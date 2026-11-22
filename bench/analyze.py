@@ -115,6 +115,30 @@ def render(summary: list[dict], meta: dict) -> str:
     return "\n".join([head, "", "## Results", "", *lines, "", *reasons, "", meta.get("body", "")]).rstrip() + "\n"
 
 
+def _newest_price(prices: dict, alias: str) -> dict:
+    versions = [(tuple(int(n) for n in key.split("-")[2:] if n.isdigit()), value) for key, value in prices.items()
+                if key.startswith(f"claude-{alias}-") and not key.endswith("*")]
+    return max(versions, key=lambda v: v[0])[1] if versions else {}
+
+
+def estimate(rows: list[dict], tasks: list[dict], configs: list[dict], prices: dict) -> dict:
+    """What MIN_RUNS of every task under every configuration would cost. A class's runs cost what its runs
+    here cost on average (all runs' mean for a class with none), and a configuration whose subagents run a
+    dearer model than sonnet costs that much more per token on the whole run. Cheaper models are never priced
+    down. A guide, not a bound: token counts differ by model and the means pool every configuration."""
+    overall = sum(r["total_cost_usd"] for r in rows) / len(rows) if rows else 0.0
+    by_class: dict[str, list[float]] = {}
+    for r in rows:
+        by_class.setdefault(r["class"], []).append(r["total_cost_usd"])
+    means = {cls: sum(costs) / len(costs) for cls, costs in by_class.items()}
+    base = _newest_price(prices, "sonnet").get("output") or 1
+    factors = {c["id"]: max(1.0, (_newest_price(prices, c.get("price_model", "sonnet")).get("output") or base) / base)
+               for c in configs}
+    usd = MIN_RUNS * sum(means.get(t["class"], overall) * factors[c["id"]] for t in tasks for c in configs)
+    return {"runs": len(tasks) * len(configs) * MIN_RUNS, "usd": usd, "means": means, "overall": overall,
+            "factors": factors}
+
+
 def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
     total = sum(r["total_cost_usd"] for r in rows)
     versions = sorted({r["claude_version"] for r in rows})
@@ -134,8 +158,9 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
     stale = sum(1 for r in rows if "plugin_state" not in r)
     unsaved = sum(1 for r in rows if "sessions_saved" not in r)
     borrowed = sum(1 for r in rows if r.get("plugin_state") is not None and "plugin_data_own" not in r)
-    per_run = total / len(rows) if rows else 0.0
-    planned = len(tasks) * len(configs) * MIN_RUNS
+    prices = json.loads((run.PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["prices"]
+    plan = estimate(rows, tasks, run.load_configs(), prices)
+    budget = max((r.get("budget_usd") or 0.5 for r in rows), default=0.5)
     header = "\n".join([
         "# Benchmarks", "",
         f"Cost and quality of Model Router against Claude Code without it. {len(rows)} runs, "
@@ -159,7 +184,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         "- Rank is the router's place among the configurations by cost per solved task, 1 being cheapest.", "",
         "## Setup", "",
         f"- Claude Code: {', '.join(versions) or 'n/a'}. Session model: {', '.join(main) or 'n/a'}, the same for "
-        "every configuration.",
+        "every configuration except one that sets its own (`opusplan`).",
         "- Configurations run: " + "; ".join(f"`{c}` ({configs.get(c, '?')})" for c in used) + ".",
         "- Models that ran, with Claude Code's list-price cost across all runs: "
         + "; ".join(f"`{name}` ${sum(costs):.4f} over {len(costs)} runs" for name, costs in sorted(models.items()))
@@ -221,12 +246,25 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         "```", "",
         "## The full suite", "",
         f"A run of the whole current task set under every configuration in `bench/configs.json`, {MIN_RUNS} times "
-        f"each, is {len(tasks)} tasks x {len(configs)} configurations x {MIN_RUNS} runs = {planned} runs. At this "
-        f"data's mean of ${per_run:.4f} per run that is about ${planned * per_run:.2f}. Opus runs cost more than "
-        "the mean here, so treat it as a floor. The full suite needs the maintainer's go-ahead before it runs.", "",
-        "Not covered yet: the cross-module, security-review, root-cause, design and research task classes; the "
-        "fan-out, workflow, team and redo shapes; `fable`, `high`-effort, `opusplan` and advisor baselines; and "
-        "each `priority` setting.",
+        f"each, is {len(tasks)} tasks x {len(configs)} configurations x {MIN_RUNS} runs = {plan['runs']} runs, "
+        f"about ${plan['usd']:.2f} at list price. Each class is priced at its own mean per run here ("
+        + ", ".join(f"{cls} ${mean:.4f}" for cls, mean in sorted(plan["means"].items()))
+        + f"), and a class with no runs yet at the mean of all runs (${plan['overall']:.4f}). A configuration "
+        "whose subagents run a dearer model than Sonnet is priced up by that model's output price over Sonnet's, "
+        "on the whole run: "
+        + ", ".join(f"`{cid}` x{factor:g}" for cid, factor in plan["factors"].items() if factor > 1)
+        + ". That scales the price per token only: a dearer model may use more or fewer tokens, the class means "
+        "pool every configuration's runs, and the new classes are harder than the pilot's two, so treat the figure "
+        f"as a guide, not a bound. At the per-run cap the pilot used, {plan['runs']} runs x ${budget:g} come to "
+        f"${plan['runs'] * budget:,.2f} before overshoot, which has no fixed limit; only `--max-total` stops "
+        "spend. The full suite needs the maintainer's go-ahead before it runs.", "",
+        "Not covered yet: the fan-out, workflow, team and redo shapes; `haiku`, `opus` and `fable` at `high` "
+        "effort; a cold and a warm prompt cache measured apart; router overhead per spawn and per turn; and each "
+        "`priority` setting. `opusplan` in a headless `dontAsk` run never enters plan mode, so it runs Sonnet "
+        "throughout (https://code.claude.com/docs/en/model-config.md#opusplan-model-setting, "
+        "https://code.claude.com/docs/en/permission-modes.md). The advisor needs the Anthropic API, Claude "
+        "Platform on AWS or Claude Models on Google Cloud (https://code.claude.com/docs/en/advisor.md), and the "
+        "`fable` configuration needs Fable access.",
     ])
     return {"header": header, "body": body}
 
