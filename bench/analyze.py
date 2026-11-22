@@ -366,7 +366,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
     plan = estimate(rows, tasks, run.load_configs(), prices)
     budget = max((r.get("budget_usd") or 0.5 for r in rows), default=0.5)
     header = "\n".join([
-        "# Benchmarks", "",
+        "<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->\n<p align=\"center\"><img src=\"assets/banner-benchmarks.svg\" width=\"880\" alt=\"Benchmarks: What does a solved task cost, with and without it?\"></p>\n\n<p align=\"center\"><a href=\"../README.md\">Model Router</a> &nbsp;&middot;&nbsp; <a href=\"README.md\">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href=\"SECURITY.md\">Security</a> &nbsp;&middot;&nbsp; Next: <a href=\"TEST_RESULTS.md\">Test results</a></p>\n<!-- End of page head. -->", "", "# Benchmarks", "",
         f"Cost and quality of Model Router against Claude Code without it. {len(rows)} runs, "
         f"${total:.2f} at list price, on {dates[0] if dates else 'n/a'}"
         + (f" to {dates[-1]}" if dates and dates[-1] != dates[0] else "") + ".", "",

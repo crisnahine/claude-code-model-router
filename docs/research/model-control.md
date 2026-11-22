@@ -1,3 +1,9 @@
+<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<p align="center"><img src="../assets/banner-research.svg" width="880" alt="Research: What can a plugin control in Claude Code?"></p>
+
+<p align="center"><a href="../../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="../README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="../../GLOSSARY.md">Glossary</a> &nbsp;&middot;&nbsp; Next: <a href="../PERFORMANCE.md">Performance</a></p>
+<!-- End of page head. -->
+
 # Model control in Claude Code: what a plugin can and can't do
 
 Researched 2026-11-22 against Claude Code **2.1.330** (`claude --version`, binary at `~/.local/share/claude/versions/2.1.330`). Docs were fetched the same day from `code.claude.com/docs/en/*.md` and `platform.claude.com/docs/en/*.md`. Where a claim rests on the installed binary rather than a doc page, it says so. Anything not confirmed in a primary source is marked **UNCONFIRMED**.

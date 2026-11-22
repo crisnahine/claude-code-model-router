@@ -1,3 +1,9 @@
+<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<p align="center"><img src="assets/banner-roadmap.svg" width="880" alt="Roadmap: What gets built next, and why first?"></p>
+
+<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="RELEASE_READINESS.md">Release readiness</a> &nbsp;&middot;&nbsp; Next: <a href="../CHANGELOG.md">Changelog</a></p>
+<!-- End of page head. -->
+
 # Roadmap
 
 What to build next, highest user value first. It starts from what 0.1.0 left undone and adds the gaps in [RELEASE_READINESS.md](RELEASE_READINESS.md). Row IDs point into [TRACEABILITY.md](TRACEABILITY.md). Move an item to "Done since 0.1.0" when its rows pass.
@@ -41,7 +47,7 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 - Hook latency and state size measured in [PERFORMANCE.md](PERFORMANCE.md); each hook now starts Python once and skips the network modules. Rows S4.10, S11.9, S12.27.
 - A clock moved backwards no longer reads an old call as a redo or stretches an outage, and only the three newest set-aside copies of a state file are kept. Rows S12.20, S12.27.
 - A hard skill typed as a slash command raises that turn, and a skill that takes its arguments is judged by them. Row S3.4.
-- A labeled corpus of 243 Agent briefs checks the profile, which now counts judgment verbs, named systems and more risk words, and ends a limit at and, or or then before a task. Rows S2.14, S9.8, S12.12.
+- A labeled corpus of 246 Agent briefs checks the profile, which now counts judgment verbs, named systems and more risk words, and ends a limit at and, or or then before a task. Rows S2.14, S9.8, S12.12.
 - The newest model ID on providers whose aliases run older models, falling back to the alias. Row S3.10.
 - A failed daily fetch waits an hour, doubling to a day; the Mythos models are priced; each benchmark run gets a plugins root of its own; the glossary covers every named module. Rows S10.6, S2.15, S14.2, S5.4.
 - A background agent's `SubagentHandback` in auto mode verified live. Rows S3.8, S9.6.
