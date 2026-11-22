@@ -91,7 +91,11 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       const model = await Promise.resolve().then(() => $.session.model()).catch(() => undefined)
-      const pick = await ask($, opts, 'mod-turn', { text: e.text, ...(model ? { model } : {}) })
+      // Null behind a gateway or a third-party provider, where an effort change drops the cache.
+      const auth = await Promise.resolve().then(() => $.session.authorize()).catch(() => undefined)
+      const pick = await ask($, opts, 'mod-turn', {
+        text: e.text, ...(model ? { model } : {}), ...(auth !== undefined ? { first_party: auth !== null } : {}),
+      })
       if (pick?.effort) remember(turnEffort, e.turnId, pick.effort)
     } else if (!agentEffort.has(e.agentId)) {
       const effort = promptEffort.get(e.text)
