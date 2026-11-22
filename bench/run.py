@@ -9,12 +9,14 @@ from __future__ import annotations
 import argparse
 import datetime
 import hashlib
+import io
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from pathlib import Path
@@ -51,6 +53,25 @@ def load_configs() -> list[dict]:
     return json.loads((BENCH / "configs.json").read_text(encoding="utf-8"))
 
 
+_EXPORTED: dict = {}
+
+
+def plugin_dir_for(config: dict, options: dict) -> str:
+    """The plugin a run loads: the checkout's, or the one at a configuration's plugin_ref, exported once from git
+    so a branch under test can't change while the bench runs."""
+    ref = config.get("plugin_ref")
+    if not ref:
+        return options["plugin_dir"]
+    if ref not in _EXPORTED:
+        archive = subprocess.run(["git", "-C", str(ROOT), "archive", ref, "plugins/model-router"],
+                                 capture_output=True, check=True).stdout
+        target = Path(tempfile.mkdtemp(prefix="mrbench-plugin-"))
+        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+            tar.extractall(target, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
+        _EXPORTED[ref] = str(target / "plugins" / "model-router")
+    return _EXPORTED[ref]
+
+
 def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[list[str], dict]:
     env = {k: v for k, v in base_env.items() if k in KEPT_EXACT or k.startswith(KEPT) or not k.startswith(CLEARED)}
     env.update(ISOLATION)
@@ -63,7 +84,7 @@ def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[l
            "--max-budget-usd", str(options["budget"]), "--setting-sources", "project", "--strict-mcp-config",
            "--permission-mode", "dontAsk"]
     if config.get("plugin"):
-        cmd += ["--plugin-dir", options["plugin_dir"]]
+        cmd += ["--plugin-dir", plugin_dir_for(config, options)]
     if config.get("plugin_options"):
         # A --plugin-dir plugin's id is <name>@inline; project settings can't set plugin options.
         name = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"]
@@ -104,6 +125,32 @@ def session_dir(work: Path, env: dict) -> Path:
     anything but letters and digits turned into ->, as Claude Code 2.1.330 names it."""
     home = Path(env.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
     return home / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(work.resolve()))
+
+
+def agent_costs(work: Path, env: dict) -> dict | None:
+    """A router run's spend by agent type, from the router's own ledger: its usage rows carry the subagent's
+    agent_id, or none for the main loop, and the saved session names each subagent's type in
+    subagents/agent-<id>.meta.json (as Claude Code 2.1.330 writes it). None when the run kept no ledger."""
+    ledger = plugin_data_dir(env) / "ledger.jsonl"
+    if not ledger.is_file():
+        return None
+    types = {}
+    for meta in session_dir(work, env).glob("*/subagents/agent-*.meta.json"):
+        try:
+            types[meta.name[len("agent-"):-len(".meta.json")]] = json.loads(meta.read_text(encoding="utf-8"))["agentType"]
+        except (OSError, ValueError, KeyError):
+            continue
+    spend: dict = {}
+    for line in ledger.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if row.get("event") != "usage" or not isinstance(row.get("cost_usd"), (int, float)):
+            continue
+        who = "main" if not row.get("agent_id") else types.get(row["agent_id"], "unknown")
+        spend[who] = round(spend.get(who, 0.0) + row["cost_usd"], 6)
+    return spend
 
 
 def _forget_session(folder: Path) -> bool:
@@ -162,6 +209,7 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
                                 capture_output=True, text=True, timeout=120).returncode == 0
     except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
         passed = False
+    costs = agent_costs(work, env) if config.get("plugin") else None
     session_removed = _forget_session(session_dir(work, env))
     shutil.rmtree(scratch, ignore_errors=True)
     models = {name: {k: usage.get(k) for k in ("inputTokens", "outputTokens", "cacheReadInputTokens",
@@ -174,7 +222,7 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
         "started_at": started, "claude_version": options["claude_version"],
         "main_model": config.get("model", options["model"]),
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
-        "plugin_state": plugin_state, "plugin_data_own": True, "sessions_saved": True, "session_dir_removed": session_removed,
+        "plugin_state": plugin_state, "agent_costs": costs, "plugin_ref": config.get("plugin_ref"), "plugin_data_own": True, "sessions_saved": True, "session_dir_removed": session_removed,
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
         "api_error_status": result.get("api_error_status"),
         # Without a result the cost is unknown; count the whole budget so totals never understate spend.

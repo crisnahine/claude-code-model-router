@@ -470,6 +470,55 @@ class RouterVariants(unittest.TestCase):
         self.assertNotIn("--settings", plain["argv"])
 
 
+COST_STUB = '''#!/usr/bin/env python3
+import json, os, re, sys
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+data = Path(os.environ["CLAUDE_CODE_PLUGIN_CACHE_DIR"]) / "data" / "model-router-inline"
+data.mkdir(parents=True)
+rows = [{"event": "spawn", "agent": "model-router:implementer"},
+        {"event": "usage", "agent_id": "a1", "cost_usd": 0.05}, {"event": "usage", "agent_id": "a2", "cost_usd": 0.01},
+        {"event": "usage", "agent_id": None, "cost_usd": 0.03}, {"event": "usage", "agent_id": "a1", "cost_usd": 0.02}]
+(data / "ledger.jsonl").write_text("\\n".join(json.dumps(r) for r in rows))
+folder = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(Path.cwd().resolve()))
+sub = folder / "s1" / "subagents"
+sub.mkdir(parents=True)
+(sub / "agent-a1.meta.json").write_text(json.dumps({"agentType": "model-router:implementer"}))
+(sub / "agent-a2.meta.json").write_text(json.dumps({"agentType": "model-router:verifier"}))
+print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.11, "modelUsage": {}}))
+'''
+
+
+class PluginRef(unittest.TestCase):
+    def test_a_configuration_can_run_the_plugin_from_a_commit(self):
+        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        cmd, _ = run.command("x", {"id": "r", "plugin": True, "env": {}, "plugin_ref": "HEAD"}, options, {})
+        exported = Path(cmd[cmd.index("--plugin-dir") + 1])
+        self.assertNotEqual(exported, Path("/p/model-router"))
+        self.assertTrue((exported / ".claude-plugin" / "plugin.json").is_file())
+        again, _ = run.command("x", {"id": "r", "plugin": True, "env": {}, "plugin_ref": "HEAD"}, options, {})
+        self.assertEqual(again[again.index("--plugin-dir") + 1], str(exported))  # exported once
+        plain, _ = run.command("x", run.load_configs()[0], options, {})
+        self.assertEqual(plain[plain.index("--plugin-dir") + 1], "/p/model-router")
+
+
+@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
+class AgentCosts(unittest.TestCase):
+    def test_a_router_run_records_its_spend_by_agent_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "claude"
+            stub.write_text(COST_STUB)
+            stub.chmod(0o755)
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
+                row = run.run_one(task, run.load_configs()[0], options, {})
+        self.assertEqual(row["agent_costs"], {"model-router:implementer": 0.07, "model-router:verifier": 0.01,
+                                              "main": 0.03})
+
+
 @unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class Limits(unittest.TestCase):
     """A rate or usage limit pauses the bench and retries the run; it is never recorded as a failed task."""
