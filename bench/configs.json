@@ -99,6 +99,14 @@
     "price_model": "sonnet"
   },
   {
+    "id": "plugin-m6-10",
+    "description": "Confirmation on the shipped commit: Model Router at a06e5d4 with its own defaults (cheap-first ladder, main_effort off, role agents with no model of their own, a smaller injected context, verify_gate off, strong_agent_gate on)",
+    "plugin": true,
+    "env": {},
+    "plugin_ref": "a06e5d4",
+    "price_model": "sonnet"
+  },
+  {
     "id": "defaults",
     "description": "No plugin: subagents inherit the session model at its default effort",
     "plugin": false,
