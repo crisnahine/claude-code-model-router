@@ -104,7 +104,7 @@ def _cell_text(cell: dict) -> str:
             f"{_money(cell['cost_per_solved'])} per solved ({_money(cps_low)} to {_money(cps_high)})")
 
 
-def render(summary: list[dict], meta: dict) -> str:
+def _table(summary: list[dict]) -> list[str]:
     configs = []
     for row in summary:
         configs += [c for c in row["configs"] if c not in configs]
@@ -113,9 +113,34 @@ def render(summary: list[dict], meta: dict) -> str:
     for row in summary:
         cells = [_cell_text(row["configs"][c]) if c in row["configs"] else "not run" for c in configs]
         lines.append(f"| {row['class']} | " + " | ".join(cells) + f" | {row['rank'] or 'n/a'} | {row['status']} |")
-    reasons = [f"- {row['class']}: {row['status']}, {row['reason']}." for row in summary]
+    return [*lines, "", *[f"- {row['class']}: {row['status']}, {row['reason']}." for row in summary]]
+
+
+def render(summary: list[dict], meta: dict) -> str:
     head = meta.get("header", "# Benchmarks")
-    return "\n".join([head, "", "## Results", "", *lines, "", *reasons, "", meta.get("body", "")]).rstrip() + "\n"
+    return "\n".join([head, "", "## Results", "", *_table(summary), "", meta.get("body", "")]).rstrip() + "\n"
+
+
+def sessions(rows: list[dict], router: str | None = None) -> list[tuple[str, str, list[dict]]]:
+    """One summary per session model, since a configuration costs differently on each. Its router is `router`,
+    or else the first configuration in configs.json that loads the plugin and ran on that session model."""
+    groups: dict[str, list[dict]] = {}
+    for r in rows:
+        groups.setdefault(r.get("main_model") or "unknown", []).append(r)
+    out = []
+    for model, group in sorted(groups.items()):
+        ran = {r["config"] for r in group}
+        chosen = router or next((c["id"] for c in run.load_configs() if c.get("plugin") and c["id"] in ran), "plugin")
+        out.append((model, chosen, summarize(group, router=chosen)))
+    return out
+
+
+def render_sessions(parts: list[tuple[str, str, list[dict]]], meta: dict) -> str:
+    body = []
+    for model, router, summary in parts:
+        body += [f"## Results: session model `{model}`", "", f"Every run here had `{model}` as its session model; "
+                 f"router: `{router}`.", "", *_table(summary), ""]
+    return "\n".join([meta.get("header", "# Benchmarks"), "", *body, meta.get("body", "")]).rstrip() + "\n"
 
 
 def _newest_price(prices: dict, alias: str) -> dict:
@@ -166,20 +191,21 @@ def _notes(rows: list[dict], files: list[Path]) -> list[str]:
                      f"task: {', '.join(parts)}. {again} of them were run again later on the same task and "
                      "configuration, and none counts for or against a configuration. Their raw lines, with the reason, "
                      f"are under {where}.")
-    spend: dict[str, dict[str, float]] = {}
-    counted: dict[str, int] = {}
+    spend: dict[tuple, dict[str, float]] = {}
+    counted: dict[tuple, int] = {}
     for r in rows:
         if isinstance(r.get("agent_costs"), dict):
-            counted[r["config"]] = counted.get(r["config"], 0) + 1
+            key = (r["config"], r.get("main_model") or "unknown")
+            counted[key] = counted.get(key, 0) + 1
             for who, usd in r["agent_costs"].items():
-                spend.setdefault(r["config"], {}).setdefault(who, 0.0)
-                spend[r["config"]][who] += usd
+                spend.setdefault(key, {}).setdefault(who, 0.0)
+                spend[key][who] += usd
     if spend:
-        def share(config: str) -> str:
-            total = sum(spend[config].values()) or 1
-            order = sorted(spend[config].items(), key=lambda kv: (kv[0] != "main", -kv[1]))
-            runs = counted[config]
-            return f"`{config}` ({runs} run{'s' * (runs != 1)}): " + ", ".join(
+        def share(key: tuple) -> str:
+            total = sum(spend[key].values()) or 1
+            order = sorted(spend[key].items(), key=lambda kv: (kv[0] != "main", -kv[1]))
+            runs = counted[key]
+            return f"`{key[0]}` on `{key[1]}` ({runs} run{'s' * (runs != 1)}): " + ", ".join(
                 f"{'main loop' if who == 'main' else f'`{who}`'} ${usd:.4f} ({usd / total:.0%})" for who, usd in order)
         lines.append("- Router spend by agent type, from the router's ledger (`agent_costs`), over the runs that "
                      "record it: " + "; ".join(share(c) for c in sorted(spend)) + ".")
@@ -239,8 +265,9 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest. A router "
         "variant (another configuration that loads the plugin) has its own column but is never a baseline.", "",
         "## Setup", "",
-        f"- Claude Code: {', '.join(versions) or 'n/a'}. Session model: {', '.join(main) or 'n/a'}, the same for "
-        "every configuration except one that sets its own (`opusplan`).",
+        f"- Claude Code: {', '.join(versions) or 'n/a'}. Session models: {', '.join(main) or 'n/a'} (`--model`), "
+        "one results table each. Inside a table every configuration ran on that session model, except one that "
+        "sets its own (`opusplan`).",
         "- Configurations run: " + "; ".join(f"`{c}` ({configs.get(c, '?')})" for c in used) + ".",
         "- Models that ran, with Claude Code's list-price cost across all runs: "
         + "; ".join(f"`{name}` ${sum(costs):.4f} over {len(costs)} runs" for name, costs in sorted(models.items()))
@@ -329,13 +356,15 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("results", nargs="+", type=Path)
-    parser.add_argument("--router", default="plugin")
+    parser.add_argument("--router", help="the router configuration (default: per session model, the first "
+                                             "configuration in configs.json that loads the plugin)")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
     rows = [dict(json.loads(line), _batch=_batch(path)) for path in args.results
             for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    summary = summarize(rows, router=args.router)
-    args.out.write_text(render(summary, _page(rows, sorted(args.results), summary)), encoding="utf-8")
+    parts = sessions(rows, router=args.router)
+    summary = [row for _, _, part in parts for row in part]
+    args.out.write_text(render_sessions(parts, _page(rows, sorted(args.results), summary)), encoding="utf-8")
     return 0
 
 

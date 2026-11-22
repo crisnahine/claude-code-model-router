@@ -91,6 +91,29 @@ class Analysis(unittest.TestCase):
         self.assertEqual(verdict["rank"], 2)
         self.assertIn("plugin-cheap", verdict["configs"])  # still shown on the page
 
+    def test_each_session_model_gets_its_own_table_and_router(self):
+        real = json.loads((ROOT / "bench" / "results" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
+        n = analyze.MIN_RUNS
+        sonnet = [dict(real, main_model="sonnet", config=c, total_cost_usd=usd, passed=True)
+                  for c, usd in (("plugin", 0.3), ("defaults", 0.2)) for _ in range(n)]
+        opus = [dict(real, main_model="claude-opus-5-5", config=c, total_cost_usd=usd, passed=True)
+                for c, usd in (("plugin-m6-08-b", 0.5), ("defaults", 0.9)) for _ in range(n)]
+        with tempfile.TemporaryDirectory() as tmp:
+            res = Path(tmp) / "results"
+            res.mkdir()
+            (res / "a-bugfix-2026-11-22.jsonl").write_text("".join(json.dumps(r) + "\n" for r in sonnet + opus))
+            out = Path(tmp) / "page.md"
+            analyze.main([str(res / "a-bugfix-2026-11-22.jsonl"), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        opus_part = page.split("## Results: session model `claude-opus-5-5`")[1].split("## Results: session model")[0]
+        sonnet_part = page.split("## Results: session model `sonnet`")[1].split("## How to read it")[0]
+        self.assertIn("router: `plugin-m6-08-b`", opus_part)
+        self.assertIn("$0.9000 per solved", opus_part)  # Opus defaults, not pooled with Sonnet's
+        self.assertIn("bugfix: PASS, cost per solved task below defaults's", opus_part)
+        self.assertIn("router: `plugin`", sonnet_part)
+        self.assertIn("bugfix: FAIL", sonnet_part)
+        self.assertNotIn("$0.9000", sonnet_part)
+
     def test_the_page_names_set_aside_runs_agent_spend_and_batches(self):
         real = [json.loads(line) for line in (ROOT / "bench" / "results" / "m6-05-bugfix-2026-11-22.jsonl")
                 .read_text(encoding="utf-8").splitlines() if line]
@@ -112,7 +135,8 @@ class Analysis(unittest.TestCase):
             page = out.read_text(encoding="utf-8")
         self.assertIn("3 run(s) are set aside, outside the results, because the API never got to the task: "
                       "2 lost the network, 1 hit a rate or usage limit. 2 of them were run again later", page)
-        self.assertIn("`plugin` (2 runs): main loop $0.0600 (75%), `model-router:implementer` $0.0200 (25%)", page)
+        self.assertIn("`plugin` on `sonnet` (2 runs): main loop $0.0600 (75%), `model-router:implementer` $0.0200 "
+                      "(25%)", page)
         self.assertIn("`defaults` old (3); `plugin` new (2)", page)
 
 
