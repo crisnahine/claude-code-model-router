@@ -1,6 +1,8 @@
 ---
 name: scout
 description: Searches read-only for files, symbols, call sites and config, and explains existing code, when that takes more than a few searches.
+model: haiku
+effort: low
 tools: Read, Grep, Glob
 omitClaudeMd: true
 color: cyan

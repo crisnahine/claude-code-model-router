@@ -34,10 +34,11 @@ def policy(config: dict, settings: Settings) -> str:
         lines.append(f"| {name}{flag} | {info.get('strength')} | {info.get('speed', '-')} | "
                      f"{info.get('cost', '-')} | {info.get('use_for', '')} |")
     lines += ["", "Strength, speed and cost are relative ranks, not prices.", "",
-              "Role agents carry no model of their own: each is routed by its brief, like any other agent.", "",
-              "| Role agent | Role |", "| :- | :- |"]
+              "A role agent with a model keeps it, also where the router doesn't route; the others are "
+              "routed by their brief, like any other agent.", "",
+              "| Role agent | Model | Role |", "| :- | :- | :- |"]
     for name, agent in (config.get("crew") or {}).items():
-        lines.append(f"| {cfg.PLUGIN_NAME}:{name} | {agent.get('role', '')} |")
+        lines.append(f"| {cfg.PLUGIN_NAME}:{name} | {agent.get('model') or 'routed by brief'} | {agent.get('role', '')} |")
     return "\n".join(lines)
 
 

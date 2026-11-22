@@ -1,6 +1,8 @@
 ---
 name: docs-researcher
 description: Checks a feature against the current Claude Code docs and changelog instead of memory.
+model: haiku
+effort: medium
 tools: Read, Grep, Glob, WebFetch, WebSearch
 omitClaudeMd: true
 color: blue

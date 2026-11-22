@@ -157,16 +157,18 @@ class Shipped(unittest.TestCase):
                             ("deep-solver", "Not for ordinary hard coding.")):
             self.assertIn(limit, frontmatter(PLUGIN / "agents" / f"{name}.md")["description"], name)
 
-    def test_role_agents_leave_model_and_effort_to_the_router(self):
+    # Always-cheap agents keep a model, so they stay cheap when the router isn't routing; the rest are routed.
+    PINNED = {"scout": ("haiku", "low"), "verifier": ("haiku", "low"), "docs-researcher": ("haiku", "medium")}
+
+    def test_only_the_always_cheap_role_agents_carry_a_model(self):
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
         for path in (PLUGIN / "agents").glob("*.md"):
             fields = frontmatter(path)
-            self.assertNotIn("model", fields, path.name)
-            self.assertNotIn("effort", fields, path.name)
+            self.assertEqual((fields.get("model"), fields.get("effort")), self.PINNED.get(path.stem, (None, None)),
+                             path.name)
+            self.assertEqual(config["crew"][path.stem].get("model"), fields.get("model"), path.name)
             # A description is when Claude delegates (sub-agents docs), so none asks to run on every change.
             self.assertNotRegex(fields["description"], r"(?i)\b(?:every|any) (?:diff|code change|change)\b", path.name)
-        for name, agent in config["crew"].items():
-            self.assertNotIn("model", agent, name)
 
     def test_levels_and_models_are_complete(self):
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
@@ -715,6 +717,7 @@ class AgentDiscovery(Sandbox):
 
     def test_own_crew(self):
         self.assertIsNone(agents.find("model-router:architect", self.project)["model"])
+        self.assertEqual(agents.find("model-router:scout", self.project)["model"], "haiku")
         self.assertIsNone(agents.find("model-router:nope", self.project))
 
     def test_other_plugin_by_install_record(self):
@@ -1006,6 +1009,14 @@ class Router(Sandbox):
         super().setUp()
         self.session_on("claude-opus-5-5")
 
+    def test_the_cheap_role_agents_keep_their_pin_and_the_rest_are_routed(self):
+        self.session_on("claude-fable-5-2")
+        for brief in (LOOKUP, HARDEST):
+            d = self.decide("model-router:scout", brief)
+            self.assertEqual((d["model"] or "haiku", d["effort"] or "low"), ("haiku", "low"), brief)
+        self.assertEqual(self.decide("model-router:architect", HARDEST)["model"], "opus")
+        self.assertEqual(self.decide("model-router:deep-solver", LOOKUP)["model"], "opus")  # routed, never Fable by pin
+
     def test_agents_without_a_model_get_the_one_their_subtask_needs(self):
         self.agent("helper")
         for agent in ("helper", "general-purpose", None, "Explore"):
@@ -1115,9 +1126,11 @@ class Router(Sandbox):
         self.assertNotIn("model-router:deep-solver", cfg.base_config().get("agents") or {})
 
     def test_the_role_agents_are_routed_by_their_brief(self):
-        for agent in ("scout", "verifier", "docs-researcher", "implementer"):
-            d = self.decide(f"model-router:{agent}", LOOKUP)
-            self.assertEqual((d["action"], d["source"], d["model"], d["effort"]), ("rewrite", "router", "haiku", "low"), agent)
+        d = self.decide("model-router:implementer", LOOKUP)
+        self.assertEqual((d["action"], d["source"], d["model"], d["effort"]), ("rewrite", "router", "haiku", "low"))
+        for agent in ("scout", "verifier", "docs-researcher"):  # pinned to Haiku, their own effort kept
+            d = self.decide(f"model-router:{agent}", HARDEST)
+            self.assertEqual((d["action"], d["source"], d["model"]), ("keep", "pin", "haiku"), agent)
         for agent in ("architect", "reviewer"):  # their names set a complex floor
             d = self.decide(f"model-router:{agent}", LOOKUP)
             self.assertEqual((d["source"], d["level"]), ("router", "complex"), agent)
@@ -2474,7 +2487,9 @@ class Reports(Sandbox):
         text = self.out("policy")
         self.assertIn("Cap: **sonnet**", text)
         self.assertIn("fable (not in use)", text)
-        self.assertIn("| model-router:deep-solver | Research-grade, open-ended tasks with no known approach |", text)
+        self.assertIn("| model-router:deep-solver | routed by brief | Research-grade, open-ended tasks with no known approach |",
+                      text)
+        self.assertIn("| model-router:scout | haiku | Read-only search and summary |", text)
         self.assertIn("| lookup | sonnet |", text)
 
     def test_models_report(self):
