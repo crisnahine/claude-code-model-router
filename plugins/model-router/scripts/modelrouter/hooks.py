@@ -236,9 +236,11 @@ def _record(config: dict, session_id: str | None, tool_input: dict, decision: di
         gates.note_check(session_id)
 
 
-def _settle(hook_input: dict, finished: bool = False) -> None:
+def _settle(hook_input: dict, finished: bool = False, launched_as: str | None = None) -> None:
     """A result or an error came back for this call, so its rewrite was accepted. A
-    finished call is remembered, so the same call issued again is seen as a redo."""
+    finished call is remembered, so the same call issued again is seen as a redo. A call
+    launched in the background has no result yet: it waits under its agent's id until
+    that agent stops."""
     session_id = hook_input.get("session_id")
     tool_input = _tool_input(hook_input)
     agent = tool_input.get("subagent_type")
@@ -248,13 +250,24 @@ def _settle(hook_input: dict, finished: bool = False) -> None:
         store.mutate_entry("pending", session_id, lambda pending: pending.pop(key, None))
     prompt = store.load_entry("prompts", session_id)
     ran = earlier if isinstance(earlier, dict) and earlier.get("level") else (prompt.get("levels") or {}).get(key)
-    if finished and isinstance(ran, dict) and ran.get("level") in cfg.LEVELS:
-        def remember(done: dict) -> None:
-            done[key] = {"level": ran["level"], "model": ran.get("model"), "effort": ran.get("effort"),
-                         "prompt_id": prompt.get("prompt_id"), "at": time.time()}
-            for old in sorted(done, key=lambda k: (done[k] or {}).get("at", 0) if isinstance(done[k], dict) else 0)[:-PENDING_KEPT]:
-                del done[old]
-        store.mutate_entry("done", session_id, remember)
+    if not isinstance(ran, dict) or ran.get("level") not in cfg.LEVELS:
+        return
+    run = {"level": ran["level"], "model": ran.get("model"), "effort": ran.get("effort"),
+           "prompt_id": prompt.get("prompt_id")}
+    if finished:
+        _remember("done", session_id, key, run)
+    elif launched_as:
+        _remember("launched", session_id, launched_as, {**run, "key": key})
+
+
+def _remember(name: str, session_id: str | None, key: str, run: dict) -> None:
+    """Keep one run in a per-session file, and only the most recent of them."""
+    def keep(runs: dict) -> None:
+        runs[key] = {**run, "at": time.time()}
+        known = [k for k in runs if isinstance(runs[k], dict)]
+        for old in sorted(known, key=lambda k: runs[k].get("at", 0))[:-PENDING_KEPT]:
+            del runs[old]
+    store.mutate_entry(name, session_id, keep)
 
 
 def _asked_for(config: dict, hook_input: dict) -> str | None:
@@ -277,8 +290,13 @@ def post_agent(hook_input: dict) -> dict | None:
     response = response if isinstance(response, dict) else {}
     ran_as = response.get("resolvedModel")
     asked = _asked_for(config, hook_input)
+    # A background agent's call returns as soon as the agent has launched. Its result
+    # is back when the agent stops (agent_stopped), not here.
+    launched = response.get("status") == "async_launched"
+    agent_id = response.get("agentId")
     try:
-        _settle(hook_input, finished=True)
+        _settle(hook_input, finished=not launched,
+                launched_as=agent_id if launched and isinstance(agent_id, str) else None)
         if asked and registry.family(config, ran_as):
             registry.record_result(asked, ran_as, registry.family(config, ran_as))
     except OSError:
@@ -314,6 +332,27 @@ def agent_failed(hook_input: dict) -> dict | None:
         f"The '{asked}' model looks unavailable here. Re-issue this agent call with model: "
         f"\"{registry.clamp(config, asked, usable)}\"."
         + (" Model Router will route around it for now." if fails >= 2 else "")))
+
+
+def agent_stopped(hook_input: dict) -> dict | None:
+    """A subagent stopped. For one launched in the background, this is when its result
+    comes back, so its call counts as finished from here."""
+    session_id, agent_id = hook_input.get("session_id"), hook_input.get("agent_id")
+    if not agent_id or agent_id not in store.load_entry("launched", session_id):
+        return None  # a foreground agent, or one whose launch was never recorded
+    run: dict = {}
+
+    def take(launched: dict) -> None:
+        waiting = launched.pop(agent_id, None)
+        run.update(waiting if isinstance(waiting, dict) else {})
+    store.mutate_entry("launched", session_id, take)
+    message = hook_input.get("last_assistant_message")
+    if isinstance(message, str) and not message.strip():
+        return None  # it stopped without an answer, so there is no result to redo
+    if run.get("level") in cfg.LEVELS and isinstance(run.get("key"), str):
+        _remember("done", session_id, run["key"],
+                  {k: run.get(k) for k in ("level", "model", "effort", "prompt_id")})
+    return None
 
 
 def post_edit(hook_input: dict) -> dict | None:
@@ -420,6 +459,7 @@ def mod_usage(hook_input: dict) -> dict | None:
 HANDLERS = {
     "mod-start": mod_start, "mod-spawn": mod_spawn, "mod-turn": mod_turn, "mod-usage": mod_usage,
     "session-start": session_start, "user-prompt": user_prompt, "pre-agent": pre_agent,
-    "post-agent": post_agent, "agent-failed": agent_failed, "post-edit": post_edit, "stop": stop,
+    "post-agent": post_agent, "agent-failed": agent_failed, "agent-stopped": agent_stopped,
+    "post-edit": post_edit, "stop": stop,
     "model-switch": model_switch, "refresh-cache": refresh_cache,
 }

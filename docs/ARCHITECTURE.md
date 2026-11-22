@@ -12,7 +12,7 @@ The aim is the lowest cost per finished task at a high quality bar. Every subtas
               Claude Code engine events                      settings hooks
    agent.spawn  turn.start  turn.step  turn.complete      SessionStart, UserPromptSubmit,
         │           │           │            │            PreToolUse, PostToolUse(Failure),
-        └───────────┴─── hooks/router.ts ────┘            PostModelSwitch, Stop
+        └───────────┴─── hooks/router.ts ────┘            PostModelSwitch, SubagentStop, Stop
                             (the mod)                               │
                                 │   sh model-router.sh mod-*        │  sh model-router.sh <event>
                                 └──────────────┬────────────────────┘
@@ -96,7 +96,7 @@ Some details of how the rules apply:
 
 ### Redo escalation
 
-When an agent's result comes back, the call is remembered with the level it ran at (`done`, per session). If the same call is issued again, the first answer wasn't good enough, so it runs one level higher, and the redo is a vote that its first level was too low. Up the ladder that means more effort first (complex to hardest), then a stronger model (standard to complex, hardest to frontier). A call that names its own model is never escalated: the caller has decided.
+When an agent's result comes back, the call is remembered with the level it ran at (`done`, per session). For an agent that runs in the background the `Agent` call returns as soon as the agent has launched, so its call waits under the agent's id (`launched`) and counts as finished when the agent stops. Copies of one brief started together therefore all run at the brief's own level. If the same call is issued again, the first answer wasn't good enough, so it runs one level higher, and the redo is a vote that its first level was too low. Up the ladder that means more effort first (complex to hardest), then a stronger model (standard to complex, hardest to frontier). A call that names its own model is never escalated: the caller has decided.
 
 ### Rewrites that don't take
 
@@ -153,7 +153,8 @@ SessionStart ─┬─ session-start   records options and the session model; ex
 UserPromptSubmit ─ user-prompt   profiles the request; notes a model the user may be asking for
 PostModelSwitch ─ model-switch   records the session's new model
 PreToolUse (Agent|Task) ─ pre-agent      fallback: router.decide, returns updatedInput
-PostToolUse (Agent|Task) ─ post-agent    (async) the model that ran; remembers the call for redos
+PostToolUse (Agent|Task) ─ post-agent    (async) the model that ran; remembers a finished call for redos
+SubagentStop ─ agent-stopped    (async) a background agent's result is back; remembers its call for redos
 PostToolUseFailure (Agent|Task) ─ agent-failed   counts model errors
 PostToolUse (Edit|Write|NotebookEdit) ─ post-edit   notes that code changed
 Stop ─ stop                      the two checks
@@ -170,7 +171,7 @@ In `${CLAUDE_PLUGIN_DATA}`:
 | `state.json` | Recorded options and model health |
 | `upstream.json` | The upstream cache and what was last reviewed |
 | `learned.json` | Calls and votes per level, and which levels are raised |
-| `sessions.json`, `prompts.json`, `edits.json`, `pending.json`, `done.json`, `mod.json` | Per session: its model, the current request's profile and routed calls, edit and check times, rewrites waiting for a result, finished calls for redo escalation, and whether the mod is running. The 200 most recently written sessions are kept |
+| `sessions.json`, `prompts.json`, `edits.json`, `pending.json`, `launched.json`, `done.json`, `mod.json` | Per session: its model, the current request's profile and routed calls, edit and check times, rewrites waiting for a result, background agents still running, finished calls for redo escalation, and whether the mod is running. The 200 most recently written sessions are kept |
 | `ledger.jsonl` | One line per agent start, result, turn effort and turn usage, with the decision, its reason and the list-price cost. Trimmed at 4 MB |
 
 Writes are atomic. Each read-modify-write cycle takes a lock file, because agents started in one message run their hooks at the same moment. A lock that can't be had within two seconds is skipped, so a hook never hangs a session.
@@ -200,5 +201,6 @@ On Claude Code 2.1.330, with the plugin loaded from disk, in headless sessions a
 - With `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` pinning Opus, a lookup subagent stayed on Opus at low effort, and the session-start note said why.
 - An agent that pins its model kept it and took its own frontmatter effort.
 - In the interactive auto-mode session, no spawn was denied, and each subagent's first request already carried its routed effort.
+- Three copies of one lookup brief, started in one message and run in the background, all ran on Haiku at low effort. The same call re-issued after its background run had finished ran on Sonnet at high.
 
 On the `Agent` call path: a Sonnet session in default and interactive auto mode routed a lookup to Haiku and a security review to Opus; another installed plugin's agents were routed the same way; a cap of Sonnet lowered a Fable agent; a rejected rewrite ran untouched on the retry; and on 2.1.270 the rewrite applied and the agent ran on Haiku.

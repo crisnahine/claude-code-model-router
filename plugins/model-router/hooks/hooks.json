@@ -136,6 +136,22 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh",
+              "agent-stopped"
+            ],
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
     ]
   }
 }

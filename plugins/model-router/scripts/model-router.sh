@@ -10,7 +10,7 @@ for py in python3 python; do
   fi
 done
 case " $* " in
-  *" session-start "*|*" user-prompt "*|*" post-edit "*|*" agent-failed "*|*" stop "*|*" pre-agent "*|*" post-agent "*|*" model-switch "*|*" refresh-cache "*|*" mod-start "*|*" mod-spawn "*|*" mod-turn "*|*" mod-usage "*)
+  *" session-start "*|*" user-prompt "*|*" post-edit "*|*" agent-failed "*|*" agent-stopped "*|*" stop "*|*" pre-agent "*|*" post-agent "*|*" model-switch "*|*" refresh-cache "*|*" mod-start "*|*" mod-spawn "*|*" mod-turn "*|*" mod-usage "*)
     [ -t 0 ] || cat >/dev/null ;;
   *) echo "(Model Router's helper needs Python 3.9 or later on PATH, so this information is unavailable.)" ;;
 esac
