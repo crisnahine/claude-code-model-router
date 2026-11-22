@@ -312,15 +312,18 @@ class SuiteCoverage(unittest.TestCase):
     ANSWERS = {  # task: (answers that must pass, answers that must fail)
         "security-sql-injection": (
             ["db\\users.py:6 interpolates name into SQL", "`db/users.py`:6 is injectable",
-             "**`db/users.py`**, line 6: f-string SQL", "db/users.py:6 builds the query; app.py:8 calls it"],
+             "**`db/users.py`**, line 6: f-string SQL", "db/users.py:6 builds the query; app.py:8 calls it",
+             "db/users.py#L6 puts name into the SQL"],
             ["db/orders.py:3", "db/users.py:6 and db/orders.py:3",
              "db/users.py:4, db/users.py:5, db/users.py:6, db/users.py:7, app.py:8", "",
-             "db/users.py:6 and db/orders.py:4 both build SQL from caller input"]),
+             "db/users.py:6 and db/orders.py:4 both build SQL from caller input",
+             "db/users.py:4, db/users.py:6, db/users.py:11 could be risky.", "db/users.py:6 and db/users.py:7"]),
         "security-path-traversal": (
             ["files\\server.py:8 joins an unresolved name", "`files/server.py` line 9 opens it",
-             "files/server.py:8, reached from web.py:7"],
+             "files/server.py:8, reached from web.py:7", "files/server.py#L8 joins the name unresolved"],
             ["files/thumbs.py:8", "files/server.py:8 or files/thumbs.py:8", "web.py:7",
-             "files/server.py:8, and files/thumbs.py:9's startswith check can be bypassed"]),
+             "files/server.py:8, and files/thumbs.py:9's startswith check can be bypassed",
+             "files/server.py:8, files/server.py:9, web.py:5", "files/server.py:6 or files/server.py:8"]),
     }
     JSON_ANSWERS = {
         "research-changelog": (
