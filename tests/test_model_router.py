@@ -1861,7 +1861,7 @@ class Hooks(Sandbox):
         text = self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))
         self.assertIn("Model Router is on", text)
         self.assertIn("strongest model in use: opus", text)
-        self.assertIn("model-router:deep-solver", text)
+        self.assertNotIn("model-router:deep-solver", text)  # the Agent tool lists the role agents already
         self.assertIn("re-issue the same call unchanged", text)
         self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", text)
         self.assertEqual(session.model("s1"), "claude-sonnet-5-5")

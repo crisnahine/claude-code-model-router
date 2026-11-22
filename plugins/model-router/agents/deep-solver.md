@@ -1,6 +1,6 @@
 ---
 name: deep-solver
-description: Research-grade agent for open-ended problems with no known approach, ambiguous multi-system investigations, and long autonomous tasks. Ordinary hard coding goes to the architect or the implementer.
+description: Takes research-grade, open-ended problems with no known approach, or work the architect couldn't settle.
 color: orange
 ---
 

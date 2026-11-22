@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Writes and edits code and tests to a clear spec. Use for a feature, fix or refactor whose approach is decided and that takes more than a few edits.
+description: Writes code and tests to a decided plan, for work of more than a few edits.
 color: yellow
 ---
 

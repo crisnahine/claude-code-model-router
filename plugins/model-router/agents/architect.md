@@ -1,6 +1,6 @@
 ---
 name: architect
-description: Senior design and planning agent, read-only. Use for system or cross-module design, a subtle bug whose root cause is unclear, or a decision with security, data or performance risk. Not for a change whose approach is already clear.
+description: Plans and designs, read-only: system or cross-module design, an unclear root cause, or a decision with security, data or performance risk.
 tools: Read, Grep, Glob, Bash, WebFetch
 color: purple
 ---

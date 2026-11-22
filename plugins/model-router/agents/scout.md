@@ -1,6 +1,6 @@
 ---
 name: scout
-description: Fast, cheap, read-only investigator. Use for finding files, symbols, call sites and config, and for summarizing how existing code works, when that takes more than a few searches. Never edits files.
+description: Searches read-only for files, symbols, call sites and config, and explains existing code, when that takes more than a few searches.
 tools: Read, Grep, Glob
 omitClaudeMd: true
 color: cyan
