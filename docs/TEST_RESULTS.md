@@ -21,21 +21,21 @@ The test counts come from each job's log (`gh run view --job <id> --log`). Commi
 
 ## Local
 
-Run 2026-11-23 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0`, up to `241b465` plus the change that updated this file.
+Run 2026-11-23 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0`, up to `aa994e7` plus the change that updated this file.
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 350 tests OK |
-| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 350 tests OK |
-| Unit tests, Python 3.15.2 | `python3.15 -m unittest discover -s tests` | 350 tests OK |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 359 tests OK |
+| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 359 tests OK |
+| Unit tests, Python 3.15.2 | `python3.15 -m unittest discover -s tests` | 359 tests OK |
 | Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 18 of 18 pass |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
-| Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78; run 2026-11-22, not rerun on this commit |
+| Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78; run 2026-11-23 on `9b27510` |
 
-The 350 local tests are 299 in `tests/test_model_router.py`, 45 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py` and 3 in `tests/test_traceability.py`. The routing corpus test prints "2 of 222 briefs over-routed (0.9%), budget 2%; 5 known under-routes" on each of the three interpreters. CI's run on `8ec8eec` had 180.
+The 359 local tests are 307 in `tests/test_model_router.py`, 46 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py` and 3 in `tests/test_traceability.py`. The routing corpus test prints "2 of 234 briefs over-routed (0.9%), budget 2%; 5 known under-routes" on each of the three interpreters. CI's run on `8ec8eec` had 180.
 
 Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
 
@@ -43,22 +43,24 @@ Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verifi
 
 ### Routing cases
 
-Run 2026-11-22 on Claude Code 2.1.330, on the three cases now in `plugins/model-router/evals/`:
+Run 2026-11-23 on Claude Code 2.1.330, on `9b27510`, on the three cases now in `plugins/model-router/evals/`, from a `git archive` export of that commit:
 
 ```bash
 CLAUDE_CODE_PLUGIN_CACHE_DIR=<scratch>/plugins claude plugin eval plugins/model-router --trust-plugin \
   --ablation with-without --runs 3 -j 2 --max-cost-usd 2 --no-publish --output-dir <scratch>/out --json <scratch>/result.json
 ```
 
+The export is needed because the CLI refuses a plugin folder whose git directory registers more linked worktrees than it can screen, and this repository's checkout has many. The three eval briefs profile the same at `9b27510` and at `aa994e7` (lookup and complex), so the result holds for the release tip.
+
 Same clean environment as below. Each case tells Claude to make one `Agent` call with an exact brief and no model, and a `regex` grader reads the run's trace for the `resolvedModel` Claude Code reports on that call's result. Without the router, a subagent with no model runs on the session's model, so the no-plugin arm fails by design. No `--allow-tools` grant is needed: routing runs in the plugin's hooks and mod, which start their own processes, not through the Bash tool.
 
 | Case | Session | Grader | With the plugin | Without | Cost with / without (3 runs each) |
 | :- | :- | :- | -: | -: | -: |
-| `route-lookup-subagent` | Sonnet | `ran-on-haiku` | 1.0, 3 of 3 (Haiku each run) | 0, 0 of 3 (Sonnet each run) | $0.11 / $0.14 |
-| `route-review-subagent` | Haiku | `ran-on-opus` | 1.0, 3 of 3 (Opus each run) | 0, 0 of 3 (Haiku each run) | $0.10 / $0.01 |
-| `route-redo-escalates` | Haiku | `called-twice`, `first-ran-on-haiku`, `redo-ran-on-sonnet` | 1.0, 3 of 3 (Haiku, then Sonnet) | 0.67, 0 of 3 (Haiku twice) | $0.09 / $0.01 |
+| `route-lookup-subagent` | Sonnet | `ran-on-haiku` | 1.0, 3 of 3 | 0, 0 of 3 | $0.106 / $0.139 |
+| `route-review-subagent` | Haiku | `ran-on-sonnet` | 1.0, 3 of 3 | 0, 0 of 3 | $0.039 / $0.007 |
+| `route-redo-escalates` | Haiku | `called-twice`, `first-ran-on-haiku`, `redo-ran-on-sonnet` | 1.0, 3 of 3 | 0.67, 0 of 3 | $0.048 / $0.013 |
 
-Total $0.43 (no LLM grader, so no judge cost), 139 seconds, not partial. `first-ran-on-haiku` was added afterwards and only `route-redo-escalates` was rerun (`--case route-redo-escalates`, $0.10, 60 seconds); its row shows that rerun. The grader checks that a run on Haiku is in the trace, and in every run the Haiku result came first. With it the case's delta is 0.33, so the suite's mean delta is 0.78. The trace carries each subagent's model but not its effort, and the spend log lives in the plugin's data folder, which a grader can't read (https://code.claude.com/docs/en/plugin-evals.md#what-a-grader-can-look-at), so effort and spend rows are covered by the unit tests and the live runs in `docs/ARCHITECTURE.md`, not here.
+Total $0.352 (no LLM grader, so no judge cost), 70 seconds, not partial. Every with-plugin run passed every grader and no without-plugin run passed, so the suite's mean delta is 0.78 (the redo case's delta is 0.33, since without the plugin the call is still made twice). The trace carries each subagent's model but not its effort, and the spend log lives in the plugin's data folder, which a grader can't read (https://code.claude.com/docs/en/plugin-evals.md#what-a-grader-can-look-at), so effort and spend rows are covered by the unit tests and the live runs in `docs/ARCHITECTURE.md`, not here.
 
 ### The first run, on the cases these replaced
 
