@@ -1,5 +1,6 @@
 ---
 description: A high-risk, multi-service design question should route to an opus or fable agent.
+expected_outcome: "level complex, model opus, effort high"
 tags: [routing]
 max_turns: 6
 allowed_tools: [Skill, Read, Glob, Grep]
