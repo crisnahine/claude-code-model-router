@@ -124,7 +124,8 @@ def _not_english(text: str) -> bool:
 
 
 # A load limit only makes a brief harder when a design or a choice has to be worked out against it.
-_CHOICE = r"\b(?:design\w*|choos\w*|choices?|trade.?offs?|strateg\w*|capacity planning)\b"
+_CHOICE = (r"\b(?:design\w*|choos\w*|choices?|trade.?offs?|strateg\w*|capacity planning|plan\w*|"
+           r"siz(?:e|es|ed|ing)|decid\w*|pick|select\w*|how many|estimat\w*|targets?|budgets?)\b")
 
 
 def signals(text: str) -> list[str]:

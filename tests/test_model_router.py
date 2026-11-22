@@ -3452,6 +3452,15 @@ class DesignDecisions(unittest.TestCase):
             self.assertEqual(result["level"], "standard", prompt)
             self.assertNotIn("load", result["signals"], prompt)
 
+    def test_a_capacity_or_sizing_decision_keeps_its_load_signal(self):
+        for prompt, level in (("Plan the capacity of the queue cluster for 10x traffic: how many brokers do we need?",
+                               "complex"),
+                              ("Size the connection pool so the billing service meets its latency target under "
+                               "peak load.", "standard")):
+            result = profile.profile_call({"prompt": prompt}, "general-purpose")
+            self.assertEqual(result["level"], level, prompt)
+            self.assertIn("load", result["signals"], prompt)
+
 
 class SolverNames(unittest.TestCase):
     """Only this plugin's own deep-solver is floored at hardest; another plugin's solver is a heavy role, a resolver none."""
