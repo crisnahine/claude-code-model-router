@@ -1622,6 +1622,31 @@ class Gates(Sandbox):
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
 
 
+class SubagentChecks(Sandbox):
+    """A subagent's commands are in its own transcript (SubagentStop's agent_transcript_path)."""
+
+    def transcript(self, name: str, command: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(json.dumps({"timestamp": "2099-01-01T00:00:00Z", "message": {"content": [
+            {"type": "tool_use", "name": "Bash", "input": {"command": command}}]}}) + "\n")
+        return str(path)
+
+    def subagent_fixes_and_stops(self, command: str) -> dict:
+        hooks.post_edit({"session_id": "s1", "agent_id": "a1", "agent_type": "model-router:implementer",
+                         "tool_input": {"file_path": "pages.py"}})
+        hooks.agent_stopped({"session_id": "s1", "agent_id": "a1", "agent_type": "model-router:implementer",
+                             "agent_transcript_path": self.transcript("agent-a1.jsonl", command),
+                             "last_assistant_message": "Fixed the start index."})
+        return {"session_id": "s1", "transcript_path": self.transcript("main.jsonl", "ls")}
+
+    def test_a_test_run_inside_the_subagent_that_edited_satisfies_the_stop_check(self):
+        self.assertIsNone(hooks.stop(self.subagent_fixes_and_stops("python3 -m pytest test_pages.py | tail -15")))
+
+    def test_a_subagent_that_ran_no_check_still_gets_one_asked_for(self):
+        stopped = hooks.stop(self.subagent_fixes_and_stops("cat pages.py"))
+        self.assertIn("model-router:verifier", json.dumps(stopped))
+
+
 class Upstream(Sandbox):
     TABLE = ("| Model alias | Behavior |\n| --- | --- |\n| **`default`** | x |\n| **`best`** | x |\n"
              "| **`fable`** | x |\n| **`sonnet`** | x |\n| **`opus`** | x |\n| **`haiku`** | x |\n"
