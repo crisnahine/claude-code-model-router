@@ -245,7 +245,8 @@ def cost(config: dict, model_id: str, tokens: dict) -> float | None:
         return None
     # shortcut: Haiku's 5x rate past a 100K prompt is per request, and a turn sums its
     # requests, so it isn't applied here; read cost from the transcript if that matters.
-    hour = tokens.get("ephemeral_1h_input_tokens", 0)  # the rest of the writes count as five minutes
+    # The rest of the writes count as five minutes.
+    hour = max(0, min(tokens.get("ephemeral_1h_input_tokens", 0), tokens.get("cache_creation_input_tokens", 0)))
     total = (tokens.get("input_tokens", 0) * rates.get("input", 0)
              + tokens.get("output_tokens", 0) * rates.get("output", 0)
              + tokens.get("cache_read_input_tokens", 0) * rates.get("cache_read", 0)
