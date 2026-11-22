@@ -1100,6 +1100,57 @@ class Router(Sandbox):
         self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", "low"))
         self.assertEqual(self.decide("deep", HARD)["model"], "sonnet")
 
+    def test_a_hand_off_to_the_strong_role_agents_runs_at_least_at_the_requests_level(self):
+        self.session_on("claude-sonnet-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": (
+            "Our order service double-charges customers under concurrent retries across the payments API and "
+            "the worker queue. Find the root cause and design a fix that keeps backward compatibility.")})
+        self.assertEqual(store.load_entry("prompts", "s1")["level"], "hardest")
+        plan = "Plan a fix for the double-charge bug described above."
+        self.assertEqual(self.decide("model-router:scout", plan.replace("Plan a fix for", "List the files of"))["model"],
+                         "haiku")  # the floor is only for the two strong role agents
+        d = self.decide("model-router:architect", plan)
+        self.assertEqual((d["level"], d["model"], d["effort"]), ("hardest", "opus", "high"))
+        self.pre("model-router:architect", plan)
+        self.done("model-router:architect", plan, "claude-opus-5-5", model="opus", effort="high")
+        d = self.decide("model-router:architect", plan)
+        self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("frontier", "fable", "hardest"))
+        check = "Check this proposed fix for the duplicate charge problem and improve it: add a lock."
+        self.assertEqual(self.decide("model-router:architect", check, model="sonnet")["model"], "sonnet")
+        store.update_entry("prompts", "s1", level="frontier")
+        self.assertEqual(self.decide("model-router:deep-solver", check)["level"], "frontier")
+        self.options(max_tier="sonnet")
+        self.assertEqual(self.decide("model-router:architect", check)["model"], "sonnet")
+
+    def test_a_hand_off_while_handling_another_sessions_message_routes_on_its_brief(self):
+        self.session_on("claude-sonnet-5-5")
+        hard = ("Our order service double-charges customers under concurrent retries across the payments API and "
+                "the worker queue. Find the root cause and design a fix that keeps backward compatibility.")
+        rename = "Review this one-line rename of a config field."
+        for message in ("Another Claude session sent a message:\n<cross-session-message from=\"peer\">"
+                        "Rename the field</cross-session-message>",
+                        "Another Claude session sent a message:\n<teammate-message teammate_id=\"dev\">"
+                        "Rename the field</teammate-message>"):
+            hooks.user_prompt({"session_id": "s1", "prompt": hard})
+            hooks.user_prompt({"session_id": "s1", "prompt": message})
+            d = self.decide("model-router:architect", rename)
+            self.assertEqual((d["level"], d["model"]), ("complex", "sonnet"), message)
+            self.assertEqual(store.load_entry("prompts", "s1")["level"], "hardest")  # the Stop check still sees it
+
+    def test_a_task_notification_keeps_the_requests_floor(self):
+        self.session_on("claude-sonnet-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": (
+            "Our order service double-charges customers under concurrent retries across the payments API and "
+            "the worker queue. Find the root cause and design a fix that keeps backward compatibility.")})
+        hooks.user_prompt({"session_id": "s1", "prompt": "<task-notification>done</task-notification>"})
+        d = self.decide("model-router:architect", "Review this one-line rename of a config field.")
+        self.assertEqual((d["level"], d["model"]), ("hardest", "opus"))
+
+    def test_with_no_request_level_the_brief_decides_the_hand_off(self):
+        self.session_on("claude-sonnet-5-5")
+        d = self.decide("model-router:architect", "Plan a fix for the double-charge bug described above.")
+        self.assertEqual((d["level"], d["model"]), ("complex", "sonnet"))
+
     def test_a_strong_agent_is_named_without_a_model_so_its_brief_routes_and_its_redo_climbs(self):
         config = cfg.load_config()
         self.assertEqual(gates.strong_agent(config, "sonnet", "complex"), "model-router:architect")
