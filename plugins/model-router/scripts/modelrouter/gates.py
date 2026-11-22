@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import os
 import re
 import time
+from pathlib import Path
 
 from . import calls, registry, session, store
 from . import config as cfg
@@ -28,8 +30,21 @@ def is_checker(agent_type: object) -> bool:
 def note_edit(hook_input: dict) -> None:
     tool_input = cfg.tool_input(hook_input)
     path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
-    if path and not path.lower().endswith(_NON_CODE):
+    if path and not path.lower().endswith(_NON_CODE) and _in_project(hook_input, path):
         store.update_entry("edits", hook_input.get("session_id"), edited_at=time.time())
+
+
+def _in_project(hook_input: dict, path: str) -> bool:
+    """Under the hook's cwd or the session's starting project root, since cwd can move into
+    a subfolder. Hook input doesn't list --add-dir directories, so files there count only
+    while cwd is inside one."""
+    cwd = cfg.project_dir(hook_input)
+    roots = [cwd, *([Path(os.environ["CLAUDE_PROJECT_DIR"])] if os.environ.get("CLAUDE_PROJECT_DIR") else [])]
+    try:
+        target = (cwd / Path(path).expanduser()).resolve()
+        return any(target.is_relative_to(root.resolve()) for root in roots)
+    except (OSError, RuntimeError, ValueError):
+        return True
 
 
 def note_check(session_id: str | None) -> None:
