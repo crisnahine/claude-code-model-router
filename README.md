@@ -51,14 +51,14 @@ Each subtask is scored from its own brief. The profile looks for risk (security,
 | Level | Typical subtask | Model (balanced) | Effort |
 | :- | :- | :- | :- |
 | lookup | Find, list, summarize, run a command | Haiku | low |
-| standard | Implement to a clear spec, write tests | Sonnet | high |
-| complex | Design, review, risky or cross-module change | Opus | high |
-| hardest | Ambiguous, multi-system and risky at once | Opus | xhigh |
+| standard | Implement to a clear spec, write tests | Sonnet | medium |
+| complex | Design, review, risky or cross-module change | Sonnet | high |
+| hardest | Ambiguous, multi-system and risky at once | Opus | high |
 | frontier | All of that, with no known approach: research, open-ended investigation | Fable | high |
 
-![The ladder: lookup on Haiku at low, standard on Sonnet at high, complex on Opus at high, hardest on Opus at xhigh, frontier on Fable at high](docs/assets/ladder.svg)
+![The ladder: lookup on Haiku at low, standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high, frontier on Fable at high](docs/assets/ladder.svg)
 
-The ladder follows Anthropic's published cost-per-solved-task numbers. Sonnet at its Claude Code default of `medium` scores about 7 points lower on coding than at `high`, so standard work runs at `high`. On the same coding problems Opus 5.5 at `high` came within a point of Fable 5.2 at `high` (95.5% against 96.3%) for under a quarter of the cost, so hard coding stays on Opus, with `xhigh` for the hardest, and Fable is kept for research-grade work.
+The ladder starts cheap and relies on redo escalation to catch what falls short, the policy Anthropic measured as cheapest for a high pass rate. In this repository's benchmark the earlier, stronger ladder (standard at `high`, complex on Opus) cost 1.2 to 2.2 times as much per solved task as Claude Code's defaults on 7 of 8 task classes, at the same pass rate ([BENCHMARKS.md](docs/BENCHMARKS.md)). So standard work runs Sonnet at `medium`, Claude Code's own default for it, and complex work Sonnet at `high`. Opus 5.5 at `high` came within a point of Fable 5.2 at `high` on coding (95.5% against 96.3%) for under a quarter of the cost, so the hardest work runs on Opus and Fable is kept for research-grade work.
 
 ### 2. Select a model
 
@@ -119,7 +119,7 @@ Options, in `/config` under the plugin:
 | `priority` | `balanced` | `balanced`, `quality` or `fast` |
 | `max_tier` | none | The strongest model subagents may run on. Anything stronger is lowered to it |
 | `agent_pins` | `respect` | `respect` keeps the model an agent names for itself. `override` routes those agents by task too |
-| `main_effort` | on | Raises the main conversation's effort for a complex or harder request, for that turn. Off where an effort change would re-read the context uncached: Bedrock, Vertex, Foundry, `ANTHROPIC_BASE_URL`, a Claude apps gateway or another third-party provider, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`, and models other than Fable 5.1+, Opus 5.5, Sonnet 5.5 and Haiku 5.5. Turn it off yourself in a HIPAA organization, which the router doesn't detect, or if Claude Desktop reaches Claude through a Claude apps gateway, which it can't tell from a subscription there |
+| `main_effort` | off | When on, raises the main conversation's effort for a complex or harder request, for that turn. Off where an effort change would re-read the context uncached: Bedrock, Vertex, Foundry, `ANTHROPIC_BASE_URL`, a Claude apps gateway or another third-party provider, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`, and models other than Fable 5.1+, Opus 5.5, Sonnet 5.5 and Haiku 5.5. Leave it off in a HIPAA organization, which the router doesn't detect, or if Claude Desktop reaches Claude through a Claude apps gateway, which it can't tell from a subscription there |
 | `update_check` | on | The daily check of the changelog, docs index, model list and deprecations |
 | `verify_gate` | on | The two checks before a turn ends |
 
