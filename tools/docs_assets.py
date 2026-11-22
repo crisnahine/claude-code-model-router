@@ -46,7 +46,17 @@ def attr(s: str) -> str:
 
 
 def width_of(text: str, size: float, mono: bool = False, bold: bool = False) -> float:
+    """A safe upper bound on rendered width: per-character widths at or above the widest font in the stacks
+    (bold "standard" is 3.9em in SF Pro, 4.1em in Segoe UI and 4.2em in Arial; this gives it 4.6em)."""
     return len(text) * size * (0.61 if mono else (0.58 if bold else 0.54))
+
+
+LAYOUT = []  # columns that can't hold their widest label, reported by --check
+
+
+def room(where: str, end: float, limit: float):
+    if end > limit:
+        LAYOUT.append(f"{where}: text ends at {end:.0f}, past {limit:.0f}")
 
 
 def wrap(text: str, size: float, width: float, mono: bool = False) -> list:
@@ -332,6 +342,8 @@ def banner(slug, title, question, icon, group) -> str:
           'stroke-linejoin="round"/>'
         + f'<circle cx="814" cy="{yt}" r="7" class="rt dot"/>'
     )
+    room(f"banner-{slug}.svg: title", 127 + width_of(title, 32, bold=True), 610)
+    room(f"banner-{slug}.svg: question", 128 + width_of(question, 16), 610)
     label = f"{title}: {question}"
     return svg(w, h, f"{title}: Model Router documentation", label, body, css)
 
@@ -440,7 +452,11 @@ def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,),
     top = y + 52 * s + chip_h + 44 * s
     ys = {lv: top + (4 - i) * row_h for i, (lv, *_rest) in enumerate(LADDER)}
     rail_l, rail_r = x + 34 * s, x + 74 * s
-    col_level, col_model, col_effort = x + 96 * s, x + w * model_at, x + w - effort_right * s
+    col_level, col_effort = x + 96 * s, x + w - effort_right * s
+    label = max(width_of(lv, round(15 * s), bold=True) for lv in LEVELS)
+    model_w = max(width_of(m, round(15 * s)) for _, m, *_r in LADDER)
+    # the model's dot sits 12s left of its name, so the name starts past the widest label, a gap and the dot
+    col_model = max(x + w * model_at, col_level + label + 26 * s)
     panel_h = top - y + 4 * row_h + 42 * s
     out = [card(x, y, w, panel_h, rx=round(18 * s), cls="card")]
     out.append(text(x + 24 * s, y + 38 * s, "One agent call", "ink b", round(15 * s)))
@@ -461,10 +477,15 @@ def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,),
         out.append(p)
     # the redo tag on the standard row and the solved tag on the complex row
     sy, cy = ys["standard"], ys["complex"]
-    tag_x = col_model + tag_gap * s
+    tag_x = max(col_model + tag_gap * s, col_model + model_w + 12 * s)
     redo, _ = pill(tag_x, sy - 12 * s, "redo", cls="rt", tcls="tag", size=round(12 * s), h=round(24 * s), pad=10 * s)
     out.append(f'<g class="{prefix}redo">{redo}</g>')
-    solved, _ = pill(tag_x, cy - 12 * s, "solved", cls="r1", tcls="tag", size=round(12 * s), h=round(24 * s), pad=10 * s)
+    solved, tag_w = pill(tag_x, cy - 12 * s, "solved", cls="r1", tcls="tag", size=round(12 * s), h=round(24 * s), pad=10 * s)
+    room(f"ladder panel {prefix}: tags", tag_x + tag_w, col_effort - 6 * s)
+    effort_w = 2 * 10 * s + max(width_of(e, round(12.5 * s), True) for *_a, e, _n, _t in LADDER)
+    room(f"ladder panel {prefix}: effort", col_effort + effort_w, x + w - 10 * s)
+    room(f"ladder panel {prefix}: brief", x + 38 * s + max(width_of(b, round(12.5 * s), True) for b in brief_lines),
+         x + w - 24 * s)
     out.append(f'<g class="{prefix}solved">{solved}</g>')
     # the call itself
     tx = (rail_l + rail_r) / 2
@@ -538,7 +559,7 @@ def diagram_ladder() -> str:
     w, h = 920, 470
     out = [frame(w, h), text(32, 42, "The ladder", "ink b", 17),
            text(32, 66, "Balanced priority: the cheapest usable model strong enough for each level.", "mut", 13.5)]
-    for x, label in ((180, "Level"), (300, "Model"), (392, "Effort"), (490, "Model strength"), (612, "Typical subtask")):
+    for x, label in ((180, "Level"), (300, "Model"), (392, "Effort"), (482, "Model strength"), (590, "Typical subtask")):
         out.append(text(x, 104, label, "mut b", 12))
     out.append('<path d="M24 114H896" class="ln" stroke-width="1"/>')
     row = 56
@@ -553,9 +574,12 @@ def diagram_ladder() -> str:
         out.append(f'<circle cx="290" cy="{y}" r="5" class="r{i}"/>' + text(300, y + 5, model, "ink", 15))
         p, _ = pill(392, y - 12, effort, size=13)
         out.append(p)
-        out.append("".join(f'<rect x="{490 + k * 24}" y="{y - 4}" width="18" height="8" rx="4" '
+        out.append("".join(f'<rect x="{482 + k * 24}" y="{y - 4}" width="18" height="8" rx="4" '
                            f'class="{f"r{i}" if k < needs else "faint"}"/>' for k in range(4)))
-        out.append(text(612, y + 5, sub, "mut", 13))
+        out.append(text(590, y + 5, sub, "mut", 12.5))
+        room("ladder.svg: subtask", 590 + width_of(sub, 12.5), 900)
+        room("ladder.svg: level", 180 + width_of(lv, 15, bold=True), 290 - 5 - 6)
+        room("ladder.svg: model", 300 + width_of(model, 15), 392 - 8)
     # the call and its redo tag, which climb one rung on each redo
     cy = ys["complex"]
     out.append(f'<g class="lcall"><circle cx="124" cy="{cy}" r="13" class="halo" fill="none" stroke-width="5"/>'
@@ -922,6 +946,7 @@ def bench_chart(phone=False) -> str:
             y += 14
         else:
             out.append(text(32, y + 22, cls_name, "ink b", 13.5))
+            room("benchmark.svg: class name", 32 + width_of(cls_name, 13.5, bold=True), bar_x - 8)
         for k, v in enumerate(vals):
             by = y + k * (bh + gap)
             if not v:
@@ -1100,6 +1125,7 @@ SITE_ASSETS = ["logo-mark.svg", "logo.svg", "routing-call.svg", "badge-version.s
 
 
 def build() -> dict:
+    LAYOUT.clear()
     check_ladder_against_registry()
     v = version()
     files = {}
@@ -1181,7 +1207,7 @@ def palette_problems() -> list:
 def main(argv: list) -> int:
     check = "--check" in argv
     files = build()
-    problems = palette_problems()
+    problems = palette_problems() + LAYOUT
     for path, body in files.items():
         if path.endswith(".svg"):
             problems += problems_in_svg(path, body)
