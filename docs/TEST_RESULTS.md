@@ -30,7 +30,7 @@ Run 2026-11-22 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
 | Mod type check, `tsc` 6.0.3 | `tsc -p <dir>/tsconfig.json` | No errors |
-| Mod and its test, `tsc` 6.0.3 | `tsc -p <dir>/tsconfig.json --skipLibCheck`, with `@types/node` 22 | 1 error: `tests/mod/router.test.ts(46,40): error TS2322: Type '(e: unknown) => unknown' is not assignable to type '(x: object) => object'` |
+| Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 
 The 256 local tests are 231 in `tests/test_model_router.py`, 22 in `tests/test_bench.py` and 3 in `tests/test_traceability.py`. CI's run on `8ec8eec` had 180.
@@ -39,7 +39,9 @@ Not run: `claude plugin eval plugins/model-router --trust-plugin` (it runs live 
 
 ## Type-checking the mod
 
-The tsconfig lives outside the plugin folder, so nothing extra ships. Point `claude-code` at the mod API types the plugin-authoring skill writes for the installed build, and leave the DOM library out, since those types declare their own globals:
+`sh tests/mod/typecheck.sh` is the gate, and CI's `typecheck` job runs it. It downloads Claude Code's published mod API types (https://github.com/anthropics/claude-code/blob/main/mods/types/claude-code.d.ts) at a pinned commit, installs `typescript` 6.0.3 and `@types/node` 22.20.5 into a temporary folder, and runs `tsc` with the options in `tests/mod/tsconfig.json`. The published copy can be older than your Claude Code (https://code.claude.com/docs/en/plugins/mods/reference.md); move the pin when the mod starts using something newer.
+
+To check against the types your installed build writes, keep a tsconfig outside the plugin folder, so nothing extra ships. Point `claude-code` at the types the plugin-authoring skill writes for the installed build, and leave the DOM library out, since those types declare their own globals:
 
 ```json
 {
@@ -59,4 +61,4 @@ The tsconfig lives outside the plugin folder, so nothing extra ships. Point `cla
 }
 ```
 
-To check the test as well, add `tests/mod/router.test.ts` to `files`, install `@types/node` next to the tsconfig, set `"types": ["node"]`, and pass `--skipLibCheck`. The 2.1.330 types redeclare `URL`, `URLSearchParams` and other globals in ways `@types/node` rejects, so the library check fails inside the two `.d.ts` files. With `--skipLibCheck` the mod is clean and the test has the one error above.
+To check the test as well, add `tests/mod/router.test.ts` to `files`, install `@types/node` next to the tsconfig, set `"types": ["node"]`, and pass `--skipLibCheck`. The 2.1.330 types redeclare `URL`, `URLSearchParams` and other globals in ways `@types/node` rejects, so the library check fails inside the two `.d.ts` files. With `--skipLibCheck` both `.ts` files are clean.

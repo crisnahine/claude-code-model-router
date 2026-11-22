@@ -4,7 +4,7 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 
 ## Next
 
-1. Fix the open defects. The 0.1.0 changelog names Python 3.10, which CI doesn't test, and the mod's Node test fails a strict type check in its `submit` helper. Rows S8.2, S9.5.
+1. Fix the open defect: the 0.1.0 changelog names Python 3.10, which CI doesn't test. Row S8.2.
 2. Run the full cost and quality suite and publish it. The router's whole claim is the lowest cost per solved task at a high pass rate, and only a 12-run pilot measures it. Run every configuration 10 times on the pinned tasks once the maintainer agrees to the cost, add the missing baselines (one model at `high`, `opusplan`, the advisor), fan-outs, cache temperature and router overhead, and claim a win only where the data shows one. Rows S4.1, S4.12 to S4.15, S10.11, S11.8, S11.12, S14.1 to S14.3.
 3. Run live beyond the macOS terminal. Linux and Windows installs; Desktop, VS Code, JetBrains and the Agent SDK; Bedrock, Vertex and Foundry; acceptEdits and bypass modes; `allowManagedHooksOnly`; split-pane teammates. Record each in "Verified live". Rows S3.7 to S3.10, S3.13, S6.1.
 4. Decide how fast mode shows in the spend log. Claude Code doesn't say which requests ran fast, so the only full figure is its own estimate in `/cost`, which a mod can read. Rows S4.8, S10.7.

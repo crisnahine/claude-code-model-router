@@ -14,9 +14,10 @@ node --experimental-strip-types --test "tests/mod/*.test.ts"
 claude plugin validate --strict .
 claude plugin validate --strict plugins/model-router
 python3 tools/traceability.py
+sh tests/mod/typecheck.sh
 ```
 
-A change to `hooks/router.ts` or its test is also type-checked with `tsc` against the mod API types for the installed Claude Code, using a tsconfig kept outside the plugin folder ([docs/TEST_RESULTS.md](docs/TEST_RESULTS.md) has one). A change to routing reruns `claude plugin eval plugins/model-router --trust-plugin`; it runs live models, so record what it cost.
+`sh tests/mod/typecheck.sh` type-checks the mod and its test with `tsc` against Claude Code's published mod API types, pinned to a commit, with the tsconfig in `tests/mod`, outside the plugin folder; CI runs it too. To check against the types your installed Claude Code writes, see [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md). A change to routing reruns `claude plugin eval plugins/model-router --trust-plugin`; it runs live models, so record what it cost.
 
 The routing evals also run free in CI. Each case under `plugins/model-router/evals` states its route in `expected_outcome` (`level L, model M, effort E`), and `RoutingEvals` in `tests/test_model_router.py` checks it against what `explain` gives for the case's prompt, as part of the unittest gate above. To run only that check: `python3 -m unittest tests.test_model_router.RoutingEvals`. A change that moves a case's route on purpose updates its `expected_outcome` in the same commit.
 
