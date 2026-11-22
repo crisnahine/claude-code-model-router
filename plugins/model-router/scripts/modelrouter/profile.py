@@ -85,7 +85,7 @@ _LOOKUP = (r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|
            r"is there|does)\b")
 # What an agent is for, read from its name. Names are short and deliberate; descriptions
 # mention too many things in passing to be read this way.
-_HEAVY_NAME = r"architect|review|audit|secur|debug|design|plann|solver"
+_HEAVY_NAME = r"architect|review|audit|secur|debug|design|plann|(?:^|[-_])solver(?:$|[-_])"
 _LIGHT_NAME = r"explor|search|scout|find|lookup|locat|fetch|summar|format|lint|runner|verif|docs?[-_]|grep"
 LONG_BRIEF = 4000
 # Open-ended work with no known approach: the only level the ladder gives its strongest model.
@@ -178,7 +178,8 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
         level, why = "standard", why + ["thorough or long brief"]
     name = agent_type.split(":")[-1].lower()
     if re.search(_HEAVY_NAME, name):
-        floor = "hardest" if "solver" in name else "complex"  # a solver is for what the others couldn't do
+        # Our deep-solver is for what the others couldn't do; another plugin's solver is only a heavy role.
+        floor = "hardest" if agent_type.lower() == "model-router:deep-solver" else "complex"
         if LEVELS.index(level) < LEVELS.index(floor):
             level, why = floor, why + ["agent's role"]
     elif re.search(_LIGHT_NAME, name):
