@@ -1,0 +1,7 @@
+{
+  "class": "lookup",
+  "revision": 1,
+  "brief": "This app runs with REQUEST_TIMEOUT_MS=45000 and HTTP_TIMEOUT=10 in its environment and the repository's settings.ini. How many seconds does a Client created with Client() use as its timeout, and in which file is that final value decided? Don't change any files. End your reply with one line of the form `<seconds> <file path>`, for example `12 app/example.py`.",
+  "reference_answer": "The legacy HTTP_TIMEOUT is ignored; 45000 ms is 45 s, which the client caps.\n25 app/client.py",
+  "wrong_answer": "REQUEST_TIMEOUT_MS is in milliseconds.\n45 app/resolve.py"
+}

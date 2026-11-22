@@ -876,5 +876,154 @@ class Pilot(unittest.TestCase):
                     self.assertEqual(res.returncode == 0, row["passed"], row["config"])
 
 
+class HardTier(unittest.TestCase):
+    """Each harder task's check rejects the mistake the task is built around and takes any fair right answer."""
+
+    def check(self, task, work, answer=""):
+        return Tasks.check(self, task, work, answer)
+
+    def shipped(self, task_id, tmp):
+        return SuiteCoverage.shipped(self, task_id, tmp)
+
+    def source(self, task_id, rel):
+        return (run.BENCH / "tasks" / task_id / rel).read_text(encoding="utf-8")
+
+    def run_with(self, task_id, files, answer=""):
+        """The check's verdict on the shipped repo with the solution and then `files` written over it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped(task_id, tmp)
+            solution = task["dir"] / "solution"
+            if solution.is_dir():
+                shutil.copytree(solution, work, dirs_exist_ok=True)
+            for rel, text in files.items():
+                (work / rel).write_text(text if isinstance(text, str) else json.dumps(text), encoding="utf-8")
+            return self.check(task, work, answer)
+
+    def test_the_harder_tier_has_a_task_in_every_class(self):
+        hard = {"lookup-effective-timeout", "impl-semver-compare", "bugfix-split-amount", "cross-tenant-cache",
+                "security-prefix-check", "rootcause-cached-rates", "design-event-partitions",
+                "research-yanked-release"}
+        tasks = {t["id"]: t for t in run.load_tasks()}
+        self.assertEqual({tasks[t]["class"] for t in hard}, set(run.CLASSES))
+
+    def test_the_timeout_lookup_wants_the_capped_value_and_the_client(self):
+        for answer, expected in (("25 app/client.py", True), ("It is capped.\n`25 app/client.py`", True),
+                                 ("25 seconds, app/client.py", True), ("25.0 ./app/client.py", True),
+                                 ("<25 app/client.py>", True), ("<25> <app/client.py>", True), ("<45 app/client.py>", False),
+                                 ("45 app/client.py", False), ("45 app/resolve.py", False), ("25 app/limits.py", False),
+                                 ("10 app/env.py", False), ("45000 app/env.py", False),
+                                 ("25 app/client.py\n45 app/resolve.py", False),
+                                 ("The answer is 25 seconds in app/client.py.", False)):
+            with self.subTest(answer=answer):
+                self.assertEqual(self.run_with("lookup-effective-timeout", {}, answer), expected)
+
+    def test_semver_needs_numeric_identifiers_validation_and_the_prerelease_rule(self):
+        solution = self.source("impl-semver-compare", "solution/semver.py")
+        loose = solution.replace("(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)", "(\\d+)\\.(\\d+)\\.(\\d+)")
+        any_prerelease = solution.replace(
+            "    return version[1] is None or any(bound[1] is not None and bound[0] == version[0] for _, bound in "
+            "comparators)", "    return True")
+        caret_major_only = solution.replace(
+            "upper = (major + 1, 0, 0) if major else (0, minor + 1, 0) if minor else (0, 0, patch + 1)",
+            "upper = (major + 1, 0, 0)")
+        for name, text in (("leading zeros allowed", loose), ("prereleases always match", any_prerelease),
+                           ("caret ignores 0.x", caret_major_only)):
+            with self.subTest(name):
+                self.assertNotEqual(text, solution)
+                self.assertFalse(self.run_with("impl-semver-compare", {"semver.py": text}))
+
+    def test_an_allocation_that_rounds_floors_negatives_or_skips_validation_fails(self):
+        solution = self.source("bugfix-split-amount", "solution/money.py")
+        to_last = ("def allocate(total_cents, weights):\n    s = sum(weights)\n"
+                   "    shares = [total_cents * w // s for w in weights]\n    shares[-1] += total_cents - sum(shares)\n"
+                   "    return shares\n")
+        floored = solution.replace("total, sign = sum(weights), (-1 if total_cents < 0 else 1)",
+                                   "total, sign = sum(weights), 1").replace("abs(total_cents)", "total_cents")
+        unchecked = "\n".join(l for l in solution.splitlines() if "raise ValueError" not in l and "if (not " not in l
+                              and "or sum(weights) <= 0" not in l) + "\n"
+        for name, text in (("remainder to the last share", to_last), ("negatives floored", floored),
+                           ("no validation", unchecked)):
+            with self.subTest(name):
+                self.assertNotEqual(text, solution)
+                self.assertFalse(self.run_with("bugfix-split-amount", {"money.py": text}))
+
+    def test_tenant_keys_must_reach_every_hand_built_key_and_never_collide(self):
+        joined = "def price_key(tenant_id, product_id):\n    return f\"price:{tenant_id}:{product_id}\"\n"
+        report = ("from cache import store\n\n\ndef cached_products(tenant_id):\n    prefix = f\"price:{tenant_id}:\"\n"
+                  "    return sorted(k[len(prefix):] for k in store.keys() if k.startswith(prefix))\n")
+        sweep = ("from cache import store\n\n\ndef sweep(tenant_id, keep):\n    prefix = f\"price:{tenant_id}:\"\n"
+                 "    for key in store.keys():\n        if key.startswith(prefix) and key[len(prefix):] not in keep:\n"
+                 "            store.delete(key)\n")
+        events = self.source("cross-tenant-cache", "solution/admin/events.py")
+        missed_delete = events.replace(
+            "    db.remove(tenant_id, product_id)\n    store.delete(keys.price_key(tenant_id, product_id))",
+            "    db.remove(tenant_id, product_id)\n    store.delete(\"price:\" + product_id)")
+        untenanted_sweep = ("from cache import keys, store\n\n\ndef sweep(tenant_id, keep):\n"
+                            "    for key in store.keys():\n"
+                            "        if key[2] not in keep:\n            store.delete(key)\n")
+        for name, files in (("colliding string key", {"cache/keys.py": joined, "reports/cached.py": report,
+                                                      "jobs/sweep.py": sweep}),
+                            ("hand-built key left in the delete handler", {"admin/events.py": missed_delete}),
+                            ("sweep across tenants", {"jobs/sweep.py": untenanted_sweep})):
+            with self.subTest(name):
+                self.assertFalse(self.run_with("cross-tenant-cache", files))
+
+    def test_the_import_finding_names_the_tar_extract_and_not_a_decoy(self):
+        for finding, expected in (({"file": "files/importer.py", "line": 17}, True),
+                                  ({"file": "files/importer.py", "line": 15}, True),
+                                  ({"file": "files/importer.py", "line": 13}, False),
+                                  ({"file": "files/server.py", "line": 9}, False),
+                                  ({"file": "files/server.py", "line": 8}, False),
+                                  ({"file": "files/thumbs.py", "line": 23}, False),
+                                  ({"file": "files/thumbs.py", "line": 12}, False),
+                                  ({"file": "auth/tokens.py", "line": 22}, False)):
+            with self.subTest(finding=finding):
+                self.assertEqual(self.run_with("security-prefix-check", {"FINDING.json": finding}), expected)
+
+    def test_dropping_or_clearing_the_cache_does_not_fix_the_shared_rows(self):
+        rates = self.source("rootcause-cached-rates", "repo/rates.py")
+        pricing = self.source("rootcause-cached-rates", "repo/pricing.py")
+        uncached = rates.replace("@functools.lru_cache(maxsize=None)\n", "")
+        cleared = pricing.replace("    rows = rate_table(region)\n    for row in rows:",
+                                  "    rate_table.cache_clear()\n    rows = rate_table(region)\n    for row in rows:")
+        for name, files in (("cache dropped", {"rates.py": uncached, "pricing.py": pricing}),
+                            ("cache cleared on each sale", {"pricing.py": cleared})):
+            with self.subTest(name):
+                self.assertNotEqual(list(files.values())[0], rates if name == "cache dropped" else pricing)
+                self.assertFalse(self.run_with("rootcause-cached-rates", files))
+        copied = rates.replace("    return rows\n", "    return rows\n\n\n_cached = rate_table\n\n\n"
+                                                    "def rate_table(region):\n"
+                                                    "    return [dict(row) for row in _cached(region)]\n")
+        self.assertTrue(self.run_with("rootcause-cached-rates", {"rates.py": copied, "pricing.py": pricing}))
+
+    def test_the_topic_design_must_hold_every_number(self):
+        good = {"partitions": 30, "key": "order_id", "retention_hours": 80, "replication_factor": 3, "reasons": ["x"]}
+        for change, expected in (({}, True), ({"partitions": 36}, True), ({"retention_hours": 72}, True),
+                                 ({"retention_hours": 82}, True),
+                                 ({"partitions": 24}, False), ({"partitions": 22}, False), ({"partitions": 32}, False),
+                                 ({"partitions": 42}, False), ({"partitions": 12}, False),
+                                 ({"key": "customer_id"}, False), ({"replication_factor": 2}, False),
+                                 ({"replication_factor": 4}, False), ({"retention_hours": 168}, False),
+                                 ({"retention_hours": 48}, False), ({"partitions": 30.0}, False),
+                                 ({"extra": 1}, False)):
+            with self.subTest(change=change):
+                self.assertEqual(self.run_with("design-event-partitions", {"DESIGN.json": {**good, **change}}),
+                                 expected)
+
+    def test_the_release_research_needs_the_yank_the_errata_and_the_advisory(self):
+        good = {"stream_since": "2.3.1", "timeout_since": "2.4.2", "safe_since": "2.4.3",
+                "sources": ["docs/changelog/v2.3.1.md", "docs/errata.md", "docs/security/SA-2025-01.md"]}
+        for change, expected in (({}, True), ({"stream_since": "v2.3.1", "safe_since": "2.4.3"}, True),
+                                 ({"sources": ["./docs/changelog/v2.3.1.md:3", "errata.md", "security/SA-2025-01.md",
+                                               "docs/security/SA-2025-02.md"]}, True),
+                                 ({"stream_since": "2.3.0"}, False), ({"timeout_since": "2.4.0"}, False),
+                                 ({"safe_since": "2.4.2"}, False), ({"safe_since": "2.5.0"}, False),
+                                 ({"sources": ["docs/changelog/v2.3.1.md", "docs/errata.md"]}, False),
+                                 ({"sources": good["sources"] + ["docs/nope.md"]}, False)):
+            with self.subTest(change=change):
+                self.assertEqual(self.run_with("research-yanked-release", {"RESEARCH.json": {**good, **change}}),
+                                 expected)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,5 @@
+{
+  "class": "security-review",
+  "revision": 1,
+  "brief": "Review this repository for a security vulnerability that lets a caller read or write files outside the folders they're given. Write FINDING.json in the repository root with exactly the keys \"file\" (the vulnerable file's path from the repository root), \"line\" (the number of the one vulnerable line, an integer) and, if you like, \"why\" (one sentence)."
+}

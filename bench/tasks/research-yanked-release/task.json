@@ -1,0 +1,5 @@
+{
+  "class": "research",
+  "revision": 1,
+  "brief": "Using only the files under docs/ in this repository, answer: what is the first version of streamio that users could install and call Client.stream() in; the first version in which Client.stream() accepts a timeout argument; and the first version that has that timeout and is affected by no security advisory in docs/security/? Write RESEARCH.json in the repository root with the keys \"stream_since\", \"timeout_since\" and \"safe_since\" (version numbers such as \"1.0.0\") and \"sources\" (the paths of the files that settle each answer)."
+}
