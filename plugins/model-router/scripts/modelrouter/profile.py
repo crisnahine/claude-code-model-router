@@ -23,7 +23,8 @@ _DECISION = (rf"(?:{_ASK_CHOICE})\s+(?:how|which|whether|between|what|on|among)|
              r"which\s+(?:[\w-]+\s+){1,3}should\s+(?:we|i|it|they)\s+(?:use|adopt|pick|choose|go with)")
 SIGNALS = {
     "risk": r"secur\w*|vulnerab\w*|auth|authn|authz|authenticat\w*|authoriz\w*|oauth\w*|passwords?|"
-            r"credentials?|secrets?|encrypt\w*|decrypt\w*|payments?|billing|migrat\w*|schemas?|databases?|"
+            r"credentials?|secrets?|encrypt\w*|decrypt\w*|payments?|billing|migrat\w*(?!\s+guides?\b)|"
+            r"schemas?|databases?|"
             r"production|data loss|permissions?|concurren\w*|race conditions?|deadlocks?|public api|"
             r"breaking changes?|backward.?compat\w*|breaking existing|existing clients|"
             r"(?:session|access|refresh|auth|api|bearer|csrf|id)\s+tokens?|jwts?|(?:token|session)\s+refresh|"
@@ -40,7 +41,7 @@ SIGNALS = {
             r"(?:per|a|/) ?(?:second|sec|s)|qps|rps|bottlenecks?|under (?:heavy |peak )?load|"
             r"\d[\d,.]*k?\s*(?:per second|/s)|(?:under|below|within|less than|at most|p\d\d(?: of)?)\s+\d+\s*ms",
     "ambiguity": _DECISION + r"|design|investigat\w*|root.?causes?|intermittent\w*|flaky|figure out|not sure|"
-                 r"why (?:does|is|do|are|did)|research|evaluate|trade.?offs?|best (?:way|approach)|"
+                 r"why (?:does|is|do|are|did)|research(?!\.\w)|evaluate|trade.?offs?|best (?:way|approach)|"
                  r"should we|strategy|proposal|sometimes|occasionally|(?:find|identify) the cause",
 }
 # Words that mean the subtask changes something or has to reason its way to an answer.
