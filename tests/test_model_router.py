@@ -756,7 +756,8 @@ class Profile(unittest.TestCase):
         self.assertEqual(self.level("which plugins support hooks?"), "lookup")
         self.assertEqual(self.level("read the update-check option"), "lookup")
         self.assertEqual(self.level("list the routes. Make sure to include the line numbers"), "lookup")
-        self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "standard")
+        # The limit names what the fix must work around, so its risk counts.
+        self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "complex")
 
     def test_a_limit_ends_with_its_clause_and_keeps_the_task_after_it(self):
         self.assertEqual(self.level("Without changing the public API, fix the race condition in the payments "
@@ -767,6 +768,70 @@ class Profile(unittest.TestCase):
                                     "and verified."), "standard")
         self.assertEqual(self.level("No need to ask questions, just implement the OAuth2 login flow and secure "
                                     "the session cookies."), "complex")
+
+    def test_a_task_joined_to_a_limit_by_and_keeps_what_it_is_about(self):
+        for brief, signals in (
+                ("Do not touch tests and implement the payment retry.", ["risk"]),
+                ("Don't break the public API and fix the authentication bug in the login service.", ["risk"]),
+                ("Never log secrets and refactor the credentials loader across all services.", ["risk", "scope"]),
+                ("Do not use any new dependencies and migrate the database schema to the new billing tables.",
+                 ["risk"])):
+            result = profile.profile_call({"prompt": brief}, "general-purpose")
+            self.assertEqual((result["level"], result["signals"]), ("complex", signals), brief)
+        # A risk named only inside the limit still says what the work touches.
+        self.assertEqual(self.level("Rename the session helper without touching the auth tokens."), "complex")
+        self.assertEqual(self.level("Find the config loader. Do not touch the database."), "lookup")
+        # A limit's scope and ambiguity words don't count, so guardrails can't push a small edit to hardest.
+        self.assertEqual(self.level("Fix the typo in docs/setup.md. Do not touch the database schema, do not make "
+                                    "changes across other modules, and do not try to figure out the flaky CI job."),
+                         "complex")
+        # "And" ends a limit only before a verb that takes an object.
+        for brief in ("Find X. Do not add and remove files.", "List the routes; don't review and fix anything.",
+                      "Explain Y. Never plan and design new modules.",
+                      "List the CI jobs. Do not edit the Dockerfile and build scripts.",
+                      "Find the deploy script. Do not touch the production config and build scripts.",
+                      "Show the migration files. Do not touch the schema and update scripts."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+
+    def test_and_or_then_before_a_task_verb_ends_a_limit_without_an_article(self):
+        for brief in ("Do not touch tests and implement payment retries.",
+                      "Don't break the API and fix auth token refresh in the login service.",
+                      "Never log secrets and refactor credentials loading.",
+                      "Do not touch tests then implement the payment retry.",
+                      "Don't touch the UI and also fix the race condition in the payments worker.",
+                      "Never edit generated code and instead fix the auth bug in the source.",
+                      "Do not touch tests and just fix the auth bug.",
+                      "Do not touch tests and please fix the auth bug.",
+                      "Do not touch tests and debug why payments fail intermittently."):
+            self.assertEqual(self.level(brief), "complex", brief)
+        # A verb that is often a noun ends the limit only with an object after it.
+        for brief in ("List the CI jobs. Do not edit the Dockerfile and build scripts.",
+                      "Find the deploy script. Do not touch the production config and build scripts.",
+                      "Show the migration files. Do not touch the schema and update scripts."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+        # So does a task verb in a compound noun such as "debug logs" or "audit trails".
+        for brief in ("List the endpoints. Do not touch the auth module and debug logs.",
+                      "Find the config. Do not delete the settings and audit logs.",
+                      "Show the release notes. Do not edit the changelog and upgrade notes.",
+                      "Find the tests. Do not edit the auth fixtures and debug output.",
+                      "Explain the logger. Do not touch production and audit trails."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+        # Scripts, builds, records, paths and tools are what these verbs take as an object, not compounds.
+        for brief in ("Do not touch tests and fix scripts that rotate the production credentials.",
+                      "Never log secrets and migrate records in the billing database.",
+                      "Do not change the UI and fix builds that leak secrets.",
+                      "Do not touch tests and refactor tools that handle payments.",
+                      "Do not touch tests and fix paths in the auth middleware."):
+            result = profile.profile_call({"prompt": brief}, "general-purpose")
+            self.assertEqual((result["level"], result["signals"]), ("complex", ["risk"]), brief)
+
+    def test_joins_inside_a_limit_stay_fast(self):
+        started = time.monotonic()
+        self.level("do not touch" + " tests and fix" * 20_000)
+        self.level("do not add" + " and remove" * 20_000 + " files")
+        self.level("never x" + " and then just" * 20_000 + " fix it")
+        self.level("do not touch tests" + " " * 64_000 + "and fix it")
+        self.assertLess(time.monotonic() - started, 0.5)
 
     def test_a_limit_over_a_list_of_single_verbs_stays_a_limit(self):
         for brief in ("Find where the retry logic lives. Do not add, remove or rename files.",
