@@ -248,6 +248,8 @@ class OptionText(unittest.TestCase):
         for case in ("CLAUDE_CODE_EFFORT_LEVEL", "Bedrock", "Vertex", "Foundry", "ANTHROPIC_BASE_URL",
                      "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "Fable 5.1", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5"):
             self.assertIn(case, text)
+        for gap in ("HIPAA", "Claude Desktop"):  # cases the router can't detect, so the user is told
+            self.assertIn(gap, text)
 
 
 class Store(Sandbox):
@@ -1146,6 +1148,13 @@ class Mod(Sandbox):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         pick = self.spawn("general-purpose", LOOKUP)
         self.assertEqual((pick["model"], pick["effort"]), (None, "low"))
+
+    def test_turn_effort_stays_off_without_a_first_party_credential(self):
+        session.record("s1", "claude-opus-5-5")
+        turn = lambda **extra: hooks.mod_turn({"session_id": "s1", "text": HARD, **extra})  # noqa: E731
+        self.assertIsNone(turn(first_party=False))  # a gateway: an effort change re-reads the context
+        self.assertEqual(turn(first_party=True), {"level": "complex", "effort": "high"})
+        self.assertEqual(turn(), {"level": "complex", "effort": "high"})  # not known: raised as before
 
     def test_turn_effort_rises_for_hard_requests_only(self):
         session.record("s1", "claude-opus-5-5")

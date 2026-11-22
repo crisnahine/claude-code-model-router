@@ -357,7 +357,8 @@ def mod_turn(hook_input: dict) -> dict | None:
     model = hook_input.get("model")
     model = model if upstream.version_of(model) else session.model(session_id)
     if (options.mode != "auto" or not options.main_effort or not is_user_prompt(text)
-            or options.effort_level or not _effort_keeps_cache(options, model)):
+            or options.effort_level or hook_input.get("first_party") is False
+            or not _effort_keeps_cache(options, model)):
         return None
     level = profile_prompt(text)["level"]
     effort = ((config.get("main") or {}).get("effort") or {}).get(level)

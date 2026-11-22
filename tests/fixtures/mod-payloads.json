@@ -19,7 +19,8 @@
   "mod-turn": {
     "session_id": "s1",
     "text": "fix the auth migration across every service",
-    "model": "claude-opus-5-5"
+    "model": "claude-opus-5-5",
+    "first_party": true
   },
   "mod-usage": {
     "session_id": "s1",

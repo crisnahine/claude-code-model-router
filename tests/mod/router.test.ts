@@ -22,7 +22,11 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}) 
   }
   const $ = {
     plugin: { root: '/plugin' },
-    session: { model: async () => 'claude-opus-5-5' },
+    session: {
+      model: async () => 'claude-opus-5-5',
+      authorize: async (): Promise<{ handle: string; kind: string } | null> => ({ handle: 'h1', kind: 'bearer' }),
+      surfaces: async (): Promise<readonly string[]> => ['terminal'],
+    },
     process: {
       hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: 's1', CLAUDE_PLUGIN_DATA: '/tmp/x' }),
       run: async (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) => {
@@ -121,6 +125,35 @@ test('the main loop effort only raises and ends with the turn', async () => {
   assert.equal((await mod.step(stepEvent({ effort: 'max' }))).effort, 'max')
   await mod.complete(completeEvent({}))
   assert.equal((await mod.step(stepEvent({ effort: 'medium' }))).effort, 'medium')
+})
+
+test('the main loop says whether the session holds a first-party credential', async () => {
+  const mod = load()
+  await mod.start({ turnId: 't1', text: 'fix the auth migration' })
+  assert.equal(mod.calls[0]!.stdin.first_party, true)
+  mod.$.session.authorize = async () => null  // a gateway or a third-party provider
+  await mod.start({ turnId: 't2', text: 'fix the auth migration' })
+  assert.equal(mod.calls[1]!.stdin.first_party, false)
+  mod.$.session.authorize = async () => { throw new Error('denied') }
+  await mod.start({ turnId: 't3', text: 'fix the auth migration' })
+  assert.equal('first_party' in mod.calls[2]!.stdin, false)
+})
+
+test('a missing credential says nothing in the desktop app, which never lends its sign-in', async () => {
+  const mod = load()
+  mod.$.session.authorize = async () => null
+  mod.$.session.surfaces = async () => ['desktop']
+  await mod.start({ turnId: 't1', text: 'fix the auth migration' })
+  assert.equal('first_party' in mod.calls[0]!.stdin, false)
+})
+
+test('the credential is not asked for when main_effort is off', async () => {
+  const mod = load({}, { main_effort: false })
+  let asked = false
+  mod.$.session.authorize = async () => { asked = true; return null }
+  await mod.start({ turnId: 't1', text: 'fix the auth migration' })
+  assert.equal(asked, false)
+  assert.equal('first_party' in mod.calls[0]!.stdin, false)
 })
 
 test('a lower main loop effort is ignored', async () => {
