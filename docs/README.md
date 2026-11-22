@@ -10,7 +10,7 @@ Every delivery item the project keeps, where it lives, and whether it exists yet
 | 4 | Supported Claude Code versions, surfaces, platforms and providers | [README.md](../README.md) "Compatibility", [ARCHITECTURE.md](ARCHITECTURE.md) "Verified live" | Yes |
 | 5 | Install and usage | [README.md](../README.md) "Install" | Yes |
 | 6 | Automated test results | [TEST_RESULTS.md](TEST_RESULTS.md) | Yes |
-| 7 | Security assessment | `SECURITY.md` | Not yet; in progress |
+| 7 | Security assessment | [SECURITY.md](SECURITY.md) | Yes |
 | 8 | Reproducible cost and quality results, with raw data | [BENCHMARKS.md](BENCHMARKS.md), raw data under [bench/results/](../bench/results/) | Yes, a pilot only |
 | 9 | Hook latency and state-size measurements | `BENCHMARKS.md` | Not yet; in progress |
 | 10 | Remaining defects and incomplete requirements | [RELEASE_READINESS.md](RELEASE_READINESS.md) "Remaining defects and incomplete requirements" | Yes |

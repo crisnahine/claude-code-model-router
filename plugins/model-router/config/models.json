@@ -30,6 +30,20 @@
   "aliases": {
     "best": "opus"
   },
+  "newest": {
+    "$comment": "The newest full model ID of each family that some provider's alias lags behind. Every provider in older_aliases takes this Claude API form: Bedrock and Agent Platform map it to their own ID, Foundry sends it as the deployment name, and Claude Platform on AWS and Claude Models on Google Cloud use it as is (https://platform.claude.com/docs/en/about-claude/models/overview.md).",
+    "opus": "claude-opus-5-5",
+    "sonnet": "claude-sonnet-5-5",
+    "haiku": "claude-haiku-5-5"
+  },
+  "older_aliases": {
+    "$comment": "Per provider, the families whose alias resolves to an older model than newest names (the alias table in https://code.claude.com/docs/en/model-config.md). The mod sends the newest ID for these instead of the alias.",
+    "anthropic_aws": ["sonnet", "haiku"],
+    "anthropic_google_cloud": ["haiku"],
+    "bedrock": ["sonnet", "haiku"],
+    "vertex": ["sonnet", "haiku"],
+    "foundry": ["opus", "sonnet", "haiku"]
+  },
   "levels": {
     "lookup": {
       "needs": 1,
@@ -76,6 +90,27 @@
       "cache_write_1h": 20
     },
     "claude-fable-5": {
+      "input": 10,
+      "output": 50,
+      "cache_read": 1,
+      "cache_write": 12.5,
+      "cache_write_1h": 20
+    },
+    "claude-mythos-5-2": {
+      "input": 8,
+      "output": 40,
+      "cache_read": 0.2,
+      "cache_write": 10,
+      "cache_write_1h": 16
+    },
+    "claude-mythos-5-1": {
+      "input": 10,
+      "output": 50,
+      "cache_read": 0.25,
+      "cache_write": 12.5,
+      "cache_write_1h": 20
+    },
+    "claude-mythos-5": {
       "input": 10,
       "output": 50,
       "cache_read": 1,

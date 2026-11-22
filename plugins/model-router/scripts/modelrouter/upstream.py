@@ -3,13 +3,10 @@ what was last reviewed."""
 from __future__ import annotations
 
 import hashlib
-import http.client
 import json
 import re
 import threading
 import time
-import urllib.request
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from . import config as cfg
@@ -41,14 +38,16 @@ def load() -> dict:
     return store.load_state_file(path())
 
 
-class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
-        return None  # urllib copies Authorization onto the next host
-
-
 def http_get(url: str, headers: dict | None = None) -> str:
+    import http.client
+    import urllib.request  # about 20 ms, so only the daily fetch pays it
+
+    class RefuseRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None  # urllib copies Authorization onto the next host
+
     req = urllib.request.Request(url, headers={"User-Agent": "model-router-plugin/0.1", **(headers or {})})
-    handlers = [_RefuseRedirect] if "Authorization" in (headers or {}) else []
+    handlers = [RefuseRedirect] if "Authorization" in (headers or {}) else []
     deadline = time.monotonic() + HTTP_TIMEOUT
     # urllib's timeout covers each socket read, so a server that drips bytes never trips it.
     with urllib.request.build_opener(*handlers).open(req, timeout=HTTP_TIMEOUT) as resp:  # noqa: S310 (fixed https URLs)
@@ -64,6 +63,7 @@ def http_get(url: str, headers: dict | None = None) -> str:
 
 
 def parse_rss(xml_text: str, limit: int = 30) -> list[dict]:
+    import xml.etree.ElementTree as ET
     items = []
     for item in ET.fromstring(xml_text).iter("item"):
         content = ""

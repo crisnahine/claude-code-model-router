@@ -202,8 +202,8 @@ class Shipped(unittest.TestCase):
             self.assertNotIn("options", option)  # not accepted by the oldest supported Claude Code
 
     def test_ci_tests_the_oldest_python_the_launcher_accepts(self):
-        launcher = (SCRIPTS / "model-router.sh").read_text(encoding="utf-8")
-        floor = "%s.%s" % re.search(r"sys\.version_info < \((\d+), (\d+)\)", launcher).groups()
+        entry = (SCRIPTS / "model-router.py").read_text(encoding="utf-8")
+        floor = "%s.%s" % re.search(r"sys\.version_info < \((\d+), (\d+)\)", entry).groups()
         ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         matrix = re.findall(r'"(\d+\.\d+)"', re.search(r"python: \[([^\]]*)\]", ci).group(1))
         self.assertEqual(min(matrix, key=lambda v: tuple(map(int, v.split(".")))), floor)
@@ -756,7 +756,8 @@ class Profile(unittest.TestCase):
         self.assertEqual(self.level("which plugins support hooks?"), "lookup")
         self.assertEqual(self.level("read the update-check option"), "lookup")
         self.assertEqual(self.level("list the routes. Make sure to include the line numbers"), "lookup")
-        self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "standard")
+        # The limit names what the fix must work around, so its risk counts.
+        self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "complex")
 
     def test_a_limit_ends_with_its_clause_and_keeps_the_task_after_it(self):
         self.assertEqual(self.level("Without changing the public API, fix the race condition in the payments "
@@ -767,6 +768,70 @@ class Profile(unittest.TestCase):
                                     "and verified."), "standard")
         self.assertEqual(self.level("No need to ask questions, just implement the OAuth2 login flow and secure "
                                     "the session cookies."), "complex")
+
+    def test_a_task_joined_to_a_limit_by_and_keeps_what_it_is_about(self):
+        for brief, signals in (
+                ("Do not touch tests and implement the payment retry.", ["risk"]),
+                ("Don't break the public API and fix the authentication bug in the login service.", ["risk"]),
+                ("Never log secrets and refactor the credentials loader across all services.", ["risk", "scope"]),
+                ("Do not use any new dependencies and migrate the database schema to the new billing tables.",
+                 ["risk"])):
+            result = profile.profile_call({"prompt": brief}, "general-purpose")
+            self.assertEqual((result["level"], result["signals"]), ("complex", signals), brief)
+        # A risk named only inside the limit still says what the work touches.
+        self.assertEqual(self.level("Rename the session helper without touching the auth tokens."), "complex")
+        self.assertEqual(self.level("Find the config loader. Do not touch the database."), "lookup")
+        # A limit's scope and ambiguity words don't count, so guardrails can't push a small edit to hardest.
+        self.assertEqual(self.level("Fix the typo in docs/setup.md. Do not touch the database schema, do not make "
+                                    "changes across other modules, and do not try to figure out the flaky CI job."),
+                         "complex")
+        # "And" ends a limit only before a verb that takes an object.
+        for brief in ("Find X. Do not add and remove files.", "List the routes; don't review and fix anything.",
+                      "Explain Y. Never plan and design new modules.",
+                      "List the CI jobs. Do not edit the Dockerfile and build scripts.",
+                      "Find the deploy script. Do not touch the production config and build scripts.",
+                      "Show the migration files. Do not touch the schema and update scripts."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+
+    def test_and_or_then_before_a_task_verb_ends_a_limit_without_an_article(self):
+        for brief in ("Do not touch tests and implement payment retries.",
+                      "Don't break the API and fix auth token refresh in the login service.",
+                      "Never log secrets and refactor credentials loading.",
+                      "Do not touch tests then implement the payment retry.",
+                      "Don't touch the UI and also fix the race condition in the payments worker.",
+                      "Never edit generated code and instead fix the auth bug in the source.",
+                      "Do not touch tests and just fix the auth bug.",
+                      "Do not touch tests and please fix the auth bug.",
+                      "Do not touch tests and debug why payments fail intermittently."):
+            self.assertEqual(self.level(brief), "complex", brief)
+        # A verb that is often a noun ends the limit only with an object after it.
+        for brief in ("List the CI jobs. Do not edit the Dockerfile and build scripts.",
+                      "Find the deploy script. Do not touch the production config and build scripts.",
+                      "Show the migration files. Do not touch the schema and update scripts."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+        # So does a task verb in a compound noun such as "debug logs" or "audit trails".
+        for brief in ("List the endpoints. Do not touch the auth module and debug logs.",
+                      "Find the config. Do not delete the settings and audit logs.",
+                      "Show the release notes. Do not edit the changelog and upgrade notes.",
+                      "Find the tests. Do not edit the auth fixtures and debug output.",
+                      "Explain the logger. Do not touch production and audit trails."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+        # Scripts, builds, records, paths and tools are what these verbs take as an object, not compounds.
+        for brief in ("Do not touch tests and fix scripts that rotate the production credentials.",
+                      "Never log secrets and migrate records in the billing database.",
+                      "Do not change the UI and fix builds that leak secrets.",
+                      "Do not touch tests and refactor tools that handle payments.",
+                      "Do not touch tests and fix paths in the auth middleware."):
+            result = profile.profile_call({"prompt": brief}, "general-purpose")
+            self.assertEqual((result["level"], result["signals"]), ("complex", ["risk"]), brief)
+
+    def test_joins_inside_a_limit_stay_fast(self):
+        started = time.monotonic()
+        self.level("do not touch" + " tests and fix" * 20_000)
+        self.level("do not add" + " and remove" * 20_000 + " files")
+        self.level("never x" + " and then just" * 20_000 + " fix it")
+        self.level("do not touch tests" + " " * 64_000 + "and fix it")
+        self.assertLess(time.monotonic() - started, 0.5)
 
     def test_a_limit_over_a_list_of_single_verbs_stays_a_limit(self):
         for brief in ("Find where the retry logic lives. Do not add, remove or rename files.",
@@ -1452,6 +1517,92 @@ class Mod(Sandbox):
             self.done("rev", LOOKUP, "claude-opus-5-5")
             hooks.agent_failed({**self.call("rev", LOOKUP), "error": "API Error: 404 not_found_error: model"})
         self.assertEqual(registry.health()["opus"]["fail"], 1)
+
+
+class NewestOnProviders(Sandbox):
+    """Where a provider's alias resolves to an older model (the alias table in
+    https://code.claude.com/docs/en/model-config.md), the mod sends the family's newest full ID."""
+
+    LAGS = {"bedrock": ("sonnet", "haiku"), "vertex": ("sonnet", "haiku"), "foundry": ("opus", "sonnet", "haiku"),
+            "anthropic_aws": ("sonnet", "haiku"), "anthropic_google_cloud": ("haiku",)}
+    NEWEST = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
+
+    def spawn(self, prompt: str, agent: str = "general-purpose", **extra) -> tuple[dict | None, dict]:
+        hook_input = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                      "kind": "subagent",
+                      "tool_input": {"subagent_type": agent, "prompt": prompt, "description": "d", **extra}}
+        return hooks.mod_spawn(hook_input), hook_input
+
+    def model(self, prompt: str, **extra) -> str | None:
+        out = self.spawn(prompt, **extra)[0]
+        return out["model"] if out else None
+
+    def test_the_provider_comes_from_the_documented_switches(self):
+        for flags, want in (((), None), (("bedrock",), "bedrock"), (("vertex",), "vertex"), (("foundry",), "foundry"),
+                            (("anthropic_aws",), "anthropic_aws"),
+                            (("anthropic_google_cloud",), "anthropic_google_cloud"),
+                            (("bedrock", "anthropic_aws"), "bedrock"), (("foundry", "anthropic_aws"), "foundry"),
+                            (("anthropic_google_cloud", "vertex"), "anthropic_google_cloud"),
+                            (("mantle",), None), (("bedrock", "mantle"), None), (("bedrock", "vertex"), None)):
+            with mock.patch.dict(os.environ, {f"CLAUDE_CODE_USE_{f.upper()}": "1" for f in flags}):
+                self.assertEqual(settings.resolve().provider, want, flags)
+
+    def test_each_lagging_alias_gets_its_familys_newest_id(self):
+        for provider, lagging in self.LAGS.items():
+            with mock.patch.dict(os.environ, {f"CLAUDE_CODE_USE_{provider.upper()}": "1"}):
+                for family, prompt in (("opus", HARD), ("sonnet", BUILD), ("haiku", LOOKUP)):
+                    want = self.NEWEST[family] if family in lagging else family
+                    self.assertEqual(self.model(prompt), want, (provider, family))
+        self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "sonnet"))  # the Anthropic API
+
+    def test_the_shipped_ids_belong_to_their_families_and_are_priced(self):
+        config = cfg.base_config()
+        self.assertEqual({p: tuple(f) for p, f in config["older_aliases"].items() if not p.startswith("$")}, self.LAGS)
+        for family, model_id in config["newest"].items():
+            if not family.startswith("$"):
+                self.assertEqual((registry.family(config, model_id), model_id), (family, self.NEWEST[family]))
+                self.assertIsNotNone(registry.price(config, model_id))
+
+    def test_a_pin_an_allowlist_a_denial_or_overrides_keep_the_alias(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "claude-sonnet-5-5"))
+        del os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"]
+        for managed, want in (({"availableModels": ["haiku", "sonnet", "opus"]}, "claude-haiku-5-5"),
+                              ({"availableModels": ["claude-haiku-5", "sonnet"]}, "claude-haiku-5-5"),
+                              ({"availableModels": ["claude-haiku-5", "sonnet"], "availableModelsMatch": "exact"}, "haiku"),
+                              ({"availableModels": ["claude-haiku-4-5", "sonnet", "opus"]}, "haiku"),
+                              ({"deniedModels": ["claude-haiku-5-5"]}, "haiku")):
+            self.managed.write_text(json.dumps(managed))
+            self.assertEqual(self.model(LOOKUP), want, managed)
+        self.managed.unlink()
+        (self.home / "settings.json").write_text(json.dumps({"modelOverrides": {"claude-haiku-4-5": "arn:aws:x"}}))
+        self.assertEqual(self.model(LOOKUP), "haiku")
+
+    def test_a_version_the_caller_or_the_agent_names_is_left_alone(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        self.assertNotEqual(self.model(LOOKUP, model="claude-haiku-4-5"), "claude-haiku-5-5")
+        self.agent("old-haiku", "claude-haiku-4-5")
+        out = self.spawn(LOOKUP, agent="old-haiku")[0]
+        self.assertNotEqual(out and out["model"], "claude-haiku-5-5")
+        self.agent("any-haiku", "haiku")
+        self.assertEqual(self.spawn(LOOKUP, agent="any-haiku")[0]["model"], "claude-haiku-5-5")
+
+    def test_an_id_the_provider_rejects_falls_back_to_the_alias(self):
+        os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
+        out, hook_input = self.spawn(LOOKUP)
+        self.assertEqual(out["model"], "claude-haiku-5-5")
+        failed = hooks.agent_failed({**hook_input, "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})
+        self.assertIn("claude-haiku-5-5", failed["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(self.ledger()[-1]["model"], "claude-haiku-5-5")  # the model_error row names the ID
+        self.assertEqual(self.model(LOOKUP), "haiku")
+        self.assertTrue(registry.healthy("haiku"))
+
+    def test_the_agent_call_fallback_sends_only_aliases(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        hook_input = {"session_id": "s9", "cwd": str(self.project),
+                      "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
+        self.assertEqual(hooks.pre_agent(hook_input)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
 
 
 class ModPayloads(Sandbox):
@@ -2302,6 +2453,67 @@ class ResetCommand(Sandbox):
         self.assertFalse((self.data / "learned.json").exists())
 
 
+class SlashSkills(Sandbox):
+    """A skill typed as /name is profiled by what it asks for: its arguments and its body."""
+
+    HARD_BODY = ("Base directory for this skill: /p/.claude/skills/hard\n\nInvestigate the race condition in the "
+                 "auth migration across every service, find the root cause and redesign the locking.")
+    LOOKUP_BODY = "Base directory for this skill: /p/.claude/skills/where\n\nList the files under src."
+    LINE = "<command-message>{0}</command-message>\n<command-name>/{0}</command-name>\n<command-args>{1}</command-args>"
+
+    def turn(self, name: str, args: str, body: str | None, **extra) -> dict | None:
+        command = {"name": name, "args": args, **({"body": body} if body is not None else {})}
+        return hooks.mod_turn({"session_id": "s1", "text": self.LINE.format(name, args), "command": command, **extra})
+
+    def test_a_hard_skill_raises_the_turn_and_a_lookup_does_not(self):
+        self.session_on("claude-opus-5-5")
+        self.assertEqual(self.turn("hard", "please check src too", self.HARD_BODY)["effort"], "xhigh")
+        self.assertIsNone(self.turn("where", "", self.LOOKUP_BODY))
+        self.assertEqual(self.turn("plain", HARD, None), {"level": "complex", "effort": "high"})  # args alone
+
+    def test_a_long_ordinary_skill_body_is_not_a_hard_request(self):
+        self.session_on("claude-opus-5-5")
+        body = "Never commit secrets or credentials. " + "Write a clear commit message for the staged change. " * 40
+        self.assertGreater(len(body), 1500)
+        self.assertIsNone(self.turn("commit", "", body))
+        self.assertIsNone(self.turn("commit", "", "Review the staged diff in production style.\n" + body))
+        # The cut only works while the opening is too short for profile_prompt's own length rule.
+        self.assertNotIn("scope", profile.profile_prompt("note " * (hooks._SKILL_BODY_CHARS // 5))["signals"])
+
+    def test_a_teammate_message_still_does_not_raise(self):
+        self.session_on("claude-opus-5-5")
+        self.assertIsNone(self.turn("hard", "", self.HARD_BODY, origin="peer"))
+        delivered = "Another Claude session sent a message:\n<cross-session-message from=\"x\">\n" + HARD
+        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": delivered}))
+        # A command left over from a submit whose turn never started can't stand in for another turn's text.
+        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": delivered,
+                                          "command": {"name": "rename", "args": HARD}}))
+        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": self.LINE.format("other", ""),
+                                          "command": {"name": "rename", "args": HARD}}))
+
+    def test_the_settings_hook_reads_a_project_or_user_skill_it_can_find(self):
+        self.session_on("claude-haiku-5-5")
+        skills = self.project / ".claude" / "skills" / "hard"
+        skills.mkdir(parents=True)
+        (skills / "SKILL.md").write_text("---\nname: hard\ndescription: x\n---\n" + self.HARD_BODY.split("\n\n")[1])
+        commands = self.home / "commands"
+        commands.mkdir(parents=True)
+        (commands / "where.md").write_text("List the files under src.")
+        level = lambda prompt: (hooks.user_prompt({"session_id": "s1", "prompt": prompt, "cwd": str(self.project)}),  # noqa: E731
+                                store.load_entry("prompts", "s1")["level"])[1]
+        self.assertEqual(level("/hard please check src too"), "hardest")
+        self.assertEqual(level("/where"), "lookup")
+        self.assertEqual(level("/elsewhere:unknown " + LOOKUP), "lookup")  # not found: the typed line is profiled
+        (skills / "SKILL.md").write_bytes("\ufeff---\r\nname: hard\r\ndescription: secrets schema production\r\n---\r\n"
+                                          "List the files under src.\r\n".encode("utf-8"))
+        self.assertEqual(level("/hard"), "lookup")  # a BOM and CRLF frontmatter is still left out
+        if hasattr(os, "mkfifo"):
+            fifo = self.project / ".claude" / "skills" / "pipe"
+            fifo.mkdir()
+            os.mkfifo(fifo / "SKILL.md")
+            self.assertEqual(level("/pipe " + LOOKUP), "lookup")  # never opened, so the hook can't hang
+
+
 @unittest.skipUnless(shutil.which("sh"), "needs sh")
 class Launcher(Sandbox):
     def test_launcher_runs_hooks_and_commands(self):
@@ -2312,6 +2524,81 @@ class Launcher(Sandbox):
         self.assertEqual(json.loads(res.stdout)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
         res = subprocess.run(["sh", launcher, "policy"], capture_output=True, text=True, env={**os.environ})
         self.assertIn("Subtask level", res.stdout)
+
+    def fake_pythons(self, python3: str, python: str) -> dict:
+        """A PATH whose python3 and python are scripts that log each start and then run `real`
+        (the interpreter running this test) or exit as a too-old one would."""
+        folder = Path(self.tmp.name) / "bin"
+        folder.mkdir()
+        log = folder / "starts.log"
+        real = Path(sys.executable).as_posix()
+        bodies = {"real": f'exec "{real}" "$@"', "old": "exit 87",
+                  "broken": "echo 'Python was not found' >&2; exit 49"}  # a Store stub or an unset shim
+        for name, kind in (("python3", python3), ("python", python)):
+            body = bodies[kind]
+            script = folder / name
+            script.write_bytes(f'#!/bin/sh\necho {name} >> "{log.as_posix()}"\n{body}\n'.encode())
+            script.chmod(0o755)
+        env = {**os.environ, "PATH": f"{folder}{os.pathsep}/usr/bin{os.pathsep}/bin"}
+        return {"env": env, "log": log}
+
+    def test_a_hook_starts_python_once(self):
+        self.session_on("claude-opus-5-5")
+        fake = self.fake_pythons("real", "real")
+        res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), "pre-agent"],
+                             input=json.dumps(self.call("general-purpose", LOOKUP)), capture_output=True,
+                             text=True, env=fake["env"])
+        self.assertEqual(json.loads(res.stdout)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
+        self.assertEqual(fake["log"].read_text().split(), ["python3"])
+
+    def test_a_too_old_or_broken_python3_falls_through_to_python(self):
+        self.session_on("claude-opus-5-5")
+        for kind in ("old", "broken"):
+            with self.subTest(python3=kind):
+                fake = self.fake_pythons(kind, "real")
+                res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), "pre-agent"],
+                                     input=json.dumps(self.call("general-purpose", LOOKUP)), capture_output=True,
+                                     text=True, env=fake["env"])
+                self.assertEqual(json.loads(res.stdout)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
+                shutil.rmtree(fake["log"].parent)
+
+    def test_with_no_new_enough_python_hooks_pass_and_commands_explain(self):
+        launcher = (SCRIPTS / "model-router.sh").as_posix()
+        for kind in ("old", "broken"):
+            with self.subTest(pythons=kind):
+                fake = self.fake_pythons(kind, kind)
+                hook = subprocess.run(["sh", launcher, "pre-agent"], input="{}", capture_output=True, text=True,
+                                      env=fake["env"])
+                self.assertEqual((hook.returncode, hook.stdout), (0, ""))
+                command = subprocess.run(["sh", launcher, "policy"], capture_output=True, text=True,
+                                         env=fake["env"])
+                self.assertEqual(command.returncode, 0)
+                self.assertIn("needs Python 3.9 or later", command.stdout)
+                shutil.rmtree(fake["log"].parent)
+
+    def test_a_real_command_error_keeps_its_exit_code(self):
+        fake = self.fake_pythons("real", "real")
+        res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), "--no-such-flag"],
+                             capture_output=True, text=True, env=fake["env"])
+        self.assertEqual(res.returncode, 2)  # argparse's code, not the fallback's 0
+        self.assertEqual(fake["log"].read_text().split(), ["python3", "python3"])  # the run, then the probe
+
+    def test_hooks_dont_load_the_network_or_xml_modules(self):
+        probe = ("import sys; sys.path.insert(0, sys.argv[1]); import modelrouter.cli; "
+                 "print(sorted(m for m in ('urllib.request', 'http.client', 'xml.etree.ElementTree') if m in sys.modules))")
+        res = subprocess.run([sys.executable, "-c", probe, str(SCRIPTS)], capture_output=True, text=True)
+        self.assertEqual(res.stdout.strip(), "[]", res.stderr)
+
+    def test_the_entry_point_exits_87_on_an_old_python_before_importing_anything(self):
+        source = (SCRIPTS / "model-router.py").read_text(encoding="utf-8")
+        head = source.split("from pathlib")[0]
+        self.assertIn("sys.version_info < (3, 9)", head)
+        self.assertIn("87", head)
+        # An old Python compiles the whole file before the check runs: any newer syntax would
+        # exit 1, which the launcher reads as a real error rather than "try the next one".
+        code = "\n".join(line.split("#")[0] for line in source.splitlines() if not line.lstrip().startswith(('"""', "#")))
+        self.assertTrue(source.isascii())
+        self.assertNotRegex(code, r"""\bf["']|:=|->|\w+\s*:\s*\w+\s*=""")
 
 
 class ReadmeDiagrams(unittest.TestCase):
@@ -2447,6 +2734,54 @@ class MachineReadable(Sandbox):
         self.assertEqual(data["set_aside"], [str(p) for p in store.set_aside()])
         self.assertRegex(data["set_aside"][0], r"learned\.json\.corrupt-")
         self.assertEqual(data["newer_files"], [str(newer)])
+
+
+@unittest.skipUnless(shutil.which("sh"), "needs sh")
+class OverheadBench(unittest.TestCase):
+    def test_the_overhead_bench_reports_every_hook_and_state_file(self):
+        run = subprocess.run([sys.executable, str(ROOT / "bench" / "overhead.py"), "--runs", "1", "--calls", "40",
+                              "--json"], capture_output=True, text=True, timeout=300)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        report = json.loads(run.stdout)
+        hooks_json = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+        commands = {h["args"][-1] for groups in hooks_json.values() for group in groups for h in group["hooks"]}
+        timed = {row["command"] for row in report["hooks"]}
+        self.assertEqual(timed, commands - {"refresh-cache"})  # async, and it would use the network
+        for row in [report["floor"], *report["hooks"], *report["mod"]]:
+            for key in ("p50_ms", "p95_ms", "runs"):
+                self.assertIn(key, row, row)
+        for row in report["hooks"]:
+            self.assertIn(row["phase"], ("cold", "warm"))
+        files = {row["file"]: row for row in report["state"]}
+        for name in ("ledger.jsonl", "learned.json", "state.json"):
+            self.assertIn(name, files)
+            self.assertIn("bytes_per_1000_calls", files[name])
+            self.assertIs(files[name]["bounded"], True, name)
+        for key in ("python", "platform", "claude_code"):
+            self.assertIn(key, report["machine"])
+
+
+class PriceTable(unittest.TestCase):
+    """Prices from https://platform.claude.com/docs/en/about-claude/pricing.md (checked 2026-11-22)."""
+
+    # The pricing page lists no rate for this one.
+    UNLISTED = {"claude-mythos-preview"}
+
+    def test_every_model_still_in_service_has_a_price(self):
+        config = cfg.load_config()
+        lifecycle = json.loads((ROOT / "compat" / "baseline.json").read_text(encoding="utf-8"))["lifecycle"]
+        missing = [model for model, info in lifecycle.items()
+                   if info.get("state") in ("Active", "Deprecated") and model not in self.UNLISTED
+                   and registry.price(config, model) is None]
+        self.assertEqual(missing, [])
+
+    def test_mythos_is_priced_like_its_fable_twin(self):
+        config = cfg.load_config()
+        for version, rates in (("5-2", (8, 40, 0.2, 10, 16)), ("5-1", (10, 50, 0.25, 12.5, 20)),
+                               ("5", (10, 50, 1, 12.5, 20))):
+            price = registry.price(config, f"claude-mythos-{version}")
+            self.assertEqual(tuple(price[k] for k in ("input", "output", "cache_read", "cache_write",
+                                                      "cache_write_1h")), rates, version)
 
 
 if __name__ == "__main__":
