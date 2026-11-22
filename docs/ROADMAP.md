@@ -1,3 +1,9 @@
+<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<p align="center"><img src="assets/banner-roadmap.svg" width="880" alt="Roadmap: What gets built next, and why first?"></p>
+
+<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="RELEASE_READINESS.md">Release readiness</a> &nbsp;&middot;&nbsp; Next: <a href="../CHANGELOG.md">Changelog</a></p>
+<!-- End of page head. -->
+
 # Roadmap
 
 What to build next, highest user value first. It starts from what 0.1.0 left undone and adds the gaps in [RELEASE_READINESS.md](RELEASE_READINESS.md). Row IDs point into [TRACEABILITY.md](TRACEABILITY.md). Move an item to "Done since 0.1.0" when its rows pass.

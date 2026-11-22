@@ -1,3 +1,9 @@
+<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<p align="center"><img src="assets/banner-traceability.svg" width="880" alt="Traceability: Where is each requirement, and is it met?"></p>
+
+<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="TEST_RESULTS.md">Test results</a> &nbsp;&middot;&nbsp; Next: <a href="RELEASE_READINESS.md">Release readiness</a></p>
+<!-- End of page head. -->
+
 # Requirement traceability
 
 One row per requirement the project holds itself to, numbered by the section of the maintainer's project brief it comes from (Sections 2 to 14). Checked on 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `e00a9a6`, on Claude Code 2.1.330. The CI evidence is the run on `8ec8eec`; nothing after it has run in CI yet.
