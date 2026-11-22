@@ -32,7 +32,7 @@ Run 2026-11-22 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0
 | Mod type check against the installed build's types, `tsc` 6.0.3 | `tsc -p <dir>/tsconfig.json` | Not rerun on this commit |
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
-| Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.83 |
+| Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78 |
 
 The 296 local tests are 262 in `tests/test_model_router.py`, 28 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py` and 3 in `tests/test_traceability.py`. The routing corpus test prints "2 of 219 briefs over-routed (0.9%), budget 2%; 5 known under-routes". CI's run on `8ec8eec` had 180.
 
@@ -55,9 +55,9 @@ Same clean environment as below. Each case tells Claude to make one `Agent` call
 | :- | :- | :- | -: | -: | -: |
 | `route-lookup-subagent` | Sonnet | `ran-on-haiku` | 1.0, 3 of 3 (Haiku each run) | 0, 0 of 3 (Sonnet each run) | $0.11 / $0.14 |
 | `route-review-subagent` | Haiku | `ran-on-opus` | 1.0, 3 of 3 (Opus each run) | 0, 0 of 3 (Haiku each run) | $0.10 / $0.01 |
-| `route-redo-escalates` | Haiku | `called-twice`, `redo-ran-on-sonnet` | 1.0, 3 of 3 (Haiku, then Sonnet) | 0.5, 0 of 3 (Haiku twice) | $0.06 / $0.01 |
+| `route-redo-escalates` | Haiku | `called-twice`, `first-ran-on-haiku`, `redo-ran-on-sonnet` | 1.0, 3 of 3 (Haiku, then Sonnet) | 0.67, 0 of 3 (Haiku twice) | $0.09 / $0.01 |
 
-Total $0.43 (no LLM grader, so no judge cost), 139 seconds, not partial; mean score delta 0.83. The trace carries each subagent's model but not its effort, and the spend log lives in the plugin's data folder, which a grader can't read (https://code.claude.com/docs/en/plugin-evals.md#what-a-grader-can-look-at), so effort and spend rows are covered by the unit tests and the live runs in `docs/ARCHITECTURE.md`, not here.
+Total $0.43 (no LLM grader, so no judge cost), 139 seconds, not partial. `first-ran-on-haiku` was added afterwards and only `route-redo-escalates` was rerun (`--case route-redo-escalates`, $0.10, 60 seconds); its row shows that rerun. The grader checks that a run on Haiku is in the trace, and in every run the Haiku result came first. With it the case's delta is 0.33, so the suite's mean delta is 0.78. The trace carries each subagent's model but not its effort, and the spend log lives in the plugin's data folder, which a grader can't read (https://code.claude.com/docs/en/plugin-evals.md#what-a-grader-can-look-at), so effort and spend rows are covered by the unit tests and the live runs in `docs/ARCHITECTURE.md`, not here.
 
 ### The first run, on the cases these replaced
 
