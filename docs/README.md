@@ -12,7 +12,7 @@ Every delivery item the project keeps, where it lives, and whether it exists yet
 | 6 | Automated test results | [TEST_RESULTS.md](TEST_RESULTS.md) | Yes |
 | 7 | Security assessment | [SECURITY.md](SECURITY.md) | Yes |
 | 8 | Reproducible cost and quality results, with raw data | [BENCHMARKS.md](BENCHMARKS.md), raw data under [bench/results/](../bench/results/) | Yes, a pilot only |
-| 9 | Hook latency and state-size measurements | `BENCHMARKS.md` | Not yet; in progress |
+| 9 | Hook latency and state-size measurements | [PERFORMANCE.md](PERFORMANCE.md) | Yes |
 | 10 | Remaining defects and incomplete requirements | [RELEASE_READINESS.md](RELEASE_READINESS.md) "Remaining defects and incomplete requirements" | Yes |
 | 11 | Release-readiness assessment | [RELEASE_READINESS.md](RELEASE_READINESS.md) | Yes |
 | 12 | Roadmap | [ROADMAP.md](ROADMAP.md) "Next" | Yes |

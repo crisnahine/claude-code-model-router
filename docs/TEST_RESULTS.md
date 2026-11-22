@@ -21,19 +21,19 @@ The test counts come from each job's log (`gh run view --job <id> --log`). Commi
 
 ## Local
 
-Run 2026-11-22 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0`, up to `76bddd9` plus the change that updated this file.
+Run 2026-11-22 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0`, up to `ea8bf9a` plus the change that updated this file.
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 256 tests OK |
-| Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 17 of 17 pass |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 296 tests OK |
+| Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 18 of 18 pass |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
-| Mod type check, `tsc` 6.0.3 | `tsc -p <dir>/tsconfig.json` | No errors |
+| Mod type check against the installed build's types, `tsc` 6.0.3 | `tsc -p <dir>/tsconfig.json` | Not rerun on this commit |
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 
-The 256 local tests are 231 in `tests/test_model_router.py`, 22 in `tests/test_bench.py` and 3 in `tests/test_traceability.py`. CI's run on `8ec8eec` had 180.
+The 296 local tests are 262 in `tests/test_model_router.py`, 28 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py` and 3 in `tests/test_traceability.py`. The routing corpus test prints "2 of 219 briefs over-routed (0.9%), budget 2%; 5 known under-routes". CI's run on `8ec8eec` had 180.
 
 Not run: `claude plugin eval plugins/model-router --trust-plugin` (it runs live models and spends money, and has not been rerun since the routing evals were written), and live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live"). The benchmark's pilot runs are in [BENCHMARKS.md](BENCHMARKS.md).
 
