@@ -43,6 +43,7 @@ class Facts:
     parent: str | None = None  # the model an agent without one inherits, when known
     earlier: dict | None = None  # calls.finished_run: this call's finished run in this request
     raises: dict = field(default_factory=dict)  # learn.raises: the learned raise of each level
+    floor: str | None = None  # the request's level, for a hand-off to a strong role agent
 
 
 def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
@@ -69,6 +70,8 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
     rule = (config.get("agents") or {}).get(agent) or {}
     profile = profile_call(tool_input, agent)
     level = rule.get("level") or profile["level"]
+    if facts.floor in cfg.LEVELS and cfg.LEVELS.index(facts.floor) > cfg.LEVELS.index(level):
+        level = facts.floor
     done = facts.earlier
     redo = bool(done and done.get("level") in cfg.LEVELS and not tool_input.get("model"))
     if redo:
