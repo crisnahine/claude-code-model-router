@@ -218,6 +218,7 @@ The top-level `schema` key is `<shape>/<version>`. A new key keeps the version, 
 | `models` | One entry per registry model, weakest first: `model`, `last_ran_as` (`null` if never reported), `status` and `detail` (the table's text). `status` is `working`, `not_used`, `above_cap`, `project_model_under_cap`, `not_permitted` or `routed_around` |
 | `levels` | Levels the feedback loop has data for: `level`, `routed_calls`, `votes_too_low`, `raised` |
 | `doc_aliases`, `not_in_registry` | Model aliases in the current docs, and the families among them the registry lacks |
+| `set_aside`, `newer_files` | Paths of state files set aside because they could not be read, and of state files a newer release wrote, which are only read (see State) |
 
 ## What is out of reach, or left alone on purpose
 

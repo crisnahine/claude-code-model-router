@@ -2063,6 +2063,19 @@ class MachineReadable(Sandbox):
         store.save_json(upstream.path(), {"cache": {"aliases": "saga"}})  # a corrupt cache lists nothing
         self.assertEqual(self.json_out("models")["not_in_registry"], [])
 
+    def test_models_json_names_state_files_set_aside_or_left_read_only(self):
+        data = self.json_out("models")
+        self.assertEqual((data["set_aside"], data["newer_files"]), ([], []))
+        learned = store.data_dir() / "learned.json"
+        learned.write_text('{"lookup": {"calls": 4,')
+        store.update_dict(learned, lambda data: None)
+        newer = store.data_dir() / "prompts.json"
+        newer.write_text(json.dumps({"schema": store.SCHEMA + 1}))
+        data = self.json_out("models")
+        self.assertEqual(data["set_aside"], [str(p) for p in store.set_aside()])
+        self.assertRegex(data["set_aside"][0], r"learned\.json\.corrupt-")
+        self.assertEqual(data["newer_files"], [str(newer)])
+
 
 if __name__ == "__main__":
     unittest.main()
