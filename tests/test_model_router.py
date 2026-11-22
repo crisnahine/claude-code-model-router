@@ -3446,5 +3446,19 @@ class DesignDecisions(unittest.TestCase):
                          "lookup")
 
 
+class SolverNames(unittest.TestCase):
+    """Only this plugin's own deep-solver is floored at hardest; another plugin's solver is a heavy role, a resolver none."""
+
+    def level(self, agent: str) -> str:
+        return profile.profile_call({"prompt": "List the files in ./puzzles."}, agent)["level"]
+
+    def test_only_the_deep_solver_starts_at_hardest(self):
+        self.assertEqual(self.level("model-router:deep-solver"), "hardest")
+        self.assertEqual(self.level("sudoku-solver"), "complex")
+        self.assertEqual(self.level("acme:equation-solver"), "complex")
+        self.assertEqual(self.level("dependency-resolver"), "lookup")
+        self.assertEqual(self.level("acme:deep-solver"), "complex")
+
+
 if __name__ == "__main__":
     unittest.main()
