@@ -278,6 +278,25 @@ class Store(Sandbox):
         store.save_entry("pending", "s1", {"a": {"model": "haiku"}})
         self.assertNotIn("\n", (self.data / "pending.json").read_text(encoding="utf-8"))
 
+    def test_a_row_appended_while_the_ledger_is_trimmed_is_kept(self):
+        import threading
+        path = store.ledger_path()
+        path.write_text("".join(json.dumps({"n": i, "pad": "x" * 20}) + "\n" for i in range(100)))
+        real = store.write_atomic
+
+        def slow_trim(target, text):
+            racer = threading.Thread(target=store.append_ledger, args=({"event": "racer"},))
+            racer.start()
+            time.sleep(0.2)  # another hook appends between the trim's read and its replace
+            real(target, text)
+            self.racer = racer
+
+        with mock.patch.object(store, "LEDGER_MAX_BYTES", path.stat().st_size), \
+                mock.patch.object(store, "write_atomic", slow_trim):
+            store.append_ledger({"event": "spawn"})
+        self.racer.join()
+        self.assertIn("racer", [row.get("event") for row in store.read_ledger()])
+
     def test_two_hooks_trimming_the_ledger_at_once_keep_half_of_it(self):
         path = store.ledger_path()
         path.write_text("".join(json.dumps({"n": i, "pad": "x" * 20}) + "\n" for i in range(100)))
