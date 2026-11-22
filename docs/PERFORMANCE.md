@@ -36,7 +36,7 @@ Times are wall time per call in milliseconds, over 30 runs.
 
 `refresh-cache` isn't timed: it is async, so nothing waits for it, and it would fetch over the network.
 
-The launcher's own work with no router code after it takes 48 ms (p50) here. That is `sh`, the version probe (one interpreter start) and a second interpreter start, and it is the floor under every hook. The router's own imports and work add about 40 to 45 ms on top.
+The launcher's own work with no router code after it is the floor under every hook: `sh`, the version probe (one interpreter start) and a second interpreter start. Its p50 moved between 45 and 79 ms over eight runs of 30 on this machine, while its p95 stayed at 83 to 89 ms, so it is bimodal. A bare `python3 -c pass` is a steady 15 to 20 ms p50, which points at the version probe and the `sh` exec as the noisy part. The router's own imports and work are the warm p50 minus the floor: anywhere from about 8 to 55 ms across these runs, so the split between launcher and router is not settled by these numbers.
 
 Every hook stays far under its timeout in `hooks/hooks.json`: 5 seconds for `user-prompt`, 10 for the rest. Warm p95 moves by 10 to 40 ms from one run to the next on this machine, so treat the p95 column as a range.
 
@@ -68,12 +68,12 @@ The mod's own handlers were also timed in Node with the runtime's answer returne
 | `ledger.jsonl` | 773,494 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
 | `prompts.json` | 178,447 | yes | The 200 most recently written sessions (`store.KEEP_ENTRIES`) |
 | `done.json` | 112,775 | yes | Same, and 100 calls per session (`calls.KEPT`) |
-| `edits.json` | 3,120 | yes | 200 sessions |
-| `sessions.json` | 2,911 | yes | 200 sessions |
-| `mod.json` | 1,738 | yes | 200 sessions |
-| `launched.json` | 1,614 | yes | 200 sessions |
-| `pending.json` | 812 | yes | 200 sessions |
+| `edits.json` | 3,120 | yes | The 200 most recently written sessions |
+| `sessions.json` | 2,911 | yes | Same |
+| `mod.json` | 1,738 | yes | Same |
+| `launched.json` | 1,614 | yes | Same |
+| `pending.json` | 812 | yes | Same |
 | `state.json` | 685 | yes | One record of options |
 | `learned.json` | 144 | yes | One entry per level |
 
-"Bounded" was checked, not read from the code. The script lowers the three caps and runs past them twice, once with many short sessions and once with one long session. It records each file's largest size during each round. A file counts as bounded when its peak in the second round, which runs twice as many calls, is at most 25% (or 2 KB) above its peak in the first.
+"Bounded" was checked, not read from the code. The script lowers the three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them twice: once with one call per session, 40 sessions and then 80, so every per-session file holds far more sessions than its cap, and once with one long session. It records each file's largest size during each round. A file counts as bounded when its peak in the second round, which runs twice as many calls, is at most 25% plus 256 bytes above its peak in the first. The check was proven by removing each trim in turn: without the session cap, all seven per-session files report unbounded; without the ledger's halving, `ledger.jsonl` does; without the per-session call cap, `done.json` and `prompts.json` do.

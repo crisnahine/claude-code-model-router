@@ -246,16 +246,16 @@ def in_process(base: Path, calls: int, runs: int):
 
     # Bound check: lower every cap, run past them twice, and compare each round's peak size,
     # so a file trimmed by halving isn't judged by where its saw-tooth happens to stand.
-    # Once with many short sessions, once with one long session.
+    # Once with one call per session, so the per-session files hold far more sessions than
+    # their cap, and once with one long session, for the per-session lists.
     caps = {(store, "LEDGER_MAX_BYTES"): 16 * 1024, (store, "KEEP_ENTRIES"): 5, (call_log, "KEPT"): 10}
     saved = {key: getattr(*key) for key in caps}
     verdict: dict = {}
-    for per_session in (10, 10 ** 9):
+    for per_session, rounds in ((1, max(40, calls // 5)), (10 ** 9, max(50, calls // 5))):
         os.environ["CLAUDE_PLUGIN_DATA"] = str(base / f"bound{per_session}")
         for (module, name), value in caps.items():
             setattr(module, name, value)
         try:
-            rounds = max(50, calls // 5)
             first: dict = {}
             simulate(rounds, per_session, watch=first)
             second: dict = {}
@@ -265,7 +265,8 @@ def in_process(base: Path, calls: int, runs: int):
                 setattr(module, name, value)
         for name in set(first) | set(second):
             before, after = first.get(name, 0), second.get(name, 0)
-            verdict[name] = verdict.get(name, True) and after <= max(before * 1.25, before + 2048)
+            # Slack scaled to the file, so a file of tiny entries still shows its growth.
+            verdict[name] = verdict.get(name, True) and after <= before * 1.25 + 256
     os.environ["CLAUDE_PLUGIN_DATA"] = str(box.root / "data")
 
     state = [{"file": name, "bytes_after": grown.get(name, 0),
