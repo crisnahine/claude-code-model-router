@@ -1,0 +1,4 @@
+{
+  "class": "bugfix",
+  "brief": "page_slice in pages.py returns the wrong page. The cause: pages are numbered from 1, but the code computes the start as if they were numbered from 0. Fix it, and keep the ValueError for a page or size below 1. test_pages.py shows the expected behaviour."
+}

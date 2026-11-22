@@ -186,6 +186,8 @@ plugins/model-router/
 tests/                         unit tests, run on Linux, macOS and Windows
 compat/baseline.json           the Claude Code version, docs index, model list and model status last reviewed
 docs/research/                 the primary-source research the design rests on
+docs/BENCHMARKS.md             cost and quality results against Claude Code without the plugin
+bench/                         the benchmark: pinned tasks, configurations, runner and analysis (not shipped)
 ```
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the design and the reasons behind it.
