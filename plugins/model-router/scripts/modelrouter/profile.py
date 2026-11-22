@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 
-from .config import LEVELS
+from .config import LEVELS, PLUGIN_NAME
 
 # Two or more systems named in a list ("across the API, the web client and ...") are cross-module work.
 _SYSTEM = r"(?:services?|clients?|api|gateway|backend|frontend|workers?|apps?|layers?|modules?)"
@@ -179,7 +179,7 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
     name = agent_type.split(":")[-1].lower()
     if re.search(_HEAVY_NAME, name):
         # Our deep-solver is for what the others couldn't do; another plugin's solver is only a heavy role.
-        floor = "hardest" if agent_type.lower() == "model-router:deep-solver" else "complex"
+        floor = "hardest" if agent_type.lower() == f"{PLUGIN_NAME}:deep-solver" else "complex"
         if LEVELS.index(level) < LEVELS.index(floor):
             level, why = floor, why + ["agent's role"]
     elif re.search(_LIGHT_NAME, name):
