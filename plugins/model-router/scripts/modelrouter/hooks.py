@@ -136,14 +136,12 @@ def session_start(hook_input: dict) -> dict | None:
     mode = options.mode
     name = cfg.PLUGIN_NAME
     if mode == "auto":
-        top = registry.ceiling(config, cfg.project_dir(hook_input), options.cap)
         # Only what Claude must act on: every word here is in context for the whole session.
         parts.append(
-            "Model Router is on: it picks the model and effort of every subagent, teammate and workflow agent "
-            f"from its brief (strongest model in use: {top}). Don't pass `model` or `effort` on Agent calls "
-            "unless the user asked for one; a named one is kept. Say in the brief what makes a subtask hard "
-            "(security, several modules, an unclear cause). If a result falls short, re-issue the same call "
-            "unchanged: it runs one level higher."
+            "Model Router sets every subagent's, teammate's and workflow agent's model and effort from its brief. "
+            "Don't pass `model` or `effort` on Agent calls unless the user asked; a named one is kept. Say what "
+            "makes a subtask hard (security, several modules, an unclear cause). If a result falls short, "
+            "re-issue the same call unchanged: it runs one level higher."
         )
         if options.force:
             pinned = options.subagent_model or "one model"
@@ -219,12 +217,15 @@ def user_prompt(hook_input: dict) -> dict | None:
         notes.append(f"Routing estimate for this request: {level}{why}, about {need}-level reasoning. "
                      "It reads only the wording; route by what the code shows.")
     elif below:
+        agent = gates.strong_agent(config, need, level)
+        asked = "; you will be asked to before finishing" if options.strong_agent_gate else ""
+        hand = (f"Get the plan or decision (design, root cause, the risky choice) from {agent} rather than settling "
+                f"it inline{asked}. It writes nothing, so make the change yourself." if gates.writes_nothing(agent)
+                else f"Hand the hard thinking (design, root cause, the risky decision) to {agent} rather than "
+                f"settling it inline{asked}.")
         notes.append(
             f"This request looks {level}{why}: about {need}-level reasoning, and this conversation runs on "
-            f"{current}. Hand the hard thinking (design, root cause, the risky decision) to "
-            f"{gates.strong_agent(config, need, level)} rather than settling it inline"
-            f"{'; you will be asked to before finishing' if options.strong_agent_gate else ''}. "
-            "If the code shows the task is simpler, say so instead."
+            f"{current}. {hand} If the code shows the task is simpler, say so instead."
         )
     if wanted and mode == "auto":
         notes.append(f"If the user is asking for the {wanted} model here, pass model: \"{wanted}\" on the "

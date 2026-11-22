@@ -72,16 +72,21 @@ The mod's own handlers were also timed in Node with the runtime's answer returne
 
 ## Context the plugin adds
 
-The plugin's text is in the model's context, so it is paid for on every request. Measured 2026-11-22 on Claude Code 2.1.330 with a headless Haiku run that only says "ok" (`--setting-sources project`, a plugins root of its own): the first request's prompt (input plus cache read plus cache write) was 18,523 tokens without the plugin, 19,738 with it before the cut below, and 19,251 after, so the plugin adds 728 tokens where it added 1,215.
+The plugin's text is in the main loop's context. Measured 2026-11-23 on Claude Code 2.1.330 with a headless Sonnet run that only says "ok" (`--setting-sources project`, a plugins root of its own): the first request's prompt (input plus cache read plus cache write) was 19,286 tokens without the plugin, 20,013 with it before the cut below, and 19,969 after. So the plugin adds 683 tokens where it added 728. An earlier cut, measured on Haiku, took it from 1,215 to 728. Each source was measured the same way, with that source removed: no `agents/` folder, no `skills/` folder, or no session-start hook.
 
-| Item | Before | After |
-| :- | -: | -: |
-| Session-start note (`hooks.session_start`) | about 386 tokens | about 104 |
-| The seven role agents' names and descriptions in the agent list | about 385 | about 286 |
-| The `route` skill's description (the other four skills set `disable-model-invocation`, so theirs aren't in context, https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill) | about 61 | about 49 |
-| The hard-request note, only when the request needs more than the session's model | about 122 | about 97 |
+| Source | When it's paid | Before | After |
+| :- | :- | -: | -: |
+| Session-start note (`hooks.session_start`) | Once per session | 147 tokens | 128 |
+| The seven role agents' names, descriptions and tools in the agent list | Once per session | 493 | 493 |
+| The `route` skill's listing (the other four skills set `disable-model-invocation`, so theirs aren't in context, https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill) | Once per session | 84 | 61 |
+| The hard-request note | Per prompt, only when the request needs more than the session's model | about 88 | about 100 |
+| The stronger-agent check at `Stop` | Once per request, only when that check fires | about 97 | about 107 |
 
-Per-item figures are the rendered text at about 4 characters a token; the totals are measured. The note keeps what Claude must act on: don't name a model or effort, say what makes a subtask hard, and re-issue a call that fell short. The architect's, reviewer's and deep-solver's descriptions keep a line on when not to use them (about 30 tokens), since Claude delegates from descriptions (https://code.claude.com/docs/en/sub-agents.md) and those are the costliest agents.
+The first three are measured; the last two are rendered text at about 4 characters a token. On the fallback path, where the mod doesn't load, each routed spawn also gets a one-line note.
+
+A once-per-session source is written to the prompt cache on the session's first request and read from it on every later one, until the cache lapses or the conversation is compacted (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md). On Sonnet 5.5 the 683 tokens cost about $0.0027 at the one-hour cache-write price, then $0.00007 per later request. No subagent gets them: in kept transcripts of the benchmark, the main loop's first request was 730 tokens bigger with the plugin, and the subagents' first requests weren't. In the 0.1.1 benchmark on a Sonnet session, the router lost by $0.009 to $0.012 a run in implementation, bugfix, cross-module and security review. This text is about $0.003 of that. In the kept security-review pair, the router's subagent, run at `high` effort for its complex level, cost $0.0064 more than `defaults`' at the session's default effort.
+
+The note keeps what Claude must act on: don't name a model or effort, say what makes a subtask hard, and re-issue a call that fell short. It no longer names the strongest model in use, which changed nothing Claude does; `/model-router:route` says it. The `route` skill lost its `when_to_use` line, which repeated its description. The role-agent descriptions were trimmed, and the five that can't write files now say so, so Claude doesn't hand one of them a task whose result is a file; those two changes cancel out in tokens. The architect's, reviewer's and deep-solver's descriptions keep a line on when not to use them, since Claude delegates from descriptions (https://code.claude.com/docs/en/sub-agents.md) and those are the costliest agents. The two conditional notes grew by a sentence for the same reason: the architect is asked for the plan, decision or check, and Claude writes the result itself.
 
 ## State size
 
