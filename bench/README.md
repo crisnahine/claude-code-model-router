@@ -21,6 +21,8 @@ Leave out `--tasks` or `--configs` to run all of them. `--model` sets the sessio
 
 Each run gets a fresh copy of the task's files in a temporary directory, never the repository. It loads no user settings, CLAUDE.md, auto memory or MCP servers, and the runner drops any `CLAUDE_CODE_*` variable it inherits except the provider switches (`CLAUDE_CODE_USE_*`) and `CLAUDE_CODE_OAUTH_TOKEN`. A run that loads the router writes the plugin's state to `~/.claude/plugins/data/model-router-inline/`, as any `--plugin-dir` session does, so the runner copies that folder to `model-router-inline.bench-saved` next to it before each router run, puts it back afterwards and records hashes of its `state.json` and `learned.json`. If a bench is killed mid-run, that copy holds the real state: copy it back before the next bench, which refuses to start while it exists. Don't run other `--plugin-dir` sessions during a bench: what they write there during a router run is lost.
 
+Sessions are saved, as Claude Code saves them by default, because the router's Stop check reads the transcripts to see whether a test ran. After each run the runner deletes that run's folder under `~/.claude/projects/`, the one named after its scratch copy, and nothing else.
+
 ## Adding a task
 
 Make `tasks/<id>/` with `task.json` (`class` is one of the names in `run.CLASSES`), `repo/`, `check.py`, and `solution/` or `reference_answer`, plus a `wrong_answer` for a lookup. Run `python3 -m unittest tests.test_bench`. A check must be deterministic: the same files and answer always give the same exit code.
