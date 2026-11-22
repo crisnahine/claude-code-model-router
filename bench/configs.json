@@ -1,5 +1,13 @@
 [
   {
+    "id": "plugin-next",
+    "description": "Model Router at 780ee86, the fixes after 0.1.1 (research-grade frontier wording, read-only role agents that say so, a smaller session note), with its own defaults",
+    "plugin": true,
+    "env": {},
+    "plugin_ref": "780ee86",
+    "price_model": "sonnet"
+  },
+  {
     "id": "plugin",
     "description": "Model Router loaded with --plugin-dir",
     "plugin": true,

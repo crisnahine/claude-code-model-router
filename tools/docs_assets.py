@@ -881,11 +881,11 @@ def diagram_stop_checks() -> str:
 
 BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(config id, legend label, color class)])
     "claude-opus-5-5": ("Opus 5.5 session", [
-        ("plugin", "Model Router", "rt"),
+        ("plugin-next", "Model Router", "rt"),
         ("defaults", "Claude Code defaults", "faintbar"),
     ]),
     "sonnet": ("Sonnet 5.5 session", [
-        ("plugin", "Model Router", "rt"),
+        ("plugin-next", "Model Router", "rt"),
         ("defaults", "Claude Code defaults", "faintbar"),
         ("sonnet-medium", "All subagents on Sonnet, medium", "r2"),
         ("sonnet-high", "All subagents on Sonnet, high", "r3"),

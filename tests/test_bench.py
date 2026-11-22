@@ -368,7 +368,7 @@ class Sessions(unittest.TestCase):
     """Runs keep their transcripts, as real sessions do, and the bench removes only its own afterwards."""
 
     def test_runs_save_their_sessions(self):
-        cmd, _ = run.command("do it", run.load_configs()[0], {"claude": "claude", "model": "sonnet", "budget": 0.5,
+        cmd, _ = run.command("do it", next(c for c in run.load_configs() if c["id"] == "plugin"), {"claude": "claude", "model": "sonnet", "budget": 0.5,
                                                              "plugin_dir": "/p"}, {})
         self.assertNotIn("--no-session-persistence", cmd)
 
@@ -600,7 +600,7 @@ class RouterVariants(unittest.TestCase):
             with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
                 row = run.run_one(task, variant, options, {})
                 got = json.loads(seen.read_text())
-                run.run_one(task, run.load_configs()[0], options, {})
+                run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
                 plain = json.loads(seen.read_text())
         self.assertEqual(got["project"], {"levels": {"standard": {"effort": "medium"}}})
         settings = json.loads(got["argv"][got["argv"].index("--settings") + 1])
@@ -644,7 +644,7 @@ class PluginRef(unittest.TestCase):
         self.assertTrue((exported / ".claude-plugin" / "plugin.json").is_file())
         again, _ = run.command("x", {"id": "r", "plugin": True, "env": {}, "plugin_ref": "HEAD"}, options, {})
         self.assertEqual(again[again.index("--plugin-dir") + 1], str(exported))  # exported once
-        plain, _ = run.command("x", run.load_configs()[0], options, {})
+        plain, _ = run.command("x", next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
         self.assertEqual(plain[plain.index("--plugin-dir") + 1], "/p/model-router")
 
 
@@ -659,7 +659,7 @@ class AgentCosts(unittest.TestCase):
             options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
-                row = run.run_one(task, run.load_configs()[0], options, {})
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
         self.assertEqual(row["agent_costs"], {"model-router:implementer": 0.07, "model-router:verifier": 0.01,
                                               "main": 0.03})
         self.assertEqual(row["duration_ms"], 1)

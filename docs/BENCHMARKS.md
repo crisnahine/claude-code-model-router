@@ -6,83 +6,83 @@
 
 # Benchmarks
 
-Cost and quality of Model Router against Claude Code without it. 480 runs, $44.54 at list price, on 2026-11-22.
+Cost and quality of Model Router against Claude Code without it. 640 runs, $60.11 at list price, on 2026-11-22.
 
 Claim "cheapest" or "best" only for a PASS row, and link its raw data.
 
 ## Results: session model `claude-opus-5-5`
 
-Every run here had `claude-opus-5-5` as its session model; router: `plugin`.
+Every run here had `claude-opus-5-5` as its session model; router: `plugin-next`.
 
-| Task class | plugin | defaults | Rank | Status |
-| :- | :- | :- | -: | :- |
-| lookup | 10 of 10 solved (100%; 100% to 100%); $0.0642 per solved ($0.0632 to $0.0653) | 10 of 10 solved (100%; 100% to 100%); $0.0989 per solved ($0.0925 to $0.1074) | 1 | PASS |
-| implementation | 10 of 10 solved (100%; 100% to 100%); $0.1221 per solved ($0.1164 to $0.1281) | 10 of 10 solved (100%; 100% to 100%); $0.1771 per solved ($0.1652 to $0.1891) | 1 | PASS |
-| bugfix | 10 of 10 solved (100%; 100% to 100%); $0.0991 per solved ($0.0962 to $0.1020) | 10 of 10 solved (100%; 100% to 100%); $0.1277 per solved ($0.1247 to $0.1311) | 1 | PASS |
-| cross-module | 10 of 10 solved (100%; 100% to 100%); $0.1566 per solved ($0.1426 to $0.1709) | 10 of 10 solved (100%; 100% to 100%); $0.1895 per solved ($0.1799 to $0.1990) | 1 | PASS |
-| security-review | 10 of 10 solved (100%; 100% to 100%); $0.1071 per solved ($0.1052 to $0.1093) | 10 of 10 solved (100%; 100% to 100%); $0.1322 per solved ($0.1283 to $0.1358) | 1 | PASS |
-| root-cause | 10 of 10 solved (100%; 100% to 100%); $0.1065 per solved ($0.1029 to $0.1102) | 10 of 10 solved (100%; 100% to 100%); $0.1292 per solved ($0.1248 to $0.1341) | 1 | PASS |
-| design | 10 of 10 solved (100%; 100% to 100%); $0.1707 per solved ($0.1482 to $0.1932) | 10 of 10 solved (100%; 100% to 100%); $0.1878 per solved ($0.1744 to $0.2010) | 1 | PARTIAL |
-| research | 10 of 10 solved (100%; 100% to 100%); $0.1498 per solved ($0.1208 to $0.2017) | 10 of 10 solved (100%; 100% to 100%); $0.1697 per solved ($0.1600 to $0.1821) | 1 | PARTIAL |
+| Task class | plugin-next | defaults | plugin | Rank | Status |
+| :- | :- | :- | :- | -: | :- |
+| lookup | 10 of 10 solved (100%; 100% to 100%); $0.0630 per solved ($0.0619 to $0.0643) | 10 of 10 solved (100%; 100% to 100%); $0.0989 per solved ($0.0925 to $0.1074) | 10 of 10 solved (100%; 100% to 100%); $0.0642 per solved ($0.0631 to $0.0653) | 1 | PASS |
+| implementation | 10 of 10 solved (100%; 100% to 100%); $0.1209 per solved ($0.1156 to $0.1261) | 10 of 10 solved (100%; 100% to 100%); $0.1771 per solved ($0.1655 to $0.1885) | 10 of 10 solved (100%; 100% to 100%); $0.1221 per solved ($0.1163 to $0.1284) | 1 | PASS |
+| bugfix | 10 of 10 solved (100%; 100% to 100%); $0.0989 per solved ($0.0969 to $0.1005) | 10 of 10 solved (100%; 100% to 100%); $0.1277 per solved ($0.1246 to $0.1310) | 10 of 10 solved (100%; 100% to 100%); $0.0991 per solved ($0.0961 to $0.1020) | 1 | PASS |
+| cross-module | 10 of 10 solved (100%; 100% to 100%); $0.1480 per solved ($0.1398 to $0.1564) | 10 of 10 solved (100%; 100% to 100%); $0.1895 per solved ($0.1800 to $0.1988) | 10 of 10 solved (100%; 100% to 100%); $0.1566 per solved ($0.1429 to $0.1721) | 1 | PASS |
+| security-review | 10 of 10 solved (100%; 100% to 100%); $0.1085 per solved ($0.1063 to $0.1106) | 10 of 10 solved (100%; 100% to 100%); $0.1322 per solved ($0.1282 to $0.1359) | 10 of 10 solved (100%; 100% to 100%); $0.1071 per solved ($0.1051 to $0.1092) | 1 | PASS |
+| root-cause | 10 of 10 solved (100%; 100% to 100%); $0.1043 per solved ($0.0998 to $0.1101) | 10 of 10 solved (100%; 100% to 100%); $0.1292 per solved ($0.1247 to $0.1342) | 10 of 10 solved (100%; 100% to 100%); $0.1065 per solved ($0.1027 to $0.1099) | 1 | PASS |
+| design | 10 of 10 solved (100%; 100% to 100%); $0.1885 per solved ($0.1622 to $0.2208) | 10 of 10 solved (100%; 100% to 100%); $0.1878 per solved ($0.1746 to $0.2013) | 10 of 10 solved (100%; 100% to 100%); $0.1707 per solved ($0.1479 to $0.1934) | 2 | PARTIAL |
+| research | 10 of 10 solved (100%; 100% to 100%); $0.1233 per solved ($0.1195 to $0.1274) | 10 of 10 solved (100%; 100% to 100%); $0.1697 per solved ($0.1599 to $0.1818) | 10 of 10 solved (100%; 100% to 100%); $0.1498 per solved ($0.1202 to $0.2001) | 1 | PASS |
 
-- lookup: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0431 to $-0.0283.
-- implementation: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0681 to $-0.0419.
-- bugfix: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0329 to $-0.0245.
-- cross-module: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0496 to $-0.0152.
-- security-review: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0292 to $-0.0207.
-- root-cause: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0288 to $-0.0169.
+- lookup: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0443 to $-0.0294.
+- implementation: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0691 to $-0.0439.
+- bugfix: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0327 to $-0.0253.
+- cross-module: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0536 to $-0.0284.
+- security-review: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0282 to $-0.0194.
+- root-cause: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0318 to $-0.0175.
 - design: PARTIAL, not significant against defaults.
-- research: PARTIAL, not significant against defaults.
+- research: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0591 to $-0.0356.
 
 ### Run metrics
 
-| Task class | plugin | defaults |
-| :- | :- | :- |
-| lookup | p50 12 s, p90 14 s, cache 83%, accuracy by level: lookup 10/10, escalated 0 of 10 spawns | p50 17 s, p90 21 s, cache 85%, not routed |
-| implementation | p50 27 s, p90 34 s, cache 86%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 42 s, p90 47 s, cache 87%, not routed |
-| bugfix | p50 18 s, p90 19 s, cache 87%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 26 s, p90 29 s, cache 88%, not routed |
-| cross-module | p50 39 s, p90 49 s, cache 87%, accuracy by level: standard 5/5, complex 5/5, escalated 0 of 10 spawns | p50 49 s, p90 61 s, cache 89%, not routed |
-| security-review | p50 23 s, p90 25 s, cache 89%, accuracy by level: complex 10/10, escalated 0 of 10 spawns | p50 32 s, p90 36 s, cache 89%, not routed |
-| root-cause | p50 21 s, p90 22 s, cache 89%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 26 s, p90 29 s, cache 88%, not routed |
-| design | p50 34 s, p90 49 s, cache 85%, accuracy by level: complex 5/5, hardest 5/5, escalated 0 of 10 spawns | p50 44 s, p90 54 s, cache 87%, not routed |
-| research | p50 28 s, p90 31 s, cache 86%, accuracy by level: standard 7/7, complex 2/2, frontier 1/1, escalated 0 of 10 spawns | p50 44 s, p90 47 s, cache 88%, not routed |
+| Task class | plugin-next | defaults | plugin |
+| :- | :- | :- | :- |
+| lookup | p50 13 s, p90 14 s, cache 84%, accuracy by level: lookup 10/10, escalated 0 of 10 spawns | p50 17 s, p90 21 s, cache 85%, not routed | p50 12 s, p90 14 s, cache 83%, accuracy by level: lookup 10/10, escalated 0 of 10 spawns |
+| implementation | p50 27 s, p90 31 s, cache 86%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 42 s, p90 47 s, cache 87%, not routed | p50 27 s, p90 34 s, cache 86%, accuracy by level: standard 10/10, escalated 0 of 10 spawns |
+| bugfix | p50 18 s, p90 19 s, cache 87%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 26 s, p90 29 s, cache 88%, not routed | p50 18 s, p90 19 s, cache 87%, accuracy by level: standard 10/10, escalated 0 of 10 spawns |
+| cross-module | p50 38 s, p90 43 s, cache 87%, accuracy by level: standard 5/5, complex 5/5, escalated 0 of 10 spawns | p50 49 s, p90 61 s, cache 89%, not routed | p50 39 s, p90 49 s, cache 87%, accuracy by level: standard 5/5, complex 5/5, escalated 0 of 10 spawns |
+| security-review | p50 23 s, p90 26 s, cache 89%, accuracy by level: complex 10/10, escalated 0 of 10 spawns | p50 32 s, p90 36 s, cache 89%, not routed | p50 23 s, p90 25 s, cache 89%, accuracy by level: complex 10/10, escalated 0 of 10 spawns |
+| root-cause | p50 18 s, p90 22 s, cache 88%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 26 s, p90 29 s, cache 88%, not routed | p50 21 s, p90 22 s, cache 89%, accuracy by level: standard 10/10, escalated 0 of 10 spawns |
+| design | p50 42 s, p90 56 s, cache 85%, accuracy by level: complex 3/3, hardest 7/7, escalated 0 of 10 spawns | p50 44 s, p90 54 s, cache 87%, not routed | p50 34 s, p90 49 s, cache 85%, accuracy by level: complex 5/5, hardest 5/5, escalated 0 of 10 spawns |
+| research | p50 27 s, p90 30 s, cache 89%, accuracy by level: standard 9/9, complex 1/1, escalated 0 of 10 spawns | p50 44 s, p90 47 s, cache 88%, not routed | p50 28 s, p90 31 s, cache 86%, accuracy by level: standard 7/7, complex 2/2, frontier 1/1, escalated 0 of 10 spawns |
 
 ## Results: session model `sonnet`
 
-Every run here had `sonnet` as its session model; router: `plugin`.
+Every run here had `sonnet` as its session model; router: `plugin-next`.
 
-| Task class | plugin | defaults | sonnet-high | sonnet-medium | Rank | Status |
-| :- | :- | :- | :- | :- | -: | :- |
-| lookup | 10 of 10 solved (100%; 100% to 100%); $0.0366 per solved ($0.0358 to $0.0374) | 10 of 10 solved (100%; 100% to 100%); $0.0479 per solved ($0.0443 to $0.0516) | 10 of 10 solved (100%; 100% to 100%); $0.0494 per solved ($0.0465 to $0.0529) | 9 of 10 solved (90%; 70% to 100%); $0.0542 per solved ($0.0472 to $0.0713) | 1 | PASS |
-| implementation | 10 of 10 solved (100%; 100% to 100%); $0.0783 per solved ($0.0727 to $0.0859) | 10 of 10 solved (100%; 100% to 100%); $0.0697 per solved ($0.0659 to $0.0732) | 10 of 10 solved (100%; 100% to 100%); $0.0744 per solved ($0.0714 to $0.0774) | 10 of 10 solved (100%; 100% to 100%); $0.0726 per solved ($0.0672 to $0.0800) | 4 | FAIL |
-| bugfix | 10 of 10 solved (100%; 100% to 100%); $0.0638 per solved ($0.0610 to $0.0674) | 10 of 10 solved (100%; 100% to 100%); $0.0547 per solved ($0.0519 to $0.0576) | 10 of 10 solved (100%; 100% to 100%); $0.0575 per solved ($0.0545 to $0.0608) | 10 of 10 solved (100%; 100% to 100%); $0.0580 per solved ($0.0556 to $0.0603) | 4 | FAIL |
-| cross-module | 10 of 10 solved (100%; 100% to 100%); $0.0940 per solved ($0.0890 to $0.0996) | 10 of 10 solved (100%; 100% to 100%); $0.0823 per solved ($0.0790 to $0.0857) | 10 of 10 solved (100%; 100% to 100%); $0.0888 per solved ($0.0832 to $0.0943) | 10 of 10 solved (100%; 100% to 100%); $0.0853 per solved ($0.0813 to $0.0906) | 4 | FAIL |
-| security-review | 10 of 10 solved (100%; 100% to 100%); $0.0753 per solved ($0.0740 to $0.0766) | 10 of 10 solved (100%; 100% to 100%); $0.0635 per solved ($0.0616 to $0.0654) | 10 of 10 solved (100%; 100% to 100%); $0.0656 per solved ($0.0637 to $0.0675) | 10 of 10 solved (100%; 100% to 100%); $0.0653 per solved ($0.0639 to $0.0668) | 4 | FAIL |
-| root-cause | 10 of 10 solved (100%; 100% to 100%); $0.0694 per solved ($0.0661 to $0.0726) | 10 of 10 solved (100%; 100% to 100%); $0.0661 per solved ($0.0629 to $0.0687) | 10 of 10 solved (100%; 100% to 100%); $0.0642 per solved ($0.0617 to $0.0669) | 10 of 10 solved (100%; 100% to 100%); $0.0638 per solved ($0.0610 to $0.0663) | 4 | FAIL |
-| design | 9 of 10 solved (90%; 70% to 100%); $0.1195 per solved ($0.0828 to $0.1728) | 8 of 10 solved (80%; 50% to 100%); $0.0835 per solved ($0.0637 to $0.1312) | 9 of 10 solved (90%; 70% to 100%); $0.0802 per solved ($0.0673 to $0.1081) | 10 of 10 solved (100%; 100% to 100%); $0.0703 per solved ($0.0661 to $0.0746) | 4 | FAIL |
-| research | 10 of 10 solved (100%; 100% to 100%); $0.1262 per solved ($0.0829 to $0.1887) | 10 of 10 solved (100%; 100% to 100%); $0.0733 per solved ($0.0703 to $0.0763) | 10 of 10 solved (100%; 100% to 100%); $0.0767 per solved ($0.0742 to $0.0793) | 10 of 10 solved (100%; 100% to 100%); $0.0779 per solved ($0.0738 to $0.0834) | 4 | FAIL |
+| Task class | plugin-next | defaults | plugin | sonnet-high | sonnet-medium | Rank | Status |
+| :- | :- | :- | :- | :- | :- | -: | :- |
+| lookup | 10 of 10 solved (100%; 100% to 100%); $0.0363 per solved ($0.0356 to $0.0370) | 10 of 10 solved (100%; 100% to 100%); $0.0479 per solved ($0.0443 to $0.0516) | 10 of 10 solved (100%; 100% to 100%); $0.0366 per solved ($0.0359 to $0.0374) | 10 of 10 solved (100%; 100% to 100%); $0.0494 per solved ($0.0464 to $0.0527) | 9 of 10 solved (90%; 70% to 100%); $0.0542 per solved ($0.0473 to $0.0712) | 1 | PASS |
+| implementation | 10 of 10 solved (100%; 100% to 100%); $0.0745 per solved ($0.0715 to $0.0776) | 10 of 10 solved (100%; 100% to 100%); $0.0697 per solved ($0.0658 to $0.0733) | 10 of 10 solved (100%; 100% to 100%); $0.0783 per solved ($0.0727 to $0.0854) | 10 of 10 solved (100%; 100% to 100%); $0.0744 per solved ($0.0714 to $0.0774) | 10 of 10 solved (100%; 100% to 100%); $0.0726 per solved ($0.0670 to $0.0802) | 4 | FAIL |
+| bugfix | 10 of 10 solved (100%; 100% to 100%); $0.0648 per solved ($0.0626 to $0.0673) | 10 of 10 solved (100%; 100% to 100%); $0.0547 per solved ($0.0520 to $0.0577) | 10 of 10 solved (100%; 100% to 100%); $0.0638 per solved ($0.0608 to $0.0676) | 10 of 10 solved (100%; 100% to 100%); $0.0575 per solved ($0.0547 to $0.0608) | 10 of 10 solved (100%; 100% to 100%); $0.0580 per solved ($0.0556 to $0.0605) | 4 | FAIL |
+| cross-module | 10 of 10 solved (100%; 100% to 100%); $0.0922 per solved ($0.0874 to $0.0966) | 10 of 10 solved (100%; 100% to 100%); $0.0823 per solved ($0.0792 to $0.0855) | 10 of 10 solved (100%; 100% to 100%); $0.0940 per solved ($0.0890 to $0.0989) | 10 of 10 solved (100%; 100% to 100%); $0.0888 per solved ($0.0831 to $0.0946) | 10 of 10 solved (100%; 100% to 100%); $0.0853 per solved ($0.0813 to $0.0905) | 4 | FAIL |
+| security-review | 10 of 10 solved (100%; 100% to 100%); $0.0761 per solved ($0.0713 to $0.0827) | 10 of 10 solved (100%; 100% to 100%); $0.0635 per solved ($0.0616 to $0.0653) | 10 of 10 solved (100%; 100% to 100%); $0.0753 per solved ($0.0740 to $0.0765) | 10 of 10 solved (100%; 100% to 100%); $0.0656 per solved ($0.0636 to $0.0675) | 10 of 10 solved (100%; 100% to 100%); $0.0653 per solved ($0.0639 to $0.0668) | 4 | FAIL |
+| root-cause | 10 of 10 solved (100%; 100% to 100%); $0.0685 per solved ($0.0653 to $0.0718) | 10 of 10 solved (100%; 100% to 100%); $0.0661 per solved ($0.0629 to $0.0687) | 10 of 10 solved (100%; 100% to 100%); $0.0694 per solved ($0.0658 to $0.0726) | 10 of 10 solved (100%; 100% to 100%); $0.0642 per solved ($0.0617 to $0.0669) | 10 of 10 solved (100%; 100% to 100%); $0.0638 per solved ($0.0612 to $0.0664) | 4 | FAIL |
+| design | 9 of 10 solved (90%; 70% to 100%); $0.1147 per solved ($0.0852 to $0.1574) | 8 of 10 solved (80%; 50% to 100%); $0.0835 per solved ($0.0641 to $0.1340) | 9 of 10 solved (90%; 70% to 100%); $0.1195 per solved ($0.0831 to $0.1729) | 9 of 10 solved (90%; 70% to 100%); $0.0802 per solved ($0.0677 to $0.1078) | 10 of 10 solved (100%; 100% to 100%); $0.0703 per solved ($0.0662 to $0.0749) | 4 | FAIL |
+| research | 10 of 10 solved (100%; 100% to 100%); $0.0851 per solved ($0.0797 to $0.0913) | 10 of 10 solved (100%; 100% to 100%); $0.0733 per solved ($0.0702 to $0.0763) | 10 of 10 solved (100%; 100% to 100%); $0.1262 per solved ($0.0829 to $0.1893) | 10 of 10 solved (100%; 100% to 100%); $0.0767 per solved ($0.0740 to $0.0792) | 10 of 10 solved (100%; 100% to 100%); $0.0779 per solved ($0.0738 to $0.0837) | 4 | FAIL |
 
-- lookup: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0151 to $-0.0077.
-- implementation: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0018 to $0.0169.
-- bugfix: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0049 to $0.0134.
-- cross-module: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0054 to $0.0178.
-- security-review: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0096 to $0.0140.
-- root-cause: FAIL, cost per solved task above sonnet-medium's; 95% interval of the difference $0.0015 to $0.0099.
-- design: FAIL, cost per solved task above sonnet-medium's; 95% interval of the difference $0.0119 to $0.1025.
-- research: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0090 to $0.1151.
+- lookup: PASS, cost per solved task below defaults's; 95% interval of the difference $-0.0153 to $-0.0079.
+- implementation: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0001 to $0.0099.
+- bugfix: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0065 to $0.0137.
+- cross-module: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0044 to $0.0149.
+- security-review: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0074 to $0.0192.
+- root-cause: FAIL, cost per solved task above sonnet-medium's; 95% interval of the difference $0.0004 to $0.0089.
+- design: FAIL, cost per solved task above sonnet-medium's; 95% interval of the difference $0.0149 to $0.0881.
+- research: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0055 to $0.0188.
 
 ### Run metrics
 
-| Task class | plugin | defaults | sonnet-high | sonnet-medium |
-| :- | :- | :- | :- | :- |
-| lookup | p50 9 s, p90 9 s, cache 87%, accuracy by level: lookup 10/10, escalated 0 of 10 spawns | p50 7 s, p90 9 s, cache 87%, not routed | p50 8 s, p90 10 s, cache 87%, not routed | p50 8 s, p90 10 s, cache 88%, not routed |
-| implementation | p50 18 s, p90 21 s, cache 86%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 19 s, p90 21 s, cache 88%, not routed | p50 19 s, p90 22 s, cache 89%, not routed | p50 18 s, p90 21 s, cache 87%, not routed |
-| bugfix | p50 13 s, p90 15 s, cache 88%, accuracy by level: standard 9/9, complex 1/1, escalated 0 of 10 spawns | p50 11 s, p90 13 s, cache 88%, not routed | p50 12 s, p90 14 s, cache 88%, not routed | p50 12 s, p90 14 s, cache 88%, not routed |
-| cross-module | p50 24 s, p90 26 s, cache 88%, accuracy by level: standard 5/5, complex 5/5, escalated 0 of 10 spawns | p50 22 s, p90 24 s, cache 89%, not routed | p50 22 s, p90 29 s, cache 90%, not routed | p50 22 s, p90 24 s, cache 88%, not routed |
-| security-review | p50 19 s, p90 20 s, cache 89%, accuracy by level: complex 10/10, escalated 0 of 10 spawns | p50 16 s, p90 17 s, cache 90%, not routed | p50 17 s, p90 18 s, cache 90%, not routed | p50 16 s, p90 17 s, cache 90%, not routed |
-| root-cause | p50 16 s, p90 17 s, cache 89%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 16 s, p90 18 s, cache 90%, not routed | p50 15 s, p90 17 s, cache 90%, not routed | p50 16 s, p90 17 s, cache 90%, not routed |
-| design | p50 19 s, p90 39 s, cache 85%, accuracy by level: complex 7/8, hardest 2/2, escalated 0 of 11 spawns | p50 14 s, p90 20 s, cache 87%, not routed | p50 15 s, p90 23 s, cache 87%, not routed | p50 15 s, p90 22 s, cache 88%, not routed |
-| research | p50 19 s, p90 28 s, cache 88%, accuracy by level: standard 3/3, complex 5/5, frontier 2/2, escalated 0 of 10 spawns | p50 18 s, p90 19 s, cache 90%, not routed | p50 19 s, p90 21 s, cache 89%, not routed | p50 18 s, p90 20 s, cache 89%, not routed |
+| Task class | plugin-next | defaults | plugin | sonnet-high | sonnet-medium |
+| :- | :- | :- | :- | :- | :- |
+| lookup | p50 8 s, p90 9 s, cache 89%, accuracy by level: lookup 10/10, escalated 0 of 10 spawns | p50 7 s, p90 9 s, cache 87%, not routed | p50 9 s, p90 9 s, cache 87%, accuracy by level: lookup 10/10, escalated 0 of 10 spawns | p50 8 s, p90 10 s, cache 87%, not routed | p50 8 s, p90 10 s, cache 88%, not routed |
+| implementation | p50 18 s, p90 21 s, cache 87%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 19 s, p90 21 s, cache 88%, not routed | p50 18 s, p90 21 s, cache 86%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 19 s, p90 22 s, cache 89%, not routed | p50 18 s, p90 21 s, cache 87%, not routed |
+| bugfix | p50 13 s, p90 15 s, cache 88%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 11 s, p90 13 s, cache 88%, not routed | p50 13 s, p90 15 s, cache 88%, accuracy by level: standard 9/9, complex 1/1, escalated 0 of 10 spawns | p50 12 s, p90 14 s, cache 88%, not routed | p50 12 s, p90 14 s, cache 88%, not routed |
+| cross-module | p50 25 s, p90 27 s, cache 88%, accuracy by level: standard 5/5, complex 5/5, escalated 0 of 10 spawns | p50 22 s, p90 24 s, cache 89%, not routed | p50 24 s, p90 26 s, cache 88%, accuracy by level: standard 5/5, complex 5/5, escalated 0 of 10 spawns | p50 22 s, p90 29 s, cache 90%, not routed | p50 22 s, p90 24 s, cache 88%, not routed |
+| security-review | p50 18 s, p90 21 s, cache 88%, accuracy by level: complex 10/10, escalated 0 of 10 spawns | p50 16 s, p90 17 s, cache 90%, not routed | p50 19 s, p90 20 s, cache 89%, accuracy by level: complex 10/10, escalated 0 of 10 spawns | p50 17 s, p90 18 s, cache 90%, not routed | p50 16 s, p90 17 s, cache 90%, not routed |
+| root-cause | p50 15 s, p90 16 s, cache 90%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 16 s, p90 18 s, cache 90%, not routed | p50 16 s, p90 17 s, cache 89%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 15 s, p90 17 s, cache 90%, not routed | p50 16 s, p90 17 s, cache 90%, not routed |
+| design | p50 19 s, p90 40 s, cache 86%, accuracy by level: complex 9/10, escalated 0 of 13 spawns | p50 14 s, p90 20 s, cache 87%, not routed | p50 19 s, p90 39 s, cache 85%, accuracy by level: complex 7/8, hardest 2/2, escalated 0 of 11 spawns | p50 15 s, p90 23 s, cache 87%, not routed | p50 15 s, p90 22 s, cache 88%, not routed |
+| research | p50 18 s, p90 22 s, cache 88%, accuracy by level: standard 10/10, escalated 0 of 10 spawns | p50 18 s, p90 19 s, cache 90%, not routed | p50 19 s, p90 28 s, cache 88%, accuracy by level: standard 3/3, complex 5/5, frontier 2/2, escalated 0 of 10 spawns | p50 19 s, p90 21 s, cache 89%, not routed | p50 18 s, p90 20 s, cache 89%, not routed |
 
 ## How to read it
 
@@ -96,11 +96,11 @@ Every run here had `sonnet` as its session model; router: `plugin`.
 ## Setup
 
 - Claude Code: 2.1.330 (Claude Code). Session models: claude-opus-5-5, sonnet (`--model`), one results table each. Inside a table every configuration ran on that session model, except one that sets its own (`opusplan`).
-- Configurations run: `defaults` (No plugin: subagents inherit the session model at its default effort); `plugin` (Model Router loaded with --plugin-dir); `sonnet-high` (No plugin: every subagent on sonnet at high effort (CLAUDE_CODE_SUBAGENT_EFFORT=high)); `sonnet-medium` (No plugin: every subagent on sonnet at medium effort (CLAUDE_CODE_SUBAGENT_EFFORT=medium)).
-- Models that ran, with Claude Code's list-price cost across all runs: `claude-fable-5-2` $0.7783 over 3 runs; `claude-haiku-5-5` $0.0164 over 20 runs; `claude-opus-5-5` $19.1133 over 163 runs; `claude-sonnet-5-5` $24.6360 over 384 runs. Each run's raw line also carries the registry's prices for those models.
-- Agents started, by configuration: `defaults` Explore x16, general-purpose x144; `plugin` claude x25, general-purpose x83, model-router:architect x3, model-router:implementer x31, model-router:reviewer x1, model-router:scout x18; `sonnet-high` Explore x9, general-purpose x71; `sonnet-medium` Explore x5, general-purpose x75.
-- Router spend by agent type, from the router's ledger (`agent_costs`), over the runs that record it: `plugin` on `claude-opus-5-5` (80 runs): main loop $6.1165 (63%), `claude` $1.2373 (13%), `model-router:implementer` $1.2313 (13%), `general-purpose` $1.1695 (12%), `model-router:scout` $0.0057 (0%); `plugin` on `sonnet` (80 runs): main loop $3.2329 (50%), `general-purpose` $2.6354 (40%), `model-router:implementer` $0.4067 (6%), `model-router:architect` $0.1746 (3%), `model-router:reviewer` $0.0284 (0%), `claude` $0.0277 (0%), `model-router:scout` $0.0054 (0%).
-- Each configuration's runs pool every batch it ran in, on the same machine, so a configuration run in a later batch is compared with the baseline runs of earlier ones. Batches, by configuration: `defaults` v011-opus (80), v011-sonnet (80); `plugin` v011-opus (80), v011-sonnet (80); `sonnet-high` v011-sonnet (80); `sonnet-medium` v011-sonnet (80).
+- Configurations run: `defaults` (No plugin: subagents inherit the session model at its default effort); `plugin` (Model Router loaded with --plugin-dir); `plugin-next` (Model Router at 780ee86, the fixes after 0.1.1 (research-grade frontier wording, read-only role agents that say so, a smaller session note), with its own defaults); `sonnet-high` (No plugin: every subagent on sonnet at high effort (CLAUDE_CODE_SUBAGENT_EFFORT=high)); `sonnet-medium` (No plugin: every subagent on sonnet at medium effort (CLAUDE_CODE_SUBAGENT_EFFORT=medium)).
+- Models that ran, with Claude Code's list-price cost across all runs: `claude-fable-5-2` $0.7783 over 3 runs; `claude-haiku-5-5` $0.0297 over 40 runs; `claude-opus-5-5` $26.2446 over 246 runs; `claude-sonnet-5-5` $33.0535 over 527 runs. Each run's raw line also carries the registry's prices for those models.
+- Agents started, by configuration: `defaults` Explore x16, general-purpose x144; `plugin` claude x25, general-purpose x83, model-router:architect x3, model-router:implementer x31, model-router:reviewer x1, model-router:scout x18; `plugin-next` Explore x1, claude x22, general-purpose x81, model-router:architect x6, model-router:implementer x34, model-router:scout x19; `sonnet-high` Explore x9, general-purpose x71; `sonnet-medium` Explore x5, general-purpose x75.
+- Router spend by agent type, from the router's ledger (`agent_costs`), over the runs that record it: `plugin` on `claude-opus-5-5` (80 runs): main loop $6.1165 (63%), `claude` $1.2373 (13%), `model-router:implementer` $1.2313 (13%), `general-purpose` $1.1695 (12%), `model-router:scout` $0.0057 (0%); `plugin` on `sonnet` (80 runs): main loop $3.2329 (50%), `general-purpose` $2.6354 (40%), `model-router:implementer` $0.4067 (6%), `model-router:architect` $0.1746 (3%), `model-router:reviewer` $0.0284 (0%), `claude` $0.0277 (0%), `model-router:scout` $0.0054 (0%); `plugin-next` on `claude-opus-5-5` (80 runs): main loop $6.0643 (63%), `general-purpose` $1.4259 (15%), `model-router:implementer` $1.1232 (12%), `claude` $0.9331 (10%), `model-router:scout` $0.0056 (0%), `Explore` $0.0019 (0%); `plugin-next` on `sonnet` (80 runs): main loop $3.1758 (53%), `general-purpose` $2.0919 (35%), `model-router:implementer` $0.6043 (10%), `model-router:architect` $0.1303 (2%), `model-router:scout` $0.0057 (0%).
+- Each configuration's runs pool every batch it ran in, on the same machine, so a configuration run in a later batch is compared with the baseline runs of earlier ones. Batches, by configuration: `defaults` v011-opus (80), v011-sonnet (80); `plugin` v011-opus (80), v011-sonnet (80); `plugin-next` next-opus (80), next-sonnet (80); `sonnet-high` v011-sonnet (80); `sonnet-medium` v011-sonnet (80).
 - Shape: a single agent. The session hands each task to one subagent with the Agent tool and relays its answer, so the subagent is what each configuration changes.
 - Each run starts in a fresh copy of the task's files, outside any repository, with `--setting-sources project`, `--strict-mcp-config`, `--permission-mode dontAsk`, `--allowedTools` `Read`, `Edit`, `Write`, `Glob`, `Grep`, `Bash(python3 *)`, `Bash(python *)`, `Bash(tail *)`, `Bash(head *)`, `Bash(echo *)` (every part of a compound command must match, so `tail`, `head` and `echo` let a subagent pipe its test output), `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. Every inherited `CLAUDE_CODE_*`, `CLAUDECODE` and `CLAUDE_PLUGIN_*` variable is dropped except the provider switches (`CLAUDE_CODE_USE_*`) and `CLAUDE_CODE_OAUTH_TOKEN`, so `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and the effort variables are set only by a configuration. Only the router configuration passes `--plugin-dir`.
 - The router keeps learned state across sessions (model health, level raises and its ledger) in its plugin data folder, by default `~/.claude/plugins/data/model-router-inline/`, which every `--plugin-dir` session on the machine shares. The runner gives each run a plugins root of its own inside its scratch copy with `CLAUDE_CODE_PLUGIN_CACHE_DIR` (https://code.claude.com/docs/en/env-vars.md), so every router run starts from an empty data folder, never reads or writes the shared one, and its data goes when the scratch copy does. Each raw line records `plugin_data_own` and, for router runs, hashes of the `state.json` and `learned.json` the run started from in `plugin_state`.
@@ -131,6 +131,22 @@ Each task's files and pass check are under `bench/tasks/<id>/`. Each check fails
 
 ## Raw data and commands
 
+- [`bench/results/next-opus-bugfix.jsonl`](../bench/results/next-opus-bugfix.jsonl)
+- [`bench/results/next-opus-cross-module.jsonl`](../bench/results/next-opus-cross-module.jsonl)
+- [`bench/results/next-opus-design.jsonl`](../bench/results/next-opus-design.jsonl)
+- [`bench/results/next-opus-implementation.jsonl`](../bench/results/next-opus-implementation.jsonl)
+- [`bench/results/next-opus-lookup.jsonl`](../bench/results/next-opus-lookup.jsonl)
+- [`bench/results/next-opus-research.jsonl`](../bench/results/next-opus-research.jsonl)
+- [`bench/results/next-opus-root-cause.jsonl`](../bench/results/next-opus-root-cause.jsonl)
+- [`bench/results/next-opus-security-review.jsonl`](../bench/results/next-opus-security-review.jsonl)
+- [`bench/results/next-sonnet-bugfix.jsonl`](../bench/results/next-sonnet-bugfix.jsonl)
+- [`bench/results/next-sonnet-cross-module.jsonl`](../bench/results/next-sonnet-cross-module.jsonl)
+- [`bench/results/next-sonnet-design.jsonl`](../bench/results/next-sonnet-design.jsonl)
+- [`bench/results/next-sonnet-implementation.jsonl`](../bench/results/next-sonnet-implementation.jsonl)
+- [`bench/results/next-sonnet-lookup.jsonl`](../bench/results/next-sonnet-lookup.jsonl)
+- [`bench/results/next-sonnet-research.jsonl`](../bench/results/next-sonnet-research.jsonl)
+- [`bench/results/next-sonnet-root-cause.jsonl`](../bench/results/next-sonnet-root-cause.jsonl)
+- [`bench/results/next-sonnet-security-review.jsonl`](../bench/results/next-sonnet-security-review.jsonl)
 - [`bench/results/v011-opus-bugfix.jsonl`](../bench/results/v011-opus-bugfix.jsonl)
 - [`bench/results/v011-opus-cross-module.jsonl`](../bench/results/v011-opus-cross-module.jsonl)
 - [`bench/results/v011-opus-design.jsonl`](../bench/results/v011-opus-design.jsonl)
@@ -158,7 +174,7 @@ python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
 
 ## The full suite
 
-A run of the whole current task set under every configuration in `bench/configs.json`, 10 times each, is 16 tasks x 19 configurations x 10 runs = 3040 runs, about $430.59 at list price. Each class is priced at its own mean per run here (bugfix $0.0768, cross-module $0.1161, design $0.1126, implementation $0.0990, lookup $0.0576, research $0.1123, root-cause $0.0832, security-review $0.0848), and a class with no runs yet at the mean of all runs ($0.0928). A configuration whose subagents run a dearer model than Sonnet is priced up by that model's output price over Sonnet's, on the whole run: `plugin` x2, `opus` x2, `opus-high` x2, `fable` x4, `fable-high` x4, `advisor` x2. That scales the price per token only: a dearer model may use more or fewer tokens, the class means pool every configuration's runs, and the new classes are harder than the pilot's two, so treat the figure as a guide, not a bound. At the per-run cap the pilot used, 3040 runs x $1 come to $3,040.00 before overshoot, which has no fixed limit; only `--max-total` stops spend. The full suite needs the maintainer's go-ahead before it runs.
+A run of the whole current task set under every configuration in `bench/configs.json`, 10 times each, is 16 tasks x 20 configurations x 10 runs = 3200 runs, about $450.80 at list price. Each class is priced at its own mean per run here (bugfix $0.0781, cross-module $0.1171, design $0.1209, implementation $0.0987, lookup $0.0556, research $0.1102, root-cause $0.0840, security-review $0.0867), and a class with no runs yet at the mean of all runs ($0.0939). A configuration whose subagents run a dearer model than Sonnet is priced up by that model's output price over Sonnet's, on the whole run: `plugin` x2, `opus` x2, `opus-high` x2, `fable` x4, `fable-high` x4, `advisor` x2. That scales the price per token only: a dearer model may use more or fewer tokens, the class means pool every configuration's runs, and the new classes are harder than the pilot's two, so treat the figure as a guide, not a bound. At the per-run cap the pilot used, 3200 runs x $1 come to $3,200.00 before overshoot, which has no fixed limit; only `--max-total` stops spend. The full suite needs the maintainer's go-ahead before it runs.
 
 Defined in `bench/configs.json` but not run here: `plugin-cheap`, `plugin-cheap-nomain`, `plugin-cheap-nomain-nogate`, `plugin-m6-08-b`, `plugin-m6-08-b-nogate`, `plugin-m6-10`, `haiku`, `haiku-high`, `sonnet`, `opus`, `opus-high`, `fable`, `fable-high`, `opusplan`, `advisor`.
 
