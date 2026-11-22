@@ -1117,6 +1117,16 @@ class Mod(Sandbox):
         row = self.ledger()[-1]
         self.assertEqual((row["event"], row["cost_usd"]), ("usage", 6.0))
         self.assertIsNone(registry.cost(cfg.load_config(), "claude-unknown-9", {"input_tokens": 1}))
+        # Opus 5.5 cache writes: $5/MTok for five minutes, $8/MTok for one hour.
+        hooks.mod_usage({"session_id": "s1", "agent_id": "a1", "usage": {
+            "model": "claude-opus-5-5", "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 3_000_000, "ephemeral_5m_input_tokens": 1_000_000,
+            "ephemeral_1h_input_tokens": 1_000_000}})
+        self.assertEqual(self.ledger()[-1]["cost_usd"], 18.0)  # the unnamed million counts as five minutes
+        hooks.mod_usage({"session_id": "s1", "agent_id": "a1", "usage": {
+            "model": "claude-opus-5-5", "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 1_000_000}})
+        self.assertEqual(self.ledger()[-1]["cost_usd"], 5.0)  # no split reported
         config = cfg.load_config()
         self.assertEqual(registry.price(config, "claude-opus-4-7")["input"], 5)  # one entry covers Opus 4.x
         self.assertEqual(registry.price(config, "claude-haiku-4-5-20251001")["input"], 1)
