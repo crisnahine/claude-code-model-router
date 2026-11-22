@@ -419,8 +419,7 @@
    "highest": "standard",
    "agent": "general-purpose",
    "description": "Bump requests pin",
-   "prompt": "Bump `requests` from 2.31 to 2.32 in requirements.txt and run the tests. Don't touch other pins.",
-   "known_under": "missing change verbs"
+   "prompt": "Bump `requests` from 2.31 to 2.32 in requirements.txt and run the tests. Don't touch other pins."
   },
   {
    "lowest": "standard",
@@ -455,8 +454,7 @@
    "highest": "standard",
    "agent": "general-purpose",
    "description": "Port levenshtein",
-   "prompt": "Port `levenshtein` from utils/strings.py to TypeScript in src/utils/strings.ts with the same behavior, plus tests.",
-   "known_under": "missing change verbs"
+   "prompt": "Port `levenshtein` from utils/strings.py to TypeScript in src/utils/strings.ts with the same behavior, plus tests."
   },
   {
    "lowest": "standard",
@@ -652,8 +650,7 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Paginate invoices API",
-   "prompt": "Add pagination to the public GET /v1/invoices endpoint without breaking existing clients: keep the current response when no cursor is passed.",
-   "known_under": "missing risk words"
+   "prompt": "Add pagination to the public GET /v1/invoices endpoint without breaking existing clients: keep the current response when no cursor is passed."
   },
   {
    "lowest": "complex",
@@ -681,8 +678,7 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Design rate limiter",
-   "prompt": "Design the interface for a new rate limiter module that the API gateway and the webhook sender will share. Propose the API, the storage choice and the trade-offs; no code yet.",
-   "known_under": "one signal stays standard"
+   "prompt": "Design the interface for a new rate limiter module that the API gateway and the webhook sender will share. Propose the API, the storage choice and the trade-offs; no code yet."
   },
   {
    "lowest": "complex",
@@ -697,24 +693,21 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Encrypt SSN column",
-   "prompt": "Encrypt the `ssn` column at rest using the existing KMS helper in lib/crypto.py, with a migration for existing rows.",
-   "known_under": "missing change verbs"
+   "prompt": "Encrypt the `ssn` column at rest using the existing KMS helper in lib/crypto.py, with a migration for existing rows."
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Admin-only project delete",
-   "prompt": "Add a role check so only admins can call DELETE /api/projects/:id. Today any logged-in user can. Add tests for admin and non-admin.",
-   "known_under": "missing risk words"
+   "prompt": "Add a role check so only admins can call DELETE /api/projects/:id. Today any logged-in user can. Add tests for admin and non-admin."
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Fix search injection",
-   "prompt": "Do not touch the tests and fix the SQL injection in the search endpoint (api/search.py builds the query with string formatting).",
-   "known_under": "missing risk words"
+   "prompt": "Do not touch the tests and fix the SQL injection in the search endpoint (api/search.py builds the query with string formatting)."
   },
   {
    "lowest": "complex",
@@ -749,16 +742,14 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Soft delete projects",
-   "prompt": "Implement soft delete for projects: add a deleted_at column, filter deleted projects in every query in the projects, search and reports modules, and add a restore endpoint.",
-   "known_under": "missing risk words"
+   "prompt": "Implement soft delete for projects: add a deleted_at column, filter deleted projects in every query in the projects, search and reports modules, and add a restore endpoint."
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Lost drafts on reconnect",
-   "prompt": "Users report losing unsaved drafts when the editor reconnects. The reconnect logic is in src/editor/sync.ts. Find why drafts are dropped and fix it without changing the sync protocol.",
-   "known_under": "missing risk words"
+   "prompt": "Users report losing unsaved drafts when the editor reconnects. The reconnect logic is in src/editor/sync.ts. Find why drafts are dropped and fix it without changing the sync protocol."
   },
   {
    "lowest": "complex",
@@ -779,8 +770,7 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Per-tenant resize limit",
-   "prompt": "Limit the image resize worker to 4 concurrent jobs per tenant without blocking other tenants. The worker is in workers/resize.ts.",
-   "known_under": "missing change verbs"
+   "prompt": "Limit the image resize worker to 4 concurrent jobs per tenant without blocking other tenants. The worker is in workers/resize.ts."
   },
   {
    "lowest": "standard",
@@ -824,24 +814,21 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Stop stored XSS",
-   "prompt": "Escape user-supplied HTML in comment rendering (web/comments.tsx) to stop stored XSS, without breaking existing markdown formatting.",
-   "known_under": "missing change verbs"
+   "prompt": "Escape user-supplied HTML in comment rendering (web/comments.tsx) to stop stored XSS, without breaking existing markdown formatting."
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Rate limit logins",
-   "prompt": "Add rate limiting to the login endpoint: 5 failed attempts per IP per 15 minutes, stored in Redis. Add tests.",
-   "known_under": "missing risk words"
+   "prompt": "Add rate limiting to the login endpoint: 5 failed attempts per IP per 15 minutes, stored in Redis. Add tests."
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Plan websocket move",
-   "prompt": "Plan the move from REST polling to websockets for order status updates: which services change, the rollout order and how to fall back. Write the plan in docs/plans/ws.md.",
-   "known_under": "missing risk words"
+   "prompt": "Plan the move from REST polling to websockets for order status updates: which services change, the rollout order and how to fall back. Write the plan in docs/plans/ws.md."
   },
   {
    "lowest": "complex",
@@ -855,8 +842,7 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Invalidate price caches",
-   "prompt": "Fix stale prices after an update: the product cache in three services isn't invalidated. Add invalidation on update events in each service.",
-   "known_under": "missing risk words"
+   "prompt": "Fix stale prices after an update: the product cache in three services isn't invalidated. Add invalidation on update events in each service."
   },
   {
    "lowest": "standard",
@@ -877,8 +863,7 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Thread-safe cache",
-   "prompt": "Make the in-memory cache in lib/cache.py thread-safe; it's used from the request threads and the background refresher.",
-   "known_under": "missing risk words"
+   "prompt": "Make the in-memory cache in lib/cache.py thread-safe; it's used from the request threads and the background refresher."
   },
   {
    "lowest": "complex",
@@ -906,8 +891,7 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Upgrade to Django 5",
-   "prompt": "Upgrade the app from Django 4.2 to 5.0: fix deprecations, update settings and run the test suite.",
-   "known_under": "missing risk words"
+   "prompt": "Upgrade the app from Django 4.2 to 5.0: fix deprecations, update settings and run the test suite."
   },
   {
    "lowest": "complex",
@@ -1324,16 +1308,14 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch the frontend and secure the session cookies.",
-   "known_under": "missing change verbs"
+   "prompt": "Do not touch the frontend and secure the session cookies."
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and harden the password hashing.",
-   "known_under": "missing change verbs"
+   "prompt": "Do not touch tests and harden the password hashing."
   },
   {
    "lowest": "standard",
@@ -1474,6 +1456,62 @@
    "agent": "general-purpose",
    "description": "Contrived noun phrasing",
    "prompt": "List the services. Do not change the payment code and fix scripts."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Rewrite token validation",
+   "prompt": "Keep the API stable, then rewrite the session token validation."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Fix search injection",
+   "prompt": "No new files; just fix the SQL injection in the search endpoint."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "List routes briefly",
+   "prompt": "List the routes. Limit the output to ten lines."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find slowest tests",
+   "prompt": "Find the slowest tests and limit the list to the top five."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Summarize auth module",
+   "prompt": "Summarize the auth module. Limit the answer to a paragraph."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Rename tokens field",
+   "prompt": "Rename the tokens field in the report to token_count."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Update admin title",
+   "prompt": "Update the admin page title."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Fix deprecation typo",
+   "prompt": "Fix the typo in the deprecation notice."
   }
  ]
 }

@@ -13,7 +13,12 @@ SIGNALS = {
     "risk": r"secur\w*|vulnerab\w*|auth|authn|authz|authenticat\w*|authoriz\w*|oauth\w*|passwords?|"
             r"credentials?|secrets?|encrypt\w*|decrypt\w*|payments?|billing|migrat\w*|schemas?|databases?|"
             r"production|data loss|permissions?|concurren\w*|race conditions?|deadlocks?|public api|"
-            r"breaking changes?|backward.?compat\w*",
+            r"breaking changes?|backward.?compat\w*|breaking existing|existing clients|"
+            r"(?:session|access|refresh|auth|api|bearer|csrf|id)\s+tokens?|jwts?|injection|xss|"
+            r"cross.site|role checks?|privileges?|access control|soft.?delet\w*|"
+            r"los(?:e|es|ing|t)\s+(?:\w+\s+)?(?:data|drafts?|work|changes|edits|records|messages)|rate.?limit\w*|"
+            r"rollouts?|invalidat\w*|thread.?safe\w*|mutex\w*|"
+            r"deprecations|deprecated\s+(?:apis?|calls?|functions?|methods?|settings)",
     "scope": r"across|every (?:service|module|package|file)|all (?:services|modules|packages)|multiple "
              r"(?:services|modules|repos|packages)|entire|whole (?:codebase|system|app)|architect\w*|"
              r"redesign\w*|rewrit\w*|monorepo|end.to.end|large.scale|system.wide",
@@ -23,8 +28,14 @@ SIGNALS = {
 }
 # Words that mean the subtask changes something or has to reason its way to an answer.
 # A subtask that does neither is a lookup, whatever it happens to mention.
+_OBJECT = r"\s+(?:the|a|an|it|this|that|these|those|its|their|our|my|your|all|each|every)\b"
+# "Port", "limit" and "secure" are often a noun or an adjective ("which port", "the retry limit"), so they
+# count only before an object, the way a verb takes one; "limit the output" shapes the answer, not the code.
 _CHANGE_VERB = (r"(?:add|implement|fix|change|update|refactor|rename|remove|delete|write|create|build|make(?! sure)|"
-                r"migrate|convert|upgrade|optimi[sz]e|rewrite|redesign|replace)\b(?!-)")
+                r"migrate|convert|upgrade|optimi[sz]e|rewrite|redesign|replace|bump|encrypt|harden|"
+                r"limit(?!\s+(?:(?:the|your|its)\s+)?(?:output|results?|list|answer|reply|response|summary|report)\b)"
+                rf"(?=\s+[`'\"]|{_OBJECT})|(?:port|secure)(?=\s+[`'\"]|{_OBJECT})|"
+                r"escape(?!\s+(?:sequences?|characters?|chars?|codes?|hatch(?:es)?)\b))\b(?!-)")
 _CHANGE = rf"\b{_CHANGE_VERB}"
 # "Do not change any files" limits a subtask; it doesn't ask for a change. The limit ends with
 # its clause, so "Without changing the API, fix the race" and "Do not stop until X is fixed"
@@ -37,12 +48,11 @@ _CHANGE = rf"\b{_CHANGE_VERB}"
 # and no verb ends it as the first half of a compound noun such as "debug logs" or "audit trails".
 _REASONING_WORDS = (r"review|audit|analy[sz]e|debug|diagnos\w*|plan|design|prove|verify the logic|"
                     r"investigat\w*|troubleshoot\w*|figure out|root.?caus\w*|reproduc\w*|bisect")
-_OBJECT = r"\s+(?:the|a|an|it|this|that|these|those|its|their|our|my|your|all|each|every)\b"
 _TASK_VERB = (r"(?:implement|fix|refactor|rename|migrate|optimi[sz]e|rewrite|convert|upgrade|redesign|debug|"
               r"diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|audit|prove|"
-              r"verify the logic|figure out)\b(?!-)")
+              r"verify the logic|figure out|encrypt|harden|bump)\b(?!-)")
 _NOUN_VERB = (r"(?:build|update|change|design|plan|review|add|write|create|delete|remove|replace|make(?! sure)|"
-              r"root.?caus\w*)\b(?!-)")
+              r"root.?caus\w*|port|limit|secure|escape)\b(?!-)")
 # Only nouns that form a compound with these verbs; scripts, builds, records and the like are their objects.
 _COMPOUND = r"\s+(?:logs?|output|trails?|notes?|mode|flags?|messages?|statements?|info|guides?|reports?)\b"
 _LIMIT_WORD = rf"(?:{_CHANGE_VERB}|(?:edit|modify|move|touch|{_REASONING_WORDS})\b)"
