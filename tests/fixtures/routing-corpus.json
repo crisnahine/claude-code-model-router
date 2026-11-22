@@ -1240,40 +1240,35 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and fix scripts that rotate the production credentials.",
-   "known_under": "compound nouns too broad"
+   "prompt": "Do not touch tests and fix scripts that rotate the production credentials."
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Never log secrets and migrate records in the billing database.",
-   "known_under": "compound nouns too broad"
+   "prompt": "Never log secrets and migrate records in the billing database."
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not change the UI and fix builds that leak secrets.",
-   "known_under": "compound nouns too broad"
+   "prompt": "Do not change the UI and fix builds that leak secrets."
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and refactor tools that handle payments.",
-   "known_under": "compound nouns too broad"
+   "prompt": "Do not touch tests and refactor tools that handle payments."
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and fix paths in the auth middleware.",
-   "known_under": "compound nouns too broad"
+   "prompt": "Do not touch tests and fix paths in the auth middleware."
   },
   {
    "lowest": "complex",

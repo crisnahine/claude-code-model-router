@@ -813,11 +813,17 @@ class Profile(unittest.TestCase):
         for brief in ("List the endpoints. Do not touch the auth module and debug logs.",
                       "Find the config. Do not delete the settings and audit logs.",
                       "Show the release notes. Do not edit the changelog and upgrade notes.",
-                      "Find the deploy job. Do not touch the database and migrate scripts.",
-                      "List the services. Do not change the payment code and fix scripts.",
                       "Find the tests. Do not edit the auth fixtures and debug output.",
                       "Explain the logger. Do not touch production and audit trails."):
             self.assertEqual(self.level(brief), "lookup", brief)
+        # Scripts, builds, records, paths and tools are what these verbs take as an object, not compounds.
+        for brief in ("Do not touch tests and fix scripts that rotate the production credentials.",
+                      "Never log secrets and migrate records in the billing database.",
+                      "Do not change the UI and fix builds that leak secrets.",
+                      "Do not touch tests and refactor tools that handle payments.",
+                      "Do not touch tests and fix paths in the auth middleware."):
+            result = profile.profile_call({"prompt": brief}, "general-purpose")
+            self.assertEqual((result["level"], result["signals"]), ("complex", ["risk"]), brief)
 
     def test_joins_inside_a_limit_stay_fast(self):
         started = time.monotonic()

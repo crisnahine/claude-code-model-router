@@ -43,8 +43,8 @@ _TASK_VERB = (r"(?:implement|fix|refactor|rename|migrate|optimi[sz]e|rewrite|con
               r"verify the logic|figure out)\b(?!-)")
 _NOUN_VERB = (r"(?:build|update|change|design|plan|review|add|write|create|delete|remove|replace|make(?! sure)|"
               r"root.?caus\w*)\b(?!-)")
-_COMPOUND = (r"\s+(?:logs?|output|trails?|notes?|scripts?|mode|builds?|flags?|messages?|statements?|info|"
-             r"records?|entries|events?|paths?|guides?|reports?|tools?|jobs?)\b")
+# Only nouns that form a compound with these verbs; scripts, builds, records and the like are their objects.
+_COMPOUND = r"\s+(?:logs?|output|trails?|notes?|mode|flags?|messages?|statements?|info|guides?|reports?)\b"
 _LIMIT_WORD = rf"(?:{_CHANGE_VERB}|(?:edit|modify|move|touch|{_REASONING_WORDS})\b)"
 _JOIN = (rf"\b(?!{_LIMIT_WORD})[\w'-]+\s+(?:and|then)\s+(?:(?:also|then|instead|please|just)\s+){{0,2}}"
          rf"(?:{_TASK_VERB}|{_NOUN_VERB}(?={_OBJECT}))(?!{_COMPOUND})")
