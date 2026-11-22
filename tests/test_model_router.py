@@ -1953,5 +1953,69 @@ class Launcher(Sandbox):
         self.assertIn("Subtask level", res.stdout)
 
 
+class ReadmeDiagrams(unittest.TestCase):
+    SVG = "{http://www.w3.org/2000/svg}"
+    NAMES = ("two-paths.svg", "ladder.svg", "redo-escalation.svg")
+
+    def parse(self, name: str):
+        import xml.etree.ElementTree as ET
+        return ET.parse(ROOT / "docs" / "assets" / name).getroot()
+
+    def test_each_diagram_is_valid_titled_svg_linked_from_the_readme(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for name in self.NAMES:
+            root = self.parse(name)
+            self.assertEqual(root.tag, f"{self.SVG}svg", name)
+            for attr in ("viewBox", "width", "height"):
+                self.assertTrue(root.get(attr), f"{name} has no {attr}")
+            title = root.find(f"{self.SVG}title")
+            self.assertTrue(title is not None and (title.text or "").strip(), f"{name} has no title")
+            self.assertIn(f"](docs/assets/{name})", readme)
+            source = (ROOT / "docs" / "assets" / name).read_text(encoding="utf-8")
+            self.assertNotIn("var(", source, f"{name}: librsvg and some viewers render CSS variables black")
+            self.assertIn("prefers-color-scheme: dark", source, name)
+
+    def text(self, name: str) -> str:
+        return " ".join((cell.text or "").strip() for cell in self.parse(name).iter(f"{self.SVG}text"))
+
+    def test_the_two_paths_diagram_names_every_settings_hook(self):
+        events = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+        words = self.text("two-paths.svg").split()
+        for event in events:
+            self.assertIn(event, words)
+
+    def test_the_redo_diagram_states_the_learning_thresholds(self):
+        text = self.text("redo-escalation.svg")
+        self.assertIn(f"{learn.VOTES_NEEDED} votes", text)
+        self.assertIn(f"{round(learn.SHARE_NEEDED * 100)}%", text)
+
+    def test_the_ladder_diagram_matches_the_registry(self):
+        config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
+        by_strength = {m["strength"]: name for name, m in config["models"].items()}
+        text = self.text("ladder.svg").lower()
+        for level, spec in config["levels"].items():
+            row = f"{level} {by_strength[spec['needs']]} {spec['effort']}"
+            self.assertIn(row, text)
+
+    def test_the_ladder_note_says_where_a_ruled_out_model_moves_the_pick(self):
+        from modelrouter import ladder
+        config = cfg.base_config()
+        self.assertEqual(ladder.pick(config, "lookup", "balanced", ["sonnet", "opus", "fable"], {}).model, "sonnet")
+        self.assertEqual(ladder.pick(config, "complex", "balanced", ["haiku", "sonnet"], {}).model, "sonnet")
+        text = self.text("ladder.svg")
+        self.assertIn("the pick moves to the nearest usable model above it, or to the strongest one left", text)
+        self.assertNotIn("never raised", text)
+
+    def test_the_redo_note_names_each_step_of_the_ladder(self):
+        levels = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["levels"]
+        steps = list(zip(levels, list(levels)[1:]))
+        stronger = [a for a, b in steps if levels[b]["needs"] > levels[a]["needs"]]
+        text = self.text("redo-escalation.svg").lower()
+        self.assertIn(f"{', '.join(stronger[:-1])} and {stronger[-1]} move to a stronger model", text)
+        for a, b in steps:
+            if levels[b]["needs"] == levels[a]["needs"]:
+                self.assertIn(f"{a} stays on", text)
+
+
 if __name__ == "__main__":
     unittest.main()

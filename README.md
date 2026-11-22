@@ -8,7 +8,7 @@ What this Claude Code model router does:
 
 - Sets the model and effort of every subagent, teammate and workflow agent as it starts, whichever agent, skill or plugin starts it. The agent the caller chose stays the same.
 - Raises the main conversation's effort for one turn when the request looks complex or harder. It never lowers what you set, and it leaves the model alone, so the prompt cache is kept.
-- Escalates on a redo. When Claude re-issues a call that already came back, that call runs one level higher: more effort first, then a stronger model.
+- Escalates on a redo. When Claude re-issues a call that already came back, that call runs one level higher on the ladder: a stronger model, or more effort when it stays on the same model.
 - Treats models as data. A registry ranks each model by strength, speed and cost, and the router works out which of them your setup can use from your settings, from the model each agent ran on, and from failures.
 - Logs what each turn cost at list price, main conversation and subagents apart, in `/model-router:usage`.
 - Leans toward quality, speed or cost with one `priority` option, and caps the strongest model allowed with another.
@@ -40,16 +40,7 @@ There is nothing to configure. Claude model routing is on from the first session
 
 ## How it works
 
-```text
-any agent starts ──► profile the subtask ──► select model + effort ──► written on the spawn ──► agent runs
-(subagent, teammate,  the brief's wording     cheapest strong enough,   by the plugin's mod
- workflow stage)      and the agent's name    by priority, cap,         (or on the Agent call
-                                              availability              on older setups)
-                            ▲                        ▲
-                     redo escalation           model registry
-                   (same call again runs     (strength, speed, cost,
-                     one level higher)         prices; what runs here)
-```
+![Two control paths, one router: engine events reach the mod, settings hooks are the fallback, and both call one Python runtime](docs/assets/two-paths.svg)
 
 The plugin has two parts. A mod (a hooks module, `hooks/router.ts`) hooks Claude Code's own events: `agent.spawn` for every subagent, teammate and workflow agent, `turn.step` for effort on each model request, and `turn.start` and `turn.complete` for the main conversation and the spend log. Settings hooks (`hooks/hooks.json`) do the rest: the checks before a turn ends, availability tracking, and routing through the `Agent` tool call when mods aren't available. Both call the same Python runtime, so one router decides everything.
 
@@ -65,6 +56,8 @@ Each subtask is scored from its own brief. The profile looks for risk (security,
 | hardest | Ambiguous, multi-system and risky at once | Opus | xhigh |
 | frontier | All of that, with no known approach: research, open-ended investigation | Fable | high |
 
+![The ladder: lookup on Haiku at low, standard on Sonnet at high, complex on Opus at high, hardest on Opus at xhigh, frontier on Fable at high](docs/assets/ladder.svg)
+
 The ladder follows Anthropic's published cost-per-solved-task numbers. Sonnet at its Claude Code default of `medium` scores about 7 points lower on coding than at `high`, so standard work runs at `high`. On the same coding problems Opus 5.5 at `high` came within a point of Fable 5.2 at `high` (95.5% against 96.3%) for under a quarter of the cost, so hard coding stays on Opus, with `xhigh` for the hardest, and Fable is kept for research-grade work.
 
 ### 2. Select a model
@@ -79,7 +72,9 @@ The plugin never approves a tool call. Your permission rules and auto mode revie
 
 ### 4. Escalate and learn
 
-A call Claude re-issues after its result came back runs one level higher. That is the cheapest policy Anthropic measured for a high pass rate: start low and re-run what fails at a higher setting. That beat starting every task high on both cost and pass rate. Each redo also counts as a vote that the level was routed too low, and enough votes raise the level for good. Copies of one brief started together are not redos, and a background agent's call counts as finished when the agent stops.
+![Redo escalation: a call routed at standard comes back, the same call again runs at complex, and counts as a vote that standard was too low](docs/assets/redo-escalation.svg)
+
+A call Claude re-issues after its result came back runs one level higher. That is the cheapest policy Anthropic measured for a high pass rate: start low and re-run what fails at a higher setting. That beat starting every task high on both cost and pass rate. Each redo also counts as a vote that the level was routed too low. At least 6 votes that are also at least 30% of the level's calls raise it one step, and a raise that keeps being overruled with a weaker model is undone the same way. Copies of one brief started together are not redos, and a background agent's call counts as finished when the agent stops.
 
 The model each agent ran on is recorded. A model is routed around for a day, and then retried, after two calls on it fail with a model error, run as a different model, or are rejected by the `Agent` tool. If the trouble comes back, the wait grows to three days and then a week. `/model-router:models` shows all of this and can reset it.
 
@@ -94,7 +89,7 @@ In order, strongest first:
 5. `CLAUDE_CODE_SUBAGENT_MODEL`, your default for agents without a model.
 6. The router's pick.
 
-Whatever wins is then lowered, never raised, to fit your cap and what is available. Effort is left alone when the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` already sets it.
+Whatever wins then has to be usable: inside your cap, allowed by your settings and known to work. If it isn't, the strongest usable model below it runs, or the weakest usable one when none is below it. Effort is left alone when the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` already sets it.
 
 ## Role agents and `/model-router:ship`
 
