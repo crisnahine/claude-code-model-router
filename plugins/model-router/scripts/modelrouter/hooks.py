@@ -132,21 +132,13 @@ def session_start(hook_input: dict) -> dict | None:
     name = cfg.PLUGIN_NAME
     if mode == "auto":
         top = registry.ceiling(config, cfg.project_dir(hook_input), options.cap)
-        crew = ", ".join(f"{name}:{agent} ({spec.get('role', '').lower()})"
-                         for agent, spec in (config.get("crew") or {}).items())
+        # Only what Claude must act on: every word here is in context for the whole session.
         parts.append(
-            "Model Router is on. It sets the model and reasoning effort of every subagent, teammate and "
-            "workflow agent, from the subtask's brief, whichever agent, skill or plugin starts it (strongest "
-            f"model in use: {top}). It starts each one on the cheapest model and effort that should do the job. "
-            "So: don't pass `model` or `effort` on Agent calls unless the user asked for a specific model or "
-            "you know something the brief doesn't show; what you name is kept. Write complete briefs and say "
-            "what makes a subtask hard (security, several modules, an unclear root cause), since the brief is "
-            "what the model is chosen from. Delegate reading-heavy and independent work, in parallel where it "
-            "doesn't touch the same files, and don't delegate what takes you one or two tool calls. Check "
-            "delegated results. If one isn't good enough, re-issue the same call unchanged: it runs one level "
-            "higher (more effort, then a stronger model), and the router learns from it. Role agents exist "
-            f"for when no better-fitting agent does: {crew}. /{name}:ship runs a full plan, build, verify and "
-            "review loop."
+            "Model Router is on: it picks the model and effort of every subagent, teammate and workflow agent "
+            f"from its brief (strongest model in use: {top}). Don't pass `model` or `effort` on Agent calls "
+            "unless the user asked for one; a named one is kept. Say in the brief what makes a subtask hard "
+            "(security, several modules, an unclear cause). If a result falls short, re-issue the same call "
+            "unchanged: it runs one level higher."
         )
         if options.force:
             pinned = options.subagent_model or "one model"
@@ -200,12 +192,14 @@ def user_prompt(hook_input: dict) -> dict | None:
     usable = registry.available(config, cfg.project_dir(hook_input), options.cap)
     result = _typed_skill(prompt, hook_input) or profile_prompt(prompt)
     level = result["level"]
-    need = ladder.pick(config, level, options.priority, usable, learn.raises()).model
+    pick = ladder.pick(config, level, options.priority, usable, learn.raises())
+    need = pick.model
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
     below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
     wanted = named_model(config, prompt)
     store.save_entry("prompts", session_id, {
-        "prompt_id": hook_input.get("prompt_id"), "level": level, "need": need, "below": below,
+        "prompt_id": hook_input.get("prompt_id"), "level": level, "need": need, "need_effort": pick.effort,
+        "below": below,
         "session_tier": current, "named": wanted})
     why = f" (wording suggests: {', '.join(result['signals'])})" if result["signals"] else ""
     notes = []
@@ -215,10 +209,10 @@ def user_prompt(hook_input: dict) -> dict | None:
     elif below:
         notes.append(
             f"This request looks {level}{why}: about {need}-level reasoning, and this conversation runs on "
-            f"{current}. This conversation keeps its model, so this step is required: "
-            f"hand the hard thinking (the design, the root cause, the risky decision) to "
-            f"{gates.strong_agent(config, need)} rather than settling it inline. You will be asked to before "
-            "finishing if you don't. If the code shows the task is simpler than its wording, say so instead."
+            f"{current}. Hand the hard thinking (design, root cause, the risky decision) to "
+            f"{gates.strong_agent(config, need, pick.effort, level)} rather than settling it inline"
+            f"{'; you will be asked to before finishing' if options.strong_agent_gate else ''}. "
+            "If the code shows the task is simpler, say so instead."
         )
     if wanted and mode == "auto":
         notes.append(f"If the user is asking for the {wanted} model here, pass model: \"{wanted}\" on the "

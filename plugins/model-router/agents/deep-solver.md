@@ -1,8 +1,6 @@
 ---
 name: deep-solver
-description: The most capable and most expensive agent, for research-grade work. Use for open-ended problems with no known approach, ambiguous multi-system investigations, long-running autonomous tasks, or a task that already fell short on an opus agent at xhigh effort. Ordinary hard coding goes to opus.
-model: fable
-effort: xhigh
+description: Takes research-grade, open-ended problems with no known approach, or work the architect couldn't settle. Not for ordinary hard coding.
 color: orange
 ---
 

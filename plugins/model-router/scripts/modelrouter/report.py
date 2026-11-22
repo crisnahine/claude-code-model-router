@@ -34,13 +34,10 @@ def policy(config: dict, settings: Settings) -> str:
         lines.append(f"| {name}{flag} | {info.get('strength')} | {info.get('speed', '-')} | "
                      f"{info.get('cost', '-')} | {info.get('use_for', '')} |")
     lines += ["", "Strength, speed and cost are relative ranks, not prices.", "",
-              "| Role agent | Model | Role |", "| :- | :- | :- |"]
-    for name, agent in sorted((config.get("crew") or {}).items(),
-                              key=lambda kv: registry.strength(config, kv[1].get("model"))):
-        model = agent.get("model")
-        runs = registry.clamp(config, model, usable) if model in registry.models(config) else model
-        shown = model if runs == model else f"{runs} (lowered from {model})"
-        lines.append(f"| {cfg.PLUGIN_NAME}:{name} | {shown} | {agent.get('role', '')} |")
+              "Role agents carry no model of their own: each is routed by its brief, like any other agent.", "",
+              "| Role agent | Role |", "| :- | :- |"]
+    for name, agent in (config.get("crew") or {}).items():
+        lines.append(f"| {cfg.PLUGIN_NAME}:{name} | {agent.get('role', '')} |")
     return "\n".join(lines)
 
 

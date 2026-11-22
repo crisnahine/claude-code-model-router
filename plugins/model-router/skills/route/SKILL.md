@@ -1,6 +1,6 @@
 ---
 name: route
-description: Explains which Claude model Model Router would give a task and why, and how to split the work. Use when the user asks which model should do something, why an agent ran on a particular model, or how to delegate a large task.
+description: Explains which model Model Router would give a task and why, and how to split the work. Use when the user asks which model should do something or why an agent ran on a model.
 when_to_use: Which model should do this, why did that agent run on haiku, how should I split this up, is this routed right.
 argument-hint: "[task description]"
 allowed-tools:

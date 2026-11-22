@@ -12,7 +12,7 @@ What this Claude Code model router does:
 - Treats models as data. A registry ranks each model by strength, speed and cost, and the router works out which of them your setup can use from your settings, from the model each agent ran on, and from failures.
 - Logs what each turn cost at list price, main conversation and subagents apart, in `/model-router:usage`.
 - Leans toward quality, speed or cost with one `priority` option, and caps the strongest model allowed with another.
-- Asks for a test run after code changes, and for a stronger model's check when a hard request was answered by a weak session model alone.
+- Asks for a stronger model's check when a hard request was answered by a weak session model alone, and, with the `verify_gate` option on (it's off by default), for a test run after code changes.
 - Checks the official changelog, docs index, model aliases and model deprecations once a day, plus your account's model list when an Anthropic API key is set, and reports releases, docs changes, new models and models it routes to that are retiring.
 
 ## Install
@@ -93,7 +93,7 @@ Whatever wins then has to be usable: inside your cap, allowed by your settings a
 
 ## Role agents and `/model-router:ship`
 
-The plugin ships seven agents for work that no better-fitting agent covers: `model-router:scout`, `verifier` and `docs-researcher` on Haiku, `implementer` on Sonnet at high effort, `architect` and `reviewer` on Opus, and `deep-solver` on Fable. They are ordinary agents with their own models, and their calls go through the same router as every other agent's.
+The plugin ships seven agents for work that no better-fitting agent covers: `model-router:scout`, `verifier`, `docs-researcher`, `implementer`, `architect`, `reviewer` and `deep-solver`. None of them names a model or effort, so the router routes each by its brief like any other agent; the architect and reviewer start no lower than complex because of their names, and the deep-solver's name floors it at hardest, so a frontier brief can still take it to the strongest model. Their descriptions say when each is the right tool, such as the reviewer for a risky or cross-module diff, rather than a step to run on every change, since Claude decides when to delegate from those descriptions (https://code.claude.com/docs/en/sub-agents.md).
 
 `/model-router:ship <task or issue>` runs a full loop with them: understand, plan, build, verify, review, fix, and commit on a branch. It stops before pushing, merging or deploying.
 
@@ -121,7 +121,8 @@ Options, in `/config` under the plugin:
 | `agent_pins` | `respect` | `respect` keeps the model an agent names for itself. `override` routes those agents by task too |
 | `main_effort` | off | When on, raises the main conversation's effort for a complex or harder request, for that turn. Off where an effort change would re-read the context uncached: Bedrock, Vertex, Foundry, `ANTHROPIC_BASE_URL`, a Claude apps gateway or another third-party provider, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`, and models other than Fable 5.1+, Opus 5.5, Sonnet 5.5 and Haiku 5.5. Leave it off in a HIPAA organization, which the router doesn't detect, or if Claude Desktop reaches Claude through a Claude apps gateway, which it can't tell from a subscription there |
 | `update_check` | on | The daily check of the changelog, docs index, model list and deprecations |
-| `verify_gate` | on | The two checks before a turn ends |
+| `verify_gate` | off | Asks for a test run before a turn ends when code changed and nothing checked it. It adds turns and often an agent, so it's off unless you want a check before every finish |
+| `strong_agent_gate` | on | Asks for a stronger agent's check before a turn ends when a weak session model answered a hard request alone. It rarely fires on a strong session model |
 
 Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours and applies everywhere. `.claude/model-router.json` belongs to a project. Both have the same shape:
 
@@ -146,7 +147,7 @@ A file may carry `"schema": 1`, the version of this shape; without it, it is rea
 
 These limits come from what Claude Code lets a plugin do, or from choices made to protect quality and cost.
 
-- It doesn't switch the main conversation's model. A mod could, but each model keeps its own prompt cache, so a switch re-reads the whole conversation uncached. It changes the main conversation's effort instead, which keeps the cache on current models, and when a request looks harder than the session's model, Claude is told to hand the hard thinking to a strong subagent and is asked once before finishing if it didn't.
+- It doesn't switch the main conversation's model. A mod could, but each model keeps its own prompt cache, so a switch re-reads the whole conversation uncached. It changes the main conversation's effort instead, which keeps the cache on current models, and when a request looks harder than the session's model, Claude is told to hand the hard thinking to a strong subagent, and is asked once before finishing if it didn't, unless `strong_agent_gate` is off.
 - It leaves forks alone. A fork reads its parent's cache and always runs on its parent's model.
 - It leaves alone an agent whose definition it can't read, such as an agent defined on the command line, unless `agent_pins` is `override`. That agent may have a model its author chose. Workflow stages and teammate roles, which the engine makes, are routed.
 - It doesn't judge answers. The profile reads the wording of the brief and the agent's name, never the code, so it is an estimate. Claude can overrule it on any call, and redo escalation and the feedback loop correct levels that prove too low.

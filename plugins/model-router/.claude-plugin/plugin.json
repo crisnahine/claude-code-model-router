@@ -69,8 +69,14 @@
     },
     "verify_gate": {
       "type": "boolean",
-      "title": "Quality gates before finishing",
-      "description": "Ask Claude once, before it finishes a turn, to (1) run the verifier when code changed and no test, lint or build ran afterwards, and (2) get a stronger agent's check when a hard request was answered by a weaker session model alone.",
+      "title": "Test run before finishing",
+      "description": "Off by default, since it adds turns and often an agent. When on, Claude is asked once, before it finishes a turn, to run the verifier when code in the project changed and no test, lint or build ran afterwards. Turn it on if you want a check before every finish.",
+      "default": false
+    },
+    "strong_agent_gate": {
+      "type": "boolean",
+      "title": "Stronger agent's check on hard requests",
+      "description": "On by default. When a hard request was answered by a session model weaker than it needs, with no agent of the needed strength started, Claude is asked once, before it finishes, to have a stronger agent check the result. It rarely fires on a strong session model. Turn it off to never be asked.",
       "default": true
     }
   }

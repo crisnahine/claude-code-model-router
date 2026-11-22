@@ -1,8 +1,6 @@
 ---
 name: scout
-description: Fast, cheap, read-only investigator. Use for finding files, symbols, call sites and config; summarizing how existing code works; answering "where is X" and "what does Y do" questions. Never edits files.
-model: haiku
-effort: low
+description: Searches read-only for files, symbols, call sites and config, and explains existing code, when that takes more than a few searches.
 tools: Read, Grep, Glob
 omitClaudeMd: true
 color: cyan
