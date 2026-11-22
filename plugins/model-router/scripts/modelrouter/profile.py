@@ -12,6 +12,12 @@ from .config import LEVELS, PLUGIN_NAME
 # Two or more systems named in a list ("across the API, the web client and ...") are cross-module work.
 _SYSTEM = r"(?:services?|clients?|api|gateway|backend|frontend|workers?|apps?|layers?|modules?)"
 _SYSTEMS = rf"(?:across|touching|between)\s+(?:the\s+)?(?:[\w-]+\s+){{0,2}}?{_SYSTEM},\s+(?:the\s+)?(?:[\w-]+\s+){{0,2}}?{_SYSTEM}"
+# Asked to make a choice, not to pick an item: decide how, choose a scheme, weigh options, which ... should we.
+_DECISION = (r"(?:decid\w*|choos\w*|pick|weigh)\s+(?:how|which|whether|between|what|on|among)|"
+             r"(?:choos\w*|pick)\s+(?:a|an|the)\s+(?:[\w-]+\s+){0,2}"
+             r"(?:schemes?|strateg\w*|approach\w*|architectures?|algorithms?|data models?|layouts?|protocols?)|"
+             r"weigh\s+(?:the\s+)?(?:options|alternatives|trade.?offs?)|"
+             r"which\s+(?:[\w-]+\s+){1,3}should\s+(?:we|i|it|they)\s+(?:use|adopt|pick|choose|go with)")
 SIGNALS = {
     "risk": r"secur\w*|vulnerab\w*|auth|authn|authz|authenticat\w*|authoriz\w*|oauth\w*|passwords?|"
             r"credentials?|secrets?|encrypt\w*|decrypt\w*|payments?|billing|migrat\w*|schemas?|databases?|"
@@ -28,8 +34,9 @@ SIGNALS = {
              r"redesign\w*|rewrit\w*|monorepo|end.to.end|large.scale|system.wide|" + _SYSTEMS,
     # Capacity, freshness and speed limits a choice has to be worked out against, not just honoured in passing.
     "load": r"performance|throughput|latency|capacity|staleness|freshness|(?:reads?|writes?|requests?|queries) "
-            r"(?:per|a|/) ?(?:second|sec|s)|qps|rps|bottlenecks?|under (?:heavy |peak )?load",
-    "ambiguity": r"design|investigat\w*|root.?causes?|intermittent\w*|flaky|figure out|not sure|"
+            r"(?:per|a|/) ?(?:second|sec|s)|qps|rps|bottlenecks?|under (?:heavy |peak )?load|"
+            r"\d[\d,.]*k?\s*(?:per second|/s)|\d+\s*ms",
+    "ambiguity": _DECISION + r"|design|investigat\w*|root.?causes?|intermittent\w*|flaky|figure out|not sure|"
                  r"why (?:does|is|do|are|did)|research|evaluate|trade.?offs?|best (?:way|approach)|"
                  r"should we|strategy|proposal|sometimes|occasionally|(?:find|identify) the cause",
 }
@@ -164,7 +171,7 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
     if "risk" not in hits and "risk" in signals(text):
         hits.insert(0, "risk")
     why = list(hits)
-    if re.search(_CHANGE, asked) or re.search(_REASONING, asked):
+    if re.search(_CHANGE, asked) or re.search(_REASONING, asked) or re.search(rf"\b(?:{_DECISION})\b", asked):
         if len(hits) >= 3:
             level = "frontier" if re.search(_FRONTIER, asked) else "hardest"
         elif len(hits) == 2 and re.search(_FRONTIER.replace("research(?:-grade)?", "research-grade"), asked):

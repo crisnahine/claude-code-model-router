@@ -1594,6 +1594,55 @@
    "agent": "general-purpose",
    "description": "Size the billing pool",
    "prompt": "Size the connection pool so the billing service meets its latency target under peak load."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Decide database sharding",
+   "prompt": "Decide how to shard the database to reach 10,000 writes per second."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Decide sharding across services",
+   "prompt": "Decide how to shard the database to reach 10,000 writes per second across the API and the worker services without losing data."
+  },
+  {
+   "lowest": "complex",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Choose events partitioning",
+   "prompt": "Choose a partitioning scheme for the events table so writes stay under 50 ms at 10,000 per second."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Pick first file",
+   "prompt": "Pick the first file in the list."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Choose variable name",
+   "prompt": "Choose a name for this variable."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Pick log level",
+   "prompt": "Decide whether to log at debug or info."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Choose driver version",
+   "prompt": "Choose the database driver version in requirements.txt."
   }
  ]
 }
