@@ -15,11 +15,21 @@ from .profile import profile_prompt
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
 
 
+# Where the mod saw a turn's prompt come from (prompt.submit's origin.kind) when it wasn't
+# the person. A kind a later build adds counts as the person's, so routing never goes quiet.
+MACHINE_ORIGINS = {"task-notification", "peer", "peer-send-message", "projects-relay", "coordinator",
+                   "observer", "observer-activity", "unclassified"}
+_DELIVERED = "Another Claude session sent a message:"
+
+
 def is_user_prompt(prompt: str) -> bool:
-    """UserPromptSubmit also fires for background-task notifications and similar
-    machine-written turns. Those must not reset what is known about the user's request.
-    Pasted text is the user's, though it arrives wrapped in a <pasted_content> tag."""
+    """UserPromptSubmit also fires for background-task notifications, teammates' reports
+    and other sessions' messages. Those must not reset what is known about the user's
+    request. Pasted text is the user's, though it arrives wrapped in a <pasted_content> tag."""
     prompt = (prompt or "").lstrip()
+    first, _, rest = prompt.partition("\n")
+    if first.strip() == _DELIVERED and rest.lstrip().startswith(("<teammate-message", "<cross-session-message")):
+        return False
     return not prompt.startswith("<") or prompt.startswith("<pasted_content")
 
 
@@ -358,6 +368,7 @@ def mod_turn(hook_input: dict) -> dict | None:
     model = model if upstream.version_of(model) else session.model(session_id)
     if (options.mode != "auto" or not options.main_effort or not is_user_prompt(text)
             or options.effort_level or hook_input.get("first_party") is False
+            or str(hook_input.get("origin")) in MACHINE_ORIGINS
             or not _effort_keeps_cache(options, model)):
         return None
     level = profile_prompt(text)["level"]
