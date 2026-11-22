@@ -471,6 +471,22 @@ class Limits(unittest.TestCase):
             self.assertFalse(run.rate_limited({"is_error": True, "exit_code": 1, "api_error_status": None,
                                                "stderr": "", "answer": answer}), answer)
 
+    @unittest.skipUnless(shutil.which("git"), "needs git")
+    def test_the_bench_s_own_results_do_not_make_the_code_dirty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            (repo / "bench" / "results").mkdir(parents=True)
+            (repo / "bench" / "run.py").write_text("x = 1\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm",
+                            "base"], check=True)
+            with unittest.mock.patch.object(run, "ROOT", repo):
+                (repo / "bench" / "results" / "m6-lookup.jsonl").write_text("{}\n", encoding="utf-8")
+                self.assertFalse(run._git_dirty())
+                (repo / "bench" / "run.py").write_text("x = 2\n", encoding="utf-8")
+                self.assertTrue(run._git_dirty())
+
     def test_the_messages_claude_code_prints_for_a_limit_are_limits(self):
         # https://code.claude.com/docs/en/errors.md, the usage-limit and server-error rows.
         for answer in ("API Error: Repeated 529 Overloaded errors", "Request rejected (429)",

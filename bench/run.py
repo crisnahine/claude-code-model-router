@@ -131,9 +131,10 @@ def _git_head() -> str | None:
 
 
 def _git_dirty() -> bool:
-    """Whether bench/ or the plugin has changes HEAD doesn't hold, so bench_commit isn't the code that ran."""
-    res = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "--", "bench", "plugins"],
-                         capture_output=True, text=True)
+    """Whether bench/ or the plugin has changes HEAD doesn't hold, so bench_commit isn't the code that ran. The
+    bench's own output under bench/results/ isn't code, so a results file written earlier in a run doesn't count."""
+    res = subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain", "--", "bench", "plugins",
+                          ":(exclude)bench/results"], capture_output=True, text=True)
     return bool(res.stdout.strip())
 
 
