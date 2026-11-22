@@ -196,6 +196,7 @@ docs/research/                 the primary-source research the design rests on
 
 ```bash
 python3 -m unittest discover -s tests
+node --experimental-strip-types --test "tests/mod/*.test.ts"
 claude plugin validate --strict .
 claude plugin validate --strict plugins/model-router
 claude plugin eval plugins/model-router --trust-plugin

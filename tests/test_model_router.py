@@ -831,6 +831,39 @@ class Mod(Sandbox):
         self.assertEqual(registry.price(cfg.load_config(), "claude-opus-4-7")["input"], 5)
 
 
+class ModPayloads(Sandbox):
+    """tests/fixtures/mod-payloads.json holds what hooks/router.ts sends; tests/mod checks the other side."""
+
+    def setUp(self):
+        super().setUp()
+        self.payloads = json.loads((FIXTURES / "mod-payloads.json").read_text(encoding="utf-8"))
+
+    def test_each_command_has_a_handler(self):
+        self.assertEqual(set(self.payloads), {name for name in hooks.HANDLERS if name.startswith("mod-")})
+
+    def test_start_marks_the_session(self):
+        hooks.mod_start(self.payloads["mod-start"])
+        self.assertTrue(hooks.mod_active("s1"))
+
+    def test_spawn_reads_every_field(self):
+        payload = {**self.payloads["mod-spawn"], "cwd": str(self.project)}
+        with mock.patch.object(router, "decide", wraps=router.decide) as decide:
+            hooks.mod_spawn(payload)
+        self.assertEqual(decide.call_args.args[0]["agent_id"], payload["parent_agent_id"])
+        row = self.ledger()[-1]
+        self.assertEqual((row["event"], row["via"], row["kind"], row["agent"], row["model"]),
+                         ("spawn", "mod", "subagent", "general-purpose", "haiku"))
+        self.assertTrue(hooks.mod_active("s1"))
+
+    def test_turn_picks_an_effort(self):
+        self.assertEqual(hooks.mod_turn(self.payloads["mod-turn"]), {"level": "complex", "effort": "high"})
+
+    def test_usage_is_logged_for_its_agent(self):
+        hooks.mod_usage(self.payloads["mod-usage"])
+        row = self.ledger()[-1]
+        self.assertEqual((row["event"], row["agent_id"], row["cost_usd"]), ("usage", "a1", 6.0))
+
+
 class Feedback(Sandbox):
     def setUp(self):
         super().setUp()

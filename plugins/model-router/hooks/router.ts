@@ -68,7 +68,7 @@ export const register: Register = (on, options) => {
     const effort = callerEffort.get(e.tool_use_id)
     const pick = await ask($, opts, 'mod-spawn', {
       cwd: e.cwd,
-      agent_id: e.parentAgentId,
+      parent_agent_id: e.parentAgentId,
       parent_model: e.parentModel,
       kind: e.workflow ? 'workflow' : e.isTeammate ? 'teammate' : 'subagent',
       tool_input: {

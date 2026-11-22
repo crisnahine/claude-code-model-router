@@ -1,0 +1,34 @@
+{
+  "mod-start": {
+    "session_id": "s1"
+  },
+  "mod-spawn": {
+    "session_id": "s1",
+    "cwd": "/work/project",
+    "parent_agent_id": "a0",
+    "parent_model": "claude-opus-5-5",
+    "kind": "subagent",
+    "tool_input": {
+      "subagent_type": "general-purpose",
+      "prompt": "list the files under src",
+      "description": "list files",
+      "model": "haiku",
+      "effort": "low"
+    }
+  },
+  "mod-turn": {
+    "session_id": "s1",
+    "text": "fix the auth migration across every service"
+  },
+  "mod-usage": {
+    "session_id": "s1",
+    "agent_id": "a1",
+    "usage": {
+      "model": "claude-opus-5-5",
+      "input_tokens": 1000000,
+      "output_tokens": 100000,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0
+    }
+  }
+}
