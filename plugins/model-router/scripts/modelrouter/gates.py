@@ -7,7 +7,7 @@ import os
 import re
 import time
 
-from . import registry, session, store
+from . import calls, registry, session, store
 from . import config as cfg
 from .settings import Settings
 
@@ -91,7 +91,7 @@ def escalation(config: dict, hook_input: dict) -> str | None:
                or entry.get("session_tier"))
     if not current or not need or registry.strength(config, current) >= registry.strength(config, need):
         return None
-    if registry.strength(config, entry.get("top_spawn")) >= registry.strength(config, need):
+    if registry.strength(config, calls.strongest(session_id)) >= registry.strength(config, need):
         return None
     try:
         store.update_entry("prompts", session_id, escalation_asked=True, session_tier=current)

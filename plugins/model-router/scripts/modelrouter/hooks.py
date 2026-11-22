@@ -8,12 +8,11 @@ from __future__ import annotations
 import re
 import time
 
-from . import agents, gates, ladder, learn, registry, router, session, settings, store, upstream
+from . import agents, calls, gates, ladder, registry, session, settings, spawn, store, upstream
 from . import config as cfg
 from .profile import profile_prompt
 
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
-PENDING_KEPT = 100
 
 
 def is_user_prompt(prompt: str) -> bool:
@@ -121,7 +120,7 @@ def user_prompt(hook_input: dict) -> dict | None:
     below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
     store.save_entry("prompts", session_id, {
         "prompt_id": hook_input.get("prompt_id"), "level": level, "need": need, "below": below,
-        "session_tier": current, "top_spawn": None, "routed": {}})
+        "session_tier": current})
     why = f" (wording suggests: {', '.join(result['signals'])})" if result["signals"] else ""
     notes = []
     if mode == "advise":
@@ -147,112 +146,66 @@ def mod_active(session_id: str | None) -> bool:
 
 
 def pre_agent(hook_input: dict) -> dict | None:
+    """The fallback path: the decision becomes the call's rewritten input and a note, or
+    the one deny that holds the user's cap."""
     if mod_active(hook_input.get("session_id")):
         return None  # the plugin's mod routes this call when it spawns
-    config = cfg.load_config(hook_input)
-    tool_input = _tool_input(hook_input)
-    decision = router.decide(hook_input, config, settings.resolve(config))
     session_id = hook_input.get("session_id")
-    action = decision["action"]
-    store.append_ledger({
-        "event": "spawn", "session": session_id, "agent": decision["agent"], "action": action,
-        "level": decision["level"], "signals": decision["signals"],
-        "model": None if action == "deny" else decision["model"] or decision["was"],
-        "was": decision["was"], "effort": decision["effort"], "source": decision["source"],
-        "reason": decision["reason"], "description": str(tool_input.get("description") or "")[:120]})
-    try:
-        _record(config, session_id, tool_input, decision)
-    except OSError:
-        pass
-    if action == "rewrite":
+    decision = spawn.run(hook_input, "fallback", guard=lambda *args: _refused_rewrite(session_id, *args))
+    if decision["action"] == "rewrite":
         return {"hookSpecificOutput": {
-            "hookEventName": "PreToolUse", "updatedInput": router.rewritten_input(tool_input, decision),
-            "additionalContext": router.note(decision)}}
-    if action == "deny":
+            "hookEventName": "PreToolUse", "updatedInput": _rewritten_input(_tool_input(hook_input), decision),
+            "additionalContext": _note(decision)}}
+    if decision["action"] == "deny":
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                        "permissionDecisionReason": decision["reason"]}}
     return None
 
 
-def _record(config: dict, session_id: str | None, tool_input: dict, decision: dict) -> None:
-    """What the feedback loop, the repeat guard and the gates need to know afterwards."""
-    agent, level, source, action = decision["agent"], decision["level"], decision["source"], decision["action"]
-    if action == "deny":
+def _refused_rewrite(session_id: str | None, decision: dict, key: str, config: dict,
+                     options: settings.Settings) -> None:
+    """We rewrote this very call before and no result came back: the rewrite wasn't
+    accepted, or something else stopped the call. Rewriting it again could loop."""
+    if decision["action"] != "rewrite" or not decision["model"]:
         return
-    key = router.call_key(agent, tool_input)
-    runs_on = decision["model"] or decision["was"]
-
-    def power(name: object) -> float:
-        return registry.strength(config, name)
-
-    if action == "rewrite":
-        def remember(pending: dict) -> None:
-            pending[key] = {"model": decision["model"], "level": level, "effort": decision.get("effort"),
-                            "at": time.time()}
-            calls = [k for k in pending if isinstance(pending[k], dict) and k != "_at"]
-            for old in sorted(calls, key=lambda k: pending[k].get("at", 0))[:-PENDING_KEPT]:
-                del pending[old]
-        store.mutate_entry("pending", session_id, remember)
-    repeat_of = decision.get("repeat_of")
+    earlier = calls.refused_rewrite(session_id, key)
+    if earlier is None:
+        return
+    cap, untouched = options.cap, decision["was"]
+    if cap and registry.strength(config, untouched) > registry.strength(config, cap):
+        decision.update(action="deny", reason=(
+            f"Model Router: subagents are capped at {cap} by the user, and this call would run on "
+            f"{untouched}. Re-issue it with model: \"{decision['model']}\"."))
+        return
+    decision.update(action="keep", model=None, repeat_of=earlier.get("model"), reason=(
+        "this call was rewritten once and came back without having run, so it is passed through unchanged"))
+    repeat_of = decision["repeat_of"]
     if repeat_of and not (registry.health().get(repeat_of) or {}).get("last_model"):
         # A rewrite to a model that has never once run here didn't run this time either.
-        registry.record_failure(repeat_of, "a call rewritten to this model came back without having run")
-
-    picked = source == "router" and not repeat_of
-    kept = source in ("router", "pin", "rule") and not repeat_of and level
-    if picked:
-        learn.record_call(level)
-    if kept and decision.get("escalated_from"):
-        learn.vote_up(decision["escalated_from"])
-    current = store.load_entry("prompts", session_id)
-    routed_before = current.get("routed") if isinstance(current.get("routed"), dict) else {}
-    earlier = routed_before.get(key)
-
-    def update(entry: dict) -> None:
-        # Re-read under the lock: calls issued together record at the same moment.
-        routed = entry.get("routed") if isinstance(entry.get("routed"), dict) else {}
-        if picked:
-            routed[key] = runs_on
-            entry["routed"] = dict(list(routed.items())[-100:])
-        if kept:
-            levels = entry.get("levels") if isinstance(entry.get("levels"), dict) else {}
-            levels[key] = {"level": level, "model": runs_on, "effort": decision.get("effort")}
-            entry["levels"] = dict(list(levels.items())[-100:])
-        if power(runs_on) > power(entry.get("top_spawn")):
-            entry["top_spawn"] = runs_on
-
-    if session_id and (kept or power(runs_on) > power(current.get("top_spawn"))):
-        store.mutate_entry("prompts", session_id, update)
-    if source == "caller" and level:
-        if earlier and power(runs_on) > power(earlier):
-            learn.vote_up(level, 2)  # the same call again, on a stronger model
-        elif power(runs_on) > power(decision["pick"]):
-            learn.vote_up(level, 1)
-        elif power(runs_on) < power(decision["pick"]):
-            learn.vote_down(level)
-    if gates.is_checker(agent):
-        gates.note_check(session_id)
+        try:
+            registry.record_failure(repeat_of, "a call rewritten to this model came back without having run")
+        except OSError:
+            pass
 
 
-def _settle(hook_input: dict, finished: bool = False) -> None:
-    """A result or an error came back for this call, so its rewrite was accepted. A
-    finished call is remembered, so the same call issued again is seen as a redo."""
-    session_id = hook_input.get("session_id")
-    tool_input = _tool_input(hook_input)
-    agent = tool_input.get("subagent_type")
-    key = router.call_key(agent if isinstance(agent, str) and agent else "general-purpose", tool_input)
-    earlier = store.load_entry("pending", session_id).get(key)
-    if earlier is not None:
-        store.mutate_entry("pending", session_id, lambda pending: pending.pop(key, None))
-    prompt = store.load_entry("prompts", session_id)
-    ran = earlier if isinstance(earlier, dict) and earlier.get("level") else (prompt.get("levels") or {}).get(key)
-    if finished and isinstance(ran, dict) and ran.get("level") in cfg.LEVELS:
-        def remember(done: dict) -> None:
-            done[key] = {"level": ran["level"], "model": ran.get("model"), "effort": ran.get("effort"),
-                         "prompt_id": prompt.get("prompt_id"), "at": time.time()}
-            for old in sorted(done, key=lambda k: (done[k] or {}).get("at", 0) if isinstance(done[k], dict) else 0)[:-PENDING_KEPT]:
-                del done[old]
-        store.mutate_entry("done", session_id, remember)
+def _rewritten_input(tool_input: dict, decision: dict) -> dict:
+    """The whole call as it should run: Claude Code replaces the input, it doesn't merge."""
+    updated = dict(tool_input)
+    if decision.get("model"):
+        updated["model"] = decision["model"]
+    if decision.get("effort"):
+        updated["effort"] = decision["effort"]
+    return updated
+
+
+def _note(decision: dict) -> str:
+    """One line for Claude, delivered with the agent's result."""
+    if not decision.get("model"):
+        return (f"Model Router set this agent's effort to {decision['effort']} ({decision['reason']}). "
+                "If the result falls short, re-issue the same call: it runs one level higher.")
+    effort = f" at {decision['effort']} effort" if decision.get("effort") else ""
+    return (f"Model Router set this agent's model to {decision['model']}{effort} ({decision['reason']}). "
+            "If the result falls short, re-issue the same call: it runs one level higher.")
 
 
 def _asked_for(config: dict, hook_input: dict) -> str | None:
@@ -276,14 +229,14 @@ def post_agent(hook_input: dict) -> dict | None:
     ran_as = response.get("resolvedModel")
     asked = _asked_for(config, hook_input)
     try:
-        _settle(hook_input, finished=True)
+        calls.settled(hook_input.get("session_id"), tool_input, finished=True)
         if asked and registry.family(config, ran_as):
             registry.record_result(asked, ran_as, registry.family(config, ran_as))
     except OSError:
         pass
     store.append_ledger({
         "event": "result", "session": hook_input.get("session_id"),
-        "agent": tool_input.get("subagent_type") or "general-purpose", "asked": asked,
+        "agent": calls.identify(tool_input)[0], "asked": asked,
         "resolved_model": ran_as, "status": response.get("status"), "total_tokens": response.get("totalTokens")})
     return None
 
@@ -292,7 +245,7 @@ def agent_failed(hook_input: dict) -> dict | None:
     """An agent call failed. If the error says the model itself isn't usable, count it,
     and route around that model once it has happened twice."""
     try:
-        _settle(hook_input)
+        calls.settled(hook_input.get("session_id"), _tool_input(hook_input))
     except OSError:
         pass
     error = str(hook_input.get("error") or "")
@@ -342,8 +295,6 @@ def refresh_cache(hook_input: dict) -> dict | None:
 # hooks/router.ts forwards three engine events here. Its spawn event sees every subagent,
 # teammate and workflow agent, and names the parent's model exactly.
 
-SPAWN_PROMPT_KEPT = 20000
-
 
 def mod_start(hook_input: dict) -> dict | None:
     store.save_entry("mod", hook_input.get("session_id"), {"active": True, "at": time.time()})
@@ -358,25 +309,9 @@ def _mark_mod(session_id: str | None) -> None:
 
 
 def mod_spawn(hook_input: dict) -> dict | None:
-    # router.decide reads agent_id as "the call comes from inside a subagent".
-    hook_input = {**hook_input, "agent_id": hook_input.get("parent_agent_id")}
     _mark_mod(hook_input.get("session_id"))
-    config = cfg.load_config(hook_input)
-    tool_input = _tool_input(hook_input)
-    decision = router.decide(hook_input, config, settings.resolve(config))
-    session_id = hook_input.get("session_id")
-    if decision["action"] == "deny":
-        decision.update(action="keep", model=None, effort=None)
-    store.append_ledger({
-        "event": "spawn", "via": "mod", "kind": hook_input.get("kind") or "subagent", "session": session_id,
-        "agent": decision["agent"], "action": decision["action"], "level": decision["level"],
-        "signals": decision["signals"], "model": decision["model"] or decision["was"], "was": decision["was"],
-        "effort": decision["effort"], "source": decision["source"], "reason": decision["reason"],
-        "description": str(tool_input.get("description") or "")[:120]})
-    try:
-        _record(config, session_id, tool_input, {**decision, "action": "spawn"})
-    except OSError:
-        pass
+    # The spawn procedure reads agent_id as "the call comes from inside a subagent".
+    decision = spawn.run({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, "mod")
     if decision["action"] != "rewrite":
         return None
     return {"model": decision["model"], "effort": decision["effort"], "reason": decision["reason"]}

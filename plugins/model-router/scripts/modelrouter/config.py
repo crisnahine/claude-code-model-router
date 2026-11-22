@@ -14,6 +14,8 @@ MODES = ("off", "advise", "auto")
 PRIORITIES = ("fast", "balanced", "quality")
 LEVELS = ("lookup", "standard", "complex", "hardest", "frontier")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
+# Who can choose a call's model and still leave its effort to the call's level.
+LEVEL_SOURCES = ("router", "pin", "rule")
 
 
 def project_dir(hook_input: dict | None = None) -> Path:

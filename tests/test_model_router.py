@@ -22,7 +22,7 @@ SCRIPT = SCRIPTS / "model-router.py"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, cli, gates, hooks, learn, profile, registry, report, router, session, settings, store, upstream  # noqa: E402
+from modelrouter import agents, calls, cli, gates, hooks, learn, profile, registry, report, router, session, settings, spawn, store, upstream  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 
 LOOKUP = "list the files under src"
@@ -92,7 +92,8 @@ class Sandbox(unittest.TestCase):
     def decide(self, agent: str | None, prompt: str, **extra) -> dict:
         hook_input = self.call(agent, prompt, **extra)
         config = cfg.load_config(hook_input)
-        return router.decide(hook_input, config, settings.resolve(config))
+        options = settings.resolve(config)
+        return router.decide(spawn.facts(hook_input, config, options), config, options)
 
     def pre(self, agent: str | None, prompt: str, **extra) -> dict | None:
         out = hooks.pre_agent(self.call(agent, prompt, **extra))
@@ -515,6 +516,7 @@ class Router(Sandbox):
                                                "model": "haiku", "effort": "low"})
         self.assertNotIn("permissionDecision", out)
         self.assertIn("haiku at low effort", out["additionalContext"])
+        self.assertEqual(self.ledger()[-1]["via"], "fallback")
 
     def test_no_output_when_the_model_would_be_the_same(self):
         self.session_on("claude-sonnet-5-5")
@@ -531,8 +533,25 @@ class Router(Sandbox):
     def test_inside_a_subagent_the_pick_is_always_written_out(self):
         self.session_on("claude-sonnet-5-5")
         hook_input = {**self.call("general-purpose", BUILD), "agent_id": "agent-1", "agent_type": "helper"}
-        d = router.decide(hook_input, cfg.load_config(), settings.Settings())
+        config = cfg.load_config()
+        d = router.decide(spawn.facts(hook_input, config, settings.Settings()), config, settings.Settings())
         self.assertEqual((d["action"], d["model"], d["was"]), ("rewrite", "sonnet", None))
+
+    def test_decide_needs_only_its_facts(self):
+        config = cfg.load_config()
+        usable = registry.available(config)
+
+        def decide(**facts) -> dict:
+            facts = {"agent": "helper", "tool_input": {"prompt": LOOKUP}, "usable": usable, **facts}
+            return router.decide(router.Facts(**facts), config, settings.Settings())
+
+        self.assertEqual(decide()["action"], "keep")  # no definition found: left alone
+        d = decide(definition={"source": "project", "model": None}, parent="opus")
+        self.assertEqual((d["action"], d["model"], d["effort"], d["was"]), ("rewrite", "haiku", "low", "opus"))
+        d = decide(definition={"source": "project", "model": "opus"})
+        self.assertEqual((d["model"], d["source"], d["effort"]), ("opus", "pin", "low"))
+        d = decide(definition={"source": "project", "model": None}, earlier={"level": "lookup", "model": "haiku"})
+        self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("standard", "sonnet", "lookup"))
 
     def test_fork_is_never_touched(self):
         self.assertEqual(self.decide("fork", LOOKUP)["action"], "keep")
@@ -640,7 +659,8 @@ class Router(Sandbox):
                 {"type": "assistant", "isSidechain": True, "message": {"role": "assistant", "model": "claude-haiku-5-5"}}]
         path.write_text("".join(json.dumps(r) + "\n" for r in rows))
         hook_input = {**self.call("general-purpose", BUILD), "transcript_path": str(path)}
-        d = router.decide(hook_input, cfg.load_config(), settings.Settings())
+        config = cfg.load_config()
+        d = router.decide(spawn.facts(hook_input, config, settings.Settings()), config, settings.Settings())
         self.assertEqual((d["model"], d["was"]), ("sonnet", "sonnet"))  # not the recorded opus, not the subagent's haiku
 
     def test_hooks_never_break_on_garbage(self):
@@ -750,10 +770,81 @@ class RepeatGuard(Sandbox):
         self.assertIn('model: "sonnet"', again["permissionDecisionReason"])
         self.assertIsNone(self.pre("general-purpose", LOOKUP, model="sonnet"))
 
+    def test_a_refused_rewrite_is_denied_when_the_untouched_call_would_break_the_cap(self):
+        # The session runs on opus, so the call left untouched would inherit opus.
+        self.options(max_tier="sonnet")
+        self.assertEqual(self.pre("general-purpose", LOOKUP)["updatedInput"]["model"], "haiku")
+        again = self.pre("general-purpose", LOOKUP)
+        self.assertEqual(again["permissionDecision"], "deny")
+        self.assertIn('model: "haiku"', again["permissionDecisionReason"])
+
     def test_pending_calls_survive_a_new_user_prompt(self):
         self.pre("general-purpose", LOOKUP)
         hooks.user_prompt({"session_id": "s1", "prompt": "try that again"})
         self.assertIsNone(self.pre("general-purpose", LOOKUP))
+
+
+class Calls(Sandbox):
+    def setUp(self):
+        super().setUp()
+        self.config = cfg.load_config()
+
+    def route(self, tool_input: dict, model: str = "haiku", **facts) -> str | None:
+        facts = {"level": "lookup", "effort": "low", "source": "router", **facts}
+        return calls.routed(self.config, "s1", calls.identify(tool_input)[1], model, **facts)
+
+    def test_a_call_is_known_by_its_agent_and_prompt(self):
+        agent, key = calls.identify({"prompt": "x"})
+        self.assertEqual(agent, "general-purpose")
+        self.assertEqual(key, calls.identify({"subagent_type": "general-purpose", "prompt": "x", "model": "opus"})[1])
+        self.assertNotEqual(key, calls.identify({"subagent_type": "Explore", "prompt": "x"})[1])
+        self.assertEqual(calls.identify({"subagent_type": ["a"], "prompt": "x"})[0], "general-purpose")
+
+    def test_a_rewrite_waits_for_its_result_and_only_a_result_finishes_the_run(self):
+        call = {"prompt": LOOKUP}
+        key = calls.identify(call)[1]
+        self.route(call, awaiting=True)
+        self.assertEqual(calls.refused_rewrite("s1", key)["model"], "haiku")
+        calls.settled("s1", call)  # an error: the rewrite was accepted, but nothing finished
+        self.assertIsNone(calls.refused_rewrite("s1", key))
+        self.assertIsNone(calls.finished_run("s1", key))
+        calls.settled("s1", call, finished=True)
+        self.assertEqual(calls.finished_run("s1", key)["level"], "lookup")
+
+    def test_only_runs_at_their_level_are_redone(self):
+        for source in ("caller", None):
+            call = {"prompt": f"list {source}"}
+            self.route(call, source=source)
+            calls.settled("s1", call, finished=True)
+            self.assertIsNone(calls.finished_run("s1", calls.identify(call)[1]), source)
+
+    def test_a_finished_run_counts_in_its_own_request_or_window(self):
+        call = {"prompt": LOOKUP}
+        key = calls.identify(call)[1]
+        self.route(call)
+        calls.settled("s1", call, finished=True)
+        self.assertIsNotNone(calls.finished_run("s1", key))
+        with mock.patch.object(calls.time, "time", return_value=time.time() + calls.REDO_WINDOW + 1):
+            self.assertIsNone(calls.finished_run("s1", key))
+        hooks.user_prompt({"session_id": "s1", "prompt": "check the repo", "prompt_id": "p1"})
+        self.assertIsNone(calls.finished_run("s1", key))
+
+    def test_the_router_pick_before_and_the_strongest_spawn_are_per_request(self):
+        call = {"prompt": LOOKUP}
+        self.assertIsNone(self.route(call))
+        self.assertEqual(self.route(call, "opus", source="caller"), "haiku")
+        self.assertEqual(self.route({"prompt": "x"}, "fable", source="pin"), None)
+        self.assertEqual(calls.strongest("s1"), "fable")
+        hooks.user_prompt({"session_id": "s1", "prompt": "something else"})
+        self.assertIsNone(calls.strongest("s1"))
+        self.assertIsNone(self.route(call, "opus", source="caller"))
+
+    def test_records_keep_the_most_recent_calls(self):
+        for i in range(calls.KEPT + 2):
+            self.route({"prompt": f"list {i}"}, awaiting=True)
+        self.assertIsNone(calls.refused_rewrite("s1", calls.identify({"prompt": "list 0"})[1]))
+        self.assertIsNone(calls.refused_rewrite("s1", calls.identify({"prompt": "list 1"})[1]))
+        self.assertIsNotNone(calls.refused_rewrite("s1", calls.identify({"prompt": "list 2"})[1]))
 
 
 class Mod(Sandbox):
@@ -849,7 +940,11 @@ class ModPayloads(Sandbox):
         payload = {**self.payloads["mod-spawn"], "cwd": str(self.project)}
         with mock.patch.object(router, "decide", wraps=router.decide) as decide:
             hooks.mod_spawn(payload)
-        self.assertEqual(decide.call_args.args[0]["agent_id"], payload["parent_agent_id"])
+        found = decide.call_args.args[0]
+        self.assertEqual((found.agent, found.parent, found.tool_input), ("general-purpose", "opus", payload["tool_input"]))
+        with mock.patch.object(router, "decide", wraps=router.decide) as decide:
+            hooks.mod_spawn({**payload, "parent_model": None})
+        self.assertIsNone(decide.call_args.args[0].parent)  # parent_agent_id: inside a subagent, so unknown
         row = self.ledger()[-1]
         self.assertEqual((row["event"], row["via"], row["kind"], row["agent"], row["model"]),
                          ("spawn", "mod", "subagent", "general-purpose", "haiku"))
@@ -1079,7 +1174,7 @@ class Gates(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": HARD})
         self.pre("general-purpose", HARD)
         self.pre("general-purpose", LOOKUP)
-        self.assertEqual(store.load_entry("prompts", "s1")["top_spawn"], "opus")
+        self.assertEqual(calls.strongest("s1"), "opus")
 
     def test_no_escalation_for_easy_tasks_or_strong_sessions(self):
         self.session_on("claude-haiku-5-5")

@@ -8,6 +8,8 @@
     profile    scores a request or a subtask from its wording and its agent
     ladder     turns a level, the priority and learned raises into a model and an effort
     router     decides the model and effort for one agent call
+    calls      what happened to each call: routed, waiting for a result, finished
+    spawn      the one procedure both paths run for a spawn: facts, decision, ledger, records
     learn      feedback: raises a level when routed work keeps being redone stronger
     gates      checks before a turn ends
     upstream   Claude Code releases, docs and model aliases
