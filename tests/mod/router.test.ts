@@ -42,6 +42,9 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}) 
     hooks, matchers, catches, calls, $,
     toolCall: (e: object) => hooks['tool.call']!($, e, same),
     sessionStart: (e: object) => hooks['session.start']!($, e, same),
+    // The engine starts the turn inside next(e), so the turn's own start runs before submit returns.
+    submit: (e: object, turn?: object, entered: (x: object) => object = same) =>
+      hooks['prompt.submit']!($, e, async (x: object) => { if (turn) await hooks['turn.start']!($, turn, same); return entered(x) }),
     spawn: (e: object, next: Hook = (x: object) => ({ ...x, agentId: 'a1' })) => hooks['agent.spawn']!($, e, next),
     start: (e: object) => hooks['turn.start']!($, e, same),
     complete: (e: object) => hooks['turn.complete']!($, e, same),
@@ -156,6 +159,22 @@ test('the credential is not asked for when main_effort is off', async () => {
   assert.equal('first_party' in mod.calls[0]!.stdin, false)
 })
 
+test('the main loop passes where its prompt came from, once', async () => {
+  const mod = load()
+  await mod.submit({ text: 'done', wait: false, origin: { kind: 'task-notification' } }, { turnId: 't1', text: 'done' })
+  assert.equal(mod.calls[0]!.stdin.origin, 'task-notification')
+  await mod.submit({ text: 'fix it', wait: false, origin: { kind: 'composer' } }, { turnId: 't2', text: 'fix it' })
+  assert.equal(mod.calls[1]!.stdin.origin, 'composer')
+  await mod.start({ turnId: 't3', text: 'Another Claude session sent a message:' })  // a drain with no submit
+  assert.equal('origin' in mod.calls[2]!.stdin, false)
+  await mod.submit({ text: 'into the running turn', wait: false, turnId: 't3', origin: { kind: 'peer' } })
+  await mod.start({ turnId: 't4', text: 'next' })
+  assert.equal('origin' in mod.calls[3]!.stdin, false)
+  await mod.submit({ text: 'no', wait: false, origin: { kind: 'peer' } }, undefined, () => ({ drop: 'refused' }))
+  await mod.start({ turnId: 't5', text: 'next' })
+  assert.equal('origin' in mod.calls[4]!.stdin, false)
+})
+
 test('a lower main loop effort is ignored', async () => {
   const mod = load({ 'mod-turn': { stdout: JSON.stringify({ level: 'lookup', effort: 'low' }) } })
   await mod.start({ turnId: 't1', text: 'list files' })
@@ -225,7 +244,7 @@ test('a CLI that throws after next(e) ran does not run next again', async () => 
 
 test('every hook falls back to next(e) when it throws', async () => {
   const mod = load()
-  const events = ['agent.spawn', 'session.start', 'tool.call', 'turn.complete', 'turn.start', 'turn.step']
+  const events = ['agent.spawn', 'prompt.submit', 'session.start', 'tool.call', 'turn.complete', 'turn.start', 'turn.step']
   assert.deepEqual(Object.keys(mod.hooks).sort(), events)
   assert.deepEqual(Object.keys(mod.catches).sort(), events)
   for (const [event, handler] of Object.entries(mod.catches)) {

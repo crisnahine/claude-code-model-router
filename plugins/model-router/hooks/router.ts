@@ -99,12 +99,27 @@ export const register: Register = (on, options) => {
     return started
   }).catch(($, e, next) => next(e))
 
+  // Where the prompt that starts the next main-loop turn came from: a teammate's report or
+  // a notification is not the person's request. Set before next(e), since the turn starts
+  // inside it; taken once, and a turn with no submit sends none.
+  let idleOrigin: string | undefined
+  on('prompt.submit', async ($, e, next) => {
+    const kind = e.turnId === undefined && typeof e.origin?.kind === 'string' ? e.origin.kind : undefined
+    if (kind) idleOrigin = kind
+    const entered = await next(e)
+    if (kind && typeof (entered as { drop?: unknown } | undefined)?.drop === 'string') idleOrigin = undefined
+    return entered
+  }).catch(($, e, next) => next(e))
+
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
+      const origin = idleOrigin
+      idleOrigin = undefined
       const model = await Promise.resolve().then(() => $.session.model()).catch(() => undefined)
       const firstParty = options.main_effort === false ? undefined : await hasFirstPartyCredential($)
       const pick = await ask($, opts, 'mod-turn', {
         text: e.text, ...(model ? { model } : {}), ...(firstParty !== undefined ? { first_party: firstParty } : {}),
+        ...(origin ? { origin } : {}),
       })
       if (pick?.effort) remember(turnEffort, e.turnId, pick.effort)
     } else if (!agentEffort.has(e.agentId)) {

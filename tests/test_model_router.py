@@ -295,6 +295,36 @@ class SkillGrants(unittest.TestCase):
                 self.assertFalse(self.allowed(rules, f"{self.PREFIX} ack"), name)
 
 
+class DeliveredMessages(Sandbox):
+    """A teammate's report or another session's message reaching the main loop isn't the user's request."""
+
+    def delivered(self, tag: str = "teammate-message") -> str:
+        return (f'Another Claude session sent a message:\n<{tag} teammate_id="auditor" color="blue">\n'
+                f"{HARD}\n</{tag}>")
+
+    def test_a_delivered_message_raises_no_effort(self):
+        session.record("s1", "claude-opus-5-5")
+        for tag in ("teammate-message", "cross-session-message"):
+            self.assertFalse(hooks.is_user_prompt(self.delivered(tag)), tag)
+            self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": self.delivered(tag)}), tag)
+        self.assertEqual(hooks.mod_turn({"session_id": "s1", "text": HARD}), {"level": "complex", "effort": "high"})
+        self.assertTrue(hooks.is_user_prompt("Another Claude session sent a message: is that how they phrase it?"))
+
+    def test_a_delivered_message_leaves_the_users_request_alone(self):
+        self.session_on("claude-haiku-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": LOOKUP})
+        self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": self.delivered()}))
+        self.assertEqual(store.load_entry("prompts", "s1")["level"], "lookup")
+
+    def test_a_machine_origin_from_the_mod_raises_no_effort(self):
+        session.record("s1", "claude-opus-5-5")
+        turn = lambda origin: hooks.mod_turn({"session_id": "s1", "text": HARD, "origin": origin})  # noqa: E731
+        for origin in ("task-notification", "peer", "peer-send-message"):
+            self.assertIsNone(turn(origin), origin)
+        for origin in ("composer", "bridge", "sdk", "unclassified", "coordinator", "a-kind-from-a-later-build"):
+            self.assertEqual(turn(origin), {"level": "complex", "effort": "high"}, origin)
+
+
 class Store(Sandbox):
     def test_keyed_files_drop_the_least_recently_written(self):
         with mock.patch.object(store, "KEEP_ENTRIES", 3):
