@@ -158,9 +158,8 @@ class Shipped(unittest.TestCase):
 
     def test_the_costly_role_agents_say_when_not_to_use_them(self):
         # Claude delegates from descriptions, so these limits keep the costliest agents for the work they're for.
-        for name, limit in (("architect", "Not for a clear change"),
-                            # With no note on the request, this is all Claude reads about who writes the file.
-                            ("architect", "you write any file from its answer"),
+        # With no note on the request, this is all Claude reads before handing it a task that writes a file.
+        for name, limit in (("architect", "Can't write files, so not for a task that must make one, or a clear change."),
                             ("reviewer", "A small, tested change doesn't need one."),
                             ("deep-solver", "Not for ordinary hard coding.")):
             self.assertIn(limit, frontmatter(PLUGIN / "agents" / f"{name}.md")["description"], name)
@@ -225,7 +224,7 @@ class Shipped(unittest.TestCase):
         for path in sorted((PLUGIN / "agents").glob("*.md")):
             front = frontmatter(path)
             if front.get("tools") and not re.search(r"\b(?:Edit|Write|NotebookEdit)\b", front["tools"]):
-                self.assertRegex(front["description"], r"(?i)writes nothing|doesn't fix code", path.name)
+                self.assertRegex(front["description"], r"(?i)writes nothing|can't write files|doesn't fix code", path.name)
 
     def test_the_architect_hands_back_a_file_it_was_asked_to_write(self):
         # Misrouted to it, a write-the-file task still ends with the content the caller can write.
