@@ -3,8 +3,10 @@ what was last reviewed."""
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import re
+import threading
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -20,7 +22,10 @@ MODEL_CONFIG_PAGE = "https://code.claude.com/docs/en/model-config.md"
 DEPRECATIONS_PAGE = "https://platform.claude.com/docs/en/about-claude/model-deprecations.md"
 MODELS_API = "https://api.anthropic.com/v1/models?limit=1000"
 CACHE_TTL_SECONDS = 24 * 3600
-HTTP_TIMEOUT = 10
+HTTP_TIMEOUT = 10  # per request: each socket wait, and the body's download as a whole
+# The whole fetch, every phase of every request. Claude Code doesn't time out an async hook, so
+# this is what ends a refresh stuck on a slow server.
+FETCH_BUDGET = 25
 # Docs pages that describe the surfaces this plugin is built on.
 WATCHED_PAGES = ("plugins", "sub-agents", "hooks", "skills", "model-config", "workflows",
                  "plugin-evals", "mcp", "settings", "agent-teams", "costs", "permission-modes")
@@ -44,8 +49,18 @@ class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
 def http_get(url: str, headers: dict | None = None) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "model-router-plugin/0.1", **(headers or {})})
     handlers = [_RefuseRedirect] if "Authorization" in (headers or {}) else []
+    deadline = time.monotonic() + HTTP_TIMEOUT
+    # urllib's timeout covers each socket read, so a server that drips bytes never trips it.
     with urllib.request.build_opener(*handlers).open(req, timeout=HTTP_TIMEOUT) as resp:  # noqa: S310 (fixed https URLs)
-        return resp.read().decode("utf-8", "replace")
+        chunks = []
+        while time.monotonic() < deadline:
+            chunk = resp.read1(65536)
+            if not chunk:
+                if resp.length:  # read1 ends a short Content-Length body quietly; read() would raise
+                    raise http.client.IncompleteRead(b"".join(chunks), resp.length)
+                return b"".join(chunks).decode("utf-8", "replace")
+            chunks.append(chunk)
+        raise TimeoutError(f"{url} took longer than {HTTP_TIMEOUT} s")
 
 
 def parse_rss(xml_text: str, limit: int = 30) -> list[dict]:
@@ -168,6 +183,27 @@ def _api_lines(cache: dict) -> list[str]:
 
 
 def fetch(settings: Settings) -> dict:
+    """All of it within FETCH_BUDGET or nothing: a worker thread bounds DNS, connecting and
+    dripped headers too, and a fetch cut off mid-way never stores a half-empty cache."""
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            box["value"] = _fetch(settings)
+        except Exception as exc:  # noqa: BLE001 - re-raised below, in the caller's thread
+            box["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)  # the hook process exits without it
+    worker.start()
+    worker.join(FETCH_BUDGET)
+    if worker.is_alive():
+        raise TimeoutError(f"the upstream fetch took longer than {FETCH_BUDGET} s")
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
+def _fetch(settings: Settings) -> dict:
     releases = parse_rss(http_get(CHANGELOG_RSS))
     pages = parse_llms_index(http_get(DOCS_INDEX))
     if not releases or not pages:
