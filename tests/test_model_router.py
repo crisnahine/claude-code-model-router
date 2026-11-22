@@ -969,8 +969,11 @@ class RoutingEvals(Sandbox):
             want = re.fullmatch(r"['\"]?level (\w+), model (\w+), effort (\w+)['\"]?",
                                 frontmatter(path).get("expected_outcome", ""))
             self.assertTrue(want, f"{name}: expected_outcome must read 'level L, model M, effort E'")
-            brief = path.read_text(encoding="utf-8").split("\n---\n", 1)[1].strip()
-            got = report.explain(config, options, brief)
+            body = path.read_text(encoding="utf-8").split("\n---\n", 1)[1].strip()
+            # A case that hands a subagent an exact brief is about how that call routes.
+            quoted = re.search(r'this exact prompt: "([^"]+)"', body)
+            got = (report.explain(config, options, quoted[1], "general-purpose") if quoted
+                   else report.explain(config, options, body))
             self.assertIn(f"Level: **{want[1]}**", got, name)
             self.assertIn(f"Model: **{want[2]}**, effort: {want[3]}.", got, name)
 
