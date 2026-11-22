@@ -2,7 +2,7 @@
 
 Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `fcce17a`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
 
-**Verdict: the next release is not ready.** Of the 13 release gates, 11 pass and 2 are partial. No defect is open. One requirement fails: the benchmark shows the router costing more per solved task than the best baseline in 7 of 8 task classes, at the same pass rate (S4.15). Nothing after `8ec8eec` has run in CI yet.
+**Verdict: the next release is not ready.** Of the 13 release gates, 11 pass and 2 are partial. No defect is open. One requirement fails: on a Sonnet session, the benchmark shows the router costing more per solved task than the best baseline in 7 of 8 task classes, at the same pass rate (S4.15). On an Opus 5.5 session, Claude Code's default for most accounts, a build with the verify gate off cost 21% less per solved task than `defaults`, but on 4 runs per cell, under the 10 a PASS needs. Nothing after `8ec8eec` has run in CI yet.
 
 ## Release gates
 
@@ -18,7 +18,7 @@ Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits afte
 | Fail-open behaviour proven by tests | PASS | Garbage payloads to every handler; every mod hook falls back to `next(e)` (S10.8) |
 | Automated tests on Linux, macOS and Windows, oldest and newest Python | PASS | CI on `8ec8eec`: Python 3.9 and 3.13 on all three, 180 tests each. The mod's Node tests now run on all three in `ci.yml`, not yet run in CI (S10.9) |
 | CI green on the release PR and on the merge commit in `main`, before tagging | PASS for 0.1.0 | PR run 45004814197 and main run 45004998622 passed before `v0.1.0` was tagged. Must be redone for the next release (S10.10) |
-| Reproducible cost and quality results | PASS | [BENCHMARKS.md](BENCHMARKS.md): 336 runs of the router, `defaults`, `sonnet-medium` and `sonnet-high` on all 16 tasks, raw data and commands committed, $27.68 at list price. 1 PASS row (lookup) and 7 FAIL (S10.11) |
+| Reproducible cost and quality results | PASS | [BENCHMARKS.md](BENCHMARKS.md): 782 runs on all 16 tasks, on Sonnet and Opus 5.5 sessions, raw data and commands committed, $73.87 at list price. Sonnet table: 1 PASS row (lookup) and 7 FAIL. Opus table: 8 PARTIAL at 4 runs per cell (S10.11) |
 | A security assessment | PASS | [SECURITY.md](SECURITY.md), each claim cited to the code it was checked against (S10.12) |
 | Professional documentation and install steps | PASS | The README has its SVG diagrams, and the 0.1.0 changelog names the Python versions CI ran (S10.13, S8.2) |
 
@@ -32,7 +32,7 @@ None.
 
 - Waiting on the user: whether a project's `.claude/model-router.json` may raise levels and effort, or only lower them (the open question on project raises). 0.1.0 allows raises. Row S6.4.
 - Fast mode in the spend log: Claude Code's own estimate in `/cost` includes fast mode, and a mod can read it. Logging it beside the router's list-price figure would change the ledger and the usage report. Rows S4.8, S10.7.
-- The ladder, from the benchmark: at the same pass rate the router cost 1.2 to 2.2 times the best baseline in every class but lookup. It started 1.4 agents per run against 1.0 (a verifier in 28 of 88 runs, a reviewer in 8) and spent 29% of its cost on Opus. Row S4.15.
+- The ladder and the verify gate, from the benchmark. On a Sonnet session the shipped router cost 1.2 to 2.2 times the best baseline in every class but lookup, and no variant closed the gap in the 7 classes it lost. The cheap-first ladder, `main_effort` off and `verify_gate` off together still cost 12 to 23% more than `defaults`, from the router's own context in every run (2,300 more cache-write and 11,000 more cache-read tokens per run). On an Opus 5.5 session, `plugin-m6-08-b-nogate` cost $0.123 per solved task against $0.156 for `defaults` (95% interval of the difference -$0.048 to -$0.018), cheaper in 6 of 8 classes. With the gate on it was level and missed 2 of 4 runs of one design task. The gate adds 1.15 main-loop turns per run, and the main loop is 67 to 69% of the router's spend on Opus. Proposed: `verify_gate` off by default and a smaller injected context, measured on that commit. Row S4.15.
 - The standard level's effort: Sonnet at `high` (shipped) or at `medium`, Claude Code's default for Sonnet. In the benchmark `sonnet-medium` solved implementation and known-cause bugfix tasks as often as `sonnet-high` (10 of 10 against 11 of 11), for less: $0.071 against $0.081 per solved implementation task (95% interval of the difference -$0.017 to -$0.002) and $0.057 against $0.063 per solved bugfix (-$0.012 to $0.001, not significant). Row S10.11.
 - Whether to run the baselines the benchmark left out: `haiku`, `opus`, `fable`, `opusplan` and the advisor. Row S14.1.
 - Whether the Mythos models become a routable family. They are priced in the registry, so their spend is logged, but no level routes to them. Row S2.15.
