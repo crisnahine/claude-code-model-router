@@ -5,7 +5,6 @@
       "strength": 1,
       "speed": 4,
       "cost": 1,
-      "context_cliff": 100000,
       "use_for": "Lookups, file search, summarizing known code, running a command and reporting, formatting, trivial edits."
     },
     "sonnet": {
@@ -119,8 +118,7 @@
       "input": 0.1,
       "output": 0.5,
       "cache_read": 0.01,
-      "cache_write": 0.125,
-      "over_cliff": 5
+      "cache_write": 0.125
     },
     "claude-haiku-4-5": {
       "input": 1,
@@ -159,8 +157,5 @@
       "role": "Research-grade, open-ended tasks with no known approach"
     }
   },
-  "agents": {},
-  "ship": {
-    "max_fix_loops": 2
-  }
+  "agents": {}
 }

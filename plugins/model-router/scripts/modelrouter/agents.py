@@ -22,7 +22,7 @@ def _field(block: str, name: str) -> str | None:
 
 def parse(path: Path, source: str) -> dict | None:
     try:
-        with path.open("r", encoding="utf-8", errors="replace") as fh:
+        with path.open("r", encoding="utf-8-sig", errors="replace") as fh:  # -sig drops a leading BOM
             head = fh.read(6000)
     except OSError:
         return None

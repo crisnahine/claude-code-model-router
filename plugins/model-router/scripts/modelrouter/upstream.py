@@ -36,9 +36,15 @@ def load() -> dict:
     return store.load_dict(path())
 
 
+class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None  # urllib copies Authorization onto the next host
+
+
 def http_get(url: str, headers: dict | None = None) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "model-router-plugin/0.1", **(headers or {})})
-    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:  # noqa: S310 (fixed https URLs)
+    handlers = [_RefuseRedirect] if "Authorization" in (headers or {}) else []
+    with urllib.request.build_opener(*handlers).open(req, timeout=HTTP_TIMEOUT) as resp:  # noqa: S310 (fixed https URLs)
         return resp.read().decode("utf-8", "replace")
 
 
@@ -111,7 +117,7 @@ def merged_lifecycle(cache: dict) -> dict[str, dict]:
     return lifecycle
 
 
-_VERSIONED_ID = re.compile(r"^claude-([a-z]+)-(\d+(?:-\d+)?)(?:-\d{8})?$")
+_VERSIONED_ID = re.compile(r"^claude-([a-z]+)-(\d+(?:-\d{1,2})?)(?:-\d{8})?$")
 
 
 def version_of(model_id: object) -> tuple[str, tuple[int, ...]] | None:
@@ -164,6 +170,9 @@ def _api_lines(cache: dict) -> list[str]:
 def fetch(settings: Settings) -> dict:
     releases = parse_rss(http_get(CHANGELOG_RSS))
     pages = parse_llms_index(http_get(DOCS_INDEX))
+    if not releases or not pages:
+        # An outage page parses as empty; stored, it would read as every page removed.
+        raise ValueError("the changelog or the docs index came back empty")
     try:
         aliases = parse_model_aliases(http_get(MODEL_CONFIG_PAGE))
     except Exception:  # noqa: BLE001 - the alias table is a bonus; never fail the refresh for it
@@ -181,9 +190,12 @@ def fetch(settings: Settings) -> dict:
             "pages": {url: hashlib.sha256(s.encode()).hexdigest()[:16] for url, s in pages.items()}}
 
 
+def _base_id(model_id: str) -> str:
+    return re.sub(r"-\d{8}$", "", model_id.lower().split("[")[0])
+
+
 def _same_model(model_id: str, seen: str) -> bool:
-    seen = seen.lower().split("[")[0]
-    return seen == model_id or seen.startswith(model_id + "-") or model_id.startswith(seen + "-")
+    return _base_id(model_id) == _base_id(seen)
 
 
 def diff(reviewed: dict, live: dict, routed: list[str] | None = None, in_use: list[str] | None = None) -> dict:

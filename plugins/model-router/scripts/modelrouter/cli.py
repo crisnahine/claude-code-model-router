@@ -107,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         changes = upstream.diff(store.load_dict(baseline_path), live)
         if args.json_out:
-            Path(args.json_out).write_text(json.dumps(changes, indent=2), encoding="utf-8")
+            Path(args.json_out).write_text(json.dumps({**changes, "pending": upstream.has_pending(changes)},
+                                                      indent=2), encoding="utf-8")
         print(report.status(changes))
     return 0

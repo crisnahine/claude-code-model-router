@@ -24,7 +24,9 @@ SIGNALS = {
 # Words that mean the subtask changes something or has to reason its way to an answer.
 # A subtask that does neither is a lookup, whatever it happens to mention.
 _CHANGE = (r"\b(?:add|implement|fix|change|update|refactor|rename|remove|delete|write|create|build|make|"
-           r"migrate|convert|upgrade|optimi[sz]e|rewrite|redesign|replace|port|support)\b")
+           r"migrate|convert|upgrade|optimi[sz]e|rewrite|redesign|replace)\b(?!-)")
+# "Do not change any files" limits a subtask; it doesn't ask for a change.
+_NEGATED = r"\b(?:do not|don't|never|without|no need to|make sure)\b[^.\n]*"
 _REASONING = (r"\b(?:review|audit|analy[sz]e|debug|diagnos\w*|plan|design|prove|verify the logic|"
               r"investigat\w*|troubleshoot\w*|figure out|root.?caus\w*|reproduc\w*|bisect)\b")
 _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"
@@ -68,11 +70,12 @@ def profile_prompt(prompt: str) -> dict:
 def profile_call(tool_input: dict, agent_type: str) -> dict:
     """One agent call, judged by its own brief and by what its agent is for."""
     text = f"{tool_input.get('description') or ''}\n{tool_input.get('prompt') or ''}".lower()
-    hits = signals(text)
+    asked = re.sub(_NEGATED, "", text)
+    hits = signals(asked)
     why = list(hits)
-    if re.search(_CHANGE, text) or re.search(_REASONING, text):
+    if re.search(_CHANGE, asked) or re.search(_REASONING, asked):
         if len(hits) >= 3:
-            level = "frontier" if re.search(_FRONTIER, text) else "hardest"
+            level = "frontier" if re.search(_FRONTIER, asked) else "hardest"
         elif len(hits) == 2 or "risk" in hits:
             level = "complex"
         else:

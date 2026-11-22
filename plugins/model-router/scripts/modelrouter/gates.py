@@ -17,6 +17,8 @@ CHECK_COMMAND = re.compile(
     r"\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|lint|typecheck|check|build)\b|"
     r"\b(?:cargo|go|dotnet|mvn|gradle|gradlew|make|just|swift|mix|deno)\s+\S*\s*(?:test|check|build|vet|lint|verify)\b")
 _CHECKERS = ("verifier", "reviewer")
+# A message's tool_use rows are stamped before its Edit's PostToolUse records the edit.
+_SAME_MESSAGE_SLACK = 5
 
 
 def is_checker(agent_type: object) -> bool:
@@ -48,7 +50,7 @@ def checks_ran_since(transcript_path: object, since: float) -> bool:
             content = row["message"]["content"]
         except (ValueError, KeyError, TypeError, AttributeError):
             continue
-        if stamp < since:
+        if stamp < since - _SAME_MESSAGE_SLACK:
             continue
         for block in content if isinstance(content, list) else []:
             command = (block.get("input") or {}).get("command") if isinstance(block, dict) else None
@@ -108,7 +110,7 @@ def unverified_edit(hook_input: dict) -> str | None:
         return None
     name = cfg.PLUGIN_NAME
     return (
-        f"Code changed in this turn and nothing has checked it since the last edit. Before finishing, run "
+        f"Code changed since the last check and nothing has checked it yet. Before finishing, run "
         f"{name}:verifier on the change (it finds and runs the project's tests, lint and type checks), and "
         f"for anything beyond a trivial edit also {name}:reviewer. If the project has no runnable checks, "
         "or the change can't affect behavior, say so in one line and finish."

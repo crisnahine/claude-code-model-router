@@ -498,6 +498,12 @@ class AgentDiscovery(Sandbox):
         self.agent("quoted", '"opus"  # the strong one')
         self.assertEqual(agents.find("quoted", self.project)["model"], "opus")
 
+    def test_a_file_saved_with_a_byte_order_mark(self):
+        folder = self.project / ".claude" / "agents"
+        folder.mkdir(parents=True)
+        (folder / "bom.md").write_text("\ufeff---\nname: bom\nmodel: opus\n---\nbody\n", encoding="utf-8")
+        self.assertEqual(agents.find("bom", self.project)["model"], "opus")
+
 
 class Profile(unittest.TestCase):
     def level(self, prompt, agent="general-purpose"):
@@ -516,7 +522,15 @@ class Profile(unittest.TestCase):
         self.assertEqual(self.level("read the auth module and list its functions"), "lookup")
         self.assertEqual(self.level("search across the codebase for usages of foo()"), "lookup")
         self.assertEqual(self.level("find the author of this file"), "lookup")
+        self.assertEqual(self.level("list the files under src. Do not change any files."), "lookup")
         self.assertEqual(self.level("explain the architecture of the payment system"), "standard")
+
+    def test_words_that_only_look_like_changes(self):
+        self.assertEqual(self.level("find the port number the server listens on"), "lookup")
+        self.assertEqual(self.level("which plugins support hooks?"), "lookup")
+        self.assertEqual(self.level("read the update-check option"), "lookup")
+        self.assertEqual(self.level("list the routes. Make sure to include the line numbers"), "lookup")
+        self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "standard")
 
     def test_thorough_or_long_briefs_are_not_lookups(self):
         self.assertEqual(self.level("very thorough: how does the request pipeline work"), "standard")
@@ -1326,6 +1340,12 @@ class Gates(Sandbox):
         out = hooks.stop({"session_id": "s1", "transcript_path": self.transcript("pytest", "2001-01-01T00:00:00Z")})
         self.assertIsNotNone(out)
 
+    def test_a_test_command_in_the_same_message_as_the_edit_counts(self):
+        self.edit()
+        edited = store.load_entry("edits", "s1")["edited_at"]
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(edited - 2))
+        self.assertIsNone(hooks.stop({"session_id": "s1", "transcript_path": self.transcript("pytest", stamp)}))
+
     def test_check_command_patterns(self):
         for command in ("pytest -q", "npm test", "pnpm run lint", "cargo test", "go vet ./...", "tsc --noEmit"):
             self.assertTrue(gates.CHECK_COMMAND.search(command), command)
@@ -1476,6 +1496,78 @@ class Upstream(Sandbox):
         self.assertIn("claude-opus-4-7 is running here and claude-opus-5-5 is the newest of its family",
                       note("claude-opus-4-7"))
         self.assertNotIn("newest of its family", note("opus"))
+
+    def test_a_dated_or_bracketed_id_is_the_same_model_but_a_newer_version_is_not(self):
+        self.assertFalse(upstream._same_model("claude-fable-5", "claude-fable-5-2"))
+        self.assertTrue(upstream._same_model("claude-sonnet-4-5-20250929", "claude-sonnet-4-5"))
+        self.assertTrue(upstream._same_model("claude-sonnet-4-5", "claude-sonnet-4-5-20250929[1m]"))
+
+    def test_a_date_is_not_a_minor_version(self):
+        self.assertEqual(upstream.version_of("claude-opus-4-20250514"), ("opus", (4,)))
+        self.assertEqual(upstream.version_of("claude-opus-4-1-20250805"), ("opus", (4, 1)))
+
+    def test_an_empty_feed_is_an_error_not_data(self):
+        store.save_json(upstream.path(), {"cache": {"fetched_at": 1, "aliases": ["haiku"]}})
+        out = Path(self.tmp.name) / "changes.json"
+        for feed in ("rss.xml", "llms.txt"):
+            def fake(url, headers=None, feed=feed):
+                return "<html>Down for maintenance</html>" if url.endswith(feed) else self.fake(url)
+
+            with mock.patch.object(upstream, "http_get", side_effect=fake):
+                with self.assertRaises(ValueError):
+                    upstream.refresh(settings.Settings(), force=True)
+                with self.assertRaises(ValueError):
+                    self.out("upstream-check", "--baseline", str(out.with_name("baseline.json")),
+                             "--json-out", str(out))
+            self.assertFalse(out.exists())
+        with mock.patch.object(upstream, "http_get", side_effect=lambda url, headers=None: (
+                "<rss><channel></channel></rss>" if url.endswith(".xml") else self.fake(url))):
+            with self.assertRaises(ValueError):
+                upstream.fetch(settings.Settings())
+        self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
+
+    def test_upstream_check_writes_whether_anything_is_pending(self):
+        baseline, out = Path(self.tmp.name) / "baseline.json", Path(self.tmp.name) / "changes.json"
+        with mock.patch.object(upstream, "http_get", side_effect=self.fake):
+            self.out("upstream-check", "--baseline", str(baseline), "--write")
+            self.out("upstream-check", "--baseline", str(baseline), "--json-out", str(out))
+            self.assertIs(json.loads(out.read_text())["pending"], False)
+            store.save_json(baseline, {**store.load_dict(baseline), "claude_code_version": "2.0.0"})
+            self.out("upstream-check", "--baseline", str(baseline), "--json-out", str(out))
+            self.assertIs(json.loads(out.read_text())["pending"], True)
+
+    def test_the_api_key_never_follows_a_redirect(self):
+        import http.server
+        import threading
+        import urllib.error
+        seen = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                seen.append((self.path, self.headers.get("Authorization")))
+                if self.path == "/start":
+                    self.send_response(302)
+                    self.send_header("Location", "/landed")
+                    self.end_headers()
+                else:
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"ok")
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+        try:
+            with self.assertRaises(urllib.error.HTTPError):
+                upstream.http_get(base + "/start", {"Authorization": "Bearer sk-test"})
+            self.assertEqual(seen, [("/start", "Bearer sk-test")])
+            self.assertEqual(upstream.http_get(base + "/start"), "ok")  # docs pages may still move
+        finally:
+            server.shutdown()
+            server.server_close()
 
     def test_a_failed_fetch_leaves_the_cache_alone(self):
         store.save_json(upstream.path(), {"cache": {"fetched_at": 1, "aliases": ["haiku"]}})

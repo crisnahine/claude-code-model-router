@@ -13,7 +13,7 @@ allowed-tools: Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" *)
 
 ## Steps
 
-1. If the output above shows no new releases and no high-impact pages, tell the user everything is current and stop.
+1. If the output above shows nothing after the "No new releases." line, tell the user everything is current and stop.
 2. Otherwise send the list above to `model-router:docs-researcher`. Ask it to read each new release's changelog entry and each high-impact docs page, and report items that affect:
    - model aliases or new models (the registry in `config/models.json` lists the models this plugin routes to)
    - agent or skill frontmatter fields

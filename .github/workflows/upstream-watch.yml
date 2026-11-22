@@ -4,6 +4,7 @@ name: Upstream watch
 # and keeps one open issue listing what changed, so nothing is missed between
 # reviews. It never edits the plugin itself: a person (or /model-router:refresh
 # run inside this repo) reviews the changes and updates the baseline in a PR.
+# An empty changelog or docs index fails the job instead of opening an issue.
 
 on:
   schedule:
@@ -31,15 +32,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          pending=$(python -c "import json;c=json.load(open('changes.json'));print(int(bool(c['new_releases'] or c['watched_pages_touched'] or c['new_model_families'] or c['removed_model_families'] or c['newly_deprecated'])))")
+          pending=$(python -c "import json;print(int(json.load(open('changes.json'))['pending']))")
           if [ "$pending" != "1" ]; then echo "Nothing to review."; exit 0; fi
           title="Upstream Claude Code changes to review"
           {
             echo "The daily upstream check found changes since \`compat/baseline.json\` was last updated."
             echo
-            echo '```'
+            echo '~~~~'
             cat report.md
-            echo '```'
+            echo '~~~~'
             echo
             echo "To review: open this repo in Claude Code with the plugin enabled and run \`/model-router:refresh\`, or update the plugin by hand, then refresh the baseline with"
             echo "\`python3 plugins/model-router/scripts/model-router.py upstream-check --baseline compat/baseline.json --write\` in the same PR."
