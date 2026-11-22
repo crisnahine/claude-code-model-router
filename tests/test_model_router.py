@@ -1178,6 +1178,8 @@ class Mod(Sandbox):
         self.assertEqual(registry.price(config, "claude-opus-4-7")["input"], 5)  # one entry covers Opus 4.x
         self.assertEqual(registry.price(config, "claude-opus-4-1-20250805"),  # except 4.1, at its own list price
                          {"input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75, "cache_write_1h": 30})
+        for opus_4 in ("claude-opus-4-0", "claude-opus-4-20250514"):  # Opus 4 lists at the same price as 4.1
+            self.assertEqual(registry.price(config, opus_4), registry.price(config, "claude-opus-4-1"), opus_4)
         self.assertEqual(registry.price(config, "claude-haiku-4-5-20251001")["input"], 1)
         self.assertEqual(registry.price(config, "claude-opus-5-5[1m]")["input"], 4)
         self.assertIsNone(registry.price(config, "claude-opus-5-6"))  # a new version is never priced as its neighbour
