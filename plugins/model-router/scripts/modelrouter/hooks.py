@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import time
 
-from . import agents, calls, gates, ladder, learn, registry, session, settings, spawn, store, upstream
+from . import calls, gates, ladder, learn, registry, session, settings, spawn, store, upstream
 from . import config as cfg
 from .profile import profile_prompt
 
@@ -120,9 +120,10 @@ def user_prompt(hook_input: dict) -> dict | None:
     need = ladder.pick(config, level, options.priority, usable, learn.raises()).model
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
     below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
+    wanted = named_model(config, prompt)
     store.save_entry("prompts", session_id, {
         "prompt_id": hook_input.get("prompt_id"), "level": level, "need": need, "below": below,
-        "session_tier": current})
+        "session_tier": current, "named": wanted})
     why = f" (wording suggests: {', '.join(result['signals'])})" if result["signals"] else ""
     notes = []
     if mode == "advise":
@@ -136,7 +137,6 @@ def user_prompt(hook_input: dict) -> dict | None:
             f"{gates.strong_agent(config, need)} rather than settling it inline. You will be asked to before "
             "finishing if you don't. If the code shows the task is simpler than its wording, say so instead."
         )
-    wanted = named_model(config, prompt)
     if wanted and mode == "auto":
         notes.append(f"If the user is asking for the {wanted} model here, pass model: \"{wanted}\" on the "
                      "Agent calls for this request. A model named on a call is kept.")
@@ -211,17 +211,10 @@ def _note(decision: dict) -> str:
             "If the result falls short, re-issue the same call: it runs one level higher.")
 
 
-def _asked_for(config: dict, hook_input: dict) -> str | None:
-    """The model a finished or failed call was meant to run on, if it named one."""
-    tool_input = cfg.tool_input(hook_input)
-    asked = registry.family(config, tool_input.get("model"))
-    if asked:
-        return asked
-    agent = tool_input.get("subagent_type")
-    if isinstance(agent, str) and agent:
-        definition = agents.find(agent, cfg.project_dir(hook_input))
-        return registry.family(config, (definition or {}).get("model"))
-    return None
+def _asked_for(config: dict, tool_input: dict, routed: str | None) -> str | None:
+    """The model a finished or failed call was meant to run on: the one it was routed to,
+    or the one it named."""
+    return routed or registry.family(config, tool_input.get("model"))
 
 
 def post_agent(hook_input: dict) -> dict | None:
@@ -230,15 +223,20 @@ def post_agent(hook_input: dict) -> dict | None:
     response = hook_input.get("tool_response")
     response = response if isinstance(response, dict) else {}
     ran_as = response.get("resolvedModel")
-    asked = _asked_for(config, hook_input)
     # A background agent's call returns as soon as the agent has launched. Its result
     # is back when the agent stops (agent_stopped), not here.
     launched = response.get("status") == "async_launched"
     agent_id = response.get("agentId")
+    routed = None
     try:
-        calls.settled(hook_input.get("session_id"), tool_input, finished=not launched,
-                      launched_as=agent_id if launched and isinstance(agent_id, str) else None)
-        if asked and registry.family(config, ran_as):
+        routed = calls.settled(hook_input.get("session_id"), tool_input, finished=not launched,
+                               launched_as=agent_id if launched and isinstance(agent_id, str) else None)
+    except OSError:
+        pass
+    asked = _asked_for(config, tool_input, routed)
+    try:
+        # Under the force setting every agent runs on the forced model, which isn't a substitution.
+        if asked and registry.family(config, ran_as) and not settings.resolve(config).force:
             registry.record_result(asked, ran_as, registry.family(config, ran_as))
     except OSError:
         pass
@@ -252,20 +250,22 @@ def post_agent(hook_input: dict) -> dict | None:
 def agent_failed(hook_input: dict) -> dict | None:
     """An agent call failed. If the error says the model itself isn't usable, count it,
     and route around that model once it has happened twice."""
+    tool_input = cfg.tool_input(hook_input)
+    routed = None
     try:
-        calls.settled(hook_input.get("session_id"), cfg.tool_input(hook_input))
+        routed = calls.settled(hook_input.get("session_id"), tool_input)
     except OSError:
         pass
     error = str(hook_input.get("error") or "")
     if hook_input.get("is_interrupt") or not registry.MODEL_ERROR.search(error):
         return None
     config = cfg.load_config(hook_input)
-    asked = _asked_for(config, hook_input)
+    asked = _asked_for(config, tool_input, routed)
     if not asked:
         return None
     fails = registry.record_failure(asked, error)
     store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
-                         "agent": cfg.tool_input(hook_input).get("subagent_type"), "model": asked})
+                         "agent": tool_input.get("subagent_type"), "model": asked})
     cap = settings.resolve(config).cap
     usable = [n for n in registry.available(config, cfg.project_dir(hook_input), cap) if n != asked]
     if not usable:

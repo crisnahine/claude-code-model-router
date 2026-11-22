@@ -3,7 +3,7 @@ that means for the same call issued again. The only module that reads or writes 
 records.
 
 Per session, `pending` holds fallback rewrites waiting for their result, `launched` holds
-background runs waiting for their agent to stop, and `done` holds finished runs. The current request's runs and its strongest spawn live in that request's
+background runs waiting for their agent to stop, and `done` holds finished runs. The current request's runs, the model each call was routed to, and its strongest spawn live in that request's
 `prompts` entry, so a new request starts them empty."""
 from __future__ import annotations
 
@@ -16,6 +16,8 @@ from .config import LEVELS, LEVEL_SOURCES
 KEPT = 100
 # Without a request id to compare, a call seen again within this long counts as a redo.
 REDO_WINDOW = 30 * 60
+# shortcut: a refused call re-issued within this many seconds is rewritten again; key on a message id if hooks get one
+REFUSED_AFTER = 5
 
 
 def identify(tool_input: dict) -> tuple[str, str]:
@@ -33,8 +35,8 @@ def _put(records: dict, key: str, record: dict) -> None:
         del records[old]
 
 
-def _runs(entry: dict) -> dict:
-    runs = entry.get("calls")
+def _runs(entry: dict, name: str = "calls") -> dict:
+    runs = entry.get(name)
     return runs if isinstance(runs, dict) else {}
 
 
@@ -45,43 +47,51 @@ def routed(config: dict, session_id: str | None, key: str, model: str | None, *,
         store.mutate_entry("pending", session_id, lambda pending: _put(
             pending, key, {"model": model, "level": level, "effort": effort}))
     stood = source in LEVEL_SOURCES and bool(level)
-    entry = store.load_entry("prompts", session_id)
-    before = _runs(entry).get(key)
-    earlier = before.get("model") if isinstance(before, dict) and before.get("source") == "router" else None
+    earlier: list = []
 
     def update(entry: dict) -> None:
-        # Re-read under the lock: calls issued together record at the same moment.
+        # Under the lock: calls issued together record at the same moment.
+        runs = _runs(entry)
+        before = runs.get(key)
+        if isinstance(before, dict) and before.get("source") == "router":
+            earlier.append(before.get("model"))
         if stood:
-            runs = _runs(entry)
             _put(runs, key, {"level": level, "model": model, "effort": effort, "source": source})
             entry["calls"] = runs
+        # The model each call runs on, for its result: the result shows the call as issued.
+        routes = _runs(entry, "routed")
+        _put(routes, key, {"model": model})
+        entry["routed"] = routes
         if registry.stronger(config, model, entry.get("top_spawn")):
             entry["top_spawn"] = model
 
-    if session_id and (stood or registry.stronger(config, model, entry.get("top_spawn"))):
-        store.mutate_entry("prompts", session_id, update)
-    return earlier
+    store.mutate_entry("prompts", session_id, update)
+    return earlier[0] if earlier else None
 
 
 def settled(session_id: str | None, tool_input: dict, finished: bool = False,
-            launched_as: str | None = None) -> None:
+            launched_as: str | None = None) -> str | None:
     """A result or an error came back, so the call's rewrite was accepted. A result also
     marks the run finished, so the same call issued again is a redo. A background launch
-    has no result yet: it waits under its agent's id until that agent stops."""
+    has no result yet: it waits under its agent's id until that agent stops. Returns the
+    model the call was routed to in this request, when known."""
     key = identify(tool_input)[1]
     rewrite = store.load_entry("pending", session_id).get(key)
     if rewrite is not None:
         store.mutate_entry("pending", session_id, lambda pending: pending.pop(key, None))
     request = store.load_entry("prompts", session_id)
+    route = _runs(request, "routed").get(key)
+    model = route.get("model") if isinstance(route, dict) and isinstance(route.get("model"), str) else None
     ran = rewrite if isinstance(rewrite, dict) and rewrite.get("level") else _runs(request).get(key)
     if not isinstance(ran, dict) or ran.get("level") not in LEVELS:
-        return
+        return model
     run = {"level": ran["level"], "model": ran.get("model"), "effort": ran.get("effort"),
            "prompt_id": request.get("prompt_id")}
     if finished:
         store.mutate_entry("done", session_id, lambda done: _put(done, key, run))
     elif launched_as:
         store.mutate_entry("launched", session_id, lambda launched: _put(launched, launched_as, {**run, "key": key}))
+    return model
 
 
 def stopped(session_id: str | None, agent_id: object, answered: bool) -> None:
@@ -114,9 +124,16 @@ def finished_run(session_id: str | None, key: str) -> dict | None:
 
 def refused_rewrite(session_id: str | None, key: str) -> dict | None:
     """This call's fallback rewrite, when the call shows up again before its result: the
-    rewrite didn't run."""
+    rewrite didn't run. A rewrite only seconds old is a copy issued alongside it."""
     rewrite = store.load_entry("pending", session_id).get(key)
-    return rewrite if isinstance(rewrite, dict) else None
+    if not isinstance(rewrite, dict) or time.time() - (rewrite.get("at") or 0) < REFUSED_AFTER:
+        return None
+    return rewrite
+
+
+def named(session_id: str | None) -> str | None:
+    """The model the user named in the current request's prompt."""
+    return store.load_entry("prompts", session_id).get("named")
 
 
 def strongest(session_id: str | None) -> str | None:

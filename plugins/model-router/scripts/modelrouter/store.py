@@ -103,11 +103,12 @@ def locked(path: Path) -> Iterator[None]:
 
 
 def update_dict(path: Path, change: Callable[[dict], Any]) -> dict:
-    """Load one JSON object, let `change` edit it in place, and save it, under its lock."""
+    """Load one JSON object, let `change` edit it in place, and save it, under its lock.
+    These are the plugin's own state files, so they are written compact."""
     with locked(path):
         data = load_dict(path)
         change(data)
-        save_json(path, data)
+        write_atomic(path, json.dumps(data, separators=(",", ":"), sort_keys=True))
         return data
 
 
@@ -176,8 +177,10 @@ def append_ledger(entry: dict) -> None:
             fh.write(json.dumps(entry) + "\n")
         if path.stat().st_size > LEDGER_MAX_BYTES:
             with locked(path):
-                lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-                write_atomic(path, "".join(lines[len(lines) // 2:]))
+                # Another hook may have trimmed it while this one waited for the lock.
+                if path.stat().st_size > LEDGER_MAX_BYTES:
+                    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+                    write_atomic(path, "".join(lines[len(lines) // 2:]))
     except OSError:
         pass
 

@@ -47,8 +47,13 @@ def family(config: dict, model: Any) -> str | None:
         return None
     m = model.lower().split("[")[0]
     m = (config.get("aliases") or {}).get(m, m)
-    for name in sorted(models(config), key=len, reverse=True):
-        if m == name or name in m:
+    names = models(config)
+    if m in names:
+        return m
+    # A project's own names match last, so they can't capture the IDs of a vouched-for model.
+    added = set(config.get("project_models") or ())
+    for name in sorted(names, key=lambda n: (n in added, -len(n))):
+        if name in m:
             return name
     return None
 

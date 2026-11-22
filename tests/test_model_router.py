@@ -1,6 +1,7 @@
 """Tests for the Model Router plugin runtime. Run: python3 -m unittest discover -s tests"""
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -117,6 +118,11 @@ class Sandbox(unittest.TestCase):
     def ledger(self) -> list[dict]:
         return store.read_ledger()
 
+    def next_message(self) -> None:
+        """Claude's next message comes seconds after this one: waiting rewrites are older."""
+        store.mutate_entry("pending", "s1", lambda pending: [
+            v.update(at=v["at"] - calls.REFUSED_AFTER - 1) for v in pending.values() if isinstance(v, dict)])
+
     def override(self, value: dict, user: bool = False) -> None:
         folder = self.home if user else self.project / ".claude"
         folder.mkdir(exist_ok=True)
@@ -215,6 +221,11 @@ class Shipped(unittest.TestCase):
                     continue
                 self.assertIsNone(old.search(text), path)
 
+    def test_agent_stopped_runs_before_the_next_step(self):
+        data = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))
+        stop = [h for g in data["hooks"]["SubagentStop"] for h in g["hooks"] if h["args"][1] == "agent-stopped"]
+        self.assertEqual([h.get("async", False) for h in stop], [False])
+
 
 class Store(Sandbox):
     def test_keyed_files_drop_the_least_recently_written(self):
@@ -258,6 +269,27 @@ class Store(Sandbox):
         self.assertLess(time.monotonic() - started, 2)
         self.assertEqual(store.load_dict(path), {"a": 1, "b": 2})
         self.assertTrue(lock.exists())  # not ours to remove
+
+    def test_state_files_are_written_compact(self):
+        store.save_entry("pending", "s1", {"a": {"model": "haiku"}})
+        self.assertNotIn("\n", (self.data / "pending.json").read_text(encoding="utf-8"))
+
+    def test_two_hooks_trimming_the_ledger_at_once_keep_half_of_it(self):
+        path = store.ledger_path()
+        path.write_text("".join(json.dumps({"n": i, "pad": "x" * 20}) + "\n" for i in range(100)))
+        real = store.locked
+
+        @contextlib.contextmanager
+        def racing(lock_path):
+            with real(lock_path):
+                lines = lock_path.read_text(encoding="utf-8").splitlines(keepends=True)
+                store.write_atomic(lock_path, "".join(lines[len(lines) // 2:]))  # the other hook trimmed first
+                yield
+
+        with mock.patch.object(store, "LEDGER_MAX_BYTES", path.stat().st_size), \
+                mock.patch.object(store, "locked", racing):
+            store.append_ledger({"event": "spawn"})
+        self.assertEqual(len(store.read_ledger()), 51)
 
 
 class Registry(Sandbox):
@@ -367,6 +399,12 @@ class Registry(Sandbox):
         self.assertEqual(settings.resolve(config).mode, "auto")
         (self.project / ".claude" / "model-router.json").write_text("{not json")
         self.assertEqual(len(cfg.load_config()["models"]), 4)
+
+    def test_a_project_model_name_cannot_capture_a_trusted_models_ids(self):
+        self.override({"models": {"claude": {"strength": 0.5}, "opus-5": {"strength": 9}, "saga": {"strength": 2}}})
+        config = cfg.load_config()
+        self.assertEqual(registry.family(config, "claude-opus-5-5"), "opus")
+        self.assertEqual([m for m in ("claude", "opus-5", "saga") if m in config["models"]], ["claude", "saga"])
 
 
 class Options(Sandbox):
@@ -686,6 +724,12 @@ class Router(Sandbox):
                                      text=True, env={**os.environ})
                 self.assertEqual((res.returncode, res.stderr), (0, ""), (command, payload))
 
+    def test_a_call_naming_a_model_outside_the_registry_is_left_alone(self):
+        for model in ("inherit", "gateway/model-x"):
+            d = self.decide("general-purpose", LOOKUP, model=model)
+            self.assertEqual((d["action"], d["model"]), ("keep", None), model)
+            self.assertIn("outside the registry", d["reason"])
+
 
 class RepeatGuard(Sandbox):
     """A rewrite that didn't run is never repeated, so a refused rewrite can't loop."""
@@ -696,6 +740,7 @@ class RepeatGuard(Sandbox):
 
     def test_the_same_call_again_without_a_result_passes_through(self):
         self.assertIsNotNone(self.pre("general-purpose", LOOKUP))
+        self.next_message()
         self.assertIsNone(self.pre("general-purpose", LOOKUP))
         self.assertIn("passed through", self.ledger()[-1]["reason"])
         self.assertIsNotNone(self.pre("general-purpose", "list the tests"))  # a different call is routed
@@ -769,6 +814,7 @@ class RepeatGuard(Sandbox):
     def test_a_model_that_never_runs_is_routed_around_after_two_refused_rewrites(self):
         for prompt in ("list the files under a", "list the files under b"):
             self.pre("general-purpose", prompt)
+            self.next_message()
             self.pre("general-purpose", prompt)
         self.assertFalse(registry.healthy("haiku"))
         self.assertEqual(self.decide("general-purpose", "list the files under c")["model"], "sonnet")
@@ -778,6 +824,7 @@ class RepeatGuard(Sandbox):
         registry.record_result("haiku", "claude-haiku-5-5", "haiku")
         for prompt in ("list the files under a", "list the files under b"):
             self.pre("general-purpose", prompt)
+            self.next_message()
             self.pre("general-purpose", prompt)
         self.assertTrue(registry.healthy("haiku"))
 
@@ -785,6 +832,7 @@ class RepeatGuard(Sandbox):
         self.options(max_tier="sonnet")
         first = self.pre("general-purpose", LOOKUP, model="fable")
         self.assertEqual(first["updatedInput"]["model"], "sonnet")
+        self.next_message()
         again = self.pre("general-purpose", LOOKUP, model="fable")
         self.assertEqual(again["permissionDecision"], "deny")
         self.assertIn('model: "sonnet"', again["permissionDecisionReason"])
@@ -794,6 +842,7 @@ class RepeatGuard(Sandbox):
         # The session runs on opus, so the call left untouched would inherit opus.
         self.options(max_tier="sonnet")
         self.assertEqual(self.pre("general-purpose", LOOKUP)["updatedInput"]["model"], "haiku")
+        self.next_message()
         again = self.pre("general-purpose", LOOKUP)
         self.assertEqual(again["permissionDecision"], "deny")
         self.assertIn('model: "haiku"', again["permissionDecisionReason"])
@@ -801,7 +850,21 @@ class RepeatGuard(Sandbox):
     def test_pending_calls_survive_a_new_user_prompt(self):
         self.pre("general-purpose", LOOKUP)
         hooks.user_prompt({"session_id": "s1", "prompt": "try that again"})
+        self.next_message()
         self.assertIsNone(self.pre("general-purpose", LOOKUP))
+
+    def test_copies_of_one_call_issued_together_are_all_routed(self):
+        for _ in range(3):
+            self.assertEqual(self.pre("general-purpose", LOOKUP)["updatedInput"]["model"], "haiku")
+        self.assertEqual(registry.health(), {})
+
+    def test_a_redo_at_the_top_of_the_ladder_gets_more_effort(self):
+        hard = "research a novel fix for the auth migration across every service, root cause unknown"
+        self.pre("general-purpose", hard)
+        self.done("general-purpose", hard, "claude-fable-5-2", model="fable", effort="high")
+        again = self.decide("general-purpose", hard)
+        self.assertEqual((again["action"], again["level"], again["model"], again["effort"], again["escalated_from"]),
+                         ("rewrite", "frontier", "fable", "xhigh", None))
 
 
 class Calls(Sandbox):
@@ -824,6 +887,8 @@ class Calls(Sandbox):
         call = {"prompt": LOOKUP}
         key = calls.identify(call)[1]
         self.route(call, awaiting=True)
+        self.assertIsNone(calls.refused_rewrite("s1", key))  # a copy issued alongside it
+        self.next_message()
         self.assertEqual(calls.refused_rewrite("s1", key)["model"], "haiku")
         calls.settled("s1", call)  # an error: the rewrite was accepted, but nothing finished
         self.assertIsNone(calls.refused_rewrite("s1", key))
@@ -862,6 +927,7 @@ class Calls(Sandbox):
     def test_records_keep_the_most_recent_calls(self):
         for i in range(calls.KEPT + 2):
             self.route({"prompt": f"list {i}"}, awaiting=True)
+        self.next_message()
         self.assertIsNone(calls.refused_rewrite("s1", calls.identify({"prompt": "list 0"})[1]))
         self.assertIsNone(calls.refused_rewrite("s1", calls.identify({"prompt": "list 1"})[1]))
         self.assertIsNotNone(calls.refused_rewrite("s1", calls.identify({"prompt": "list 2"})[1]))
@@ -969,6 +1035,26 @@ class Mod(Sandbox):
         self.assertEqual(registry.price(config, "claude-haiku-4-5-20251001")["input"], 1)
         self.assertEqual(registry.price(config, "claude-opus-5-5[1m]")["input"], 4)
         self.assertIsNone(registry.price(config, "claude-opus-5-6"))  # a new version is never priced as its neighbour
+
+    def test_results_are_checked_against_the_model_the_mod_routed_to(self):
+        self.options(agent_pins="override")
+        self.agent("rev", "opus")
+        for prompt in ("list the files under a", "list the files under b"):
+            self.assertEqual(self.spawn("rev", prompt)["model"], "haiku")
+            self.done("rev", prompt, "claude-haiku-5-5")
+        self.assertTrue(registry.healthy("opus"))
+        self.assertEqual(self.ledger()[-1]["asked"], "haiku")
+        hooks.agent_failed({**self.call("rev", "list the files under a"),
+                            "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})
+        self.assertEqual((registry.health()["haiku"]["fail"], "opus" in registry.health()), (1, False))
+
+    def test_a_result_reads_no_agent_files(self):
+        self.agent("rev", "opus")
+        self.spawn("rev", LOOKUP)
+        with mock.patch.object(agents, "find", side_effect=AssertionError("agents.find on a result")):
+            self.done("rev", LOOKUP, "claude-opus-5-5")
+            hooks.agent_failed({**self.call("rev", LOOKUP), "error": "API Error: 404 not_found_error: model"})
+        self.assertEqual(registry.health()["opus"]["fail"], 1)
 
 
 class ModPayloads(Sandbox):
@@ -1091,6 +1177,18 @@ class Feedback(Sandbox):
             self.assertEqual(worker.wait(timeout=120), 0)
         self.assertEqual(learn.stats()["lookup"]["calls"], 50)
 
+    def test_a_model_the_user_named_casts_no_votes(self):
+        hooks.user_prompt({"session_id": "s1", "prompt": "use opus to list the files in these six folders"})
+        for i in range(learn.VOTES_NEEDED):
+            self.pre("general-purpose", f"list the files under dir{i}", model="opus")
+        self.assertEqual(learn.bump("lookup"), 0)
+
+    def test_a_spawn_identifies_its_call_once_and_reuses_the_raises(self):
+        with mock.patch.object(calls, "identify", wraps=calls.identify) as identify, \
+                mock.patch.object(learn, "bump", side_effect=AssertionError("re-read the raises")):
+            self.pre("general-purpose", BUILD, model="haiku")
+        self.assertEqual(identify.call_count, 1)
+
 
 class Hooks(Sandbox):
     def text(self, output: dict | None) -> str:
@@ -1159,6 +1257,7 @@ class Hooks(Sandbox):
         for _ in range(2):
             self.done("x", "p", "claude-opus-5-5", model="fable")
         self.assertFalse(registry.healthy("fable"))
+        self.pre("pinned", "p")
         self.done("pinned", "p", "claude-opus-5-5")
         self.assertEqual(registry.health()["opus"]["last_model"], "claude-opus-5-5")
         hooks.post_agent({"session_id": "s1", "tool_input": {"subagent_type": "x"}, "tool_response": "text"})
@@ -1168,6 +1267,7 @@ class Hooks(Sandbox):
         failed = {"session_id": "s1", "cwd": str(self.project),
                   "error": "API Error: 404 not_found_error: model: claude-fable-5-2",
                   "tool_input": {"subagent_type": "model-router:deep-solver", "prompt": "x"}}
+        self.pre("model-router:deep-solver", "x")
         self.assertIn('model: "opus"', self.text(hooks.agent_failed(failed)))
         self.assertIn("route around", self.text(hooks.agent_failed(failed)))
         self.assertFalse(registry.healthy("fable"))
@@ -1178,6 +1278,12 @@ class Hooks(Sandbox):
     def test_model_switch_is_recorded(self):
         hooks.model_switch({"session_id": "s1", "to_model": "claude-fable-5-2"})
         self.assertEqual(session.model("s1"), "claude-fable-5-2")
+
+    def test_forced_runs_are_not_substitutions(self):
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        for _ in range(2):
+            self.done("general-purpose", LOOKUP, "claude-sonnet-5-5", model="opus")
+        self.assertTrue(registry.healthy("opus"))
 
 
 class Gates(Sandbox):

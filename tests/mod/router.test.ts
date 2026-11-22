@@ -160,6 +160,20 @@ test('a failing or garbled CLI leaves every event unchanged', async () => {
   }
 })
 
+test('a CLI that throws after next(e) ran does not run next again', async () => {
+  const mod = load()
+  mod.$.process.run = async () => { throw new Error('spawn failed') }
+  const events = [['session.start', { source: 'startup' }], ['turn.complete', completeEvent({ usage: payloads['mod-usage'].usage })]] as const
+  for (const [event, e] of events) {
+    let runs = 0
+    const next = (x: unknown) => { runs++; return x }
+    // The engine runs a hook's .catch when the hook rejects.
+    const result = await Promise.resolve(mod.hooks[event]!(mod.$, e, next)).catch(() => mod.catches[event]!(mod.$, e, next))
+    assert.equal(result, e)
+    assert.equal(runs, 1, event)
+  }
+})
+
 test('every hook falls back to next(e) when it throws', async () => {
   const mod = load()
   const events = ['agent.spawn', 'session.start', 'tool.call', 'turn.complete', 'turn.start', 'turn.step']

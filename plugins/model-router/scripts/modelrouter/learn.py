@@ -62,23 +62,25 @@ def _update(level: str, calls: int = 0, up: int = 0, down: int = 0) -> None:
 
 
 def decided(config: dict, *, source: str | None, level: str | None, pick: str | None, runs_on: str | None,
-            earlier: str | None = None, escalated_from: str | None = None) -> None:
+            raised: dict | None = None, earlier: str | None = None, escalated_from: str | None = None,
+            user_named: bool = False) -> None:
     """Count one spawn and cast the votes its facts carry. `source` is None for a call
-    that ran untouched."""
+    that ran untouched. A call on the model the user named in the prompt carries no
+    caller votes: the user chose it, not Claude."""
     if not level:
         return
     if source == "router":
         _update(level, calls=1)
     if source in LEVEL_SOURCES and escalated_from:
         _update(escalated_from, up=1)
-    if source != "caller":
+    if source != "caller" or user_named:
         return
     # The same call routed weaker earlier in this request counts double: it was redone.
     if earlier and registry.stronger(config, runs_on, earlier):
         _update(level, up=2)
     elif registry.stronger(config, runs_on, pick):
         _update(level, up=1)
-    elif registry.stronger(config, pick, runs_on) and bump(level) > 0:
+    elif registry.stronger(config, pick, runs_on) and (raises() if raised is None else raised).get(level, 0) > 0:
         _update(level, down=1)
 
 

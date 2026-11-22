@@ -19,15 +19,16 @@ function optionEnv(options: PluginOptions): Record<string, string> {
   return env
 }
 
+// Never throws: a hook that already called next(e) must not reach its .catch and call it again.
 async function ask($: EngineInterface, options: Record<string, string>, command: string, payload: object): Promise<Pick> {
-  const env = { ...(await $.process.hookEnv()), ...options }
-  const run = await $.process.run(['sh', `${$.plugin.root}/scripts/model-router.sh`, command], {
-    stdin: JSON.stringify({ session_id: env.CLAUDE_CODE_SESSION_ID, ...payload }),
-    env,
-    timeoutMs: 8000,
-  })
-  if (run.exitCode !== 0 || !run.stdout.trim()) return null
   try {
+    const env = { ...(await $.process.hookEnv()), ...options }
+    const run = await $.process.run(['sh', `${$.plugin.root}/scripts/model-router.sh`, command], {
+      stdin: JSON.stringify({ session_id: env.CLAUDE_CODE_SESSION_ID, ...payload }),
+      env,
+      timeoutMs: 8000,
+    })
+    if (run.exitCode !== 0 || !run.stdout.trim()) return null
     return JSON.parse(run.stdout) as Pick
   } catch {
     return null

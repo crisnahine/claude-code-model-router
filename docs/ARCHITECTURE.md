@@ -98,15 +98,16 @@ Some details of how the rules apply:
 - If the result is the model and effort the agent would run on anyway, nothing is changed.
 - An agent whose definition can't be found is left alone, since it may have a model its author chose. Workflow stages and teammate roles are the exception: the engine makes them, and they name no model unless the script or the call does.
 - On the fallback path, inside a subagent and for the built-in Explore and Plan agents, the model a call would inherit isn't known for certain, so the pick is always written onto the call. The mod path knows the parent's model and needs no such guess.
-- A model the user names in a prompt is passed to Claude as a reminder to put it on the calls for that request. Words like "opus" appear in ordinary sentences too, so the hook leaves that judgment to Claude and forces nothing.
+- A call that names a model outside the registry, such as `inherit` or a gateway's own ID, is left as it is.
+- A model the user names in a prompt is passed to Claude as a reminder to put it on the calls for that request. Words like "opus" appear in ordinary sentences too, so the hook leaves that judgment to Claude and forces nothing. A call on that model casts no feedback votes, since the user chose it, not Claude.
 
 ### Redo escalation
 
-When an agent's result comes back, the call is remembered with the level it ran at (`done`, per session). For an agent that runs in the background the `Agent` call returns as soon as the agent has launched, so its call waits under the agent's id (`launched`) and counts as finished when the agent stops with an answer. Copies of one brief started together therefore all run at the brief's own level. The `post-agent` hook runs before Claude's next step, so a redo always finds the record. If the same call is issued again, the first answer wasn't good enough, so it runs one level higher, and the redo is a vote that its first level was too low. Up the ladder that means more effort first (complex to hardest), then a stronger model (standard to complex, hardest to frontier). A call that names its own model is never escalated: the caller has decided.
+When an agent's result comes back, the call is remembered with the level it ran at (`done`, per session). For an agent that runs in the background the `Agent` call returns as soon as the agent has launched, so its call waits under the agent's id (`launched`) and counts as finished when the agent stops with an answer. Copies of one brief started together therefore all run at the brief's own level. The `post-agent` hook runs before Claude's next step, so a redo always finds the record. If the same call is issued again, the first answer wasn't good enough, so it runs one level higher, and the redo is a vote that its first level was too low. Up the ladder that means more effort first (complex to hardest), then a stronger model (standard to complex, hardest to frontier). A redo of a frontier run, with no level above it, runs at one step more effort. A call that names its own model is never escalated: the caller has decided.
 
 ### Rewrites that don't take
 
-On the fallback path, the `Agent` tool validates a rewritten call, and Claude Code reports no event when it rejects one. A hook that rewrote the retry the same way would loop. So every rewrite is remembered until its result or failure arrives. If the same call shows up again first, the earlier rewrite didn't run, and a call the router would give a model is passed through untouched. This guard belongs to the fallback adapter alone; `router.decide` doesn't know about it. When the target was a model that has never run in this setup, that counts as a strike against it, and two strikes route around it.
+On the fallback path, the `Agent` tool validates a rewritten call, and Claude Code reports no event when it rejects one. A hook that rewrote the retry the same way would loop. So every rewrite is remembered until its result or failure arrives. If the same call shows up again first, and more than a few seconds later, the earlier rewrite didn't run, and a call the router would give a model is passed through untouched. Copies of one call issued in one message arrive together, so they are each routed as usual. This guard belongs to the fallback adapter alone; `router.decide` doesn't know about it. When the target was a model that has never run in this setup, that counts as a strike against it, and two strikes route around it.
 
 One case can't be passed through. If the model the call would run on untouched is above the user's cap, letting it go would break the cap. That repeated call is denied, with the model to use in the reason. This is the only denial the plugin ever returns, and the mod path never needs it.
 
@@ -135,7 +136,7 @@ A second check at `Stop` asks for verification once, when code changed and no te
 | The models your organization allows | `availableModels` and `deniedModels` in user, project and managed settings | Blocked ones are never picked |
 | The model a name resolves to | `resolvedModel` in the `Agent` tool's result, and the model on each turn's usage | Shown in `/model-router:models` and `/model-router:usage` |
 | A model that isn't served here | A model error from the `Agent` tool, twice | Routed around for a day, then retried. Repeat trouble extends the wait to three days, then seven |
-| A model that is silently replaced | Asked for one, `resolvedModel` is another, twice | Same |
+| A model that is silently replaced | The model a call was routed to, or the one it named, against `resolvedModel`, twice. Not counted while `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is set | Same |
 | A model name the `Agent` tool rejects | A rewrite to it comes back without having run, twice | Same |
 | A level routed too low | A redo of a routed call, or Claude naming a stronger model than the pick | Redos run one level up at once. After 6 votes that amount to 30% of that level's calls, the level is raised for good |
 | A new or removed model alias | The alias table on the docs' model configuration page, fetched daily | Reported at session start and by `/model-router:refresh`. The repo's daily workflow opens an issue |
@@ -161,7 +162,7 @@ UserPromptSubmit ─ user-prompt   profiles the request; notes a model the user 
 PostModelSwitch ─ model-switch   records the session's new model
 PreToolUse (Agent|Task) ─ pre-agent      fallback: spawn.run, returns updatedInput
 PostToolUse (Agent|Task) ─ post-agent    the model that ran; a returned result finishes the call for redos
-SubagentStop ─ agent-stopped    (async) a background agent's result is back; finishes its call for redos
+SubagentStop ─ agent-stopped    a background agent's result is back; finishes its call for redos
 PostToolUseFailure (Agent|Task) ─ agent-failed   counts model errors
 PostToolUse (Edit|Write|NotebookEdit) ─ post-edit   notes that code changed
 Stop ─ stop                      the two checks
@@ -181,13 +182,13 @@ In `${CLAUDE_PLUGIN_DATA}`:
 | `sessions.json`, `prompts.json`, `edits.json`, `pending.json`, `launched.json`, `done.json`, `mod.json` | Per session: its model, the current request's profile and routed calls, edit and check times, rewrites waiting for a result, background agents still running, finished calls for redo escalation, and whether the mod is running. The 200 most recently written sessions are kept |
 | `ledger.jsonl` | One line per agent start, result, turn effort and turn usage, with the decision, its reason and the list-price cost. Trimmed at 4 MB |
 
-Writes are atomic. Each read-modify-write cycle takes a lock file, because agents started in one message run their hooks at the same moment. A lock that can't be had within two seconds is skipped, so a hook never hangs a session.
+Writes are atomic, and the state files are written as compact JSON. Each read-modify-write cycle takes a lock file, because agents started in one message run their hooks at the same moment. A lock that can't be had within two seconds is skipped, so a hook never hangs a session.
 
 Nothing about your work leaves the machine. The only network access is the daily fetch from `code.claude.com` and `platform.claude.com`, and from `api.anthropic.com` when an Anthropic API key is set.
 
 ## Trust
 
-The user's own `~/.claude/model-router.json` is trusted in full. A repository's `.claude/model-router.json` is read like any project file. It can turn routing down to `advise` or `off`, set rules for agents, and add models. It can't switch routing on for a user who turned it off, and it can't change the strength of a model that ships or that the user defined. Models it adds are ignored while the user has a cap set, since their rank is only the repository's claim.
+The user's own `~/.claude/model-router.json` is trusted in full. A repository's `.claude/model-router.json` is read like any project file. It can turn routing down to `advise` or `off`, set rules for agents, and add models. It can't switch routing on for a user who turned it off, and it can't change the strength of a model that ships or that the user defined. A name it adds that sits inside one of those names, or contains one, is dropped, and the names it adds are matched against a model ID last, so a name like `claude` can't claim the shipped models' IDs. Models it adds are ignored while the user has a cap set, since their rank is only the repository's claim.
 
 ## What is out of reach, or left alone on purpose
 

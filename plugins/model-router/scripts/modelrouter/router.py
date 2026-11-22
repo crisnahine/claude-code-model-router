@@ -69,7 +69,8 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
     profile = profile_call(tool_input, agent)
     level = rule.get("level") or profile["level"]
     done = facts.earlier
-    if done and done.get("level") in cfg.LEVELS and not tool_input.get("model"):
+    redo = bool(done and done.get("level") in cfg.LEVELS and not tool_input.get("model"))
+    if redo:
         # The same call again after its result came back: the first answer wasn't good
         # enough. Re-running at the next level is cheaper than starting every call high.
         above = cfg.LEVELS.index(done["level"]) + 1
@@ -83,6 +84,9 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
         return out
     if rule.get("route") is False:
         out["reason"] = "a rule in model-router.json leaves this agent alone"
+        return out
+    if tool_input.get("model") and not requested:
+        out.update(was=None, reason=f"the call names a model outside the registry ({tool_input['model']})")
         return out
     if settings.force:
         # The user pinned every subagent's model. Effort is still free to set, and on a
@@ -116,6 +120,8 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
         target, source, why = pick, "router", f"{level} subtask"
         if out.get("escalated_from"):
             why += f", one level above the {out['escalated_from']} run that came back before"
+        elif redo:
+            why += ", redone with more effort than the run that came back before"
 
     final = registry.clamp(config, target, usable)
     if final != target:
@@ -125,7 +131,7 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
     # the model, and on current models effort is the cheaper lever for quality.
     if source in cfg.LEVEL_SOURCES and not _effort_decided(tool_input, definition, settings):
         effort = level_effort
-    if out.get("escalated_from") and done:
+    if redo:
         effort = _above_earlier(config, effort, final, done)
     out.update(model=final, source=source, reason=why)
     if final == out["was"] and not effort:

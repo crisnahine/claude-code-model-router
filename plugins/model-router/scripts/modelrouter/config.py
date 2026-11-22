@@ -111,12 +111,15 @@ def load_config(hook_input: dict | None = None) -> dict:
     project = _clean(store.load_dict(project_dir(hook_input) / ".claude" / OVERRIDE_FILE))
     trusted = set(base.get("models") or {}) | set(user.get("models") or {})
     if "models" in project:
-        project["models"] = {k: v for k, v in project["models"].items() if k not in trusted}
+        # A name inside a trusted one, or around it, would capture that model's IDs.
+        project["models"] = {k: v for k, v in project["models"].items()
+                             if not any(k in t or t in k for t in trusted)}
     file_modes = [m for m in (user.pop("routing_mode", None), project.pop("routing_mode", None)) if m]
     config = _merge(_merge(base, user), project)
     # A model needs a strength to be routed to; drop half-defined ones.
     config["models"] = {k: v for k, v in (config.get("models") or {}).items()
                         if isinstance(v, dict) and _number(v.get("strength"))}
+    config["project_models"] = sorted(project.get("models") or {})
     config.pop("routing_mode", None)
     if file_modes:
         config["routing_mode"] = min(file_modes, key=MODES.index)

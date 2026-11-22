@@ -11,10 +11,10 @@ from . import config as cfg
 Guard = Callable[[dict, str, dict, settings.Settings], None]
 
 
-def facts(hook_input: dict, config: dict, options: settings.Settings, key: str | None = None) -> router.Facts:
+def facts(hook_input: dict, config: dict, options: settings.Settings,
+          call: tuple[str, str] | None = None) -> router.Facts:
     tool_input = cfg.tool_input(hook_input)
-    agent, found = calls.identify(tool_input)
-    key = key or found
+    agent, key = call or calls.identify(tool_input)
     project = cfg.project_dir(hook_input)
     definition = agents.find(agent, project)
     if definition is None and hook_input.get("kind") in ("workflow", "teammate"):
@@ -40,8 +40,9 @@ def run(hook_input: dict, via: str, guard: Guard | None = None) -> dict:
     """Decide one spawn and record it. `via` is "mod" or "fallback"."""
     config = cfg.load_config(hook_input)
     options = settings.resolve(config)
-    key = calls.identify(cfg.tool_input(hook_input))[1]
-    found = facts(hook_input, config, options, key)
+    call = calls.identify(cfg.tool_input(hook_input))
+    key = call[1]
+    found = facts(hook_input, config, options, call)
     decision = router.decide(found, config, options)
     if guard:
         guard(decision, key, config, options)
@@ -57,20 +58,22 @@ def run(hook_input: dict, via: str, guard: Guard | None = None) -> dict:
     store.append_ledger(row)
     if action != "deny":
         try:
-            _record(config, session_id, key, decision, awaiting=via == "fallback" and action == "rewrite")
+            _record(config, session_id, key, decision, found.raises,
+                    awaiting=via == "fallback" and action == "rewrite")
         except OSError:
             pass
     return decision
 
 
-def _record(config: dict, session_id: str | None, key: str, decision: dict, awaiting: bool) -> None:
+def _record(config: dict, session_id: str | None, key: str, decision: dict, raises: dict, awaiting: bool) -> None:
     level, source = decision["level"], decision["source"]
     runs_on = decision["model"] or decision["was"]
     if decision["repeat_of"]:
         source = None  # passed through untouched: neither the pick nor the level applied
     earlier = calls.routed(config, session_id, key, runs_on, level=level, effort=decision["effort"],
                            source=source, awaiting=awaiting)
-    learn.decided(config, source=source, level=level, pick=decision["pick"], runs_on=runs_on,
-                  earlier=earlier, escalated_from=decision["escalated_from"])
+    user_named = source == "caller" and decision["was"] == calls.named(session_id)
+    learn.decided(config, source=source, level=level, pick=decision["pick"], runs_on=runs_on, raised=raises,
+                  earlier=earlier, escalated_from=decision["escalated_from"], user_named=user_named)
     if gates.is_checker(decision["agent"]):
         gates.note_check(session_id)
