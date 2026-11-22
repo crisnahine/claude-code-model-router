@@ -33,7 +33,7 @@ def path() -> Path:
 
 
 def load() -> dict:
-    return store.load_dict(path())
+    return store.load_state_file(path())
 
 
 class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
