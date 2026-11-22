@@ -199,6 +199,14 @@ class Shipped(unittest.TestCase):
         for option in manifest["userConfig"].values():
             self.assertNotIn("options", option)  # not accepted by the oldest supported Claude Code
 
+    def test_ci_tests_the_oldest_python_the_launcher_accepts(self):
+        launcher = (SCRIPTS / "model-router.sh").read_text(encoding="utf-8")
+        floor = "%s.%s" % re.search(r"sys\.version_info < \((\d+), (\d+)\)", launcher).groups()
+        ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        matrix = re.findall(r'"(\d+\.\d+)"', re.search(r"python: \[([^\]]*)\]", ci).group(1))
+        self.assertEqual(min(matrix, key=lambda v: tuple(map(int, v.split(".")))), floor)
+        self.assertIn(f"Python {floor} or later", (ROOT / "README.md").read_text(encoding="utf-8"))
+
     def test_shipped_baseline_lists_the_registry_models(self):
         baseline = json.loads((ROOT / "compat" / "baseline.json").read_text(encoding="utf-8"))
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
