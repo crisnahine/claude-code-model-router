@@ -1092,6 +1092,7 @@ def site_files() -> dict:
     page = between(page, FAQ_LD, site_faq_ld())
     v, day = version(), release_date(version())
     page = re.sub(r'"softwareVersion": "[^"]*"', f'"softwareVersion": "{v}"', page)
+    page = badge_alt(page, v)
     page = re.sub(r'"datePublished": "[^"]*"', f'"datePublished": "{day}"', page)
     page = re.sub(r'Version [^,]+, released <time datetime="[^"]*">[^<]*</time>',
                   f'Version {v}, released <time datetime="{day}">{day}</time>', page)
@@ -1106,6 +1107,10 @@ def site_files() -> dict:
 
 
 # ---------------------------------------------------------------- write and check
+
+def badge_alt(page: str, v: str) -> str:
+    return re.sub(r'(badge-version\.svg"[^>]*? alt=")version [^"]*"', rf'\g<1>version {v}"', page)
+
 
 def version() -> str:
     return json.loads((ROOT / "plugins/model-router/.claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
@@ -1183,6 +1188,7 @@ def build() -> dict:
             files[path] = with_head(path, p.read_text(encoding="utf-8"))
             if path == "docs/README.md":
                 files[path] = with_cards(files[path])
+    files["README.md"] = badge_alt((ROOT / "README.md").read_text(encoding="utf-8"), v)
     files["CITATION.cff"] = citation(v)
     files.update(site_files())
     return files
