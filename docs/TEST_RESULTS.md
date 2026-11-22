@@ -32,10 +32,50 @@ Run 2026-11-22 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0
 | Mod type check against the installed build's types, `tsc` 6.0.3 | `tsc -p <dir>/tsconfig.json` | Not rerun on this commit |
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
+| Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78 |
 
 The 301 local tests are 267 in `tests/test_model_router.py`, 28 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py` and 3 in `tests/test_traceability.py`. The routing corpus test prints "2 of 219 briefs over-routed (0.9%), budget 2%; 5 known under-routes". CI's run on `8ec8eec` had 180.
 
-Not run: `claude plugin eval plugins/model-router --trust-plugin` (it runs live models and spends money, and has not been rerun since the routing evals were written), and live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live"). The benchmark's pilot runs are in [BENCHMARKS.md](BENCHMARKS.md).
+Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
+
+## Plugin evals
+
+### Routing cases
+
+Run 2026-11-22 on Claude Code 2.1.330, on the three cases now in `plugins/model-router/evals/`:
+
+```bash
+CLAUDE_CODE_PLUGIN_CACHE_DIR=<scratch>/plugins claude plugin eval plugins/model-router --trust-plugin \
+  --ablation with-without --runs 3 -j 2 --max-cost-usd 2 --no-publish --output-dir <scratch>/out --json <scratch>/result.json
+```
+
+Same clean environment as below. Each case tells Claude to make one `Agent` call with an exact brief and no model, and a `regex` grader reads the run's trace for the `resolvedModel` Claude Code reports on that call's result. Without the router, a subagent with no model runs on the session's model, so the no-plugin arm fails by design. No `--allow-tools` grant is needed: routing runs in the plugin's hooks and mod, which start their own processes, not through the Bash tool.
+
+| Case | Session | Grader | With the plugin | Without | Cost with / without (3 runs each) |
+| :- | :- | :- | -: | -: | -: |
+| `route-lookup-subagent` | Sonnet | `ran-on-haiku` | 1.0, 3 of 3 (Haiku each run) | 0, 0 of 3 (Sonnet each run) | $0.11 / $0.14 |
+| `route-review-subagent` | Haiku | `ran-on-opus` | 1.0, 3 of 3 (Opus each run) | 0, 0 of 3 (Haiku each run) | $0.10 / $0.01 |
+| `route-redo-escalates` | Haiku | `called-twice`, `first-ran-on-haiku`, `redo-ran-on-sonnet` | 1.0, 3 of 3 (Haiku, then Sonnet) | 0.67, 0 of 3 (Haiku twice) | $0.09 / $0.01 |
+
+Total $0.43 (no LLM grader, so no judge cost), 139 seconds, not partial. `first-ran-on-haiku` was added afterwards and only `route-redo-escalates` was rerun (`--case route-redo-escalates`, $0.10, 60 seconds); its row shows that rerun. The grader checks that a run on Haiku is in the trace, and in every run the Haiku result came first. With it the case's delta is 0.33, so the suite's mean delta is 0.78. The trace carries each subagent's model but not its effort, and the spend log lives in the plugin's data folder, which a grader can't read (https://code.claude.com/docs/en/plugin-evals.md#what-a-grader-can-look-at), so effort and spend rows are covered by the unit tests and the live runs in `docs/ARCHITECTURE.md`, not here.
+
+### The first run, on the cases these replaced
+
+Run 2026-11-22 on Claude Code 2.1.330 against `atd-7385-next`:
+
+```bash
+CLAUDE_CODE_PLUGIN_CACHE_DIR=<scratch>/plugins claude plugin eval plugins/model-router --trust-plugin \
+  --ablation with-without --runs 3 -j 2 --max-cost-usd 3 --no-publish --output-dir <scratch>/out --json <scratch>/result.json
+```
+
+It ran in a clean environment (no `CLAUDECODE`, `CLAUDE_CODE_*` or `CLAUDE_CODE_SUBAGENT_MODEL`), with a scratch plugins root so the shared plugin data folder wasn't touched, and with the report kept local (`--no-publish`; by default the CLI publishes it to claude.ai). No `--model` was set, so each case ran on the account's default model; the LLM graders used the default judge, Haiku, with three votes each. The `with-without` arm runs each case once with the plugin and once without (https://code.claude.com/docs/en/plugin-evals.md).
+
+| Case | Graders | With the plugin | Without | Cost with / without (3 runs each) |
+| :- | :- | -: | -: | -: |
+| `route-hard-task` | `picks-strong-tier` (LLM), `skill-fired` (with-only: the `route` skill was invoked) | 1.0, 3 of 3 | 1.0, 3 of 3 | $0.28 / $0.23 |
+| `route-trivial-task` | `picks-cheap-tier` (LLM), `no-fable` (regex) | 1.0, 3 of 3 | 1.0, 3 of 3 | $0.22 / $0.88 |
+
+Total $1.61 including the judge, 148 seconds, not partial. Every judge vote was PASS. The `route` skill was invoked once in each with-plugin run of the hard case, but its shell command was denied every time, in those runs and in two of the trivial ones: the eval runner removes Bash unless `--allow-tools` grants it, and a skill's own `allowed-tools` can't widen that (https://code.claude.com/docs/en/plugin-evals.md#grant-tools). So the with-plugin arm got the skill's text and the plugin's hooks, not the router's policy table or `explain` output. That is part of why the score delta is 0 for both cases. The rest is that the model without the plugin also recommends a strong model for the migration and Haiku for the lookup, so these two evals check that the plugin doesn't make the advice worse, not what it adds. Two of the three no-plugin runs of the trivial case took 3 turns and cost about $0.41 each, against $0.07 with the plugin; with three runs that is a hint, not a measured saving. The benchmark's pilot runs are in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Dogfood ledger
 

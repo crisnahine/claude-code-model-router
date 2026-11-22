@@ -8,7 +8,7 @@ What to build next, highest user value first. It starts from what 0.1.0 left und
 2. Run live beyond the macOS terminal. Linux and Windows installs; Desktop, VS Code, JetBrains and the Agent SDK; Bedrock, Vertex and Foundry; acceptEdits and bypass modes; `allowManagedHooksOnly`; split-pane teammates. Record each in "Verified live". Rows S3.7 to S3.10, S3.13, S6.1.
 3. Decide how fast mode shows in the spend log. Claude Code doesn't say which requests ran fast, so the only full figure is its own estimate in `/cost`, which a mod can read. Rows S4.8, S10.7.
 4. Measure cache sharing across fan-outs that start from one prefix. Row S4.5.
-5. Rerun `claude plugin eval plugins/model-router --trust-plugin` and record its cost. Rows S4.11, S9.4.
+5. Add a `claude plugin eval` case for the `route` skill. The three routing cases pass with the plugin and fail without it ([TEST_RESULTS.md](TEST_RESULTS.md)), but the skill's own command needs a narrow `--allow-tools` Bash grant to run inside an eval. Rows S4.11, S9.4.
 6. Confirm the CI changes in CI. Actions are pinned to commit SHAs, the mod's tests run on every OS, and the mod and its test are type-checked; none of it has run in CI yet. Rows S6.12, S9.5.
 7. Close the remaining edge cases: a short or unlisted-language brief, and another plugin's mod moving a spawn to another family, which the mod path counts as a substitution (check live whether `AgentSpawnResult.model` tells that from an allowlist substitution). Rows S12.10, S12.14.
 
