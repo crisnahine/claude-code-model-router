@@ -203,6 +203,7 @@ The user's own `~/.claude/model-router.json` is trusted in full. A repository's 
 - Sessions where hooks are disabled by `disableAllHooks` or `allowManagedHooksOnly`. Where an organization doesn't load user mods, routing falls back to the `Agent` call and workflow stages and teammates aren't routed.
 - Another installed mod that also sets a spawn's model. Mods run in their own order. The model that ran is in the ledger either way.
 - A HIPAA organization. An effort change there re-reads the context uncached (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level), but the router finds no reliable sign that the configuration applies, so the main conversation's effort is still raised. Turn `main_effort` off in such an organization.
+- A Claude apps gateway reached through the Claude Desktop app. Desktop never lends its sign-in to plugins, so `$.session.authorize()` is null there whether the session signed in to a subscription or a gateway, and the router treats it as unknown and keeps the raise. Desktop reads the gateway URL from its own managed configuration (https://code.claude.com/docs/en/claude-apps-gateway.md#deliver-policy-to-claude-desktop-sessions), which a hook can't read either. Turn `main_effort` off if Desktop reaches Claude through a gateway.
 
 ## Verified live
 

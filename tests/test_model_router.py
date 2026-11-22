@@ -248,6 +248,8 @@ class OptionText(unittest.TestCase):
         for case in ("CLAUDE_CODE_EFFORT_LEVEL", "Bedrock", "Vertex", "Foundry", "ANTHROPIC_BASE_URL",
                      "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "Fable 5.1", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5"):
             self.assertIn(case, text)
+        for gap in ("HIPAA", "Claude Desktop"):  # cases the router can't detect, so the user is told
+            self.assertIn(gap, text)
 
 
 class Store(Sandbox):
