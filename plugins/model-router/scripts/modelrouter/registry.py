@@ -124,29 +124,40 @@ def record_result(name: str, ran_as: str | None, ran_family: str | None) -> None
 
 
 def _settings_files(project: Path) -> list[Path]:
-    files = [store.claude_home() / "settings.json", project / ".claude" / "settings.json",
-             project / ".claude" / "settings.local.json"]
+    return [store.claude_home() / "settings.json", project / ".claude" / "settings.json",
+            project / ".claude" / "settings.local.json"]
+
+
+def _managed_file() -> Path:
     if sys.platform == "darwin":
-        files.append(Path("/Library/Application Support/ClaudeCode/managed-settings.json"))
-    elif os.name == "nt":
-        files.append(Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "ClaudeCode" / "managed-settings.json")
-    else:
-        files.append(Path("/etc/claude-code/managed-settings.json"))
-    return files
+        return Path("/Library/Application Support/ClaudeCode/managed-settings.json")
+    if os.name == "nt":
+        return Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "ClaudeCode" / "managed-settings.json"
+    return Path("/etc/claude-code/managed-settings.json")
 
 
 def permitted(config: dict, project: Path) -> set[str]:
-    """Registry models that the availableModels and deniedModels settings leave open."""
+    """Registry models that the availableModels and deniedModels settings leave open, read
+    the way Claude Code reads them: a managed allowlist applies alone, otherwise the user,
+    project and local lists are concatenated; deniedModels counts only in managed settings.
+    An entry matches its family, so claude-opus-5-5 stands for opus."""
     names = set(models(config))
-    for path in _settings_files(project):
-        settings = store.load_dict(path)
-        allow = settings.get("availableModels")
-        if isinstance(allow, list) and allow:
-            entries = [str(e).lower() for e in allow]
-            names = {n for n in names if any(e == n or n in e for e in entries)}
-        deny = settings.get("deniedModels")
-        if isinstance(deny, list):
-            names -= {str(e).lower() for e in deny}
+
+    def matches(entries: list) -> set[str]:
+        found = {family(config, str(e)) for e in entries}
+        return {n for n in names if n in found}
+
+    managed = store.load_dict(_managed_file())
+    allow = managed.get("availableModels")
+    if not isinstance(allow, list):
+        lists = [store.load_dict(path).get("availableModels") for path in _settings_files(project)]
+        lists = [a for a in lists if isinstance(a, list)]
+        allow = sum(lists, []) if lists else None
+    if allow is not None:
+        names = matches(allow)
+    deny = managed.get("deniedModels")
+    if isinstance(deny, list):
+        names -= matches([e for e in deny if str(e).lower() not in ("best", "opusplan", "default")])
     return names
 
 
