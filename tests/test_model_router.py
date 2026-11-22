@@ -39,7 +39,8 @@ def frontmatter(path: Path) -> dict:
     for line in match.group(1).splitlines():
         if ":" in line and not line.startswith(" "):
             key, value = line.split(":", 1)
-            fields[key.strip()] = value.strip()
+            value = value.strip()
+            fields[key.strip()] = json.loads(value) if value.startswith('"') else value
     return fields
 
 
@@ -155,7 +156,7 @@ class Shipped(unittest.TestCase):
 
     def test_the_costly_role_agents_say_when_not_to_use_them(self):
         # Claude delegates from descriptions, so these limits keep the costliest agents for the work they're for.
-        for name, limit in (("architect", "Not for a change whose approach is already clear."),
+        for name, limit in (("architect", "Not for a file to deliver or a clear change."),
                             ("reviewer", "A small, tested change doesn't need one."),
                             ("deep-solver", "Not for ordinary hard coding.")):
             self.assertIn(limit, frontmatter(PLUGIN / "agents" / f"{name}.md")["description"], name)
@@ -172,6 +173,26 @@ class Shipped(unittest.TestCase):
             self.assertEqual(config["crew"][path.stem].get("model"), fields.get("model"), path.name)
             # A description is when Claude delegates (sub-agents docs), so none asks to run on every change.
             self.assertNotRegex(fields["description"], r"(?i)\b(?:every|any) (?:diff|code change|change)\b", path.name)
+
+    def test_frontmatter_plain_scalars_are_valid_yaml(self):
+        # Claude Code's loader tolerates these, but GitHub and other strict YAML readers reject the whole block.
+        indicators = tuple("-?:,[]{}#&*!|>'\"%@`")
+        bad = []
+        for path in sorted(PLUGIN.rglob("*.md")):
+            match = re.match(r"^---\n(.*?)\n---\n", path.read_text(encoding="utf-8"), re.S)
+            for line in match.group(1).splitlines() if match else ():
+                item = re.match(r"^\s+- (.*)$", line)
+                field = re.match(r"^[A-Za-z_][\w-]*:(?: (.*))?$", line)
+                value = (item.group(1) if item else (field.group(1) or "") if field else line).strip()
+                if not value or value[0] in "\"'" and value[-1] == value[0] and len(value) > 1:
+                    continue
+                if value[0] in "[{" and value[-1] == {"[": "]", "{": "}"}[value[0]] and ": " not in value:
+                    continue
+                if re.fullmatch(r"[|>][-+]?", value):
+                    continue
+                if ": " in value or " #" in value or value.endswith(":") or value.startswith(indicators):
+                    bad.append(f"{path.relative_to(PLUGIN)}: {line}")
+        self.assertEqual(bad, [])
 
     def test_levels_and_models_are_complete(self):
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
@@ -194,6 +215,25 @@ class Shipped(unittest.TestCase):
             self.assertNotIn("model-router.py", text, path)
             for used in re.findall(r'model-router\.sh" --data-dir "\$\{CLAUDE_PLUGIN_DATA\}" ([a-z-]+)', text):
                 self.assertIn(used, commands, path)
+
+    def test_read_only_role_agents_say_they_write_nothing(self):
+        # Claude picks an agent from its description; a task whose deliverable is a file must not go here.
+        for path in sorted((PLUGIN / "agents").glob("*.md")):
+            front = frontmatter(path)
+            if front.get("tools") and not re.search(r"\b(?:Edit|Write|NotebookEdit)\b", front["tools"]):
+                self.assertRegex(front["description"], r"(?i)writes nothing|doesn't fix code", path.name)
+
+    def test_the_architect_hands_back_a_file_it_was_asked_to_write(self):
+        # Misrouted to it, a write-the-file task still ends with the content the caller can write.
+        body = (PLUGIN / "agents" / "architect.md").read_text(encoding="utf-8").split("---", 2)[2]
+        self.assertIn("asks you to write a file", body)
+        self.assertIn("for the caller to write", body)
+
+    def test_the_route_skill_says_when_to_use_it_in_its_description_alone(self):
+        front = frontmatter(PLUGIN / "skills" / "route" / "SKILL.md")
+        self.assertNotIn("when_to_use", front)  # it repeated the description, in context in every session
+        for phrase in ("which model", "why an agent ran", "split", "routed right"):
+            self.assertIn(phrase, front["description"])
 
     def test_hooks_call_existing_commands(self):
         data = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))
@@ -223,6 +263,19 @@ class Shipped(unittest.TestCase):
         self.assertEqual(manifest["userConfig"]["routing_mode"]["default"], "auto")
         for option in manifest["userConfig"].values():
             self.assertNotIn("options", option)  # not accepted by the oldest supported Claude Code
+
+    def test_the_installed_plugin_carries_the_license(self):
+        # An install copies only the plugin folder, and the license asks for its notice in every copy.
+        copy = PLUGIN / "LICENSE"
+        self.assertFalse(copy.is_symlink())
+        self.assertEqual(copy.read_bytes(), (ROOT / "LICENSE").read_bytes())
+
+    def test_the_marketplace_names_the_product_model_router(self):
+        market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
+        for text in (market["description"], market["plugins"][0]["description"]):
+            self.assertIn("Model Router, a plugin for Claude Code", text)
+            self.assertNotIn("Claude Code Model Router", text)
+            self.assertNotIn("Claude Code model router", text)
 
     def test_ci_tests_the_oldest_python_the_launcher_accepts(self):
         entry = (SCRIPTS / "model-router.py").read_text(encoding="utf-8")
@@ -468,8 +521,8 @@ class Registry(Sandbox):
 
     def test_cap_limits_available_models(self):
         self.assertEqual(registry.available(self.config, cap="sonnet"), ["haiku", "sonnet"])
-        self.assertEqual(registry.ceiling(self.config, cap="sonnet"), "sonnet")
-        self.assertEqual(registry.ceiling(self.config), "fable")
+        self.assertEqual(registry.available(self.config, cap="sonnet")[-1], "sonnet")
+        self.assertEqual(registry.available(self.config)[-1], "fable")
 
     def test_clamp_never_raises_above_what_was_asked(self):
         self.assertEqual(registry.clamp(self.config, "fable", ["haiku", "sonnet"]), "sonnet")
@@ -539,13 +592,13 @@ class Registry(Sandbox):
 
     def test_two_model_errors_route_around_a_model_and_outages_grow(self):
         self.assertEqual(registry.record_failure("fable", "404 model not found"), 1)
-        self.assertEqual(registry.ceiling(self.config), "fable")
+        self.assertEqual(registry.available(self.config)[-1], "fable")
         registry.record_failure("fable", "404 model not found")
-        self.assertEqual(registry.ceiling(self.config), "opus")
+        self.assertEqual(registry.available(self.config)[-1], "opus")
         first = registry.health()["fable"]["unavailable_until"] - time.time()
         self.assertTrue(0.9 * 86400 < first < 1.1 * 86400)
         registry.update_health("fable", unavailable_until=time.time() - 1)  # the day has passed
-        self.assertEqual(registry.ceiling(self.config), "fable")
+        self.assertEqual(registry.available(self.config)[-1], "fable")
         registry.record_failure("fable", "404 model not found")  # one more failure is now enough
         second = registry.health()["fable"]["unavailable_until"] - time.time()
         self.assertTrue(2.9 * 86400 < second < 3.1 * 86400)
@@ -1949,15 +2002,28 @@ class Hooks(Sandbox):
     def test_session_start_explains_automatic_routing(self):
         self.options(max_tier="opus")
         text = self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))
-        self.assertIn("Model Router is on", text)
-        self.assertIn("strongest model in use: opus", text)
+        self.assertIn("Model Router sets", text)
+        self.assertNotIn("strongest model in use", text)  # changes nothing Claude does; /model-router:route says it
         self.assertNotIn("model-router:deep-solver", text)  # the Agent tool lists the role agents already
+        self.assertIn("Don't pass `model` or `effort`", text)
         self.assertIn("re-issue the same call unchanged", text)
         self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", text)
         self.assertEqual(session.model("s1"), "claude-sonnet-5-5")
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         text = self.text(hooks.session_start({"session_id": "s1"}))
         self.assertIn("pins every subagent to opus, so Model Router sets only their effort", text)
+
+    def test_the_text_in_context_every_session_stays_within_budget(self):
+        # The session-start note, the role agents' descriptions and the model-invoked skills' listings are in
+        # the main loop's context in every session (docs/PERFORMANCE.md, "Context the plugin adds").
+        note = self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))
+        agents = [frontmatter(p)["description"] for p in (PLUGIN / "agents").glob("*.md")]
+        listed = [frontmatter(p) for p in (PLUGIN / "skills").glob("*/SKILL.md")]
+        skills = [f.get("description", "") + f.get("when_to_use", "") for f in listed
+                  if f.get("disable-model-invocation") != "true"]
+        self.assertLessEqual(len(note), 360, note)
+        self.assertLessEqual(sum(map(len, agents)), 930)
+        self.assertLessEqual(sum(map(len, skills)), 200)
 
     def test_session_start_is_silent_when_off_and_nothing_is_pending(self):
         self.options(routing_mode="off")
@@ -2082,6 +2148,22 @@ class GatesDefault(Sandbox):
         self.options(verify_gate="true", strong_agent_gate="false")
         self.edited()
         self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
+
+    def test_the_architect_is_asked_for_a_plan_or_check_never_the_deliverable(self):
+        # The architect has no Write tool: a task whose deliverable is a file fails there, or its redo climbs.
+        self.session_on("claude-haiku-5-5")
+        note = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
+        reason = hooks.stop({"session_id": "s1"})["reason"]
+        for text in (note, reason):
+            self.assertIn("model-router:architect", text)
+            self.assertIn("writes nothing", text)
+            self.assertIn("yourself", text)
+        self.assertNotIn("improve", reason)
+        frontier = ("Investigate the unknown root cause of intermittent data loss in the payments database across "
+                    "every service and design a fix; there is no known approach.")
+        note = self.text(hooks.user_prompt({"session_id": "s1", "prompt": frontier}))
+        self.assertIn("model-router:deep-solver", note)
+        self.assertNotIn("writes nothing", note)  # the deep-solver has every tool and can do the work
 
     def test_the_prompt_note_promises_a_check_only_when_the_stronger_agent_check_is_on(self):
         self.session_on("claude-haiku-5-5")
@@ -3308,7 +3390,7 @@ class EdgeCases(Sandbox):
         self.assertTrue(all(state.values()), state)
         out = hooks.session_start({"session_id": "s1", "source": "compact", "cwd": str(self.project)})
         self.assertEqual({name: store.load_entry(name, "s1") for name in state}, state)  # no model: kept as is
-        self.assertIn("Model Router is on", json.dumps(out))  # compaction drops the old note, so it is sent again
+        self.assertIn("Model Router sets", json.dumps(out))  # compaction drops the old note, so it is sent again
         hooks.session_start({"session_id": "s1", "source": "compact", "model": "claude-opus-5-5",
                              "cwd": str(self.project)})
         self.assertEqual(session.model("s1"), "claude-opus-5-5")
@@ -3531,6 +3613,23 @@ class DesignDecisions(unittest.TestCase):
             result = profile.profile_call({"prompt": prompt}, "general-purpose")
             self.assertEqual(result["level"], "complex", prompt)
             self.assertNotIn("load", result["signals"], prompt)
+
+    def test_a_doc_or_file_name_is_not_a_signal(self):
+        cases = {"Read the migration guides under docs/ and list every renamed option.": [],
+                 "Using only docs/, find the version that changed the default and write RESEARCH.json.": [],
+                 "Migrate the billing schema to Postgres.": ["risk"],
+                 "Research which queue the team should adopt and write a short note.": ["ambiguity"]}
+        for prompt, expected in cases.items():
+            self.assertEqual(profile.profile_call({"prompt": prompt}, "general-purpose")["signals"], expected, prompt)
+
+    def test_researching_docs_is_not_research_grade(self):
+        brief = ("Research the fetchkit docs: read the changelogs and migration guides across the docs tree, then "
+                 "write RESEARCH.json with the version where the retry default changed.")
+        self.assertEqual(profile.profile_call({"prompt": brief}, "general-purpose")["level"], "complex")
+        self.assertEqual(profile.profile_prompt(brief)["level"], "complex")
+        grade = ("Research-grade problem: our CRDT editor diverges in rare three-way merges across clients; find the "
+                 "root cause and design a fix for the data loss.")
+        self.assertEqual(profile.profile_call({"prompt": grade}, "general-purpose")["level"], "frontier")
 
     def test_only_a_millisecond_budget_counts_as_load(self):
         for prompt in ("Plan the release notes for 2.0; the API answers in 120 ms.",

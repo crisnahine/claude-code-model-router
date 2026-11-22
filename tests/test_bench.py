@@ -92,7 +92,7 @@ class Analysis(unittest.TestCase):
         self.assertIn("plugin-cheap", verdict["configs"])  # still shown on the page
 
     def test_each_session_model_gets_its_own_table_and_router(self):
-        real = json.loads((ROOT / "bench" / "results" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
+        real = json.loads((ROOT / "bench" / "results" / "archive" / "pre-0.1.1" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
         n = analyze.MIN_RUNS
         sonnet = [dict(real, main_model="sonnet", config=c, total_cost_usd=usd, passed=True)
                   for c, usd in (("plugin", 0.3), ("defaults", 0.2)) for _ in range(n)]
@@ -115,7 +115,7 @@ class Analysis(unittest.TestCase):
         self.assertNotIn("$0.9000", sonnet_part)
 
     def test_the_page_reports_latency_cache_level_accuracy_and_escalation(self):
-        real = json.loads((ROOT / "bench" / "results" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
+        real = json.loads((ROOT / "bench" / "results" / "archive" / "pre-0.1.1" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
         usage = {"m": {"inputTokens": 10, "cacheReadInputTokens": 80, "cacheCreationInputTokens": 10}}
         first = {"agent": "model-router:implementer", "level": "standard", "escalated_from": None}
         redo = {"agent": "general-purpose", "level": "complex", "escalated_from": "standard"}
@@ -147,8 +147,34 @@ class Analysis(unittest.TestCase):
             self.assertIn(name, never)
         self.assertNotIn("`defaults`", never)
 
+    def test_the_page_says_what_the_archive_holds_and_why_it_is_left_out(self):
+        real = json.loads((ROOT / "bench" / "tasks" / "lookup-retry-limit" / "task.json").read_text())
+        assert real["class"] == "lookup"
+        base = {"class": "lookup", "task": "lookup-retry-limit", "config": "defaults", "total_cost_usd": 0.05,
+                "passed": True, "claude_version": "2.1.330", "main_model": "sonnet", "models": {},
+                "started_at": "2026-11-23T01:00:00+00:00", "budget_usd": 1.0, "plugin_state": None,
+                "plugin_data_own": True, "sessions_saved": True, "bench_commit": "c" * 40, "task_revision": 1}
+        old = {k: v for k, v in base.items() if k != "task_revision"}
+        kept = [dict(old, bench_commit="a" * 40, task="design-cache-invalidation", **{"class": "design"}),
+                dict(old, bench_commit="b" * 40), dict(base)]
+        with tempfile.TemporaryDirectory() as tmp:
+            res = Path(tmp) / "results"
+            (res / "archive" / "pre-0.1.1" / "infra").mkdir(parents=True)
+            (res / "new-lookup.jsonl").write_text(json.dumps(base) + "\n")
+            (res / "archive" / "pre-0.1.1" / "old-lookup.jsonl").write_text("".join(json.dumps(r) + "\n" for r in kept))
+            (res / "archive" / "pre-0.1.1" / "infra" / "net.jsonl").write_text(json.dumps(old) + "\n")
+            out = Path(tmp) / "page.md"
+            analyze.main([str(res / "new-lookup.jsonl"), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        raw = page.split("## Raw data and commands")[1]
+        self.assertIn("- `bench/results/archive/pre-0.1.1/` holds 3 rows left out of every table, plus 1 set-aside "
+                      "line under its `infra/` and `limited/`: 2 ran on 2 other commits (older builds of the router "
+                      "and the bench), 1 on an earlier revision of `design-cache-invalidation`, and 2 were recorded "
+                      "while the run's folder name held its task id.", raw)
+        self.assertNotIn("$0.15", page.split("## Raw data and commands")[0])  # archived spend is in no table
+
     def test_the_page_names_set_aside_runs_agent_spend_and_batches(self):
-        real = [json.loads(line) for line in (ROOT / "bench" / "results" / "m6-05-bugfix-2026-11-22.jsonl")
+        real = [json.loads(line) for line in (ROOT / "bench" / "results" / "archive" / "pre-0.1.1" / "m6-05-bugfix-2026-11-22.jsonl")
                 .read_text(encoding="utf-8").splitlines() if line]
         base = dict(real[0], started_at="2026-11-22T10:00:00+00:00")
         lost = dict(base, config="plugin", task="bugfix-median", started_at="2026-11-22T09:00:00+00:00")
@@ -342,7 +368,7 @@ class Sessions(unittest.TestCase):
     """Runs keep their transcripts, as real sessions do, and the bench removes only its own afterwards."""
 
     def test_runs_save_their_sessions(self):
-        cmd, _ = run.command("do it", run.load_configs()[0], {"claude": "claude", "model": "sonnet", "budget": 0.5,
+        cmd, _ = run.command("do it", next(c for c in run.load_configs() if c["id"] == "plugin"), {"claude": "claude", "model": "sonnet", "budget": 0.5,
                                                              "plugin_dir": "/p"}, {})
         self.assertNotIn("--no-session-persistence", cmd)
 
@@ -574,7 +600,7 @@ class RouterVariants(unittest.TestCase):
             with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
                 row = run.run_one(task, variant, options, {})
                 got = json.loads(seen.read_text())
-                run.run_one(task, run.load_configs()[0], options, {})
+                run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
                 plain = json.loads(seen.read_text())
         self.assertEqual(got["project"], {"levels": {"standard": {"effort": "medium"}}})
         settings = json.loads(got["argv"][got["argv"].index("--settings") + 1])
@@ -618,7 +644,7 @@ class PluginRef(unittest.TestCase):
         self.assertTrue((exported / ".claude-plugin" / "plugin.json").is_file())
         again, _ = run.command("x", {"id": "r", "plugin": True, "env": {}, "plugin_ref": "HEAD"}, options, {})
         self.assertEqual(again[again.index("--plugin-dir") + 1], str(exported))  # exported once
-        plain, _ = run.command("x", run.load_configs()[0], options, {})
+        plain, _ = run.command("x", next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
         self.assertEqual(plain[plain.index("--plugin-dir") + 1], "/p/model-router")
 
 
@@ -633,7 +659,7 @@ class AgentCosts(unittest.TestCase):
             options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
-                row = run.run_one(task, run.load_configs()[0], options, {})
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
         self.assertEqual(row["agent_costs"], {"model-router:implementer": 0.07, "model-router:verifier": 0.01,
                                               "main": 0.03})
         self.assertEqual(row["duration_ms"], 1)
@@ -784,15 +810,32 @@ class TaskIdentity(unittest.TestCase):
         self.assertEqual(tasks["design-cache-invalidation"]["revision"], 2)
 
     def test_the_page_names_each_tasks_revision_and_the_folder_name_bias(self):
+        template = json.loads((ROOT / "bench" / "results" / "archive" / "pre-0.1.1" / "m6-05-design-2026-11-22.jsonl")
+                              .read_text(encoding="utf-8").splitlines()[0])
+        old = {k: v for k, v in template.items() if k != "task_revision"}
+        rows = [dict(old, task="design-cache-invalidation", config="plugin"),
+                dict(old, task="design-cache-invalidation", config="defaults"),
+                dict(old, task="design-rate-limiter", config="plugin", task_revision=1)]
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp) / "results"
+            results.mkdir()
+            (results / "a-design.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            out = Path(tmp) / "page.md"
+            analyze.main([str(results / "a-design.jsonl"), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        self.assertIn("`design-cache-invalidation` is at revision 2; 2 of its runs here ran on an earlier revision", page)
+        self.assertIn("- Bias: 1 router-arm runs", page)  # the one router row with no task_revision
+        self.assertIn("`design-cache-invalidation`", page.split("- Bias: ")[1].split("\n")[0])
+
+    def test_the_committed_page_states_revision_and_bias_only_when_the_rows_call_for_it(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
         data = [json.loads(line) for path in raw for line in path.read_text(encoding="utf-8").splitlines() if line]
         page = (ROOT / "docs" / "BENCHMARKS.md").read_text(encoding="utf-8")
         old = sum(r["task"] == "design-cache-invalidation" and r.get("task_revision", 1) < 2 for r in data)
-        self.assertIn(f"`design-cache-invalidation` is at revision 2; {old} of its runs here ran on an earlier revision",
-                      page)
-        for task_id in ("design-cache-invalidation", "design-rate-limiter", "research-changelog", "research-latency",
-                        "rootcause-cart", "rootcause-ranking", "security-path-traversal", "security-sql-injection"):
-            self.assertIn(f"`{task_id}`", page.split("- Bias: ")[1].split("\n")[0])
+        line = f"`design-cache-invalidation` is at revision 2; {old} of its runs here ran on an earlier revision"
+        (self.assertIn if old else self.assertNotIn)(line if old else "is at revision 2;", page)
+        early = sum("task_revision" not in r and r["config"].startswith("plugin") for r in data)
+        (self.assertIn if early else self.assertNotIn)("- Bias: ", page)
 
 
 class Pilot(unittest.TestCase):

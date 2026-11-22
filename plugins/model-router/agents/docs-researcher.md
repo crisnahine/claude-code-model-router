@@ -1,6 +1,6 @@
 ---
 name: docs-researcher
-description: Checks a feature against the current Claude Code docs and changelog instead of memory.
+description: Checks a feature against the current Claude Code docs and changelog, not memory. Writes nothing.
 model: haiku
 effort: medium
 tools: Read, Grep, Glob, WebFetch, WebSearch

@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use Model Router in your work, please cite it with these details."
+type: software
+title: "Model Router"
+abstract: >-
+  Model Router (model-router) is a Claude Code plugin that routes every agent
+  Claude Code starts (subagents, agent-team teammates and workflow stages) to
+  the cheapest Claude model and reasoning effort that should do the job, and
+  runs a call one level higher when its work comes back for a redo.
+authors:
+  - given-names: Cris
+    family-names: Nahine
+version: "0.1.2"
+date-released: "2026-11-23"
+license: Apache-2.0
+repository-code: "https://github.com/crisnahine/claude-code-model-router"
+url: "https://github.com/crisnahine/claude-code-model-router"
+keywords:
+  - Claude Code
+  - Claude Code plugin
+  - model routing
+  - subagents
+  - cost per solved task

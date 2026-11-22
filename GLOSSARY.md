@@ -1,3 +1,9 @@
+<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<p align="center"><img src="docs/assets/banner-glossary.svg" width="880" alt="Glossary: What do call, level, pick and redo mean?"></p>
+
+<p align="center"><a href="README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="docs/README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="docs/ARCHITECTURE.md">Architecture</a> &nbsp;&middot;&nbsp; Next: <a href="docs/research/model-control.md">Research</a></p>
+<!-- End of page head. -->
+
 # Glossary
 
 The words this plugin's code, docs and reviews use for its own domain.

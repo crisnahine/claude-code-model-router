@@ -1,6 +1,6 @@
 ---
 name: scout
-description: Searches read-only for files, symbols, call sites and config, and explains existing code, when that takes more than a few searches.
+description: Finds files, symbols, call sites and config and explains existing code when that takes more than a few searches. Writes nothing.
 model: haiku
 effort: low
 tools: Read, Grep, Glob
