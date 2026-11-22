@@ -1454,7 +1454,7 @@
   },
   {
    "lowest": "lookup",
-   "highest": "lookup",
+   "highest": "complex",
    "agent": "general-purpose",
    "description": "Read-only with a limit",
    "prompt": "Find the importer. Do not touch the billing tables and update records."
