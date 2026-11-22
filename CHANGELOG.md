@@ -6,6 +6,10 @@
 
 # Changelog
 
+## Unreleased
+
+- The architect's description opens with "Read-only" and says it can't write files, so a task whose result is a file goes to an agent that can write it. A design task told to go to one subagent no longer lands on the architect and then needs an Opus implementer, or ends without its file.
+
 ## 0.1.2 - 2026-11-23
 
 Relicensed under the Apache License 2.0, with routing fixes from the 0.1.1 benchmark and a redesigned README, docs and site. Needs Claude Code 2.1.292 or later.
