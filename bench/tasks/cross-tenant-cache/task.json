@@ -1,0 +1,5 @@
+{
+  "class": "cross-module",
+  "revision": 1,
+  "brief": "Prices are now kept per tenant. Every function in catalog/, admin/ and jobs/ that takes a product id or a list of product ids must take a tenant_id as its first argument, and so must the functions in catalog/db.py; cached_products in reports/cached.py takes the tenant_id whose products it lists. Each tenant has its own prices. Tenant ids and product ids are arbitrary strings. The cache must never serve, evict, sweep or report one tenant's price for another tenant. Keep cache/keys.py the one place cache keys are built."
+}

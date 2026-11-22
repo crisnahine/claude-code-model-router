@@ -1,0 +1,5 @@
+{
+  "class": "bugfix",
+  "revision": 1,
+  "brief": "allocate in money.py doesn't always add up to the total. The cause: it rounds each share on its own. Fix it so it does what its docstring says."
+}
