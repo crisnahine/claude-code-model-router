@@ -7,6 +7,106 @@
     "price_model": "opus"
   },
   {
+    "id": "plugin-cheap",
+    "description": "Model Router with a cheap-first ladder from the project's model-router.json: standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high, frontier as shipped",
+    "plugin": true,
+    "env": {},
+    "router_config": {
+      "levels": {
+        "standard": {
+          "effort": "medium"
+        },
+        "complex": {
+          "needs": 2,
+          "effort": "high"
+        },
+        "hardest": {
+          "needs": 3,
+          "effort": "high"
+        }
+      }
+    },
+    "price_model": "sonnet"
+  },
+  {
+    "id": "plugin-cheap-nomain",
+    "description": "Model Router with a cheap-first ladder from the project's model-router.json: standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high, frontier as shipped; main_effort off",
+    "plugin": true,
+    "env": {},
+    "router_config": {
+      "levels": {
+        "standard": {
+          "effort": "medium"
+        },
+        "complex": {
+          "needs": 2,
+          "effort": "high"
+        },
+        "hardest": {
+          "needs": 3,
+          "effort": "high"
+        }
+      }
+    },
+    "plugin_options": {
+      "main_effort": false
+    },
+    "price_model": "sonnet"
+  },
+  {
+    "id": "plugin-cheap-nomain-nogate",
+    "description": "Model Router with a cheap-first ladder from the project's model-router.json: standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high, frontier as shipped; main_effort and verify_gate off",
+    "plugin": true,
+    "env": {},
+    "router_config": {
+      "levels": {
+        "standard": {
+          "effort": "medium"
+        },
+        "complex": {
+          "needs": 2,
+          "effort": "high"
+        },
+        "hardest": {
+          "needs": 3,
+          "effort": "high"
+        }
+      }
+    },
+    "plugin_options": {
+      "main_effort": false,
+      "verify_gate": false
+    },
+    "price_model": "sonnet"
+  },
+  {
+    "id": "plugin-m6-08-b",
+    "description": "Model Router at commit 810e971 (m6-08-b): the cheap-first ladder and main_effort off as shipped defaults, role agents that pin no model or effort, a reviewer asked for only on risky or cross-module changes",
+    "plugin": true,
+    "env": {},
+    "plugin_ref": "810e971",
+    "price_model": "sonnet"
+  },
+  {
+    "id": "plugin-m6-08-b-nogate",
+    "description": "plugin-m6-08-b with the Stop check's verifier request off (`verify_gate: false`)",
+    "plugin": true,
+    "env": {},
+    "plugin_ref": "810e971",
+    "plugin_options": {
+      "verify_gate": false
+    },
+    "price_model": "sonnet"
+  },
+  {
+    "id": "plugin-m6-10",
+    "description": "Confirmation on the shipped commit: Model Router at a06e5d4 with its own defaults (cheap-first ladder, main_effort off, role agents with no model of their own, a smaller injected context, verify_gate off, strong_agent_gate on)",
+    "plugin": true,
+    "env": {},
+    "plugin_ref": "a06e5d4",
+    "price_model": "sonnet"
+  },
+  {
     "id": "defaults",
     "description": "No plugin: subagents inherit the session model at its default effort",
     "plugin": false,
@@ -17,44 +117,62 @@
     "id": "haiku",
     "description": "No plugin: every subagent on haiku (CLAUDE_CODE_SUBAGENT_MODEL=haiku, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1)",
     "plugin": false,
-    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "haiku", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"},
+    "env": {
+      "CLAUDE_CODE_SUBAGENT_MODEL": "haiku",
+      "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"
+    },
     "price_model": "haiku"
   },
   {
     "id": "sonnet",
     "description": "No plugin: every subagent on sonnet (CLAUDE_CODE_SUBAGENT_MODEL=sonnet, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1)",
     "plugin": false,
-    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"},
+    "env": {
+      "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+      "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"
+    },
     "price_model": "sonnet"
   },
   {
     "id": "sonnet-medium",
     "description": "No plugin: every subagent on sonnet at medium effort (CLAUDE_CODE_SUBAGENT_EFFORT=medium)",
     "plugin": false,
-    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
-            "CLAUDE_CODE_SUBAGENT_EFFORT": "medium"},
+    "env": {
+      "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+      "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
+      "CLAUDE_CODE_SUBAGENT_EFFORT": "medium"
+    },
     "price_model": "sonnet"
   },
   {
     "id": "sonnet-high",
     "description": "No plugin: every subagent on sonnet at high effort (CLAUDE_CODE_SUBAGENT_EFFORT=high)",
     "plugin": false,
-    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "sonnet", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
-            "CLAUDE_CODE_SUBAGENT_EFFORT": "high"},
+    "env": {
+      "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
+      "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
+      "CLAUDE_CODE_SUBAGENT_EFFORT": "high"
+    },
     "price_model": "sonnet"
   },
   {
     "id": "opus",
     "description": "No plugin: every subagent on opus (CLAUDE_CODE_SUBAGENT_MODEL=opus, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1)",
     "plugin": false,
-    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"},
+    "env": {
+      "CLAUDE_CODE_SUBAGENT_MODEL": "opus",
+      "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"
+    },
     "price_model": "opus"
   },
   {
     "id": "fable",
     "description": "No plugin: every subagent on fable (CLAUDE_CODE_SUBAGENT_MODEL=fable, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1); needs Fable access",
     "plugin": false,
-    "env": {"CLAUDE_CODE_SUBAGENT_MODEL": "fable", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"},
+    "env": {
+      "CLAUDE_CODE_SUBAGENT_MODEL": "fable",
+      "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"
+    },
     "price_model": "fable"
   },
   {
@@ -70,7 +188,10 @@
     "description": "No plugin: a sonnet session with an opus advisor (--advisor opus); needs the Anthropic API, Claude Platform on AWS or Claude Models on Google Cloud, on a subscription or API billing",
     "plugin": false,
     "env": {},
-    "args": ["--advisor", "opus"],
+    "args": [
+      "--advisor",
+      "opus"
+    ],
     "price_model": "opus"
   }
 ]

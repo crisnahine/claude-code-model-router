@@ -82,6 +82,63 @@ class Analysis(unittest.TestCase):
         for line in class_rows:
             self.assertTrue(line.endswith("| PARTIAL |"), line)
 
+    def test_another_router_configuration_is_never_the_baseline(self):
+        n = analyze.MIN_RUNS
+        data = (rows("plugin", "bugfix", [0.3] * n, [True] * n) + rows("plugin-cheap", "bugfix", [0.1] * n, [True] * n)
+                + rows("defaults", "bugfix", [0.2] * n, [True] * n))
+        verdict = self.summary(data)["bugfix"]
+        self.assertEqual(verdict["best_baseline"], "defaults")
+        self.assertEqual(verdict["rank"], 2)
+        self.assertIn("plugin-cheap", verdict["configs"])  # still shown on the page
+
+    def test_each_session_model_gets_its_own_table_and_router(self):
+        real = json.loads((ROOT / "bench" / "results" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
+        n = analyze.MIN_RUNS
+        sonnet = [dict(real, main_model="sonnet", config=c, total_cost_usd=usd, passed=True)
+                  for c, usd in (("plugin", 0.3), ("defaults", 0.2)) for _ in range(n)]
+        opus = [dict(real, main_model="claude-opus-5-5", config=c, total_cost_usd=usd, passed=True)
+                for c, usd in (("plugin-m6-08-b", 0.5), ("defaults", 0.9)) for _ in range(n)]
+        with tempfile.TemporaryDirectory() as tmp:
+            res = Path(tmp) / "results"
+            res.mkdir()
+            (res / "a-bugfix-2026-11-22.jsonl").write_text("".join(json.dumps(r) + "\n" for r in sonnet + opus))
+            out = Path(tmp) / "page.md"
+            analyze.main([str(res / "a-bugfix-2026-11-22.jsonl"), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        opus_part = page.split("## Results: session model `claude-opus-5-5`")[1].split("## Results: session model")[0]
+        sonnet_part = page.split("## Results: session model `sonnet`")[1].split("## How to read it")[0]
+        self.assertIn("router: `plugin-m6-08-b`", opus_part)
+        self.assertIn("$0.9000 per solved", opus_part)  # Opus defaults, not pooled with Sonnet's
+        self.assertIn("bugfix: PASS, cost per solved task below defaults's", opus_part)
+        self.assertIn("router: `plugin`", sonnet_part)
+        self.assertIn("bugfix: FAIL", sonnet_part)
+        self.assertNotIn("$0.9000", sonnet_part)
+
+    def test_the_page_names_set_aside_runs_agent_spend_and_batches(self):
+        real = [json.loads(line) for line in (ROOT / "bench" / "results" / "m6-05-bugfix-2026-11-22.jsonl")
+                .read_text(encoding="utf-8").splitlines() if line]
+        base = dict(real[0], started_at="2026-11-22T10:00:00+00:00")
+        lost = dict(base, config="plugin", task="bugfix-median", started_at="2026-11-22T09:00:00+00:00")
+        with tempfile.TemporaryDirectory() as tmp:
+            res = Path(tmp) / "results"
+            (res / "infra").mkdir(parents=True)
+            (res / "limited").mkdir()
+            write = lambda path, items: path.write_text("".join(json.dumps(r) + "\n" for r in items))  # noqa: E731
+            write(res / "old-bugfix-2026-11-22.jsonl", [dict(base, config="defaults")] * 3)
+            write(res / "new-bugfix-2026-11-22.jsonl", [dict(base, config="plugin", task="bugfix-median",
+                  agent_costs={"main": 0.03, "model-router:implementer": 0.01})] * 2)
+            write(res / "infra" / "new-network.jsonl", [dict(lost, infra_reason="network outage")] * 2)
+            write(res / "limited" / "new-bugfix-2026-11-22.jsonl",
+                  [dict(lost, task="bugfix-pagination", limited_reason="limit")])
+            out = Path(tmp) / "page.md"
+            analyze.main([str(p) for p in sorted(res.glob("*.jsonl"))] + ["--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        self.assertIn("3 run(s) are set aside, outside the results, because the API never got to the task: "
+                      "2 lost the network, 1 hit a rate or usage limit. 2 of them were run again later", page)
+        self.assertIn("`plugin` on `sonnet` (2 runs): main loop $0.0600 (75%), `model-router:implementer` $0.0200 "
+                      "(25%)", page)
+        self.assertIn("`defaults` old (3); `plugin` new (2)", page)
+
 
 class Runner(unittest.TestCase):
     def test_each_run_starts_clean_and_only_the_configuration_differs(self):
@@ -446,6 +503,97 @@ print(json.dumps({"is_error": False, "subtype": "success", "api_error_status": N
 '''
 
 
+VARIANT_STUB = '''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+seen = {"argv": sys.argv[1:], "project": None}
+project = Path.cwd() / ".claude" / "model-router.json"
+if project.is_file():
+    seen["project"] = json.loads(project.read_text())
+Path(os.environ["STUB_SEEN"]).write_text(json.dumps(seen))
+print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.01, "modelUsage": {}}))
+'''
+
+
+@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
+class RouterVariants(unittest.TestCase):
+    """A router variant is the shipped plugin plus a project model-router.json and plugin option values."""
+
+    def test_a_variant_gets_its_router_file_and_options_and_nothing_else_does(self):
+        variant = {"id": "v", "plugin": True, "env": {}, "router_config": {"levels": {"standard": {"effort": "medium"}}},
+                   "plugin_options": {"main_effort": False}}
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "claude"
+            stub.write_text(VARIANT_STUB)
+            stub.chmod(0o755)
+            seen = Path(tmp) / "seen.json"
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
+                row = run.run_one(task, variant, options, {})
+                got = json.loads(seen.read_text())
+                run.run_one(task, run.load_configs()[0], options, {})
+                plain = json.loads(seen.read_text())
+        self.assertEqual(got["project"], {"levels": {"standard": {"effort": "medium"}}})
+        settings = json.loads(got["argv"][got["argv"].index("--settings") + 1])
+        self.assertEqual(settings, {"pluginConfigs": {"model-router@inline": {"options": {"main_effort": False}}}})
+        self.assertTrue(row["passed"])
+        self.assertIsNone(plain["project"])
+        self.assertNotIn("--settings", plain["argv"])
+
+
+COST_STUB = '''#!/usr/bin/env python3
+import json, os, re, sys
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+data = Path(os.environ["CLAUDE_CODE_PLUGIN_CACHE_DIR"]) / "data" / "model-router-inline"
+data.mkdir(parents=True)
+rows = [{"event": "spawn", "agent": "model-router:implementer"},
+        {"event": "usage", "agent_id": "a1", "cost_usd": 0.05}, {"event": "usage", "agent_id": "a2", "cost_usd": 0.01},
+        {"event": "usage", "agent_id": None, "cost_usd": 0.03}, {"event": "usage", "agent_id": "a1", "cost_usd": 0.02}]
+(data / "ledger.jsonl").write_text("\\n".join(json.dumps(r) for r in rows))
+folder = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(Path.cwd().resolve()))
+sub = folder / "s1" / "subagents"
+sub.mkdir(parents=True)
+(sub / "agent-a1.meta.json").write_text(json.dumps({"agentType": "model-router:implementer"}))
+(sub / "agent-a2.meta.json").write_text(json.dumps({"agentType": "model-router:verifier"}))
+print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.11, "modelUsage": {}}))
+'''
+
+
+class PluginRef(unittest.TestCase):
+    def test_a_configuration_can_run_the_plugin_from_a_commit(self):
+        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        cmd, _ = run.command("x", {"id": "r", "plugin": True, "env": {}, "plugin_ref": "HEAD"}, options, {})
+        exported = Path(cmd[cmd.index("--plugin-dir") + 1])
+        self.assertNotEqual(exported, Path("/p/model-router"))
+        self.assertTrue((exported / ".claude-plugin" / "plugin.json").is_file())
+        again, _ = run.command("x", {"id": "r", "plugin": True, "env": {}, "plugin_ref": "HEAD"}, options, {})
+        self.assertEqual(again[again.index("--plugin-dir") + 1], str(exported))  # exported once
+        plain, _ = run.command("x", run.load_configs()[0], options, {})
+        self.assertEqual(plain[plain.index("--plugin-dir") + 1], "/p/model-router")
+
+
+@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
+class AgentCosts(unittest.TestCase):
+    def test_a_router_run_records_its_spend_by_agent_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "claude"
+            stub.write_text(COST_STUB)
+            stub.chmod(0o755)
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
+                row = run.run_one(task, run.load_configs()[0], options, {})
+        self.assertEqual(row["agent_costs"], {"model-router:implementer": 0.07, "model-router:verifier": 0.01,
+                                              "main": 0.03})
+
+
 @unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class Limits(unittest.TestCase):
     """A rate or usage limit pauses the bench and retries the run; it is never recorded as a failed task."""
@@ -466,6 +614,19 @@ class Limits(unittest.TestCase):
             self.assertEqual(sorted(p.name for p in Path(tmp).glob("*.jsonl")), ["out.jsonl"] if out.exists() else [])
             return code, read(out), read(Path(tmp) / "limited" / "out.jsonl"), pauses
 
+    def test_a_later_round_keeps_its_run_number_and_rotation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "claude"
+            stub.write_text(LIMIT_STUB)
+            stub.chmod(0o755)
+            out = Path(tmp) / "out.jsonl"
+            with unittest.mock.patch.dict("os.environ", {"STUB_CALLS": str(Path(tmp) / "calls"), "STUB_LIMITED": "0"}):
+                code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "sonnet", "--runs", "1",
+                                 "--first-run", "1", "--max-total", "3", "--claude", str(stub), "--out", str(out)])
+            rows = [json.loads(line) for line in out.read_text().splitlines()]
+        self.assertEqual(code, 0)
+        self.assertEqual([(r["config"], r["run"]) for r in rows], [("sonnet", 1), ("defaults", 1)])
+
     def test_a_limited_run_pauses_and_is_retried(self):
         code, rows, limited, pauses = self.bench(limited=2)
         self.assertEqual(code, 0)
@@ -479,6 +640,22 @@ class Limits(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(rows, [])
         self.assertEqual(len(limited), run.LIMIT_RETRIES + 1)
+
+    def test_a_lost_network_is_retried_like_a_limit(self):
+        # The answers Claude Code gave during the 2026-11-22 outage, plus a dropped connection.
+        for answer in ("API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+                       "API Error: No internet route — check your connection or VPN (ENETUNREACH)",
+                       "Connection lost"):
+            row = {"is_error": True, "exit_code": 1, "api_error_status": None, "stderr": "", "answer": answer}
+            self.assertTrue(run.rate_limited(row), answer)
+            self.assertEqual(run.refusal(row), "network", answer)
+        self.assertEqual(run.refusal({"is_error": True, "exit_code": 1, "api_error_status": 429, "stderr": "",
+                                      "answer": ""}), "limit")
+        for row in ({"is_error": True, "exit_code": 1, "api_error_status": None, "stderr": "",
+                     "answer": "The fix fails: socket code raises ENOTFOUND when DNS is down."},
+                    {"is_error": False, "exit_code": 0, "api_error_status": None, "stderr": "",
+                     "answer": "Connection lost errors come from the retry wrapper."}):
+            self.assertFalse(run.rate_limited(row), row["answer"])
 
     def test_an_answer_about_rate_limits_is_not_a_limit(self):
         self.assertFalse(run.rate_limited({"is_error": False, "api_error_status": None, "stderr": "",
@@ -538,6 +715,10 @@ class Pilot(unittest.TestCase):
         borrowed = sum(r.get("plugin_state") is not None and "plugin_data_own" not in r for r in data)
         if borrowed:
             self.assertIn(f"{borrowed} router run(s) here borrowed the shared folder", page)
+        aside = sum(1 for sub in ("infra", "limited") for path in (ROOT / "bench" / "results" / sub).glob("*.jsonl")
+                    for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+        if aside:
+            self.assertIn(f"{aside} run(s) are set aside", page)
         unsaved = sum("sessions_saved" not in r for r in data)
         if unsaved:
             self.assertIn(f"{unsaved} run(s) here ran with `--no-session-persistence`", page)
