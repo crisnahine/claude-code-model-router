@@ -43,6 +43,9 @@ def frontmatter(path: Path) -> dict:
     return fields
 
 
+# Slow CI runners take about twice as long as a laptop; the quadratic negation regex took 32 s on 64 KB.
+LINEAR_SECONDS = 2
+
 class Sandbox(unittest.TestCase):
     """A private data dir, Claude home and project for each test, and a clean environment."""
 
@@ -857,7 +860,7 @@ class Profile(unittest.TestCase):
         self.level("do not add" + " and remove" * 20_000 + " files")
         self.level("never x" + " and then just" * 20_000 + " fix it")
         self.level("do not touch tests" + " " * 64_000 + "and fix it")
-        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertLess(time.monotonic() - started, LINEAR_SECONDS)
 
     def test_a_hyphenated_word_before_and_still_ends_a_limit(self):
         # "edit-mode" and "review-ready" are nouns, not the limit verbs edit and review.
@@ -868,7 +871,7 @@ class Profile(unittest.TestCase):
         for run in ("a-" * 32_000, "a'" * 32_000):  # 64 KB, such as a pasted token or a kebab-case list
             started = time.monotonic()
             self.level("do not " + run)
-            self.assertLess(time.monotonic() - started, 0.5, run[:4])
+            self.assertLess(time.monotonic() - started, LINEAR_SECONDS, run[:4])
 
     def test_a_limit_over_a_list_of_single_verbs_stays_a_limit(self):
         for brief in ("Find where the retry logic lives. Do not add, remove or rename files.",
@@ -920,12 +923,12 @@ class Profile(unittest.TestCase):
         self.level("do not add" + ", add x y" * 20_000 + ", then stop")
         self.level("never x" + ", add never x" * 4_000 + ", then stop")
         self.level("never, add" + ", add never" * 4_000 + ", then stop")
-        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertLess(time.monotonic() - started, LINEAR_SECONDS)
 
     def test_a_huge_whitespace_run_after_a_limit_stays_fast(self):
         started = time.monotonic()
         self.level("do not" + " " * 64_000 + "x")
-        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertLess(time.monotonic() - started, LINEAR_SECONDS)
 
     def test_a_brief_in_another_language_starts_at_standard(self):
         for brief in ("Corrige le bug de sécurité dans le module de paiement.",
