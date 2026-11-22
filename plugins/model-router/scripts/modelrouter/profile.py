@@ -13,10 +13,12 @@ SIGNALS = {
     "risk": r"secur\w*|vulnerab\w*|auth|authn|authz|authenticat\w*|authoriz\w*|oauth\w*|passwords?|"
             r"credentials?|secrets?|encrypt\w*|decrypt\w*|payments?|billing|migrat\w*|schemas?|databases?|"
             r"production|data loss|permissions?|concurren\w*|race conditions?|deadlocks?|public api|"
-            r"breaking changes?|backward.?compat\w*|breaking existing|existing clients|tokens?|injection|xss|"
-            r"cross.site|role checks?|admins?|privileges?|access control|soft.?delet\w*|"
+            r"breaking changes?|backward.?compat\w*|breaking existing|existing clients|"
+            r"(?:session|access|refresh|auth|api|bearer|csrf|id)\s+tokens?|jwts?|injection|xss|"
+            r"cross.site|role checks?|privileges?|access control|soft.?delet\w*|"
             r"los(?:e|es|ing|t)\s+(?:\w+\s+)?(?:data|drafts?|work|changes|edits|records|messages)|rate.?limit\w*|"
-            r"rollouts?|invalidat\w*|thread.?safe\w*|mutex\w*|deprecat\w*",
+            r"rollouts?|invalidat\w*|thread.?safe\w*|mutex\w*|"
+            r"deprecations|deprecated\s+(?:apis?|calls?|functions?|methods?|settings)",
     "scope": r"across|every (?:service|module|package|file)|all (?:services|modules|packages)|multiple "
              r"(?:services|modules|repos|packages)|entire|whole (?:codebase|system|app)|architect\w*|"
              r"redesign\w*|rewrit\w*|monorepo|end.to.end|large.scale|system.wide",

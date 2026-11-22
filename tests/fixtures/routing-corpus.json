@@ -1491,6 +1491,27 @@
    "agent": "general-purpose",
    "description": "Summarize auth module",
    "prompt": "Summarize the auth module. Limit the answer to a paragraph."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Rename tokens field",
+   "prompt": "Rename the tokens field in the report to token_count."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Update admin title",
+   "prompt": "Update the admin page title."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Fix deprecation typo",
+   "prompt": "Fix the typo in the deprecation notice."
   }
  ]
 }
