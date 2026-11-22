@@ -8,7 +8,7 @@ type Hook = (...args: any[]) => any
 type Reply = { exitCode?: number; stdout: string }
 type Call = { command: string; argv: readonly string[]; stdin: any; env: Record<string, string> }
 
-const same = (e: unknown) => e
+const same = <T>(e: T): T => e
 
 function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}) {
   const hooks: Record<string, Hook> = {}
