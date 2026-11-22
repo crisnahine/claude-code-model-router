@@ -18,6 +18,8 @@ python3 tools/traceability.py
 
 A change to `hooks/router.ts` or its test is also type-checked with `tsc` against the mod API types for the installed Claude Code, using a tsconfig kept outside the plugin folder ([docs/TEST_RESULTS.md](docs/TEST_RESULTS.md) has one). A change to routing reruns `claude plugin eval plugins/model-router --trust-plugin`; it runs live models, so record what it cost.
 
+The routing evals also run free in CI. Each case under `plugins/model-router/evals` states its route in `expected_outcome` (`level L, model M, effort E`), and `RoutingEvals` in `tests/test_model_router.py` checks it against what `explain` gives for the case's prompt, as part of the unittest gate above. To run only that check: `python3 -m unittest tests.test_model_router.RoutingEvals`. A change that moves a case's route on purpose updates its `expected_outcome` in the same commit.
+
 ## Rules for a change
 
 - The runtime is Python 3.9 or later on the standard library only. Never add a dependency.
