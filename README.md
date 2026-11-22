@@ -202,6 +202,7 @@ bench/                         the benchmark: pinned tasks, configurations, runn
 ```bash
 python3 -m unittest discover -s tests
 node --experimental-strip-types --test "tests/mod/*.test.ts"
+sh tests/mod/typecheck.sh
 claude plugin validate --strict .
 claude plugin validate --strict plugins/model-router
 claude plugin eval plugins/model-router --trust-plugin

@@ -2,7 +2,7 @@
 
 One row per requirement the project holds itself to, numbered by the section of the maintainer's project brief it comes from (Sections 2 to 14). Checked on 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `76bddd9`, on Claude Code 2.1.330. The CI evidence is the run on `8ec8eec`; nothing after it has run in CI yet.
 
-Summary: 103 PASS, 51 PARTIAL, 2 FAIL, 1 BLOCKED, 157 requirements.
+Summary: 104 PASS, 51 PARTIAL, 1 FAIL, 1 BLOCKED, 157 requirements.
 
 The line above is counted by `python3 tools/traceability.py`, never by hand. `tests/test_traceability.py` fails when it disagrees with the rows. After changing a status, run the script and paste its output over that line.
 
@@ -142,7 +142,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S9.2 | Gate: `node --experimental-strip-types --test "tests/mod/*.test.ts"` | Node suite | `tests/mod/router.test.ts` | Local, CI | Local Node 22.22.3: 17 of 17 pass; CI main `mod` job 12 of 12 | PASS |
 | S9.3 | Gate: `claude plugin validate --strict .` and `plugins/model-router` | Manifests | `.claude-plugin/`, `plugins/model-router/.claude-plugin/` | Local, CI | Both "Validation passed" on 2.1.330 locally and in CI main `validate` | PASS |
 | S9.4 | Gate: `claude plugin eval plugins/model-router --trust-plugin` | Two routing evals | `evals/` | n/a | Not rerun since the evals were written; a run spends money. Their expected routes are checked for free in the unit gate (S14.4) | PARTIAL |
-| S9.5 | Type-check the mod and its test with `tsc` against the installed build's mod API types, tsconfig outside the plugin | n/a | `hooks/router.ts`, `tests/mod/router.test.ts` | Local | `tsc` 6.0.3 against the 2.1.330 types: the mod passes with full lib checks. The test fails with `--skipLibCheck` and `@types/node` 22: `tests/mod/router.test.ts(46,40): error TS2322: Type '(e: unknown) => unknown' is not assignable to type '(x: object) => object'`, in the `submit` helper added with the prompt-origin change. Not in CI | FAIL |
+| S9.5 | Type-check the mod and its test with `tsc` against the installed build's mod API types, tsconfig outside the plugin | `tests/mod/typecheck.sh` with `tests/mod/tsconfig.json`, against the published types at a pinned commit; a `typecheck` job in `ci.yml` | `tests/mod/`, `.github/workflows/ci.yml` | Local, CI | `tsc` 6.0.3: the mod and its test pass. With the test's old identity helper back it fails with `TS2322` at `tests/mod/router.test.ts:46`. Against the 2.1.330 types the engine writes, the mod passes with full lib checks. The CI job hasn't run yet | PASS |
 | S9.6 | Live verification on the installed Claude Code, headless and interactive auto mode, ledger read back, learned stats reset | Manual | `docs/ARCHITECTURE.md` "Verified live" | Live | Done for 0.1.0 on 2.1.330, macOS. Since then on 2.1.330: in-process teammates in an interactive session, and skills, plan mode and `disableAllHooks` headless, each with the ledger read back. The full set has not been rerun | PARTIAL |
 | S9.7 | The traceability matrix is counted by a script, never by hand | `tools/traceability.py` | `tools/traceability.py` | Unit | `tests/test_traceability.py` | PASS |
 | S9.8 | Unit, integration, end-to-end, differential, property-based, regression, concurrency, security and cross-platform tests | Unit, integration (launcher), concurrency (store), security (trust, redirect), cross-platform CI | `tests/` | Inspection | No property-based or differential tests | PARTIAL |

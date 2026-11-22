@@ -2,7 +2,7 @@
 
 Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `76bddd9`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
 
-**Verdict: the next release is not ready.** Of the 13 release gates, 9 pass and 4 are partial. Two defects are open, and the cost and quality results are a pilot. Nothing after `8ec8eec` has run in CI yet.
+**Verdict: the next release is not ready.** Of the 13 release gates, 9 pass and 4 are partial. One defect is open, and the cost and quality results are a pilot. Nothing after `8ec8eec` has run in CI yet.
 
 ## Release gates
 
@@ -27,7 +27,6 @@ Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits afte
 ### Open defects
 
 1. `CHANGELOG.md` 0.1.0 says the unit tests run on Python 3.9, 3.10 and 3.13. `ci.yml` runs 3.9 and 3.13, and so did the release run. Row S8.2.
-2. The mod's Node test doesn't type-check: `tsc` strict reports `tests/mod/router.test.ts(46,40): error TS2322` in the `submit` helper. The tests themselves pass, since Node strips types without checking them. Row S9.5.
 
 ### Decisions needed
 
@@ -44,7 +43,6 @@ Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits afte
 ### Not implemented (FAIL)
 
 - Hook latency and state-size measurements (in progress). Row S11.9.
-- A clean type check of the mod's Node test (open defect 2). Row S9.5.
 
 ### Incomplete or not verified enough (PARTIAL)
 
