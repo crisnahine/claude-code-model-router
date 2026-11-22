@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The `architect` agent's and the `usage` skill's frontmatter is valid YAML again, so GitHub and other strict YAML readers no longer reject it: their descriptions are quoted, since an unquoted `: ` broke the block.
 - Only research-grade wording (research-grade, open-ended, no known approach, first principles and the like) sends a brief to frontier on Fable. A brief that researches docs or writes a file named RESEARCH.json routes hardest at most.
 
 ## 0.1.1 - 2026-11-23

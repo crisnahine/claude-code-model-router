@@ -39,7 +39,8 @@ def frontmatter(path: Path) -> dict:
     for line in match.group(1).splitlines():
         if ":" in line and not line.startswith(" "):
             key, value = line.split(":", 1)
-            fields[key.strip()] = value.strip()
+            value = value.strip()
+            fields[key.strip()] = json.loads(value) if value.startswith('"') else value
     return fields
 
 
@@ -172,6 +173,26 @@ class Shipped(unittest.TestCase):
             self.assertEqual(config["crew"][path.stem].get("model"), fields.get("model"), path.name)
             # A description is when Claude delegates (sub-agents docs), so none asks to run on every change.
             self.assertNotRegex(fields["description"], r"(?i)\b(?:every|any) (?:diff|code change|change)\b", path.name)
+
+    def test_frontmatter_plain_scalars_are_valid_yaml(self):
+        # Claude Code's loader tolerates these, but GitHub and other strict YAML readers reject the whole block.
+        indicators = tuple("-?:,[]{}#&*!|>'\"%@`")
+        bad = []
+        for path in sorted(PLUGIN.rglob("*.md")):
+            match = re.match(r"^---\n(.*?)\n---\n", path.read_text(encoding="utf-8"), re.S)
+            for line in match.group(1).splitlines() if match else ():
+                item = re.match(r"^\s+- (.*)$", line)
+                field = re.match(r"^[A-Za-z_][\w-]*:(?: (.*))?$", line)
+                value = (item.group(1) if item else (field.group(1) or "") if field else line).strip()
+                if not value or value[0] in "\"'" and value[-1] == value[0] and len(value) > 1:
+                    continue
+                if value[0] in "[{" and value[-1] == {"[": "]", "{": "}"}[value[0]] and ": " not in value:
+                    continue
+                if re.fullmatch(r"[|>][-+]?", value):
+                    continue
+                if ": " in value or " #" in value or value.endswith(":") or value.startswith(indicators):
+                    bad.append(f"{path.relative_to(PLUGIN)}: {line}")
+        self.assertEqual(bad, [])
 
     def test_levels_and_models_are_complete(self):
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
