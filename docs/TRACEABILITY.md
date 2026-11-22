@@ -1,6 +1,6 @@
 # Requirement traceability
 
-One row per requirement the project holds itself to, numbered by the section of the maintainer's project brief it comes from (Sections 2 to 14). Checked on 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `fcce17a`, on Claude Code 2.1.330. The CI evidence is the run on `8ec8eec`; nothing after it has run in CI yet.
+One row per requirement the project holds itself to, numbered by the section of the maintainer's project brief it comes from (Sections 2 to 14). Checked on 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `0f8292f`, on Claude Code 2.1.330. The CI evidence is the run on `8ec8eec`; nothing after it has run in CI yet.
 
 Summary: 132 PASS, 23 PARTIAL, 1 FAIL, 1 BLOCKED, 157 requirements.
 
@@ -160,7 +160,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S10.7 | A spend ledger that matches list prices | See S2.22 | `scripts/modelrouter/registry.py` | Unit | Haiku's long-prompt rate is applied per request (`LongPromptPricing`). Fast mode requests are logged at standard rates (S4.8) | PARTIAL |
 | S10.8 | Fail-open behaviour proven by tests | See S2.9, S6.2 | `hooks/router.ts`, `scripts/modelrouter/hooks.py` | Unit, Node | Same tests | PASS |
 | S10.9 | Automated tests on Linux, macOS and Windows, oldest and newest Python in CI | CI matrix | `.github/workflows/ci.yml` | CI | CI main: Python 3.9 and 3.13 on all three. The mod's Node tests ran on Linux only in 0.1.0; `ci.yml` now runs them on all three, not yet run in CI | PASS |
-| S10.10 | CI green on the release PR and on the merge commit in `main` before tagging | Release checklist | `RELEASING.md` | CI | PR run 45004814197 passed; main run 45004998622 passed at 08:56 UTC; `v0.1.0` points at `8ec8eec`, released 08:57 UTC | PASS |
+| S10.10 | CI green on the release PR and on the merge commit in `main` before tagging | Release checklist | `RELEASING.md` | CI | PR run 45004814197 passed; main run 45004998622 passed at 08:56 UTC; `v0.1.0` points at `8ec8eec`, released 08:57 UTC. For 0.2.0 this runs at release time (RELEASING.md items 5 and 6) | PASS |
 | S10.11 | Reproducible cost and quality results | Benchmark harness and a full run | `bench/`, `docs/BENCHMARKS.md` | Benchmark | 336 runs on 2026-11-22 (Claude Code 2.1.330, session model sonnet): 16 tasks in 8 classes under `plugin`, `defaults`, `sonnet-medium` and `sonnet-high`, 10 or 11 runs per cell, $27.68 at list price. 1 PASS and 7 FAIL rows under the Section 14 rule | PASS |
 | S10.12 | A security assessment | [SECURITY.md](SECURITY.md): who can influence routing, the network, credentials, state files, the mod, skills, workflows and open items | `docs/SECURITY.md` | Inspection | Each claim names the module and the function, class or constant it was checked against on 2026-11-22, not a line number | PASS |
 | S10.13 | Professional documentation and install steps, README at release polish with SVG diagrams | README with three SVG diagrams in "How it works" | `README.md`, `docs/assets/` | Unit, inspection | `ReadmeDiagrams` class (6 tests); the changelog's Python claim is corrected (S8.2) | PASS |

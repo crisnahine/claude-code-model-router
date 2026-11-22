@@ -1,9 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-11-22
+
+Reviewed against Claude Code 2.1.330 and the platform docs of the same day. Tested live on 2.1.330 on macOS, headless and in an interactive terminal in auto mode. Needs Claude Code 2.1.292 or later.
 
 - On Bedrock, Google Cloud's Agent Platform, Microsoft Foundry, Claude Platform on AWS and Claude Models on Google Cloud, where an alias runs an older model, the mod starts routed work on that family's newest model and falls back to the alias if the provider refuses it. Setting `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` keeps the alias.
-- A hard skill typed as a slash command raises that turn's effort, and a skill that takes its arguments is judged by them, so a small job given to a large pipeline skill stays at standard.
+- A hard skill typed as a slash command raises that turn's effort, and a skill that takes its arguments is judged by them, so a small job given to a large pipeline skill stays at standard. An argument that only names a target, such as a file, leaves the level to the skill's own body.
 - Briefs are profiled more accurately: other languages start at standard instead of lookup, a negated limit ends with its clause, and judgment verbs such as design and review, named systems and more risk words count. A labeled corpus of 219 briefs checks it.
 - Teammates' reports and messages from other sessions no longer raise the lead's effort.
 - Each hook starts Python once and leaves the network modules unloaded, about 30 to 40 ms faster per warm hook.
@@ -13,6 +15,7 @@
 - Haiku 5.5's prompts over 100K tokens are priced at their own rate per request, and the Mythos models are priced. Fast-mode requests are logged at standard rates, which the README now says.
 - The main conversation's effort is left alone behind a Claude apps gateway, where a change drops the cache.
 - The Stop check counts test runs inside subagents before asking for a verifier.
+- A clock that moves backwards no longer makes an old call look like a redo or stretches a model's outage, and only the three newest set-aside copies of a state file are kept.
 - Skills pre-approve only the commands they run.
 - The registry and override files carry a `schema` version, with a written compatibility policy.
 - New docs: a security assessment, hook latency and state-size measurements, a benchmark pilot with its raw data, diagrams in the README, and a glossary.

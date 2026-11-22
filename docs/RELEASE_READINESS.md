@@ -1,8 +1,8 @@
 # Release readiness
 
-Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `fcce17a`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
+Checked 2026-11-22 for 0.2.0, against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `0f8292f`, on Claude Code 2.1.330. Row IDs (S2.1 and so on) point into [TRACEABILITY.md](TRACEABILITY.md), which holds the evidence.
 
-**Verdict: the next release is not ready.** Of the 13 release gates, 11 pass and 2 are partial. No defect is open. One requirement fails: the benchmark shows the router costing more per solved task than the best baseline in 7 of 8 task classes, at the same pass rate (S4.15). Nothing after `8ec8eec` has run in CI yet.
+**Verdict: the next release is not ready.** Of the 13 release gates, 10 pass, 2 are partial and 1 waits for the release PR. No defect is open. One requirement fails: the benchmark shows the router costing more per solved task than the best baseline in 7 of 8 task classes, at the same pass rate (S4.15). Nothing after `8ec8eec` has run in CI yet.
 
 ## Release gates
 
@@ -17,10 +17,10 @@ Checked 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits afte
 | A spend ledger that matches list prices | PARTIAL | One-hour cache writes, unpriced models and Haiku's long-prompt rate per request are tested. Fast mode requests are logged at standard rates, because Claude Code doesn't say which requests ran fast (S10.7, S4.8) |
 | Fail-open behaviour proven by tests | PASS | Garbage payloads to every handler; every mod hook falls back to `next(e)` (S10.8) |
 | Automated tests on Linux, macOS and Windows, oldest and newest Python | PASS | CI on `8ec8eec`: Python 3.9 and 3.13 on all three, 180 tests each. The mod's Node tests now run on all three in `ci.yml`, not yet run in CI (S10.9) |
-| CI green on the release PR and on the merge commit in `main`, before tagging | PASS for 0.1.0 | PR run 45004814197 and main run 45004998622 passed before `v0.1.0` was tagged. Must be redone for the next release (S10.10) |
+| CI green on the release PR and on the merge commit in `main`, before tagging | NOT YET for 0.2.0 | Nothing after `8ec8eec` has run in CI. It runs on the release PR and its merge (RELEASING.md items 5 and 6). For 0.1.0, PR run 45004814197 and main run 45004998622 passed before `v0.1.0` was tagged (S10.10) |
 | Reproducible cost and quality results | PASS | [BENCHMARKS.md](BENCHMARKS.md): 336 runs of the router, `defaults`, `sonnet-medium` and `sonnet-high` on all 16 tasks, raw data and commands committed, $27.68 at list price. 1 PASS row (lookup) and 7 FAIL (S10.11) |
 | A security assessment | PASS | [SECURITY.md](SECURITY.md), each claim cited to the code it was checked against (S10.12) |
-| Professional documentation and install steps | PASS | The README has its SVG diagrams, and the 0.1.0 changelog names the Python versions CI ran (S10.13, S8.2) |
+| Professional documentation and install steps | PASS | The README has its SVG diagrams, the changelog has a 0.2.0 section, and the 0.1.0 section names the Python versions CI ran (S10.13, S8.2) |
 
 ## Remaining defects and incomplete requirements
 
