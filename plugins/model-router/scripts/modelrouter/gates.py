@@ -83,14 +83,14 @@ def checks_ran_since(transcript_path: object, since: float) -> bool:
     return False
 
 
-def strong_agent(config: dict, need: str) -> str:
-    """The role agent to hand hard thinking to, with `need` named on the call: the role agents
-    carry no model of their own, and a model named on a call is kept."""
-    top = registry.by_strength(config)[-1] if registry.models(config) else None
-    name = "deep-solver" if need == top else "architect"
+def strong_agent(config: dict, need: str, effort: str | None = None, level: str | None = None) -> str:
+    """The role agent to hand hard thinking to, with the level's model and effort named on the
+    call: the role agents carry neither, and the router keeps both when the caller names them."""
+    named = f'model: "{need}"' + (f' and effort: "{effort}"' if effort else "")
+    name = "deep-solver" if level == "frontier" else "architect"
     if name not in (config.get("crew") or {}):
-        return f'a subagent with model: "{need}"'
-    return f'{cfg.PLUGIN_NAME}:{name} with model: "{need}"'
+        return f"a subagent with {named}"
+    return f"{cfg.PLUGIN_NAME}:{name} with {named}"
 
 
 def escalation(config: dict, hook_input: dict) -> str | None:
@@ -115,7 +115,8 @@ def escalation(config: dict, hook_input: dict) -> str | None:
     return (
         f"This request was estimated as {entry.get('level')}, which needs about {need}-level reasoning, and "
         f"this conversation runs on {current}. No {need}-level agent has looked at it. Before finishing, give "
-        f"the task and your result to {strong_agent(config, need)} to check and improve, then give the user "
+        f"the task and your result to {strong_agent(config, need, entry.get('need_effort'), entry.get('level'))} "
+        "to check and improve, then give the user "
         "the reconciled answer. If the task turned out to be simple and the estimate was wrong, say so in "
         "one line and finish."
     )
@@ -137,7 +138,7 @@ def unverified_edit(hook_input: dict) -> str | None:
     return (
         f"Code changed since the last check and nothing has checked it yet. Before finishing, run "
         f"{name}:verifier on the change (it finds and runs the project's tests, lint and type checks), and "
-        f"for anything beyond a trivial edit also {name}:reviewer. If the project has no runnable checks, "
+        f"for a risky or cross-module change also {name}:reviewer. If the project has no runnable checks, "
         "or the change can't affect behavior, say so in one line and finish."
     )
 

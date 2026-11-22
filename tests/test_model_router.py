@@ -590,7 +590,7 @@ class Registry(Sandbox):
         self.assertEqual(config["levels"]["lookup"], {"needs": 1, "effort": "low"})
         self.assertEqual(config["levels"]["complex"]["effort"], "max")
         self.assertNotIn("bogus", config["levels"])
-        self.assertEqual(config["agents"], {"a": {}})
+        self.assertEqual({k: v for k, v in config["agents"].items() if k in ("a", "b")}, {"a": {}})
         self.assertEqual(settings.resolve(config).mode, "auto")
         (self.project / ".claude" / "model-router.json").write_text("{not json")
         self.assertEqual(len(cfg.load_config()["models"]), 4)
@@ -1081,11 +1081,24 @@ class Router(Sandbox):
         self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", "low"))
         self.assertEqual(self.decide("deep", HARD)["model"], "sonnet")
 
+    def test_a_strong_agent_is_named_with_its_model_and_effort(self):
+        config = cfg.load_config()
+        self.assertEqual(gates.strong_agent(config, "opus", "high", "hardest"),
+                         'model-router:architect with model: "opus" and effort: "high"')
+        self.assertEqual(gates.strong_agent(config, "fable", "high", "frontier"),
+                         'model-router:deep-solver with model: "fable" and effort: "high"')
+        self.assertEqual(gates.strong_agent({**config, "crew": {}}, "opus", None, "complex"),
+                         'a subagent with model: "opus"')
+
+    def test_the_deep_solver_starts_at_hardest(self):
+        d = self.decide("model-router:deep-solver", LOOKUP)  # a shipped rule sets the level, the ladder the model
+        self.assertEqual((d["source"], d["level"], d["model"], d["effort"]), ("router", "hardest", "opus", "high"))
+
     def test_the_role_agents_are_routed_by_their_brief(self):
         for agent in ("scout", "verifier", "docs-researcher", "implementer"):
             d = self.decide(f"model-router:{agent}", LOOKUP)
             self.assertEqual((d["action"], d["source"], d["model"], d["effort"]), ("rewrite", "router", "haiku", "low"), agent)
-        for agent in ("architect", "reviewer", "deep-solver"):  # their names set a complex floor
+        for agent in ("architect", "reviewer"):  # their names set a complex floor
             d = self.decide(f"model-router:{agent}", LOOKUP)
             self.assertEqual((d["source"], d["level"]), ("router", "complex"), agent)
         self.assertEqual(self.decide("model-router:implementer", HARD)["source"], "router")
@@ -1871,7 +1884,8 @@ class Hooks(Sandbox):
         self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
         self.session_on("claude-haiku-5-5")
         text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
-        self.assertIn('model-router:architect with model: "opus"', text)  # the agent has no pin of its own
+        # The agent has no pin of its own, so the level's model and effort go on the call.
+        self.assertIn('model-router:architect with model: "opus" and effort: "high"', text)
         self.assertTrue(store.load_entry("prompts", "s1")["below"])
 
     def test_machine_written_turns_dont_reset_the_request(self):
@@ -2378,7 +2392,7 @@ class RefreshBackoff(Sandbox):
 
 
 class Reports(Sandbox):
-    def test_policy_shows_levels_cap_and_lowered_crew(self):
+    def test_policy_shows_levels_cap_and_the_crew(self):
         self.assertIn("| complex | sonnet | high |", self.out("policy"))
         store.update_state(lambda state: state.update(max_tier="sonnet", priority="quality"))
         text = self.out("policy")

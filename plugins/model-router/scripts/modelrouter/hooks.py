@@ -200,12 +200,14 @@ def user_prompt(hook_input: dict) -> dict | None:
     usable = registry.available(config, cfg.project_dir(hook_input), options.cap)
     result = _typed_skill(prompt, hook_input) or profile_prompt(prompt)
     level = result["level"]
-    need = ladder.pick(config, level, options.priority, usable, learn.raises()).model
+    pick = ladder.pick(config, level, options.priority, usable, learn.raises())
+    need = pick.model
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
     below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
     wanted = named_model(config, prompt)
     store.save_entry("prompts", session_id, {
-        "prompt_id": hook_input.get("prompt_id"), "level": level, "need": need, "below": below,
+        "prompt_id": hook_input.get("prompt_id"), "level": level, "need": need, "need_effort": pick.effort,
+        "below": below,
         "session_tier": current, "named": wanted})
     why = f" (wording suggests: {', '.join(result['signals'])})" if result["signals"] else ""
     notes = []
@@ -217,7 +219,7 @@ def user_prompt(hook_input: dict) -> dict | None:
             f"This request looks {level}{why}: about {need}-level reasoning, and this conversation runs on "
             f"{current}. This conversation keeps its model, so this step is required: "
             f"hand the hard thinking (the design, the root cause, the risky decision) to "
-            f"{gates.strong_agent(config, need)} rather than settling it inline. You will be asked to before "
+            f"{gates.strong_agent(config, need, pick.effort, level)} rather than settling it inline. You will be asked to before "
             "finishing if you don't. If the code shows the task is simpler than its wording, say so instead."
         )
     if wanted and mode == "auto":

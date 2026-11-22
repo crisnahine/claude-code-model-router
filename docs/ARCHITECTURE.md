@@ -89,7 +89,7 @@ Order of authority, strongest first:
 5. `CLAUDE_CODE_SUBAGENT_MODEL`, the user's default for agents without a model.
 6. The router's pick: `ladder.pick(level, priority, usable models)`, which runs `registry.select` on the level's needs plus any learned raise.
 
-The plugin's own role agents (`agents/*.md`) name no model or effort, so step 6 decides them like any agent without a pin. When the session note or the `Stop` check asks for a strong agent, it names the architect, or the deep-solver for the strongest model, with that model on the call (`gates.strong_agent`), and step 2 keeps it.
+The plugin's own role agents (`agents/*.md`) name no model or effort, so step 6 decides them like any agent without a pin, except the deep-solver, which a shipped rule (step 3) starts at hardest. When the session note or the `Stop` check asks for a strong agent, it names the architect, or the deep-solver for a frontier request, with the level's model and effort on the call (`gates.strong_agent`), and step 2 keeps both.
 
 Then `registry.clamp` lowers the result to the nearest usable model. It never raises.
 

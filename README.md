@@ -93,7 +93,7 @@ Whatever wins then has to be usable: inside your cap, allowed by your settings a
 
 ## Role agents and `/model-router:ship`
 
-The plugin ships seven agents for work that no better-fitting agent covers: `model-router:scout`, `verifier`, `docs-researcher`, `implementer`, `architect`, `reviewer` and `deep-solver`. None of them names a model or effort, so the router routes each by its brief like any other agent; the architect, reviewer and deep-solver start no lower than complex because of their names. Their descriptions say when each is the right tool, such as the reviewer for a risky or cross-module diff, rather than a step to run on every change, since Claude decides when to delegate from those descriptions (https://code.claude.com/docs/en/sub-agents.md).
+The plugin ships seven agents for work that no better-fitting agent covers: `model-router:scout`, `verifier`, `docs-researcher`, `implementer`, `architect`, `reviewer` and `deep-solver`. None of them names a model or effort, so the router routes each by its brief like any other agent; the architect, reviewer and deep-solver start no lower than complex because of their names, and a shipped rule in `config/models.json` starts the deep-solver at hardest. Their descriptions say when each is the right tool, such as the reviewer for a risky or cross-module diff, rather than a step to run on every change, since Claude decides when to delegate from those descriptions (https://code.claude.com/docs/en/sub-agents.md).
 
 `/model-router:ship <task or issue>` runs a full loop with them: understand, plan, build, verify, review, fix, and commit on a branch. It stops before pushing, merging or deploying.
 

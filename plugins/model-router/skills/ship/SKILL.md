@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Takes a task from request to reviewed, verified change with multi-model orchestration. Plans and reviews on a strong model, builds on a mid one, verifies on a cheap one, loops on failures, and stops before anything irreversible.
+description: Takes a task from request to reviewed, verified change with multi-model orchestration. Each step's agent is routed by its brief, so plans and reviews start no lower than complex and checks stay cheap; it loops on failures and stops before anything irreversible.
 argument-hint: "[task, issue URL or issue number]"
 disable-model-invocation: true
 ---
@@ -20,7 +20,7 @@ Run this pipeline yourself as the coordinator. Delegate each stage to the named 
 
 ## 1. Plan
 
-Send the task, the relevant files and the constraints to `model-router:architect`. Use `model-router:deep-solver` instead only when the task is research-grade: no known approach, open-ended, across several systems. Hard but well-understood work stays with the architect, which costs a fraction as much.
+Send the task, the relevant files and the constraints to `model-router:architect`. Use `model-router:deep-solver` instead only when the task is research-grade: no known approach, open-ended, across several systems. Hard but well-understood work stays with the architect, which starts at complex; the deep-solver starts at hardest and costs more.
 
 Show the user the plan summary in a few lines. If the plan changes a public API, a data schema, security behavior or dependencies, stop and ask the user to confirm before building. Otherwise continue.
 
