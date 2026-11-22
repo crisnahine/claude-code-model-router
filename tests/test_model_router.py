@@ -1802,6 +1802,67 @@ class Upstream(Sandbox):
             server.shutdown()
             server.server_close()
 
+    def dripping_server(self, bodies: dict, delay: float, raw: dict | None = None):
+        """Serves each path's body one byte at a time, `delay` seconds apart. A `raw` path
+        drips its bytes with no status line or headers of the server's own."""
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path not in (raw or {}):
+                    self.send_response(200)
+                    self.end_headers()
+                try:
+                    for byte in (raw or {}).get(self.path) or bodies.get(self.path, b"x" * 1000):
+                        self.wfile.write(bytes([byte]))
+                        self.wfile.flush()
+                        time.sleep(delay)
+                except OSError:
+                    pass  # the client gave up
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}"
+
+    def test_a_request_that_keeps_dripping_stops_at_its_deadline(self):
+        base = self.dripping_server({}, delay=0.05)
+        started = time.monotonic()
+        with mock.patch.object(upstream, "HTTP_TIMEOUT", 0.5), self.assertRaises(OSError):
+            upstream.http_get(base + "/slow")
+        self.assertLess(time.monotonic() - started, 2)
+
+    def test_the_whole_fetch_stops_at_its_budget(self):
+        # The left-over worker's one request fails at its own 5 s deadline, so it never moves on
+        # to the real URLs once the patch is gone.
+        base = self.dripping_server({}, delay=0.02)
+        started = time.monotonic()
+        with mock.patch.multiple(upstream, FETCH_BUDGET=0.7, HTTP_TIMEOUT=5, CHANGELOG_RSS=base + "/rss"), \
+                self.assertRaises(OSError):
+            upstream.fetch(settings.Settings())
+        self.assertLess(time.monotonic() - started, 2)
+
+    def test_the_budget_covers_a_dripped_status_line_too(self):
+        # Headers that never end: the left-over worker fails when the server hangs up.
+        base = self.dripping_server({}, delay=0.05, raw={"/rss": b"HTTP/1.0 200 OK\r\nX-Pad: " + b"x" * 200})
+        started = time.monotonic()
+        with mock.patch.multiple(upstream, FETCH_BUDGET=0.7, HTTP_TIMEOUT=5, CHANGELOG_RSS=base + "/rss"), \
+                self.assertRaises(OSError):
+            upstream.fetch(settings.Settings())
+        self.assertLess(time.monotonic() - started, 2)
+
+    def test_a_body_cut_short_is_a_failed_request(self):
+        import http.client
+        base = self.dripping_server({}, delay=0, raw={"/cut": b"HTTP/1.0 200 OK\r\nContent-Length: 100\r\n\r\n"
+                                                              + b"x" * 10})
+        with self.assertRaises(http.client.IncompleteRead):
+            upstream.http_get(base + "/cut")
+
     def test_a_failed_fetch_leaves_the_cache_alone(self):
         store.save_json(upstream.path(), {"cache": {"fetched_at": 1, "aliases": ["haiku"]}})
         with mock.patch.object(upstream, "http_get", side_effect=OSError("offline")):
