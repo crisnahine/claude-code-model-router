@@ -136,6 +136,24 @@ def _managed_file() -> Path:
     return Path("/etc/claude-code/managed-settings.json")
 
 
+def _managed_settings() -> dict:
+    """The file-based managed policy's model lists: managed-settings.json, then each
+    non-hidden managed-settings.d/*.json in name order, with lists combined."""
+    main = _managed_file()
+    try:
+        drop_ins = sorted(p for p in (main.parent / "managed-settings.d").iterdir()
+                          if p.suffix == ".json" and not p.name.startswith("."))
+    except OSError:
+        drop_ins = []
+    merged: dict = {}
+    for path in [main, *drop_ins]:
+        data = store.load_dict(path)
+        for key in ("availableModels", "deniedModels"):
+            if isinstance(data.get(key), list):
+                merged[key] = merged.get(key, []) + [e for e in data[key] if e not in merged.get(key, [])]
+    return merged
+
+
 def permitted(config: dict, project: Path) -> set[str]:
     """Registry models that the availableModels and deniedModels settings leave open, read
     the way Claude Code reads them: a managed allowlist applies alone, otherwise the user,
@@ -149,7 +167,7 @@ def permitted(config: dict, project: Path) -> set[str]:
         found = {family(config, e) for e in entries}
         return {n for n in names if n in found}
 
-    managed = store.load_dict(_managed_file())
+    managed = _managed_settings()
     allow = managed.get("availableModels")
     if not isinstance(allow, list):
         lists = [store.load_dict(path).get("availableModels") for path in _settings_files(project)]
