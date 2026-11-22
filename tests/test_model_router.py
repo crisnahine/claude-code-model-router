@@ -3521,6 +3521,14 @@ class DesignDecisions(unittest.TestCase):
                        "Choosing between Kafka and SQS for the event bus.", "Weighing the options for the job queue."):
             self.assertIn("ambiguity", profile.profile_call({"prompt": prompt}, "general-purpose")["signals"], prompt)
 
+    def test_a_reported_plan_or_choice_lets_no_load_word_count(self):
+        for prompt in ("As planned, rename the payments column in every service, across all services, to keep latency "
+                       "low.", "We decided on Postgres to handle 10,000 writes per second; migrate the billing schema "
+                       "in all services to it."):
+            result = profile.profile_call({"prompt": prompt}, "general-purpose")
+            self.assertEqual(result["level"], "complex", prompt)
+            self.assertNotIn("load", result["signals"], prompt)
+
     def test_only_a_millisecond_budget_counts_as_load(self):
         for prompt in ("Plan the release notes for 2.0; the API answers in 120 ms.",
                        "Plan the sprint: fix the 300 ms login delay."):
