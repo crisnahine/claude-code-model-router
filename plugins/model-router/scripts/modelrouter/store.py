@@ -137,9 +137,12 @@ def load_state_file(path: Path) -> dict:
 
 
 def _set_aside(path: Path) -> bool:
-    stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    target = path.with_name(f"{path.name}.corrupt-{stamp}")
+    if target.exists():  # never overwrite an earlier copy
+        return False
     try:
-        os.replace(path, path.with_name(f"{path.name}.corrupt-{stamp}"))
+        os.replace(path, target)
         return True
     except OSError:
         return False
@@ -148,6 +151,11 @@ def _set_aside(path: Path) -> bool:
 def set_aside() -> list[Path]:
     """State files that failed to parse and were moved out of the way."""
     return sorted(data_dir().glob("*.corrupt-*"))
+
+
+def newer_files() -> list[Path]:
+    """State files a later release wrote, which this one reads but never updates."""
+    return [p for p in sorted(data_dir().glob("*.json")) if _read_state(p)[1] == "newer"]
 
 
 def update_dict(path: Path, change: Callable[[dict], Any]) -> dict:

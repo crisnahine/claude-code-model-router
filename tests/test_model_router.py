@@ -1851,7 +1851,7 @@ class StateFiles(Sandbox):
         self.count_call()
         aside = list(self.data.glob("learned.json.corrupt-*"))
         self.assertEqual(len(aside), 1)
-        self.assertRegex(aside[0].name, r"^learned\.json\.corrupt-\d{8}T\d{6}Z$")
+        self.assertRegex(aside[0].name, r"^learned\.json\.corrupt-\d{8}T\d{12}Z$")
         self.assertEqual(aside[0].read_text(), '{"lookup": {"calls": 4,')
         self.assertEqual(learn.stats()["lookup"]["calls"], 1)
         text = self.out("models")
@@ -1871,6 +1871,25 @@ class StateFiles(Sandbox):
         self.count_call()
         self.assertEqual(self.learned().read_text(), newer)
         self.assertEqual(list(self.data.glob("learned.json.corrupt-*")), [])
+        self.assertIn(f"only read and never updated: {self.learned()}", self.out("models"))
+
+    def test_a_bad_schema_value_counts_as_unreadable(self):
+        for value in (True, -1, "1", 1.0):
+            with self.subTest(value=value):
+                self.learned().write_text(json.dumps({"schema": value, "lookup": {"calls": 4}}))
+                self.count_call()
+                self.assertEqual(learn.stats(), {"lookup": {"calls": 1}})
+                for aside in self.data.glob("learned.json.corrupt-*"):
+                    aside.unlink()
+
+    def test_a_file_that_cant_be_set_aside_is_left_as_it_is(self):
+        self.learned().write_text("{oops")
+        with mock.patch.object(store.os, "replace", side_effect=PermissionError("in use")):
+            self.count_call()
+        self.assertEqual(self.learned().read_text(), "{oops")
+
+    def test_every_older_version_has_a_migration_step(self):
+        self.assertEqual(set(store.MIGRATIONS), set(range(store.SCHEMA)))
 
     def test_a_broken_settings_file_is_never_moved(self):
         (self.home / "model-router.json").write_text("{oops")

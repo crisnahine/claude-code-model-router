@@ -81,6 +81,10 @@ def models(config: dict, settings: Settings) -> str:
     if aside:
         lines += ["", "Set aside because it could not be read, so that state started fresh: "
                   + ", ".join(str(p) for p in aside) + ". Look at them, then delete them."]
+    newer = store.newer_files()
+    if newer:
+        lines += ["", "Written by a newer Model Router, so only read and never updated: "
+                  + ", ".join(str(p) for p in newer) + ". Update the plugin, or delete them to start fresh."]
     return "\n".join(lines)
 
 
