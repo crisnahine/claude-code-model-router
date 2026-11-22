@@ -1,6 +1,6 @@
 # Requirement traceability
 
-One row per requirement the project holds itself to, numbered by the section of the maintainer's project brief it comes from (Sections 2 to 14). Checked on 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `2195560`, on Claude Code 2.1.330. The CI evidence is the run on `8ec8eec`; nothing after it has run in CI yet.
+One row per requirement the project holds itself to, numbered by the section of the maintainer's project brief it comes from (Sections 2 to 14). Checked on 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `e00a9a6`, on Claude Code 2.1.330. The CI evidence is the run on `8ec8eec`; nothing after it has run in CI yet.
 
 Summary: 135 PASS, 20 PARTIAL, 1 FAIL, 1 BLOCKED, 157 requirements.
 
@@ -138,7 +138,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 
 | ID | Requirement | Implementation | Source | Verification | Evidence | Status |
 | :- | :- | :- | :- | :- | :- | :- |
-| S9.1 | Gate: `python3 -m unittest discover -s tests` | Unit suite | `tests/` | Local, CI | Local on 2026-11-23 at `2195560` plus the release change: 360 tests OK on Python 3.9.6, the system 3.9.6 and 3.15.2 (308 in `test_model_router.py`, 46 in `test_bench.py`, 3 in `test_routing_corpus.py`, 3 in `test_traceability.py`); CI main: 180 tests OK on each of 6 jobs | PASS |
+| S9.1 | Gate: `python3 -m unittest discover -s tests` | Unit suite | `tests/` | Local, CI | Local on 2026-11-23 at `e00a9a6` plus the release change: 361 tests OK on Python 3.9.6, the system 3.9.6 and 3.15.2 (309 in `test_model_router.py`, 46 in `test_bench.py`, 3 in `test_routing_corpus.py`, 3 in `test_traceability.py`); CI main: 180 tests OK on each of 6 jobs | PASS |
 | S9.2 | Gate: `node --experimental-strip-types --test "tests/mod/*.test.ts"` | Node suite | `tests/mod/router.test.ts` | Local, CI | Local Node 22.22.3: 18 of 18 pass; CI main `mod` job 12 of 12 | PASS |
 | S9.3 | Gate: `claude plugin validate --strict .` and `plugins/model-router` | Manifests | `.claude-plugin/`, `plugins/model-router/.claude-plugin/` | Local, CI | Both "Validation passed" on 2.1.330 locally and in CI main `validate` | PASS |
 | S9.4 | Gate: `claude plugin eval plugins/model-router --trust-plugin` | Three routing evals graded on the model each subagent ran on | `evals/` | Live eval | Run 2026-11-22 on Claude Code 2.1.330 with a no-plugin baseline arm, 3 runs per case per arm: every case scored 1.0 with the plugin; without it 0, 0 and 0.67; $0.43 plus a $0.10 rerun of one case ([TEST_RESULTS.md](TEST_RESULTS.md)). Their expected routes are also checked for free in the unit gate (S14.4) | PASS |
