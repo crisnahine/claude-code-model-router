@@ -428,6 +428,48 @@ print(json.dumps({"is_error": False, "subtype": "success", "api_error_status": N
 '''
 
 
+VARIANT_STUB = '''#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+seen = {"argv": sys.argv[1:], "project": None}
+project = Path.cwd() / ".claude" / "model-router.json"
+if project.is_file():
+    seen["project"] = json.loads(project.read_text())
+Path(os.environ["STUB_SEEN"]).write_text(json.dumps(seen))
+print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.01, "modelUsage": {}}))
+'''
+
+
+@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
+class RouterVariants(unittest.TestCase):
+    """A router variant is the shipped plugin plus a project model-router.json and plugin option values."""
+
+    def test_a_variant_gets_its_router_file_and_options_and_nothing_else_does(self):
+        variant = {"id": "v", "plugin": True, "env": {}, "router_config": {"levels": {"standard": {"effort": "medium"}}},
+                   "plugin_options": {"main_effort": False}}
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "claude"
+            stub.write_text(VARIANT_STUB)
+            stub.chmod(0o755)
+            seen = Path(tmp) / "seen.json"
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
+                row = run.run_one(task, variant, options, {})
+                got = json.loads(seen.read_text())
+                run.run_one(task, run.load_configs()[0], options, {})
+                plain = json.loads(seen.read_text())
+        self.assertEqual(got["project"], {"levels": {"standard": {"effort": "medium"}}})
+        settings = json.loads(got["argv"][got["argv"].index("--settings") + 1])
+        self.assertEqual(settings, {"pluginConfigs": {"model-router@inline": {"options": {"main_effort": False}}}})
+        self.assertTrue(row["passed"])
+        self.assertIsNone(plain["project"])
+        self.assertNotIn("--settings", plain["argv"])
+
+
 @unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class Limits(unittest.TestCase):
     """A rate or usage limit pauses the bench and retries the run; it is never recorded as a failed task."""

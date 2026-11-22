@@ -64,6 +64,10 @@ def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[l
            "--permission-mode", "dontAsk"]
     if config.get("plugin"):
         cmd += ["--plugin-dir", options["plugin_dir"]]
+    if config.get("plugin_options"):
+        # A --plugin-dir plugin's id is <name>@inline; project settings can't set plugin options.
+        name = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"]
+        cmd += ["--settings", json.dumps({"pluginConfigs": {f"{name}@inline": {"options": config["plugin_options"]}}})]
     return cmd + list(config.get("args", [])) + ["--allowedTools", *TOOLS], env
 
 
@@ -135,6 +139,9 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
     scratch = Path(tempfile.mkdtemp(prefix=f"mrbench-{task['id']}-{config['id']}-"))
     work = scratch / "work"
     shutil.copytree(task["dir"] / "repo", work)
+    if config.get("router_config"):  # a router variant, as the project's own model-router.json
+        (work / ".claude").mkdir(exist_ok=True)
+        (work / ".claude" / "model-router.json").write_text(json.dumps(config["router_config"]), encoding="utf-8")
     cmd, env = command(PROMPT.format(brief=task["brief"]), config,
                        {**options, "plugins_root": str(scratch / "plugins")}, dict(os.environ))
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
