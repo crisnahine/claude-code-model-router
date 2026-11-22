@@ -13,7 +13,8 @@ First release. Reviewed against Claude Code 2.1.330 and the platform docs of the
 - Options: `routing_mode`, `priority`, `max_tier`, `agent_pins`, `main_effort`, `update_check` and `verify_gate`.
 - Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` the router sets effort only, and the session-start note says what the force setting costs. `CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_EFFORT_LEVEL` and `CLAUDE_CODE_SUBAGENT_EFFORT` are respected.
 - Availability tracking that honors `availableModels` and `deniedModels` and routes around models that fail, are substituted, or are rejected on agent calls.
-- Every turn's tokens are priced at list price, and `/model-router:usage` shows spend by loop and model.
+- Every turn's tokens are priced at list price, and `/model-router:usage` shows spend by loop and model. A version the price table doesn't list is reported as unpriced, never priced as its neighbour.
+- Session start names a session model or an alias that runs older than the newest active version of its family.
 - Two checks before a turn ends: verification after code changes, and a stronger model's review when a hard request was answered by a weaker session model alone.
 - Seven role agents and five skills: `ship`, `route`, `models`, `usage` and `refresh`.
 - A daily check of the Claude Code changelog, docs index, model aliases and model deprecations page, plus the account's Models API list when an Anthropic API key is set, in the plugin and as a GitHub workflow. Models routed calls ran on that are deprecated or retiring are reported at session start.

@@ -967,7 +967,11 @@ class Mod(Sandbox):
         row = self.ledger()[-1]
         self.assertEqual((row["event"], row["cost_usd"]), ("usage", 6.0))
         self.assertIsNone(registry.cost(cfg.load_config(), "claude-unknown-9", {"input_tokens": 1}))
-        self.assertEqual(registry.price(cfg.load_config(), "claude-opus-4-7")["input"], 5)
+        config = cfg.load_config()
+        self.assertEqual(registry.price(config, "claude-opus-4-7")["input"], 5)  # one entry covers Opus 4.x
+        self.assertEqual(registry.price(config, "claude-haiku-4-5-20251001")["input"], 1)
+        self.assertEqual(registry.price(config, "claude-opus-5-5[1m]")["input"], 4)
+        self.assertIsNone(registry.price(config, "claude-opus-5-6"))  # a new version is never priced as its neighbour
 
 
 class ModPayloads(Sandbox):
@@ -1352,6 +1356,23 @@ class Upstream(Sandbox):
         self.assertEqual(changes["new_model_families"], ["mythos"])
         self.assertEqual(changes["deprecated_in_use"][0]["retires"], "2026-11-30")
         self.assertEqual(upstream.diff(upstream.snapshot(live), live)["new_model_families"], [])
+
+    def test_a_version_older_than_its_familys_newest_is_named_at_session_start(self):
+        life = upstream.parse_deprecations((FIXTURES / "model-deprecations.md").read_text(encoding="utf-8"))
+        store.save_json(upstream.path(), {"cache": {"lifecycle": life, "releases": []}, "reviewed": {}})
+        self.assertEqual(upstream.version_of("claude-haiku-4-5-20251001[1m]"), ("haiku", (4, 5)))
+        self.assertIsNone(upstream.version_of("claude-3-haiku-20240307"))
+        newest = upstream.newest_versions()
+        self.assertEqual((newest["opus"], newest["sonnet"], newest["fable"]),
+                         ("claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2"))
+        self.assertEqual(upstream.behind(["claude-opus-5[1m]", "claude-opus-5-5", "opus", None]),
+                         [("claude-opus-5", "claude-opus-5-5")])
+        def note(model: str) -> str:
+            out = hooks.session_start({"session_id": "s1", "model": model}) or {}
+            return (out.get("hookSpecificOutput") or {}).get("additionalContext", "")
+        self.assertIn("claude-opus-4-7 is running here and claude-opus-5-5 is the newest of its family",
+                      note("claude-opus-4-7"))
+        self.assertNotIn("newest of its family", note("opus"))
 
     def test_a_failed_fetch_leaves_the_cache_alone(self):
         store.save_json(upstream.path(), {"cache": {"fetched_at": 1, "aliases": ["haiku"]}})

@@ -79,6 +79,13 @@ def session_start(hook_input: dict) -> dict | None:
         )
     if options.update_check:
         changes = upstream.pending()
+        running = [hook_input.get("model")] + [info.get("last_model") for info in registry.health().values()
+                                               if isinstance(info, dict)]
+        for model_id, latest in upstream.behind(running):
+            parts.append(
+                f"{model_id} is running here and {latest} is the newest of its family. Tell the user once: a model "
+                "setting naming a full version stays on it, so use the alias (opus, sonnet, haiku, fable) to follow "
+                "new versions, and update Claude Code, which moves each alias to the newest version.")
         if changes and changes["new_model_families"]:
             parts.append("New Claude model alias in the docs that isn't in Model Router's registry yet: "
                          + ", ".join(changes["new_model_families"]) + f". Tell the user once; /{name}:refresh "

@@ -130,6 +130,7 @@ A second check at `Stop` asks for verification once, when code changed and no te
 | :- | :- | :- |
 | The models that exist | `config/models.json`, plus the user's and a project's additions | They are the candidates |
 | New versions of a model | Nothing to discover: routing uses the aliases, and Claude Code moves each alias to the newest version | Picked up the day Claude Code ships them |
+| A setup running behind the newest version | The session's model and what each alias resolved to, against the newest active version of each family in the model status data | Named at session start: a `model` setting that pins a full version, or a Claude Code that hasn't moved its alias yet |
 | The models you allow | The `max_tier` option | Stronger ones are never picked, and pins and explicit choices are lowered |
 | The models your organization allows | `availableModels` and `deniedModels` in user, project and managed settings | Blocked ones are never picked |
 | The model a name resolves to | `resolvedModel` in the `Agent` tool's result, and the model on each turn's usage | Shown in `/model-router:models` and `/model-router:usage` |

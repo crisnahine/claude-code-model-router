@@ -218,11 +218,14 @@ def select(config: dict, needs: float, priority: str, usable: list[str]) -> str 
 
 
 def price(config: dict, model_id: str) -> dict | None:
-    """List prices for a full model ID: the longest `prices` key it starts with."""
+    """List prices for a full model ID, or None for a version the table doesn't list.
+    A near match never counts: a new version is often priced differently."""
     table = config.get("prices") or {}
-    model_id = (model_id or "").lower().split("[")[0]
-    keys = [k for k in table if model_id.startswith(k)]
-    return table[max(keys, key=len)] if keys else None
+    model_id = re.sub(r"-\d{8}$", "", (model_id or "").lower().split("[")[0])
+    if model_id in table:
+        return table[model_id]
+    families = [k for k in table if k.endswith("-*") and model_id.startswith(k[:-1])]
+    return table[max(families, key=len)] if families else None
 
 
 def cost(config: dict, model_id: str, tokens: dict) -> float | None:

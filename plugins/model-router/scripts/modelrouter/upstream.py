@@ -111,6 +111,42 @@ def merged_lifecycle(cache: dict) -> dict[str, dict]:
     return lifecycle
 
 
+_VERSIONED_ID = re.compile(r"^claude-([a-z]+)-(\d+(?:-\d+)?)(?:-\d{8})?$")
+
+
+def version_of(model_id: object) -> tuple[str, tuple[int, ...]] | None:
+    """A model ID's family and version: claude-opus-5-5 is ("opus", (5, 5))."""
+    match = _VERSIONED_ID.match(str(model_id or "").lower().split("[")[0])
+    if not match:
+        return None
+    return match.group(1), tuple(int(part) for part in match.group(2).split("-"))
+
+
+def newest_versions(data: dict | None = None) -> dict[str, str]:
+    """The newest active model ID of each family, from the last fetch."""
+    lifecycle = merged_lifecycle((load() if data is None else data).get("cache") or {})
+    newest: dict[str, tuple[tuple[int, ...], str]] = {}
+    for model_id, info in lifecycle.items():
+        found = version_of(model_id)
+        if found and str((info or {}).get("state", "")).lower() == "active":
+            line, version = found
+            if line not in newest or version > newest[line][0]:
+                newest[line] = (version, model_id)
+    return {line: model_id for line, (_, model_id) in newest.items()}
+
+
+def behind(model_ids: list, data: dict | None = None) -> list[tuple[str, str]]:
+    """(running, newest) for each model ID older than its family's newest active version."""
+    newest = newest_versions(data)
+    out = []
+    for model_id in dict.fromkeys(m for m in model_ids if isinstance(m, str)):
+        found = version_of(model_id)
+        latest = newest.get(found[0]) if found else None
+        if found and latest and version_of(latest)[1] > found[1]:
+            out.append((model_id.split("[")[0], latest))
+    return out
+
+
 def model_families(aliases: object) -> list[str]:
     aliases = aliases if isinstance(aliases, list) else []
     return sorted({a for a in aliases if isinstance(a, str) and a not in NON_FAMILY_ALIASES and "[" not in a})
