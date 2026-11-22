@@ -10,30 +10,33 @@ The latest results, with the commands that produce them. Replace this file's num
 
 ## CI on `main`
 
-`gh run list --branch main` shows one run: [45004998622](https://github.com/crisnahine/claude-code-model-router/actions/runs/45004998622), on `8ec8eec` (the `v0.1.0` merge), started 2026-11-22 08:54 UTC. Result: success, 8 of 8 jobs.
+`gh run list --branch main` shows the CI run on the latest release merge: [45055601879](https://github.com/crisnahine/claude-code-model-router/actions/runs/45055601879), on `27b94e6` (the `v0.1.1` merge), started 2026-11-22 18:31 UTC. Result: success, 12 of 12 jobs. The run before it, [45004998622](https://github.com/crisnahine/claude-code-model-router/actions/runs/45004998622) on `8ec8eec` (the `v0.1.0` merge), also passed.
 
 | Job | Result | Tests | Took |
 | :- | :- | :- | -: |
-| `test (ubuntu-latest, 3.13)` | success | 180 OK, 0 skipped | 13 s |
-| `test (ubuntu-24.04, 3.9)` | success | 180 OK, 0 skipped | 17 s |
-| `test (macos-latest, 3.9)` | success | 180 OK, 0 skipped | 79 s |
-| `test (macos-latest, 3.13)` | success | 180 OK, 0 skipped | 52 s |
-| `test (windows-latest, 3.9)` | success | 180 OK, 0 skipped | 80 s |
-| `test (windows-latest, 3.13)` | success | 180 OK, 0 skipped | 35 s |
-| `mod` (Linux) | success | 12 of 12 pass | 5 s |
-| `validate` | success | marketplace and plugin both "Validation passed" | 12 s |
+| `test (ubuntu-latest, 3.13)` | success | 361 OK, 1 skipped | 36 s |
+| `test (ubuntu-24.04, 3.9)` | success | 361 OK, 1 skipped | 44 s |
+| `test (macos-latest, 3.9)` | success | 361 OK, 1 skipped | 128 s |
+| `test (macos-latest, 3.13)` | success | 361 OK, 1 skipped | 70 s |
+| `test (windows-latest, 3.9)` | success | 361 OK, 19 skipped | 127 s |
+| `test (windows-latest, 3.13)` | success | 361 OK, 19 skipped | 76 s |
+| `mod (ubuntu-latest)` | success | 18 of 18 pass | 8 s |
+| `mod (macos-latest)` | success | 18 of 18 pass | 11 s |
+| `mod (windows-latest)` | success | 18 of 18 pass | 16 s |
+| `typecheck` | success | the mod type-checks with `tsc` | 7 s |
+| `validate` | success | marketplace and plugin both "Validation passed" | 23 s |
 
-The test counts come from each job's log (`gh run view --job <id> --log`). Commits after `8ec8eec` have not run in CI yet. CI runs on pushes to `main` and on pull requests, so a work branch is covered once it has an open PR.
+The test counts come from each job's log (`gh run view --job <id> --log`), and the times from each job's start and end. Windows skips more because the stub `claude` the bench tests use is a shebang script. Commits after `27b94e6` have not run in CI yet. CI runs on pushes to `main` and on pull requests, so a work branch is covered once it has an open PR.
 
 ## Local
 
-Run 2026-11-23 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0`, up to `780ee86` with the docs redesign merged, plus the change that updated this file.
+Run 2026-11-23 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.1`, up to `38b11c3` (the 0.1.2 release prep) with the 0.1.2 benchmark merged, plus the change that updated this file.
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 376 tests OK |
-| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 376 tests OK |
-| Unit tests, Python 3.15.2 | `python3.15 -m unittest discover -s tests` | 376 tests OK |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 377 tests OK |
+| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 377 tests OK |
+| Unit tests, Python 3.15.2 | `python3.15 -m unittest discover -s tests` | 377 tests OK |
 | Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 18 of 18 pass |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
@@ -42,7 +45,7 @@ Run 2026-11-23 on macOS (Darwin 27.2.0), on the unreleased commits after `v0.1.0
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 | Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78; run 2026-11-23 on `9b27510` |
 
-The 376 local tests are 319 in `tests/test_model_router.py`, 48 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 3 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 246 briefs over-routed (0.8%), budget 2%; 5 known under-routes" on each of the three interpreters. CI's run on `8ec8eec` had 180.
+The 377 local tests are 319 in `tests/test_model_router.py`, 48 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 4 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 246 briefs over-routed (0.8%), budget 2%; 5 known under-routes" on each of the three interpreters. CI's run on `8ec8eec` had 180.
 
 Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
 
@@ -136,3 +139,5 @@ Run numbers of reruns: a run the runner retries keeps its own number. The six ou
 Wall time: the rows before 0.1.1, now under `bench/results/archive/pre-0.1.1/`, carry no `wall_ms`, and their `duration_ms` isn't used in its place. Each results file is written by one process, one run after another, so the gap between one run's `started_at` and the next is that run plus its check and setup. On the Opus-session files (`m6-05-opus-*`, `m6-05-confirm`), that gap minus `duration_ms` has a median of 0.9 to 1.1 s per file, which is about what the check and setup take. On the Sonnet-session files the median is 1.1 to 36.5 s per file, and the gap is more than 10 s over `duration_ms` for 5 to 36 runs per file. So on those rows `duration_ms` leaves out time the run took. The docs count the wait for background subagents in `duration_api_ms`, not in `duration_ms` (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md). The 0.1.1 rows carry `wall_ms`, the runner's own clock around the `claude` process, and the page's latency comes from it.
 
 The 0.1.1 run (2026-11-22, Claude Code 2.1.330, `bench-0.1.1` at `v0.1.1`, `27b94e6`, `bench_dirty` false on every row): `--runs 5` per task, so 10 per class and configuration, at `--budget 1.0`. Stage 1 was an Opus 5.5 session (`--model claude-opus-5-5`), `plugin` and `defaults` on all 16 tasks: 160 runs, $21.88. Stage 2 was a Sonnet session (`--model sonnet`), `plugin`, `defaults`, `sonnet-medium` and `sonnet-high`: 320 runs, $22.66. The total is $44.54 at list price. Every cell reached 10, and no run lost the network or hit a limit. Each class ran as its own `run.py` with one results file per class. Each stage ran its classes in parallel workers that shared the stage's cap ($30 and $36): 2 workers on Opus and 4 on Sonnet, each class's `--max-total` being what was left of its worker's share. That way `run.py`'s reserve of twice the budget held once per worker, not once per class. The 810 earlier rows went to `bench/results/archive/` with `git mv`, so the tables compare 0.1.1 only with baselines run beside it, on the same commit, task revisions and Claude Code version.
+
+The 0.1.2 run (2026-11-22 UTC, Claude Code 2.1.330, `bench_dirty` false on every row): `plugin-next`, the plugin exported from `780ee86`, which differs from 0.1.2 only in its version and license, on every task, `--runs 5`, so 10 per class. Sonnet session: 80 runs, $6.01, under an $8 cap. Opus 5.5 session: 80 runs, $9.55, under a $12 cap. The total is $15.56 at list price. Every cell reached 10, and no run lost the network or hit a limit. The baselines weren't rerun: they are the 0.1.1 run's rows, on the same Claude Code version, machine and task revisions. These runs used `--budget 0.6` where the baselines used 1.0, so that `run.py`'s reserve of twice the budget fit one worker per stage under its cap. No 0.1.1 run had cost more than $0.37, so the lower cap ended no run. Commands: `python3 bench/run.py --configs plugin-next --runs 5 --budget 0.6 --model sonnet` (then `--model claude-opus-5-5`), one class at a time, each class's `--max-total` being what was left of the stage cap.
