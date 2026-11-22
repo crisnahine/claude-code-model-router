@@ -1,5 +1,6 @@
 ---
 description: A trivial lookup should route to the cheapest tier, never fable.
+expected_outcome: "level lookup, model haiku, effort low"
 tags: [routing, cost]
 max_turns: 6
 allowed_tools: [Skill, Read, Glob, Grep]

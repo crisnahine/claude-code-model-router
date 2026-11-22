@@ -673,6 +673,26 @@ class Profile(unittest.TestCase):
         self.assertIn("scope", profile.profile_prompt("x " * 900)["signals"])
 
 
+class RoutingEvals(Sandbox):
+    """Each `claude plugin eval` case routes as its expected_outcome says, with no model call, so a
+    routing regression fails CI instead of waiting for a paid eval run."""
+
+    def test_each_eval_case_routes_as_expected(self):
+        cases = sorted((PLUGIN / "evals").glob("*/prompt.md"))
+        self.assertGreaterEqual(len(cases), 2)
+        config = cfg.load_config()
+        options = settings.resolve(config)
+        for path in cases:
+            name = path.parent.name
+            want = re.fullmatch(r"['\"]?level (\w+), model (\w+), effort (\w+)['\"]?",
+                                frontmatter(path).get("expected_outcome", ""))
+            self.assertTrue(want, f"{name}: expected_outcome must read 'level L, model M, effort E'")
+            brief = path.read_text(encoding="utf-8").split("\n---\n", 1)[1].strip()
+            got = report.explain(config, options, brief)
+            self.assertIn(f"Level: **{want[1]}**", got, name)
+            self.assertIn(f"Model: **{want[2]}**, effort: {want[3]}.", got, name)
+
+
 class Router(Sandbox):
     def setUp(self):
         super().setUp()
