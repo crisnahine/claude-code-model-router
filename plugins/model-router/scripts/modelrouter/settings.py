@@ -24,7 +24,7 @@ class Settings:
     pins: str = "respect"  # agent_pins: respect or override
     main_effort: bool = False
     update_check: bool = True
-    verify_gate: bool = True
+    verify_gate: bool = False
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
     force: bool = False  # CLAUDE_CODE_SUBAGENT_MODEL_FORCE
     subagent_effort: str | None = None  # CLAUDE_CODE_SUBAGENT_EFFORT
@@ -83,7 +83,7 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
         pins="override" if option("agent_pins") == "override" else "respect",
         main_effort=truthy(option("main_effort")),
         update_check=_on(option("update_check")),
-        verify_gate=_on(option("verify_gate")),
+        verify_gate=truthy(option("verify_gate")),
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),
         force=truthy(env("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")),
         subagent_effort=env("CLAUDE_CODE_SUBAGENT_EFFORT"),

@@ -637,7 +637,7 @@ class Options(Sandbox):
         os.environ.update(ANTHROPIC_API_KEY="sk-test", ANTHROPIC_BASE_URL="https://gateway.example")
         s = settings.resolve(cfg.load_config())
         self.assertEqual((s.subagent_model, s.force, s.cloud, s.cap, s.main_effort, s.verify_gate),
-                         ("opus", True, "vertex", None, False, True))
+                         ("opus", True, "vertex", None, False, False))
         self.assertEqual((s.api_key, s.base_url), ("sk-test", True))
         self.assertNotIn("sk-test", repr(s))
 
@@ -1780,6 +1780,7 @@ class Feedback(Sandbox):
         self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "haiku")
 
     def test_the_prompt_note_and_the_stop_gate_follow_a_raised_level(self):
+        self.options(verify_gate="true")  # off by default
         self.session_on("claude-sonnet-5-5")
         for _ in range(learn.VOTES_NEEDED):
             learn.decided(cfg.load_config(), source="caller", level="complex", pick="sonnet", runs_on="opus")
@@ -1965,7 +1966,33 @@ class Hooks(Sandbox):
         self.assertTrue(registry.healthy("opus"))
 
 
+class GatesDefault(Sandbox):
+    def test_the_checks_before_a_turn_ends_are_off_by_default(self):
+        self.assertFalse(settings.resolve().verify_gate)
+        self.session_on("claude-haiku-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
+        hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": "src/app.py"}})
+        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+        self.options(verify_gate="true")
+        self.assertIsNotNone(hooks.stop({"session_id": "s1"}))
+
+    def test_the_prompt_note_promises_a_check_only_when_the_gate_is_on(self):
+        self.session_on("claude-haiku-5-5")
+        note = lambda: self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))  # noqa: E731
+        self.assertIn("model-router:architect", note())
+        self.assertNotIn("before finishing", note())
+        self.options(verify_gate="true")
+        self.assertIn("you will be asked to before finishing", note())
+
+    def text(self, out):
+        return out["hookSpecificOutput"]["additionalContext"]
+
+
 class Gates(Sandbox):
+    def setUp(self):
+        super().setUp()
+        self.options(verify_gate="true")  # off by default
+
     def transcript(self, command: str, stamp: str = "2099-01-01T00:00:00Z") -> str:
         path = Path(self.tmp.name) / "t.jsonl"
         path.write_text(json.dumps({"timestamp": stamp, "message": {"content": [
@@ -2076,6 +2103,10 @@ class Gates(Sandbox):
 
 class SubagentChecks(Sandbox):
     """A subagent's commands are in its own transcript (SubagentStop's agent_transcript_path)."""
+
+    def setUp(self):
+        super().setUp()
+        self.options(verify_gate="true")  # off by default
 
     def transcript(self, name: str, command: str) -> str:
         path = Path(self.tmp.name) / name
