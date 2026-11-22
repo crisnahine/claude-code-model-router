@@ -1,6 +1,6 @@
 # Requirement traceability
 
-One row per requirement the project holds itself to, numbered by the section of the maintainer's project brief it comes from (Sections 2 to 14). Checked on 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `5049780`, on Claude Code 2.1.330. The CI evidence is the run on `8ec8eec`; nothing after it has run in CI yet.
+One row per requirement the project holds itself to, numbered by the section of the maintainer's project brief it comes from (Sections 2 to 14). Checked on 2026-11-22 against `v0.1.0` (`8ec8eec`) plus the unreleased commits after it, up to `76bddd9`, on Claude Code 2.1.330. The CI evidence is the run on `8ec8eec`; nothing after it has run in CI yet.
 
 Summary: 103 PASS, 51 PARTIAL, 2 FAIL, 1 BLOCKED, 157 requirements.
 
@@ -70,7 +70,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 
 | ID | Requirement | Implementation | Source | Verification | Evidence | Status |
 | :- | :- | :- | :- | :- | :- | :- |
-| S4.1 | Cost per solved task is the measure | `bench/analyze.py` reports cost per solved task, with failed runs counted against it | `bench/` | Pilot | [BENCHMARKS.md](BENCHMARKS.md): a 6-run pilot, $0.38; every row PARTIAL, too few runs | PARTIAL |
+| S4.1 | Cost per solved task is the measure | `bench/analyze.py` reports cost per solved task, with failed runs counted against it | `bench/` | Pilot | [BENCHMARKS.md](BENCHMARKS.md): a 12-run pilot, $0.85; every row PARTIAL, too few runs | PARTIAL |
 | S4.2 | Effort tuning before model switching | complex and hardest share Opus; a redo adds effort first | `config/models.json` levels, `scripts/modelrouter/learn.py` | Unit | `RepeatGuard.test_a_redo_held_on_the_same_model_by_the_cap_gets_more_effort`; `RepeatGuard.test_a_call_redone_after_its_result_runs_one_level_up` | PASS |
 | S4.3 | Cheap first, verify, escalate on a failed check | Ladder starts low; redo escalation; Stop gates | `scripts/modelrouter/ladder.py`, `learn.py`, `gates.py` | Unit | `Router.test_agents_without_a_model_get_the_one_their_subtask_needs`; `RepeatGuard` class; `Gates` class | PASS |
 | S4.4 | Prompt-cache awareness: one model for the main loop, no switch that re-reads the context uncached | Main loop gets effort only, skipped where it drops the cache | `hooks/router.ts`, `scripts/modelrouter/hooks.py` | Unit | `Mod.test_turn_effort_is_left_alone_where_an_effort_change_drops_the_cache`; the mod sets no main-loop model (inspection) | PASS |
@@ -83,8 +83,8 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S4.11 | Measure with `claude plugin eval`, the ledger, `/model-router:usage` and live sessions | Evals under `evals/`; their expected routes checked in the unit gate; benchmark harness | `evals/`, `bench/` | Unit, pilot | `claude plugin eval` not rerun since the evals were written; `RoutingEvals.test_each_eval_case_routes_as_expected`; the benchmark pilot ran live sessions | PARTIAL |
 | S4.12 | Measure cost per solved task, pass rate, tokens, accuracy per level, escalation rate, latency, cache hit rate | `bench/analyze.py` | `bench/` | Pilot | The pilot records pass rate, cost per solved task and tokens per run. No accuracy per level, escalation rate, latency or cache hit rate | PARTIAL |
 | S4.13 | Test small and large tasks, fan-outs, cold and warm caches, every priority | Six tasks in three classes, single-agent shape | `bench/tasks/`, `bench/configs.json` | Pilot | The pilot ran the lookup and bugfix classes. No fan-out, cache temperature or priority comparison | PARTIAL |
-| S4.14 | Publish reproducible results with version, models, settings, tasks, commands and live-run cost | [BENCHMARKS.md](BENCHMARKS.md) with raw data and commands | `docs/BENCHMARKS.md`, `bench/results/` | Pilot | Version, models, settings, tasks, commands and cost recorded for a 6-run pilot | PARTIAL |
-| S4.15 | Beat every baseline on cost per solved task at equal or higher pass rate | None shown | `docs/BENCHMARKS.md` | Pilot | One run per configuration ranks the router 2nd on lookup and 3rd on bugfix, inside the noise | PARTIAL |
+| S4.14 | Publish reproducible results with version, models, settings, tasks, commands and live-run cost | [BENCHMARKS.md](BENCHMARKS.md) with raw data and commands | `docs/BENCHMARKS.md`, `bench/results/` | Pilot | Version, models, settings, tasks, commands and cost recorded for a 12-run pilot | PARTIAL |
+| S4.15 | Beat every baseline on cost per solved task at equal or higher pass rate | None shown | `docs/BENCHMARKS.md` | Pilot | With 1 to 4 runs per configuration the router ranks 2nd on lookup and 3rd on bugfix, inside the noise | PARTIAL |
 
 ## Section 5: plugin engineering
 
@@ -138,7 +138,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 
 | ID | Requirement | Implementation | Source | Verification | Evidence | Status |
 | :- | :- | :- | :- | :- | :- | :- |
-| S9.1 | Gate: `python3 -m unittest discover -s tests` | Unit suite | `tests/` | Local, CI | Local on Python 3.9.6: 253 tests OK (231 in `test_model_router.py`, 19 in `test_bench.py`, 3 in `test_traceability.py`); CI main: 180 tests OK on each of 6 jobs | PASS |
+| S9.1 | Gate: `python3 -m unittest discover -s tests` | Unit suite | `tests/` | Local, CI | Local on Python 3.9.6: 256 tests OK (231 in `test_model_router.py`, 22 in `test_bench.py`, 3 in `test_traceability.py`); CI main: 180 tests OK on each of 6 jobs | PASS |
 | S9.2 | Gate: `node --experimental-strip-types --test "tests/mod/*.test.ts"` | Node suite | `tests/mod/router.test.ts` | Local, CI | Local Node 22.22.3: 17 of 17 pass; CI main `mod` job 12 of 12 | PASS |
 | S9.3 | Gate: `claude plugin validate --strict .` and `plugins/model-router` | Manifests | `.claude-plugin/`, `plugins/model-router/.claude-plugin/` | Local, CI | Both "Validation passed" on 2.1.330 locally and in CI main `validate` | PASS |
 | S9.4 | Gate: `claude plugin eval plugins/model-router --trust-plugin` | Two routing evals | `evals/` | n/a | Not rerun since the evals were written; a run spends money. Their expected routes are checked for free in the unit gate (S14.4) | PARTIAL |
@@ -161,7 +161,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S10.8 | Fail-open behaviour proven by tests | See S2.9, S6.2 | `hooks/router.ts`, `scripts/modelrouter/hooks.py` | Unit, Node | Same tests | PASS |
 | S10.9 | Automated tests on Linux, macOS and Windows, oldest and newest Python in CI | CI matrix | `.github/workflows/ci.yml` | CI | CI main: Python 3.9 and 3.13 on all three. The mod's Node tests ran on Linux only in 0.1.0; `ci.yml` now runs them on all three, not yet run in CI | PASS |
 | S10.10 | CI green on the release PR and on the merge commit in `main` before tagging | Release checklist | `RELEASING.md` | CI | PR run 45004814197 passed; main run 45004998622 passed at 08:56 UTC; `v0.1.0` points at `8ec8eec`, released 08:57 UTC | PASS |
-| S10.11 | Reproducible cost and quality results | Benchmark harness and pilot | `bench/`, `docs/BENCHMARKS.md` | Pilot | A 6-run pilot, every row PARTIAL. The full suite, about $19 at the pilot's mean, waits on the maintainer | PARTIAL |
+| S10.11 | Reproducible cost and quality results | Benchmark harness and pilot | `bench/`, `docs/BENCHMARKS.md` | Pilot | A 12-run pilot, every row PARTIAL. The full suite, about $21 at the pilot's mean, waits on the maintainer | PARTIAL |
 | S10.12 | A security assessment | `docs/SECURITY.md` | `docs/SECURITY.md` | n/a | In progress | PARTIAL |
 | S10.13 | Professional documentation and install steps, README at release polish with SVG diagrams | README with three SVG diagrams in "How it works" | `README.md`, `docs/assets/` | Unit, inspection | `ReadmeDiagrams` class (6 tests). The 0.1.0 changelog's Python claim still stands (S8.2) | PARTIAL |
 
@@ -176,11 +176,11 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S11.5 | Install and usage instructions | README "Install" | `README.md` | Inspection | Present | PASS |
 | S11.6 | Automated test results | `docs/TEST_RESULTS.md` | `docs/TEST_RESULTS.md` | Inspection | Present | PASS |
 | S11.7 | Security assessment | `docs/SECURITY.md` | `docs/SECURITY.md` | n/a | In progress | PARTIAL |
-| S11.8 | Reproducible cost and quality results with raw data | [BENCHMARKS.md](BENCHMARKS.md), raw data in `bench/results/` | `docs/BENCHMARKS.md`, `bench/results/` | Pilot | A 6-run pilot only | PARTIAL |
+| S11.8 | Reproducible cost and quality results with raw data | [BENCHMARKS.md](BENCHMARKS.md), raw data in `bench/results/` | `docs/BENCHMARKS.md`, `bench/results/` | Pilot | A 12-run pilot only | PARTIAL |
 | S11.9 | Hook latency and state-size measurements | None | n/a | n/a | Missing. In progress: per-hook timings and state size | FAIL |
 | S11.10 | Remaining defects, incomplete requirements and release readiness | `docs/RELEASE_READINESS.md` | `docs/RELEASE_READINESS.md` | Inspection | Present | PASS |
 | S11.11 | Future engineering roadmap | `docs/ROADMAP.md` | `docs/ROADMAP.md` | Inspection | Present | PASS |
-| S11.12 | Evidence-based comparison against the baselines | Pilot against `defaults` and `haiku` | `docs/BENCHMARKS.md` | Pilot | One run per configuration per class, inside the noise | PARTIAL |
+| S11.12 | Evidence-based comparison against the baselines | Pilot against `defaults` and `haiku` | `docs/BENCHMARKS.md` | Pilot | 1 to 4 runs per configuration per class, inside the noise | PARTIAL |
 | S11.13 | Release checklist and changelog | `RELEASING.md`, `CHANGELOG.md` | repo root | Inspection | Present | PASS |
 | S11.14 | An index of all delivery items in `docs/README.md` | Index | `docs/README.md` | Inspection | Present | PASS |
 
@@ -235,6 +235,6 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | ID | Requirement | Implementation | Source | Verification | Evidence | Status |
 | :- | :- | :- | :- | :- | :- | :- |
 | S14.1 | Baselines run: defaults, one model per agent at default and `high`, `opusplan` and the advisor | `bench/configs.json`: `defaults`, `haiku`, `sonnet`, `opus` and the router | `bench/` | Pilot | The pilot ran `defaults` and `haiku`. One model at `high`, `opusplan` and the advisor are not configured | PARTIAL |
-| S14.2 | A pinned suite: task classes, shapes, fixed repos and commits, pass checks, cold and warm cache, router overhead | Six pinned tasks in three classes, each with a pass check that fails as shipped and passes on a reference answer; the router's state saved and restored around each run | `bench/tasks/`, `bench/run.py`, `tests/test_bench.py` | Unit, pilot | `tests/test_bench.py` (19 tests). Single-agent shape only; cache temperature and router overhead not separated | PARTIAL |
+| S14.2 | A pinned suite: task classes, shapes, fixed repos and commits, pass checks, cold and warm cache, router overhead | Six pinned tasks in three classes, each with a pass check that fails as shipped and passes on a reference answer; the router's state saved and restored around each run | `bench/tasks/`, `bench/run.py`, `tests/test_bench.py` | Unit, pilot | `tests/test_bench.py` (22 tests). Single-agent shape only; cache temperature and router overhead not separated | PARTIAL |
 | S14.3 | Results per task class and configuration with pass rate, cost per solved task, 95% intervals and rank | `bench/analyze.py` | `docs/BENCHMARKS.md` | Pilot | Pass rate, cost per solved task, 95% bootstrap intervals and rank per class; too few runs to rank with confidence | PARTIAL |
 | S14.4 | The cheap routing evals run in CI and a regression blocks the change | Each eval case states its route in `expected_outcome`; `RoutingEvals` checks it in the unit gate on every CI cell | `evals/*/prompt.md`, `tests/test_model_router.py` | Unit | `RoutingEvals.test_each_eval_case_routes_as_expected`; a broken ladder entry or expectation fails `python3 -m unittest discover -s tests`. Not yet run in CI | PASS |
