@@ -2,8 +2,8 @@
 that means for the same call issued again. The only module that reads or writes those
 records.
 
-Per session, `pending` holds fallback rewrites waiting for their result and `done` holds
-finished runs. The current request's runs and its strongest spawn live in that request's
+Per session, `pending` holds fallback rewrites waiting for their result, `launched` holds
+background runs waiting for their agent to stop, and `done` holds finished runs. The current request's runs and its strongest spawn live in that request's
 `prompts` entry, so a new request starts them empty."""
 from __future__ import annotations
 
@@ -63,19 +63,42 @@ def routed(config: dict, session_id: str | None, key: str, model: str | None, *,
     return earlier
 
 
-def settled(session_id: str | None, tool_input: dict, finished: bool = False) -> None:
+def settled(session_id: str | None, tool_input: dict, finished: bool = False,
+            launched_as: str | None = None) -> None:
     """A result or an error came back, so the call's rewrite was accepted. A result also
-    marks the run finished, so the same call issued again is a redo."""
+    marks the run finished, so the same call issued again is a redo. A background launch
+    has no result yet: it waits under its agent's id until that agent stops."""
     key = identify(tool_input)[1]
     rewrite = store.load_entry("pending", session_id).get(key)
     if rewrite is not None:
         store.mutate_entry("pending", session_id, lambda pending: pending.pop(key, None))
     request = store.load_entry("prompts", session_id)
     ran = rewrite if isinstance(rewrite, dict) and rewrite.get("level") else _runs(request).get(key)
-    if finished and isinstance(ran, dict) and ran.get("level") in LEVELS:
-        run = {"level": ran["level"], "model": ran.get("model"), "effort": ran.get("effort"),
-               "prompt_id": request.get("prompt_id")}
+    if not isinstance(ran, dict) or ran.get("level") not in LEVELS:
+        return
+    run = {"level": ran["level"], "model": ran.get("model"), "effort": ran.get("effort"),
+           "prompt_id": request.get("prompt_id")}
+    if finished:
         store.mutate_entry("done", session_id, lambda done: _put(done, key, run))
+    elif launched_as:
+        store.mutate_entry("launched", session_id, lambda launched: _put(launched, launched_as, {**run, "key": key}))
+
+
+def stopped(session_id: str | None, agent_id: object, answered: bool) -> None:
+    """An agent stopped. A background launch waiting under its id is finished now, when it
+    stopped with an answer. Foreground agents finished at their result and aren't waiting."""
+    if not isinstance(agent_id, str) or agent_id not in store.load_entry("launched", session_id):
+        return
+    run: dict = {}
+
+    def take(launched: dict) -> None:
+        waiting = launched.pop(agent_id, None)
+        run.update(waiting if isinstance(waiting, dict) else {})
+
+    store.mutate_entry("launched", session_id, take)
+    if answered and run.get("level") in LEVELS and isinstance(run.get("key"), str):
+        finished = {k: run.get(k) for k in ("level", "model", "effort", "prompt_id")}
+        store.mutate_entry("done", session_id, lambda done: _put(done, run["key"], finished))
 
 
 def finished_run(session_id: str | None, key: str) -> dict | None:

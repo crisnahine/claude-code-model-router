@@ -1,7 +1,7 @@
 """Command line: hook commands read hook JSON on stdin; the rest serve skills and CI.
 
-  hooks      session-start, user-prompt, pre-agent, post-agent, agent-failed, post-edit,
-             stop, model-switch, refresh-cache
+  hooks      session-start, user-prompt, pre-agent, post-agent, agent-failed, agent-stopped,
+             post-edit, stop, model-switch, refresh-cache
   policy     the routing policy as it stands for this user and project
   models     what each registry model really runs as, and what is unavailable
              (--reset forgets learned availability and feedback)

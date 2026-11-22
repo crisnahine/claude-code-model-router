@@ -104,6 +104,16 @@ class Sandbox(unittest.TestCase):
         hooks.post_agent({**self.call(agent, prompt, **extra),
                           "tool_response": {"resolvedModel": ran_as, "status": "completed", "totalTokens": 1200}})
 
+    def launched(self, agent: str | None, prompt: str, ran_as: str, agent_id: str, **extra) -> None:
+        """The agent call returned at once: the agent runs on in the background."""
+        hooks.post_agent({**self.call(agent, prompt, **extra), "tool_response": {
+            "resolvedModel": ran_as, "status": "async_launched", "agentId": agent_id}})
+
+    def stopped(self, agent_id: str, answer: str | None = "src/a.py and src/b.py") -> None:
+        """A subagent finished, as SubagentStop reports it."""
+        hook_input = {"session_id": "s1", "agent_id": agent_id, "agent_type": "general-purpose"}
+        hooks.agent_stopped(hook_input if answer is None else {**hook_input, "last_assistant_message": answer})
+
     def ledger(self) -> list[dict]:
         return store.read_ledger()
 
@@ -698,13 +708,6 @@ class RepeatGuard(Sandbox):
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
         self.assertIsNotNone(self.pre("general-purpose", LOOKUP))
 
-    def test_a_background_launch_is_not_a_finished_run(self):
-        self.pre("general-purpose", LOOKUP, run_in_background=True)
-        hooks.post_agent({**self.call("general-purpose", LOOKUP, model="haiku", run_in_background=True),
-                          "tool_response": {"status": "async_launched", "resolvedModel": "claude-haiku-5-5"}})
-        again = self.decide("general-purpose", LOOKUP, run_in_background=True)
-        self.assertEqual((again["level"], again["escalated_from"]), ("lookup", None))
-
     def test_a_call_redone_after_its_result_runs_one_level_up(self):
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
@@ -749,6 +752,15 @@ class RepeatGuard(Sandbox):
         self.pre("general-purpose", LOOKUP)
         hooks.agent_failed({**self.call("general-purpose", LOOKUP, model="haiku"), "error": "timed out"})
         self.assertIsNotNone(self.pre("general-purpose", LOOKUP))
+
+    def test_a_background_launch_settles_the_call_but_is_not_its_result(self):
+        self.pre("general-purpose", LOOKUP)
+        self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1", model="haiku", effort="low")
+        again = self.decide("general-purpose", LOOKUP)  # the same brief, while the first still runs
+        self.assertEqual((again["action"], again["level"], again["escalated_from"]), ("rewrite", "lookup", None))
+        self.stopped("a1")
+        again = self.decide("general-purpose", LOOKUP)
+        self.assertEqual((again["level"], again["model"], again["escalated_from"]), ("standard", "sonnet", "lookup"))
 
     def test_claude_reissuing_the_rewritten_call_is_fine(self):
         self.pre("general-purpose", LOOKUP)
@@ -884,6 +896,31 @@ class Mod(Sandbox):
     def test_a_spawn_redone_after_its_result_runs_one_level_up(self):
         self.spawn("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
+        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "sonnet")
+
+    def test_copies_of_one_brief_launched_in_the_background_all_run_at_its_level(self):
+        for agent_id in ("a1", "a2", "a3"):
+            self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku", agent_id)
+            self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", agent_id)
+        self.assertEqual(learn.stats()["lookup"]["votes"], 0)
+
+    def test_a_background_spawn_is_redone_one_level_up_only_after_it_stops(self):
+        self.spawn("general-purpose", LOOKUP)
+        self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1")
+        self.stopped("a9")  # another agent, one this session never launched in the background
+        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku")
+        self.stopped("a1")
+        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "sonnet")
+        self.stopped("a1")  # a second stop for the same agent changes nothing
+        self.assertEqual(store.load_entry("launched", "s1").get("a1"), None)
+
+    def test_a_background_agent_that_stops_without_an_answer_is_not_a_result(self):
+        self.spawn("general-purpose", LOOKUP)
+        self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1")
+        self.stopped("a1", answer=" ")
+        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku")
+        self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a2")
+        self.stopped("a2", answer=None)  # a Claude Code that doesn't send the answer
         self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "sonnet")
 
     def test_turns_and_spawns_keep_the_mod_marked_after_a_clear(self):

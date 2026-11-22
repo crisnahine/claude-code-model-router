@@ -224,9 +224,13 @@ def post_agent(hook_input: dict) -> dict | None:
     response = response if isinstance(response, dict) else {}
     ran_as = response.get("resolvedModel")
     asked = _asked_for(config, hook_input)
+    # A background agent's call returns as soon as the agent has launched. Its result
+    # is back when the agent stops (agent_stopped), not here.
+    launched = response.get("status") == "async_launched"
+    agent_id = response.get("agentId")
     try:
-        # A background launch reports at once; only a returned result finishes the call.
-        calls.settled(hook_input.get("session_id"), tool_input, finished=response.get("status") != "async_launched")
+        calls.settled(hook_input.get("session_id"), tool_input, finished=not launched,
+                      launched_as=agent_id if launched and isinstance(agent_id, str) else None)
         if asked and registry.family(config, ran_as):
             registry.record_result(asked, ran_as, registry.family(config, ran_as))
     except OSError:
@@ -263,6 +267,15 @@ def agent_failed(hook_input: dict) -> dict | None:
         f"The '{asked}' model looks unavailable here. Re-issue this agent call with model: "
         f"\"{registry.clamp(config, asked, usable)}\"."
         + (" Model Router will route around it for now." if fails >= 2 else "")))
+
+
+def agent_stopped(hook_input: dict) -> dict | None:
+    """A subagent stopped. For one launched in the background, this is when its result
+    comes back, so its call counts as finished from here."""
+    message = hook_input.get("last_assistant_message")
+    calls.stopped(hook_input.get("session_id"), hook_input.get("agent_id"),
+                  answered=not (isinstance(message, str) and not message.strip()))
+    return None
 
 
 def post_edit(hook_input: dict) -> dict | None:
@@ -354,6 +367,7 @@ def mod_usage(hook_input: dict) -> dict | None:
 HANDLERS = {
     "mod-start": mod_start, "mod-spawn": mod_spawn, "mod-turn": mod_turn, "mod-usage": mod_usage,
     "session-start": session_start, "user-prompt": user_prompt, "pre-agent": pre_agent,
-    "post-agent": post_agent, "agent-failed": agent_failed, "post-edit": post_edit, "stop": stop,
+    "post-agent": post_agent, "agent-failed": agent_failed, "agent-stopped": agent_stopped,
+    "post-edit": post_edit, "stop": stop,
     "model-switch": model_switch, "refresh-cache": refresh_cache,
 }

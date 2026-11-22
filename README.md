@@ -79,7 +79,7 @@ The plugin never approves a tool call. Your permission rules and auto mode revie
 
 ### 4. Escalate and learn
 
-A call Claude re-issues after its result came back runs one level higher. That is the cheapest policy Anthropic measured for a high pass rate: start low and re-run what fails at a higher setting. That beat starting every task high on both cost and pass rate. Each redo also counts as a vote that the level was routed too low, and enough votes raise the level for good.
+A call Claude re-issues after its result came back runs one level higher. That is the cheapest policy Anthropic measured for a high pass rate: start low and re-run what fails at a higher setting. That beat starting every task high on both cost and pass rate. Each redo also counts as a vote that the level was routed too low, and enough votes raise the level for good. Copies of one brief started together are not redos, and a background agent's call counts as finished when the agent stops.
 
 The model each agent ran on is recorded. A model is routed around for a day, and then retried, after two calls on it fail with a model error, run as a different model, or are rejected by the `Agent` tool. If the trouble comes back, the wait grows to three days and then a week. `/model-router:models` shows all of this and can reset it.
 
@@ -179,7 +179,8 @@ plugins/model-router/
   config/models.json           the model registry, levels, prices and role agents
   hooks/router.ts              the mod: agent.spawn, turn.start, turn.step, turn.complete
   hooks/hooks.json             the mod, plus SessionStart, UserPromptSubmit, PreToolUse,
-                               PostToolUse, PostToolUseFailure, PostModelSwitch, Stop
+                               PostToolUse, PostToolUseFailure, PostModelSwitch,
+                               SubagentStop, Stop
   scripts/modelrouter/         the runtime: registry, profile, router, learn, gates, agents,
                                session, upstream, report, hooks, cli, store (standard library only)
   agents/                      the seven role agents
