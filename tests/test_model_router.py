@@ -793,6 +793,40 @@ class Profile(unittest.TestCase):
                       "Show the migration files. Do not touch the schema and update scripts."):
             self.assertEqual(self.level(brief), "lookup", brief)
 
+    def test_and_or_then_before_a_task_verb_ends_a_limit_without_an_article(self):
+        for brief in ("Do not touch tests and implement payment retries.",
+                      "Don't break the API and fix auth token refresh in the login service.",
+                      "Never log secrets and refactor credentials loading.",
+                      "Do not touch tests then implement the payment retry.",
+                      "Don't touch the UI and also fix the race condition in the payments worker.",
+                      "Never edit generated code and instead fix the auth bug in the source.",
+                      "Do not touch tests and just fix the auth bug.",
+                      "Do not touch tests and please fix the auth bug.",
+                      "Do not touch tests and debug why payments fail intermittently."):
+            self.assertEqual(self.level(brief), "complex", brief)
+        # A verb that is often a noun ends the limit only with an object after it.
+        for brief in ("List the CI jobs. Do not edit the Dockerfile and build scripts.",
+                      "Find the deploy script. Do not touch the production config and build scripts.",
+                      "Show the migration files. Do not touch the schema and update scripts."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+        # So does a task verb in a compound noun such as "debug logs" or "audit trails".
+        for brief in ("List the endpoints. Do not touch the auth module and debug logs.",
+                      "Find the config. Do not delete the settings and audit logs.",
+                      "Show the release notes. Do not edit the changelog and upgrade notes.",
+                      "Find the deploy job. Do not touch the database and migrate scripts.",
+                      "List the services. Do not change the payment code and fix scripts.",
+                      "Find the tests. Do not edit the auth fixtures and debug output.",
+                      "Explain the logger. Do not touch production and audit trails."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+
+    def test_joins_inside_a_limit_stay_fast(self):
+        started = time.monotonic()
+        self.level("do not touch" + " tests and fix" * 20_000)
+        self.level("do not add" + " and remove" * 20_000 + " files")
+        self.level("never x" + " and then just" * 20_000 + " fix it")
+        self.level("do not touch tests" + " " * 64_000 + "and fix it")
+        self.assertLess(time.monotonic() - started, 0.5)
+
     def test_a_limit_over_a_list_of_single_verbs_stays_a_limit(self):
         for brief in ("Find where the retry logic lives. Do not add, remove or rename files.",
                       "Find where the retry logic lives. Do not edit, delete or create any files.",

@@ -30,14 +30,25 @@ _CHANGE = rf"\b{_CHANGE_VERB}"
 # its clause, so "Without changing the API, fix the race" and "Do not stop until X is fixed"
 # keep their task. A limit that starts with a verb runs past a comma only into a list of short
 # verb items closed by "or"/"nor" ("do not add, remove, or rename files"); "and" doesn't close one.
-# "Make sure" isn't here: it introduces the task, so _CHANGE skips it instead. "And" ends the
-# limit only before a change or reasoning verb with an object: "do not touch tests and implement
-# the retry" has a task, "do not add and remove files" or "the config and build scripts" doesn't.
+# "Make sure" isn't here: it introduces the task, so _CHANGE skips it instead. "And" or "then"
+# ends the limit before a task verb ("do not touch tests and just fix the auth bug"), unless the
+# word before it is a limit verb too ("do not add and remove files" is a list). A verb that is
+# often a noun ends it only with an object after it, so "the config and build scripts" doesn't,
+# and no verb ends it as the first half of a compound noun such as "debug logs" or "audit trails".
 _REASONING_WORDS = (r"review|audit|analy[sz]e|debug|diagnos\w*|plan|design|prove|verify the logic|"
                     r"investigat\w*|troubleshoot\w*|figure out|root.?caus\w*|reproduc\w*|bisect")
 _OBJECT = r"\s+(?:the|a|an|it|this|that|these|those|its|their|our|my|your|all|each|every)\b"
-_CLAUSE_WORD = (rf"\b(?:until|unless|before|after|while|once|but|because)\b"
-                rf"|\band\s+(?:{_CHANGE_VERB}|(?:{_REASONING_WORDS})\b)(?={_OBJECT})")
+_TASK_VERB = (r"(?:implement|fix|refactor|rename|migrate|optimi[sz]e|rewrite|convert|upgrade|redesign|debug|"
+              r"diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|audit|prove|"
+              r"verify the logic|figure out)\b(?!-)")
+_NOUN_VERB = (r"(?:build|update|change|design|plan|review|add|write|create|delete|remove|replace|make(?! sure)|"
+              r"root.?caus\w*)\b(?!-)")
+_COMPOUND = (r"\s+(?:logs?|output|trails?|notes?|scripts?|mode|builds?|flags?|messages?|statements?|info|"
+             r"records?|entries|events?|paths?|guides?|reports?|tools?|jobs?)\b")
+_LIMIT_WORD = rf"(?:{_CHANGE_VERB}|(?:edit|modify|move|touch|{_REASONING_WORDS})\b)"
+_JOIN = (rf"\b(?!{_LIMIT_WORD})[\w'-]+\s+(?:and|then)\s+(?:(?:also|then|instead|please|just)\s+){{0,2}}"
+         rf"(?:{_TASK_VERB}|{_NOUN_VERB}(?={_OBJECT}))(?!{_COMPOUND})")
+_CLAUSE_WORD = rf"\b(?:until|unless|before|after|while|once|but|because)\b|{_JOIN}"
 _CLAUSE = rf"(?:(?!{_CLAUSE_WORD})[^.,;:!?\n])*"
 _LIST_VERB = rf"\b(?:{_CHANGE_VERB}|(?:edit|modify|move|touch)\b(?!-))"
 _ITEM = rf"{_LIST_VERB}(?:\s+[\w'-]+){{0,3}}?"
