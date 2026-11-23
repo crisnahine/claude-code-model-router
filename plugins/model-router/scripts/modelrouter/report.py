@@ -2,7 +2,7 @@
 fall back to what the last SessionStart recorded."""
 from __future__ import annotations
 
-from . import agents, health, ladder, learn, registry, store, upstream
+from . import agents, allowlist, health, ladder, learn, registry, store, upstream
 from . import config as cfg
 from .profile import profile_call, profile_prompt
 from .settings import Settings
@@ -13,7 +13,7 @@ MODELS_SCHEMA = "model-router.models/1"
 
 
 def _usable(config: dict, settings: Settings) -> list[str]:
-    return registry.available(config, cfg.project_dir(), settings.cap)
+    return registry.available(config, settings.cap, allowed=allowlist.read(None, cfg.project_dir()))
 
 
 def policy(config: dict, settings: Settings) -> str:
@@ -47,7 +47,7 @@ def models_data(config: dict, settings: Settings) -> dict:
     table = health.load()
     limit = settings.cap
     usable = _usable(config, settings)
-    allowed = registry.permitted(config, cfg.project_dir())
+    allowed = allowlist.read(None, cfg.project_dir()).permitted(config)
     rows = []
     for name in registry.by_strength(config):
         if limit and registry.strength(config, name) > registry.strength(config, limit):

@@ -83,8 +83,11 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
     pick, level_effort = ladder.pick(config, level, settings.priority, usable, facts.raises)
     out.update(level=level, signals=profile["signals"], pick=pick)
 
-    if settings.mode != "auto" or not usable:
+    if settings.mode != "auto":
         out["reason"] = f"routing is {settings.mode}"
+        return out
+    if not usable:
+        out["reason"] = "availableModels and deniedModels leave no registry model open here, so the call is left as it is"
         return out
     if rule.get("route") is False:
         out["reason"] = "a rule in model-router.json leaves this agent alone"

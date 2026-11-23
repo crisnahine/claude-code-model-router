@@ -40,7 +40,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Routing mode**: `auto` sets each call's model and effort, `advise` only tells Claude the estimate, and `off` does nothing (`routing_mode`). When the option and the override files disagree, the most cautious one wins.
 
-**Allowlist**: the `availableModels` and `deniedModels` settings, read the way Claude Code reads them, managed drop-in files included. Models they block are not picked unless nothing else would be left.
+**Allowlist** (`allowlist.py`): the `availableModels` and `deniedModels` settings, read the way Claude Code reads them, from the layers the mod sends or from the settings files. Models they block are not picked. When they leave no registry model open, the call is left as it is.
 
 **Model health** (`health.py`): what the router has seen of each model here. Two calls that fail with a model error, run as a different model or are rejected route the model around for a day, then three days, then a week, after which it is tried again. A call that runs as asked clears the record.
 

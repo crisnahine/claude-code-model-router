@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import os
 import re
-import sys
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import config as cfg
-from . import health, store
+from . import health
+
+if TYPE_CHECKING:
+    from . import allowlist
 
 
 def models(config: dict) -> dict[str, dict]:
@@ -51,79 +52,8 @@ def family(config: dict, model: Any) -> str | None:
     return None
 
 
-def _settings_files(project: Path) -> list[Path]:
-    return [store.claude_home() / "settings.json", project / ".claude" / "settings.json",
-            project / ".claude" / "settings.local.json"]
-
-
-def _managed_file() -> Path:
-    if sys.platform == "darwin":
-        return Path("/Library/Application Support/ClaudeCode/managed-settings.json")
-    if os.name == "nt":
-        return Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "ClaudeCode" / "managed-settings.json"
-    return Path("/etc/claude-code/managed-settings.json")
-
-
-def _managed_settings() -> dict:
-    """The file-based managed policy's model lists: managed-settings.json, then each
-    non-hidden managed-settings.d/*.json in name order, with lists combined."""
-    main = _managed_file()
-    try:
-        drop_ins = sorted(p for p in (main.parent / "managed-settings.d").iterdir()
-                          if p.suffix == ".json" and not p.name.startswith("."))
-    except OSError:
-        drop_ins = []
-    merged: dict = {}
-    for path in [main, *drop_ins]:
-        data = store.load_dict(path)
-        for key in ("availableModels", "deniedModels"):
-            if isinstance(data.get(key), list):
-                merged[key] = merged.get(key, []) + [e for e in data[key] if e not in merged.get(key, [])]
-        if data.get("availableModelsMatch") == "exact":
-            merged["availableModelsMatch"] = "exact"
-        if isinstance(data.get("modelOverrides"), dict) and data["modelOverrides"]:
-            merged["modelOverrides"] = True
-    return merged
-
-
-def _model_lists(project: Path) -> tuple[list | None, list | None, dict]:
-    """availableModels as Claude Code applies it (a managed list alone, else the user,
-    project and local lists concatenated), the managed deniedModels, and the managed rest."""
-    managed = _managed_settings()
-    allow = managed.get("availableModels")
-    if not isinstance(allow, list):
-        lists = [store.load_dict(path).get("availableModels") for path in _settings_files(project)]
-        lists = [a for a in lists if isinstance(a, list)]
-        allow = sum(lists, []) if lists else None
-    deny = managed.get("deniedModels")
-    return allow, deny if isinstance(deny, list) else None, managed
-
-
-def permitted(config: dict, project: Path) -> set[str]:
-    """Registry models that the availableModels and deniedModels settings leave open, read
-    the way Claude Code reads them: a managed allowlist applies alone, otherwise the user,
-    project and local lists are concatenated; deniedModels counts only in managed settings.
-    An allow entry matches its family, so claude-opus-4-6 permits opus. A deny entry blocks a
-    family only when it names the family: Claude Code moves the alias to the newest version
-    still permitted, so a denied version leaves the alias usable."""
-    names = set(models(config))
-
-    def matches(entries: list) -> set[str]:
-        found = {family(config, e) for e in entries}
-        return {n for n in names if n in found}
-
-    allow, deny, _ = _model_lists(project)
-    if allow is not None:
-        names = matches(allow)
-    if deny is not None:
-        aliases = config.get("aliases") or {}
-        names -= {aliases.get(e.lower(), e.lower()) for e in deny
-                  if isinstance(e, str) and e.lower() not in ("best", "opusplan", "default")}
-    return names
-
-
-def newest_id(config: dict, name: str | None, provider: str | None, project: Path,
-              table: health.Health | None = None) -> str | None:
+def newest_id(config: dict, name: str | None, provider: str | None, allowed: allowlist.Allowlist,
+              table: health.Health) -> str | None:
     """The newest full ID of `name`'s family, where `provider`'s alias for it resolves to an
     older model, or None to send the alias. Never past the user's own choices: an
     ANTHROPIC_DEFAULT_<FAMILY>_MODEL pin, modelOverrides, or availableModels and deniedModels
@@ -133,34 +63,23 @@ def newest_id(config: dict, name: str | None, provider: str | None, project: Pat
     if (not isinstance(model_id, str) or name not in ((config.get("older_aliases") or {}).get(provider or "") or ())
             or os.environ.get(f"ANTHROPIC_DEFAULT_{str(name).upper()}_MODEL")):
         return None
-    allow, deny, managed = _model_lists(project)
-    exact = managed.get("availableModelsMatch") == "exact"
-
-    def names(entries: list, prefix: bool) -> bool:
-        return any(isinstance(e, str) and (e.lower() in (name, model_id) or prefix and model_id.startswith(e.lower() + "-"))
-                   for e in entries)
-
-    if allow is not None and not names(allow, not exact) or deny is not None and names(deny, True):
-        return None
-    overrides = [store.load_dict(path).get("modelOverrides") for path in _settings_files(project)]
-    if managed.get("modelOverrides") or any(isinstance(o, dict) and o for o in overrides):
-        return None
-    return model_id if (table or health.load()).healthy(model_id) else None
+    return model_id if allowed.permits_id(name, model_id) and table.healthy(model_id) else None
 
 
-def available(config: dict, project: Path | None = None, cap: str | None = None, *,
+def available(config: dict, cap: str | None = None, *, allowed: allowlist.Allowlist | None = None,
               table: health.Health | None = None) -> list[str]:
-    """Usable models, weakest first: inside the cap, permitted by settings, and healthy.
-    The settings and health filters are dropped rather than leave nothing to route to."""
+    """Usable models, weakest first: inside the cap, permitted by `allowed` (none: no
+    allowlist filter), and healthy. The health filter is dropped rather than leave nothing
+    to route to; the allowlist's is not."""
     names = by_strength(config)
     if cap:
         # Under a cap, only models whose strength the user vouches for count: a model a
         # repository added carries the repository's own claim about its rank.
         trusted = cfg.trusted_models(config) or names
         names = [n for n in names if n in trusted and strength(config, n) <= strength(config, cap)]
-    if project is not None:
-        allowed = permitted(config, project)
-        names = [n for n in names if n in allowed] or names
+    if allowed is not None:
+        permitted = allowed.permitted(config)
+        names = [n for n in names if n in permitted]
     table = table or health.load()
     return [n for n in names if table.healthy(n)] or names
 

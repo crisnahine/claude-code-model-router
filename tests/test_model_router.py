@@ -26,7 +26,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ERRORS = json.loads((FIXTURES / "model-errors.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, calls, cli, gates, health, hooks, learn, profile, registry, report, router, session, settings, spawn, store, upstream  # noqa: E402
+from modelrouter import agents, allowlist, calls, cli, gates, health, hooks, learn, profile, registry, report, router, session, settings, spawn, store, upstream  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 
 LOOKUP = "list the files under src"
@@ -66,17 +66,12 @@ class Sandbox(unittest.TestCase):
         for name in list(os.environ):
             if name.startswith(("CLAUDE_PLUGIN_OPTION_", "CLAUDE_CODE_SUBAGENT_", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_USE_", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "ANTHROPIC_")):
                 del os.environ[name]
-        self.no_managed = mock.patch.object(
-            registry, "_settings_files",
-            lambda project: [self.home / "settings.json", project / ".claude" / "settings.json"])
-        self.no_managed.start()
         self.managed = self.home / "managed-settings.json"
-        self.managed_file = mock.patch.object(registry, "_managed_file", lambda: self.managed)
-        self.managed_file.start()
+        self.managed_root = mock.patch.object(allowlist, "MANAGED_ROOT", self.home)
+        self.managed_root.start()
 
     def tearDown(self):
-        self.managed_file.stop()
-        self.no_managed.stop()
+        self.managed_root.stop()
         self.patch.stop()
         self.tmp.cleanup()
 
@@ -562,66 +557,6 @@ class Registry(Sandbox):
         # Nothing at or below it is usable: the weakest usable is the least bad.
         self.assertEqual(registry.clamp(self.config, "haiku", ["sonnet", "opus"]), "sonnet")
 
-    def test_settings_allowlist_is_discovered(self):
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["sonnet", "claude-haiku-5-5"]}))
-        self.assertEqual(registry.available(self.config, self.project), ["haiku", "sonnet"])
-        self.managed.write_text(json.dumps({"deniedModels": ["haiku"]}))
-        self.assertEqual(registry.available(self.config, self.project), ["sonnet"])
-
-    def test_allowlists_from_user_and_project_settings_are_concatenated(self):
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["opus"]}))
-        (self.project / ".claude").mkdir()
-        (self.project / ".claude" / "settings.json").write_text(json.dumps({"availableModels": ["claude-sonnet-5"]}))
-        self.assertEqual(registry.available(self.config, self.project), ["sonnet", "opus"])
-
-    def test_a_managed_allowlist_applies_alone(self):
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["opus"]}))
-        self.managed.write_text(json.dumps({"availableModels": ["sonnet"]}))
-        self.assertEqual(registry.available(self.config, self.project), ["sonnet"])
-
-    def test_managed_drop_in_files_merge_with_the_managed_file(self):
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
-        drop_ins = self.home / "managed-settings.d"
-        drop_ins.mkdir()
-        (drop_ins / "20-models.json").write_text(json.dumps({"availableModels": ["sonnet", "opus"],
-                                                              "deniedModels": ["opus"]}))
-        (drop_ins / ".30-hidden.json").write_text(json.dumps({"availableModels": ["fable"]}))
-        (drop_ins / "40-notes.txt").write_text(json.dumps({"availableModels": ["fable"]}))
-        self.assertEqual(registry.permitted(self.config, self.project), {"sonnet"})
-        self.managed.write_text(json.dumps({"availableModels": ["fable"]}))
-        (drop_ins / "10-more.json").write_text(json.dumps({"availableModels": ["sonnet"]}))
-        self.assertEqual(registry.permitted(self.config, self.project), {"sonnet", "fable"})
-        for path in (self.managed, drop_ins / "10-more.json", drop_ins / "20-models.json"):
-            path.unlink()
-        (drop_ins / "50-empty.json").write_text(json.dumps({"availableModels": []}))
-        self.assertEqual(registry.permitted(self.config, self.project), set())  # an empty drop-in list still applies alone
-
-    def test_an_empty_managed_allowlist_permits_nothing(self):
-        self.managed.write_text(json.dumps({"availableModels": []}))
-        self.assertEqual(registry.permitted(self.config, self.project), set())
-
-    def test_denied_models_block_a_family_only_when_they_name_it(self):
-        self.managed.write_text(json.dumps({"deniedModels": ["Opus"]}))
-        self.assertEqual(registry.available(self.config, self.project), ["haiku", "sonnet", "fable"])
-        # A denied version leaves the alias on the newest permitted one; best, opusplan and default are ignored.
-        self.managed.write_text(json.dumps({"deniedModels": ["claude-opus-5-5", "sonnet[1m]", "best", "opusplan", "default"]}))
-        self.assertEqual(len(registry.available(self.config, self.project)), 4)
-
-    def test_settings_entries_that_are_not_strings_match_nothing(self):
-        self.managed.write_text(json.dumps({"availableModels": ["sonnet", {"id": "claude-opus-5-5"}],
-                                            "deniedModels": [{"id": "sonnet"}]}))
-        self.assertEqual(registry.permitted(self.config, self.project), {"sonnet"})
-
-    def test_denied_models_outside_managed_settings_are_ignored(self):
-        (self.home / "settings.json").write_text(json.dumps({"deniedModels": ["opus"]}))
-        (self.project / ".claude").mkdir()
-        (self.project / ".claude" / "settings.json").write_text(json.dumps({"deniedModels": ["haiku"]}))
-        self.assertEqual(registry.available(self.config, self.project), ["haiku", "sonnet", "opus", "fable"])
-
-    def test_an_allowlist_that_excludes_everything_is_ignored(self):
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["some-other-model"]}))
-        self.assertEqual(len(registry.available(self.config, self.project)), 4)
-
     def test_project_can_add_a_model_but_not_rerank_or_slip_under_the_cap(self):
         self.override({"models": {"saga": {"strength": 0.5, "cost": 9}, "fable": {"strength": 0}}})
         config = cfg.load_config()
@@ -670,6 +605,136 @@ class Registry(Sandbox):
         config = cfg.load_config()
         self.assertEqual(registry.family(config, "claude-opus-5-5"), "opus")
         self.assertEqual([m for m in ("claude", "opus-5", "saga") if m in config["models"]], ["claude", "saga"])
+
+
+class Allowlist(Sandbox):
+    """availableModels and deniedModels, from the settings layers the mod sends or the files."""
+
+    def setUp(self):
+        super().setUp()
+        self.config = cfg.load_config()
+
+    def permitted(self, **layers):
+        return allowlist.from_layers(layers).permitted(self.config)
+
+    def test_a_managed_list_applies_alone_else_the_other_sources_are_concatenated(self):
+        self.assertEqual(self.permitted(user={"availableModels": ["opus"]}, local={"availableModels": ["haiku"]},
+                                        flag={"availableModels": ["claude-sonnet-5"]}), {"haiku", "sonnet", "opus"})
+        self.assertEqual(self.permitted(policy={"availableModels": ["sonnet"]}, user={"availableModels": ["opus"]}),
+                         {"sonnet"})
+        self.assertEqual(self.permitted(policy={"availableModels": []}), set())
+
+    def test_denied_models_count_only_in_policy_and_block_a_family_only_by_name(self):
+        self.assertEqual(self.permitted(policy={"deniedModels": ["Opus"]}), {"haiku", "sonnet", "fable"})
+        self.assertEqual(len(self.permitted(policy={"deniedModels": ["claude-opus-5-5", "sonnet[1m]", "best",
+                                                                     "opusplan", "default"]})), 4)
+        self.assertEqual(len(self.permitted(user={"deniedModels": ["opus"]}, project={"deniedModels": ["haiku"]})), 4)
+
+    def test_entries_that_are_not_strings_match_nothing(self):
+        self.assertEqual(self.permitted(policy={"availableModels": ["sonnet", {"id": "claude-opus-5-5"}],
+                                                "deniedModels": [{"id": "sonnet"}]}), {"sonnet"})
+
+    def test_junk_engine_layers_count_as_unset(self):
+        sent = {"policy": {"availableModels": "opus", "deniedModels": [1, None]}, "user": "x", "bogus": {"a": 1}}
+        self.assertEqual(allowlist.read("s1", self.project, sent).permitted(self.config), set(registry.models(self.config)))
+        self.assertIsNone(allowlist.remember("s1", "not an object"))
+
+    def test_only_the_four_keys_are_stored(self):
+        hooks.mod_start({"session_id": "s1", "settings": {"policy": {"availableModels": ["opus"], "env": {"TOKEN": "x"}}}})
+        self.assertNotIn("TOKEN", (self.data / "allowlist.json").read_text(encoding="utf-8"))
+
+    def test_managed_drop_ins_merge_in_name_order(self):
+        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
+        drop_ins = self.home / "managed-settings.d"
+        drop_ins.mkdir()
+        (drop_ins / "20-models.json").write_text(json.dumps({"availableModels": ["sonnet", "opus"],
+                                                              "deniedModels": ["opus"]}))
+        (drop_ins / ".30-hidden.json").write_text(json.dumps({"availableModels": ["fable"]}))
+        (drop_ins / "40-notes.txt").write_text(json.dumps({"availableModels": ["fable"]}))
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), {"sonnet"})
+        self.managed.write_text(json.dumps({"availableModels": ["fable"]}))
+        (drop_ins / "10-more.json").write_text(json.dumps({"availableModels": ["sonnet"]}))
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), {"sonnet", "fable"})
+        for path in (self.managed, drop_ins / "10-more.json", drop_ins / "20-models.json"):
+            path.unlink()
+        (drop_ins / "50-empty.json").write_text(json.dumps({"availableModels": []}))
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
+        (drop_ins / "60-a.json").write_text(json.dumps({"availableModelsMatch": "exact"}))
+        self.assertTrue(allowlist.read(None, self.project).exact)
+        (drop_ins / "70-b.json").write_text(json.dumps({"availableModelsMatch": "prefix"}))
+        self.assertFalse(allowlist.read(None, self.project).exact)
+
+    def test_the_local_settings_file_counts(self):
+        (self.project / ".claude").mkdir()
+        (self.project / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["haiku"]}))
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), {"haiku"})
+
+    @unittest.skipIf(os.name == "nt", "on Windows the local file stays beside settings.json")
+    def test_the_local_file_is_read_at_the_repository_root(self):
+        (self.project / ".git").mkdir()
+        sub = self.project / "pkg" / ".claude"
+        sub.mkdir(parents=True)
+        (self.project / ".claude").mkdir()
+        (self.project / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["opus"]}))
+        (self.project / ".claude" / "settings.json").write_text(json.dumps({"availableModels": ["fable"]}))
+        (sub / "settings.local.json").write_text(json.dumps({"availableModels": ["haiku"]}))  # the root's wins
+        (sub / "settings.json").write_text(json.dumps({"availableModels": ["sonnet"]}))  # read where the session is
+        self.assertEqual(allowlist.read(None, self.project / "pkg").permitted(self.config), {"sonnet", "opus"})
+
+    @unittest.skipIf(os.name == "nt", "on Windows the local file stays beside settings.json")
+    def test_a_worktree_reads_the_local_file_at_the_main_checkout(self):
+        (self.project / ".git" / "worktrees" / "w").mkdir(parents=True)
+        (self.project / ".git" / "worktrees" / "w" / "commondir").write_text("../..\n")
+        tree = Path(self.tmp.name) / "w"
+        tree.mkdir()
+        (tree / ".git").write_text(f"gitdir: {self.project / '.git' / 'worktrees' / 'w'}\n")
+        (self.project / ".claude").mkdir()
+        (self.project / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["opus"]}))
+        self.assertEqual(allowlist.read(None, tree).permitted(self.config), {"opus"})
+
+    @unittest.skipIf(os.name == "nt", "on Windows the local file stays beside settings.json")
+    def test_the_local_file_stays_beside_settings_json_when_the_root_cannot_be_trusted(self):
+        (self.project / ".git").mkdir()
+        (self.project / ".claude").mkdir()
+        (self.project / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["opus"]}))
+        sub = self.project / "pkg"
+        (sub / ".claude").mkdir(parents=True)
+        (sub / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["haiku"]}))
+        self.assertEqual(allowlist.read(None, sub).permitted(self.config), {"opus"})
+        with mock.patch.object(os, "getuid", return_value=os.getuid() + 1):
+            self.assertEqual(allowlist.read(None, sub).permitted(self.config), {"haiku"})  # not owned by this user
+        with mock.patch.object(Path, "home", return_value=self.project):
+            self.assertEqual(allowlist.read(None, sub).permitted(self.config), {"haiku"})  # a root that is the home folder
+
+    def test_the_windows_managed_folder_ignores_ProgramFiles(self):
+        with mock.patch.dict(os.environ, {"ProgramFiles": r"D:\Planted"}), mock.patch.object(allowlist, "MANAGED_ROOT", None):
+            self.assertEqual(str(allowlist.managed_root("win32")), r"C:\Program Files\ClaudeCode")
+            self.assertEqual(str(allowlist.managed_root("darwin")), "/Library/Application Support/ClaudeCode")
+            self.assertEqual(str(allowlist.managed_root("linux")), "/etc/claude-code")
+
+    def test_engine_layers_win_over_files_for_the_whole_session(self):
+        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
+        hooks.mod_start({"session_id": "s1", "settings": {"policy": {"availableModels": ["sonnet"]}}})
+        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet"})
+        self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "sonnet")  # a later hook of the session
+
+    def test_a_failed_engine_read_falls_back_to_files(self):
+        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
+        hooks.mod_start({"session_id": "s1"})
+        self.assertEqual(allowlist.read("s1", self.project).source, "files")
+        hooks.mod_start({"session_id": "s1", "settings": {"policy": {"availableModels": ["opus"]}}})
+        hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                         "tool_input": {"prompt": LOOKUP}})  # this read failed: the latest set stands
+        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"opus"})
+
+    def test_nothing_left_leaves_the_call_as_it_is(self):
+        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["some-other-model"]}))
+        self.assertEqual(registry.available(self.config, allowed=allowlist.read(None, self.project)), [])
+        self.session_on("claude-opus-5-5")
+        self.assertIsNone(self.pre("general-purpose", LOOKUP))
+        row = self.ledger()[-1]
+        self.assertEqual((row["action"], row["model"]), ("keep", "opus"))
+        self.assertIn("availableModels", row["reason"])
 
 
 class Options(Sandbox):

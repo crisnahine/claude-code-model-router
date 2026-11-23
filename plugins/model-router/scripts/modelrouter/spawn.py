@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from . import agents, calls, gates, learn, registry, router, session, settings, store
+from . import agents, allowlist, calls, gates, learn, registry, router, session, settings, store
 from . import config as cfg
 
 # Adjusts a decision before it is logged and recorded: (decision, call key, config, settings).
@@ -33,10 +33,11 @@ def facts(hook_input: dict, config: dict, options: settings.Settings,
                                                        hook_input.get("transcript_path")))
     # A hand-off brief often reads simpler than the request it serves, so the strong role
     # agents start no lower than the request's level; a redo still climbs from there.
+    allowed = allowlist.read(hook_input.get("session_id"), project, hook_input.get("settings"))
     strong = agent in (f"{cfg.PLUGIN_NAME}:architect", f"{cfg.PLUGIN_NAME}:deep-solver")
     request = store.load_entry("prompts", hook_input.get("session_id")) if strong else {}
     floor = None if request.get("floor_off") else request.get("level")
-    return router.Facts(agent=agent, tool_input=tool_input, usable=registry.available(config, project, options.cap),
+    return router.Facts(agent=agent, tool_input=tool_input, usable=registry.available(config, options.cap, allowed=allowed),
                         definition=definition, parent=parent,
                         earlier=calls.finished_run(hook_input.get("session_id"), key), raises=learn.raises(),
                         floor=floor)

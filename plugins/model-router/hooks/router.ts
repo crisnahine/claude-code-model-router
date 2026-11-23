@@ -1,4 +1,4 @@
-import type { EngineInterface, ModelEffort, PluginOptions, Register, TurnUsage } from 'claude-code'
+import type { EngineInterface, ModelEffort, PluginOptions, Register, SettingsSource, TurnUsage } from 'claude-code'
 
 // The engine's own events, forwarded to the Python runtime the settings hooks use, so
 // one router decides everything. agent.spawn sees every subagent, teammate and workflow
@@ -6,6 +6,8 @@ import type { EngineInterface, ModelEffort, PluginOptions, Register, TurnUsage }
 
 const EFFORTS: readonly ModelEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const KEPT = 500
+const SOURCES: readonly SettingsSource[] = ['policy', 'user', 'project', 'local', 'flag']
+const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides']
 
 type Pick = { model?: string; effort?: ModelEffort } | null
 
@@ -46,6 +48,19 @@ async function hasFirstPartyCredential($: EngineInterface): Promise<boolean | un
   return surfaces && !surfaces.includes('desktop') ? false : undefined
 }
 
+// Only these keys cross to the runtime. One failed read sends no layers, so the runtime reads the files whole.
+async function modelSettings($: EngineInterface): Promise<Record<string, Record<string, unknown>> | undefined> {
+  try {
+    const layers = await Promise.all(SOURCES.map(async source => {
+      const read = (await $.settings.read({ source })) as Record<string, unknown>
+      return [source, Object.fromEntries(KEYS.filter(key => key in read).map(key => [key, read[key]]))] as const
+    }))
+    return Object.fromEntries(layers)
+  } catch {
+    return undefined
+  }
+}
+
 function effortRank(effort: ModelEffort | undefined): number {
   return effort === undefined ? -1 : EFFORTS.indexOf(effort)
 }
@@ -73,14 +88,17 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await ask($, opts, 'mod-start', {})
+    const layers = await modelSettings($)
+    await ask($, opts, 'mod-start', { ...(layers ? { settings: layers } : {}) })
     return started
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     if (e.fork || e.resume) return next(e)
     const effort = callerEffort.get(e.tool_use_id)
+    const layers = await modelSettings($)
     const pick = await ask($, opts, 'mod-spawn', {
+      ...(layers ? { settings: layers } : {}),
       cwd: e.cwd,
       parent_agent_id: e.parentAgentId,
       parent_model: e.parentModel,

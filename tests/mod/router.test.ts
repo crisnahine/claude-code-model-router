@@ -10,7 +10,7 @@ type Call = { command: string; argv: readonly string[]; stdin: any; env: Record<
 
 const same = <T>(e: T): T => e
 
-function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}) {
+function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}, settings: Record<string, object | Error> = {}) {
   const hooks: Record<string, Hook> = {}
   const matchers: Record<string, unknown> = {}
   const catches: Record<string, Hook> = {}
@@ -22,6 +22,13 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}) 
   }
   const $ = {
     plugin: { root: '/plugin' },
+    settings: {
+      read: async ({ source }: { source: string }) => {
+        const v = settings[source]
+        if (v instanceof Error) throw v
+        return v ?? {}
+      },
+    },
     session: {
       model: async () => 'claude-opus-5-5',
       authorize: async (): Promise<{ handle: string; kind: string } | null> => ({ handle: 'h1', kind: 'bearer' }),
@@ -81,6 +88,26 @@ test('a spawn passes the pick model to next', async () => {
   await mod.spawn(spawnEvent(), (e: any) => { seen = e; return { model: e.model, agentId: 'a1' } })
   assert.equal(seen.model, 'haiku')
   assert.deepEqual(mod.calls.map(c => c.argv), [['sh', '/plugin/scripts/model-router.sh', 'mod-spawn']])
+})
+
+test('mod-start and mod-spawn carry the four allowlist keys of each settings source', async () => {
+  const mod = load({ 'mod-spawn': PICK }, {}, { policy: { availableModels: ['opus'], env: { TOKEN: 'x' }, permissions: {} } })
+  await mod.sessionStart({ source: 'startup' })
+  await mod.spawn(spawnEvent())
+  assert.equal(mod.calls.length, 2)
+  for (const call of mod.calls) {
+    assert.deepEqual(Object.keys(call.stdin.settings).sort(), ['flag', 'local', 'policy', 'project', 'user'])
+    assert.deepEqual(call.stdin.settings.policy, { availableModels: ['opus'] })
+    assert.equal(JSON.stringify(call.stdin).includes('TOKEN'), false)
+  }
+})
+
+test('a settings read that fails sends no layers at all', async () => {
+  const mod = load({ 'mod-spawn': PICK }, {}, { policy: new Error('denied'), user: { availableModels: ['haiku'] } })
+  await mod.sessionStart({ source: 'startup' })
+  await mod.spawn(spawnEvent())
+  assert.equal(mod.calls.length, 2)
+  for (const call of mod.calls) assert.equal('settings' in call.stdin, false)
 })
 
 test('forks and resumed runs pass through with no CLI call', async () => {
@@ -287,7 +314,7 @@ test('every hook falls back to next(e) when it throws', async () => {
 })
 
 test('each payload the mod sends matches its fixture', async () => {
-  const mod = load()
+  const mod = load({}, {}, payloads['mod-start'].settings)
   const spawn = payloads['mod-spawn']
   const usage = payloads['mod-usage']
   await mod.sessionStart({ source: 'startup' })

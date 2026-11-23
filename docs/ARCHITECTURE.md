@@ -61,6 +61,7 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 | `gates` | The two checks before a turn ends |
 | `upstream` | Compares releases, the docs index, model aliases and model status with what was last reviewed |
 | `settings` | The plugin's options and the environment facts routing depends on, resolved once per hook call or command |
+| `allowlist` | Which registry models `availableModels` and `deniedModels` leave open, from the settings layers the mod reads from the engine or, without the mod, from the settings files |
 | `hooks`, `cli`, `report`, `store`, `config` | Handlers for settings hooks and mod calls, commands, tables, state files, and the registry and override files |
 
 All of it is standard-library Python, plus the one TypeScript file the engine runs. No module names a model: the shipped models, and aliases such as `best`, are entries in `config/models.json`.
@@ -115,7 +116,7 @@ Some details of how the rules apply:
 - On the fallback path, inside a subagent and for the built-in Explore and Plan agents, the model a call would inherit isn't known for certain, so the pick is always written onto the call. The mod path knows the parent's model and needs no such guess.
 - A call that names a model outside the registry, such as `inherit` or a gateway's own ID, is left as it is.
 - A model the user names in a prompt is passed to Claude as a reminder to put it on the calls for that request. Words like "opus" appear in ordinary sentences too, so the hook leaves that judgment to Claude and forces nothing. A call on that model casts no feedback votes, since the user chose it, not Claude.
-- On a provider whose alias for the decided family resolves to an older model (`settings.provider`, from the `CLAUDE_CODE_USE_*` switches), the mod sends that family's newest ID in place of the alias (`registry.newest_id`). It doesn't when the user pinned the family with `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`, set `modelOverrides`, or has `availableModels`, `availableModelsMatch` or `deniedModels` ruling the version out, when the caller or the agent named an exact version, or on Mantle, whose aliases aren't documented. A model error on that ID routes around the ID alone, after one failure, so the alias runs until the ID is retried. Only `agent.spawn` takes a full ID: the `Agent` tool's `model` takes an alias (https://code.claude.com/docs/en/sub-agents.md), so the fallback path sends aliases.
+- On a provider whose alias for the decided family resolves to an older model (`settings.provider`, from the `CLAUDE_CODE_USE_*` switches), the mod sends that family's newest ID in place of the alias (`registry.newest_id`, which asks `allowlist.Allowlist.permits_id`). It doesn't when the user pinned the family with `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`, set `modelOverrides`, or has `availableModels`, `availableModelsMatch` or `deniedModels` ruling the version out, when the caller or the agent named an exact version, or on Mantle, whose aliases aren't documented. A model error on that ID routes around the ID alone, after one failure, so the alias runs until the ID is retried. Only `agent.spawn` takes a full ID: the `Agent` tool's `model` takes an alias (https://code.claude.com/docs/en/sub-agents.md), so the fallback path sends aliases.
 
 ### Redo escalation
 
@@ -151,7 +152,7 @@ A second check at `Stop`, under the `verify_gate` option, which is off by defaul
 | New versions of a model | Nothing to discover: routing uses the aliases, and Claude Code moves each alias to the newest version. Where a provider's alias lags (`older_aliases` in `config/models.json`, from the alias table in https://code.claude.com/docs/en/model-config.md), the mod sends the family's newest ID from `newest` instead | Picked up the day Claude Code ships them; on a lagging provider, when a release updates `newest` |
 | A setup running behind the newest version | The session's model and what each alias resolved to, against the newest active version of each family in the model status data | Named at session start: a `model` setting that pins a full version, or a Claude Code that hasn't moved its alias yet |
 | The models you allow | The `max_tier` option | Stronger ones are never picked, and pins and explicit choices are lowered |
-| The models your organization allows | `availableModels` from managed settings alone, else user, project and local settings combined; `deniedModels` from managed settings only. An allow entry stands for its family; a deny entry counts when it names a family | Blocked ones are not picked, unless nothing in the registry is left open |
+| The models your organization allows | `availableModels` from the policy source alone, else the user, project, local and flag sources combined; `deniedModels` from the policy source only. The mod reads the sources from the engine; without it the settings files are read. An allow entry stands for its family; a deny entry counts when it names a family | Blocked ones are not picked. When they leave no registry model open, the call is left as it is and the ledger says why |
 | The model a name resolves to | `resolvedModel` in the `Agent` tool's result, and the model on each turn's usage | Shown in `/model-router:models` and `/model-router:usage` |
 | A model that isn't served here | A model error from the `Agent` tool, twice | Routed around for a day, then retried. Repeat trouble extends the wait to three days, then seven. A clock moved back can't stretch a wait past its own days from now |
 | A model that is silently replaced | The model a call was routed to, or the one it named, against `resolvedModel`, twice. Not counted while `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is set | Same |
@@ -171,7 +172,7 @@ A changelog or docs index that comes back empty, such as an outage page, counts 
 ## Hook flow
 
 ```text
-mod  session.start ─ mod-start      marks the session, so PreToolUse stands down
+mod  session.start ─ mod-start      marks the session, so PreToolUse stands down, and keeps the settings layers the mod read
 mod  agent.spawn   ─ mod-spawn      spawn.run for a subagent, teammate or workflow stage
 mod  turn.start    ─ mod-turn       the main loop's effort for this turn
 mod  turn.step                      applies the agent's or the turn's effort to each request; keeps its usage
@@ -200,6 +201,7 @@ In `${CLAUDE_PLUGIN_DATA}`:
 | :- | :- |
 | `state.json` | Every plugin option as SessionStart recorded it, for skill commands, which run without them; and model health |
 | `upstream.json` | The upstream cache and what was last reviewed |
+| `allowlist.json` | Per session: the four allowlist keys of each settings source, as the mod last read them |
 | `learned.json` | Calls and votes per level, and which levels are raised |
 | `sessions.json`, `prompts.json`, `edits.json`, `pending.json`, `launched.json`, `done.json`, `mod.json` | Per session: its model, the current request's profile and routed calls, edit and check times, rewrites waiting for a result, background agents still running, finished calls for redo escalation, and whether the mod is running. The 200 most recently written sessions are kept |
 | `ledger.jsonl` | One line per agent start, result, turn effort and turn usage, with the decision, its reason and the list-price cost. Trimmed at 4 MB |

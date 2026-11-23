@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import time
 
-from . import calls, gates, health, ladder, learn, registry, session, settings, spawn, store, upstream
+from . import allowlist, calls, gates, health, ladder, learn, registry, session, settings, spawn, store, upstream
 from . import config as cfg
 from .profile import asks_for_work, profile_prompt
 
@@ -198,7 +198,7 @@ def user_prompt(hook_input: dict) -> dict | None:
             pass
     if mode == "off" or not is_user_prompt(prompt):
         return None
-    usable = registry.available(config, cfg.project_dir(hook_input), options.cap)
+    usable = registry.available(config, options.cap, allowed=allowlist.read(session_id, cfg.project_dir(hook_input)))
     result = _typed_skill(prompt, hook_input) or profile_prompt(prompt)
     level = result["level"]
     pick = ladder.pick(config, level, options.priority, usable, learn.raises())
@@ -351,7 +351,8 @@ def agent_failed(hook_input: dict) -> dict | None:
     named = tool_input.get("model")
     newest = None
     if mod_active(hook_input.get("session_id")) and (not named or str(named).lower() == asked):
-        newest = registry.newest_id(config, asked, settings.resolve(config).provider, cfg.project_dir(hook_input))
+        newest = registry.newest_id(config, asked, settings.resolve(config).provider,
+                                    allowlist.read(hook_input.get("session_id"), cfg.project_dir(hook_input)), health.load())
     if newest:
         # The mod sent the family's newest ID, and this provider refused it: the alias runs
         # from now on, and the ID is tried again after the outage.
@@ -365,7 +366,8 @@ def agent_failed(hook_input: dict) -> dict | None:
     store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
                          "agent": tool_input.get("subagent_type"), "model": asked})
     cap = settings.resolve(config).cap
-    usable = [n for n in registry.available(config, cfg.project_dir(hook_input), cap) if n != asked]
+    allowed = allowlist.read(hook_input.get("session_id"), cfg.project_dir(hook_input))
+    usable = [n for n in registry.available(config, cap, allowed=allowed) if n != asked]
     if not usable:
         return None
     return _context("PostToolUseFailure", (
@@ -409,6 +411,7 @@ def refresh_cache(hook_input: dict) -> dict | None:
 
 def mod_start(hook_input: dict) -> dict | None:
     _mark_mod(hook_input.get("session_id"))
+    allowlist.remember(hook_input.get("session_id"), hook_input.get("settings"))
     return None
 
 
@@ -436,7 +439,8 @@ def _newest(hook_input: dict, decision: dict) -> str | None:
     if decision["action"] == "deny" or decision["version"]:
         return None
     config = cfg.load_config(hook_input)
-    return registry.newest_id(config, decision["model"], settings.resolve(config).provider, cfg.project_dir(hook_input))
+    allowed = allowlist.read(hook_input.get("session_id"), cfg.project_dir(hook_input), hook_input.get("settings"))
+    return registry.newest_id(config, decision["model"], settings.resolve(config).provider, allowed, health.load())
 
 
 def _effort_keeps_cache(options: settings.Settings, model: object) -> bool:

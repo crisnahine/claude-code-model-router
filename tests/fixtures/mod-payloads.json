@@ -1,6 +1,18 @@
 {
   "mod-start": {
-    "session_id": "s1"
+    "session_id": "s1",
+    "settings": {
+      "policy": {},
+      "user": {
+        "availableModels": [
+          "haiku",
+          "sonnet"
+        ]
+      },
+      "project": {},
+      "local": {},
+      "flag": {}
+    }
   },
   "mod-spawn": {
     "session_id": "s1",
@@ -14,6 +26,18 @@
       "description": "list files",
       "model": "haiku",
       "effort": "low"
+    },
+    "settings": {
+      "policy": {},
+      "user": {
+        "availableModels": [
+          "haiku",
+          "sonnet"
+        ]
+      },
+      "project": {},
+      "local": {},
+      "flag": {}
     }
   },
   "mod-turn": {
