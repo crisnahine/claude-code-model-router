@@ -1019,6 +1019,10 @@ class Allowlist(Sandbox):
         self.assertTrue(permits(["sonnet", "claude-opus-4-6"], "sonnet", "claude-sonnet-5-5"))
         self.assertFalse(permits(["opus", "claude-opus-4-6"], "opus", "claude-opus-5-5"))
         self.assertFalse(permits(["sonnet", "anthropic.claude-sonnet-5-5-v1:0"], "sonnet", "claude-sonnet-5-5"))
+        # An alias that only contains a family's name names no version.
+        for alias in ("opusplan", "default", "best"):
+            self.assertTrue(permits(["opus", alias], "opus", "claude-opus-5-5"), alias)
+        self.assertFalse(permits(["opus", "us.anthropic.claude-opus"], "opus", "claude-opus-5-5"))
         # The family keeps a permitted version, which its alias moves to, so it stays routable.
         self.assertEqual(self.permitted(policy={"availableModels": pinned}), {"sonnet"})
         managed = allowlist.from_layers({}, floor={"availableModels": pinned})
