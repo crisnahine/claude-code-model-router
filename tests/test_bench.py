@@ -10,6 +10,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -1316,7 +1317,8 @@ class QualityTier(unittest.TestCase):
     check, shipped, source, run_with = HardTier.check, HardTier.shipped, HardTier.source, HardTier.run_with
 
     def test_the_quality_tier_has_one_task_in_each_of_six_classes(self):
-        want = {"impl-merge-customers": "implementation", "bugfix-statement-queries": "bugfix"}
+        want = {"impl-merge-customers": "implementation", "bugfix-statement-queries": "bugfix",
+                "rootcause-wallet-race": "root-cause"}
         tasks = {t["id"]: t for t in run.load_tasks()}
         self.assertEqual({i: tasks[i]["class"] for i in want}, want)
         self.assertTrue(all(tasks[i]["revision"] == 1 for i in want))
@@ -1516,6 +1518,77 @@ class QualityTier(unittest.TestCase):
             '        result[account_id] += cents - paid[invoice_id]\n'
             '    return result\n')
         self.assertTrue(self.run_with(task, {rel: by_invoice}))
+
+    def test_wallet_check_rejects_each_known_mistake(self):
+        task = "rootcause-wallet-race"
+        rel = "ledger/wallet.py"
+        solution = self.source(task, "solution/ledger/wallet.py")
+        shipped = self.source(task, "repo/ledger/wallet.py")
+        self.assertTrue(self.run_with(task, {rel: solution}))
+        guard = "import threading\n\n_MUTEX = threading.Lock()\n"
+        credit = solution[solution.index("def credit"):solution.index("def transfer")]
+        local = solution.replace("store.lock(wallet)", "_MUTEX").replace(
+            "contextlib.ExitStack() as locks", "_MUTEX").replace("            locks.enter_context(store.lock(key))\n", "").replace(
+            "        for key in sorted({src, dst}):\n", "")
+        self.assertIn("with _MUTEX:\n        available", local)
+        mutants = {
+            "shipped": shipped,
+            "locks in argument order": solution.replace("sorted({src, dst})", "dict.fromkeys((src, dst))"),
+            "process-local lock": guard + local,
+            "one global key": solution.replace("store.lock(wallet)", 'store.lock("wallets")').replace(
+                "store.lock(key)", 'store.lock("wallets")').replace("sorted({src, dst})", "{src}"),
+            "self transfer locks twice": solution.replace("sorted({src, dst})", "sorted([src, dst])"),
+            "self transfer creates money": solution.replace(
+                "        if src != dst:\n            store.put(src, available - cents)\n            store.put(dst, balance(store, dst) + cents)",
+                "        target = balance(store, dst)\n        store.put(src, available - cents)\n        store.put(dst, target + cents)"),
+            "funds read outside the lock": solution.replace(
+                "    with contextlib.ExitStack() as locks:", "    available = balance(store, src)\n    with contextlib.ExitStack() as locks:").replace(
+                "        available = balance(store, src)\n", ""),
+            "credit unlocked": solution.replace(credit, "def credit(store, wallet, cents):\n    store.put(wallet, balance(store, wallet) + cents)\n\n\n"),
+            "credit put and verify": solution.replace(credit, (
+                "def credit(store, wallet, cents):\n    while True:\n        want = balance(store, wallet) + cents\n"
+                "        store.put(wallet, want)\n        if balance(store, wallet) == want:\n            return\n\n\n")),
+            "no funds check": solution.replace("        if available < cents:\n            raise InsufficientFunds(src)\n", ""),
+        }
+        for name, text in mutants.items():
+            with self.subTest(name):
+                self.assertNotEqual(text, solution if name != "shipped" else "")
+                self.assertFalse(self.run_with(task, {rel: text}))
+        with self.subTest("process-local lock in a helper module"):
+            self.assertFalse(self.run_with(task, {"ledger/guard.py": guard, rel: "from ledger.guard import _MUTEX\n" + local}))
+
+    def test_wallet_check_takes_a_compare_and_put_solution(self):
+        task = "rootcause-wallet-race"
+        rel = "ledger/wallet.py"
+        solution = self.source(task, "solution/ledger/wallet.py")
+        cas = (
+            "class InsufficientFunds(Exception):\n    pass\n\n\n"
+            "def balance(store, wallet):\n    return store.get(wallet) or 0\n\n\n"
+            "def _add(store, wallet, cents):\n    while True:\n        seen = store.get(wallet)\n"
+            "        if store.compare_and_put(wallet, seen, (seen or 0) + cents):\n            return\n\n\n"
+            "def credit(store, wallet, cents):\n    _add(store, wallet, cents)\n\n\n"
+            "def transfer(store, src, dst, cents):\n    while True:\n        seen = store.get(src)\n"
+            "        if (seen or 0) < cents:\n            raise InsufficientFunds(src)\n"
+            "        if src == dst:\n            return\n"
+            "        if store.compare_and_put(src, seen, seen - cents):\n            break\n    _add(store, dst, cents)\n")
+        self.assertTrue(self.run_with(task, {rel: cas}))
+        noisy = solution.replace("    with store.lock(wallet):", '    print("credit")\n    with store.lock(wallet):', 1)
+        self.assertNotEqual(noisy, solution)
+        self.assertTrue(self.run_with(task, {rel: noisy}))
+        ordered = {"ledger/order.py": "def ordered(*keys):\n    return sorted(set(keys))\n",
+                   rel: "from . import order\n" + solution.replace("sorted({src, dst})", "order.ordered(src, dst)")}
+        self.assertTrue(self.run_with(task, ordered))
+
+    def test_the_wallet_check_ends_inside_the_grade_timeout_on_the_shipped_deadlock(self):
+        task_id = "rootcause-wallet-race"
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped(task_id, tmp)
+            (Path(tmp) / "result.txt").write_text("", encoding="utf-8")
+            start = time.monotonic()
+            verdict = run.grade(task["dir"] / "check.py", work, Path(tmp) / "result.txt")
+            took = time.monotonic() - start
+        self.assertFalse(verdict)
+        self.assertLess(took, 40)
 
 if __name__ == "__main__":
     unittest.main()
