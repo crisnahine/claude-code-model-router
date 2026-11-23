@@ -28,6 +28,8 @@ Sessions are saved, as Claude Code saves them by default, because the router's S
 
 Each raw line records `bench_commit`, the HEAD it ran on, and `bench_dirty`, whether `bench/` or the plugin had changes HEAD doesn't hold. When the `m6-*` files were recorded, the check also counted the bench's own output under `bench/results/`, so once the first results file of a session was written, every later line said `bench_dirty: true`. That is why the 320 main rows of the `m6-*` files carry it while the 16 probe rows before them don't. The code that ran for all of them is `499d046`; the check now leaves `bench/results/` out.
 
+The page's quality verdict is separate from the cost verdict. Per class, the router's pass rate is tested against every baseline with an exact one-sided test. A class is saturated when the weakest forced baseline (the lowest model, then the lowest effort, among the configurations that force every subagent onto one model) can't be told from the strongest by the same test, and then no quality claim is made.
+
 ## The quality-tier pilot
 
 The six quality-tier tasks (one per class) run under `defaults`, `plugin` and the three forced baselines, 3 times each:

@@ -1,6 +1,6 @@
 """Turn bench results into docs/BENCHMARKS.md: pass rate (exact 95% binomial interval) and cost per solved task
-(95% bootstrap interval) for each task class and configuration, and the router's standing against the best
-baseline.
+(95% bootstrap interval) for each task class and configuration, the router's cost standing against the best
+baseline, and a quality verdict that is withheld when the task set can't tell models apart.
 
   python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
   python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check
@@ -20,13 +20,13 @@ BENCH = Path(__file__).resolve().parent
 sys.path.insert(0, str(BENCH))
 import run  # noqa: E402
 sys.path.insert(0, str(run.PLUGIN / "scripts"))
-from modelrouter import config as mrconfig, profile  # noqa: E402
+from modelrouter import config as mrconfig, profile, registry  # noqa: E402
 from overhead import percentile  # noqa: E402
 
 RESULTS = BENCH / "results"
 HEAD_END = "<!-- End of page head. -->\n\n"  # the same text as docs_assets.HEAD_END
 MIN_RUNS = 10  # fewer runs per configuration than this and no row is called a win or a loss
-ALPHA = 0.05  # the level of the 95% intervals
+ALPHA = 0.05  # the 95% intervals, and the one-sided level of the exact comparisons
 SPLIT_STRONG, SPLIT_WEAK = "opus", "sonnet"  # the pair a task must split to count as telling models apart
 
 
@@ -57,6 +57,13 @@ def exact_interval(solved: int, n: int) -> tuple[float, float]:
                 high = mid
         return (low + high) / 2
     return (bound(True, solved) if solved else 0.0, bound(False, solved) if solved < n else 1.0)
+
+
+def _lower_p(k1: int, n1: int, k2: int, n2: int) -> float:
+    """Exact one-sided p that the first rate is below the second if both come from one rate (hypergeometric)."""
+    total = k1 + k2
+    return sum(math.comb(n1, i) * math.comb(n2, total - i) for i in range(max(0, total - n2), k1 + 1)) \
+        / math.comb(n1 + n2, total)
 
 
 def _cell(runs: list[dict], rng: random.Random, draws: int) -> dict:
@@ -126,18 +133,55 @@ def splitting_tasks(runs: list[dict], strong: str = SPLIT_STRONG, weak: str = SP
     return out
 
 
+def _quality(cells: dict, runs: list[dict], router: str, routers: frozenset[str], forced: dict) -> dict:
+    """What the pass rates say about quality. The router's rate is set against every baseline with an exact
+    one-sided test. When the weakest forced baseline can't be told from the strongest, the tasks can't tell models
+    apart, so the class is `saturated` and no claim is made either way."""
+    base = {name: cell for name, cell in cells.items() if name != router and name not in routers}
+    ours = cells.get(router)
+    against = {name: {"pass_rate": cell["pass_rate"], "pass_ci": cell["pass_ci"],
+                      "behind": _lower_p(ours["solved"], ours["runs"], cell["solved"], cell["runs"]) < ALPHA,
+                      "ahead": _lower_p(cell["solved"], cell["runs"], ours["solved"], ours["runs"]) < ALPHA}
+               for name, cell in sorted(base.items())} if ours else {}
+    ladder = sorted((n for n in base if n in forced), key=lambda n: (forced[n], n))
+    weak, strong = (ladder[0], ladder[-1]) if ladder else (None, None)
+    out = {"saturated": None, "weakest": weak, "strongest": strong, "claim": None, "against": against,
+           "splits": splitting_tasks(runs)}
+    if ours is None or not base:
+        return {**out, "reason": "no router or baseline runs"}
+    if not ladder or forced[weak][0] == forced[strong][0]:
+        return {**out, "reason": "forced baselines on fewer than 2 models, so the class can't show whether the "
+                                 "tasks tell models apart; no quality claim"}
+    if min(base[weak]["runs"], base[strong]["runs"], ours["runs"]) < MIN_RUNS:
+        return {**out, "reason": f"too few runs ({MIN_RUNS} needed); no quality claim"}
+    w, s = base[weak], base[strong]
+    p = _lower_p(w["solved"], w["runs"], s["solved"], s["runs"])
+    seen = f"{weak} solved {w['solved']} of {w['runs']}, {strong} {s['solved']} of {s['runs']} (exact p = {p:.3f})"
+    if p >= ALPHA:
+        return {**out, "saturated": True, "reason": f"{seen}, a gap that could be chance, so these tasks can't "
+                                                    "tell models apart; no quality claim"}
+    behind = [n for n, a in against.items() if a["behind"]]
+    if behind:
+        return {**out, "saturated": False, "claim": "BEHIND",
+                "reason": f"{seen}; the router solved fewer than {', '.join(behind)} beyond noise"}
+    return {**out, "saturated": False, "claim": "LEVEL",
+            "reason": f"{seen}; no baseline solved more than the router beyond noise"}
+
+
 def summarize(rows: list[dict], *, routers: frozenset[str], router: str = "plugin", draws: int = 2000,
-              seed: int = 0) -> list[dict]:
+              seed: int = 0, forced: dict | None = None) -> list[dict]:
     rng = random.Random(seed)
     order = {name: i for i, name in enumerate(run.CLASSES)}
     out = []
     for cls in sorted({r["class"] for r in rows}, key=lambda c: (order.get(c, len(order)), c)):
-        configs = sorted({r["config"] for r in rows if r["class"] == cls}, key=lambda c: (c != router, c))
-        cells = {c: _cell([r for r in rows if r["class"] == cls and r["config"] == c], rng, draws) for c in configs}
+        runs = [r for r in rows if r["class"] == cls]
+        configs = sorted({r["config"] for r in runs}, key=lambda c: (c != router, c))
+        cells = {c: _cell([r for r in runs if r["config"] == c], rng, draws) for c in configs}
         verdict = _verdict(cells, router, routers)
+        quality = _quality(cells, runs, router, routers, forced or {})
         for cell in cells.values():
             del cell["_cps"], cell["_rate"]
-        out.append({"class": cls, "configs": cells, **verdict})
+        out.append({"class": cls, "configs": cells, **verdict, "quality": quality})
     return out
 
 
@@ -180,7 +224,8 @@ def sessions(results: Results, router: str | None = None) -> list[tuple[str, str
     for model, group in sorted(groups.items()):
         ran = {r["config"] for r in group}
         chosen = router or next((c["id"] for c in results.configs if c.get("plugin") and c["id"] in ran), "plugin")
-        out.append((model, chosen, summarize(group, routers=results.routers, router=chosen), group))
+        out.append((model, chosen, summarize(group, routers=results.routers, router=chosen,
+                                             forced=results.forced), group))
     return out
 
 
@@ -293,6 +338,7 @@ class Results:
     prices: dict
     routers: frozenset[str]
     own_model: frozenset[str]
+    forced: dict
 
 
 def default_paths() -> list[Path]:
@@ -301,6 +347,20 @@ def default_paths() -> list[Path]:
 
 def router_ids(configs: list[dict]) -> frozenset[str]:
     return frozenset(c["id"] for c in configs if c.get("plugin"))
+
+
+def forced_ranks(configs: list[dict], registry_config: dict) -> dict[str, tuple[float, int]]:
+    """Each configuration that forces every subagent onto one model, ranked by that model's strength in the
+    registry, then by the effort it sets (none ranks below low)."""
+    out = {}
+    for c in configs:
+        env = c.get("env") or {}
+        if env.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE") and env.get("CLAUDE_CODE_SUBAGENT_MODEL"):
+            model = registry.family(registry_config, env["CLAUDE_CODE_SUBAGENT_MODEL"])
+            effort = env.get("CLAUDE_CODE_SUBAGENT_EFFORT")
+            out[c["id"]] = (registry.strength(registry_config, model),
+                            mrconfig.EFFORTS.index(effort) if effort in mrconfig.EFFORTS else -1)
+    return out
 
 
 def load(paths: list[Path]) -> Results:
@@ -320,7 +380,8 @@ def load(paths: list[Path]) -> Results:
     configs = run.load_configs()
     prices = json.loads((run.PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["prices"]
     return Results(files, rows, aside, archive, configs, run.load_tasks(), prices, router_ids(configs),
-                   frozenset(c["id"] for c in configs if c.get("model")))
+                   frozenset(c["id"] for c in configs if c.get("model")),
+                   forced_ranks(configs, mrconfig.base_config()))
 
 
 def _notes(results: Results) -> list[str]:

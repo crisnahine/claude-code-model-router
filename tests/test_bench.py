@@ -113,6 +113,42 @@ class Analysis(unittest.TestCase):
         cell = self.summary(rows("plugin", "lookup", [1] * 10, [True] * 10))["lookup"]["configs"]["plugin"]
         self.assertAlmostEqual(cell["pass_ci"][0], 0.6915, places=3)
 
+    def quality(self, data, forced):
+        summary = analyze.summarize(data, routers=frozenset({"plugin"}), router="plugin", draws=200, seed=1, forced=forced)
+        return {s["class"]: s for s in summary}["lookup"]
+
+    FORCED = {"haiku": (1, -1), "opus": (3, -1)}
+
+    def test_a_class_where_the_weakest_forced_baseline_keeps_up_is_saturated(self):
+        n = analyze.MIN_RUNS
+        data = (rows("plugin", "lookup", [0.1] * n, [True] * n) + rows("haiku", "lookup", [0.2] * n, [True] * n)
+                + rows("opus", "lookup", [0.4] * n, [True] * n))
+        row = self.quality(data, self.FORCED)
+        q = row["quality"]
+        self.assertEqual((q["saturated"], q["claim"], q["weakest"], q["strongest"]), (True, None, "haiku", "opus"))
+        self.assertIn("no quality claim", q["reason"])
+        self.assertEqual(row["status"], "PASS")  # the cost verdict stands beside it
+        self.assertEqual(set(q["against"]), {"haiku", "opus"})  # the strongest is compared too
+
+    def test_a_class_that_tells_the_models_apart_gets_a_quality_claim(self):
+        n = analyze.MIN_RUNS
+        weak = rows("haiku", "lookup", [0.2] * n, [True] * 4 + [False] * 6)
+        strong = rows("opus", "lookup", [0.4] * n, [True] * n)
+        level = self.quality(rows("plugin", "lookup", [0.3] * n, [True] * n) + weak + strong, self.FORCED)["quality"]
+        self.assertEqual((level["saturated"], level["claim"]), (False, "LEVEL"))
+        behind = self.quality(rows("plugin", "lookup", [0.3] * n, [True] * 5 + [False] * 5) + weak + strong,
+                              self.FORCED)["quality"]
+        self.assertEqual((behind["saturated"], behind["claim"]), (False, "BEHIND"))
+        self.assertTrue(behind["against"]["opus"]["behind"])
+        self.assertFalse(behind["against"]["haiku"]["behind"])
+
+    def test_forced_baselines_on_one_model_cannot_show_saturation(self):
+        n = analyze.MIN_RUNS
+        data = (rows("plugin", "lookup", [0.1] * n, [True] * n) + rows("opus", "lookup", [0.4] * n, [True] * n)
+                + rows("opus-high", "lookup", [0.4] * n, [True] * n))
+        q = self.quality(data, {"opus": (3, -1), "opus-high": (3, 2)})["quality"]
+        self.assertEqual((q["saturated"], q["claim"]), (None, None))
+
     def test_a_task_splits_the_models_when_the_strong_one_solves_most_and_the_weak_one_few(self):
         def task_rows(task, strong, weak):
             return [{"task": task, "config": c, "passed": p} for c, ps in (("opus", strong), ("sonnet", weak)) for p in ps]
@@ -122,6 +158,15 @@ class Analysis(unittest.TestCase):
                 + task_rows("d", [True, True, True], [True, True, False]))  # weak over 1 of 3
         self.assertEqual(analyze.splitting_tasks(data), ["a", "b"])
         self.assertIsNone(analyze.splitting_tasks([r for r in data if r["config"] == "opus"]))
+
+    def test_forced_baselines_rank_by_model_strength_then_effort(self):
+        ranks = analyze.forced_ranks(run.load_configs(), analyze.mrconfig.base_config())
+        self.assertLess(ranks["haiku"], ranks["haiku-high"])
+        self.assertLess(ranks["haiku-high"], ranks["sonnet-medium"])
+        self.assertLess(ranks["sonnet-high"], ranks["opus"])
+        self.assertLess(ranks["opus-high"], ranks["fable"])
+        self.assertNotIn("defaults", ranks)
+        self.assertNotIn("opusplan", ranks)
 
     def test_a_class_with_no_router_or_baseline_has_no_differences(self):
         self.assertEqual(self.summary(rows("defaults", "lookup", [0.3], [True]))["lookup"]["differences"], {})
