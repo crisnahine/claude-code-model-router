@@ -1,0 +1,1 @@
+{"partitions": 12, "key": "order_id", "retention_hours": 80, "replication_factor": 3, "reasons": ["x"]}

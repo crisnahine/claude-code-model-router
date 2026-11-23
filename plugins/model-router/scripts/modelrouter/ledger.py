@@ -5,7 +5,8 @@ import datetime as _dt
 import json
 from pathlib import Path
 
-from . import registry, router, store
+from . import router, store
+from .registry import Registry
 
 
 def spawn(session_id: str | None, via: str, decision: router.Decision, description: object,
@@ -19,6 +20,8 @@ def spawn(session_id: str | None, via: str, decision: router.Decision, descripti
            "description": str(description or "")[:120]}
     if kind is not None:
         row["kind"] = kind
+    if decision.get("held"):
+        row["held"] = decision["held"]
     store.append_ledger(row)
 
 
@@ -33,9 +36,11 @@ def model_error(session_id: str | None, agent: object, model: str) -> None:
     store.append_ledger({"event": "model_error", "session": session_id, "agent": agent, "model": model})
 
 
-def turn(session_id: str | None, level: str, effort: str, command: str | None = None) -> None:
+def turn(session_id: str | None, level: str, effort: str | None, command: str | None = None,
+         reason: str | None = None) -> None:
+    """A main-loop turn: the effort it was raised to, or null with the reason it wasn't."""
     store.append_ledger({"event": "turn", "session": session_id, "level": level, "effort": effort,
-                         **({"command": command} if command else {})})
+                         **({"command": command} if command else {}), **({"reason": reason} if reason else {})})
 
 
 def _tokens(usage: dict) -> dict:
@@ -50,21 +55,21 @@ def _usage(value: object) -> bool:
     return isinstance(value, dict) and isinstance(value.get("model"), str)
 
 
-def turn_cost(config: dict, usage: dict, requests: object) -> float | None:
+def turn_cost(reg: Registry, usage: dict, requests: object) -> float | None:
     """The turn's dollars: each request priced on its own model, None if any has no price.
     Without requests the summed tokens are priced at the base rate."""
     requests = [r for r in requests if _usage(r)] if isinstance(requests, list) else []
     if not requests:
-        return registry.cost(config, usage["model"], _tokens(usage), whole_turn=True)
-    costs = [registry.cost(config, r["model"], _tokens(r)) for r in requests]
+        return reg.cost(usage["model"], _tokens(usage), whole_turn=True)
+    costs = [reg.cost(r["model"], _tokens(r)) for r in requests]
     return None if None in costs else round(sum(costs), 6)
 
 
-def usage(config: dict, session_id: str | None, agent_id: object, usage: object, requests: object) -> None:
+def usage(reg: Registry, session_id: str | None, agent_id: object, usage: object, requests: object) -> None:
     if not _usage(usage):
         return
     store.append_ledger({"event": "usage", "session": session_id, "agent_id": agent_id, "model": usage["model"],
-                         **_tokens(usage), "cost_usd": turn_cost(config, usage, requests)})
+                         **_tokens(usage), "cost_usd": turn_cost(reg, usage, requests)})
 
 
 def read(days: int | None = None, path: Path | None = None) -> list[dict]:

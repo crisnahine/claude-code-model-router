@@ -223,7 +223,7 @@ def _fetch(settings: Settings) -> dict:
         account = api_models(settings)
     except Exception:  # noqa: BLE001 - and this
         account = {}
-    return {"aliases": aliases, "lifecycle": lifecycle, "api_models": account, "fetched_at": int(time.time()),
+    return {"aliases": aliases, "lifecycle": lifecycle, "api_models": account, "fetched_at": int(store.now()),
             "releases": releases,
             "pages": {url: hashlib.sha256(s.encode()).hexdigest()[:16] for url, s in pages.items()}}
 
@@ -239,7 +239,7 @@ def _same_model(model_id: str, seen: str) -> bool:
 def diff(reviewed: dict, live: dict, routed: list[str] | None = None, in_use: list[str] | None = None) -> dict:
     """`routed` is the registry's model names; by default the ones this plugin ships.
     `in_use` is the full model IDs routed calls have really run as here."""
-    routed = list(routed if routed is not None else (cfg.base_config().get("models") or {}))
+    routed = list(routed if routed is not None else cfg.shipped().models)
     reviewed_version = reviewed.get("claude_code_version") or "0"
     old_pages, new_pages = reviewed.get("pages") or {}, live.get("pages") or {}
     added = sorted(set(new_pages) - set(old_pages))
@@ -302,7 +302,7 @@ def _retry_wait(failed: object, now: float) -> float:
 
 def refresh(settings: Settings, force: bool = False) -> dict:
     data = load()
-    now = time.time()
+    now = store.now()
     if not force and (now - ((data.get("cache") or {}).get("fetched_at") or 0) < CACHE_TTL_SECONDS
                       or _retry_wait(data.get("failed"), now) > 0):
         return data
@@ -329,7 +329,7 @@ def ack() -> str | None:
         return None
 
     def apply(data: dict) -> None:
-        data["reviewed"] = {**snapshot(data.get("cache") or {}), "reviewed_at": int(time.time())}
+        data["reviewed"] = {**snapshot(data.get("cache") or {}), "reviewed_at": int(store.now())}
 
     return store.update_dict(path(), apply)["reviewed"]["claude_code_version"]
 

@@ -2,18 +2,21 @@
 from __future__ import annotations
 
 import contextlib
+import copy
+import dataclasses
 import io
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "bench"))
 import analyze  # noqa: E402
 import docs_assets  # noqa: E402
+import docs_pages  # noqa: E402
 
 
 def check() -> tuple:
@@ -23,100 +26,166 @@ def check() -> tuple:
     return code, err.getvalue()
 
 
-def bench_summary(solved=3, cps=0.12344, runs=4):
-    """A summary_data dict with one session per BENCH_SERIES key and one class that ran every series config."""
-    sessions = []
+def fixture_results(solved=3, cps=0.12344, runs=4, router="mine", cls="lookup"):
+    """analyze.Results for a router and every configuration BENCH_SERIES names, one task class, on each session."""
+    rows, ids = [], {}
     for model, (_, series) in docs_assets.BENCH_SERIES.items():
-        configs = {c: {"runs": runs, "solved": runs, "cost_per_solved": 0.2} for c, _, _ in series}
-        configs["plugin-next"] = {"runs": runs, "solved": solved, "cost_per_solved": cps}
-        sessions.append({"model": model, "router": "plugin-next", "plugin_ref": None, "pooled": {},
-                         "classes": [{"class": "lookup", "status": "PASS", "configs": configs}]})
-    return {"runs": 12, "usd": 1.0, "dates": ["2030-01-01", "2030-01-02"], "claude_versions": ["2.1.0"],
-            "sessions": sessions}
+        ids[model] = [c for c, _, _ in series if c != "router"]
+        for config in [router, *ids[model]]:
+            ok, cost = (solved, cps * solved / runs) if config == router else (runs, 0.2)
+            rows += [{"config": config, "class": cls, "task": f"{cls}-1", "total_cost_usd": cost, "passed": i < ok,
+                      "main_model": model, "started_at": "2030-01-01T10:00:00+00:00", "claude_version": "2.1.0"}
+                     for i in range(runs)]
+    configs = [{"id": router, "plugin": True, "env": {}}, {"id": "defaults", "plugin": False, "env": {}},
+               *({"id": c, "plugin": False, "env": {"X": "1"}} for c in sorted({c for v in ids.values() for c in v})
+                 if c != "defaults")]
+    return analyze.Results(files=[], rows=rows, stale=[], broken=[], aside=[], archive=[], configs=configs, tasks=[],
+                           registry={}, routers=frozenset({router}), own_model=frozenset(), forced={})
+
+
+def bench_data(**kwargs):
+    return analyze.figures(fixture_results(**kwargs))
 
 
 class DocsAssets(unittest.TestCase):
-    def test_the_head_marker_matches_analyze(self):
-        self.assertEqual(analyze.HEAD_END, docs_assets.HEAD_END)
+    @classmethod
+    def setUpClass(cls):
+        cls.snap = docs_assets.snapshot()
 
-    def test_the_benchmarks_head_comes_from_pages(self):
-        pages = [p if p[0] != "docs/BENCHMARKS.md" else (*p[:3], "A new question?", *p[4:]) for p in docs_assets.PAGES]
-        with mock.patch.object(docs_assets, "PAGES", pages):
-            page = docs_assets.build()["docs/BENCHMARKS.md"]
+    def build(self, **changes):
+        return docs_assets.build(dataclasses.replace(self.snap, **changes))
+
+    def with_changed_figures(self):
+        """The snapshot's benchmark figures with the Opus router's pooled cost and its bugfix cost changed."""
+        data = copy.deepcopy(self.snap.bench)
+        opus = next(s for s in data["sessions"] if s["model"] == analyze.OPUS)
+        opus["pooled"][opus["router"]]["cost_usd"] = 9.999 * opus["pooled"][opus["router"]]["solved"]
+        bugfix = next(c for c in opus["classes"] if c["class"] == "bugfix")
+        bugfix["configs"][opus["router"]]["cost_per_solved"] = 9.9999
+        return data
+
+    def test_the_benchmarks_head_comes_from_the_snapshots_page_index(self):
+        pages = [p if p[0] != "docs/BENCHMARKS.md" else (*p[:3], "A new question?", *p[4:]) for p in self.snap.pages]
+        page = self.build(pages=pages)["docs/BENCHMARKS.md"]
         self.assertIn('alt="Benchmarks: A new question?"', page)
         self.assertIn("\n# Benchmarks\n", page)
 
-    def test_the_chart_draws_from_the_summary_not_the_page(self):
-        with mock.patch.object(docs_assets, "bench_summary", return_value=bench_summary()):
-            svg = docs_assets.bench_chart()
+    def test_build_makes_what_it_is_given_and_reads_no_file(self):
+        files = self.build(texts={"README.md": self.snap.texts["README.md"]})
+        self.assertEqual({p for p in files if not p.startswith("docs/assets/")}, {"README.md", "CITATION.cff"})
+
+    def test_a_page_head_comes_from_the_page_index_and_replaces_the_old_one(self):
+        pages = [p if p[0] != "docs/BENCHMARKS.md" else (*p[:3], "A new question?", *p[4:]) for p in docs_pages.PAGES]
+        old = docs_pages.with_head("docs/BENCHMARKS.md", "# Benchmarks\n")
+        page = docs_pages.with_head("docs/BENCHMARKS.md", old, pages)
+        self.assertIn('alt="Benchmarks: A new question?"', page)
+        self.assertEqual(page.count("<!-- Page head"), 1)
+        self.assertTrue(page.endswith("<!-- End of page head. -->\n\n# Benchmarks\n"))
+
+    def test_analyze_keeps_a_head_that_ends_where_the_index_says(self):
+        head = docs_pages.page_head("docs/BENCHMARKS.md")
+        self.assertTrue(head.startswith(docs_pages.HEAD_START) and head.endswith(docs_pages.HEAD_END))
+        self.assertIs(analyze.HEAD_END, docs_pages.HEAD_END)
+
+    def test_the_chart_draws_from_the_figures_not_the_page(self):
+        data = bench_data()
+        svg = docs_assets.bench_chart(data)
         self.assertIn("$0.1234 (3 of 4)", svg)
-        self.assertIn("12 runs on 2030-01-01", svg)
+        self.assertIn(f"{data['runs']} runs on 2030-01-01", svg)
 
     def test_a_cell_with_nothing_solved_is_not_drawn_as_not_run(self):
-        with mock.patch.object(docs_assets, "bench_summary", return_value=bench_summary(0, None)):
-            svg = docs_assets.bench_chart()
+        svg = docs_assets.bench_chart(bench_data(solved=0))
         self.assertIn("none solved (0 of 4)", svg)
         self.assertNotIn("not run", svg)
 
     def test_a_series_configuration_with_no_runs_stops_the_build(self):
-        data = bench_summary()
-        del data["sessions"][0]["classes"][0]["configs"]["defaults"]
-        with mock.patch.object(docs_assets, "bench_summary", return_value=data):
-            with self.assertRaises(SystemExit) as caught:
-                docs_assets.bench_chart()
+        results = fixture_results()
+        results = dataclasses.replace(results, rows=[r for r in results.rows if r["config"] != "defaults"])
+        data = analyze.figures(results)
+        with self.assertRaises(SystemExit) as caught:
+            docs_assets.bench_chart(data)
         self.assertIn(f"no defaults runs for {data['sessions'][0]['model']}; update BENCH_SERIES", str(caught.exception))
+
+    def test_renaming_the_router_changes_no_figure_but_its_own_name(self):
+        old, new = bench_data(), bench_data(router="renamed")
+        self.assertEqual(docs_assets.bench_chart(old), docs_assets.bench_chart(new))
+        a, b = docs_assets.bench_figures(old), docs_assets.bench_figures(new)
+        named = lambda f: {k: v for k, v in f.items() if not k.endswith((".router_code", ".trace"))}  # noqa: E731
+        self.assertEqual(named(a), named(b))
+        self.assertEqual(b["opus.router_code"], "`renamed`")
+        self.assertFalse([k for k in b if "renamed" in k])
 
     def test_the_committed_assets_match_the_script(self):
         code, err = check()
         self.assertEqual(code, 0, "python3 tools/docs_assets.py --check:\n" + err)
 
     def test_every_page_under_docs_research_is_in_PAGES(self):
-        listed = {row[0] for row in docs_assets.PAGES}
+        listed = {row[0] for row in docs_pages.PAGES}
         found = {p.relative_to(ROOT).as_posix() for p in (ROOT / "docs" / "research").glob("*.md")}
         self.assertEqual(found - listed, set())
 
-    def test_a_stale_file_fails_the_check(self):
-        with mock.patch.object(docs_assets, "build", return_value={"README.md": "stale"}):
-            code, err = check()
-        self.assertEqual(code, 1)
-        self.assertIn("README.md: out of date", err)
+    def test_a_stale_file_fails_the_check_and_a_write_fixes_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "README.md").write_text("old", encoding="utf-8")
+            self.assertEqual(docs_assets.sync({"README.md": "new"}, True, root), ["README.md: out of date, run python3 tools/docs_assets.py"])
+            self.assertEqual((root / "README.md").read_text(encoding="utf-8"), "old")
+            self.assertEqual(docs_assets.sync({"README.md": "new"}, False, root), [])
+            self.assertEqual((root / "README.md").read_text(encoding="utf-8"), "new")
+            self.assertEqual(docs_assets.sync({"README.md": "new"}, True, root), [])
 
     def test_the_figures_from_the_committed_results(self):
-        f = docs_assets.bench_figures(docs_assets.bench_summary())
+        f = docs_assets.bench_figures(self.snap.bench)
         self.assertEqual((f["runs"], f["usd"], f["dates"], f["opus.commit"]),
-                         ("1,280", "$154.94", "2026-11-22 to 2026-11-23", "780ee86"))
+                         ("1,120", "$134.97", "2026-11-22 to 2026-11-23", "780ee86"))
         self.assertEqual(f["opus.commit_code"], "`780ee86`")
-        self.assertEqual((f["opus.pooled.plugin-next"], f["opus.pooled.defaults"], f["opus.pooled_less.defaults"]),
-                         ("$0.119", "$0.152", "21"))
+        self.assertEqual((f["opus.pooled.router"], f["opus.pooled.defaults"], f["opus.pooled_less.defaults"]),
+                         ("$0.121", "$0.151", "20"))
         self.assertEqual((f["opus.below.defaults"], f["opus.less.defaults.min"], f["opus.less.defaults.max"],
-                          f["opus.level.defaults"]), ("7", "18", "36", "design"))
-        self.assertEqual((f["opus.behind.min"], f["opus.behind.max"], f["opus.status.FAIL"]), ("27", "144", "8"))
-        self.assertEqual((f["sonnet.pass_classes"], f["sonnet.behind.min"], f["sonnet.behind.max"],
-                          f["sonnet.solved.plugin-next"], f["sonnet.solved.defaults"]),
-                         ("lookup", "7", "63", "79 of 80", "78 of 80"))
+                          f["opus.level.defaults"]), ("5", "18", "32", "design"))
+        self.assertEqual((f["opus.behind.min"], f["opus.behind.max"], f["opus.status.FAIL"]), ("60", "144", "6"))
+        self.assertEqual((f["sonnet.status.PASS"], f["sonnet.behind.min"], f["sonnet.behind.max"],
+                          f["sonnet.solved.router"], f["sonnet.solved.defaults"]),
+                         ("0", "7", "63", "69 of 70", "68 of 70"))
+        self.assertNotIn("sonnet.pass_classes", f)
+
+    def test_the_figures_are_keyed_by_role(self):
+        f = docs_assets.bench_figures(self.snap.bench)
+        self.assertEqual((f["opus.pooled.best"], f["opus.pooled.strongest"], f["opus.solved.best"]),
+                         (f["opus.pooled.opusplan"], f["opus.pooled.fable-high"], "69 of 70"))
+        self.assertEqual((f["opus.saturated"], f["sonnet.saturated"], f["opus.router_code"]), ("5", "0", "`plugin-next`"))
+        self.assertEqual((f["tasks"], f["tasks_total"], f["opus.partial_classes"]), ("14", "30", "lookup and cross-module"))
+        self.assertFalse([k for k in f if "plugin-next" in k])
+
+    def test_the_figures_do_not_read_the_wording_of_a_reason(self):
+        data = copy.deepcopy(self.snap.bench)
+        for session in data["sessions"]:
+            for c in session["classes"]:
+                c["reason"] = "reworded"
+        self.assertEqual(docs_assets.bench_figures(data), docs_assets.bench_figures(self.snap.bench))
 
     def test_the_trace_text_lists_every_baseline_with_its_interval(self):
-        data = bench_summary()
-        del data["sessions"][1:]
-        session = data["sessions"][0]
-        session["pooled"] = {"plugin-next": {"runs": 10, "solved": 9, "cost_usd": 1.0},
-                             "defaults": {"runs": 10, "solved": 10, "cost_usd": 1.0}}
-        session["classes"] = [{
-            "class": "root-cause", "status": "FAIL", "best_baseline": "defaults",
-            "configs": {"plugin-next": {"runs": 10, "solved": 9, "cost_per_solved": 0.2},
-                        "defaults": {"runs": 10, "solved": 10, "cost_per_solved": 0.1}},
-            "differences": {"defaults": (0.05, 0.15)}}]
-        f = docs_assets.bench_figures(data)
-        self.assertEqual(f["opus.trace"],
-                         "root cause FAIL (router $0.200, 9 of 10 solved; `defaults` $0.100 (+0.050 to +0.150))")
+        data = bench_data(solved=9, cps=0.2, runs=10, cls="root-cause")
+        trace = docs_assets.bench_figures(data)["opus.trace"]
+        self.assertRegex(trace, r"^root cause (FAIL|PARTIAL) \(router \$0\.200, 9 of 10 solved; `\w[\w-]*` \$0\.200 "
+                                r"\([+-]\d\.\d{3} to [+-]\d\.\d{3}\)")
+        for cfg in ("defaults", "haiku", "haiku-high", "opusplan"):
+            self.assertRegex(trace, rf"`{cfg}` \$0\.200 \([+-]\d\.\d{{3}} to [+-]\d\.\d{{3}}\)")
 
     def test_a_changed_figure_makes_the_docs_stale(self):
-        real = docs_assets.bench_figures(docs_assets.bench_summary())
-        with mock.patch.object(docs_assets, "bench_figures", return_value={**real, "opus.pooled.plugin-next": "$9.999"}):
-            code, err = check()
-        self.assertEqual(code, 1)
+        problems = docs_assets.sync(self.build(bench=self.with_changed_figures()), True)
         for path in ("README.md", "docs/FAQ.md", "site/index.html", "docs/TRACEABILITY.md"):
-            self.assertIn(f"{path}: out of date", err)
+            self.assertIn(f"{path}: out of date, run python3 tools/docs_assets.py", problems)
+
+    def test_renaming_the_router_changes_no_file_but_the_trace_in_traceability(self):
+        base = analyze.load(analyze.default_paths())
+        swap = lambda name: "renamed" if name == "plugin-next" else name  # noqa: E731
+        results = dataclasses.replace(
+            base, rows=[dict(r, config=swap(r["config"])) for r in base.rows],
+            configs=[dict(c, id=swap(c["id"])) for c in base.configs], routers=frozenset(map(swap, base.routers)))
+        before, after = self.build(), self.build(bench=analyze.figures(results))
+        self.assertEqual({p for p in before if before[p] != after[p]}, {"docs/TRACEABILITY.md"})
+        self.assertIn("<!-- bench:opus.router_code -->`renamed`<!-- /bench -->", after["docs/TRACEABILITY.md"])
 
     def test_an_unknown_figure_stops_the_build(self):
         with self.assertRaises(SystemExit) as raised:
@@ -127,19 +196,16 @@ class DocsAssets(unittest.TestCase):
         self.assertIn("alt: unknown benchmark figure nope", str(raised.exception))
 
     def patched_build(self):
-        real = docs_assets.bench_figures(docs_assets.bench_summary())
-        with mock.patch.object(docs_assets, "bench_figures", return_value={**real, "opus.pooled.plugin-next": "$9.999",
-                                                                          "opus.cell.lookup.plugin-next": "$9.9999"}):
-            return docs_assets.build()
+        return self.build(bench=self.with_changed_figures())
 
     def test_the_figure_alt_text_follows_the_figures(self):
         files = self.patched_build()
         for path in ("README.md", "site/index.html"):
             alt = re.search(r'benchmark\.svg"[^>]*? alt="([^"]*)"', files[path]).group(1)
-            self.assertIn("lookup $9.9999 against", alt, path)
+            self.assertIn("bugfix $9.9999 against", alt, path)
 
     def test_no_figure_span_sits_inside_backticks(self):
-        for path in ("README.md", "docs/FAQ.md", "site/index.html", "docs/TRACEABILITY.md"):
+        for path in (*docs_assets.FIGURE_PAGES, "site/index.html"):
             text = (ROOT / path).read_text(encoding="utf-8")
             self.assertIsNone(re.search(r"`<!-- bench:|<!-- /bench -->`", text), path)
 
@@ -151,9 +217,7 @@ class DocsAssets(unittest.TestCase):
             self.assertIn("$9.999", block)
 
     def test_the_version_badge_alt_text_follows_the_plugin_version(self):
-        with mock.patch.object(docs_assets, "version", return_value="9.8.7"), \
-                mock.patch.object(docs_assets, "release_date", return_value="2030-01-01"):
-            files = docs_assets.build()
+        files = self.build(version="9.8.7", released="2030-01-01")
         for path in ("README.md", "site/index.html"):
             self.assertIn('badge-version.svg', files[path], path)
             self.assertIn('alt="version 9.8.7"', files[path], path)

@@ -1,4 +1,5 @@
 """Pieces the pass checks share. A check loads this by file path and runs under `python -I`."""
+import contextlib
 import importlib.util
 import json
 import re
@@ -10,6 +11,35 @@ from pathlib import Path
 # unittest is imported before the work dir joins sys.path, so a unittest.py left there can't stand in for it.
 LAUNCHER = ("import sys, unittest; sys.path.append(sys.argv[1]); "
             "unittest.main(module=None, argv=['unittest', sys.argv[2]])")
+
+
+def finish(ok: bool, reason: str = "") -> None:
+    """End the check: exit 0 for a solved task, 1 for an unsolved one. The last line printed is the reason a row records:
+    `reason` says why it failed and is ignored for a pass. A check exits 2 only by raising, which the launcher in run.py
+    reads as the check itself being broken."""
+    print("solved" if ok else reason or "not solved", flush=True)
+    sys.exit(0 if ok else 1)
+
+
+@contextlib.contextmanager
+def agent_code():
+    """Wrap the lines of a check that run the work dir's code. Whatever they raise, SystemExit included, the task failed;
+    anything raised outside is a bug in the check."""
+    try:
+        yield
+    except BaseException as exc:
+        finish(False, f"the work dir's code raised {type(exc).__name__}: {exc}"[:300])
+
+
+def differs(got, want) -> str:
+    """Where two results first differ, for a check's failure reason."""
+    if isinstance(got, (list, tuple)) and isinstance(want, (list, tuple)):
+        for n, (a, b) in enumerate(zip(got, want), 1):
+            if a != b:
+                return f"result {n} is {a!r}, expected {b!r}"[:300]
+        if len(got) != len(want):
+            return f"{len(got)} results, expected {len(want)}"
+    return f"got {got!r}, expected {want!r}"[:300]
 
 
 def use_work(work: Path) -> None:
@@ -70,10 +100,16 @@ def finding(work: Path, target: str, lines: set) -> bool:
 
 
 def tests_pass(work: Path, shipped: Path, test: str) -> bool:
-    if (Path(work) / test).read_bytes() != (Path(shipped) / test).read_bytes():
-        return False  # the test is the spec; changing it doesn't count
-    res = subprocess.run([sys.executable, "-I", "-c", LAUNCHER, str(work), test[:-3]], cwd=work,
-                         capture_output=True, text=True, timeout=60)
+    """Whether the work dir's copy of the shipped test is unchanged and passes. A test the run removed, made
+    unreadable or left hanging, or output that isn't UTF-8, is False; a shipped test that can't be read raises."""
+    spec = (Path(shipped) / test).read_bytes()
+    try:
+        if (Path(work) / test).read_bytes() != spec:
+            return False  # the test is the spec; changing it doesn't count
+        res = subprocess.run([sys.executable, "-I", "-c", LAUNCHER, str(work), test[:-3]], cwd=work,
+                             capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
+        return False
     return res.returncode == 0 and re.search(r"Ran [1-9]\d* tests?", res.stderr) is not None and "OK" in res.stderr
 
 

@@ -4,11 +4,12 @@ from __future__ import annotations
 import datetime as _dt
 import os
 import re
-import time
 from pathlib import Path
 
-from . import registry, request, session, store
+from . import calls, profile, request, session, store
 from . import config as cfg
+from .config import Level
+from .registry import Registry
 from .settings import Settings
 
 _NON_CODE = (".md", ".mdx", ".txt", ".rst", ".adoc", ".csv", ".log")
@@ -17,20 +18,20 @@ CHECK_COMMAND = re.compile(
     r"ruff|eslint|flake8|pylint|clippy|golangci-lint|rubocop)\b|"
     r"\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|lint|typecheck|check|build)\b|"
     r"\b(?:cargo|go|dotnet|mvn|gradle|gradlew|make|just|swift|mix|deno)\s+\S*\s*(?:test|check|build|vet|lint|verify)\b")
-_CHECKERS = ("verifier", "reviewer")
 # A message's tool_use rows are stamped before its Edit's PostToolUse records the edit.
 _SAME_MESSAGE_SLACK = 5
 
 
 def is_checker(agent_type: object) -> bool:
-    return str(agent_type or "").endswith(_CHECKERS)
+    return profile.role(agent_type).checker
 
 
 def note_edit(hook_input: dict) -> None:
     tool_input = cfg.tool_input(hook_input)
     path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
     if path and not path.lower().endswith(_NON_CODE) and _in_project(hook_input, path):
-        store.update_entry("edits", hook_input.get("session_id"), edited_at=time.time())
+        store.update_entry("edits", hook_input.get("session_id"), edited_at=store.now())
+        request.note_edit(hook_input.get("session_id"))
 
 
 def _in_project(hook_input: dict, path: str) -> bool:
@@ -47,7 +48,7 @@ def _in_project(hook_input: dict, path: str) -> bool:
 
 
 def note_check(session_id: str | None) -> None:
-    store.update_entry("edits", session_id, verified_at=time.time())
+    store.update_entry("edits", session_id, verified_at=store.now())
 
 
 def note_agent_checks(hook_input: dict) -> None:
@@ -74,48 +75,56 @@ def checks_ran_since(transcript_path: object, since: float) -> bool:
     return False
 
 
-def strong_agent(config: dict, need: str, level: str | None = None) -> str:
+def strong_agent(reg: Registry, need: str, level: Level | None = None) -> str:
     """The role agent to hand hard thinking to, by name only: the router routes its brief with the
     role's floor and a redo still climbs, which a model named on the call would stop. Only with no
     role agent does the needed model go on the call."""
-    name = "deep-solver" if level == "frontier" else "architect"
-    if name not in (config.get("crew") or {}):
+    name = profile.DEEP_SOLVER if level == Level.frontier else profile.ARCHITECT
+    if name not in reg.crew:
         return f'a subagent with model: "{need}"'
     return f"{cfg.PLUGIN_NAME}:{name}"
 
 
 def writes_nothing(agent: str) -> bool:
-    """The architect has no Write or Edit tool, so a task whose deliverable is a file fails there."""
-    return agent == f"{cfg.PLUGIN_NAME}:architect"
+    """The architect and the reviewer have no Write or Edit tool, so a task whose deliverable is a file fails there."""
+    return not profile.role(agent).writes
 
 
-def escalation(config: dict, hook_input: dict) -> str | None:
+def finished_check(reg: Registry, hook_input: dict, need: str, level: Level | None) -> str:
+    """The agent to check a finished result. The reviewer stops without a diff file, so it is named only
+    once code changed in this request, which is when a diff can be saved; otherwise the plan is still open."""
+    if request.load(hook_input.get("session_id")).edited and profile.REVIEWER in reg.crew:
+        return f"{cfg.PLUGIN_NAME}:{profile.REVIEWER}"
+    return strong_agent(reg, need, level)
+
+
+def escalation(reg: Registry, hook_input: dict) -> str | None:
     """A request estimated above the conversation's own model, answered without any
     agent of that strength: ask once for a stronger model to check the result."""
     session_id = hook_input.get("session_id")
     entry = request.load(session_id)
-    if entry.escalation_asked or entry.level not in cfg.LEVELS[cfg.LEVELS.index("complex"):]:
+    if entry.escalation_asked or not entry.level or entry.level < Level.complex:
         return None
     need = entry.need
     # On a session's first prompt the model isn't known yet; by now the transcript has it.
-    current = (registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
-               or entry.session_tier)
-    if not current or not need or registry.strength(config, current) >= registry.strength(config, need):
+    model = session.model(session_id, hook_input.get("transcript_path"))
+    if not entry.below(reg, model) or reg.strength(calls.strongest(reg, session_id)) >= reg.strength(need):
         return None
-    if registry.strength(config, entry.top_spawn) >= registry.strength(config, need):
-        return None
+    current = reg.family(model) or entry.session_tier
     try:
         request.mark_escalation(session_id, current)
     except OSError:
         return None
-    agent = strong_agent(config, need, entry.level)
-    act = ("to check; it writes nothing, so apply what it finds yourself" if writes_nothing(agent)
+    agent = finished_check(reg, hook_input, need, entry.level)
+    act = ("to check; it writes nothing, so what it finds is applied here" if writes_nothing(agent)
            else "to check and improve")
+    given = ("The task and the path of the diff, saved to a file, go" if agent.endswith(f":{profile.REVIEWER}")
+             else "The task and the result go")
     return (
-        f"This request was estimated as {entry.level}, which needs about {need}-level reasoning, and "
-        f"this conversation runs on {current}. No {need}-level agent has looked at it. Before finishing, give "
-        f"the task and your result to {agent} {act}, then give the user the reconciled answer. If the task "
-        "turned out to be simple and the estimate was wrong, say so in one line and finish."
+        f"This request was estimated as {entry.level}: about {need}-level reasoning, on a conversation running "
+        f"{current}, with no {need}-level agent having looked. {given} to {agent} {act}, and "
+        "the user gets the reconciled answer. If the task was simple and the estimate wrong, one line saying so "
+        "finishes the turn."
     )
 
 
@@ -133,15 +142,15 @@ def unverified_edit(hook_input: dict) -> str | None:
         return None
     name = cfg.PLUGIN_NAME
     return (
-        f"Code changed since the last check and nothing has checked it yet. Before finishing, run "
-        f"{name}:verifier on the change (it finds and runs the project's tests, lint and type checks), and "
-        f"for a risky or cross-module change also {name}:reviewer. If the project has no runnable checks, "
-        "or the change can't affect behavior, say so in one line and finish."
+        f"Code changed since the last check and nothing has checked it yet. {name}:verifier finds and runs the "
+        f"project's tests, lint and type checks on the change, and a risky or cross-module change also gets "
+        f"{name}:reviewer, given the path of a saved diff. A project with no runnable checks, or a change that can't affect behavior, finishes "
+        "with one line saying so."
     )
 
 
-def before_stop(hook_input: dict, config: dict, settings: Settings) -> str | None:
+def before_stop(hook_input: dict, reg: Registry, settings: Settings) -> str | None:
     if hook_input.get("stop_hook_active") or settings.mode != "auto":
         return None
-    return ((escalation(config, hook_input) if settings.strong_agent_gate else None)
+    return ((escalation(reg, hook_input) if settings.strong_agent_gate else None)
             or (unverified_edit(hook_input) if settings.verify_gate else None))

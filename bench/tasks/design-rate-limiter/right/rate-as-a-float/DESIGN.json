@@ -1,0 +1,12 @@
+{
+  "algorithm": "token_bucket",
+  "store": "redis",
+  "key": "api_key",
+  "rate_per_second": 5.0,
+  "burst": 20,
+  "reasons": [
+    "bursts of 20 over an average of 5/s",
+    "shared across servers",
+    "quota is per key"
+  ]
+}

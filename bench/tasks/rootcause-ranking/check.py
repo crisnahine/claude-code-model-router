@@ -12,10 +12,10 @@ WORK = Path(sys.argv[1])
 SHIPPED = Path(__file__).resolve().parent / "repo"
 
 passcheck.use_work(WORK)
-try:
+players = [{"name": n, "score": s} for n, s in (("a", 3), ("b", 100), ("c", 20), ("d", 1000))]
+with passcheck.agent_code():
     import ranking
-    players = [{"name": n, "score": s} for n, s in (("a", 3), ("b", 100), ("c", 20), ("d", 1000))]
-    ok = passcheck.tests_pass(WORK, SHIPPED, "test_ranking.py") and [p["name"] for p in ranking.top(players, 4)] == ["d", "b", "c", "a"]
-except BaseException:  # a SystemExit from work-dir code is a failure
-    ok = False
-sys.exit(0 if ok else 1)
+    order = [p["name"] for p in ranking.top(players, 4)]
+tests = passcheck.tests_pass(WORK, SHIPPED, "test_ranking.py")
+passcheck.finish(tests and order == ["d", "b", "c", "a"],
+                 "test_ranking.py no longer passes" if not tests else passcheck.differs(order, ["d", "b", "c", "a"]))

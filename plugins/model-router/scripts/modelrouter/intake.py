@@ -1,5 +1,5 @@
 """Whether a prompt or a turn is the person's request, and at what level, for both paths: the
-UserPromptSubmit hook (a typed skill is read from its file on disk) and the mod's turn.start
+UserPromptSubmit hook (a typed skill is read from its file on disk, a plugin's from its install folder) and the mod's turn.start
 (the engine hands over the rendered skill body)."""
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import store
+from . import agents, store
 from . import config as cfg
+from .config import Level
 from .profile import asks_for_work, profile_prompt
 
 # Where the mod saw a turn's prompt come from (prompt.submit's origin.kind): whether it is the person's.
@@ -89,37 +90,50 @@ def profile_skill(args: object, body: object, rendered: bool) -> dict:
     if takes_args and asks_for_work(args):
         return profile_prompt(args)
     parts = [profile_prompt(text) for text in (args, body[:SKILL_BODY_CHARS])]
-    if takes_args and cfg.LEVELS.index(parts[1]["level"]) > cfg.LEVELS.index("complex"):
+    if takes_args and parts[1]["level"] > Level.complex:
         # A template that serves any target: its own wording, a pipeline's gates say, isn't one task's depth.
-        parts[1] = {**parts[1], "level": "complex"}
-    return max(parts, key=lambda p: cfg.LEVELS.index(p["level"]))
+        parts[1] = {**parts[1], "level": Level.complex}
+    return max(parts, key=lambda p: p["level"])
 
 
-def _typed_skill(prompt: str, project: Path) -> dict | None:
-    """The profile behind "/name args" when name is a project or user skill or command on disk.
-    UserPromptSubmit sees only the typed line; a plugin's skill isn't found this way."""
-    match = re.match(r"/([A-Za-z0-9_.-]+)(?:\s+(.*))?\Z", prompt.strip(), re.S)
-    if not match:
-        return None
-    name, args = match.group(1), match.group(2) or ""
-    project, home = project / ".claude", store.claude_home()
-    for path in (project / "skills" / name / "SKILL.md", home / "skills" / name / "SKILL.md",
-                 project / "commands" / f"{name}.md", home / "commands" / f"{name}.md"):
+def _read_skill(paths: list[Path]) -> str | None:
+    """The first of `paths` that is a regular file, up to 64 KB."""
+    for path in paths:
         try:
             if not path.is_file():  # a FIFO or device would hang or never end
                 continue
             with path.open("rb") as fh:
-                return profile_skill(args, fh.read(64 * 1024).decode("utf-8", "replace"), rendered=False)
+                return fh.read(64 * 1024).decode("utf-8", "replace")
         except OSError:
             continue
     return None
+
+
+def _typed_skill(prompt: str, project: Path) -> dict | None:
+    """The profile behind "/name args" when name is a project or user skill or command on disk, or
+    "/plugin:name args". UserPromptSubmit sees only the typed line, so it reads the body from the file: under
+    .claude for a project or user skill, under the plugin's install folder for a plugin's, found from the install
+    record alone, since a walk of the plugins folder is too slow for every typed line. A plugin's skill it can't
+    find is profiled by its arguments alone, which the mod's reading of the rendered body can raise."""
+    match = re.match(r"/(?:([A-Za-z0-9_.-]+):)?([A-Za-z0-9_.-]+)(?:\s+(.*))?\Z", prompt.strip(), re.S)
+    if not match:
+        return None
+    plugin, name, args = match.group(1), match.group(2), match.group(3) or ""
+    if plugin:
+        roots = [cfg.PLUGIN_ROOT] if plugin == cfg.PLUGIN_NAME else agents.installed_roots(plugin)
+        body = _read_skill([root / "skills" / name / "SKILL.md" for root in roots])
+        return profile_skill(args, body or "", rendered=False)
+    project, home = project / ".claude", store.claude_home()
+    body = _read_skill([project / "skills" / name / "SKILL.md", home / "skills" / name / "SKILL.md",
+                        project / "commands" / f"{name}.md", home / "commands" / f"{name}.md"])
+    return None if body is None else profile_skill(args, body, rendered=False)
 
 
 @dataclass(frozen=True)
 class Intake:
     delivered: bool
     person: bool
-    level: str | None
+    level: Level | None
     signals: tuple[str, ...]
     command: str | None = None
 

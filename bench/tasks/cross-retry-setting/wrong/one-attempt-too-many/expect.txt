@@ -1,0 +1,1 @@
+(fetch, upload) attempts by setting (none, 5, 1) are [(4, 3), (6, 5), (2, 1)], expected [(3, 3), (5, 5), (1, 1)]

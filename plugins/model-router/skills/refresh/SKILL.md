@@ -5,6 +5,7 @@ disable-model-invocation: true
 allowed-tools:
   - Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" refresh --force)
   - Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" ack)
+  - Bash(date +%F)
 ---
 
 # Review upstream Claude Code changes
@@ -16,7 +17,7 @@ allowed-tools:
 ## Steps
 
 1. If the output above shows nothing after the "No new releases." line, tell the user everything is current and stop.
-2. Otherwise send the list above to `model-router:docs-researcher`. Ask it to read each new release's changelog entry and each high-impact docs page, and report items that affect:
+2. Otherwise send the list above to `model-router:docs-researcher`, starting the brief with today's date: !`date +%F`. Ask it to read each new release's changelog entry and each high-impact docs page, and report items that affect:
    - model aliases or new models (the registry in `config/models.json` lists the models this plugin routes to)
    - agent or skill frontmatter fields
    - hook events, hook input or output fields

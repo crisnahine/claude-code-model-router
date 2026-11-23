@@ -2,51 +2,56 @@
 fall back to what the last SessionStart recorded."""
 from __future__ import annotations
 
-from . import agents, ladder, learn, ledger, registry, settings, store, upstream
+from . import intake, ladder, learn, ledger, router, settings, spawn, store, upstream
 from . import config as cfg
-from .profile import profile_call, profile_prompt
+from . import registry
 
 # The --json shapes. A new key keeps the version; removing or renaming one bumps it.
 USAGE_SCHEMA = "model-router.usage/1"
 MODELS_SCHEMA = "model-router.models/1"
 
 
+def _effort(snap: settings.Snapshot, pick: ladder.Pick) -> str | None:
+    """The pick's effort as it runs, held to any maxEffortLevel cap, and saying so."""
+    effort, held = router.capped(pick.effort, snap.allowed.effort_cap(snap.registry, pick.model))
+    return f"{effort} ({held.lstrip('; ')})" if held else effort
+
+
 def policy(snap: settings.Snapshot) -> str:
-    config, options, usable = snap.config, snap.options, snap.usable
+    reg, options, usable = snap.registry, snap.options, snap.usable
     limit = options.cap
     lines = [f"Routing: **{options.mode}**. Priority: **{options.priority}**. "
              f"Cap: **{limit or 'none'}**. Strongest model in use: **{usable[-1] if usable else 'none'}**.", "",
              "| Subtask level | Model | Effort |", "| :- | :- | :- |"]
-    raises = learn.raises()
     for level in cfg.LEVELS:
-        pick = ladder.pick(config, level, options.priority, usable, raises)
-        note = " (raised by feedback)" if raises[level] else ""
-        lines.append(f"| {level} | {pick.model or 'left as it is'}{note} | {pick.effort or 'as the agent or session sets it'} |")
+        pick = snap.pick(level)
+        note = " (raised by feedback)" if snap.raises[level] else ""
+        lines.append(f"| {level} | {pick.model or 'left as it is'}{note} | {_effort(snap, pick) or 'as the agent or session sets it'} |")
     lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
-    for name in registry.by_strength(config):
-        info = registry.models(config)[name]
+    for name in reg.by_strength():
+        info = reg.models[name]
         flag = "" if name in usable else " (not in use)"
-        lines.append(f"| {name}{flag} | {info.get('strength')} | {info.get('speed', '-')} | "
-                     f"{info.get('cost', '-')} | {info.get('use_for', '')} |")
+        lines.append(f"| {name}{flag} | {info.strength} | {'-' if info.speed is None else info.speed} | "
+                     f"{'-' if info.cost is None else info.cost} | {info.use_for} |")
     lines += ["", "Strength, speed and cost are relative ranks, not prices.", "",
               "A role agent with a model keeps it, also where the router doesn't route; the others are "
               "routed by their brief, like any other agent.", "",
               "| Role agent | Model | Role |", "| :- | :- | :- |"]
-    for name, agent in (config.get("crew") or {}).items():
+    for name, agent in reg.crew.items():
         lines.append(f"| {cfg.PLUGIN_NAME}:{name} | {agent.get('model') or 'routed by brief'} | {agent.get('role', '')} |")
     return "\n".join(lines)
 
 
 def models_data(snap: settings.Snapshot) -> dict:
     """Each registry model's state here, in the `model-router.models/1` shape."""
-    config, options, table, usable = snap.config, snap.options, snap.health, snap.usable
+    reg, options, table, usable = snap.registry, snap.options, snap.health, snap.usable
     limit = options.cap
-    allowed = snap.allowed.permitted(config)
+    allowed = snap.allowed.permitted(reg)
     rows = []
-    for name in registry.by_strength(config):
-        if limit and registry.strength(config, name) > registry.strength(config, limit):
+    for name in reg.by_strength():
+        if limit and reg.strength(name) > reg.strength(limit):
             status, detail = "above_cap", "above your cap"
-        elif limit and name not in snap.trusted:
+        elif limit and reg.models[name].project:
             status, detail = "project_model_under_cap", "added by this project, so not used while a cap is set"
         elif name not in allowed:
             status, detail = "not_permitted", "not permitted by the availableModels or deniedModels setting"
@@ -63,7 +68,7 @@ def models_data(snap: settings.Snapshot) -> dict:
               for level, info in ((lv, learned.get(lv)) for lv in cfg.LEVELS) if isinstance(info, dict)]
     aliases = (upstream.load().get("cache") or {}).get("aliases")
     aliases = aliases if isinstance(aliases, list) else []
-    return {
+    data = {
         "schema": MODELS_SCHEMA,
         "cap": limit or None,
         "strongest_in_use": usable[-1] if usable else None,
@@ -71,11 +76,30 @@ def models_data(snap: settings.Snapshot) -> dict:
         "models": rows,
         "levels": levels,
         "doc_aliases": aliases,
-        "not_in_registry": [f for f in upstream.model_families(aliases) if f not in registry.models(config)],
+        "not_in_registry": [f for f in upstream.model_families(aliases) if f not in reg.models],
         "set_aside": [str(p) for p in store.set_aside()],
         "newer_files": [str(p) for p in store.newer_files()],
-        "newer_config": [str(p) for p in cfg.newer_overrides()],
+        "newer_config": [str(p) for p in reg.newer],
+        "workflow_model": options.workflow_model,
     }
+    # New keys appear only when they have something to say, so a clean setup's output keeps its bytes.
+    if reg.problems:
+        data["config_problems"] = list(reg.problems)
+    held_back = _held_back(reg)
+    if held_back:
+        data["held_back"] = held_back
+    locks = lock_rows()
+    if locks:
+        data["locks"] = locks
+    return data
+
+
+def _held_back(reg: registry.Registry) -> list[dict]:
+    """What a project's override file asked for that was not applied: what the registry held at load, and
+    each rule model a spawn in the last week found weaker than what the call would run on without it."""
+    found = [{"kind": h.kind, "name": h.name, "reason": h.reason} for h in reg.held]
+    seen = {(r.get("agent"), r["held"]) for r in ledger.read(7) if isinstance(r.get("held"), str)}
+    return found + [{"kind": "rule", "name": str(agent), "reason": reason} for agent, reason in sorted(seen, key=str)]
 
 
 def models(snap: settings.Snapshot) -> str:
@@ -88,6 +112,17 @@ def models(snap: settings.Snapshot) -> str:
         lines += ["", "| Subtask level | Routed calls | Votes it was too low | Raised |", "| :- | -: | -: | :- |"]
         lines += [f"| {lv['level']} | {lv['routed_calls']} | {lv['votes_too_low']} | "
                   f"{'yes' if lv['raised'] else 'no'} |" for lv in data["levels"]]
+    if data.get("config_problems"):
+        lines += ["", "Left out of the override files, so the registry runs without them: "
+                  + "; ".join(data["config_problems"]) + "."]
+    if data.get("held_back"):
+        lines += ["", "A project's model-router.json asked for these and Model Router did not apply them "
+                  "(a project's file can raise, never lower):"]
+        lines += [f"- {h['kind']} {h['name']}: {h['reason']}" for h in data["held_back"]]
+    if data["workflow_model"]:
+        lines += ["", f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins every workflow agent to {data['workflow_model']}. "
+                  "Model Router still sets a workflow agent's model, and the docs don't say which of the two wins; "
+                  "/model-router:usage shows the model each one ran on."]
     if data["doc_aliases"]:
         lines += ["", "Model aliases in the current Claude Code docs: " + ", ".join(data["doc_aliases"]) + "."]
         if data["not_in_registry"]:
@@ -101,26 +136,55 @@ def models(snap: settings.Snapshot) -> str:
     if data["newer_config"]:
         lines += ["", "Written for a newer Model Router, so only the settings this release understands apply: "
                   + ", ".join(data["newer_config"]) + ". Update the plugin to use the rest."]
+    lines += lock_table(data.get("locks", []))
     return "\n".join(lines)
 
 
+LOCK_EVENTS = ("waits", "other_session", "skipped", "broken")
+
+
+def lock_rows() -> list[dict]:
+    """Each state file's lock counts, for `models`: waits for the lock, how many of those were
+    on another session's lock, writes skipped because it stayed held, stale locks broken."""
+    rows = []
+    for name, counts in sorted(store.lock_counts().items()):
+        if isinstance(counts, dict):
+            rows.append({"file": name, **{e: counts.get(e) if isinstance(counts.get(e), int) else 0
+                                          for e in LOCK_EVENTS},
+                         "last_at": counts.get("at") if isinstance(counts.get("at"), (int, float)) else None})
+    return rows
+
+
+def lock_table(rows: list[dict]) -> list[str]:
+    if not rows:
+        return []
+    return ["", "| State file | Lock waits | On another session's lock | Writes skipped | Stale locks broken |",
+            "| :- | -: | -: | -: | -: |",
+            *(f"| {r['file']} | {r['waits']} | {r['other_session']} | {r['skipped']} | {r['broken']} |" for r in rows),
+            "", "A skipped write lost one update to that file, since the lock stayed held past "
+            f"{store.LOCK_WAIT_SECONDS:g} seconds."]
+
+
 def explain(snap: settings.Snapshot, text: str, agent: str | None = None) -> str:
-    """What the router would make of this task, and why."""
-    config, options, usable = snap.config, snap.options, snap.usable
-    result = profile_call({"prompt": text}, agent) if agent else profile_prompt(text)
-    level = result["level"]
-    pick = ladder.pick(config, level, options.priority, usable, learn.raises())
-    why = ", ".join(result["signals"]) or "no risk, scope or ambiguity wording"
-    out = [f"Level: **{level}** ({why}).",
-           f"Model: **{pick.model or 'left as it is'}**, effort: {pick.effort or 'unchanged'}.",
+    """What the router would make of an agent call with this brief, and why: a dry run of spawn.decide, which
+    writes nothing. Without an agent, the text also reads as the user's own request."""
+    options, usable = snap.options, snap.usable
+    call = {"session_id": snap.session_id, "tool_input": {"prompt": text, "subagent_type": agent or "general-purpose"}}
+    decision = spawn.decide(call, snap).decision
+    level = decision["level"]
+    why = ", ".join(decision["signals"]) or "no risk, scope or ambiguity wording"
+    out = [f"Level: **{level}** ({why})." if level else "Level: none, the call is not routed by level.",
+           f"Model: **{decision['model'] or 'left as it is'}**, effort: {decision['effort'] or 'unchanged'}.",
+           f"Why: {decision['reason']}.",
            f"Priority {options.priority}; models in use: {', '.join(usable) or 'none: availableModels and deniedModels leave no registry model open'}."]
-    if agent:
-        definition = agents.find(agent, snap.project)
-        pinned = (definition or {}).get("model")
-        if definition is None:
-            out.append(f"The definition of `{agent}` wasn't found, so its calls are left alone.")
-        elif pinned and options.pins == "respect":
-            out.append(f"`{agent}` names its own model ({pinned}), which is kept within the cap.")
+    if not agent:
+        seen = intake.from_prompt(text, snap.project)
+        if seen.person:
+            need = snap.pick(seen.level).model
+            out.append(f"As your own request it reads **{seen.level}** ({', '.join(seen.signals) or 'no signals'}), "
+                       f"which needs about {need or 'no model change'}.")
+        else:
+            out.append("It is not read as your own request: it is a delivered or machine message.")
     return "\n".join(out)
 
 
@@ -178,9 +242,15 @@ def usage_data(days: int, exact: bool = False) -> dict:
             model = str(r.get("resolved_model") or "background (not reported)")
             a = row(r.get("agent"))
             a["ran_on"][model] = a["ran_on"].get(model, 0) + 1
-            m = by_model.setdefault(model, {"model": model, "runs": 0, "tokens": 0})
+            m = by_model.setdefault(model, {"model": model, "runs": 0, "tokens": 0, "run_tokens": None})
             m["runs"] += 1
+            # totalTokens is the run's final request only (https://code.claude.com/docs/en/hooks.md).
             m["tokens"] += r.get("total_tokens") if isinstance(r.get("total_tokens"), int) else 0
+    for r in rows:
+        m = by_model.get(str(r.get("model"))) if r.get("event") == "usage" and r.get("agent_id") else None
+        if m is not None:
+            m["run_tokens"] = (m["run_tokens"] or 0) + sum(int(r.get(k) or 0) for k in (
+                "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
     spend: dict[tuple[str, str], dict] = {}
     unpriced = set()
     for r in rows:
@@ -223,8 +293,9 @@ def usage(days: int) -> str:
         ran = ", ".join(f"{m} x{n}" for m, n in sorted(a["ran_on"].items())) or "-"
         lines.append(f"| {a['agent']} | {a['calls']} | {a['routed']} | {levels} | {ran} |")
     if data["models"]:
-        lines += ["", "| Model | Agent runs | Tokens |", "| :- | -: | -: |"]
-        lines += [f"| {m['model']} | {m['runs']} | {m['tokens']:,} |" for m in data["models"]]
+        lines += ["", "| Model | Agent runs | Final-request tokens | All subagent turns' tokens |", "| :- | -: | -: | -: |"]
+        lines += [f"| {m['model']} | {m['runs']} | {m['tokens']:,} | "
+                  f"{'-' if m['run_tokens'] is None else format(m['run_tokens'], ',')} |" for m in data["models"]]
     if data["model_errors"]:
         lines += ["", f"Agent calls that failed with a model error: {data['model_errors']}."]
     if spend["rows"]:

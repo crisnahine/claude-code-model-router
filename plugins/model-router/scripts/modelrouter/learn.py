@@ -5,9 +5,14 @@ itself is never measured."""
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Mapping
 
-from . import registry, store
-from .config import LEVEL_SOURCES, LEVELS
+from . import store
+from .config import LEVELS, Level
+from .registry import Registry
+
+if TYPE_CHECKING:
+    from .calls import Route
 
 VOTES_NEEDED = 6
 SHARE_NEEDED = 0.3
@@ -35,55 +40,84 @@ def _raise(info: object) -> int:
         return 0
 
 
-def _update(level: str, calls: int = 0, up: int = 0, down: int = 0) -> None:
-    if level not in LEVELS:
-        return
+def _tally(data: dict, level: str, calls: int = 0, up: int = 0, down: int = 0) -> None:
+    info = data.get(level) if isinstance(data.get(level), dict) else {}
+    for field, amount in (("calls", calls), ("votes", up), ("relax", down)):
+        info[field] = max(0, int(info.get(field) or 0) + amount)
+    raised = int(info.get("bump") or 0)
+    enough = max(VOTES_NEEDED, SHARE_NEEDED * info["calls"])
+    if raised < MAX_BUMP and info["votes"] >= enough:
+        info.update(bump=raised + 1, calls=0, votes=0, relax=0)
+    elif raised > 0 and info["relax"] >= enough:
+        info.update(bump=raised - 1, calls=0, votes=0, relax=0)
+    data[level] = info
+
+
+def _update(changes: list[tuple[object, dict[str, int]]]) -> None:
+    """Apply every (level, {"calls" | "up" | "down": amount}) in one locked write."""
+    found = []
+    for level, amounts in changes:
+        parsed = Level.parse(level)
+        if parsed is not None:
+            found.append((parsed.value, amounts))  # a plain str key: the state file sorts its keys
 
     def change(data: dict) -> None:
-        info = data.get(level) if isinstance(data.get(level), dict) else {}
-        for field, amount in (("calls", calls), ("votes", up), ("relax", down)):
-            info[field] = max(0, int(info.get(field) or 0) + amount)
-        raised = int(info.get("bump") or 0)
-        enough = max(VOTES_NEEDED, SHARE_NEEDED * info["calls"])
-        if raised < MAX_BUMP and info["votes"] >= enough:
-            info.update(bump=raised + 1, calls=0, votes=0, relax=0)
-        elif raised > 0 and info["relax"] >= enough:
-            info.update(bump=raised - 1, calls=0, votes=0, relax=0)
-        data[level] = info
+        for level, amounts in found:
+            _tally(data, level, **amounts)
 
-    try:
-        store.update_dict(_path(), change)
-    except OSError:
-        pass
+    if found:
+        try:
+            store.update_dict(_path(), change)
+        except OSError:
+            pass
 
 
-def uncount(level: str | None) -> None:
-    """Take one routed call back out of the level's count."""
-    if level:
-        _update(level, calls=-1)
+SUBAGENT = "subagent"
 
 
-def decided(config: dict, *, source: str | None, level: str | None, pick: str | None, runs_on: str | None,
-            raised: dict | None = None, earlier: str | None = None, escalated_from: str | None = None,
-            user_named: bool = False) -> None:
-    """Count one spawn and cast the votes its facts carry. `source` is None for a call
-    that ran untouched. A call on the model the user named in the prompt carries no
-    caller votes: the user chose it, not Claude."""
-    if not level:
-        return
-    if source == "router":
-        _update(level, calls=1)
-    if source in LEVEL_SOURCES and escalated_from:
-        _update(escalated_from, up=1)
-    if source != "caller" or user_named:
-        return
-    # The same call routed weaker earlier in this request counts double: it was redone.
-    if earlier and registry.stronger(config, runs_on, earlier):
-        _update(level, up=2)
-    elif registry.stronger(config, runs_on, pick):
-        _update(level, up=1)
-    elif registry.stronger(config, pick, runs_on) and (raises() if raised is None else raised).get(level, 0) > 0:
-        _update(level, down=1)
+def _source(decision: Mapping) -> str | None:
+    """A call the repeat guard passed through untouched: neither the pick nor the level applied."""
+    return None if decision["repeat_of"] else decision["source"]
+
+
+def counted(decision: Mapping, kind: str) -> Level | None:
+    """The level this spawn counts toward the vote threshold, or None. Only a subagent the router
+    gave its model counts: a workflow stage or a teammate is never redone on Claude's judgment."""
+    return Level.parse(decision["level"]) if kind == SUBAGENT and _source(decision) == "router" else None
+
+
+def spawned(reg: Registry, decision: Mapping, kind: str, earlier: Route | None, user_named: bool,
+            raised: Mapping[str, int] | None = None) -> Level | None:
+    """Count one spawn and cast the votes its facts carry, and return the level it counted toward.
+    `earlier` is the route this call had before in the request. A call on the model the user named in
+    the prompt carries no caller votes: the user chose it, not Claude. A redo votes that its first
+    level was too low only when the router chose the model: a pin, a rule or a named model decided
+    it otherwise."""
+    level = Level.parse(decision["level"])
+    if kind != SUBAGENT or level is None:
+        return None
+    source = _source(decision)
+    counts = counted(decision, kind)
+    changes: list[tuple[object, dict[str, int]]] = [(counts, {"calls": 1})] if counts else []
+    if source == "router" and decision["escalated_from"]:
+        changes.append((decision["escalated_from"], {"up": 1}))
+    if source == "caller" and not user_named:
+        pick, runs_on = decision["pick"], decision["model"] or decision["was"]
+        # The same call routed weaker earlier in this request counts double: it was redone.
+        if earlier and earlier.source == "router" and reg.stronger(runs_on, earlier.model):
+            changes.append((level, {"up": 2}))
+        elif reg.stronger(runs_on, pick):
+            changes.append((level, {"up": 1}))
+        elif reg.stronger(pick, runs_on) and (raises() if raised is None else raised).get(level, 0) > 0:
+            changes.append((level, {"down": 1}))
+    _update(changes)
+    return counts
+
+
+def swapped(route: Route | None) -> None:
+    """A run that swapped models mid-run is no result for its level: take back the count it made."""
+    if route and route.counted:
+        _update([(route.counted, {"calls": -1})])
 
 
 def reset() -> str:

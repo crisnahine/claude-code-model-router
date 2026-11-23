@@ -1,0 +1,1 @@
+result 1 is [3, 4, 5], expected [0, 1, 2]

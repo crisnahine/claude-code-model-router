@@ -10,9 +10,10 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 
-from . import allowlist, health, registry, store
+from . import allowlist, health, ladder, learn, store
 from . import config as cfg
-from .config import MODES, PRIORITIES, parse_mode
+from .config import MODES, PRIORITIES, Level, parse_mode
+from .registry import Registry
 
 CLOUDS = ("bedrock", "vertex", "foundry")
 PROVIDERS = (*CLOUDS, "anthropic_aws", "anthropic_google_cloud", "mantle")
@@ -32,6 +33,7 @@ class Settings:
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
     force: bool = False  # CLAUDE_CODE_SUBAGENT_MODEL_FORCE
     subagent_effort: str | None = None  # CLAUDE_CODE_SUBAGENT_EFFORT
+    workflow_model: str | None = None  # CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL, reported only
     effort_level: str | None = None  # CLAUDE_CODE_EFFORT_LEVEL
     cloud: str | None = None  # bedrock, vertex or foundry, from CLAUDE_CODE_USE_<NAME>
     provider: str | None = None  # the one provider the CLAUDE_CODE_USE_<NAME> switches select, if clear
@@ -71,8 +73,8 @@ def _cache_off() -> tuple[str, ...]:
                         if name.startswith(prefix) and name[len(prefix):len(prefix) + 1] in ("", "_") and truthy(value)))
 
 
-def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
-    """`config` validates the cap and carries the override files' routing_mode.
+def resolve(reg: Registry | None = None, recorded: bool = False) -> Settings:
+    """`reg` validates the cap and carries the override files' routing_mode.
     `recorded` falls back to what SessionStart recorded, for skill commands."""
     state = store.load_state() if recorded else {}
 
@@ -85,15 +87,14 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
     def env(name: str) -> str | None:
         return os.environ.get(name) or None
 
-    config = config or {}
     user = parse_mode(option("routing_mode")) or "auto"
-    from_files = parse_mode(config.get("routing_mode"))
+    from_files = parse_mode(reg.routing_mode) if reg else None
     cap = option("max_tier")
     return Settings(
         mode=from_files if from_files and MODES.index(from_files) < MODES.index(user) else user,
         routing_mode=user,
         priority=option("priority") if option("priority") in PRIORITIES else "balanced",
-        cap=cap if cap in (config.get("models") or {}) else None,
+        cap=cap if reg and cap in reg.models else None,
         pins="override" if option("agent_pins") == "override" else "respect",
         main_effort=truthy(option("main_effort")),
         update_check=_on(option("update_check")),
@@ -102,6 +103,7 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),
         force=truthy(env("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")),
         subagent_effort=env("CLAUDE_CODE_SUBAGENT_EFFORT"),
+        workflow_model=env("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL"),
         effort_level=env("CLAUDE_CODE_EFFORT_LEVEL"),
         cloud=next((c for c in CLOUDS if truthy(env(f"CLAUDE_CODE_USE_{c.upper()}"))), None),
         provider=_provider({p for p in PROVIDERS if truthy(env(f"CLAUDE_CODE_USE_{p.upper()}"))}),
@@ -115,14 +117,14 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
 
 class Snapshot:
     """What one hook call or command knows about this setup, built once at its entry. The
-    config and options are read at once; the rest on first use, so a hook that never asks
+    registry and options are read at once; the rest on first use, so a hook that never asks
     for the allowlist or the health table never reads them."""
 
     def __init__(self, hook_input: dict | None = None, recorded: bool = False) -> None:
         self.hook_input = hook_input
         self.session_id = (hook_input or {}).get("session_id")
-        self.config = cfg.load_config(hook_input)
-        self.options = resolve(self.config, recorded)
+        self.registry = cfg.load(hook_input)
+        self.options = resolve(self.registry, recorded)
         self.project: Path = cfg.project_dir(hook_input)
 
     @cached_property
@@ -134,13 +136,24 @@ class Snapshot:
         return allowlist.read(self.session_id, self.project, (self.hook_input or {}).get("settings"))
 
     @cached_property
-    def trusted(self) -> list[str]:
-        return cfg.trusted_models(self.config)
+    def raises(self) -> dict[str, int]:
+        return learn.raises()
+
+    def pick(self, level: Level) -> ladder.Pick:
+        """The ladder's pick for `level` under this setup's priority, usable models and learned raises."""
+        return ladder.pick(self.registry, level, self.options.priority, self.usable, self.raises)
+
+    def settle(self) -> None:
+        """Write what reads only noticed: an outage the health table found too long. Dry runs skip it."""
+        if "health" in vars(self):
+            try:
+                self.health.settle()
+            except OSError:
+                pass
 
     @cached_property
     def usable(self) -> list[str]:
-        return registry.available(self.config, self.options.cap, allowed=self.allowed, table=self.health,
-                                  trusted=self.trusted if self.options.cap else None)
+        return self.registry.available(self.options.cap, allowed=self.allowed, table=self.health)
 
 
 def record(settings: Settings) -> None:

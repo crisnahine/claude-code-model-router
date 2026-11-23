@@ -8,7 +8,7 @@ Install it in Claude Code:
 /plugin install model-router --marketplace crisnahine/claude-code-model-router
 ```
 
-Requirements: Claude Code 2.1.326 or later, `sh`, and Python 3.9 or later on your `PATH`. There is nothing to configure.
+Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later on your `PATH`. In a session the command opens the plugin's details in `/plugin`, where you pick a scope. Its eight options in `/config` start at their defaults, so there is nothing you have to set.
 
 Commands: `/model-router:route`, `/model-router:usage`, `/model-router:models`, `/model-router:refresh` and `/model-router:ship`.
 

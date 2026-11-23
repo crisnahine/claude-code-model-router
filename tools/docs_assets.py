@@ -6,7 +6,7 @@ Run: python3 tools/docs_assets.py            write everything
 """
 from __future__ import annotations
 
-import functools
+import dataclasses
 import html
 import json
 import re
@@ -14,9 +14,10 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from docs_pages import PAGES, attr, rel, with_head  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
-ASSETS = ROOT / "docs" / "assets"
-SITE = ROOT / "site"
 REPO = "https://github.com/crisnahine/claude-code-model-router"
 
 SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif'
@@ -40,10 +41,6 @@ LEVELS = ["lookup", "standard", "complex", "hardest", "frontier"]
 
 def esc(s: str) -> str:
     return html.escape(str(s), quote=False)
-
-
-def attr(s: str) -> str:
-    return html.escape(str(s), quote=True)
 
 
 def width_of(text: str, size: float, mono: bool = False, bold: bool = False) -> float:
@@ -255,63 +252,36 @@ def icon_body(name, x=0, y=0, s=1.0, cls="inks", sw=1.8):
 
 # ---------------------------------------------------------------- pages and banners
 
-# (file, slug, title, question, icon, group). Groups: 1 start here, 2 how it works, 3 evidence, 4 the project.
-PAGES = [
-    ("docs/FAQ.md", "faq", "Questions", "What is Model Router, and how does it pick?", "faq", 1),
-    ("docs/GUIDE.md", "guide", "Guide", "How do I configure it for my setup?", "plug", 1),
-    ("docs/README.md", "docs", "Documentation", "Every page, and the question each one answers", "index", 1),
-    ("docs/ARCHITECTURE.md", "architecture", "Architecture", "How do two paths share one router?", "architecture", 2),
-    ("GLOSSARY.md", "glossary", "Glossary", "What do call, level, pick and redo mean?", "glossary", 2),
-    ("docs/research/model-control.md", "research", "Research", "What can a plugin control in Claude Code?",
-     "research", 2),
-    ("docs/research/quality-first-routing.md", "research-quality", "Quality research",
-     "What can the router save without losing quality?", "research", 2),
-    ("docs/PERFORMANCE.md", "performance", "Performance", "What does the router cost in time and disk?",
-     "performance", 2),
-    ("docs/SECURITY.md", "security", "Security", "What reaches the network, and who can steer it?", "security", 2),
-    ("docs/BENCHMARKS.md", "benchmarks", "Benchmarks", "What does a solved task cost, with and without it?",
-     "benchmarks", 3),
-    ("docs/TEST_RESULTS.md", "test-results", "Test results", "What ran last, and what passed?", "tests", 3),
-    ("docs/TRACEABILITY.md", "traceability", "Traceability", "Where is each requirement, and is it met?",
-     "trace", 3),
-    ("docs/RELEASE_READINESS.md", "release-readiness", "Release readiness",
-     "Is this release ready, and what is still open?", "flag", 3),
-    ("docs/ROADMAP.md", "roadmap", "Roadmap", "What gets built next, and why first?", "roadmap", 4),
-    ("CHANGELOG.md", "changelog", "Changelog", "What changed in each release?", "changelog", 4),
-    ("CONTRIBUTING.md", "contributing", "Contributing", "How does a change get merged?", "branch", 4),
-    ("RELEASING.md", "releasing", "Releasing", "How is a release cut, step by step?", "tag", 4),
-    ("docs/assets/BRAND.md", "brand", "Brand", "Which colors, type and motion make a page ours?", "brand", 4),
-]
 # Cards on the index for pages that carry no page head of their own.
 EXTRA_CARDS = [("README.md", "readme", "Model Router", "What does it do, and how do I install it?", "plug", 1)]
 GROUPS = {1: ("Start here", "What it is, and the questions people ask first."),
           2: ("How it works", "The design, its words and sources, and what it costs to run."),
           3: ("Evidence", "What was measured and tested, and what is still open."),
           4: ("The project", "What comes next, what changed, and how to take part.")}
-CARDS_START, CARDS_END = "<!-- Cards, written by tools/docs_assets.py from its PAGES table. -->", "<!-- End of cards. -->"
+CARDS_START, CARDS_END = "<!-- Cards, written by tools/docs_assets.py from PAGES in tools/docs_pages.py. -->", "<!-- End of cards. -->"
 
 
-def cards() -> str:
+def cards(pages: list = PAGES) -> str:
     out = [CARDS_START, "<table>"]
     for group, (name, blurb) in GROUPS.items():
-        pages = [p for p in EXTRA_CARDS + PAGES if p[5] == group and p[0] != "docs/README.md"]
+        shown = [p for p in EXTRA_CARDS + pages if p[5] == group and p[0] != "docs/README.md"]
         out.append(f'<tr><th colspan="2" align="left">{name}<br><sub>{blurb}</sub></th></tr>')
-        for k in range(0, len(pages), 2):
+        for k in range(0, len(shown), 2):
             out.append("<tr>")
-            for path, slug, title, question, _, _ in pages[k:k + 2]:
+            for path, slug, title, question, _, _ in shown[k:k + 2]:
                 out.append(f'<td width="50%" valign="top"><img src="assets/icon-{slug}.svg" width="20" height="20" '
                            f'alt=""> <a href="{rel("docs/README.md", path)}"><b>{title}</b></a><br>{question}</td>')
-            if len(pages[k:k + 2]) == 1:
+            if len(shown[k:k + 2]) == 1:
                 out.append('<td width="50%"></td>')
             out.append("</tr>")
     out += ["</table>", CARDS_END]
     return "\n".join(out)
 
 
-def with_cards(current: str) -> str:
+def with_cards(current: str, pages: list = PAGES) -> str:
     if CARDS_START in current:
         before, rest = current.split(CARDS_START, 1)
-        return before + cards() + rest.split(CARDS_END, 1)[1]
+        return before + cards(pages) + rest.split(CARDS_END, 1)[1]
     return current
 
 
@@ -350,52 +320,20 @@ def banner(slug, title, question, icon, group) -> str:
     return svg(w, h, f"{title}: Model Router documentation", label, body, css)
 
 
-def banner_assets() -> dict:
+def banner_assets(pages: list = PAGES) -> dict:
     out = {}
-    for _, slug, title, question, icon, group in PAGES:
+    for _, slug, title, question, icon, group in pages:
         out[f"banner-{slug}.svg"] = banner(slug, title, question, icon, group)
-    for _, slug, title, question, icon, group in PAGES + EXTRA_CARDS:
+    for _, slug, title, question, icon, group in [*pages, *EXTRA_CARDS]:
         out[f"icon-{slug}.svg"] = svg(24, 24, title, f"{title} icon", icon_body(icon))
     return out
-
-
-def rel(from_file: str, to_path: str) -> str:
-    import os
-    return os.path.relpath(ROOT / to_path, (ROOT / from_file).parent).replace(os.sep, "/")
-
-
-def page_head(path: str) -> str:
-    i = [p[0] for p in PAGES].index(path)
-    _, slug, title, question, _, _ = PAGES[i]
-    link = lambda p: f'<a href="{rel(path, p[0])}">{p[2]}</a>'  # noqa: E731
-    nav = [f'<a href="{rel(path, "README.md")}">Model Router</a>']
-    if path != "docs/README.md":
-        nav.append(f'<a href="{rel(path, "docs/README.md")}">Documentation</a>')
-    if i > 0:
-        nav.append("Previous: " + link(PAGES[i - 1]))
-    if i + 1 < len(PAGES):
-        nav.append("Next: " + link(PAGES[i + 1]))
-    return ("<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->\n"
-            f'<p align="center"><img src="{rel(path, f"docs/assets/banner-{slug}.svg")}" width="880" '
-            f'alt="{attr(title)}: {attr(question)}"></p>\n\n'
-            f'<p align="center">{" &nbsp;&middot;&nbsp; ".join(nav)}</p>\n'
-            "<!-- End of page head. -->\n\n")
-
-
-HEAD_END = "<!-- End of page head. -->\n\n"
-
-
-def with_head(path: str, current: str) -> str:
-    if current.startswith("<!-- Page head"):
-        current = current.split(HEAD_END, 1)[1]
-    return page_head(path) + current
 
 
 # ---------------------------------------------------------------- badges
 
 BADGES = [
     ("version", "version", None),
-    ("claude-code", "claude code", "2.1.326 or later"),
+    ("claude-code", "claude code", "2.1.329 or later"),
     ("python", "python", "3.9 or later"),
     ("dependencies", "dependencies", "none"),
     ("license", "license", "Apache-2.0"),
@@ -428,14 +366,13 @@ def badge_assets(version: str) -> dict:
 LADDER = [  # level, model, effort, needs, subtask
     ("lookup", "Haiku", "medium", 1, "Find, list, summarize, run a command"),
     ("standard", "Sonnet", "medium", 2, "Implement to a clear spec, write tests"),
-    ("complex", "Opus", "medium", 3, "Fix a bug, design, review, risky change"),
-    ("hardest", "Opus", "high", 3, "Ambiguous, multi-system and risky at once"),
+    ("complex", "Opus", "high", 3, "Fix a bug, design, review, risky change"),
+    ("hardest", "Opus", "xhigh", 3, "Ambiguous, multi-system and risky at once"),
     ("frontier", "Fable", "high", 4, "No known approach: research"),
 ]
 
 
-def check_ladder_against_registry():
-    config = json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8"))
+def check_ladder_against_registry(config: dict):
     by_strength = {m["strength"]: name for name, m in config["models"].items()}
     shipped = [(lv, by_strength[spec["needs"]], spec["effort"], spec["needs"]) for lv, spec in config["levels"].items()]
     mine = [(lv, model.lower(), effort, needs) for lv, model, effort, needs, _ in LADDER]
@@ -520,8 +457,8 @@ def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,),
 HERO_TITLE = "Model Router: every Claude Code agent on the cheapest model that should do the job"
 HERO_LABEL = ("Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and "
               "runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level "
-              "to complex, Opus at medium effort, and is solved. The ladder runs lookup on Haiku at medium, standard on "
-              "Sonnet at medium, complex on Opus at medium, hardest on Opus at high and frontier on Fable at high.")
+              "to complex, Opus at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on "
+              "Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.")
 
 
 def hero(phone=False) -> str:
@@ -608,7 +545,7 @@ def diagram_ladder() -> str:
            + ".lstatic{animation:hide 1s infinite}" + keyframes("hide", [(0, "opacity:0"), (100, "opacity:0")]))
     title = "The ladder: five levels to a model and an effort"
     label = ("With balanced priority, lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on "
-             "Opus at medium, hardest on Opus at high, and frontier on Fable at high. A call climbs one rung each "
+             "Opus at high, hardest on Opus at xhigh, and frontier on Fable at high. A call climbs one rung each "
              "time it comes back for a redo. Quality priority goes one step stronger, fast one step lighter. When "
              "the cap, the availableModels or deniedModels settings, or failures rule a model out, the pick moves "
              "to the nearest usable model above it, or to the strongest one left, and a pick weaker than its level needs "
@@ -624,7 +561,7 @@ def diagram_redo() -> str:
         ("1. Agent call", ["Routed at its level:"], "standard, Sonnet, medium", 2),
         ("2. Result comes back", ["Recorded as finished,", "with the level it ran at."], None, 0),
         ("3. Same call again", ["In the same request:", "the answer fell short."], None, -1),
-        ("4. One level higher", ["Up a model, or up effort:"], "complex, Opus, medium", 3),
+        ("4. One level higher", ["Up a model, or up effort:"], "complex, Opus, high", 3),
     ]
     cw, gap, top = 196, 28, 92
     for k, (head, body, code, accent) in enumerate(steps):
@@ -678,7 +615,7 @@ def diagram_redo() -> str:
     title = "Redo escalation: the same call again runs one level higher"
     label = ("A call is routed at its level, for example standard on Sonnet at medium effort. Its result comes back "
              "and the call is recorded as finished. If Claude issues the same call again in the same request, it "
-             "runs one level higher, complex on Opus at medium, and counts as a vote that standard was routed too "
+             "runs one level higher, complex on Opus at high, and counts as a vote that standard was routed too "
              "low. At least 6 votes that are also at least 30 percent of a level's calls raise that level one step.")
     return svg(w, h, title, label, "".join(out), css)
 
@@ -884,41 +821,34 @@ def diagram_stop_checks() -> str:
 
 # ---------------------------------------------------------------- the benchmark chart
 
-BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(config id, legend label, color class)])
+BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(role or config id, legend label, color class)])
     "claude-opus-5-5": ("Opus 5.5 session", [
-        ("plugin-next", "Model Router", "rt"),
+        ("router", "Model Router", "rt"),
         ("defaults", "Claude Code defaults", "faintbar"),
         ("haiku", "All subagents on Haiku", "r2"),
         ("haiku-high", "All subagents on Haiku, high", "r3"),
         ("opusplan", "opusplan (runs Sonnet when headless)", "r4"),
     ]),
     "sonnet": ("Sonnet 5.5 session", [
-        ("plugin-next", "Model Router", "rt"),
+        ("router", "Model Router", "rt"),
         ("defaults", "Claude Code defaults", "faintbar"),
         ("sonnet-medium", "All subagents on Sonnet, medium", "r2"),
         ("sonnet-high", "All subagents on Sonnet, high", "r3"),
         ("opusplan", "opusplan (runs Sonnet when headless)", "r4"),
     ]),
 }
-@functools.lru_cache(maxsize=1)
-def bench_summary() -> dict:
-    sys.path.insert(0, str(ROOT / "bench"))
-    import analyze
-    return analyze.summary_data(analyze.load(analyze.default_paths()))
-
-
-def bench_data():
-    data = bench_summary()
+def bench_data(data: dict):
     by_model = {s["model"]: s for s in data["sessions"]}
     sessions = []
     for session, (heading, series) in BENCH_SERIES.items():
         if session not in by_model:
             raise SystemExit(f"bench results have no runs for {session}")
+        roles = by_model[session]["roles"]
         rows = []
         for cls in by_model[session]["classes"]:
             values = []
             for config, _, _ in series:
-                cell = cls["configs"].get(config)
+                cell = cls["configs"].get(roles.get(config) or config)
                 if cell is None:
                     raise SystemExit(f"bench results have no {config} runs for {session}; update BENCH_SERIES")
                 cps = cell["cost_per_solved"]
@@ -935,8 +865,8 @@ def status_summary(rows) -> str:
     return ", ".join(f"{status} in {n} of {len(rows)}" for status, n in counts.items())
 
 
-def bench_chart(phone=False) -> str:
-    sessions, runs, date = bench_data()
+def bench_chart(data: dict, phone=False) -> str:
+    sessions, runs, date = bench_data(data)
     peak = max((v[2] for _, _, rows in sessions for _, vals, _ in rows for v in vals if v[2] is not None), default=0)
     axis = max(0.1, -(-peak // 0.1) * 0.1)
     w = 520 if phone else 920
@@ -1032,20 +962,22 @@ def social_preview() -> str:
 
 # ---------------------------------------------------------------- the headline figures in the docs
 
+FIGURE_PAGES = ("README.md", "docs/ARCHITECTURE.md", "docs/FAQ.md", "docs/RELEASE_READINESS.md", "docs/ROADMAP.md",
+                "docs/TRACEABILITY.md")
 BENCH_SPAN = re.compile(r"<!-- bench:([\w.-]+) -->(.*?)<!-- /bench -->")
 SESSION_NAMES = {"claude-opus-5-5": "opus", "sonnet": "sonnet"}
 CLASS_WORDS = {"security-review": "security review", "root-cause": "root cause"}
 BENCH_ALT = (
     "Cost per solved task by task class, from docs/BENCHMARKS.md, {per_cell} runs per class and configuration. "
     "On an Opus 5.5 session the router cost less than Claude Code's defaults in {opus.below.defaults} classes, "
-    "for example lookup {opus.cell.lookup.plugin-next} against {opus.cell.lookup.defaults}, but more than the "
-    "cheapest baseline in all {opus.status.FAIL} (FAIL): opusplan, which runs Sonnet throughout when headless, in "
-    "{opus.best_count.opusplan} classes, and every subagent on Haiku in {opus.best.haiku} and "
-    "{opus.best.haiku-high}, for example lookup {opus.cell.lookup.plugin-next} against "
-    "{opus.cell.lookup.opusplan} for opusplan. On a Sonnet session the router is cheapest only in "
-    "{sonnet.pass_classes} ({sonnet.cell.lookup.plugin-next} against {sonnet.cell.lookup.defaults}, PASS) and "
-    "costs more than the best baseline in the other {sonnet.status.FAIL} (FAIL), from {sonnet.behind.min}% more in "
-    "{sonnet.behind.min_class} to {sonnet.behind.max}% more in {sonnet.behind.max_class}.")
+    "for example bugfix {opus.cell.bugfix.router} against {opus.cell.bugfix.defaults}, but more than the "
+    "cheapest baseline in {opus.status.FAIL} of {opus.classes} (FAIL): opusplan, which runs Sonnet throughout when "
+    "headless, in {opus.best_count.opusplan} classes, and every subagent on Haiku in {opus.best.haiku} and "
+    "{opus.best.haiku-high}, for example bugfix {opus.cell.bugfix.router} against "
+    "{opus.cell.bugfix.opusplan} for opusplan. On a Sonnet session the router is cheapest in {sonnet.status.PASS} of "
+    "{sonnet.classes} classes (PASS) and costs more than the best baseline in {sonnet.status.FAIL} (FAIL), from "
+    "{sonnet.behind.min}% more in {sonnet.behind.min_class} to {sonnet.behind.max}% more in {sonnet.behind.max_class}. "
+    "A class with too few runs is PARTIAL.")
 
 
 def class_word(k: str) -> str:
@@ -1064,52 +996,54 @@ def session_figures(name: str, session: dict) -> dict:
     f = {}
     router = session["router"]
     classes = session["classes"]
+    roles = {role: cfg for role, cfg in session["roles"].items() if cfg}
     if session.get("plugin_ref"):
         f["commit"] = session["plugin_ref"]
         f["commit_code"] = f"`{session['plugin_ref']}`"  # the span must sit outside the code span
+    f["router_code"] = f"`{router}`"  # the span must sit outside the code span
     f["classes"] = str(len(classes))
+    f["saturated"] = str(session["saturated"])
     for status in ("PASS", "FAIL", "PARTIAL"):
         f[f"status.{status}"] = str(sum(c["status"] == status for c in classes))
     passed = [class_word(c["class"]) for c in classes if c["status"] == "PASS"]
     if passed:
         f["pass_classes"] = words(passed)
-    cps = lambda c, cfg: c["configs"][cfg]["cost_per_solved"]  # noqa: E731
+    partial = [class_word(c["class"]) for c in classes if c["status"] == "PARTIAL"]
+    if partial:
+        f["partial_classes"] = words(partial)
+    # The router is spelled by its role, never by its id; every other configuration by its id, and some by a role too.
+    key = lambda cfg: "router" if cfg == router else cfg  # noqa: E731
     for c in classes:
         for cfg, cell in c["configs"].items():
             v = cell["cost_per_solved"]
-            f[f"cell.{c['class']}.{cfg}"] = "n/a" if v is None else f"${v:.4f}"
-            f[f"cell_solved.{c['class']}.{cfg}"] = f"{cell['solved']} of {cell['runs']}"
+            f[f"cell.{c['class']}.{key(cfg)}"] = "n/a" if v is None else f"${v:.4f}"
+            f[f"cell_solved.{c['class']}.{key(cfg)}"] = f"{cell['solved']} of {cell['runs']}"
     pooled = session["pooled"]
-    for cfg, p in pooled.items():
-        f[f"runs.{cfg}"] = str(p["runs"])
-        f[f"solved.{cfg}"] = f"{p['solved']} of {p['runs']}"
+    spelled = {**{key(cfg): cfg for cfg in pooled}, **roles}
+    for k, cfg in spelled.items():
+        p = pooled[cfg]
+        f[f"runs.{k}"] = str(p["runs"])
+        f[f"solved.{k}"] = f"{p['solved']} of {p['runs']}"
         if p["solved"]:
-            f[f"pooled.{cfg}"] = f"${p['cost_usd'] / p['solved']:.3f}"
-    pr = pooled.get(router)
-    pooled_router = pr["cost_usd"] / pr["solved"] if pr and pr["solved"] else None
-    baselines = sorted({cfg for c in classes for cfg in c["differences"]})
-    for cfg in baselines:
-        if pooled_router is not None and cfg in pooled and pooled[cfg]["solved"]:
-            f[f"pooled_less.{cfg}"] = pct(1 - pooled_router / (pooled[cfg]["cost_usd"] / pooled[cfg]["solved"]))
-        diffs = [(c, c["differences"][cfg]) for c in classes if cfg in c["differences"]]
-        below = [c for c, (lo, hi) in diffs if hi < 0]
-        f[f"below.{cfg}"] = str(len(below))
-        level = [class_word(c["class"]) for c, (lo, hi) in diffs if lo <= 0 <= hi]
-        if level:
-            f[f"level.{cfg}"] = words(level)
-        less = [1 - cps(c, router) / cps(c, cfg) for c in below if cps(c, cfg) and cps(c, router) is not None]
-        if less:
-            f[f"less.{cfg}.min"], f[f"less.{cfg}.max"] = pct(min(less)), pct(max(less))
-        best = [class_word(c["class"]) for c in classes if c["best_baseline"] == cfg]
-        if best:
-            f[f"best.{cfg}"], f[f"best_count.{cfg}"] = words(best), str(len(best))
-    behind = [(cps(c, router) / cps(c, c["best_baseline"]) - 1, class_word(c["class"]))
-              for c in classes if c["status"] == "FAIL" and c["best_baseline"]
-              and cps(c, router) is not None and cps(c, c["best_baseline"])]
-    if behind:
-        lo, hi = min(behind, key=lambda b: b[0]), max(behind, key=lambda b: b[0])
-        f["behind.min"], f["behind.min_class"] = pct(lo[0]), lo[1]
-        f["behind.max"], f["behind.max_class"] = pct(hi[0]), hi[1]
+            f[f"pooled.{k}"] = f"${p['cost_usd'] / p['solved']:.3f}"
+    against = {**{cfg: cfg for cfg in session["against"]}, **{r: roles[r] for r in ("defaults", "best", "strongest")
+                                                              if r in roles and roles[r] in session["against"]}}
+    for k, cfg in against.items():
+        a = session["against"][cfg]
+        if cfg in session["pooled_less"]:
+            f[f"pooled_less.{k}"] = pct(session["pooled_less"][cfg])
+        f[f"below.{k}"] = str(len(a["below"]))
+        if a["level"]:
+            f[f"level.{k}"] = words([class_word(c) for c in a["level"]])
+        if a["less"]:
+            f[f"less.{k}.min"], f[f"less.{k}.max"] = pct(a["less"][0]), pct(a["less"][1])
+    for cfg, a in session["against"].items():
+        if a["best_in"]:
+            f[f"best.{cfg}"], f[f"best_count.{cfg}"] = words([class_word(c) for c in a["best_in"]]), str(len(a["best_in"]))
+    if session["behind"]:
+        (lo, lo_class), (hi, hi_class) = session["behind"]["min"], session["behind"]["max"]
+        f["behind.min"], f["behind.min_class"] = pct(lo), class_word(lo_class)
+        f["behind.max"], f["behind.max_class"] = pct(hi), class_word(hi_class)
     f["trace"] = "; ".join(class_trace(c, router) for c in classes)
     return {f"{name}.{k}": v for k, v in f.items()}
 
@@ -1134,8 +1068,8 @@ def bench_figures(data: dict) -> dict:
     f = {"runs": f"{data['runs']:,}", "usd": f"${data['usd']:,.2f}",
          "dates": " to ".join(dict.fromkeys(data["dates"])),
          "claude": ", ".join(v.replace(" (Claude Code)", "") for v in data["claude_versions"]),
-         "per_cell": " or ".join(str(n) for n in sorted({
-             cell["runs"] for s in data["sessions"] for c in s["classes"] for cell in c["configs"].values()}))}
+         "per_cell": " or ".join(str(n) for n in data["per_cell"]),
+         "tasks": str(data["tasks"]), "tasks_total": str(data["tasks_total"])}
     for s in data["sessions"]:
         if s["model"] in SESSION_NAMES:
             f.update(session_figures(SESSION_NAMES[s["model"]], s))
@@ -1217,23 +1151,20 @@ def between(current: str, marks: tuple, body: str) -> str:
     return before + body + rest.split(marks[1], 1)[1]
 
 
-def site_files(faq: str, figures: dict) -> dict:
-    index = SITE / "index.html"
-    if not index.exists():
+def site_files(faq: str, figures: dict, texts: dict, v: str, day: str) -> dict:
+    if "site/index.html" not in texts:
         return {}
-    page = index.read_text(encoding="utf-8")
+    page = texts["site/index.html"]
     url = SITE_URL.search(page).group(1)
     old = None
-    sitemap = SITE / "sitemap.xml"
-    if sitemap.exists():
-        m = re.search(r"<loc>(\S+?)</loc>", sitemap.read_text(encoding="utf-8"))
+    if "site/sitemap.xml" in texts:
+        m = re.search(r"<loc>(\S+?)</loc>", texts["site/sitemap.xml"])
         old = m.group(1) if m else None
     if old and old != url:
         head, sep, tail = page.partition("-->")
         page = head + sep + tail.replace(old, url)
     page = between(page, FAQ_HTML, site_faq_html(faq))
     page = between(page, FAQ_LD, site_faq_ld(faq))
-    v, day = version(), release_date(version())
     page = re.sub(r'"softwareVersion": "[^"]*"', f'"softwareVersion": "{v}"', page)
     page = badge_alt(page, v)
     page = bench_alt(with_figures("site/index.html", page, figures), figures)
@@ -1244,7 +1175,7 @@ def site_files(faq: str, figures: dict) -> dict:
         "site/index.html": page,
         "site/sitemap.xml": ('<?xml version="1.0" encoding="UTF-8"?>\n'
                              '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-                             f"  <url>\n    <loc>{url}</loc>\n    <lastmod>{release_date(version())}</lastmod>\n"
+                             f"  <url>\n    <loc>{url}</loc>\n    <lastmod>{day}</lastmod>\n"
                              "  </url>\n</urlset>\n"),
         "site/robots.txt": f"User-agent: *\nAllow: /\n\nSitemap: {url}sitemap.xml\n",
     }
@@ -1268,7 +1199,7 @@ def release_date(v: str) -> str:
     return m.group(1)
 
 
-def citation(v: str) -> str:
+def citation(v: str, day: str) -> str:
     return f"""cff-version: 1.2.0
 message: "If you use Model Router in your work, please cite it with these details."
 type: software
@@ -1282,7 +1213,7 @@ authors:
   - given-names: Cris
     family-names: Nahine
 version: "{v}"
-date-released: "{release_date(v)}"
+date-released: "{day}"
 license: Apache-2.0
 repository-code: "{REPO}"
 url: "{REPO}"
@@ -1301,15 +1232,40 @@ SITE_ASSETS = ["logo-mark.svg", "logo.svg", "routing-call.svg", "badge-version.s
                "social-preview.png"]
 
 
-def build() -> dict:
-    LAYOUT.clear()
-    check_ladder_against_registry()
-    figures = bench_figures(bench_summary())
+@dataclasses.dataclass(frozen=True)
+class Snapshot:
+    """Everything `build` reads, taken once: the plugin's version and its release date, the shipped ladder, the
+    text of every page it rewrites, the page index and the benchmark figures from `analyze.figures`."""
+    version: str
+    released: str
+    ladder: dict
+    texts: dict
+    bench: dict
+    pages: list = dataclasses.field(default_factory=lambda: list(PAGES))
+
+
+def snapshot() -> Snapshot:
+    sys.path.insert(0, str(ROOT / "bench"))
+    import analyze
     v = version()
+    wanted = [*(p[0] for p in PAGES), "README.md", "site/index.html", "site/sitemap.xml"]
+    return Snapshot(
+        version=v, released=release_date(v),
+        ladder=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
+        texts={path: (ROOT / path).read_text(encoding="utf-8") for path in wanted if (ROOT / path).exists()},
+        bench=analyze.figures(analyze.load(analyze.default_paths())))
+
+
+def build(snap: Snapshot) -> dict:
+    """The files to write, by path, for a snapshot of the inputs. Reads no file."""
+    LAYOUT.clear()
+    check_ladder_against_registry(snap.ladder)
+    figures = bench_figures(snap.bench)
+    v = snap.version
     files = {}
     assets = {}
     assets.update(brand_assets())
-    assets.update(banner_assets())
+    assets.update(banner_assets(snap.pages))
     assets.update(badge_assets(v))
     assets["hero.svg"] = hero()
     assets["hero-phone.svg"] = hero(phone=True)
@@ -1318,26 +1274,25 @@ def build() -> dict:
     assets["two-paths.svg"] = diagram_two_paths()
     assets["precedence.svg"] = diagram_precedence()
     assets["stop-checks.svg"] = diagram_stop_checks()
-    assets["benchmark.svg"] = bench_chart()
-    assets["benchmark-phone.svg"] = bench_chart(phone=True)
+    assets["benchmark.svg"] = bench_chart(snap.bench)
+    assets["benchmark-phone.svg"] = bench_chart(snap.bench, phone=True)
     assets["social-preview.svg"] = social_preview()
     panel, css, ph = ladder_panel(1, 1, 518, prefix="c")
     assets["routing-call.svg"] = svg(520, round(ph) + 2, "One agent call, routed and redone", HERO_LABEL, panel, css)
     for name, body in assets.items():
         files[f"docs/assets/{name}"] = body
-    for path, *_ in PAGES:
-        p = ROOT / path
-        if p.exists():
-            files[path] = with_head(path, p.read_text(encoding="utf-8"))
+    for path, *_ in snap.pages:
+        if path in snap.texts:
+            files[path] = with_head(path, snap.texts[path], snap.pages)
             if path == "docs/README.md":
-                files[path] = with_cards(files[path])
-    readme = badge_alt((ROOT / "README.md").read_text(encoding="utf-8"), v)
+                files[path] = with_cards(files[path], snap.pages)
+    readme = badge_alt(snap.texts["README.md"], v)
     files["README.md"] = bench_alt(readme, figures)
-    for path in ("README.md", "docs/FAQ.md", "docs/TRACEABILITY.md"):
+    for path in FIGURE_PAGES:
         if path in files:
             files[path] = with_figures(path, files[path], figures)
-    files["CITATION.cff"] = citation(v)
-    files.update(site_files(files.get("docs/FAQ.md", ""), figures))
+    files["CITATION.cff"] = citation(v, snap.released)
+    files.update(site_files(files.get("docs/FAQ.md", ""), figures, snap.texts, v, snap.released))
     return files
 
 
@@ -1385,14 +1340,13 @@ def palette_problems() -> list:
     return found
 
 
-def main(argv: list) -> int:
-    check = "--check" in argv
-    files = build()
-    problems = palette_problems() + LAYOUT
+def sync(files: dict, check: bool, root: Path = ROOT) -> list:
+    """Write `files` under `root`, or with `check` report each one that differs, and the same for the site's copies."""
+    problems = []
     for path, body in files.items():
         if path.endswith(".svg"):
             problems += problems_in_svg(path, body)
-        target = ROOT / path
+        target = root / path
         current = target.read_text(encoding="utf-8") if target.exists() else None
         if current != body:
             if check:
@@ -1401,13 +1355,20 @@ def main(argv: list) -> int:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(body.encode("utf-8"))
     for name in SITE_ASSETS:
-        src, dst = ASSETS / name, SITE / "assets" / name
+        src, dst = root / "docs" / "assets" / name, root / "site" / "assets" / name
         if src.exists() and (not dst.exists() or dst.read_bytes() != src.read_bytes()):
             if check:
                 problems.append(f"site/assets/{name}: differs from docs/assets, run python3 tools/docs_assets.py")
             else:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 dst.write_bytes(src.read_bytes())
+    return problems
+
+
+def main(argv: list) -> int:
+    check = "--check" in argv
+    files = build(snapshot())
+    problems = palette_problems() + LAYOUT + sync(files, check)
     for p in problems:
         print(p, file=sys.stderr)
     return 1 if problems else 0

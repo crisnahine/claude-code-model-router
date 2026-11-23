@@ -1,0 +1,68 @@
+{
+  "schema": "model-router.models/1",
+  "cap": null,
+  "strongest_in_use": "opus",
+  "priority": "balanced",
+  "models": [
+    {
+      "model": "haiku",
+      "last_ran_as": "claude-haiku-5-5",
+      "status": "working",
+      "detail": "working"
+    },
+    {
+      "model": "saga",
+      "last_ran_as": null,
+      "status": "not_permitted",
+      "detail": "not permitted by the availableModels or deniedModels setting"
+    },
+    {
+      "model": "sonnet",
+      "last_ran_as": "claude-sonnet-5-5",
+      "status": "working",
+      "detail": "working"
+    },
+    {
+      "model": "swift",
+      "last_ran_as": null,
+      "status": "not_used",
+      "detail": "not used yet"
+    },
+    {
+      "model": "opus",
+      "last_ran_as": "claude-opus-5-5",
+      "status": "working",
+      "detail": "working"
+    },
+    {
+      "model": "fable",
+      "last_ran_as": null,
+      "status": "routed_around",
+      "detail": "routed around until retried (ran as claude-opus-5-5 instead)"
+    }
+  ],
+  "levels": [
+    {
+      "level": "lookup",
+      "routed_calls": 3,
+      "votes_too_low": 0,
+      "raised": false
+    },
+    {
+      "level": "complex",
+      "routed_calls": 5,
+      "votes_too_low": 1,
+      "raised": true
+    }
+  ],
+  "doc_aliases": [
+    "haiku",
+    "saga",
+    "swift"
+  ],
+  "not_in_registry": [],
+  "set_aside": [],
+  "newer_files": [],
+  "newer_config": [],
+  "workflow_model": null
+}

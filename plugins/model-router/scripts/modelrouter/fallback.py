@@ -1,12 +1,12 @@
 """The Agent call path's own pieces when no mod routes the spawn: the rewrite to `updatedInput`,
-the rewrite waiting for its result, the refused-rewrite guard and the one deny."""
+the rewrite waiting for its result, the refused-rewrite guard and the one deny. What a result means
+for the call is `calls.py`'s, the same on both paths."""
 from __future__ import annotations
 
-import time
-
-from . import health, registry, settings, spawn, store
+from . import health, settings, spawn, store
 from . import config as cfg
 from . import router
+from .registry import Registry
 
 # shortcut: a refused call re-issued within this many seconds is rewritten again; key on a message id if hooks get one
 REFUSED_AFTER = 5
@@ -17,7 +17,7 @@ def route(hook_input: dict, snap: settings.Snapshot) -> dict | None:
     one deny that holds the user's cap."""
     spawned = spawn.decide(hook_input, snap)
     session_id, decision = hook_input.get("session_id"), spawned.decision
-    _guard(session_id, spawned.key, decision, snap.config, snap.options)
+    _guard(session_id, spawned.key, decision, snap.registry, snap.options)
     spawn.record(spawned, "fallback")
     if decision["action"] == "rewrite":
         # A rewrite auto mode denies after review gets no result, so it stays pending and
@@ -37,16 +37,14 @@ def route(hook_input: dict, snap: settings.Snapshot) -> dict | None:
 
 def remember(session_id: str | None, key: str, decision: router.Decision) -> None:
     """A rewrite waits here for its result."""
-    pending = {"model": decision["model"] or decision["was"], "level": decision["level"], "effort": decision["effort"]}
+    pending = {"model": decision["model"] or decision["was"]}
     store.mutate_entry("pending", session_id, lambda waiting: store.keep(waiting, key, pending))
 
 
-def take(session_id: str | None, key: str) -> dict | None:
-    """The call's waiting rewrite, removed: a result or an error came back."""
-    taken = store.load_entry("pending", session_id).get(key)
-    if taken is not None:
+def forget(session_id: str | None, key: str) -> None:
+    """A result or an error came back, so the call's waiting rewrite was accepted."""
+    if key in store.load_entry("pending", session_id):
         store.mutate_entry("pending", session_id, lambda waiting: waiting.pop(key, None))
-    return taken
 
 
 def refused(session_id: str | None, key: str) -> dict | None:
@@ -55,12 +53,12 @@ def refused(session_id: str | None, key: str) -> dict | None:
     it: a clock stepped back a little mustn't pass a fan-out's copies through unrouted, and one
     stamped far ahead still counts as refused, so a big jump back can't loop a rewrite."""
     rewrite = store.load_entry("pending", session_id).get(key)
-    if not isinstance(rewrite, dict) or abs(time.time() - (rewrite.get("at") or 0)) < REFUSED_AFTER:
+    if not isinstance(rewrite, dict) or abs(store.now() - (rewrite.get("at") or 0)) < REFUSED_AFTER:
         return None
     return rewrite
 
 
-def _guard(session_id: str | None, key: str, decision: router.Decision, config: dict,
+def _guard(session_id: str | None, key: str, decision: router.Decision, reg: Registry,
            options: settings.Settings) -> None:
     """We rewrote this very call before and no result came back: the rewrite wasn't
     accepted, or something else stopped the call. Rewriting it again could loop."""
@@ -70,7 +68,7 @@ def _guard(session_id: str | None, key: str, decision: router.Decision, config: 
     if earlier is None:
         return
     cap, untouched = options.cap, decision["was"]
-    if cap and registry.strength(config, untouched) > registry.strength(config, cap):
+    if cap and reg.strength(untouched) > reg.strength(cap):
         decision.update(action="deny", reason=(
             f"Model Router: subagents are capped at {cap} by the user, and this call would run on "
             f"{untouched}. Re-issue it with model: \"{decision['model']}\"."))
@@ -101,4 +99,4 @@ def _note(decision: router.Decision) -> str:
     else:
         what = f"effort to {decision['effort']}"
     return (f"Model Router set this agent's {what} ({decision['reason']}). "
-            "If the result falls short, re-issue the same call: it runs one level higher.")
+            "The same call re-issued after a weak result runs one level higher.")

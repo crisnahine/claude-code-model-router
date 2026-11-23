@@ -1,0 +1,68 @@
+{
+  "schema": "model-router.models/1",
+  "cap": "sonnet",
+  "strongest_in_use": "sonnet",
+  "priority": "balanced",
+  "models": [
+    {
+      "model": "haiku",
+      "last_ran_as": "claude-haiku-5-5",
+      "status": "working",
+      "detail": "working"
+    },
+    {
+      "model": "saga",
+      "last_ran_as": null,
+      "status": "project_model_under_cap",
+      "detail": "added by this project, so not used while a cap is set"
+    },
+    {
+      "model": "sonnet",
+      "last_ran_as": "claude-sonnet-5-5",
+      "status": "working",
+      "detail": "working"
+    },
+    {
+      "model": "swift",
+      "last_ran_as": null,
+      "status": "above_cap",
+      "detail": "above your cap"
+    },
+    {
+      "model": "opus",
+      "last_ran_as": "claude-opus-5-5",
+      "status": "above_cap",
+      "detail": "above your cap"
+    },
+    {
+      "model": "fable",
+      "last_ran_as": null,
+      "status": "above_cap",
+      "detail": "above your cap"
+    }
+  ],
+  "levels": [
+    {
+      "level": "lookup",
+      "routed_calls": 3,
+      "votes_too_low": 0,
+      "raised": false
+    },
+    {
+      "level": "complex",
+      "routed_calls": 5,
+      "votes_too_low": 1,
+      "raised": true
+    }
+  ],
+  "doc_aliases": [
+    "haiku",
+    "saga",
+    "swift"
+  ],
+  "not_in_registry": [],
+  "set_aside": [],
+  "newer_files": [],
+  "newer_config": [],
+  "workflow_model": null
+}

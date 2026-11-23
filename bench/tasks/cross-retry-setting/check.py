@@ -21,19 +21,18 @@ def attempts(fn):
     return len(calls)
 
 
-try:
-    fetch = importlib.import_module("fetcher").fetch
-    upload = importlib.import_module("uploader").upload
-    os.environ.pop("APP_CONFIG", None)
-    seen = [(attempts(fetch), attempts(upload))]
-    with tempfile.TemporaryDirectory() as tmp:
-        for retries in (5, 1):
-            path = os.path.join(tmp, f"c{retries}.json")
-            with open(path, "w", encoding="utf-8") as fh:
-                json.dump({"retries": retries}, fh)
+with tempfile.TemporaryDirectory() as tmp:
+    configs = [os.path.join(tmp, f"c{retries}.json") for retries in (5, 1)]
+    for path, retries in zip(configs, (5, 1)):
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"retries": retries}, fh)
+    with passcheck.agent_code():
+        fetch = importlib.import_module("fetcher").fetch
+        upload = importlib.import_module("uploader").upload
+        os.environ.pop("APP_CONFIG", None)
+        seen = [(attempts(fetch), attempts(upload))]
+        for path in configs:
             os.environ["APP_CONFIG"] = path
             seen.append((attempts(fetch), attempts(upload)))
-    ok = seen == [(3, 3), (5, 5), (1, 1)]
-except BaseException:  # a SystemExit from work-dir code is a failure
-    ok = False
-sys.exit(0 if ok else 1)
+passcheck.finish(seen == [(3, 3), (5, 5), (1, 1)],
+                 f"(fetch, upload) attempts by setting (none, 5, 1) are {seen}, expected [(3, 3), (5, 5), (1, 1)]")

@@ -12,11 +12,10 @@ WORK = Path(sys.argv[1])
 SHIPPED = Path(__file__).resolve().parent / "repo"
 
 passcheck.use_work(WORK)
-try:
+with passcheck.agent_code():
     import cart
     a, b = cart.add_item("a", 1), cart.add_item("b", 1)
     kept = cart.add_item("c", 1, items=a)
-    ok = passcheck.tests_pass(WORK, SHIPPED, "test_cart.py") and len(b) == 1 and kept is a and len(a) == 2
-except BaseException:  # a SystemExit from work-dir code is a failure
-    ok = False
-sys.exit(0 if ok else 1)
+    shape = [len(b), kept is a, len(a)]
+got = [passcheck.tests_pass(WORK, SHIPPED, "test_cart.py"), *shape]
+passcheck.finish(got == [True, 1, True, 2], passcheck.differs(got, [True, 1, True, 2]))

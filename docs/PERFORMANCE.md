@@ -1,4 +1,4 @@
-<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
 <p align="center"><img src="assets/banner-performance.svg" width="880" alt="Performance: What does the router cost in time and disk?"></p>
 
 <p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="research/quality-first-routing.md">Quality research</a> &nbsp;&middot;&nbsp; Next: <a href="SECURITY.md">Security</a></p>
@@ -79,14 +79,33 @@ The plugin's text is in the main loop's context. Measured 2026-11-23 on Claude C
 | Session-start note (`hooks.session_start`) | Once per session | 147 tokens | 128 |
 | The seven role agents' names, descriptions and tools in the agent list | Once per session | 493 | 493 |
 | The `route` skill's listing (the other four skills set `disable-model-invocation`, so theirs aren't in context, https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill) | Once per session | 84 | 61 |
-| The hard-request note | Per prompt, only when the request needs more than the session's model | about 88 | about 100 |
-| The stronger-agent check at `Stop` | Once per request, only when that check fires | about 97 | about 107 |
+| The hard-request note | Per prompt, only when the request needs more than the session's model | about 88 | about 106 |
+| The stronger-agent check at `Stop` | Once per request, only when that check fires | about 97 | about 95 |
 
 The first three are measured; the last two are rendered text at about 4 characters a token. On the fallback path, where the mod doesn't load, each routed spawn also gets a one-line note.
 
-A once-per-session source is written to the prompt cache on the session's first request and read from it on every later one, until the cache lapses or the conversation is compacted (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md). On Sonnet 5.5 the 683 tokens cost about $0.0027 at the one-hour cache-write price, then $0.00007 per later request. No subagent gets them: in kept transcripts of the benchmark, the main loop's first request was 730 tokens bigger with the plugin, and the subagents' first requests weren't. In the benchmark of commit `27b94e6` on a Sonnet session, the router lost by $0.009 to $0.012 a run in implementation, bugfix, cross-module and security review. This text is about $0.003 of that. In the kept security-review pair, the router's subagent, run at `high` effort for its complex level, cost $0.0064 more than `defaults`' at the session's default effort.
+A once-per-session source is written to the prompt cache on the session's first request and read from it on every later one, until the cache lapses or the conversation is compacted (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md). On Sonnet 5.5 the 683 tokens cost about $0.0027 to write at the one-hour price, which the main conversation gets on a Claude subscription within its plan's usage, or $0.0017 at the five-minute price, which it gets with an API key, usage credits or a cloud provider (https://code.claude.com/docs/en/prompt-caching.md#which-ttl-each-request-gets, https://platform.claude.com/docs/en/about-claude/pricing.md). Each later request then reads them for $0.00007. No subagent gets them: in kept transcripts of the benchmark, the main loop's first request was 730 tokens bigger with the plugin, and the subagents' first requests weren't. In the benchmark of commit `27b94e6` on a Sonnet session, the router lost by $0.009 to $0.012 a run in implementation, bugfix, cross-module and security review. This text is about $0.003 of that. In the kept security-review pair, the router's subagent, run at `high` effort for its complex level, cost $0.0064 more than `defaults`' at the session's default effort.
 
 The note keeps what Claude must act on: don't name a model or effort, say what makes a subtask hard, and re-issue a call that fell short. It no longer names the strongest model in use, which changed nothing Claude does; `/model-router:route` says it. The `route` skill lost its `when_to_use` line, which repeated its description. The role-agent descriptions were trimmed, and the five that can't write files now say so, so Claude doesn't hand one of them a task whose result is a file; those two changes cancel out in tokens. The architect's, reviewer's and deep-solver's descriptions keep a line on when not to use them, since Claude delegates from descriptions (https://code.claude.com/docs/en/sub-agents.md) and those are the costliest agents. The two conditional notes grew by a sentence for the same reason: the architect is asked for the plan, decision or check, and Claude writes the result itself.
+
+## State locks a spawn takes
+
+Every read-modify-write of a state file takes that file's lock ([State](ARCHITECTURE.md#state)), and under the bounded retry each lock is one more wait for agents started in one message and one more chance for a skipped write. `bench/overhead.py` counts them in the same 1,000-call simulation (`locks` in `--json`), measured on 2026-11-24 on the machine above:
+
+| Path | Locks per spawn before | After | Files after |
+| :- | -: | -: | :- |
+| Mod (`mod-spawn`) | 3.1 | 3.0 | `ledger.jsonl`, `routes.json`, `learned.json` |
+| Fallback (`PreToolUse`) | 4.1 | 4.0 | the same, and `pending.json` for the rewrite waiting for its result |
+
+The simulation sends one prompt per 20 calls, so only one spawn in ten was the request's strongest so far. A real request starts with its first spawn, and that one used to take a lock on `prompts.json` for the strongest spawn. Counted on single spawns in a test:
+
+| Spawn | Mod before | Mod after | Fallback before | Fallback after |
+| :- | -: | -: | -: | -: |
+| The first of a request, or stronger than its siblings | 4 | 3 | 5 | 4 |
+| A redo the router chose (its count and its vote) | 5 | 3 | 6 | 4 |
+| Weaker than or as strong as a sibling already routed | 3 | 3 | 4 | 4 |
+
+Two changes made the difference. The request's strongest spawn is no longer written: it is read from the routes, which hold every spawn's model and request. A spawn's count and its vote against the level it escalated from are one write to `learned.json`. What is left is one lock per file a spawn has to write: the ledger is a log, `learned.json` is shared by all sessions, and `pending.json` exists only on the fallback. Folding the rewrite waiting for its result into the route would take the fallback to three, and is left until the counts in `locks.json` show it matters.
 
 ## State size
 
@@ -98,15 +117,16 @@ The note keeps what Claude must act on: don't name a model or effort, say what m
 
 | File | Bytes after 1,000 calls | Bounded | What bounds it |
 | :- | -: | :- | :- |
-| `ledger.jsonl` | 773,494 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
-| `prompts.json` | 178,447 | yes | The 200 most recently written sessions (`store.KEEP_ENTRIES`) |
-| `done.json` | 112,775 | yes | Same, and 100 calls per session (`store.KEPT_RECORDS`) |
-| `edits.json` | 3,120 | yes | The 200 most recently written sessions |
+| `ledger.jsonl` | 798,174 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
+| `routes.json` | 206,970 | yes | The 200 most recently written sessions (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
+| `done.json` | 114,486 | yes | Same |
+| `prompts.json` | 5,140 | yes | The 200 most recently written sessions |
+| `edits.json` | 3,120 | yes | Same |
 | `sessions.json` | 2,911 | yes | Same |
 | `mod.json` | 1,738 | yes | Same |
-| `launched.json` | 1,614 | yes | Same |
-| `pending.json` | 812 | yes | Same |
-| `state.json` | 685 | yes | One record of options |
+| `launched.json` | 1,619 | yes | Same |
+| `pending.json` | 816 | yes | Same |
+| `state.json` | 713 | yes | One record of options |
 | `learned.json` | 144 | yes | One entry per level |
 
 "Bounded" was checked, not read from the code. The script lowers the three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them twice: once with one call per session, 40 sessions and then 80, so every per-session file holds far more sessions than its cap, and once with one long session. It records each file's largest size during each round. A file counts as bounded when its peak in the second round, which runs twice as many calls, is at most 25% plus 256 bytes above its peak in the first. The check was proven by removing each trim in turn: without the session cap, all seven per-session files report unbounded; without the ledger's halving, `ledger.jsonl` does; without the per-session call cap, `done.json` and `prompts.json` do.

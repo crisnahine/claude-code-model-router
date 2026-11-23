@@ -96,14 +96,16 @@ test('a spawn passes the pick model to next', async () => {
   assert.deepEqual(mod.calls.map(c => c.argv), [['sh', '/plugin/scripts/model-router.sh', 'mod-spawn']])
 })
 
-test('mod-start and mod-spawn carry the four allowlist keys of each settings source', async () => {
-  const mod = load({ 'mod-spawn': PICK }, {}, { policy: { availableModels: ['opus'], env: { TOKEN: 'x' }, permissions: {} } })
+test('mod-start and mod-spawn carry the allowlist and effort cap keys of each settings source, and only the caps of modelSettings', async () => {
+  const policy = { availableModels: ['opus'], maxEffortLevel: 'high', modelSettings: { 'claude-opus-5-5': { maxEffortLevel: 'max' } } }
+  const sent = { ...policy, modelSettings: { 'claude-opus-5-5': { maxEffortLevel: 'max', alwaysThinking: true }, 'claude-haiku-5-5': { fastMode: true } } }
+  const mod = load({ 'mod-spawn': PICK }, {}, { policy: { ...sent, env: { TOKEN: 'x' }, permissions: {} } })
   await mod.sessionStart({ source: 'startup' })
   await mod.spawn(spawnEvent())
   assert.equal(mod.calls.length, 2)
   for (const call of mod.calls) {
     assert.deepEqual(Object.keys(call.stdin.settings).sort(), ['flag', 'local', 'policy', 'project', 'user'])
-    assert.deepEqual(call.stdin.settings.policy, { availableModels: ['opus'] })
+    assert.deepEqual(call.stdin.settings.policy, policy)
     assert.equal(JSON.stringify(call.stdin).includes('TOKEN'), false)
   }
 })
@@ -176,6 +178,16 @@ test('forks and resumed runs pass through with no CLI call', async () => {
     assert.equal(seen, e)
   }
   assert.equal(mod.calls.length, 0)
+})
+
+test('a spawn sends its Agent call id, and a workflow agent sends none', async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  await mod.spawn(spawnEvent())
+  await mod.spawn(spawnEvent({ workflow: { runId: 'w1' } }))
+  await mod.spawn(spawnEvent({ tool_use_id: '' }))
+  assert.equal(mod.calls[0]!.stdin.tool_use_id, 'tu1')
+  assert.equal('tool_use_id' in mod.calls[1]!.stdin, false)
+  assert.equal('tool_use_id' in mod.calls[2]!.stdin, false)
 })
 
 test('a routed agent steps at the pick effort', async () => {

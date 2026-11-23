@@ -1,4 +1,4 @@
-<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
 <p align="center"><img src="assets/banner-test-results.svg" width="880" alt="Test results: What ran last, and what passed?"></p>
 
 <p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="BENCHMARKS.md">Benchmarks</a> &nbsp;&middot;&nbsp; Next: <a href="TRACEABILITY.md">Traceability</a></p>
@@ -34,9 +34,9 @@ Run 2026-11-23 on macOS (Darwin 27.2.0), on `deepen-modules` after the merge of 
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` (`python3` is the system `/usr/bin/python3` here) | 553 tests OK |
-| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 553 tests OK |
-| Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 24 of 24 pass |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` (`python3` is the system `/usr/bin/python3` here) | 668 tests OK |
+| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 668 tests OK |
+| Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 25 of 25 pass |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
@@ -45,7 +45,7 @@ Run 2026-11-23 on macOS (Darwin 27.2.0), on `deepen-modules` after the merge of 
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 | Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78; run 2026-11-23 on `9b27510` |
 
-The 553 local tests are 414 in `tests/test_model_router.py`, 115 in `tests/test_bench.py`, 4 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 17 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 250 briefs over-routed (0.8%), budget 2%; 4 known under-routes" on each of the interpreters run. CI's run on `8ec8eec` had 180.
+The 668 local tests are 500 in `tests/test_model_router.py`, 134 in `tests/test_bench.py`, 8 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 23 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 268 briefs over-routed (0.7%), budget 2%; 4 known under-routes" on each of the interpreters run. CI's run on `8ec8eec` had 180.
 
 Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
 
@@ -72,7 +72,7 @@ Same clean environment as below. Each case tells Claude to make one `Agent` call
 | `route-review-subagent` | Haiku | `ran-on-sonnet` | 1.0, 3 of 3 | 0, 0 of 3 | $0.039 / $0.007 |
 | `route-redo-escalates` | Haiku | `called-twice`, `first-ran-on-haiku`, `redo-ran-on-sonnet` | 1.0, 3 of 3 | 0.67, 0 of 3 | $0.048 / $0.013 |
 
-The table was recorded before complex moved to Opus at `medium`: `route-review-subagent` now expects Opus (`ran-on-opus`) and its live result has not been rerun.
+The table was recorded before complex moved to Opus, and then to `high`: `route-review-subagent` now expects Opus at `high` (`ran-on-opus`) and its live result has not been rerun.
 
 Total $0.352 (no LLM grader, so no judge cost), 70 seconds, not partial. Every with-plugin run passed every grader and no without-plugin run passed, so the suite's mean delta is 0.78 (the redo case's delta is 0.33, since without the plugin the call is still made twice). The trace carries each subagent's model but not its effort, and the spend log lives in the plugin's data folder, which a grader can't read (https://code.claude.com/docs/en/plugin-evals.md#what-a-grader-can-look-at), so effort and spend rows are covered by the unit tests and the live runs in `docs/ARCHITECTURE.md`, not here.
 

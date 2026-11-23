@@ -1,0 +1,1 @@
+`read_retry_limit` in app/settings.py; `fetch` in app/client.py passes it to `backoff.retries_left`.

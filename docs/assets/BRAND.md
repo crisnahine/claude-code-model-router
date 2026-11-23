@@ -1,4 +1,4 @@
-<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
 <p align="center"><img src="banner-brand.svg" width="880" alt="Brand: Which colors, type and motion make a page ours?"></p>
 
 <p align="center"><a href="../../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="../README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="../../RELEASING.md">Releasing</a></p>
@@ -39,8 +39,8 @@ The wordmark is drawn with strokes, so it needs no font. Write the product name 
 | `routesoft` | `#FFF1DE` | `#33260F` | The row a call is on |
 | rung 1, lookup | `#0E8C6F` | `#38D3A8` | Haiku, medium |
 | rung 2, standard | `#0A78B8` | `#45B4F2` | Sonnet, medium |
-| rung 3, complex | `#3B57D6` | `#8196FF` | Opus, medium |
-| rung 4, hardest | `#6D3FD1` | `#AA8BFF` | Opus, high |
+| rung 3, complex | `#3B57D6` | `#8196FF` | Opus, high |
+| rung 4, hardest | `#6D3FD1` | `#AA8BFF` | Opus, xhigh |
 | rung 5, frontier | `#A72C8A` | `#F27BCD` | Fable, high |
 
 `python3 tools/docs_assets.py --check` fails when `ink` is under 7:1, `muted` or `route` under 4.5:1, or a rung color under 3:1 against the surfaces it sits on, in either theme.
@@ -68,11 +68,11 @@ The wordmark is drawn with strokes, so it needs no font. Write the product name 
 
 ## Making a new banner
 
-1. Add a row to `PAGES` in `tools/docs_assets.py`: the file, a short slug, the title, the question the page answers (under about 50 characters), an icon from `ICONS`, and its group (1 start here, 2 how it works, 3 evidence, 4 the project). The group picks which rung the banner's route climbs from.
+1. Add a row to `PAGES` in `tools/docs_pages.py`: the file, a short slug, the title, the question the page answers (under about 50 characters), an icon from `ICONS`, and its group (1 start here, 2 how it works, 3 evidence, 4 the project). The group picks which rung the banner's route climbs from.
 2. Run `python3 tools/docs_assets.py`. It writes `banner-<slug>.svg` and `icon-<slug>.svg`, puts the page head (banner and previous and next links) at the top of the page, and adds the page's card to the [documentation index](../README.md).
 3. Run `python3 tools/docs_assets.py --check` and look at the banner in a browser in both themes.
 
-`docs/BENCHMARKS.md` gets its page head from `PAGES` like every other page; `bench/analyze.py` writes everything below it and keeps the head when it rewrites the page.
+`docs/BENCHMARKS.md` gets its page head from `PAGES` like every other page, through the same `tools/docs_pages.py` that `bench/analyze.py` reads; `bench/analyze.py` writes everything below it and keeps the head when it rewrites the page.
 
 ## The site
 

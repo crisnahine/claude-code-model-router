@@ -8,7 +8,7 @@ const EFFORTS: readonly ModelEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'
 const KEPT = 500
 const SETTINGS_MS = 2000
 const SOURCES: readonly SettingsSource[] = ['policy', 'user', 'project', 'local', 'flag']
-const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides']
+const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides', 'maxEffortLevel', 'modelSettings']
 
 type Pick = { model?: string; effort?: ModelEffort } | null
 
@@ -49,6 +49,14 @@ async function hasFirstPartyCredential($: EngineInterface): Promise<boolean | un
   return surfaces && !surfaces.includes('desktop') ? false : undefined
 }
 
+// modelSettings can hold more per model than the effort cap, and the runtime reads only the cap.
+function effortCaps(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw
+  return Object.fromEntries(Object.entries(raw as Record<string, unknown>).flatMap(([id, entry]) =>
+    entry && typeof entry === 'object' && 'maxEffortLevel' in entry
+      ? [[id, { maxEffortLevel: (entry as Record<string, unknown>).maxEffortLevel }]] : []))
+}
+
 // Only these keys cross to the runtime. A source whose read fails or is still pending after
 // two seconds is left out, and the runtime fills it from the files. Never throws, like ask.
 async function modelSettings($: EngineInterface): Promise<Record<string, Record<string, unknown>> | undefined> {
@@ -57,7 +65,8 @@ async function modelSettings($: EngineInterface): Promise<Record<string, Record<
     const reads = SOURCES.map(async source => {
       try {
         const read = (await $.settings.read({ source })) as Record<string, unknown>
-        layers[source] = Object.fromEntries(KEYS.filter(key => key in read).map(key => [key, read[key]]))
+        layers[source] = Object.fromEntries(KEYS.filter(key => key in read)
+          .map(key => [key, key === 'modelSettings' ? effortCaps(read[key]) : read[key]]))
       } catch {
         // left out
       }
@@ -113,6 +122,8 @@ export const register: Register = (on, options) => {
       parent_agent_id: e.parentAgentId,
       parent_model: e.parentModel,
       kind: e.workflow ? 'workflow' : e.isTeammate ? 'teammate' : 'subagent',
+      // A workflow's id is shared by all of its agents, so it can't tell one route from another.
+      ...(e.tool_use_id && !e.workflow ? { tool_use_id: e.tool_use_id } : {}),
       tool_input: {
         subagent_type: e.subagentType,
         prompt: e.prompt,
