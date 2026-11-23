@@ -711,7 +711,8 @@ class Limits(unittest.TestCase):
                                  "--max-total", "3", "--claude", str(stub), "--out", str(out)])
             read = lambda p: [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []  # noqa: E731
             self.assertEqual(sorted(p.name for p in Path(tmp).glob("*.jsonl")), ["out.jsonl"] if out.exists() else [])
-            return code, read(out), read(Path(tmp) / "limited" / "out.jsonl"), pauses
+            # subprocess also calls time.sleep in short steps while it waits on a slow child.
+            return code, read(out), read(Path(tmp) / "limited" / "out.jsonl"), [p for p in pauses if p >= run.LIMIT_PAUSE]
 
     def test_a_later_round_keeps_its_run_number_and_rotation(self):
         with tempfile.TemporaryDirectory() as tmp:
