@@ -96,7 +96,8 @@ def start(session_id: str | None, reading: Intake, reg: Registry, session_model:
 def raise_to(session_id: str | None, reading: Intake, reg: Registry, usable: list[str],
              raises: Mapping[str, int], *, priority: str = "balanced") -> bool:
     """Lift the current request to the level of a turn's reading, and never lower it. A turn can't start a
-    request, and only a typed command's reading counts: plain turn text may carry other hooks' context."""
+    request, and only a typed command's reading counts: plain turn text may carry other hooks' context.
+    Returns whether the raise was written; a busy lock skips it."""
     level = reading.level
     if not (reading.person and reading.command and level):
         return False
@@ -111,8 +112,8 @@ def raise_to(session_id: str | None, reading: Intake, reg: Registry, usable: lis
             entry["level"], entry["need"] = level, _need(reg, level, priority, usable, raises)
             raised.append(True)
 
-    store.mutate_entry("prompts", session_id, update)
-    return bool(raised)
+    status = store.mutate_entry("prompts", session_id, update)
+    return bool(raised) and status == "saved"
 
 
 def note_edit(session_id: str | None) -> None:

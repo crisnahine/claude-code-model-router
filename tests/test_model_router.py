@@ -4643,6 +4643,19 @@ class SlashSkills(Sandbox):
         self.assertEqual(self.decide("model-router:architect", LOOKUP)["level"], "hardest")  # the floor
         self.assertIn("model-router:architect", hooks.stop({"session_id": "s1"})["reason"])
 
+    def test_a_raise_the_busy_lock_dropped_is_not_reported_as_made(self):
+        hook_input = {"session_id": "s1", "cwd": str(self.project)}
+        snap = settings.Snapshot(hook_input)
+        request.begin("s1", prompt_id="p1", level="lookup", need="haiku", session_tier=None, named=None)
+        reading = intake.Intake(False, True, Level.complex, (), command="hard")
+        (self.data / "prompts.json.lock").write_text("other")  # held by someone else, and fresh
+        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
+            self.assertFalse(request.raise_to("s1", reading, snap.registry, snap.usable, snap.raises))
+        self.assertEqual(request.load("s1").level, "lookup")
+        (self.data / "prompts.json.lock").unlink()
+        self.assertTrue(request.raise_to("s1", reading, snap.registry, snap.usable, snap.raises))
+        self.assertEqual(request.load("s1").level, "complex")
+
     def test_a_turn_only_raises_and_only_for_a_typed_command_of_the_person(self):
         self.session_on("claude-haiku-5-5")
         self.turn("acme:hard", "1234", self.HARD_BODY)

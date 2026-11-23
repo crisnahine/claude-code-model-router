@@ -317,11 +317,12 @@ def load_entry(name: str, key: str | None) -> dict:
     return entry if isinstance(entry, dict) else {}
 
 
-def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any]) -> None:
+def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any]) -> str:
     """Edit one record of a keyed file in place, under the file's lock. Each file keeps
-    its KEEP_ENTRIES most recently written records."""
+    its KEEP_ENTRIES most recently written records. Returns "saved", or why nothing was
+    written (see try_update; "unkeyed" with no key)."""
     if not key:
-        return
+        return "unkeyed"
 
     def apply(data: dict) -> None:
         entry = data.get(key)
@@ -335,7 +336,7 @@ def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any]) -> N
             for old in sorted(data, key=written)[:len(data) - KEEP_ENTRIES]:
                 del data[old]
 
-    update_dict(_keyed(name), apply)
+    return try_update(_keyed(name), apply)[1]
 
 
 def save_entry(name: str, key: str | None, entry: dict) -> None:
