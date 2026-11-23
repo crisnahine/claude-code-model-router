@@ -1,7 +1,7 @@
 <!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
 <p align="center"><img src="assets/banner-faq.svg" width="880" alt="Questions: What is Model Router, and how does it pick?"></p>
 
-<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Next: <a href="README.md">Documentation</a></p>
+<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Next: <a href="GUIDE.md">Guide</a></p>
 <!-- End of page head. -->
 
 # Model Router FAQ: questions about the Claude Code model router
@@ -26,11 +26,11 @@ The plugin is free under the Apache-2.0 license, and it adds 683 tokens to each 
 
 ## Does Model Router reduce Claude Code cost?
 
-On an Opus 5.5 session, yes: the router cost less per solved task than Claude Code's defaults in 7 of 8 task classes, $0.119 against $0.152 over 80 runs each (21% less), with every run solved for both. The difference is outside the noise in those 7 (18 to 36% less), and design is level. On a Sonnet session, no: the router is cheapest only in lookup and costs 7 to 63% more per solved task than the best baseline in the other 7 classes, at the same pass rate. Both ran 0.1.2's routing code, 10 runs per class and configuration ([BENCHMARKS.md](BENCHMARKS.md), [TRACEABILITY.md](TRACEABILITY.md) row S4.15).
+On an Opus 5.5 session, yes: the router cost less per solved task than Claude Code's defaults in 7 of 8 task classes, $0.119 against $0.152 over 80 runs each (21% less), with every run solved for both. The difference is outside the noise in those 7 (18 to 36% less), and design is level. On a Sonnet session, no: the router is cheapest only in lookup and costs 7 to 63% more per solved task than the best baseline in the other 7 classes, at the same pass rate. Both ran the routing code at commit `780ee86`, 10 runs per class and configuration ([BENCHMARKS.md](BENCHMARKS.md), [TRACEABILITY.md](TRACEABILITY.md) row S4.15).
 
 ## Does quality drop when subagents run on cheaper models?
 
-In the 0.1.2 benchmark the router solved as many tasks as Claude Code's defaults: 80 of 80 for each on an Opus 5.5 session, and 79 of 80 against 78 of 80 on a Sonnet session, 10 runs per class and configuration. Its one Sonnet miss was a design task, where the best baseline, every subagent on Sonnet at medium, solved 10 of 10. Two things guard quality: a redo runs one level higher, and the `strong_agent_gate` check, on by default, asks once for a stronger agent's review when a hard request was answered by a weaker session model alone. The profile is an estimate from the brief's wording, so Claude can overrule it on any call ([BENCHMARKS.md](BENCHMARKS.md), [README](../README.md#the-checks-before-a-turn-ends)).
+In the benchmark of the routing code at commit `780ee86`, the router solved as many tasks as Claude Code's defaults: 80 of 80 for each on an Opus 5.5 session, and 79 of 80 against 78 of 80 on a Sonnet session, 10 runs per class and configuration. Its one Sonnet miss was a design task, where the best baseline, every subagent on Sonnet at medium, solved 10 of 10. Two things guard quality: a redo runs one level higher, and the `strong_agent_gate` check, on by default, asks once for a stronger agent's review when a hard request was answered by a weaker session model alone. The profile is an estimate from the brief's wording, so Claude can overrule it on any call ([BENCHMARKS.md](BENCHMARKS.md), [guide](GUIDE.md#the-checks-before-a-turn-ends)).
 
 ## How do I turn Model Router off, or turn parts of it off?
 
@@ -38,7 +38,7 @@ Set the plugin's `routing_mode` option to `off` in `/config`, and the router cha
 
 ## Can I cap the strongest model, or force one model?
 
-Yes: `max_tier` caps the strongest model subagents may run on, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` pins every subagent to one model. With the cap set to `sonnet`, for example, anything the router or a caller picks above Sonnet is lowered to it. With the force variable set, the router only sets effort. A pinned strong model costs far more on small jobs: in a live test, listing a directory on a forced Opus subagent cost about 30 times what the same subagent cost on Haiku ($0.39 against $0.012) ([README](../README.md#who-decides-the-model)).
+Yes: `max_tier` caps the strongest model subagents may run on, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` pins every subagent to one model. With the cap set to `sonnet`, for example, anything the router or a caller picks above Sonnet is lowered to it, including a level a project's `.claude/model-router.json` raised. The cap bounds the model, not the effort. With the force variable set, the router only sets effort. A pinned strong model costs far more on small jobs: Opus 5.5's list price is 40 times Haiku 5.5's per token, for prompts up to 100,000 tokens ([pricing](https://platform.claude.com/docs/en/about-claude/pricing.md)) ([guide](GUIDE.md#who-decides-the-model)).
 
 ## How is this different from setting one model for every agent?
 
@@ -50,7 +50,7 @@ No, Model Router never switches the main conversation's model, because each mode
 
 ## Does Model Router work on Amazon Bedrock, Google Vertex AI and Microsoft Foundry?
 
-Yes, routing works on third-party providers through the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves for your provider. Some providers resolve an alias to an older model, so on those the mod starts routed work on the family's newest model (`claude-opus-5-5`, `claude-sonnet-5-5` or `claude-haiku-5-5`) and falls back to the alias if the provider refuses it. Setting `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` keeps the alias. The main conversation's effort is left alone on Bedrock, Vertex and Foundry, where an effort change would re-read the context uncached ([README](../README.md#compatibility)).
+Yes, routing works on third-party providers through the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves for your provider. Some providers resolve an alias to an older model, so on those the mod starts routed work on the family's newest model (`claude-opus-5-5`, `claude-sonnet-5-5` or `claude-haiku-5-5`) and falls back to the alias if the provider refuses it. Setting `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` keeps the alias. The main conversation's effort is left alone on Bedrock, Vertex and Foundry, where an effort change would re-read the context uncached ([guide](GUIDE.md#third-party-providers)).
 
 ## What does Model Router store on my machine, and what leaves it?
 

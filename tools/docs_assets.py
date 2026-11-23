@@ -257,6 +257,7 @@ def icon_body(name, x=0, y=0, s=1.0, cls="inks", sw=1.8):
 # (file, slug, title, question, icon, group). Groups: 1 start here, 2 how it works, 3 evidence, 4 the project.
 PAGES = [
     ("docs/FAQ.md", "faq", "Questions", "What is Model Router, and how does it pick?", "faq", 1),
+    ("docs/GUIDE.md", "guide", "Guide", "How do I configure it for my setup?", "plug", 1),
     ("docs/README.md", "docs", "Documentation", "Every page, and the question each one answers", "index", 1),
     ("docs/ARCHITECTURE.md", "architecture", "Architecture", "How do two paths share one router?", "architecture", 2),
     ("GLOSSARY.md", "glossary", "Glossary", "What do call, level, pick and redo mean?", "glossary", 2),
