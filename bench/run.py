@@ -101,6 +101,7 @@ def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[l
 
 LIMIT_RETRIES = 5
 LIMIT_PAUSE = 60  # seconds before the first retry; each later pause is twice as long
+API_ERROR_STOP = 3  # API errors before any spend, in a row, that stop the bench: the key or the account is wrong
 # The messages Claude Code prints when the API refuses for a limit (https://code.claude.com/docs/en/errors.md).
 _LIMIT_MESSAGE = (r"API Error: (?:Repeated )?(?:429|529)\b|API Error: Repeated 529 Overloaded|Request rejected \(429\)|"
                   r"Server is temporarily limiting requests|You've hit your (?:session|weekly|Opus|Sonnet) limit")
@@ -113,9 +114,10 @@ _NETWORK_MESSAGE = (r"API Error: [^\n]*\((?:ENOTFOUND|ENETUNREACH|ECONNRESET|ECO
 
 
 def refusal(row: dict) -> str | None:
-    """Why the API never got to the task: "limit" or "network", else None. Only an errored run counts, and only
-    on the API's status or Claude Code's own message, at the start of the answer (which is then that message) or
-    in stderr. Task text that talks about limits or network codes is never read as one."""
+    """Why the API never got to the task: "limit" or "network", "api_error" for any other error before a cent was
+    spent (a bad key, no credit, a model the account can't use), else None. Only an errored run counts, and a limit
+    or network only on the API's status or Claude Code's own message, at the start of the answer (which is then that
+    message) or in stderr. Task text that talks about limits or network codes is never read as one."""
     if not (row.get("is_error") or row.get("exit_code")):
         return None
     if row.get("api_error_status") in (429, 529):
@@ -124,12 +126,16 @@ def refusal(row: dict) -> str | None:
     for reason, message in (("limit", _LIMIT_MESSAGE), ("network", _NETWORK_MESSAGE)):
         if re.match(rf"\s*(?:{message})", answer) or re.search(message, stderr):
             return reason
+    # No spend means no model reply, so no tool ran. error_during_execution's zero cost may have been zeroed.
+    if row.get("total_cost_usd") == 0 and row.get("subtype") != "error_during_execution":
+        return "api_error"
     return None
 
 
 def rate_limited(row: dict) -> bool:
-    """A run refused for a rate or usage limit or a lost network: no measurement, not a failed task."""
-    return refusal(row) is not None
+    """A run refused for a rate or usage limit or a lost network, which waiting can lift: no measurement, not a
+    failed task."""
+    return refusal(row) in ("limit", "network")
 
 
 SECRET_NAMES = ("TOKEN", "KEY", "SECRET", "PASSWORD", "AUTH", "CREDENTIAL")
@@ -393,7 +399,8 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
     ledger, code = facts["ledger"], facts["exit_code"]
     stderr = facts["stderr"][-300:] if code else ""
     refused = refusal({"is_error": result.get("is_error"), "exit_code": code, "stderr": stderr,
-                       "api_error_status": result.get("api_error_status"), "answer": result.get("result")})
+                       "api_error_status": result.get("api_error_status"), "answer": result.get("result"),
+                       "subtype": result.get("subtype"), "total_cost_usd": cost})
     # A cost of 0 on error_during_execution "may be zeroed" (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md),
     # except when the API refused the run: it never started, so nothing was spent.
     known = isinstance(cost, (int, float)) and not (
@@ -459,7 +466,7 @@ def main(argv: list[str] | None = None) -> int:
                "plugin_dir": str(PLUGIN), "claude_version": version, "commit": _git_head(), "dirty": _git_dirty(),
                "keep": str(args.keep) if args.keep else None}
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    spent = 0.0
+    spent, errors = 0.0, 0
     for run_index, task, config in schedule(tasks, configs, args.runs, args.first_run):
         if not can_start(spent, args.budget, args.max_total):
             print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
@@ -469,20 +476,33 @@ def main(argv: list[str] | None = None) -> int:
             row = run_one(task, config, options, registry_config)
             row["run"] = run_index
             spent += row["total_cost_usd"]
-            if not rate_limited(row):
+            reason = refusal(row)
+            if reason is None:
                 break
-            row["limited_reason"] = refusal(row)
+            row["limited_reason"] = reason
             # Kept apart, outside results/*.jsonl, so the spend is on record but never a failed task.
             limited = args.out.parent / "limited" / args.out.name
             limited.parent.mkdir(parents=True, exist_ok=True)
             with limited.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row, sort_keys=True) + "\n")
+            if reason == "api_error":  # a pause fixes no key, balance or model access
+                break
             if attempt == LIMIT_RETRIES:
                 print(f"stopped: still rate or usage limited after {LIMIT_RETRIES} pauses, "
                       f"${spent:.4f} spent", file=sys.stderr)
                 return 2
             print(f"{task['id']} {config['id']}: rate or usage limited, pausing", file=sys.stderr)
             time.sleep(LIMIT_PAUSE * 2 ** attempt)
+        if row.get("limited_reason") == "api_error":
+            errors += 1
+            print(f"{task['id']} {config['id']}: API error before any spend, set aside: {row['answer'][:200]}",
+                  file=sys.stderr)
+            if errors == API_ERROR_STOP:
+                print(f"stopped: {errors} API errors in a row before any spend; check the key, the credit balance "
+                      "and the account's model access", file=sys.stderr)
+                return 2
+            continue
+        errors = 0
         with args.out.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, sort_keys=True) + "\n")
         print(f"{task['id']} {config['id']} run {run_index}: passed={row['passed']} "
