@@ -3903,7 +3903,9 @@ class SlashSkills(Sandbox):
 
     def test_a_typed_plugin_skill_is_profiled_by_its_arguments(self):
         # Its body isn't under .claude, and the skill's own name must not count as wording.
+        # Read as typed, /acme:security-review profiled standard on its own name's "security".
         for typed, level in (("/acme:code-review", "lookup"), ("/acme:code-review 482", "lookup"),
+                             ("/acme:security-review", "lookup"), ("/acme:security-review 482", "lookup"),
                              ("/acme:go fix the typo in README.md", "complex"),
                              (f"/acme:go {HARD}", "complex"), (f"/acme:go {HARDEST}", "hardest"),
                              ("/acme:go list the files under src", "lookup")):
