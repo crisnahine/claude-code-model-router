@@ -2936,7 +2936,8 @@ class Hooks(Sandbox):
         out = self.done("general-purpose", HARD, "claude-sonnet-5-5", models_used=SWAP["swapped"]["modelsUsed"])
         self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
         self.assertEqual(self.text(out), "Model Router: this agent switched models mid-run "
-                         "(claude-sonnet-5-5 to claude-sonnet-5). Check its result before relying on it.")
+                         "(claude-sonnet-5-5 to claude-sonnet-5), so its result needs a check before it is "
+                         "relied on.")
 
     def test_a_swapped_run_of_a_plain_brief_says_nothing(self):
         self.assertIsNone(self.done("general-purpose", LOOKUP, "claude-haiku-5-5", models_used=["claude-haiku-5-5", "x-1"]))
@@ -2965,8 +2966,8 @@ class Hooks(Sandbox):
         self.assertIn("Model Router sets", text)
         self.assertNotIn("strongest model in use", text)  # changes nothing Claude does; /model-router:route says it
         self.assertNotIn("model-router:deep-solver", text)  # the Agent tool lists the role agents already
-        self.assertIn("Don't pass `model` or `effort`", text)
-        self.assertIn("re-issue the same call unchanged", text)
+        self.assertIn("A model or effort passed on a call overrides it", text)
+        self.assertIn("re-issued unchanged", text)
         self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", text)
         self.assertEqual(session.model("s1"), "claude-sonnet-5-5")
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
@@ -3006,7 +3007,7 @@ class Hooks(Sandbox):
         self.session_on("claude-haiku-5-5")
         text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
         # By name only: the router routes the hand-off's brief, and its redo can climb.
-        self.assertIn("model-router:architect rather than", text)
+        self.assertIn("model-router:architect can take", text)
         self.assertNotIn('model: "', text)
         self.assertTrue(request.load("s1").below)
 
@@ -3028,7 +3029,7 @@ class Hooks(Sandbox):
         self.session_on("claude-opus-5-5")
         text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": "use haiku to refactor the auth module"}))
         self.assertIn('model: "haiku"', text)
-        self.assertIn("If the user is asking", text)
+        self.assertIn("If it asks for that model", text)
         self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")  # nothing is forced
         config = cfg.load_config()
         self.assertEqual(hooks.named_model(config, "Use Opus for the review"), "opus")
@@ -3039,6 +3040,29 @@ class Hooks(Sandbox):
     def test_advise_mode_gives_the_estimate(self):
         self.options(routing_mode="advise")
         self.assertIn("Routing estimate", self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARD})))
+
+    def test_advise_mode_never_tells_claude_to_pass_a_model(self):
+        # A model passed on a call outranks the agent definition's own `model`, so it would undo a pin.
+        self.options(routing_mode="advise")
+        note = self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))
+        estimate = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARD}))
+        for text in (note, estimate):
+            self.assertNotRegex(text, r"(?i)\bpass\b")
+            self.assertNotIn('model: "', text)
+        self.assertIn("Agents keep the model their definition sets", note)
+
+    def test_the_notes_state_facts_and_give_no_commands(self):
+        # Text framed as an out-of-band command can trip Claude's prompt-injection defenses (hooks.md, additionalContext).
+        self.options(max_tier="opus")
+        self.session_on("claude-haiku-5-5")
+        notes = [self.text(hooks.session_start({"session_id": "s1", "model": "claude-haiku-5-5"})),
+                 self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})),
+                 hooks.stop({"session_id": "s1"})["reason"],
+                 self.text(hooks.user_prompt({"session_id": "s1", "prompt": "use haiku to refactor auth"}))]
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+        notes.append(self.text(hooks.session_start({"session_id": "s2"})))
+        for text in notes:
+            self.assertNotRegex(text, r"(?i)(?:^|[.;:] )(?:tell|pass|don't|do not|never|get|hand|run|give|make|say|mention)\b", text)
 
     def test_results_teach_the_registry_which_models_really_run(self):
         self.agent("pinned", "opus")
@@ -3123,7 +3147,8 @@ class GatesDefault(Sandbox):
         for text in (note, reason):
             self.assertIn("model-router:architect", text)
             self.assertIn("writes nothing", text)
-            self.assertIn("yourself", text)
+        self.assertIn("the change stays here", note)
+        self.assertIn("what it finds is applied here", reason)
         self.assertNotIn("improve", reason)
         frontier = ("Investigate the unknown root cause of intermittent data loss in the payments database across "
                     "every service and design a fix; there is no known approach.")
@@ -3135,9 +3160,9 @@ class GatesDefault(Sandbox):
         self.session_on("claude-haiku-5-5")
         note = lambda: self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))  # noqa: E731
         self.assertIn("model-router:architect", note())
-        self.assertIn("you will be asked to before finishing", note())
+        self.assertIn("A stop before then is held once", note())
         self.options(strong_agent_gate="false")
-        self.assertNotIn("before finishing", note())
+        self.assertNotIn("held once", note())
 
     def text(self, out):
         return out["hookSpecificOutput"]["additionalContext"]

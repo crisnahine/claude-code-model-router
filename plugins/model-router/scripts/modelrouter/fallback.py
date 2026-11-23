@@ -101,4 +101,4 @@ def _note(decision: router.Decision) -> str:
     else:
         what = f"effort to {decision['effort']}"
     return (f"Model Router set this agent's {what} ({decision['reason']}). "
-            "If the result falls short, re-issue the same call: it runs one level higher.")
+            "The same call re-issued after a weak result runs one level higher.")

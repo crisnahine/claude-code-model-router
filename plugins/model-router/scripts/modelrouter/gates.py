@@ -109,13 +109,13 @@ def escalation(config: dict, hook_input: dict) -> str | None:
     except OSError:
         return None
     agent = strong_agent(config, need, entry.level)
-    act = ("to check; it writes nothing, so apply what it finds yourself" if writes_nothing(agent)
+    act = ("to check; it writes nothing, so what it finds is applied here" if writes_nothing(agent)
            else "to check and improve")
     return (
-        f"This request was estimated as {entry.level}, which needs about {need}-level reasoning, and "
-        f"this conversation runs on {current}. No {need}-level agent has looked at it. Before finishing, give "
-        f"the task and your result to {agent} {act}, then give the user the reconciled answer. If the task "
-        "turned out to be simple and the estimate was wrong, say so in one line and finish."
+        f"This request was estimated as {entry.level}: about {need}-level reasoning, on a conversation running "
+        f"{current}, with no {need}-level agent having looked. The task and the result go to {agent} {act}, and "
+        "the user gets the reconciled answer. If the task was simple and the estimate wrong, one line saying so "
+        "finishes the turn."
     )
 
 
@@ -133,10 +133,10 @@ def unverified_edit(hook_input: dict) -> str | None:
         return None
     name = cfg.PLUGIN_NAME
     return (
-        f"Code changed since the last check and nothing has checked it yet. Before finishing, run "
-        f"{name}:verifier on the change (it finds and runs the project's tests, lint and type checks), and "
-        f"for a risky or cross-module change also {name}:reviewer. If the project has no runnable checks, "
-        "or the change can't affect behavior, say so in one line and finish."
+        f"Code changed since the last check and nothing has checked it yet. {name}:verifier finds and runs the "
+        f"project's tests, lint and type checks on the change, and a risky or cross-module change also gets "
+        f"{name}:reviewer. A project with no runnable checks, or a change that can't affect behavior, finishes "
+        "with one line saying so."
     )
 
 

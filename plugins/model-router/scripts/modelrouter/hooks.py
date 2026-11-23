@@ -43,44 +43,44 @@ def session_start(hook_input: dict) -> dict | None:
     if mode == "auto":
         # Only what Claude must act on: every word here is in context for the whole session.
         parts.append(
-            "Model Router sets every subagent's, teammate's and workflow agent's model and effort from its brief. "
-            "Don't pass `model` or `effort` on Agent calls unless the user asked; a named one is kept. Say what "
-            "makes a subtask hard (security, several modules, an unclear cause). If a result falls short, "
-            "re-issue the same call unchanged: it runs one level higher."
+            "Model Router sets each subagent's, teammate's and workflow agent's model and effort from its brief. "
+            "A model or effort passed on a call overrides it. A brief that names what makes the task hard "
+            "(security, several modules, an unclear cause) routes higher. The same call re-issued unchanged "
+            "after a weak result runs one level higher."
         )
         if options.force:
             pinned = options.subagent_model or "one model"
             parts.append(
                 f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent to {pinned}, so Model Router sets only "
-                "their effort. Tell the user once: removing CLAUDE_CODE_SUBAGENT_MODEL_FORCE from their settings "
-                "lets the router put each subtask on the cheapest model strong enough for it."
+                "their effort. Without it in the user's settings, the router would put each subtask on the "
+                "cheapest model strong enough for it. Worth telling the user once."
             )
     elif mode == "advise":
         parts.append(
-            "Model Router is in advise mode: it estimates the model each request needs and tells you, but "
-            "changes nothing. Pass `model` on Agent calls to match the estimate."
+            "Model Router is in advise mode: it estimates the model each request needs and changes no call. "
+            "Agents keep the model their definition sets, which a model passed on a call would override."
         )
     if options.update_check:
         changes = upstream.pending()
         running = [hook_input.get("model")] + snap.health.seen_running()
         for model_id, latest in upstream.behind(running):
             parts.append(
-                f"{model_id} is running here and {latest} is the newest of its family. Tell the user once: a model "
-                "setting naming a full version stays on it, so use the alias (opus, sonnet, haiku, fable) to follow "
-                "new versions, and update Claude Code, which moves each alias to the newest version.")
+                f"{model_id} is running here and {latest} is the newest of its family. A model setting that names a "
+                "full version stays on it; the alias (opus, sonnet, haiku, fable) follows new versions once Claude "
+                "Code is updated. Worth telling the user once.")
         if changes and changes["new_model_families"]:
             parts.append("New Claude model alias in the docs that isn't in Model Router's registry yet: "
-                         + ", ".join(changes["new_model_families"]) + f". Tell the user once; /{name}:refresh "
-                         "reviews it.")
+                         + ", ".join(changes["new_model_families"]) + f". /{name}:refresh reviews it; "
+                         "worth telling the user once.")
         if changes and changes.get("deprecated_in_use"):
             parts.append("Models this setup routes to are deprecated or retiring: " + "; ".join(
                 f"{m['model']} retires {m['retires']}" for m in changes["deprecated_in_use"])
-                + ". Tell the user once; the model aliases move on by themselves, but a pinned full ID won't.")
+                + ". The model aliases move on by themselves; a pinned full ID doesn't. Worth telling the user once.")
         if upstream.has_pending(changes):
             parts.append(
                 f"Upstream: {len(changes['new_releases'])} Claude Code release(s) and "
                 f"{len(changes['watched_pages_touched'])} plugin-relevant docs page change(s) since the last "
-                f"review. Mention once to the user that /{name}:refresh reviews them."
+                f"review. /{name}:refresh reviews them; worth mentioning to the user once."
             )
     return _context("SessionStart", " ".join(parts)) if parts else None
 
@@ -118,22 +118,23 @@ def user_prompt(hook_input: dict) -> dict | None:
     notes = []
     if mode == "advise":
         if need:
-            notes.append(f"Routing estimate for this request: {level}{why}, about {need}-level reasoning. "
-                         "It reads only the wording; route by what the code shows.")
+            notes.append(f"Routing estimate for this request: {level}{why}, about {need}-level reasoning, "
+                         "from its wording alone.")
     elif below:
         agent = gates.strong_agent(config, need, level)
-        asked = "; you will be asked to before finishing" if options.strong_agent_gate else ""
-        hand = (f"Get the plan or decision (design, root cause, the risky choice) from {agent} rather than settling "
-                f"it inline{asked}. It writes nothing, so make the change yourself." if gates.writes_nothing(agent)
-                else f"Hand the hard thinking (design, root cause, the risky decision) to {agent} rather than "
-                f"settling it inline{asked}.")
+        asked = " A stop before then is held once." if options.strong_agent_gate else ""
+        hand = (f"{agent} can take the plan or decision (design, root cause, the risky choice) instead of this "
+                f"conversation settling it. It writes nothing, so the change stays here.{asked}"
+                if gates.writes_nothing(agent)
+                else f"{agent} can take the hard thinking (design, root cause, the risky decision) instead of "
+                f"this conversation settling it.{asked}")
         notes.append(
             f"This request looks {level}{why}: about {need}-level reasoning, and this conversation runs on "
-            f"{current}. {hand} If the code shows the task is simpler, say so instead."
+            f"{current}. {hand} The estimate reads only the wording; a simpler task in the code can be said so."
         )
     if wanted and mode == "auto":
-        notes.append(f"If the user is asking for the {wanted} model here, pass model: \"{wanted}\" on the "
-                     "Agent calls for this request. A model named on a call is kept.")
+        notes.append(f"The request mentions the {wanted} model. If it asks for that model, an Agent call with "
+                     f"model: \"{wanted}\" runs on it, and Model Router keeps it.")
     return _context("UserPromptSubmit", " ".join(notes)) if notes else None
 
 
@@ -191,8 +192,8 @@ def post_agent(hook_input: dict) -> dict | None:
         pass
     if "risk" in profile.profile_call(tool_input, agent)["signals"]:
         return _context("PostToolUse", (
-            f"Model Router: this agent switched models mid-run ({swapped[0]} to {swapped[-1]}). "
-            "Check its result before relying on it."))
+            f"Model Router: this agent switched models mid-run ({swapped[0]} to {swapped[-1]}), so its result "
+            "needs a check before it is relied on."))
     return None
 
 
@@ -225,8 +226,8 @@ def agent_failed(hook_input: dict) -> dict | None:
         health.failed(newest, error, newest=True)
         ledger.model_error(hook_input.get("session_id"), tool_input.get("subagent_type"), newest)
         return _context("PostToolUseFailure", (
-            f"{newest} isn't available here. Re-issue this agent call unchanged: it now runs on the "
-            f"'{asked}' alias, as Claude Code resolves it for this provider."))
+            f"{newest} isn't available here. The '{asked}' alias runs from now on, as Claude Code resolves it for "
+            "this provider; the same agent call re-issued unchanged uses it."))
     fails = health.failed(asked, error)
     ledger.model_error(hook_input.get("session_id"), tool_input.get("subagent_type"), asked)
     # snap.health may predate the strike just written, so the list reads the table again.
@@ -235,8 +236,8 @@ def agent_failed(hook_input: dict) -> dict | None:
     if not usable:
         return None
     return _context("PostToolUseFailure", (
-        f"The '{asked}' model looks unavailable here. Re-issue this agent call with model: "
-        f"\"{registry.clamp(config, asked, usable)}\"."
+        f"The '{asked}' model looks unavailable here. This agent call re-issued with model: "
+        f"\"{registry.clamp(config, asked, usable)}\" runs on the nearest usable one."
         + (" Model Router will route around it for now." if fails >= 2 else "")))
 
 
