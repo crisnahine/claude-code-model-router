@@ -498,6 +498,49 @@
    "prompt": "",
    "level": "lookup",
    "signals": []
+  },
+  {
+   "prompt": "analyze the sales numbers in q3.csv",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "analyze the failing checkout test",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "prove the parser terminates on every input",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "prove the cache bug is gone",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "reproduce the export from last week's report",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "reproduce the crash on upload",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "figure out the quarterly totals",
+   "level": "standard",
+   "signals": [
+    "ambiguity"
+   ]
   }
  ]
 }

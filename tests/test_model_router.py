@@ -1465,8 +1465,10 @@ class Profile(unittest.TestCase):
         self.assertIn("fixes or hunts a defect", fixed["signals"])
         self.assertEqual(profile.profile_prompt("Figure out why it times out and fix it.")["level"], "complex")
         for brief in ("Rename the helper. Avoid fixing the unrelated tests.", "Do not fix the tests. Rename the helper.",
-                      "Find the commit that landed the fix for the CSV export.", "Add debug logging to the retry loop."):
+                      "Find the commit that landed the fix for the CSV export.", "Add debug logging to the retry loop.",
+                      "Analyze the sales numbers in q3.csv.", "Reproduce the export from last week's report."):
             self.assertNotEqual(profile.profile_prompt(brief)["level"], "complex", brief)
+        self.assertEqual(profile.profile_prompt("Reproduce the crash on upload.")["level"], "complex")
 
     def test_reading_about_something_sensitive_or_broad_is_still_a_lookup(self):
         self.assertEqual(self.level("read the auth module and list its functions"), "lookup")
