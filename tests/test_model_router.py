@@ -563,21 +563,44 @@ class Store(Sandbox):
         self.assertEqual(store.load_entry("sample", "s1")["n"], 120)
         self.assertEqual(list(self.data.glob("*.lock")) + list(self.data.glob("*.tmp")), [])
 
-    def test_a_stale_lock_is_cleared_and_a_held_one_never_hangs(self):
-        path = self.data / "state.json"
+    def test_a_lock_held_past_the_bound_skips_the_write(self):
+        self.data.mkdir(exist_ok=True)
+        store.save_entry("sample", "s1", {"n": 1})
+        path = self.data / "sample.json"
+        before = path.read_bytes()
+        lock = self.data / "sample.json.lock"
+        lock.write_text("other")  # held by someone else, and fresh
+        (self.data / "ledger.jsonl.lock").write_text("")
+        started = time.monotonic()
+        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
+            self.assertEqual(store.try_update(path, lambda data: data.update(b=2)), ({"s1": mock.ANY, "b": 2}, "busy"))
+            store.mutate_entry("sample", "s1", lambda entry: entry.update(n=2))
+            self.assertEqual(store.remove_state_file(path), "busy")
+            store.append_ledger({"event": "spawn"})
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertFalse(store.ledger_path().exists())
+        self.assertTrue(lock.exists())  # not ours to remove
+
+    def test_a_stale_lock_is_broken(self):
         self.data.mkdir(exist_ok=True)
         lock = self.data / "state.json.lock"
         lock.write_text("")
         os.utime(lock, (time.time() - 60, time.time() - 60))
-        store.update_dict(path, lambda data: data.update(a=1))
+        store.update_dict(self.data / "state.json", lambda data: data.update(a=1))
         self.assertFalse(lock.exists())
-        lock.write_text("")  # held by someone else, and fresh
-        started = time.monotonic()
-        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
-            store.update_dict(path, lambda data: data.update(b=2))
-        self.assertLess(time.monotonic() - started, 2)
-        self.assertEqual(store.load_state_file(path), {"a": 1, "b": 2})
-        self.assertTrue(lock.exists())  # not ours to remove
+        self.assertEqual(store.load_state_file(self.data / "state.json"), {"a": 1})
+
+    def test_a_reset_while_another_process_holds_the_lock_says_so(self):
+        self.data.mkdir(exist_ok=True)
+        (self.data / "state.json.lock").write_text("")
+        (self.data / "learned.json.lock").write_text("")
+        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                cli.main(["models", "--reset"])
+        self.assertIn("another Model Router process held state.json", out.getvalue())
+        self.assertIn("another Model Router process held learned.json", out.getvalue())
 
     def test_state_files_are_written_compact(self):
         store.save_entry("sample", "s1", {"a": {"model": "haiku"}})

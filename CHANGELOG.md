@@ -57,6 +57,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 - A brief that opens with "Debug logging for ...", or rules a fix out ("avoid fixing", "must not fix"), no longer profiles as a fix. A long run of newlines in a brief no longer makes the profiler's regex scans quadratic.
 - A bench check can no longer be fooled by a `unittest.py` the agent leaves in the work directory: every check runs isolated, and the root-cause checks run the work directory's tests in a child that imports `unittest` first.
 - A bench run that errored during execution with a zero cost counts as an unknown cost and books the whole budget. A run the API refused for a rate limit or a lost network keeps its zero, since nothing started.
+- A state write no longer goes ahead without its lock. When the lock stayed held past two seconds the hook wrote anyway, and could drop another hook's update to the same file, such as a redo record, a health strike or a vote. A busy lock is now tried again with backoff for up to one second, then that write is skipped. `models --reset` says when another process held the file.
 
 ### Internal
 

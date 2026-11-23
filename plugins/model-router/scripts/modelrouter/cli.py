@@ -37,6 +37,7 @@ def _well_formed(hook_input: object) -> dict:
 
 
 _NEWER = "left as is: {} was written by a newer Model Router release."
+_BUSY = "left as is: another Model Router process held {}. Run it again."
 
 
 def _reset_health() -> str:
@@ -49,6 +50,8 @@ def _reset_health() -> str:
         return "Learned availability cleared." if removed else "No learned availability to clear."
     if status == "newer":
         return "Learned availability " + _NEWER.format("state.json")
+    if status == "busy":
+        return "Learned availability " + _BUSY.format("state.json")
     return "Learned availability left as is: state.json could not be read or written."
 
 
@@ -58,6 +61,8 @@ def _reset_feedback() -> str:
         return "Feedback cleared." if status == "removed" else "No feedback to clear."
     if status == "newer":
         return "Feedback " + _NEWER.format("learned.json")
+    if status == "busy":
+        return "Feedback " + _BUSY.format("learned.json")
     return "Feedback left as is: learned.json could not be read or removed."
 
 
