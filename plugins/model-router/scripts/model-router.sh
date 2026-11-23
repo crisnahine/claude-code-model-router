@@ -10,8 +10,14 @@
 # call, the prompt or the stop (https://code.claude.com/docs/en/hooks.md#exit-code-2-behavior-per-event).
 dir=$(dirname "$0")
 hook=
-case " $* " in
-  *" session-start "*|*" user-prompt "*|*" post-edit "*|*" agent-failed "*|*" agent-stopped "*|*" stop "*|*" pre-agent "*|*" post-agent "*|*" model-switch "*|*" refresh-cache "*|*" mod-start "*|*" mod-spawn "*|*" mod-turn "*|*" mod-usage "*)
+# The command is the first argument after --data-dir; a hook name later on, as in `explain ... stop`, is text.
+cmd=$1
+case "$cmd" in
+  --data-dir) cmd=${3-} ;;
+  --data-dir=*) cmd=${2-} ;;
+esac
+case "$cmd" in
+  session-start|user-prompt|post-edit|agent-failed|agent-stopped|stop|pre-agent|post-agent|model-switch|refresh-cache|mod-start|mod-spawn|mod-turn|mod-usage)
     hook=1 ;;
 esac
 for py in python3 python; do

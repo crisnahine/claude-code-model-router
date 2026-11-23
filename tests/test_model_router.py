@@ -4433,6 +4433,17 @@ class Launcher(Sandbox):
                                      input="{}", capture_output=True, text=True, env=fake["env"])
                 self.assertEqual(res.returncode, 1, res.stderr)
 
+    def test_a_command_whose_text_names_a_hook_keeps_its_exit_code(self):
+        fake = self.fake_pythons("real", "real")
+        launcher = (SCRIPTS / "model-router.sh").as_posix()
+        for args in (["explain", "--no-such-flag", "stop"], ["--data-dir", "stop", "explain", "--no-such-flag"]):
+            with self.subTest(args=args):
+                res = subprocess.run(["sh", launcher, *args], capture_output=True, text=True, env=fake["env"])
+                self.assertEqual(res.returncode, 2, res.stderr)
+        res = subprocess.run(["sh", launcher, "--data-dir", "unused", "stop", "--no-such-flag"], input="{}",
+                             capture_output=True, text=True, env=fake["env"])
+        self.assertEqual(res.returncode, 1, res.stderr)
+
     def test_hooks_dont_load_the_network_or_xml_modules(self):
         probe = ("import sys; sys.path.insert(0, sys.argv[1]); import modelrouter.cli; "
                  "print(sorted(m for m in ('urllib.request', 'http.client', 'xml.etree.ElementTree') if m in sys.modules))")
