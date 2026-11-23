@@ -90,7 +90,7 @@ def _difference(ours: list[float], theirs: list[float]) -> tuple[float, float]:
     return _interval([0.0 if math.isinf(a) and math.isinf(b) else a - b for a, b in zip(ours, theirs)])
 
 
-def _verdict(cells: dict, router: str, routers: frozenset[str]) -> dict:
+def _verdict(cells: dict, router: str, routers: frozenset[str], gap: str | None = None) -> dict:
     # A router variant (any configuration that loads the plugin) is a rival build, never a baseline.
     base = {name: cell for name, cell in cells.items() if name != router and name not in routers}
     if router not in cells or not base:
@@ -101,12 +101,14 @@ def _verdict(cells: dict, router: str, routers: frozenset[str]) -> dict:
     theirs = base[best]
     verdict = {"rank": 1 + sum(_key(cell) < _key(ours) for cell in base.values()), "best_baseline": best,
                "differences": {name: _difference(ours["_cps"], cell["_cps"]) for name, cell in base.items()}}
+    if gap:
+        return {**verdict, "status": "PARTIAL", "reason": gap}
     if ours["runs"] < MIN_RUNS or theirs["runs"] < MIN_RUNS:
         return {**verdict, "status": "PARTIAL",
                 "reason": f"too few runs ({router} {ours['runs']}, {best} {theirs['runs']}; {MIN_RUNS} needed)"}
     if _difference(ours["_rate"], theirs["_rate"])[1] < 0:
-        gap = theirs["pass_rate"] - ours["pass_rate"]
-        return {**verdict, "status": "FAIL", "reason": f"pass rate behind {best} by {gap:.0%}"}
+        short = theirs["pass_rate"] - ours["pass_rate"]
+        return {**verdict, "status": "FAIL", "reason": f"pass rate behind {best} by {short:.0%}"}
     low, high = _difference(ours["_cps"], theirs["_cps"])
     if high < 0:
         return {**verdict, "status": "PASS", "reason": f"cost per solved task below {best}'s; "
@@ -115,6 +117,20 @@ def _verdict(cells: dict, router: str, routers: frozenset[str]) -> dict:
         return {**verdict, "status": "FAIL", "reason": f"cost per solved task above {best}'s; "
                                                        f"95% interval of the difference ${low:.4f} to ${high:.4f}"}
     return {**verdict, "status": "PARTIAL", "reason": f"not significant against {best}"}
+
+
+def _coverage_gap(runs: list[dict], router: str, base: list[str]) -> str | None:
+    """Why the router's cell and a baseline's don't cover the same tasks the same number of times, if they don't."""
+    def tasks(config: str) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for r in runs:
+            if r["config"] == config:
+                counts[r["task"]] = counts.get(r["task"], 0) + 1
+        return counts
+    ours = tasks(router)
+    odd = [name for name in base if tasks(name) != ours]
+    return (f"cells cover different tasks or run counts ({', '.join(odd)} against {router}'s "
+            f"{len(ours)} task(s))") if odd else None
 
 
 def splitting_tasks(runs: list[dict], strong: str = SPLIT_STRONG, weak: str = SPLIT_WEAK) -> list[str] | None:
@@ -133,7 +149,7 @@ def splitting_tasks(runs: list[dict], strong: str = SPLIT_STRONG, weak: str = SP
     return out
 
 
-def _quality(cells: dict, runs: list[dict], router: str, routers: frozenset[str], forced: dict) -> dict:
+def _quality(cells: dict, runs: list[dict], router: str, routers: frozenset[str], forced: dict, gap: str | None) -> dict:
     """What the pass rates say about quality. The router's rate is set against every baseline with an exact
     one-sided test. When the weakest forced baseline can't be told from the strongest, the tasks can't tell models
     apart, so the class is `saturated` and no claim is made either way."""
@@ -149,6 +165,8 @@ def _quality(cells: dict, runs: list[dict], router: str, routers: frozenset[str]
            "splits": splitting_tasks(runs)}
     if ours is None or not base:
         return {**out, "reason": "no router or baseline runs"}
+    if gap:
+        return {**out, "reason": f"{gap}; no quality claim"}
     if not ladder or forced[weak][0] == forced[strong][0]:
         return {**out, "reason": "forced baselines on fewer than 2 models, so the class can't show whether the "
                                  "tasks tell models apart; no quality claim"}
@@ -177,8 +195,10 @@ def summarize(rows: list[dict], *, routers: frozenset[str], router: str = "plugi
         runs = [r for r in rows if r["class"] == cls]
         configs = sorted({r["config"] for r in runs}, key=lambda c: (c != router, c))
         cells = {c: _cell([r for r in runs if r["config"] == c], rng, draws) for c in configs}
-        verdict = _verdict(cells, router, routers)
-        quality = _quality(cells, runs, router, routers, forced or {})
+        base = [c for c in configs if c != router and c not in routers]
+        gap = _coverage_gap(runs, router, base) if router in cells else None
+        verdict = _verdict(cells, router, routers, gap)
+        quality = _quality(cells, runs, router, routers, forced or {}, gap)
         for cell in cells.values():
             del cell["_cps"], cell["_rate"]
         out.append({"class": cls, "configs": cells, **verdict, "quality": quality})
