@@ -348,8 +348,14 @@ class Shipped(unittest.TestCase):
     def test_nothing_still_carries_the_old_name(self):
         old = re.compile("orchestr" + "ator", re.I)
         skip = {".git", ".superpowers", "superpowers", "fixtures", "__pycache__", "results"}
-        for path in ROOT.rglob("*"):
-            if path.is_file() and not skip & set(path.parts) and path.suffix != ".pyc":
+        try:  # tracked files only, so a local scratch folder can't fail the suite; a tarball has no git
+            listed = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True,
+                                    timeout=60).stdout.decode("utf-8").split("\0")
+            paths = [ROOT / name for name in listed if name]
+        except (OSError, subprocess.SubprocessError):
+            paths = list(ROOT.rglob("*"))
+        for path in paths:
+            if path.is_file() and not skip & set(path.relative_to(ROOT).parts) and path.suffix != ".pyc":
                 self.assertIsNone(old.search(str(path.relative_to(ROOT))), path)
                 try:
                     text = path.read_text(encoding="utf-8")
