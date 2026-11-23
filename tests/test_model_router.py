@@ -278,6 +278,14 @@ class Shipped(unittest.TestCase):
         body = (PLUGIN / "agents" / "implementer.md").read_text(encoding="utf-8").split("---", 2)[2]
         self.assertIn("Finish the planned change. Stop early only when the plan is wrong or needs the user's decision", body)
 
+    def test_the_docs_researcher_brief_carries_todays_date(self):
+        # Haiku 5.5 grounds its answers in recent search results when it is given the date with a search tool.
+        refresh = (PLUGIN / "skills" / "refresh" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("starting the brief with today's date: !`date +%F`", refresh)
+        self.assertIn("\n  - Bash(date +%F)\n", refresh)  # the `!` line runs under the skill's own allowed-tools
+        body = (PLUGIN / "agents" / "docs-researcher.md").read_text(encoding="utf-8").split("---", 2)[2]
+        self.assertIn("Your brief starts with today's date", body)
+
     def test_the_architect_hands_back_a_file_it_was_asked_to_write(self):
         # Misrouted to it, a write-the-file task still ends with the content the caller can write.
         body = (PLUGIN / "agents" / "architect.md").read_text(encoding="utf-8").split("---", 2)[2]
