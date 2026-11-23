@@ -1,0 +1,1 @@
+{"retry_at": "gateway", "attempts": 2, "per_try_timeout_ms": 1000, "backoff_ms": 100, "idempotency_key": "per_checkout", "gateway_retries": "off", "reasons": ["x"]}

@@ -1,0 +1,1 @@
+{"strategy": "event_invalidation", "ttl_seconds": 600, "max_staleness_seconds": 2, "reasons": ["x"]}

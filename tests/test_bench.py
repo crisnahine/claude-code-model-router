@@ -659,19 +659,57 @@ class Tasks(unittest.TestCase):
                 self.assertTrue(self.check(task, work, task.get("reference_answer", "")))
 
 
-    def test_a_lookup_answer_listing_every_candidate_fails(self):
-        task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+
+def overlay_dirs(task, kind):
+    folder = task["dir"] / kind
+    return sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
+
+
+def build_work(task, overlay, work):
+    """repo/, solution/ over it, then an overlay: `remove.txt` lists paths to delete, `answer.txt` is the reply and
+    stays out of the work dir, and every other file is copied in. Returns the reply."""
+    shutil.copytree(task["dir"] / "repo", work)
+    if (task["dir"] / "solution").is_dir():
+        shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
+    if overlay is None:
+        return ""
+    for line in (overlay / "remove.txt").read_text(encoding="utf-8").split("\n") if (overlay / "remove.txt").is_file() else []:
+        if line.strip():
+            (work / line.strip()).unlink()
+    for src in sorted(p for p in overlay.rglob("*") if p.is_file()):
+        rel = src.relative_to(overlay)
+        if rel.as_posix() in ("answer.txt", "remove.txt"):
+            continue
+        (work / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, work / rel)
+    return (overlay / "answer.txt").read_text(encoding="utf-8") if (overlay / "answer.txt").is_file() else ""
+
+
+class KnownAnswers(unittest.TestCase):
+    """Each task folder keeps the answers its check must turn down (wrong/) and take (right/) beside the check."""
+
+    def grade(self, task, overlay):
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp) / "work"
-            shutil.copytree(task["dir"] / "repo", work)
-            self.assertFalse(self.check(task, work, "app/settings.py: read_retry_limit, read_timeout; "
-                                                    "app/backoff.py: retries_left, retry_delay"))
-            for answer in ("read_retry_limit in app/settings.py; app/client.py calls it",
-                           "`read_retry_limit` in `app/settings.py`. `read_timeout` next to it reads REQUEST_TIMEOUT "
-                           "instead.",
-                           "`read_retry_limit` in app/settings.py; `fetch` in app/client.py passes it to "
-                           "`backoff.retries_left`."):
-                self.assertTrue(self.check(task, work, answer), answer)
+            reply = build_work(task, overlay, work)
+            answer = Path(tmp) / "answer.txt"
+            answer.write_text(reply, encoding="utf-8")
+            return run.grade(task["dir"] / "check.py", work, answer, timeout=60)
+
+    def test_every_wrong_answer_fails_and_every_right_answer_passes(self):
+        for task in run.load_tasks():
+            for kind, verdict in (("wrong", "fail"), ("right", "pass")):
+                for overlay in overlay_dirs(task, kind):
+                    with self.subTest(task=task["id"], answer=f"{kind}/{overlay.name}"):
+                        graded = self.grade(task, overlay)
+                        self.assertEqual(graded.verdict, verdict, graded.reason)
+
+    def test_an_answer_folder_changes_something(self):
+        for task in run.load_tasks():
+            for kind in ("wrong", "right"):
+                for overlay in overlay_dirs(task, kind):
+                    with self.subTest(task=task["id"], answer=f"{kind}/{overlay.name}"):
+                        self.assertTrue(any(p.is_file() for p in overlay.rglob("*")))
 
 
 STUB = '''#!/usr/bin/env python3
@@ -814,77 +852,6 @@ class SuiteCoverage(unittest.TestCase):
         tasks = run.load_tasks()
         for cls in run.CLASSES:
             self.assertGreaterEqual(sum(t["class"] == cls for t in tasks), 2, cls)
-
-    def test_a_root_cause_check_fails_when_the_test_is_edited_to_pass(self):
-        for task in (t for t in run.load_tasks() if t["class"] == "root-cause"):
-            with self.subTest(task=task["id"]), tempfile.TemporaryDirectory() as tmp:
-                task, work = self.shipped(task["id"], tmp)
-                for test_file in work.glob("test_*.py"):
-                    test_file.write_text("import unittest\n", encoding="utf-8")
-                self.assertFalse(self.check(task, work))
-
-    def test_a_security_finding_given_only_in_the_reply_fails(self):
-        for task_id, reply in (("security-sql-injection", "db/users.py:6 builds the SQL with an f-string."),
-                               ("security-path-traversal", "files/server.py:8 joins the name unresolved."),
-                               ("security-admin-route", "gateway/router.py decodes the path twice.")):
-            with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
-                task, work = self.shipped(task_id, tmp)
-                self.assertFalse(self.check(task, work, reply))
-
-    JSON_ANSWERS = {  # task: (answer files that must pass, answer files that must fail); a str is written as is
-        "security-sql-injection": (
-            [{"file": "db/users.py", "line": 6}, {"file": "db/users.py", "line": 6, "why": "an f-string builds the SQL"},
-             {"file": "./db/users.py", "line": 6}, {"file": "db\\users.py", "line": 6},
-             {"file": "/tmp/x/work/db/users.py", "line": 6}],
-            [{"file": "db/orders.py", "line": 3}, {"file": "db/users.py", "line": 7}, {"file": "app.py", "line": 8},
-             {"file": "db/users.py", "line": "6 or 7"}, {"file": "db/users.py", "line": [6, 7, 11]},
-             {"file": "db/users.py", "line": "6-11"}, {"file": "db/users.py", "line": "6 to 11"},
-             {"file": "db/users.py", "line": 6, "maybe": [7, 11]}, {"file": "db/users.py", "line": [4, 6, 11]},
-             [{"file": "db/users.py", "line": 6}, {"file": "db/orders.py", "line": 4}],
-             {"file": ["db/users.py", "db/orders.py"], "line": 6}, {"file": "db/users.py", "line": "6"},
-             {"file": "db/users.py", "line": 6.0}, {"file": "db/users.py", "line": 6, "why": ["f-string"]},
-             {"file": "db/users.py"}, "db/users.py:6", ""]),
-        "security-path-traversal": (
-            [{"file": "files/server.py", "line": 8}, {"file": "files/server.py", "line": 9, "why": "opens it"},
-             {"file": "files\\server.py", "line": 8}, {"file": "/tmp/x/work/files/server.py", "line": 8}],
-            [{"file": "files/server.py", "line": "8 or 9"}, {"file": "files/server.py", "line": [8, 9]},
-             {"file": "files/server.py", "line": "8-9"}, {"file": "files/server.py", "line": 6},
-             {"file": "files/thumbs.py", "line": 8}, {"file": "web.py", "line": 7},
-             {"file": "files/server.py", "line": 8, "also": "web.py:5"},
-             [{"file": "files/server.py", "line": 8}, {"file": "files/thumbs.py", "line": 9}],
-             "files/server.py:8"]),
-        "research-changelog": (
-            [{"default_changed_in": "v1.3", "configurable_in": "2", "variable": "FETCHKIT_RETRIES",
-              "sources": ["/tmp/x/work/docs/changelog/v1.3.md", "changelog\\v2.0.md"]},
-             {"default_changed_in": "1.3.0", "configurable_in": 2, "variable": "FETCHKIT_RETRIES",
-              "sources": ["./docs/changelog/v1.3.md:3", "docs/changelog/v2.0.md#L4"]}],
-            [{"default_changed_in": "1.4", "configurable_in": "2.0", "variable": "FETCHKIT_RETRIES",
-              "sources": ["docs/changelog/v1.3.md", "docs/changelog/v2.0.md"]},
-             {"default_changed_in": "1.3", "configurable_in": "2.0", "variable": "FETCHKIT_RETRIES",
-              "sources": ["docs/changelog/v2.0.md"]}]),
-        "design-cache-invalidation": (
-            [{"strategy": "event_invalidation", "ttl_seconds": None, "max_staleness_seconds": 1, "reasons": ["bus"]},
-             {"strategy": "event_invalidation", "ttl_seconds": 600, "max_staleness_seconds": 2, "reasons": ["x"]}],
-            [{"strategy": "event_invalidation", "ttl_seconds": 5, "max_staleness_seconds": 1, "reasons": ["x"]},
-             {"strategy": "ttl_only", "ttl_seconds": 5, "max_staleness_seconds": 5, "reasons": ["x"]}]),
-        "research-latency": (
-            [{"deploy": "d3", "commit": "c0912ee", "p95_ms": 310}, {"deploy": "d3", "commit": "c0912ee",
-                                                                     "p95_ms": "310"}],
-            [{"deploy": "d2", "commit": "b77e210", "p95_ms": 280}, {"deploy": "d3", "commit": "c0912ee",
-                                                                     "p95_ms": 330}]),
-    }
-
-    def test_checks_take_every_fair_form_of_a_right_answer_and_no_wrong_one(self):
-        files = {"research-changelog": "RESEARCH.json", "research-latency": "RESEARCH.json",
-                 "design-cache-invalidation": "DESIGN.json", "security-sql-injection": "FINDING.json",
-                 "security-path-traversal": "FINDING.json"}
-        for task_id, (right, wrong) in self.JSON_ANSWERS.items():
-            for answer, expected in [(a, True) for a in right] + [(a, False) for a in wrong]:
-                with self.subTest(task=task_id, answer=answer), tempfile.TemporaryDirectory() as tmp:
-                    task, work = self.shipped(task_id, tmp)
-                    text = answer if isinstance(answer, str) else json.dumps(answer)
-                    (work / files[task_id]).write_text(text, encoding="utf-8")
-                    self.assertEqual(self.check(task, work), expected)
 
     def test_work_dir_code_cannot_exit_the_check_with_success(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1477,124 +1444,6 @@ class HardTier(unittest.TestCase):
         tasks = {t["id"]: t for t in run.load_tasks()}
         self.assertEqual({tasks[t]["class"] for t in hard}, set(run.CLASSES))
 
-    def test_the_timeout_lookup_wants_the_capped_value_and_the_client(self):
-        for answer, expected in (("25 app/client.py", True), ("It is capped.\n`25 app/client.py`", True),
-                                 ("25 seconds, app/client.py", True), ("25.0 ./app/client.py", True),
-                                 ("<25 app/client.py>", True), ("<25> <app/client.py>", True), ("<45 app/client.py>", False),
-                                 ("45 app/client.py", False), ("45 app/resolve.py", False), ("25 app/limits.py", False),
-                                 ("10 app/env.py", False), ("45000 app/env.py", False),
-                                 ("25 app/client.py\n45 app/resolve.py", False),
-                                 ("The answer is 25 seconds in app/client.py.", False)):
-            with self.subTest(answer=answer):
-                self.assertEqual(self.run_with("lookup-effective-timeout", {}, answer), expected)
-
-    def test_semver_needs_numeric_identifiers_validation_and_the_prerelease_rule(self):
-        solution = self.source("impl-semver-compare", "solution/semver.py")
-        loose = solution.replace("(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)", "(\\d+)\\.(\\d+)\\.(\\d+)")
-        any_prerelease = solution.replace(
-            "    return version[1] is None or any(bound[1] is not None and bound[0] == version[0] for _, bound in "
-            "comparators)", "    return True")
-        caret_major_only = solution.replace(
-            "upper = (major + 1, 0, 0) if major else (0, minor + 1, 0) if minor else (0, 0, patch + 1)",
-            "upper = (major + 1, 0, 0)")
-        for name, text in (("leading zeros allowed", loose), ("prereleases always match", any_prerelease),
-                           ("caret ignores 0.x", caret_major_only)):
-            with self.subTest(name):
-                self.assertNotEqual(text, solution)
-                self.assertFalse(self.run_with("impl-semver-compare", {"semver.py": text}))
-
-    def test_an_allocation_that_rounds_floors_negatives_or_skips_validation_fails(self):
-        solution = self.source("bugfix-split-amount", "solution/money.py")
-        to_last = ("def allocate(total_cents, weights):\n    s = sum(weights)\n"
-                   "    shares = [total_cents * w // s for w in weights]\n    shares[-1] += total_cents - sum(shares)\n"
-                   "    return shares\n")
-        floored = solution.replace("total, sign = sum(weights), (-1 if total_cents < 0 else 1)",
-                                   "total, sign = sum(weights), 1").replace("abs(total_cents)", "total_cents")
-        unchecked = "\n".join(l for l in solution.splitlines() if "raise ValueError" not in l and "if (not " not in l
-                              and "or sum(weights) <= 0" not in l) + "\n"
-        for name, text in (("remainder to the last share", to_last), ("negatives floored", floored),
-                           ("no validation", unchecked)):
-            with self.subTest(name):
-                self.assertNotEqual(text, solution)
-                self.assertFalse(self.run_with("bugfix-split-amount", {"money.py": text}))
-
-    def test_tenant_keys_must_reach_every_hand_built_key_and_never_collide(self):
-        joined = "def price_key(tenant_id, product_id):\n    return f\"price:{tenant_id}:{product_id}\"\n"
-        report = ("from cache import store\n\n\ndef cached_products(tenant_id):\n    prefix = f\"price:{tenant_id}:\"\n"
-                  "    return sorted(k[len(prefix):] for k in store.keys() if k.startswith(prefix))\n")
-        sweep = ("from cache import store\n\n\ndef sweep(tenant_id, keep):\n    prefix = f\"price:{tenant_id}:\"\n"
-                 "    for key in store.keys():\n        if key.startswith(prefix) and key[len(prefix):] not in keep:\n"
-                 "            store.delete(key)\n")
-        events = self.source("cross-tenant-cache", "solution/admin/events.py")
-        missed_delete = events.replace(
-            "    db.remove(tenant_id, product_id)\n    store.delete(keys.price_key(tenant_id, product_id))",
-            "    db.remove(tenant_id, product_id)\n    store.delete(\"price:\" + product_id)")
-        untenanted_sweep = ("from cache import keys, store\n\n\ndef sweep(tenant_id, keep):\n"
-                            "    for key in store.keys():\n"
-                            "        if key[2] not in keep:\n            store.delete(key)\n")
-        for name, files in (("colliding string key", {"cache/keys.py": joined, "reports/cached.py": report,
-                                                      "jobs/sweep.py": sweep}),
-                            ("hand-built key left in the delete handler", {"admin/events.py": missed_delete}),
-                            ("sweep across tenants", {"jobs/sweep.py": untenanted_sweep})):
-            with self.subTest(name):
-                self.assertFalse(self.run_with("cross-tenant-cache", files))
-
-    def test_the_import_finding_names_the_tar_extract_and_not_a_decoy(self):
-        for finding, expected in (({"file": "files/importer.py", "line": 17}, True),
-                                  ({"file": "files/importer.py", "line": 15}, True),
-                                  ({"file": "files/importer.py", "line": 13}, False),
-                                  ({"file": "files/server.py", "line": 9}, False),
-                                  ({"file": "files/server.py", "line": 8}, False),
-                                  ({"file": "files/thumbs.py", "line": 23}, False),
-                                  ({"file": "files/thumbs.py", "line": 12}, False),
-                                  ({"file": "auth/tokens.py", "line": 22}, False)):
-            with self.subTest(finding=finding):
-                self.assertEqual(self.run_with("security-prefix-check", {"FINDING.json": finding}), expected)
-
-    def test_dropping_or_clearing_the_cache_does_not_fix_the_shared_rows(self):
-        rates = self.source("rootcause-cached-rates", "repo/rates.py")
-        pricing = self.source("rootcause-cached-rates", "repo/pricing.py")
-        uncached = rates.replace("@functools.lru_cache(maxsize=None)\n", "")
-        cleared = pricing.replace("    rows = rate_table(region)\n    for row in rows:",
-                                  "    rate_table.cache_clear()\n    rows = rate_table(region)\n    for row in rows:")
-        for name, files in (("cache dropped", {"rates.py": uncached, "pricing.py": pricing}),
-                            ("cache cleared on each sale", {"pricing.py": cleared})):
-            with self.subTest(name):
-                self.assertNotEqual(list(files.values())[0], rates if name == "cache dropped" else pricing)
-                self.assertFalse(self.run_with("rootcause-cached-rates", files))
-        copied = rates.replace("    return rows\n", "    return rows\n\n\n_cached = rate_table\n\n\n"
-                                                    "def rate_table(region):\n"
-                                                    "    return [dict(row) for row in _cached(region)]\n")
-        self.assertTrue(self.run_with("rootcause-cached-rates", {"rates.py": copied, "pricing.py": pricing}))
-
-    def test_the_topic_design_must_hold_every_number(self):
-        good = {"partitions": 30, "key": "order_id", "retention_hours": 80, "replication_factor": 3, "reasons": ["x"]}
-        for change, expected in (({}, True), ({"partitions": 36}, True), ({"retention_hours": 72}, True),
-                                 ({"retention_hours": 82}, True),
-                                 ({"partitions": 24}, False), ({"partitions": 22}, False), ({"partitions": 32}, False),
-                                 ({"partitions": 42}, False), ({"partitions": 12}, False),
-                                 ({"key": "customer_id"}, False), ({"replication_factor": 2}, False),
-                                 ({"replication_factor": 4}, False), ({"retention_hours": 168}, False),
-                                 ({"retention_hours": 48}, False), ({"partitions": 30.0}, False),
-                                 ({"extra": 1}, False)):
-            with self.subTest(change=change):
-                self.assertEqual(self.run_with("design-event-partitions", {"DESIGN.json": {**good, **change}}),
-                                 expected)
-
-    def test_the_release_research_needs_the_yank_the_errata_and_the_advisory(self):
-        good = {"stream_since": "2.3.1", "timeout_since": "2.4.2", "safe_since": "2.4.3",
-                "sources": ["docs/changelog/v2.3.1.md", "docs/errata.md", "docs/security/SA-2025-01.md"]}
-        for change, expected in (({}, True), ({"stream_since": "v2.3.1", "safe_since": "2.4.3"}, True),
-                                 ({"sources": ["./docs/changelog/v2.3.1.md:3", "errata.md", "security/SA-2025-01.md",
-                                               "docs/security/SA-2025-02.md"]}, True),
-                                 ({"stream_since": "2.3.0"}, False), ({"timeout_since": "2.4.0"}, False),
-                                 ({"safe_since": "2.4.2"}, False), ({"safe_since": "2.5.0"}, False),
-                                 ({"sources": ["docs/changelog/v2.3.1.md", "docs/errata.md"]}, False),
-                                 ({"sources": good["sources"] + ["docs/nope.md"]}, False)):
-            with self.subTest(change=change):
-                self.assertEqual(self.run_with("research-yanked-release", {"RESEARCH.json": {**good, **change}}),
-                                 expected)
-
 
 class ProbeHelper(unittest.TestCase):
     CASES = (
@@ -1647,117 +1496,6 @@ class QualityTier(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT lower('\u00c9'), lower('A')").fetchone(), ("\u00c9", "a"),
                          "this SQLite is built with ICU, so lower() folds non-ASCII letters and the task's data is wrong")
 
-    def test_migration_rejects_each_known_mistake(self):
-        solution = self.source("impl-merge-customers", "solution/store/migrations/m0002_merge_customers.py")
-        rel = "store/migrations/m0002_merge_customers.py"
-        self.assertTrue(self.run_with("impl-merge-customers", {rel: solution}))
-
-        def between(first, last, replacement=""):
-            return solution[:solution.index(first)] + replacement + solution[solution.index(last):]
-
-        rebuild, view, fill = ('        conn.execute("""\n            CREATE TABLE new_customers', '        conn.execute("""\n            CREATE VIEW',
-                               '        conn.execute("""\n            UPDATE customers SET name')
-        copy = 'INSERT INTO {} SELECT id, lower(trim(email)), name, created_at FROM {}'
-        schema = "id INTEGER PRIMARY KEY, email TEXT NOT NULL COLLATE NOCASE UNIQUE, name TEXT, created_at TEXT NOT NULL"
-        mutants = {
-            "pragma inside the transaction": solution.replace(
-                '    conn.execute("PRAGMA foreign_keys = OFF")\n    conn.execute("BEGIN")\n',
-                '    conn.execute("BEGIN")\n').replace(
-                "WHERE name IS NULL OR name = \'\'\"\"\")\n",
-                "WHERE name IS NULL OR name = \'\'\"\"\")\n        conn.execute(\"PRAGMA foreign_keys = OFF\")\n"),
-            "old table renamed first": between(rebuild, view, (
-                '        conn.execute("ALTER TABLE customers RENAME TO old_customers")\n'
-                f'        conn.execute("CREATE TABLE customers ({schema})")\n'
-                f'        conn.execute("{copy.format("customers", "old_customers")}")\n'
-                '        conn.execute("DROP TABLE old_customers")\n')),
-            "newest kept": solution.replace("ORDER BY k.created_at, k.id", "ORDER BY k.created_at DESC, k.id"),
-            "python lower": solution.replace(
-                '    conn.execute("BEGIN")\n',
-                '    conn.execute("BEGIN")\n    for key, email in conn.execute("SELECT id, email FROM customers").fetchall():\n'
-                '        conn.execute("UPDATE customers SET email = ? WHERE id = ?", (email.strip().lower(), key))\n'),
-            "view not recreated": between(view, '        if conn.execute("PRAGMA foreign_key_check")'),
-            "foreign keys left off": solution.replace(
-                '    finally:\n        conn.execute("PRAGMA foreign_keys = ON")\n', ""),
-            "unique index": between(rebuild, view, (
-                '        conn.execute("UPDATE customers SET email = lower(trim(email))")\n'
-                '        conn.execute("CREATE UNIQUE INDEX customers_email ON customers(email COLLATE NOCASE)")\n')),
-            "names not filled": between(fill, '        conn.execute("UPDATE orders'),
-            "tie goes to the highest id": solution.replace("ORDER BY k.created_at, k.id", "ORDER BY k.created_at, k.id DESC"),
-            "latest donor names the kept customer": solution.replace(
-                "ORDER BY d.created_at, d.id LIMIT 1), name)", "ORDER BY d.created_at DESC, d.id LIMIT 1), name)"),
-            "backup table left behind": solution.replace(
-                '        conn.execute("DROP TABLE customers")\n',
-                '        conn.execute("CREATE TABLE customers_backup AS SELECT * FROM customers")\n'
-                '        conn.execute("DROP TABLE customers")\n'),
-            "view turned into a table": between(view, '        if conn.execute("PRAGMA foreign_key_check")', (
-                '        conn.execute("""\n            CREATE TABLE customer_totals AS\n'
-                '            SELECT c.id, c.email, COUNT(o.id) AS orders, COALESCE(SUM(o.total_cents), 0) AS cents\n'
-                '            FROM customers c LEFT JOIN orders o ON o.customer_id = c.id\n'
-                '            GROUP BY c.id""")\n')),
-            "created_at no longer required": solution.replace(
-                "created_at TEXT NOT NULL\n            )", "created_at TEXT\n            )"),
-            "primary key lost": solution.replace("id INTEGER PRIMARY KEY,\n                email", "id INTEGER,\n                email"),
-            "view left in place": solution.replace('        conn.execute("DROP VIEW customer_totals")\n', ""),
-            "not committed": solution.replace('        conn.execute("COMMIT")\n', ""),
-        }
-        for name, text in mutants.items():
-            with self.subTest(name):
-                self.assertNotEqual(text, solution)
-                self.assertFalse(self.run_with("impl-merge-customers", {rel: text}))
-        noise = {
-            "writes to stdout": solution.replace("def upgrade(conn):\n", 'def upgrade(conn):\n    import sys\n'
-                                                 '    sys.stdout.write("done")\n'),
-            "swaps stdout": solution.replace("def upgrade(conn):\n", 'def upgrade(conn):\n    import os, sys\n'
-                                             '    sys.stdout = open(os.devnull, "w")\n'),
-            "prints at exit": solution.replace("import sqlite3\n", 'import atexit\nimport sqlite3\n\n'
-                                               'atexit.register(lambda: print(\'{"error": "late"}\'))\n', 1),
-        }
-        for name, text in noise.items():
-            with self.subTest(name):
-                self.assertNotEqual(text, solution)
-                self.assertTrue(self.run_with("impl-merge-customers", {rel: text}))
-        legacy_rename = between(rebuild, view, (
-            '        conn.execute("PRAGMA legacy_alter_table = ON")\n'
-            '        conn.execute("ALTER TABLE customers RENAME TO old_customers")\n'
-            f'        conn.execute("CREATE TABLE customers ({schema})")\n'
-            f'        conn.execute("{copy.format("customers", "old_customers")}")\n'
-            '        conn.execute("DROP TABLE old_customers")\n'
-            '        conn.execute("PRAGMA legacy_alter_table = OFF")\n'))
-        self.assertTrue(self.run_with("impl-merge-customers", {rel: legacy_rename}))
-
-    def line_of(self, rel, text, nth=1):
-        lines = self.source("security-admin-route", f"repo/{rel}").splitlines()
-        return [n for n, line in enumerate(lines, 1) if text in line][nth - 1]
-
-    def test_the_route_finding_names_the_second_decode_or_the_guard_and_no_decoy(self):
-        first, second = self.line_of("gateway/router.py", 'if "%" in path:'), self.line_of("gateway/router.py", "path = unquote(path)")
-        self.assertEqual(second, first + 1)
-        guard = self.line_of("gateway/guard.py", "path.startswith(")
-        decode = self.line_of("gateway/guard.py", "unquote(")
-        pairs = (
-            [("gateway/router.py", first, True), ("gateway/router.py", second, True), ("gateway/guard.py", guard, True),
-             ("./gateway/router.py", second, True), ("gateway\\router.py", first, True),
-             ("gateway/router.py", self.line_of("gateway/router.py", "path = unquote(raw"), False),
-             ("gateway/guard.py", decode, True),
-             ("gateway/admin.py", self.line_of("gateway/admin.py", 'f"SELECT'), False),
-             ("gateway/hooks.py", self.line_of("gateway/hooks.py", "pickle.loads"), False),
-             ("gateway/releases.py", self.line_of("gateway/releases.py", "subprocess.run"), False),
-             ("gateway/etag.py", self.line_of("gateway/etag.py", "hashlib.md5"), False),
-             ("gateway/files.py", self.line_of("gateway/files.py", "path = os.path.realpath"), False),
-             ("gateway/router.py", self.line_of("gateway/router.py", "random.uniform"), False),
-             ("auth/session.py", self.line_of("auth/session.py", "compare_digest"), False)])
-        for rel, line, expected in pairs:
-            with self.subTest(file=rel, line=line):
-                self.assertEqual(self.run_with("security-admin-route", {"FINDING.json": {"file": rel, "line": line}}), expected)
-        self.assertTrue(self.run_with("security-admin-route", {"FINDING.json": {
-            "file": "gateway/router.py", "line": second, "why": "It decodes the path a second time."}}))
-        for name, answer in (("two findings", [{"file": "gateway/router.py", "line": second},
-                                               {"file": "gateway/admin.py", "line": 1}]),
-                             ("a string line", {"file": "gateway/router.py", "line": str(second)}),
-                             ("two lines", {"file": "gateway/router.py", "line": [first, second]})):
-            with self.subTest(name):
-                self.assertFalse(self.run_with("security-admin-route", {"FINDING.json": answer}))
-
     def test_the_shipped_repo_has_no_comment_that_names_the_trap_or_clears_a_decoy(self):
         for path in (run.BENCH / "tasks" / "security-admin-route" / "repo").rglob("*.py"):
             with self.subTest(path=path.name):
@@ -1778,63 +1516,6 @@ class QualityTier(unittest.TestCase):
         self.assertTrue(admin[1])
         self.assertEqual(sneaked[1], admin[1])
 
-    def solution_with(self, rel, old, new):
-        text = self.source("cross-amount-cents", f"solution/{rel}")
-        self.assertIn(old, text)
-        return {rel: text.replace(old, new, 1)}
-
-    def shipped_module(self, rel):
-        return {rel: self.source("cross-amount-cents", f"repo/{rel}")}
-
-    def cents_mutants(self):
-        convert = 'int(round(Decimal(str(event["amount"])) * 100))'
-        zero = 'if "amount" not in event:\n        return dict(event)\n    cents = ' + convert
-        totals_hand = ("from shop import events\n\n\ndef order_total(log, order_id):\n    total = 0\n    for e in log:\n"
-                       "        cents = e[\"amount_cents\"] if \"amount_cents\" in e else round(e[\"amount\"] * 100)\n"
-                       "        if e[\"order_id\"] == order_id:\n"
-                       "            total += cents if e[\"kind\"] == \"charge\" else -cents\n    return total\n")
-        mutants = {
-            "truncated cents": self.solution_with("shop/events.py", convert, 'int(event["amount"] * 100)'),
-            "refund rounded the other way": self.solution_with(
-                "shop/events.py", "    new = {", '    if event["kind"] == "refund":\n        cents = int(event["amount"] * 100)\n    new = {'),
-            "rewritten in place": self.solution_with(
-                "shop/events.py", 'new = {k: v for k, v in event.items() if k != "amount"}\n    new["amount_cents"] = cents\n    return new',
-                'event.pop("amount")\n    event["amount_cents"] = cents\n    return event'),
-            "zero falls through": self.solution_with(
-                "shop/events.py", zero, 'cents = event.get("amount_cents") or ' + convert),
-            "float left in the total": self.solution_with(
-                "shop/totals.py", 'total += e["amount_cents"] if e["kind"] == "charge" else -e["amount_cents"]',
-                'cents = int(e["amount_cents"] / 100 * 100)\n            total += cents if e["kind"] == "charge" else -cents'),
-            "float left in the report": self.solution_with(
-                "reports/daily.py", "return charges - refunds", "return (charges - refunds) / 100 * 100"),
-            "refund bound off by one": self.solution_with("shop/refunds.py", "<= refundable(", "< refundable("),
-            "export header kept": self.solution_with(
-                "shop/export.py", 'HEADER = "kind,order_id,amount_cents"', 'HEADER = "kind,order_id,amount"'),
-            "export rows in dollars": self.solution_with(
-                "shop/export.py", "{amount_cents}", "{amount_cents / 100}"),
-            "second converter": {"shop/totals.py": totals_hand},
-            "old key in a new top-level module": {"legacy.py": 'def dollars(event):\n    return event["amount"]\n'},
-            "zero dollars skip the conversion": self.solution_with(
-                "shop/events.py", 'if "amount" not in event:', 'if not event.get("amount"):'),
-            "upcast keeps the old key": self.solution_with(
-                "shop/events.py", 'new = {k: v for k, v in event.items() if k != "amount"}', "new = dict(event)"),
-            "upcast under another name": {
-                rel: text.replace("upcast", "to_cents") for rel, text in (
-                    (f"{d}/{m}.py", self.source("cross-amount-cents", f"solution/{d}/{m}.py"))
-                    for d, m in (("shop", "events"), ("shop", "totals"), ("shop", "refunds"), ("shop", "invoice"),
-                                 ("shop", "export"), ("shop", "audit"), ("reports", "daily")))},
-        }
-        for module in ("events", "totals", "refunds", "invoice", "export", "audit"):
-            mutants[f"{module} untouched"] = self.shipped_module(f"shop/{module}.py")
-        mutants["report untouched"] = self.shipped_module("reports/daily.py")
-        return mutants
-
-    def test_cents_check_rejects_each_known_mistake(self):
-        self.assertTrue(self.run_with("cross-amount-cents", {}))
-        for name, files in self.cents_mutants().items():
-            with self.subTest(name):
-                self.assertFalse(self.run_with("cross-amount-cents", files))
-
     def test_cents_check_gives_the_same_verdicts_on_other_seeds(self):
         spec = importlib.util.spec_from_file_location("cents_check", run.BENCH / "tasks" / "cross-amount-cents" / "check.py")
         check, saved = importlib.util.module_from_spec(spec), sys.modules.get("passcheck")
@@ -1842,39 +1523,16 @@ class QualityTier(unittest.TestCase):
             spec.loader.exec_module(check)
         finally:
             sys.modules["passcheck"] = saved
-        solution = run.BENCH / "tasks" / "cross-amount-cents" / "solution"
-        builds = {"the solution": {}, **self.cents_mutants()}
+        task = next(t for t in run.load_tasks() if t["id"] == "cross-amount-cents")
+        builds = [("the solution", None, True)] + [(f"{kind}/{p.name}", p, kind == "right")
+                                                     for kind in ("right", "wrong") for p in overlay_dirs(task, kind)]
         with tempfile.TemporaryDirectory() as tmp:
-            for n, (name, files) in enumerate(builds.items()):
+            for n, (name, overlay, expected) in enumerate(builds):
                 work = Path(tmp) / str(n)
-                shutil.copytree(solution, work)
-                for rel, text in files.items():
-                    (work / rel).write_text(text, encoding="utf-8")
+                build_work(task, overlay, work)
                 for seed in range(1, 11):
                     with self.subTest(build=name, seed=seed):
-                        self.assertEqual(check.passes(work, seed), name == "the solution")
-
-    def test_cents_check_takes_a_round_based_converter(self):
-        files = self.solution_with("shop/events.py", 'int(round(Decimal(str(event["amount"])) * 100))',
-                                   'int(round(event["amount"] * 100))')
-        self.assertTrue(self.run_with("cross-amount-cents", files))
-
-    def test_the_cents_check_does_not_read_a_comment_or_a_longer_string_as_the_old_key(self):
-        files = self.solution_with("shop/totals.py", "from shop import events\n",
-                                   "from shop import events\n\n# the old amount key is gone\nNOTE = \"amount_cents, not amount\"\n")
-        self.assertTrue(self.run_with("cross-amount-cents", files))
-
-    def test_the_cents_check_lets_a_test_file_hold_the_old_key(self):
-        test = 'from shop import events\n\n\ndef test_upcast():\n    assert events.upcast([{"amount": 0.29}])\n'
-        for rel in ("test_events.py", "events_test.py", "tests/check_events.py"):
-            with self.subTest(rel):
-                files = {rel: test}
-                self.assertTrue(self.run_with("cross-amount-cents", files))
-
-    def test_the_cents_check_still_fails_a_new_non_test_module_with_the_old_key(self):
-        for rel in ("legacy.py", "attests.py", "shop/contest.py"):
-            with self.subTest(rel):
-                self.assertFalse(self.run_with("cross-amount-cents", {rel: 'def dollars(event):\n    return event["amount"]\n'}))
+                        self.assertEqual(check.passes(work, seed), expected)
 
     def test_the_cents_repo_has_no_comment(self):
         for path in (run.BENCH / "tasks" / "cross-amount-cents" / "repo").rglob("*.py"):
@@ -1890,38 +1548,6 @@ class QualityTier(unittest.TestCase):
             res = subprocess.run([sys.executable, "-I", "-c", code, str(work)], cwd=tmp, capture_output=True, text=True, timeout=60)
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(json.loads(res.stdout), [[{"kind": "charge", "order_id": "o1", "amount": 19.99}], ["charge 19.99"]])
-
-    def test_the_retry_design_must_hold_every_constraint(self):
-        good = {"retry_at": "payments_client", "attempts": 2, "per_try_timeout_ms": 1000, "backoff_ms": 100,
-                "idempotency_key": "per_checkout", "gateway_retries": "off", "reasons": ["x"]}
-        for change, expected in (({}, True), ({"per_try_timeout_ms": 600, "backoff_ms": 1500}, True),
-                                 ({"per_try_timeout_ms": 1325, "backoff_ms": 50}, True),
-                                 ({"per_try_timeout_ms": 1326, "backoff_ms": 50}, False),
-                                 ({"per_try_timeout_ms": 1400}, False), ({"per_try_timeout_ms": 599}, False),
-                                 ({"backoff_ms": 40}, False), ({"attempts": 3}, False), ({"attempts": 1}, False),
-                                 ({"retry_at": "checkout"}, False), ({"retry_at": "gateway"}, False),
-                                 ({"gateway_retries": "on"}, False), ({"idempotency_key": "per_attempt"}, False),
-                                 ({"per_try_timeout_ms": 1000.0}, False), ({"attempts": True}, False),
-                                 ({"reasons": []}, False), ({"extra": 1}, False)):
-            with self.subTest(change=change):
-                self.assertEqual(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}),
-                                 expected)
-
-    def test_the_retry_check_rejects_the_other_wrong_designs(self):
-        good = json.loads(self.source("design-checkout-retries", "solution/DESIGN.json"))
-        self.assertTrue(self.run_with("design-checkout-retries", {}))
-        for change in ({"retry_at": "none"}, {"retry_at": "none", "attempts": 1}, {"idempotency_key": "none"},
-                       {"attempts": "2"}, {"backoff_ms": 100.0}, {"gateway_retries": False}, {"reasons": "x"},
-                       {"reasons": [" "]}, {"per_try_timeout_ms": 1400, "backoff_ms": 50}):
-            with self.subTest(change=change):
-                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
-        for key in good:
-            with self.subTest(missing=key):
-                self.assertFalse(self.run_with("design-checkout-retries",
-                                               {"DESIGN.json": {k: v for k, v in good.items() if k != key}}))
-        for text in ("", "not json", json.dumps([good])):
-            with self.subTest(text=text):
-                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": text}))
 
     def test_each_rejected_retry_design_breaks_a_fact_spec_md_states(self):
         good = json.loads(self.source("design-checkout-retries", "solution/DESIGN.json"))
@@ -1957,108 +1583,6 @@ class QualityTier(unittest.TestCase):
                 self.assertFalse(holds({**good, **change}))
                 self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
 
-    def test_a_retry_design_given_only_in_the_reply_fails(self):
-        reply = json.dumps(json.loads(self.source("design-checkout-retries", "solution/DESIGN.json")))
-        with tempfile.TemporaryDirectory() as tmp:
-            task, work = self.shipped("design-checkout-retries", tmp)
-            self.assertFalse(self.check(task, work, reply))
-
-
-    def test_statement_check_rejects_each_known_mistake(self):
-        task = "bugfix-statement-queries"
-        rel = "billing/statement.py"
-        solution = self.source(task, "solution/billing/statement.py")
-        shipped = self.source(task, "repo/billing/statement.py")
-        self.assertTrue(self.run_with(task, {rel: solution}))
-        header = solution[:solution.index("    result = {")]
-        mutants = {
-            "shipped": shipped,
-            "join fan-out": header + (
-                '    sql = ("SELECT a.id, COALESCE(SUM(i.amount_cents), 0) - COALESCE(SUM(p.amount_cents), 0) FROM accounts a "\n'
-                '           "LEFT JOIN invoices i ON i.account_id = a.id AND i.voided = 0 "\n'
-                '           "LEFT JOIN payments p ON p.invoice_id = i.id GROUP BY a.id")\n'
-                '    return {a: c for a, c in conn.execute(sql)}\n'),
-            "rule dropped": solution.replace("if rules.counts(status, method):", "if True:"),
-            "pending bank counted": solution.replace("if rules.counts(status, method):", 'if status != "failed":'),
-            "voided kept": solution.replace(" WHERE voided = 0", "").replace(" WHERE i.voided = 0", ""),
-            "voided invoices' payments kept": solution.replace(" WHERE i.voided = 0", ""),
-            "payments per invoice": header + (
-                '    result = {a: 0 for (a,) in conn.execute("SELECT id FROM accounts")}\n'
-                '    for invoice_id, account_id, cents in conn.execute("SELECT id, account_id, amount_cents FROM invoices WHERE voided = 0").fetchall():\n'
-                '        result[account_id] += cents\n'
-                '        for paid, status, method in conn.execute("SELECT amount_cents, status, method FROM payments WHERE invoice_id = ?", (invoice_id,)).fetchall():\n'
-                '            if rules.counts(status, method):\n'
-                '                result[account_id] -= paid\n'
-                '    return result\n'),
-            "trace removed": shipped.replace("    result = {}", "    conn.set_trace_callback(None)\n    result = {}"),
-            "trace and progress removed": shipped.replace(
-                "    result = {}", "    conn.set_trace_callback(None)\n    conn.set_progress_handler(None, 0)\n    result = {}"),
-            "progress handler removed": solution.replace("    result = {", "    conn.set_progress_handler(None, 0)\n    result = {", 1),
-            "line tracing removed": solution.replace("    result = {", "    import sys\n    sys.settrace(None)\n    result = {", 1),
-            "index added": solution.replace(
-                "    result = {", '    conn.execute("CREATE INDEX payments_by_status ON payments(status)")\n    result = {', 1),
-            "temp table left": header + (
-                '    conn.execute("CREATE TEMP TABLE owed AS SELECT a.id AS id, COALESCE((SELECT SUM(amount_cents) FROM invoices '
-                'WHERE account_id = a.id AND voided = 0), 0) AS cents FROM accounts a")\n'
-                '    result = {a: c for a, c in conn.execute("SELECT id, cents FROM owed")}\n'
-                '    for account_id, paid, status, method in conn.execute("SELECT i.account_id, p.amount_cents, p.status, p.method FROM payments p '
-                'JOIN invoices i ON i.id = p.invoice_id WHERE i.voided = 0"):\n'
-                '        if rules.counts(status, method):\n'
-                '            result[account_id] -= paid\n'
-                '    return result\n'),
-            "string keys": solution.replace("    return result", "    return {str(k): v for k, v in result.items()}"),
-            "bool values": solution.replace("    return result", "    return {k: (True if v == 0 else v) for k, v in result.items()}"),
-            "float values": solution.replace("    return result", "    return {k: float(v) for k, v in result.items()}"),
-            "accounts without invoices left out": solution.replace("    return result", "    return {k: v for k, v in result.items() if v}"),
-            "not a dict": solution.replace("    return result", "    return list(result.items())"),
-            "raises": solution.replace("    return result", "    raise RuntimeError('no')"),
-        }
-        for name, text in mutants.items():
-            with self.subTest(name):
-                self.assertNotEqual(text, solution if name != "shipped" else "")
-                self.assertFalse(self.run_with(task, {rel: text}))
-        noise = {
-            "writes to stdout": solution.replace("    result = {", '    print("done")\n    result = {', 1),
-            "prints at exit": "import atexit\n" + solution.replace(
-                "from billing import rules\n", "from billing import rules\n\natexit.register(lambda: print('[]'))\n", 1),
-        }
-        for name, text in noise.items():
-            with self.subTest(name):
-                self.assertNotEqual(text, solution)
-                self.assertTrue(self.run_with(task, {rel: text}))
-
-    def test_statement_check_rejects_quadratic_python_and_takes_a_linear_rewrite(self):
-        task = "bugfix-statement-queries"
-        rel = "billing/statement.py"
-        solution = self.source(task, "solution/billing/statement.py")
-        header = solution[:solution.index("    result = {")]
-        quadratic = header + (
-            '    result = {a: 0 for (a,) in conn.execute("SELECT id FROM accounts")}\n'
-            '    invoices = conn.execute("SELECT id, account_id, amount_cents FROM invoices WHERE voided = 0").fetchall()\n'
-            '    payments = conn.execute("SELECT invoice_id, amount_cents, status, method FROM payments").fetchall()\n'
-            '    for invoice_id, account_id, cents in invoices:\n'
-            '        result[account_id] += cents - sum(p[1] for p in payments if p[0] == invoice_id and rules.counts(p[2], p[3]))\n'
-            '    return result\n')
-        self.assertFalse(self.run_with(task, {rel: quadratic}))
-        one_statement = header + (
-            '    sql = ("SELECT a.id, COALESCE(i.cents, 0) - COALESCE(p.cents, 0) FROM accounts a "\n'
-            '           "LEFT JOIN (SELECT account_id, SUM(amount_cents) AS cents FROM invoices WHERE voided = 0 GROUP BY account_id) i ON i.account_id = a.id "\n'
-            '           "LEFT JOIN (SELECT i.account_id AS account_id, SUM(p.amount_cents) AS cents FROM payments p JOIN invoices i ON i.id = p.invoice_id "\n'
-            '           "WHERE i.voided = 0 AND (p.status = \'settled\' OR (p.status = \'pending\' AND p.method = \'card\')) GROUP BY i.account_id) p "\n'
-            '           "ON p.account_id = a.id")\n'
-            '    return dict(conn.execute(sql).fetchall())\n')
-        self.assertTrue(self.run_with(task, {rel: one_statement}))
-        by_invoice = header + (
-            '    import collections\n'
-            '    paid = collections.defaultdict(int)\n'
-            '    for invoice_id, cents, status, method in conn.execute("SELECT invoice_id, amount_cents, status, method FROM payments"):\n'
-            '        if rules.counts(status, method):\n'
-            '            paid[invoice_id] += cents\n'
-            '    result = collections.defaultdict(int, {a: 0 for (a,) in conn.execute("SELECT id FROM accounts")})\n'
-            '    for invoice_id, account_id, cents in conn.execute("SELECT id, account_id, amount_cents FROM invoices WHERE voided = 0"):\n'
-            '        result[account_id] += cents - paid[invoice_id]\n'
-            '    return result\n')
-        self.assertTrue(self.run_with(task, {rel: by_invoice}))
 
     def wallet_phases(self, files):
         """The probe output for the wallet solution with `files` written over it, and the phases the check calls wrong."""
