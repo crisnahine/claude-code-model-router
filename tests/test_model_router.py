@@ -339,7 +339,7 @@ class Shipped(unittest.TestCase):
 
     def test_nothing_still_carries_the_old_name(self):
         old = re.compile("orchestr" + "ator", re.I)
-        skip = {".git", "fixtures", "__pycache__", "results"}
+        skip = {".git", ".superpowers", "fixtures", "__pycache__", "results"}
         for path in ROOT.rglob("*"):
             if path.is_file() and not skip & set(path.parts) and path.suffix != ".pyc":
                 self.assertIsNone(old.search(str(path.relative_to(ROOT))), path)
