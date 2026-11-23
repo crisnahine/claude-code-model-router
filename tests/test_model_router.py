@@ -3989,7 +3989,6 @@ class ReadmeDiagrams(unittest.TestCase):
             self.assertIn(row, text)
 
     def test_the_ladder_note_says_where_a_ruled_out_model_moves_the_pick(self):
-        from modelrouter import ladder
         config = cfg.base_config()
         self.assertEqual(ladder.pick(config, "lookup", "balanced", ["sonnet", "opus", "fable"], {}).model, "sonnet")
         self.assertEqual(ladder.pick(config, "complex", "balanced", ["haiku", "sonnet"], {}).model, "sonnet")

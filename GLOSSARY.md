@@ -24,7 +24,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Override file**: `~/.claude/model-router.json` or a project's `.claude/model-router.json`, merged over the registry. The user's file is trusted in full. A project's is limited: it can turn routing down but never on, and it can't change the rank of a shipped model or one the user defined.
 
-**Ladder**: the rule that turns a level, the priority and learned feedback into a model and an effort. When the model it lands on is weaker than the level needs, because a cap, the allowlist or model health left nothing at or above it, the pick gets one more effort step, at most `xhigh`, so a missing model costs effort and not quality. A pin, a caller's model or a rule that the cap lowers keeps the level's own effort.
+**Ladder**: the rule that turns a level, the priority and learned feedback into a model and an effort. When the model it lands on is weaker than the level needs, because a cap, the allowlist or model health left nothing at or above it, the pick gets one more effort step, at most `xhigh`, which makes up part of the loss. A pin, a caller's model or a rule that the cap lowers keeps the level's own effort.
 
 **Pick**: the model and effort the ladder gives a call before anyone else's choice is applied.
 

@@ -4,7 +4,7 @@ A level's `needs` is a strength, raised one step when votes say the level runs t
 registry.select turns it into the cheapest usable model at or above it, shifted by the
 priority. The effort comes from the level, except that fast keeps only low effort, and a pick
 weaker than the level's own `needs` (the cap, the allowlist or model health left nothing at or
-above it) gets one more effort step, at most xhigh, so a missing model costs effort and not quality."""
+above it) gets one more effort step, at most xhigh, which makes up part of the loss."""
 from __future__ import annotations
 
 from typing import Mapping, NamedTuple

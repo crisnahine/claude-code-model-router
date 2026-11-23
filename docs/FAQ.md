@@ -38,7 +38,7 @@ Set the plugin's `routing_mode` option to `off` in `/config`, and the router cha
 
 ## Can I cap the strongest model, or force one model?
 
-Yes: `max_tier` caps the strongest model subagents may run on, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` pins every subagent to one model. With the cap set to `sonnet`, for example, anything the router or a caller picks above Sonnet is lowered to it, including a level a project's `.claude/model-router.json` raised. The cap bounds the model, not the effort: a pick the cap leaves weaker than its level needs gets one more effort step, up to `xhigh`. With the force variable set, the router only sets effort. A pinned strong model costs far more on small jobs: Opus 5.5's list price is 40 times Haiku 5.5's per token, for prompts up to 100,000 tokens ([pricing](https://platform.claude.com/docs/en/about-claude/pricing.md)) ([guide](GUIDE.md#who-decides-the-model)).
+Yes: `max_tier` caps the strongest model subagents may run on, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` pins every subagent to one model. With the cap set to `sonnet`, for example, anything the router or a caller picks above Sonnet is lowered to it, including a level a project's `.claude/model-router.json` raised. The cap bounds the model, not the effort: a pick the cap leaves weaker than its level needs gets one more effort step, up to `xhigh`, which makes up part of the loss. With the force variable set, the router only sets effort. A pinned strong model costs far more on small jobs: Opus 5.5's list price is 40 times Haiku 5.5's per token, for prompts up to 100,000 tokens ([pricing](https://platform.claude.com/docs/en/about-claude/pricing.md)) ([guide](GUIDE.md#who-decides-the-model)).
 
 ## How is this different from setting one model for every agent?
 

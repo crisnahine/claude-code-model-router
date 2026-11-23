@@ -594,8 +594,8 @@ def diagram_ladder() -> str:
                     "availableModels, deniedModels or failures", "mut", 13))
     out.append(text(32, 452, "rule a model out, the pick moves to the nearest usable model above it, or to the "
                     "strongest one left. A redo runs one level higher.", "mut", 13))
-    out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh, so a "
-                    "missing model costs effort and not quality.", "mut", 13))
+    out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh, "
+                    "which makes up part of the loss.", "mut", 13))
     at = lambda lv: f"transform:translate(0px,{ys[lv] - cy}px)"  # noqa: E731
     stops = [(0, at("lookup") + ";opacity:0"), (4, at("lookup") + ";opacity:1"), (18, at("lookup")),
              (24, at("standard")), (40, at("standard")), (46, at("complex")), (62, at("complex")),
