@@ -4602,6 +4602,20 @@ class SlashSkills(Sandbox):
             with self.subTest(typed=typed):
                 self.assertEqual(intake.from_prompt(typed, self.project).level, level)
 
+    def test_a_typed_skill_for_a_plugin_the_install_record_lacks_walks_nothing(self):
+        # A --plugin-dir plugin is never in the record, so a walk could not find it and would only cost time.
+        other = self.home / "plugins" / "cache" / "acme"
+        (other / "skills" / "go").mkdir(parents=True)
+        (other / "skills" / "go" / "SKILL.md").write_text(self.HARD_BODY.split("\n\n")[1] + " $ARGUMENTS\n")
+        self.assertEqual(agents.installed_roots("acme"), [])
+        with mock.patch.object(agents.os, "walk", side_effect=AssertionError("walked the plugins folder")):
+            self.assertEqual(intake.from_prompt("/acme:go 482", self.project).level, "lookup")
+            hooks.user_prompt({"session_id": "s1", "prompt": "/acme:go 482", "cwd": str(self.project)})
+        (self.home / "plugins" / "installed_plugins.json").write_text(
+            json.dumps({"plugins": {"acme@market": [{"installPath": str(other)}]}}))
+        self.assertEqual(agents.installed_roots("acme"), [other])
+        self.assertEqual(intake.from_prompt("/acme:go 482", self.project).level, "complex")
+
     def test_the_mod_raises_the_request_where_the_settings_hook_saw_less(self):
         self.options(main_effort="false")
         self.session_on("claude-haiku-5-5")

@@ -112,14 +112,15 @@ def _read_skill(paths: list[Path]) -> str | None:
 def _typed_skill(prompt: str, project: Path) -> dict | None:
     """The profile behind "/name args" when name is a project or user skill or command on disk, or
     "/plugin:name args". UserPromptSubmit sees only the typed line, so it reads the body from the file: under
-    .claude for a project or user skill, under the plugin's install folder for a plugin's. A plugin's skill
-    it can't find is profiled by its arguments alone, which the mod's reading of the rendered body can raise."""
+    .claude for a project or user skill, under the plugin's install folder for a plugin's, found from the install
+    record alone, since a walk of the plugins folder is too slow for every typed line. A plugin's skill it can't
+    find is profiled by its arguments alone, which the mod's reading of the rendered body can raise."""
     match = re.match(r"/(?:([A-Za-z0-9_.-]+):)?([A-Za-z0-9_.-]+)(?:\s+(.*))?\Z", prompt.strip(), re.S)
     if not match:
         return None
     plugin, name, args = match.group(1), match.group(2), match.group(3) or ""
     if plugin:
-        roots = [cfg.PLUGIN_ROOT] if plugin == cfg.PLUGIN_NAME else agents._plugin_roots(plugin)
+        roots = [cfg.PLUGIN_ROOT] if plugin == cfg.PLUGIN_NAME else agents.installed_roots(plugin)
         body = _read_skill([root / "skills" / name / "SKILL.md" for root in roots])
         return profile_skill(args, body or "", rendered=False)
     project, home = project / ".claude", store.claude_home()
