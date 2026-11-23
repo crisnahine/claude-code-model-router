@@ -326,13 +326,16 @@ def render_sessions(parts: list[tuple[str, str, list[dict], list[dict]]], meta: 
     return "\n".join([meta.get("header", "# Benchmarks"), "", *body, meta.get("body", "")]).rstrip() + "\n"
 
 
-def _newest_price(prices: dict, alias: str) -> dict:
-    versions = [(tuple(int(n) for n in key.split("-")[2:] if n.isdigit()), value) for key, value in prices.items()
+def _newest_price(registry_config: dict, alias: str) -> dict:
+    """The list price of a family's newest model: the registry's `newest` ID, else the highest priced version."""
+    prices = registry_config.get("prices") or {}
+    versions = [(tuple(int(n) for n in key.split("-")[2:] if n.isdigit()), key) for key in prices
                 if key.startswith(f"claude-{alias}-") and not key.endswith("*")]
-    return max(versions, key=lambda v: v[0])[1] if versions else {}
+    named = (registry_config.get("newest") or {}).get(alias) or (max(versions)[1] if versions else "")
+    return registry.price(registry_config, named) or {}
 
 
-def estimate(rows: list[dict], tasks: list[dict], configs: list[dict], prices: dict) -> dict:
+def estimate(rows: list[dict], tasks: list[dict], configs: list[dict], registry_config: dict) -> dict:
     """What MIN_RUNS of every task under every configuration would cost. A class's runs cost what its runs
     here cost on average (all runs' mean for a class with none), and a configuration whose subagents run a
     dearer model than sonnet costs that much more per token on the whole run. Cheaper models are never priced
@@ -342,8 +345,8 @@ def estimate(rows: list[dict], tasks: list[dict], configs: list[dict], prices: d
     for r in rows:
         by_class.setdefault(r["class"], []).append(r["total_cost_usd"])
     means = {cls: sum(costs) / len(costs) for cls, costs in by_class.items()}
-    base = _newest_price(prices, "sonnet").get("output") or 1
-    factors = {c["id"]: max(1.0, (_newest_price(prices, c.get("price_model", "sonnet")).get("output") or base) / base)
+    base = _newest_price(registry_config, "sonnet").get("output") or 1
+    factors = {c["id"]: max(1.0, (_newest_price(registry_config, c.get("price_model", "sonnet")).get("output") or base) / base)
                for c in configs}
     usd = MIN_RUNS * sum(means.get(t["class"], overall) * factors[c["id"]] for t in tasks for c in configs)
     return {"runs": len(tasks) * len(configs) * MIN_RUNS, "usd": usd, "means": means, "overall": overall,
@@ -369,7 +372,7 @@ class Results:
     archive: list[tuple[str, list[dict], int]]
     configs: list[dict]
     tasks: list[dict]
-    prices: dict
+    registry: dict
     routers: frozenset[str]
     own_model: frozenset[str]
     forced: dict
@@ -418,10 +421,9 @@ def load(paths: list[Path]) -> Results:
                 lines = len(_jsonl([*folder.glob("infra/*.jsonl"), *folder.glob("limited/*.jsonl")]))
                 archive.append((folder.relative_to(results).as_posix(), kept, lines))
     configs = run.load_configs()
-    prices = json.loads((run.PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["prices"]
-    return Results(files, rows, stale, aside, archive, configs, tasks, prices, router_ids(configs),
-                   frozenset(c["id"] for c in configs if c.get("model")),
-                   forced_ranks(configs, mrconfig.base_config()))
+    registry_config = mrconfig.base_config()
+    return Results(files, rows, stale, aside, archive, configs, tasks, registry_config, router_ids(configs),
+                   frozenset(c["id"] for c in configs if c.get("model")), forced_ranks(configs, registry_config))
 
 
 def _notes(results: Results) -> list[str]:
@@ -541,7 +543,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
     stale = sum(1 for r in rows if "plugin_state" not in r)
     unsaved = sum(1 for r in rows if "sessions_saved" not in r)
     borrowed = sum(1 for r in rows if r.get("plugin_state") is not None and "plugin_data_own" not in r)
-    plan = estimate(rows, tasks, results.configs, results.prices)
+    plan = estimate(rows, tasks, results.configs, results.registry)
     budget = max((r.get("budget_usd") or 0.5 for r in rows), default=0.5)
     saturated = sum(bool(row["quality"]["saturated"]) for row in summary)
     header = "\n".join([

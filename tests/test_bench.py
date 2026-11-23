@@ -868,9 +868,12 @@ class SuiteCoverage(unittest.TestCase):
         tasks = [{"id": "l", "class": "lookup"}, {"id": "b", "class": "bugfix"}, {"id": "d", "class": "design"}]
         configs = [{"id": "a", "price_model": "sonnet"}, {"id": "o", "price_model": "opus"},
                    {"id": "h", "price_model": "haiku"}]
-        prices = {"claude-sonnet-5-5": {"output": 15}, "claude-opus-5-5": {"output": 75},
-                  "claude-opus-4-1": {"output": 99}, "claude-haiku-5-5": {"output": 5}, "claude-opus-*": {"output": 1}}
-        plan = analyze.estimate(data, tasks, configs, prices)
+        registry_config = {"prices": {"claude-sonnet-5-5": {"output": 15}, "claude-opus-5-5": {"output": 75},
+                                      "claude-opus-4-1": {"output": 99}, "claude-haiku-5-5": {"output": 5},
+                                      "claude-opus-*": {"output": 1}},
+                           "newest": {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5",
+                                      "haiku": "claude-haiku-5-5"}}
+        plan = analyze.estimate(data, tasks, configs, registry_config)
         self.assertEqual(plan["runs"], 90)
         # 10 runs x (0.05 + 0.10 + 0.0667 for design, from the mean of all runs) x (1 + 5 + 1, haiku never priced down)
         self.assertAlmostEqual(plan["usd"], 10 * (0.05 + 0.10 + 0.2 / 3) * 7, places=6)
