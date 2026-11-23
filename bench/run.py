@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import filecmp
 import hashlib
 import io
 import json
@@ -309,6 +310,11 @@ def final_answer(shipped: Path, work: Path, reply: str) -> dict:
         try:  # the money for the run is spent by now, so a file that can't be read must not lose the row
             if root not in path.resolve().parents:
                 omitted.append(rel)
+                continue
+            # A UTF-8 character is at most 4 bytes, so a bigger file can't fit the cap; reading it could exhaust memory.
+            if path.stat().st_size > 4 * FINAL_FILE_CHARS:
+                if not (before.is_file() and filecmp.cmp(before, path, shallow=False)):
+                    omitted.append(rel)
                 continue
             data = path.read_bytes()
         except OSError:

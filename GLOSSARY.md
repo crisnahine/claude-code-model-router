@@ -96,7 +96,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Pilot**: a benchmark run with too few runs per cell (under 10) to tell a difference from noise, or whose cells cover different tasks or counts. Every row it produces is PARTIAL, and it supports no claim beyond its raw data. The quality-tier pilot, 3 runs per cell, is kept under `bench/results/pilot/` and the page's tables leave it out.
 
-**Saturated**: a task class where the weakest forced baseline (every subagent on the lowest model) can't be told from the strongest by an exact one-sided test at 5%. Its tasks can't tell models apart, so the benchmark makes no quality claim for or against the router there, and a PASS or FAIL on that class is a cost result only.
+**Saturated**: a task class where the weakest forced baseline (every subagent on the lowest model) can't be told from the strongest by an exact one-sided test at 5%. Its tasks can't tell models apart, so the benchmark makes no quality claim for or against the router there. A PASS, or a FAIL on cost, on that class is a cost result only; a FAIL for a pass rate behind the cheapest baseline still stands.
 
 **Quality verdict**: what a class's pass rates say about the router's quality, apart from its cost verdict. The router's rate is tested against every baseline that has 10 runs, with an exact one-sided test at 5% adjusted across the baselines (Holm): `BEHIND` when a baseline solved more beyond noise, `NOT SHOWN BEHIND` when none did. The second is not parity, since 10 runs per cell can't show a tie. The verdict is withheld ("no claim") for a saturated class, one with too few runs or cells that differ, and one whose forced baselines cover fewer than two models.
 

@@ -735,25 +735,30 @@ NEARLY = 0.95  # "solves nearly every run": at least this share of runs
 PROSE = {
     OPUS: {"ran": {"defaults", "haiku", "haiku-high", "opus", "opus-high", "fable", "fable-high", "opusplan", "advisor"},
            "cheaper": ("haiku-high", "opusplan"), "best_in": {"opusplan", "haiku", "haiku-high"},
-           "level_as_defaults": ("opus", "opus-high", "advisor"), "example": ("bugfix", "opusplan")},
-    SONNET: {"ran": {"defaults", "sonnet-medium", "sonnet-high", "opusplan"}, "miss": ("design", "sonnet-medium")},
+           "level_as_defaults": ("opus", "opus-high", "advisor"), "example": ("bugfix", "opusplan"),
+           "nearly": ("opusplan", "haiku-high")},
+    SONNET: {"ran": {"defaults", "sonnet-medium", "sonnet-high", "opusplan"}, "miss": ("design", "sonnet-medium"),
+             "nearly": ("defaults", "opusplan", "sonnet-medium")},
 }
 FACT_TEXT = {
     "solved_all": "the router and the defaults solved every run",
     "solved_as_many": "the router solved as many runs as the defaults",
     "one_miss": "the router missed one run, in a class where its best baseline solved them all",
-    "strongest_beaten": "the router beat every subagent on the strongest model outside the noise in every class",
-    "level_as_defaults": "the router beat the Opus and advisor baselines in every class but the ones where it is level with the defaults",
+    "strongest_beaten": "the router beat every subagent on the strongest model outside the noise in every class "
+                        f"with {MIN_RUNS} runs",
+    "level_as_defaults": f"the router beat the defaults, Opus and advisor baselines in every class with {MIN_RUNS} runs "
+                         "but the ones where it is level with the defaults, and is level with each of them there",
     "cheaper_everywhere": "the named cheap baselines cost less than the router in every class",
     "not_cheapest": "the router is not the cheapest configuration over all runs",
-    "best_named": "the best baseline in every FAIL class is one the docs name",
+    "best_named": "a class is FAIL, and the best baseline in each FAIL class is one the docs name",
     "partial_for_runs": "every PARTIAL class is PARTIAL for lack of runs",
-    "fail_on_cost": "every FAIL class fails on cost per solved task, not on pass rate",
+    "fail_on_cost": "a class is FAIL, and each FAIL class fails on cost per solved task, not on pass rate",
     "not_behind": "the router's pass rate is not behind its best baseline's beyond noise in any class",
     "no_gain": "the router's pass rate is not ahead of its best baseline's beyond noise in any class",
     "no_pass": "no class is PASS",
     "example": "the docs' example class: the router is cheaper than the defaults and dearer than the named baseline",
-    "nearly_all": f"the best baseline over all runs solved at least {NEARLY:.0%} of them",
+    "nearly_all": f"the best baseline over all runs, and each one the docs say solves nearly every run, solved at "
+                  f"least {NEARLY:.0%} of them",
     "ran": "the configurations that ran are the ones the docs list",
 }
 
@@ -787,12 +792,16 @@ def roles(results: Results, router: str, pooled: dict) -> dict:
             "strongest": max((c for c in base if c in results.forced), key=lambda c: (results.forced[c], c), default=None)}
 
 
+def _judged(c: dict) -> bool:
+    """Whether a class's cost intervals can be read: a class with too few runs, or whose cells differ, is no win
+    and no loss."""
+    return c["status"] != "PARTIAL" or c["why"] == "not_significant"
+
+
 def _against(classes: list[dict], router: str, cfg: str) -> dict:
-    """How the router stands against one baseline, class by class. A class with too few runs, or whose cells
-    differ, is no win and no loss, so its interval is never read."""
+    """How the router stands against one baseline, class by class, over the classes whose intervals are read."""
     cps = lambda c, name: c["configs"][name]["cost_per_solved"]  # noqa: E731
-    diffs = [(c, c["differences"][cfg]) for c in classes
-             if cfg in c["differences"] and (c["status"] != "PARTIAL" or c["why"] == "not_significant")]
+    diffs = [(c, c["differences"][cfg]) for c in classes if cfg in c["differences"] and _judged(c)]
     below = [c for c, (lo, hi) in diffs if hi < 0]
     less = [1 - cps(c, router) / cps(c, cfg) for c in below if cps(c, cfg) and cps(c, router) is not None]
     return {"below": [c["class"] for c in below], "level": [c["class"] for c, (lo, hi) in diffs if lo <= 0 <= hi],
@@ -818,10 +827,12 @@ def facts(session: dict, routers: frozenset[str], forced: dict) -> dict[str, boo
     router, defaults, best = role["router"], role["defaults"], role["best"]
     row = lambda name: next((c for c in classes if c["class"] == name), None)  # noqa: E731
     cps = lambda c, name: c["configs"][name]["cost_per_solved"] if name in c["configs"] else None  # noqa: E731
-    beaten = lambda name: bool(classes) and all(name in c["differences"] and c["differences"][name][1] < 0  # noqa: E731
-                                                for c in classes)
-    unbeaten = lambda name: {c["class"] for c in classes if not (name in c["differences"]  # noqa: E731
-                                                                  and c["differences"][name][1] < 0)}
+    judged = [c for c in classes if _judged(c)]
+    beaten = lambda name: bool(judged) and all(name in c["differences"] and c["differences"][name][1] < 0  # noqa: E731
+                                               for c in judged)
+    unbeaten = lambda name: {c["class"] for c in judged if not (name in c["differences"]  # noqa: E731
+                                                                 and c["differences"][name][1] < 0)}
+    level = lambda name: set(session["against"].get(name, {}).get("level", []))  # noqa: E731
     solved = lambda name: name in pooled and pooled[name]["solved"] == pooled[name]["runs"]  # noqa: E731
     fails = [c for c in classes if c["status"] == "FAIL"]
     against = lambda c: c["quality"]["against"].get(c["best_baseline"])  # noqa: E731
@@ -833,24 +844,28 @@ def facts(session: dict, routers: frozenset[str], forced: dict) -> dict[str, boo
 
     out = {
         "partial_for_runs": all(c["why"] == "few_runs" for c in classes if c["status"] == "PARTIAL"),
-        "fail_on_cost": all(c["why"] == "cost_above" for c in fails),
-        "not_behind": all(against(c) is not None and not against(c)["behind"] for c in classes if c["best_baseline"]),
+        "fail_on_cost": bool(fails) and all(c["why"] == "cost_above" for c in fails),
+        # One comparison backing a favourable claim, so the unadjusted p; Holm is for BEHIND across the baselines.
+        "not_behind": all(against(c) is not None and (against(c)["p_behind"] is None or against(c)["p_behind"] >= ALPHA)
+                          for c in classes if c["best_baseline"]),
         "no_gain": all(not ahead(c) for c in classes if c["best_baseline"]),
         "no_pass": not any(c["status"] == "PASS" for c in classes),
-        "nearly_all": best is not None and pooled[best]["solved"] >= NEARLY * pooled[best]["runs"],
+        "nearly_all": best is not None and all(name in pooled and pooled[name]["solved"] >= NEARLY * pooled[name]["runs"]
+                                               for name in {best, *named.get("nearly", ())}),
         "ran": {c for c in pooled if c != router and c not in routers} == named["ran"],
     }
     if "cheaper" in named:
         out["solved_all"] = solved(router) and solved(defaults)
         top = [c for c in pooled if c in forced and role["strongest"] and forced[c][0] == forced[role["strongest"]][0]]
         out["strongest_beaten"] = bool(top) and all(beaten(c) for c in top)
-        out["level_as_defaults"] = defaults is not None and all(unbeaten(c) == unbeaten(defaults)
-                                                                for c in named["level_as_defaults"])
+        # The classes the prose prints (the defaults' level set), and level there, not dearer.
+        out["level_as_defaults"] = defaults is not None and all(unbeaten(c) == level(c) == level(defaults)
+                                                                for c in (defaults, *named["level_as_defaults"]))
         out["cheaper_everywhere"] = bool(classes) and all(
             n in c["configs"] and router in c["configs"] and _below(cps(c, n), cps(c, router))
             for c in classes for n in named["cheaper"])
         out["not_cheapest"] = _below(_per_solved(pooled.get(best)), _per_solved(pooled.get(router)))
-        out["best_named"] = all(c["best_baseline"] in named["best_in"] for c in fails)
+        out["best_named"] = bool(fails) and all(c["best_baseline"] in named["best_in"] for c in fails)
         name, other = named["example"]
         ex = row(name)
         out["example"] = ex is not None and _below(cps(ex, router), cps(ex, defaults)) \

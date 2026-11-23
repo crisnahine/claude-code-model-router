@@ -167,7 +167,7 @@ class Analysis(unittest.TestCase):
         six = against(6)  # p = 0.043 alone, 0.087 once adjusted for the second baseline
         self.assertLess(six["p_behind"], analyze.ALPHA)
         self.assertFalse(six["behind"])
-        self.assertTrue(against(5)["behind"])  # p = 0.011, 0.022 adjusted
+        self.assertTrue(against(5)["behind"])  # p = 0.016, 0.033 adjusted
         few = rows("plugin", "lookup", [0.3] * 5, [False] * 5) + rows("opus", "lookup", [0.4] * 5, [True] * 5)
         self.assertFalse(self.quality(few, self.FORCED)["quality"]["against"]["opus"]["behind"])  # p = 0.004, 5 runs
 
@@ -380,6 +380,71 @@ class Analysis(unittest.TestCase):
             with self.subTest(name):
                 facts = self.session(self.changed(edit))["facts"]
                 self.assertFalse(facts[name])
+
+    @staticmethod
+    def first(n, who, cls=None, model=analyze.OPUS, **changes):
+        """An edit that applies `changes` to the first `n` rows of configuration `who` (and class) in a session,
+        or in every session for `model=None`, as for opusplan, which joins each one."""
+        done = []
+
+        def edit(row):
+            if (len(done) < n and row["config"] == who and model in (None, row["main_model"])
+                    and cls in (None, row["class"])):
+                done.append(row)
+                row.update({k: v(row) if callable(v) else v for k, v in changes.items()})
+        return edit
+
+    def test_a_class_with_too_few_runs_is_never_read_as_a_win_or_a_loss(self):
+        cheap = lambda row: row["total_cost_usd"] * 0.1  # noqa: E731
+        for config in ("fable-high", "opus"):  # cheaper than the router in lookup only, which has 5 runs a cell
+            with self.subTest(config):
+                facts = self.session(self.changed(self.first(99, config, "lookup", total_cost_usd=cheap)))["facts"]
+                self.assertTrue(facts["strongest_beaten"] and facts["level_as_defaults"])
+
+    def test_level_as_defaults_needs_the_printed_classes_and_level_there(self):
+        cheap = lambda row: row["total_cost_usd"] * 0.5  # noqa: E731
+        for cls in ("implementation", "design"):  # Opus beats the router where it was beaten, and where it was level
+            with self.subTest(cls):
+                facts = self.session(self.changed(self.first(99, "opus", cls, total_cost_usd=cheap)))["facts"]
+                self.assertFalse(facts["level_as_defaults"])
+
+    def test_each_other_fact_turns_false_on_a_row_edit(self):
+        times = lambda by: lambda row: row["total_cost_usd"] * by  # noqa: E731
+        both = lambda *edits: lambda row: [edit(row) for edit in edits]  # noqa: E731
+        cases = (
+            ("best_named", None, self.first(99, "opus", "implementation", total_cost_usd=times(0.1))),
+            ("example", None, self.first(99, "opusplan", "bugfix", None, total_cost_usd=times(3))),
+            ("partial_for_runs", None, self.first(1, "defaults", "implementation", config="gone")),  # cells differ
+            ("fail_on_cost", None, self.first(5, "plugin-next", "implementation", passed=False)),
+            ("not_behind", None, self.first(8, "plugin-next", "implementation", passed=False)),
+            # opusplan solves 4 of 10 implementation runs and stays cheapest, so the router is ahead of it
+            ("no_gain", None, both(self.first(6, "opusplan", "implementation", None, passed=False),
+                                   self.first(99, "opusplan", "implementation", None, total_cost_usd=times(0.1)))),
+            ("no_pass", None, self.first(999, "plugin-next", total_cost_usd=times(0.01))),
+            ("solved_as_many", analyze.SONNET,
+             self.first(2, "plugin-next", "implementation", analyze.SONNET, passed=False)),
+            ("one_miss", analyze.SONNET, self.first(1, "sonnet-medium", "design", analyze.SONNET, passed=False)),
+        )
+        for name, model, edit in cases:
+            with self.subTest(name):
+                self.assertFalse(self.session(self.changed(edit), model)["facts"][name])
+
+    def test_not_behind_reads_the_unadjusted_p(self):
+        session = self.session(self.changed(self.first(4, "plugin-next", "implementation", passed=False)))
+        row = next(c for c in session["classes"] if c["class"] == "implementation")
+        mine = row["quality"]["against"][row["best_baseline"]]  # 6 of 10 against 10 of 10: p = 0.043
+        self.assertEqual((mine["p_behind"] < analyze.ALPHA, mine["behind"]), (True, False))  # not BEHIND after Holm
+        self.assertFalse(session["facts"]["not_behind"])
+
+    def test_the_facts_about_fail_classes_are_false_with_none(self):
+        facts = self.session(self.changed(self.first(999, "plugin-next", total_cost_usd=lambda row: 0.0001)))["facts"]
+        self.assertEqual((facts["no_pass"], facts["fail_on_cost"], facts["best_named"]), (False, False, False))
+
+    def test_nearly_all_reads_each_configuration_the_docs_name(self):
+        lose = self.first(4, "haiku-high", passed=False)  # 66 of 70, under NEARLY, while opusplan stays best
+        session = self.session(self.changed(lose))
+        self.assertEqual(session["roles"]["best"], "opusplan")
+        self.assertFalse(session["facts"]["nearly_all"])
 
     def test_a_session_the_docs_say_nothing_about_has_no_facts(self):
         results = self.changed(lambda row: row.update(main_model="elsewhere"))
@@ -724,6 +789,21 @@ class FinalAnswer(unittest.TestCase):
             final = run.final_answer(shipped, work, "the reply")
         self.assertEqual(final, {"reply": "the reply", "files": {"DESIGN.json": '{"x": 1}', "pkg/edit.py": "b = 2\n"},
                                  "removed": ["gone.py"], "omitted": ["big.txt", "blob.bin"]})
+
+    def test_a_file_too_big_for_the_cap_is_omitted_unread(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            big = "z" * (4 * run.FINAL_FILE_CHARS + 1)
+            for folder in (shipped, work):
+                (folder / "same.txt").write_text(big, encoding="utf-8")
+            (work / "huge.txt").write_text(big, encoding="utf-8")
+            (work / "small.txt").write_text("ok\n", encoding="utf-8")
+            with unittest.mock.patch.object(Path, "read_bytes", autospec=True, side_effect=Path.read_bytes) as read:
+                final = run.final_answer(shipped, work, "")
+        self.assertEqual((final["files"], final["omitted"]), ({"small.txt": "ok\n"}, ["huge.txt"]))
+        self.assertEqual({p.name for (p,), _ in read.call_args_list}, {"small.txt"})
 
     def test_the_files_together_stay_under_the_row_cap(self):
         with tempfile.TemporaryDirectory() as tmp:
