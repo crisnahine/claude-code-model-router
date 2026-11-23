@@ -109,8 +109,9 @@ _HUNT = rf"\b(?:{_HUNT_OTHER})\b"
 _DEFECT = rf"{_FIX}|{_HUNT}"
 # A person's request says "analyze the sales numbers" about data as often as about code, so there a hunt verb
 # counts only beside a word for a defect.
-_DEFECT_NOUN = (r"\b(?:bugs?|failures?|failing|errors?|flaky|crash(?:es|ed|ing)?|regressions?|broken|races?|"
-                r"leak(?:s|ing)?)\b")
+_DEFECT_NOUN = (r"\b(?:bugs?|failures?|failing|errors?|exceptions?|flaky|crash(?:es|ed|ing)?|regressions?|broken|races?|"
+                r"leak(?:s|ing)?|hang(?:s|ing)?|hung|time[sd]?[- ]?outs?|timing out|deadlocks?|panics?|outages?|"
+                r"slow|wrong|incorrect|issues?|problems?|not working)\b")
 _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"
 _LOOKUP = (r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|describe|summari[sz]e|"
            r"is there|does)\b")

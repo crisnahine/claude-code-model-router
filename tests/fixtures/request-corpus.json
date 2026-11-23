@@ -608,6 +608,117 @@
    "signals": [
     "risk"
    ]
+  },
+  {
+   "prompt": "diagnose the timeout in the payment worker",
+   "level": "complex",
+   "signals": [
+    "risk",
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "troubleshoot why checkout hangs",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "reproduce the exception on upload",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "diagnose why the job times out",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "diagnose the wrong total in the invoice",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "troubleshoot the problem with uploads",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "investigate the outage last night",
+   "level": "complex",
+   "signals": [
+    "ambiguity",
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "diagnose why the export is not working",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "reproduce the panic in the parser",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "investigate the issue with login",
+   "level": "complex",
+   "signals": [
+    "ambiguity",
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "investigate the slow query",
+   "level": "complex",
+   "signals": [
+    "ambiguity",
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "list the open issues in the tracker",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "show the timeout setting for the worker",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "where is the exception handler defined?",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "describe the slow query log format",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "what is the panic handler's job",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "analyze how requests flow through the checkout",
+   "level": "lookup",
+   "signals": []
   }
  ]
 }
