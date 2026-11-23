@@ -1,0 +1,270 @@
+{
+ "rules": [
+  "Labeled from what profile_call gave on 2026-11-23, before the Role refactor.",
+  "on_lookup is the level for a plain file-listing brief, on_hard for a brief that already reads hardest: a heavy name lifts the first, a light name caps the second."
+ ],
+ "lookup_brief": "List the files in src and report their names.",
+ "hard_brief": "Investigate why auth is flaky, then redesign it across every service and decide how to handle existing sessions.",
+ "agents": [
+  {
+   "agent": "Explore",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "Plan",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "general-purpose",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "scout",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "explorer",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "docs-researcher",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "verifier",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "lint-runner",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "researcher",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "relocation-migrator",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "splinter-fixer",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "information-extractor",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "allocator-tuner",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "helper",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "architect",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "security-reviewer",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "deep-solver",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "reviewer",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "model-router:scout",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "model-router:architect",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "model-router:deep-solver",
+   "on_lookup": "hardest",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "model-router:reviewer",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "model-router:verifier",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "model-router:implementer",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "model-router:docs-researcher",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "acme:deep-solver",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "code_reviewer",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "db-designer",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "code-searcher",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "test_runner",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "bug-hunter",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "auditor",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "debugger",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "release-planner",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "log-finder",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "summarizer",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "formatter",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "docs",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "grep",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "fetcher",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "implementer",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "tester",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "planetarium",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "reviewed-by-hand",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "researcher-lite",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "Architect",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "SECURITY-REVIEWER",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "unsecured-parser",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "designer",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "plan-b",
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "finder-of-things",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  },
+  {
+   "agent": "lookup",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
+  }
+ ]
+}
