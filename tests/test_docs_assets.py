@@ -231,5 +231,44 @@ class DocsAssets(unittest.TestCase):
         self.assertIn("reduced-motion", docs_assets.problems_in_svg("c.svg", ok.replace("prefers-reduced", "x"))[0])
 
 
+class BrokenInputs(unittest.TestCase):
+    """A missing marker or a torn file stops the tools with the file and what is missing, not a traceback."""
+
+    def stops(self, call, *named):
+        with self.assertRaises(SystemExit) as caught:
+            call()
+        for text in named:
+            self.assertIn(text, str(caught.exception))
+
+    def test_a_page_head_with_no_end_marker(self):
+        self.stops(lambda: docs_pages.with_head("docs/FAQ.md", f"{docs_pages.HEAD_START} cut off\n# FAQ\n"),
+                   "docs/FAQ.md", docs_pages.HEAD_END.strip())
+
+    def test_cards_with_no_end_marker(self):
+        self.stops(lambda: docs_assets.with_cards(f"# Docs\n{docs_assets.CARDS_START}\n<table>\n"),
+                   "docs/README.md", docs_assets.CARDS_END)
+
+    def test_a_site_page_with_a_marker_missing(self):
+        page = (ROOT / "site" / "index.html").read_text(encoding="utf-8")
+        site = lambda text: docs_assets.site_files("", {}, {"site/index.html": text}, "0.0.0", "2030-01-01")  # noqa: E731
+        self.stops(lambda: site(docs_assets.SITE_URL.sub("", page)), "site/index.html", "SITE_URL")
+        for marks in (docs_assets.FAQ_HTML, docs_assets.FAQ_LD):
+            for mark in marks:
+                self.stops(lambda: site(page.replace(mark, "")), "site/index.html", mark)
+
+    def test_a_class_the_router_never_ran(self):
+        results = fixture_results()
+        extra = [dict(r, **{"class": "bugfix", "task": "bugfix-1"}) for r in results.rows if r["config"] != "mine"]
+        data = analyze.figures(dataclasses.replace(results, rows=results.rows + extra))
+        self.stops(lambda: docs_assets.bench_figures(data), "no mine runs", "bugfix")
+
+    def test_a_results_file_with_a_torn_last_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            torn = Path(tmp) / "results" / "a-lookup.jsonl"
+            torn.parent.mkdir()
+            torn.write_text('{"task": "lookup-todo-count"}\n{"task": "look', encoding="utf-8")
+            self.stops(lambda: analyze.load([torn]), f"{torn}:2")
+
+
 if __name__ == "__main__":
     unittest.main()
