@@ -27,6 +27,7 @@ RESULTS = BENCH / "results"
 HEAD_END = "<!-- End of page head. -->\n\n"  # the same text as docs_assets.HEAD_END
 MIN_RUNS = 10  # fewer runs per configuration than this and no row is called a win or a loss
 ALPHA = 0.05  # the level of the 95% intervals
+SPLIT_STRONG, SPLIT_WEAK = "opus", "sonnet"  # the pair a task must split to count as telling models apart
 
 
 def _interval(draws: list[float]) -> tuple[float, float]:
@@ -107,6 +108,22 @@ def _verdict(cells: dict, router: str, routers: frozenset[str]) -> dict:
         return {**verdict, "status": "FAIL", "reason": f"cost per solved task above {best}'s; "
                                                        f"95% interval of the difference ${low:.4f} to ${high:.4f}"}
     return {**verdict, "status": "PARTIAL", "reason": f"not significant against {best}"}
+
+
+def splitting_tasks(runs: list[dict], strong: str = SPLIT_STRONG, weak: str = SPLIT_WEAK) -> list[str] | None:
+    """The tasks that tell two models apart: `strong` solved at least 2 of every 3 runs and `weak` at most 1 of
+    every 3. A reading rule for a few runs, not a significance test. None when either configuration has no runs."""
+    def solved(task: str, config: str) -> tuple[int, int]:
+        ok = [bool(r["passed"]) for r in runs if r["task"] == task and r["config"] == config]
+        return sum(ok), len(ok)
+    if not any(r["config"] == strong for r in runs) or not any(r["config"] == weak for r in runs):
+        return None
+    out = []
+    for task in sorted({r["task"] for r in runs}):
+        (s, sn), (w, wn) = solved(task, strong), solved(task, weak)
+        if sn and wn and 3 * s >= 2 * sn and 3 * w <= wn:
+            out.append(task)
+    return out
 
 
 def summarize(rows: list[dict], *, routers: frozenset[str], router: str = "plugin", draws: int = 2000,

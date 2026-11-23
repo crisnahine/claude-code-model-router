@@ -113,6 +113,16 @@ class Analysis(unittest.TestCase):
         cell = self.summary(rows("plugin", "lookup", [1] * 10, [True] * 10))["lookup"]["configs"]["plugin"]
         self.assertAlmostEqual(cell["pass_ci"][0], 0.6915, places=3)
 
+    def test_a_task_splits_the_models_when_the_strong_one_solves_most_and_the_weak_one_few(self):
+        def task_rows(task, strong, weak):
+            return [{"task": task, "config": c, "passed": p} for c, ps in (("opus", strong), ("sonnet", weak)) for p in ps]
+        data = (task_rows("a", [True, True, False], [False, True, False])   # 2 of 3 and 1 of 3: splits
+                + task_rows("b", [True, True, True], [True, False, False])  # 1 of 3: splits
+                + task_rows("c", [True, False, False], [False, False, False])  # strong under 2 of 3
+                + task_rows("d", [True, True, True], [True, True, False]))  # weak over 1 of 3
+        self.assertEqual(analyze.splitting_tasks(data), ["a", "b"])
+        self.assertIsNone(analyze.splitting_tasks([r for r in data if r["config"] == "opus"]))
+
     def test_a_class_with_no_router_or_baseline_has_no_differences(self):
         self.assertEqual(self.summary(rows("defaults", "lookup", [0.3], [True]))["lookup"]["differences"], {})
 
