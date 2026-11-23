@@ -16,10 +16,11 @@ HERE = Path(__file__).resolve().parent
 START = {"A": {"w": None}, "B": {"x": 0, "y": 0}, "C": {"w1": 100, "w2": 100}, "D": {"w": 100, "a": 0, "b": 0},
          "E": {"w": 100}, "F": {"w": 100, "v": None}, "G": {"w1": 100, "w2": 100, "w3": 100, "w4": 100},
          "H": {"w": 100, "a": None}}
-# What each phase may end with: balances and the exceptions raised. Which of D's two transfers wins isn't fixed.
+# What each phase may end with: balances and the exceptions raised. Which of D's two transfers wins isn't fixed, and
+# E's transfer of 140 from a wallet holding 100 to itself may raise or, as a no-op, return.
 END = {"A": [({"w": 80}, [])], "B": [({"x": 10, "y": 20}, [])], "C": [({"w1": 120, "w2": 80}, [])],
        "D": [({"w": 30, "a": 70, "b": 0}, ["InsufficientFunds"]), ({"w": 30, "a": 0, "b": 70}, ["InsufficientFunds"])],
-       "E": [({"w": 100}, ["InsufficientFunds"])], "F": [({"w": 65, "v": 60}, [])],
+       "E": [({"w": 100}, ["InsufficientFunds"]), ({"w": 100}, [])], "F": [({"w": 65, "v": 60}, [])],
        "G": [({"w1": 70, "w2": 130, "w3": 80, "w4": 120}, [])], "H": [({"w": 70, "a": 55}, [])]}
 MEET = ("B", "G")  # unrelated wallets must reach their reads together
 
