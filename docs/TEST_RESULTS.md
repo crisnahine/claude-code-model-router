@@ -30,14 +30,14 @@ The test counts come from each job's log (`gh run view --job <id> --log`), and t
 
 ## Local
 
-Run 2026-11-23 on macOS (Darwin 27.2.0), on `27b94e6` and the commits after it, up to `e9a555e`, on branch `deepen-modules`, plus the change that updated this file.
+Run 2026-11-23 on macOS (Darwin 27.2.0), on `27b94e6` and the commits after it, up to `3c92f05`, on branch `deepen-modules`, plus the change that updated this file.
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 471 tests OK |
-| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 471 tests OK |
-| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 471 tests OK |
-| Unit tests, Python 3.15.2 | `python3.15 -m unittest discover -s tests` | Not run since the merge of `deepen-q-early` |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 483 tests OK |
+| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 483 tests OK |
+| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 483 tests OK |
+| Unit tests, Python 3.15.2 | `python3.15 -m unittest discover -s tests` | 483 tests OK |
 | Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 23 of 23 pass |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
@@ -46,7 +46,7 @@ Run 2026-11-23 on macOS (Darwin 27.2.0), on `27b94e6` and the commits after it, 
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 | Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78; run 2026-11-23 on `9b27510` |
 
-The 471 local tests are 401 in `tests/test_model_router.py`, 58 in `tests/test_bench.py`, 4 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 5 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 250 briefs over-routed (0.8%), budget 2%; 4 known under-routes" on each of the interpreters run. CI's run on `8ec8eec` had 180.
+The 483 local tests are 413 in `tests/test_model_router.py`, 58 in `tests/test_bench.py`, 4 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 5 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 250 briefs over-routed (0.8%), budget 2%; 4 known under-routes" on each of the interpreters run. CI's run on `8ec8eec` had 180.
 
 Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
 
@@ -72,6 +72,8 @@ Same clean environment as below. Each case tells Claude to make one `Agent` call
 | `route-lookup-subagent` | Sonnet | `ran-on-haiku` | 1.0, 3 of 3 | 0, 0 of 3 | $0.106 / $0.139 |
 | `route-review-subagent` | Haiku | `ran-on-sonnet` | 1.0, 3 of 3 | 0, 0 of 3 | $0.039 / $0.007 |
 | `route-redo-escalates` | Haiku | `called-twice`, `first-ran-on-haiku`, `redo-ran-on-sonnet` | 1.0, 3 of 3 | 0.67, 0 of 3 | $0.048 / $0.013 |
+
+The table was recorded before complex moved to Opus at `medium`: `route-review-subagent` now expects Opus (`ran-on-opus`) and its live result has not been rerun.
 
 Total $0.352 (no LLM grader, so no judge cost), 70 seconds, not partial. Every with-plugin run passed every grader and no without-plugin run passed, so the suite's mean delta is 0.78 (the redo case's delta is 0.33, since without the plugin the call is still made twice). The trace carries each subagent's model but not its effort, and the spend log lives in the plugin's data folder, which a grader can't read (https://code.claude.com/docs/en/plugin-evals.md#what-a-grader-can-look-at), so effort and spend rows are covered by the unit tests and the live runs in `docs/ARCHITECTURE.md`, not here.
 

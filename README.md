@@ -3,7 +3,7 @@
 <p align="center">
   <picture>
     <source media="(max-width: 600px)" srcset="docs/assets/hero-phone.svg">
-    <img src="docs/assets/hero.svg" width="100%" alt="Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level to complex, Sonnet at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high and frontier on Fable at high.">
+    <img src="docs/assets/hero.svg" width="100%" alt="Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level to complex, Opus at medium effort, and is solved. The ladder runs lookup on Haiku at medium, standard on Sonnet at medium, complex on Opus at medium, hardest on Opus at high and frontier on Fable at high.">
   </picture>
 </p>
 
@@ -68,7 +68,7 @@ There is nothing to configure. Claude model routing is on from the first session
 
    > Review the auth middleware change for security holes and race conditions across the api and worker services
    Level: complex (risk, scope).
-   Model: sonnet, effort: high.
+   Model: opus, effort: medium.
    ```
 
 3. Work as you always do. Every agent call is routed as it starts.
@@ -84,7 +84,7 @@ Each subtask is scored from its own brief: risk (security, data, migrations, pub
 | :- | :- | :- | :- |
 | lookup | Find, list, summarize, run a command | Haiku | medium |
 | standard | Implement to a clear spec, write tests | Sonnet | medium |
-| complex | Fix a bug, design, review, risky change | Sonnet | high |
+| complex | Fix a bug, design, review, risky change | Opus | medium |
 | hardest | Ambiguous, multi-system and risky at once | Opus | high |
 | frontier | All of that, with no known approach: research, open-ended investigation | Fable | high |
 

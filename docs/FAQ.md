@@ -14,11 +14,11 @@ Model Router is an open-source Claude Code plugin that sets the Claude model and
 
 ## How does Model Router pick a model for a subagent?
 
-Model Router reads the subagent's brief and the agent's name, gives the call one of five levels, and runs it on the cheapest usable model and effort for that level. The levels are lookup (Haiku at medium effort), standard (Sonnet at medium), complex (Sonnet at high), hardest (Opus at high) and frontier (Fable at high). The brief is scored for risk, scope, load and ambiguity, and for whether the call changes something or only reads. A model you or the caller named still wins: the order is `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, a model named on the call, a per-agent rule, the agent's own `model` field, `CLAUDE_CODE_SUBAGENT_MODEL`, and only then the router's pick ([ARCHITECTURE.md](ARCHITECTURE.md#the-decision)).
+Model Router reads the subagent's brief and the agent's name, gives the call one of five levels, and runs it on the cheapest usable model and effort for that level. The levels are lookup (Haiku at medium effort), standard (Sonnet at medium), complex (Opus at medium), hardest (Opus at high) and frontier (Fable at high). The brief is scored for risk, scope, load and ambiguity, and for whether the call changes something or only reads. A model you or the caller named still wins: the order is `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, a model named on the call, a per-agent rule, the agent's own `model` field, `CLAUDE_CODE_SUBAGENT_MODEL`, and only then the router's pick ([ARCHITECTURE.md](ARCHITECTURE.md#the-decision)).
 
 ## What happens when the cheap model gets it wrong?
 
-When Claude issues the same call again in the same request after its result came back, that call runs one level higher. Lookup, complex and hardest move to a stronger model on a redo, standard moves to complex and stays on Sonnet at more effort, and a frontier redo runs at one more step of effort. Each redo is also a vote that the first level was too low: at least 6 votes that are also at least 30% of a level's calls raise that level for later calls ([ARCHITECTURE.md](ARCHITECTURE.md#redo-escalation)).
+When Claude issues the same call again in the same request after its result came back, that call runs one level higher. Lookup, standard and hardest move to a stronger model on a redo, complex moves to hardest and stays on Opus at more effort, and a frontier redo runs at one more step of effort. Each redo is also a vote that the first level was too low: at least 6 votes that are also at least 30% of a level's calls raise that level for later calls ([ARCHITECTURE.md](ARCHITECTURE.md#redo-escalation)).
 
 ## What does Model Router cost?
 
@@ -38,7 +38,7 @@ Set the plugin's `routing_mode` option to `off` in `/config`, and the router cha
 
 ## Can I cap the strongest model, or force one model?
 
-Yes: `max_tier` caps the strongest model subagents may run on, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` pins every subagent to one model. With the cap set to `sonnet`, for example, anything the router or a caller picks above Sonnet is lowered to it, including a level a project's `.claude/model-router.json` raised. The cap bounds the model, not the effort. With the force variable set, the router only sets effort. A pinned strong model costs far more on small jobs: Opus 5.5's list price is 40 times Haiku 5.5's per token, for prompts up to 100,000 tokens ([pricing](https://platform.claude.com/docs/en/about-claude/pricing.md)) ([guide](GUIDE.md#who-decides-the-model)).
+Yes: `max_tier` caps the strongest model subagents may run on, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` pins every subagent to one model. With the cap set to `sonnet`, for example, anything the router or a caller picks above Sonnet is lowered to it, including a level a project's `.claude/model-router.json` raised. The cap bounds the model, not the effort: a pick the cap leaves weaker than its level needs gets one more effort step, up to `xhigh`. With the force variable set, the router only sets effort. A pinned strong model costs far more on small jobs: Opus 5.5's list price is 40 times Haiku 5.5's per token, for prompts up to 100,000 tokens ([pricing](https://platform.claude.com/docs/en/about-claude/pricing.md)) ([guide](GUIDE.md#who-decides-the-model)).
 
 ## How is this different from setting one model for every agent?
 

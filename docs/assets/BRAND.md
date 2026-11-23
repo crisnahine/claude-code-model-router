@@ -39,7 +39,7 @@ The wordmark is drawn with strokes, so it needs no font. Write the product name 
 | `routesoft` | `#FFF1DE` | `#33260F` | The row a call is on |
 | rung 1, lookup | `#0E8C6F` | `#38D3A8` | Haiku, medium |
 | rung 2, standard | `#0A78B8` | `#45B4F2` | Sonnet, medium |
-| rung 3, complex | `#3B57D6` | `#8196FF` | Sonnet, high |
+| rung 3, complex | `#3B57D6` | `#8196FF` | Opus, medium |
 | rung 4, hardest | `#6D3FD1` | `#AA8BFF` | Opus, high |
 | rung 5, frontier | `#A72C8A` | `#F27BCD` | Fable, high |
 

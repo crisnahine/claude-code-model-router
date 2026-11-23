@@ -80,7 +80,8 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
         above = cfg.LEVELS.index(done["level"]) + 1
         if above < len(cfg.LEVELS) and cfg.LEVELS.index(level) < above:
             level, out["escalated_from"] = cfg.LEVELS[above], done["level"]
-    pick, level_effort = ladder.pick(config, level, settings.priority, usable, facts.raises)
+    pick, pick_effort = ladder.pick(config, level, settings.priority, usable, facts.raises)
+    level_effort = ladder.effort(config, level, settings.priority)
     out.update(level=level, signals=profile["signals"], pick=pick)
 
     if settings.mode != "auto":
@@ -139,7 +140,7 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
     # Effort is set whenever nobody chose it, a pinned agent included: the pin is about
     # the model, and on current models effort is the cheaper lever for quality.
     if source in cfg.LEVEL_SOURCES and not _effort_decided(tool_input, definition, settings):
-        effort = level_effort
+        effort = pick_effort if source == "router" else level_effort
     if redo:
         effort = _above_earlier(config, effort, final, done)
     out.update(model=final, source=source, reason=why)
