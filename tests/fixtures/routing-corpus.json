@@ -1696,6 +1696,13 @@
    "prompt": "Plan the release notes for 2.0; the API answers in 120 ms."
   },
   {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Add parser tests",
+   "prompt": "Avoid breaking the CSV format and add tests for the parser."
+  },
+  {
    "lowest": "complex",
    "highest": "complex",
    "agent": "general-purpose",

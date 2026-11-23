@@ -1140,6 +1140,12 @@ class Profile(unittest.TestCase):
                       "Rename the helper. Avoid investigating the flaky tests."):
             self.assertEqual(self.level(brief), "standard", brief)
 
+    def test_ruling_out_a_change_keeps_the_task_after_it(self):
+        for brief in ("Avoid breaking the CSV format and add tests for the parser.",
+                      "You must not rename the public symbols and write tests for the loader.",
+                      "Be careful not to touch the config and create a migration guide."):
+            self.assertEqual(self.level(brief), "standard", brief)
+
     def test_the_standard_model_text_does_not_call_fixes_standard(self):
         use_for = json.loads((ROOT / "plugins/model-router/config/models.json").read_text())["models"]["sonnet"]["use_for"]
         self.assertNotIn("fixes with a clear spec", use_for)
@@ -1243,6 +1249,8 @@ class Profile(unittest.TestCase):
         self.level("do not touch tests" + " " * 64_000 + "and fix it")
         self.level("add" + "\n" * 64_000)
         self.level("add" + "\n \t" * 32_000 + "x")
+        self.level("add across" + "\n" * 64_000)
+        self.level("add latency" + "\n" * 64_000)
         self.assertLess(time.monotonic() - started, LINEAR_SECONDS)
 
     def test_a_hyphenated_word_before_and_still_ends_a_limit(self):
