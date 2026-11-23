@@ -621,6 +621,44 @@ class FinalAnswer(unittest.TestCase):
         self.assertEqual(len(final["files"]) + len(final["omitted"]), 6)
         self.assertTrue(final["omitted"])
 
+    def test_the_reply_is_cut_to_the_row_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "repo").mkdir()
+            (Path(tmp) / "work").mkdir()
+            final = run.final_answer(Path(tmp) / "repo", Path(tmp) / "work", "r" * (run.FINAL_ROW_CHARS + 5))
+        self.assertEqual(len(final["reply"]), run.FINAL_ROW_CHARS)
+
+    @unittest.skipIf(sys.platform == "win32" or os.geteuid() == 0, "needs POSIX modes that bind the reader")
+    def test_an_unreadable_file_is_omitted_and_the_row_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            (work / "locked.py").write_text("x = 1\n", encoding="utf-8")
+            (work / "open.py").write_text("y = 1\n", encoding="utf-8")
+            (work / "locked.py").chmod(0)
+            try:
+                final = run.final_answer(shipped, work, "")
+            finally:
+                (work / "locked.py").chmod(0o644)
+        self.assertEqual((final["files"], final["omitted"]), ({"open.py": "y = 1\n"}, ["locked.py"]))
+
+    def test_a_link_out_of_the_work_dir_is_never_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            (Path(tmp) / "secret.txt").write_text("outside\n", encoding="utf-8")
+            (work / "inside.txt").write_text("inside\n", encoding="utf-8")
+            try:
+                (work / "out.txt").symlink_to(Path(tmp) / "secret.txt")
+                (work / "in.txt").symlink_to(work / "inside.txt")
+            except OSError:
+                self.skipTest("this system can't make symlinks")
+            final = run.final_answer(shipped, work, "")
+        self.assertEqual((final["files"], final["omitted"]),
+                         ({"in.txt": "inside\n", "inside.txt": "inside\n"}, ["out.txt"]))
+
     def test_a_run_row_has_the_whole_reply_and_the_files_the_run_left(self):
         with tempfile.TemporaryDirectory() as tmp:
             claude = stub(tmp, FILES_STUB)
