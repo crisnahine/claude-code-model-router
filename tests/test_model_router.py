@@ -540,6 +540,12 @@ class Intake(Sandbox):
                 self.assertTrue(intake.from_prompt(text, self.project).person)
                 self.assertTrue(intake.from_turn(text, None, "composer").person)
 
+    def test_a_long_run_after_a_bracket_is_read_quickly(self):
+        for text in ("<" + "a" * 80_000, "<" + "a-" * 40_000, "<" + "a-b" * 27_000):
+            started = time.monotonic()
+            self.assertTrue(intake.is_user_prompt(text))
+            self.assertLess(time.monotonic() - started, 0.5, text[:8])
+
     def test_a_command_is_this_turns_only_when_its_line_opens_the_turn(self):
         line = SlashSkills.LINE.format("hard", "")  # no arguments: the body is the task
         command = {"name": "hard", "args": "", "body": SlashSkills.HARD_BODY}

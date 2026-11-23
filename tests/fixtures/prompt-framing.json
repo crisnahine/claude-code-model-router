@@ -17,6 +17,9 @@
     "<pasted_content id=\"x\">\nTraceback (most recent call last):\n  File \"billing.py\"\n</pasted_content id=\"x\">\nlist the files under src",
     "<button> does nothing on Safari when the form is invalid; fix the submit handler",
     "<UserCard /> renders twice after login. Find why and fix it.",
-    "<?xml version=\"1.0\"?> this config fails to parse, why?"
+    "<?xml version=\"1.0\"?> this config fails to parse, why?",
+    "<task>Fix the race in token refresh</task>\n<context>The api and the web client both refresh.</context>",
+    "<instructions>Review the payment service for security holes.</instructions>",
+    "<request>Add retries to the upload worker</request>"
   ]
 }
