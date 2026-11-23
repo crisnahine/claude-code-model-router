@@ -161,8 +161,7 @@ class Sandbox(unittest.TestCase):
 
     def next_message(self) -> None:
         """Claude's next message comes seconds after this one: waiting rewrites are older."""
-        store.mutate_entry("pending", "s1", lambda pending: [
-            v.update(at=v["at"] - fallback.REFUSED_AFTER - 1) for v in pending.values() if isinstance(v, dict)])
+        self.advance(fallback.REFUSED_AFTER + 1)
 
     def override(self, value: dict, user: bool = False) -> None:
         folder = self.home if user else self.project / ".claude"
@@ -537,8 +536,8 @@ class Store(Sandbox):
         with mock.patch.object(store, "KEEP_ENTRIES", 3):
             for i, key in enumerate(("zz", "aa", "mm", "bb")):
                 with self.clock_at(1000.0 + i):
-                    store.save_entry("prompts", key, {"n": i})
-        self.assertEqual(sorted(store.load_state_file(self.data / "prompts.json")), ["aa", "bb", "mm"])
+                    store.save_entry("sample", key, {"n": i})
+        self.assertEqual(sorted(store.load_state_file(self.data / "sample.json")), ["aa", "bb", "mm"])
 
     def test_the_state_clock_can_be_replaced_and_restored(self):
         self.assertEqual(store.now(), self.clock)
@@ -556,12 +555,12 @@ class Store(Sandbox):
                 "from modelrouter import store\n"
                 "store.LOCK_WAIT_SECONDS = 60\n"  # a slow machine must wait, not skip the lock
                 "def add(entry): entry['n'] = entry.get('n', 0) + 1\n"
-                "for _ in range(20): store.mutate_entry('prompts', 's1', add)\n")
+                "for _ in range(20): store.mutate_entry('sample', 's1', add)\n")
         workers = [subprocess.Popen([sys.executable, "-c", code, str(SCRIPTS)], env={**os.environ})
                    for _ in range(6)]
         for worker in workers:
             self.assertEqual(worker.wait(timeout=120), 0)
-        self.assertEqual(store.load_entry("prompts", "s1")["n"], 120)
+        self.assertEqual(store.load_entry("sample", "s1")["n"], 120)
         self.assertEqual(list(self.data.glob("*.lock")) + list(self.data.glob("*.tmp")), [])
 
     def test_a_stale_lock_is_cleared_and_a_held_one_never_hangs(self):
@@ -581,8 +580,8 @@ class Store(Sandbox):
         self.assertTrue(lock.exists())  # not ours to remove
 
     def test_state_files_are_written_compact(self):
-        store.save_entry("pending", "s1", {"a": {"model": "haiku"}})
-        self.assertNotIn("\n", (self.data / "pending.json").read_text(encoding="utf-8"))
+        store.save_entry("sample", "s1", {"a": {"model": "haiku"}})
+        self.assertNotIn("\n", (self.data / "sample.json").read_text(encoding="utf-8"))
 
     def test_a_row_appended_while_the_ledger_is_trimmed_is_kept(self):
         import threading
@@ -668,7 +667,7 @@ class Snapshot(Sandbox):
         self.assertEqual(trusted.call_count, 1)
 
     def test_a_failed_agent_call_filters_the_usable_list_on_the_table_it_just_wrote(self):
-        store.save_entry("mod", "s1", {"active": True})
+        hooks.mod_start({"session_id": "s1"})
         self.route_around("sonnet", "opus", "fable")
         health.failed("haiku", "404 model not found")
         out = hooks.agent_failed({**self.call("general-purpose", LOOKUP, model="haiku"),
@@ -1776,7 +1775,7 @@ class Router(Sandbox):
         self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("frontier", "fable", "hardest"))
         check = "Check this proposed fix for the duplicate charge problem and improve it: add a lock."
         self.assertEqual(self.decide("model-router:architect", check, model="sonnet")["model"], "sonnet")
-        store.update_entry("prompts", "s1", level="frontier")
+        request.start("s1", prompt_id=None, level="frontier", need=None, below=False, session_tier=None, named=None)
         self.assertEqual(self.decide("model-router:deep-solver", check)["level"], "frontier")
         self.options(max_tier="sonnet")
         self.assertEqual(self.decide("model-router:architect", check)["model"], "sonnet")
@@ -2172,7 +2171,8 @@ class Calls(Sandbox):
 
 class Fallback(Sandbox):
     def pending(self, key: str, at: float) -> None:
-        store.save_entry("pending", "s1", {key: {"model": "haiku", "at": at}})
+        with self.clock_at(at):
+            fallback.remember("s1", key, {"model": "haiku", "was": None, "level": "lookup", "effort": None})
 
     def test_a_rewrite_waits_for_its_result_and_only_a_result_finishes_the_run(self):
         key = calls.identify({"prompt": LOOKUP})[1]
@@ -2262,7 +2262,7 @@ class Request(Sandbox):
 
     def test_a_session_without_a_request_reads_empty(self):
         self.assertEqual(request.load("nobody"), request.Request())
-        store.save_entry("prompts", "s1", {"level": 5, "below": "yes", "calls": []})
+        store.save_entry("prompts", "s1", {"level": 5, "below": "yes", "calls": []})  # junk no module writes
         self.assertEqual(request.load("s1"), request.Request())
 
 
@@ -2415,7 +2415,7 @@ class Mod(Sandbox):
 
     def test_turn_effort_is_left_alone_where_an_effort_change_drops_the_cache(self):
         self.options(main_effort="true")  # off by default
-        turn = lambda: hooks.mod_turn({"session_id": "s1", "text": HARD})  # noqa: E731
+        turn = lambda sid="s1": hooks.mod_turn({"session_id": sid, "text": HARD})  # noqa: E731
         for model in ("claude-opus-5-5[1m]", "claude-opus-5-5[1M]", "claude-fable-5-1", "claude-fable-5-2",
                       "claude-fable-6", "claude-sonnet-5-5-20260101", "claude-haiku-5-5"):
             session.record("s1", model)
@@ -2428,10 +2428,12 @@ class Mod(Sandbox):
             session.record("s1", model)
             self.assertIsNone(turn(), model)
         for model in ("opus", "opus[1m]", None):  # no version to judge, as after /clear: today's behavior
-            store.save_entry("sessions", "s1", {"model": model} if model else {})
-            self.assertEqual(turn(), {"level": "complex", "effort": "high"}, model)
+            sid = "s1" if model else "no-model"
+            if model:
+                session.record(sid, model)
+            self.assertEqual(turn(sid), {"level": "complex", "effort": "high"}, model)
             with mock.patch.dict(os.environ, {"ANTHROPIC_BASE_URL": "https://gateway"}):
-                self.assertIsNone(turn(), model)
+                self.assertIsNone(turn(sid), model)
         live = lambda model: hooks.mod_turn({"session_id": "s1", "text": HARD, "model": model})  # noqa: E731
         self.assertEqual(live("claude-opus-5-5"), {"level": "complex", "effort": "high"})
         session.record("s1", "claude-opus-5-5")
@@ -3751,7 +3753,7 @@ class StateFiles(Sandbox):
 
     def test_state_files_carry_a_schema_version_that_reads_never_see(self):
         store.update_state(lambda state: state.update(max_tier="opus"))
-        store.save_entry("prompts", "s1", {"level": "lookup"})
+        request.start("s1", prompt_id=None, level="lookup", need=None, below=False, session_tier=None, named=None)
         self.assertEqual(json.loads((self.data / "state.json").read_text())["schema"], store.SCHEMA)
         self.assertEqual(json.loads((self.data / "prompts.json").read_text())["schema"], store.SCHEMA)
         self.assertEqual(store.load_state(), {"max_tier": "opus"})
@@ -4627,9 +4629,11 @@ class ClockAndCleanup(Sandbox):
     """A clock moved backwards, and copies of unreadable state files piling up."""
 
     def test_a_run_stamped_in_the_future_is_not_a_redo(self):
-        store.save_entry("done", "s1", {"k": {"level": "lookup", "at": time.time() + 3600}})
+        with self.clock_at(self.clock + 3600):
+            calls.settled("s1", "k", {"level": "lookup"}, finished=True)
         self.assertIsNone(calls.finished_run("s1", "k"))
-        store.save_entry("done", "s1", {"k": {"level": "lookup", "at": time.time() - 60}})
+        with self.clock_at(self.clock - 60):
+            calls.settled("s1", "k", {"level": "lookup"}, finished=True)
         self.assertEqual(calls.finished_run("s1", "k")["level"], "lookup")
 
     def test_only_the_newest_copies_of_an_unreadable_file_are_kept(self):
