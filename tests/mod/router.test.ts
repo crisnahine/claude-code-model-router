@@ -207,6 +207,27 @@ test('an agent stepping before its spawn resolves still gets the pick effort', a
   assert.equal(sent.effort, 'low')
 })
 
+test("an agent never steps at another spawn's effort for the same brief", async () => {
+  const LEFT = { stdout: JSON.stringify({ model: 'sonnet', reason: 'the call named its own effort' }) }
+  // Each order of a picked spawn (a1, low) and an unpicked one (a2) with the same prompt, agents started late.
+  for (const order of [[PICK, LEFT], [LEFT, PICK]]) {
+    const replies: Record<string, Reply> = {}
+    const mod = load(replies)
+    const sent: Record<string, any> = {}
+    for (const [i, reply] of order.entries()) {
+      replies['mod-spawn'] = reply
+      const id = reply === PICK ? 'a1' : 'a2'
+      await mod.spawn(spawnEvent({ tool_use_id: `tu${i}` }), async (e: any) => {
+        await mod.start({ turnId: `t${id}`, agentId: id, text: e.prompt })
+        sent[id] = await mod.step(stepEvent({ turnId: `t${id}`, agentId: id, effort: 'max' }))
+        return { model: e.model, agentId: id }
+      })
+    }
+    assert.equal(sent.a2.effort, 'max', JSON.stringify(order))
+    assert.equal((await mod.step(stepEvent({ turnId: 'ta1', agentId: 'a1', effort: 'max', index: 1 }))).effort, 'low')
+  }
+})
+
 test('an effort on the Agent call reaches mod-spawn', async () => {
   const mod = load()
   const call = { tool: 'Agent', tool_use_id: 'tu1', effort: 'high', prompt: 'p' }
