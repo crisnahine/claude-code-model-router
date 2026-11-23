@@ -1561,6 +1561,7 @@ class QualityTier(unittest.TestCase):
             "export rows in dollars": self.solution_with(
                 "shop/export.py", "{amount_cents}", "{amount_cents / 100}"),
             "second converter": {"shop/totals.py": totals_hand},
+            "old key in a new top-level module": {"legacy.py": 'def dollars(event):\n    return event["amount"]\n'},
             "zero dollars skip the conversion": self.solution_with(
                 "shop/events.py", 'if "amount" not in event:', 'if not event.get("amount"):'),
             "upcast keeps the old key": self.solution_with(

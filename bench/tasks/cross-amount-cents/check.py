@@ -1,5 +1,5 @@
 """Pass when the six shop modules and reports/daily.py, run in a child on a generated mixed log of old and new events,
-give exactly the cents results the spec describes, leave the log as it was, and only shop/events.py still names the
+give exactly the cents results the spec describes, leave the log as it was, and no module but shop/events.py still names the
 old amount key."""
 import ast
 import importlib.util
@@ -78,16 +78,15 @@ def same(a, b):
 
 
 def names_old_key(work):
-    for folder in ("shop", "reports"):
-        for path in sorted((work / folder).rglob("*.py")):
-            if path == work / "shop" / "events.py":
-                continue
-            try:
-                tree = ast.parse(path.read_text(encoding="utf-8"))
-            except (OSError, SyntaxError, ValueError):
-                return True
-            if any(isinstance(n, ast.Constant) and n.value == "amount" for n in ast.walk(tree)):
-                return True
+    for path in sorted(work.rglob("*.py")):
+        if path == work / "shop" / "events.py":
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, ValueError):
+            return True
+        if any(isinstance(n, ast.Constant) and n.value == "amount" for n in ast.walk(tree)):
+            return True
     return False
 
 
