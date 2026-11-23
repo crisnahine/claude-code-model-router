@@ -148,6 +148,18 @@ class Sandbox(unittest.TestCase):
 class Shipped(unittest.TestCase):
     """What ships must be consistent with itself."""
 
+
+    def test_each_choice_option_is_a_picker_the_runtime_accepts(self):
+        # A string option with no `options` list shows as an empty text box in /plugin.
+        manifest = json.loads((ROOT / "plugins/model-router/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
+        fields = manifest["userConfig"]
+        models = list(json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8"))["models"])
+        accepted = {"routing_mode": set(cfg.MODES), "priority": set(cfg.PRIORITIES),
+                    "max_tier": {"none", *models}, "agent_pins": {"respect", "override"}}
+        for name, values in accepted.items():
+            field = fields[name]
+            self.assertIn(field["default"], field["options"], name)
+            self.assertEqual(set(field["options"]), values, name)
     def test_crew_matches_agent_files(self):
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
         files = {p.stem: frontmatter(p) for p in (PLUGIN / "agents").glob("*.md")}
@@ -264,8 +276,10 @@ class Shipped(unittest.TestCase):
         self.assertEqual(market["plugins"][0]["name"], manifest["name"])
         self.assertTrue((ROOT / market["plugins"][0]["source"]).is_dir())
         self.assertEqual(manifest["userConfig"]["routing_mode"]["default"], "auto")
-        for option in manifest["userConfig"].values():
-            self.assertNotIn("options", option)  # not accepted by the oldest supported Claude Code
+        # Claude Code before v2.1.271 can't load a plugin whose userConfig declares options.
+        if any("options" in option for option in manifest["userConfig"].values()):
+            floor = re.fullmatch(r">=(\d+)\.(\d+)\.(\d+)", manifest["engines"]["claude-code"])
+            self.assertGreaterEqual(tuple(map(int, floor.groups())), (2, 1, 271))
 
     def test_the_installed_plugin_carries_the_license(self):
         # An install copies only the plugin folder, and the license asks for its notice in every copy.

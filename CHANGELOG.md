@@ -6,6 +6,10 @@
 
 # Changelog
 
+## Unreleased
+
+- In `/plugin` and `/config`, Routing mode, Priority, Strongest model allowed and Agents that name their own model are now pickers of their allowed values, so they show their default and a mistyped value can't be saved.
+
 ## 0.1.0 - 2026-11-23
 
 First release. Reviewed against Claude Code 2.1.330 and the platform docs of 2026-11-23; the research is in `docs/research/model-control.md`. Tested live on Claude Code 2.1.330 on macOS, headless and in an interactive terminal in auto mode. Needs Claude Code 2.1.292 or later. Licensed under the Apache License 2.0, and an installed plugin carries the license text in its own folder.
