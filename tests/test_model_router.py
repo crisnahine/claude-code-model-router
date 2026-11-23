@@ -2528,6 +2528,16 @@ class Health(Sandbox):
         with self.at(1.1 + 3.1):
             self.assertTrue(health.load().healthy("fable"))
 
+    def test_parallel_failures_during_an_outage_never_stack_it(self):
+        with self.at(0):
+            for _ in range(6):
+                health.failed("fable", "404 model not found")
+            for _ in range(3):
+                health.ran("opus", "claude-sonnet-5-5", "sonnet", forced=False)
+        with self.at(1.1):
+            self.assertEqual([health.load().healthy("fable"), health.load().healthy("opus")], [True, True])
+        self.assertEqual(store.load_state()["health"]["fable"]["outages"], 1)
+
     def test_a_run_as_asked_clears_trouble_and_names_the_model(self):
         health.failed("opus", "model not found")
         health.failed("opus", "model not found")
