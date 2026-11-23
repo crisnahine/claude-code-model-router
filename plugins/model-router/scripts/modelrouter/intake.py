@@ -142,7 +142,7 @@ def from_turn(text: object, command: object, origin: object) -> Intake:
     if not (name is not None and text.lstrip().startswith("<command-") and f"<command-name>/{name}</command-name>" in text):
         command = None
     delivered = is_delivered(text)
-    if not ((command is not None or is_user_prompt(text)) and ORIGINS.get(str(origin), True)):
+    if not ((command is not None or is_user_prompt(text)) and str(origin) not in MACHINE_ORIGINS):
         return Intake(delivered, False, None, ())
     result = profile_skill(command.get("args"), command.get("body"), rendered=True) if command else profile_prompt(text)
     return Intake(delivered, True, result["level"], tuple(result["signals"]), command.get("name") if command else None)

@@ -473,6 +473,7 @@ class Store(Sandbox):
                     store.save_entry("prompts", key, {"n": i})
         self.assertEqual(sorted(store.load_state_file(self.data / "prompts.json")), ["aa", "bb", "mm"])
 
+        self.assertFalse(intake.from_turn(line, command, "peer").person)
     def test_ledger_survives_junk_lines(self):
         store.append_ledger({"event": "spawn"})
         with store.ledger_path().open("a") as fh:
