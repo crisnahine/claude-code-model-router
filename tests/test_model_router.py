@@ -1954,6 +1954,24 @@ class Mod(Sandbox):
             self.stopped(agent_id, answer="", transcript=transcript)
             self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku", agent_id)
 
+    def test_a_lagging_handback_transcript_is_no_answer(self):
+        lines = (FIXTURES / "subagent-handback.jsonl").read_text().splitlines(keepends=True)
+        lagging = {"only-the-blank-row": lines[1], "truncated-last-line": lines[0][:60]}
+        self.spawn("general-purpose", LOOKUP)
+        for agent_id, text in lagging.items():
+            path = Path(self.tmp.name) / f"{agent_id}.jsonl"
+            path.write_text(text)
+            self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", agent_id)
+            self.stopped(agent_id, answer="", transcript=str(path))
+            self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku", agent_id)
+
+    def test_a_transcript_read_that_raises_still_counts_the_stop(self):
+        self.spawn("general-purpose", LOOKUP)
+        self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1")
+        with mock.patch.object(session, "handed_back", side_effect=ValueError("boom")):
+            self.stopped("a1", answer="", transcript=self.handback("src/a.py"))
+        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku")
+
     def test_turns_and_spawns_keep_the_mod_marked_after_a_clear(self):
         self.assertFalse(hooks.mod_active("s2"))
         hooks.mod_turn({"session_id": "s2", "text": LOOKUP})

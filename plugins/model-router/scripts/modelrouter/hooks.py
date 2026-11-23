@@ -288,8 +288,12 @@ def agent_stopped(hook_input: dict) -> dict | None:
     message = hook_input.get("last_assistant_message")
     # A SubagentHandback report isn't in last_assistant_message, only the closing text is
     # (https://code.claude.com/docs/en/hooks.md#subagentstop).
-    answered = not (isinstance(message, str) and not message.strip()) or session.handed_back(
-        hook_input.get("agent_transcript_path"))
+    answered = not (isinstance(message, str) and not message.strip())
+    if not answered:
+        try:
+            answered = session.handed_back(hook_input.get("agent_transcript_path"))
+        except Exception:
+            pass
     calls.stopped(hook_input.get("session_id"), hook_input.get("agent_id"), answered=answered)
     gates.note_agent_checks(hook_input)
     return None
