@@ -1316,7 +1316,7 @@ class QualityTier(unittest.TestCase):
     check, shipped, source, run_with = HardTier.check, HardTier.shipped, HardTier.source, HardTier.run_with
 
     def test_the_quality_tier_has_one_task_in_each_of_six_classes(self):
-        want = {"impl-merge-customers": "implementation"}
+        want = {"impl-merge-customers": "implementation", "bugfix-statement-queries": "bugfix"}
         tasks = {t["id"]: t for t in run.load_tasks()}
         self.assertEqual({i: tasks[i]["class"] for i in want}, want)
         self.assertTrue(all(tasks[i]["revision"] == 1 for i in want))
@@ -1420,6 +1420,101 @@ class QualityTier(unittest.TestCase):
             '        conn.execute("PRAGMA legacy_alter_table = OFF")\n'))
         self.assertTrue(self.run_with("impl-merge-customers", {rel: legacy_rename}))
 
+
+    def test_statement_check_rejects_each_known_mistake(self):
+        task = "bugfix-statement-queries"
+        rel = "billing/statement.py"
+        solution = self.source(task, "solution/billing/statement.py")
+        shipped = self.source(task, "repo/billing/statement.py")
+        self.assertTrue(self.run_with(task, {rel: solution}))
+        header = solution[:solution.index("    result = {")]
+        mutants = {
+            "shipped": shipped,
+            "join fan-out": header + (
+                '    sql = ("SELECT a.id, COALESCE(SUM(i.amount_cents), 0) - COALESCE(SUM(p.amount_cents), 0) FROM accounts a "\n'
+                '           "LEFT JOIN invoices i ON i.account_id = a.id AND i.voided = 0 "\n'
+                '           "LEFT JOIN payments p ON p.invoice_id = i.id GROUP BY a.id")\n'
+                '    return {a: c for a, c in conn.execute(sql)}\n'),
+            "rule dropped": solution.replace("if rules.counts(status, method):", "if True:"),
+            "pending bank counted": solution.replace("if rules.counts(status, method):", 'if status != "failed":'),
+            "voided kept": solution.replace(" WHERE voided = 0", "").replace(" WHERE i.voided = 0", ""),
+            "voided invoices' payments kept": solution.replace(" WHERE i.voided = 0", ""),
+            "payments per invoice": header + (
+                '    result = {a: 0 for (a,) in conn.execute("SELECT id FROM accounts")}\n'
+                '    for invoice_id, account_id, cents in conn.execute("SELECT id, account_id, amount_cents FROM invoices WHERE voided = 0").fetchall():\n'
+                '        result[account_id] += cents\n'
+                '        for paid, status, method in conn.execute("SELECT amount_cents, status, method FROM payments WHERE invoice_id = ?", (invoice_id,)).fetchall():\n'
+                '            if rules.counts(status, method):\n'
+                '                result[account_id] -= paid\n'
+                '    return result\n'),
+            "trace removed": shipped.replace("    result = {}", "    conn.set_trace_callback(None)\n    result = {}"),
+            "trace and progress removed": shipped.replace(
+                "    result = {}", "    conn.set_trace_callback(None)\n    conn.set_progress_handler(None, 0)\n    result = {}"),
+            "line tracing removed": solution.replace("    result = {", "    import sys\n    sys.settrace(None)\n    result = {", 1),
+            "index added": solution.replace(
+                "    result = {", '    conn.execute("CREATE INDEX payments_by_status ON payments(status)")\n    result = {', 1),
+            "temp table left": header + (
+                '    conn.execute("CREATE TEMP TABLE owed AS SELECT a.id AS id, COALESCE((SELECT SUM(amount_cents) FROM invoices '
+                'WHERE account_id = a.id AND voided = 0), 0) AS cents FROM accounts a")\n'
+                '    result = {a: c for a, c in conn.execute("SELECT id, cents FROM owed")}\n'
+                '    for account_id, paid, status, method in conn.execute("SELECT i.account_id, p.amount_cents, p.status, p.method FROM payments p '
+                'JOIN invoices i ON i.id = p.invoice_id WHERE i.voided = 0"):\n'
+                '        if rules.counts(status, method):\n'
+                '            result[account_id] -= paid\n'
+                '    return result\n'),
+            "string keys": solution.replace("    return result", "    return {str(k): v for k, v in result.items()}"),
+            "bool values": solution.replace("    return result", "    return {k: (True if v == 0 else v) for k, v in result.items()}"),
+            "float values": solution.replace("    return result", "    return {k: float(v) for k, v in result.items()}"),
+            "accounts without invoices left out": solution.replace("    return result", "    return {k: v for k, v in result.items() if v}"),
+            "not a dict": solution.replace("    return result", "    return list(result.items())"),
+            "raises": solution.replace("    return result", "    raise RuntimeError('no')"),
+        }
+        for name, text in mutants.items():
+            with self.subTest(name):
+                self.assertNotEqual(text, solution if name != "shipped" else "")
+                self.assertFalse(self.run_with(task, {rel: text}))
+        noise = {
+            "writes to stdout": solution.replace("    result = {", '    print("done")\n    result = {', 1),
+            "prints at exit": "import atexit\n" + solution.replace(
+                "from billing import rules\n", "from billing import rules\n\natexit.register(lambda: print('[]'))\n", 1),
+        }
+        for name, text in noise.items():
+            with self.subTest(name):
+                self.assertNotEqual(text, solution)
+                self.assertTrue(self.run_with(task, {rel: text}))
+
+    def test_statement_check_rejects_quadratic_python_and_takes_a_linear_rewrite(self):
+        task = "bugfix-statement-queries"
+        rel = "billing/statement.py"
+        solution = self.source(task, "solution/billing/statement.py")
+        header = solution[:solution.index("    result = {")]
+        quadratic = header + (
+            '    result = {a: 0 for (a,) in conn.execute("SELECT id FROM accounts")}\n'
+            '    invoices = conn.execute("SELECT id, account_id, amount_cents FROM invoices WHERE voided = 0").fetchall()\n'
+            '    payments = conn.execute("SELECT invoice_id, amount_cents, status, method FROM payments").fetchall()\n'
+            '    for invoice_id, account_id, cents in invoices:\n'
+            '        result[account_id] += cents - sum(p[1] for p in payments if p[0] == invoice_id and rules.counts(p[2], p[3]))\n'
+            '    return result\n')
+        self.assertFalse(self.run_with(task, {rel: quadratic}))
+        one_statement = header + (
+            '    sql = ("SELECT a.id, COALESCE(i.cents, 0) - COALESCE(p.cents, 0) FROM accounts a "\n'
+            '           "LEFT JOIN (SELECT account_id, SUM(amount_cents) AS cents FROM invoices WHERE voided = 0 GROUP BY account_id) i ON i.account_id = a.id "\n'
+            '           "LEFT JOIN (SELECT i.account_id AS account_id, SUM(p.amount_cents) AS cents FROM payments p JOIN invoices i ON i.id = p.invoice_id "\n'
+            '           "WHERE i.voided = 0 AND (p.status = \'settled\' OR (p.status = \'pending\' AND p.method = \'card\')) GROUP BY i.account_id) p "\n'
+            '           "ON p.account_id = a.id")\n'
+            '    return dict(conn.execute(sql).fetchall())\n')
+        self.assertTrue(self.run_with(task, {rel: one_statement}))
+        by_invoice = header + (
+            '    import collections\n'
+            '    paid = collections.defaultdict(int)\n'
+            '    for invoice_id, cents, status, method in conn.execute("SELECT invoice_id, amount_cents, status, method FROM payments"):\n'
+            '        if rules.counts(status, method):\n'
+            '            paid[invoice_id] += cents\n'
+            '    result = collections.defaultdict(int, {a: 0 for (a,) in conn.execute("SELECT id FROM accounts")})\n'
+            '    for invoice_id, account_id, cents in conn.execute("SELECT id, account_id, amount_cents FROM invoices WHERE voided = 0"):\n'
+            '        result[account_id] += cents - paid[invoice_id]\n'
+            '    return result\n')
+        self.assertTrue(self.run_with(task, {rel: by_invoice}))
 
 if __name__ == "__main__":
     unittest.main()
