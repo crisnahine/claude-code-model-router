@@ -2987,7 +2987,7 @@ class Hooks(Sandbox):
         self.assertIn("Model Router sets", text)
         self.assertNotIn("strongest model in use", text)  # changes nothing Claude does; /model-router:route says it
         self.assertNotIn("model-router:deep-solver", text)  # the Agent tool lists the role agents already
-        self.assertIn("A model or effort passed on a call overrides it", text)
+        self.assertIn("Agent calls here omit `model` and `effort` unless the user named one", text)
         self.assertIn("re-issued unchanged", text)
         self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", text)
         self.assertEqual(session.model("s1"), "claude-sonnet-5-5")
