@@ -1434,12 +1434,12 @@ class QualityTier(unittest.TestCase):
             [("gateway/router.py", first, True), ("gateway/router.py", second, True), ("gateway/guard.py", guard, True),
              ("./gateway/router.py", second, True), ("gateway\\router.py", first, True),
              ("gateway/router.py", self.line_of("gateway/router.py", "path = unquote(raw"), False),
-             ("gateway/guard.py", decode, False),
+             ("gateway/guard.py", decode, True),
              ("gateway/admin.py", self.line_of("gateway/admin.py", 'f"SELECT'), False),
              ("gateway/hooks.py", self.line_of("gateway/hooks.py", "pickle.loads"), False),
              ("gateway/releases.py", self.line_of("gateway/releases.py", "subprocess.run"), False),
              ("gateway/etag.py", self.line_of("gateway/etag.py", "hashlib.md5"), False),
-             ("gateway/files.py", self.line_of("gateway/files.py", "os.path.realpath"), False),
+             ("gateway/files.py", self.line_of("gateway/files.py", "path = os.path.realpath"), False),
              ("gateway/router.py", self.line_of("gateway/router.py", "random.uniform"), False),
              ("auth/session.py", self.line_of("auth/session.py", "compare_digest"), False)])
         for rel, line, expected in pairs:
@@ -1453,6 +1453,11 @@ class QualityTier(unittest.TestCase):
                              ("two lines", {"file": "gateway/router.py", "line": [first, second]})):
             with self.subTest(name):
                 self.assertFalse(self.run_with("security-admin-route", {"FINDING.json": answer}))
+
+    def test_the_shipped_repo_has_no_comment_that_names_the_trap_or_clears_a_decoy(self):
+        for path in (run.BENCH / "tasks" / "security-admin-route" / "repo").rglob("*.py"):
+            with self.subTest(path=path.name):
+                self.assertFalse([l for l in path.read_text(encoding="utf-8").splitlines() if l.lstrip().startswith("#")])
 
     def test_the_shipped_route_serves_the_admin_handler_to_a_user_on_a_double_encoded_path(self):
         code = ("import json, sys\nsys.path.append(sys.argv[1])\nfrom app import handle\nfrom auth import session\n"

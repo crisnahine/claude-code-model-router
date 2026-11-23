@@ -1,5 +1,5 @@
 {
   "file": "gateway/router.py",
-  "line": 26,
+  "line": 25,
   "why": "The router decodes the path a second time, so %2561dmin reaches the admin handler after the guard saw %61dmin."
 }

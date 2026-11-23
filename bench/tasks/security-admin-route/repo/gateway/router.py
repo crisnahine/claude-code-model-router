@@ -21,7 +21,6 @@ def call(handler, *args):
 
 def dispatch(user, raw, body):
     path = unquote(raw.split("?", 1)[0])
-    # links from the old mailer arrive encoded twice
     if "%" in path:
         path = unquote(path)
     path = posixpath.normpath("/" + path.lstrip("/")) + "/"
