@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import inspect
 import io
 import json
 import os
@@ -65,7 +66,7 @@ class Sandbox(unittest.TestCase):
         self.patch = mock.patch.dict(os.environ, self.env)
         self.patch.start()
         for name in list(os.environ):
-            if name.startswith(("CLAUDE_PLUGIN_OPTION_", "CLAUDE_CODE_SUBAGENT_", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_USE_", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "ANTHROPIC_")):
+            if name.startswith(("CLAUDE_PLUGIN_OPTION_", "CLAUDE_CODE_SUBAGENT_", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_USE_", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "DISABLE_PROMPT_CACHING", "ANTHROPIC_")):
                 del os.environ[name]
         self.managed = self.home / "managed-settings.json"
         self.managed_root = mock.patch.object(allowlist, "MANAGED_ROOT", self.home)
@@ -105,9 +106,8 @@ class Sandbox(unittest.TestCase):
 
     def decide(self, agent: str | None, prompt: str, **extra) -> dict:
         hook_input = self.call(agent, prompt, **extra)
-        config = cfg.load_config(hook_input)
-        options = settings.resolve(config)
-        return router.decide(spawn.facts(hook_input, config, options), config, options)
+        snap = settings.Snapshot(hook_input)
+        return router.decide(spawn.facts(hook_input, snap), snap.config, snap.options)
 
     def pre(self, agent: str | None, prompt: str, **extra) -> dict | None:
         out = hooks.pre_agent(self.call(agent, prompt, **extra))
@@ -354,13 +354,21 @@ class Shipped(unittest.TestCase):
         stop = [h for g in data["hooks"]["SubagentStop"] for h in g["hooks"] if h["args"][1] == "agent-stopped"]
         self.assertEqual([h.get("async", False) for h in stop], [False])
 
+    def test_the_effort_cache_rule_is_registry_data(self):
+        rule = {k: v for k, v in cfg.base_config()["main"]["effort_keeps_cache"].items() if not k.startswith("$")}
+        self.assertEqual(rule, {"fable": ">=5.1", "opus": "5.5", "sonnet": "5.5", "haiku": "5.5"})
+        source = inspect.getsource(hooks._effort_keeps_cache)
+        for name in cfg.base_config()["models"]:
+            self.assertNotIn(f'"{name}"', source)
+
 
 class OptionText(unittest.TestCase):
     def test_main_effort_names_every_case_it_stays_off(self):
         manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         text = manifest["userConfig"]["main_effort"]["description"]
         for case in ("CLAUDE_CODE_EFFORT_LEVEL", "Bedrock", "Vertex", "Foundry", "ANTHROPIC_BASE_URL",
-                     "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "Fable 5.1", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5"):
+                     "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "Fable 5.1", "Opus 5.5", "Sonnet 5.5", "Haiku 5.5",
+                     "Mantle", "DISABLE_PROMPT_CACHING"):
             self.assertIn(case, text)
         for gap in ("HIPAA", "Claude Desktop"):  # cases the router can't detect, so the user is told
             self.assertIn(gap, text)
@@ -558,6 +566,42 @@ class Store(Sandbox):
                 mock.patch.object(store, "locked", racing):
             store.append_ledger({"event": "spawn"})
         self.assertEqual(len(ledger.read()), 51)
+
+
+class Snapshot(Sandbox):
+    def test_each_hook_call_reads_the_registry_and_options_once(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        spawned = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5", "kind": "subagent",
+                   "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
+        for name, run in (("mod-spawn", lambda: hooks.mod_spawn(spawned)),
+                          ("agent-failed", lambda: hooks.agent_failed(
+                              {**spawned, "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})),
+                          ("pre-agent", lambda: hooks.pre_agent(self.call("general-purpose", BUILD, session_id="s2"))),
+                          ("user-prompt", lambda: hooks.user_prompt({"session_id": "s1", "prompt": HARD}))):
+            with mock.patch.object(cfg, "load_config", wraps=cfg.load_config) as load, \
+                    mock.patch.object(settings, "resolve", wraps=settings.resolve) as resolve:
+                run()
+            self.assertEqual((load.call_count, resolve.call_count), (1, 1), name)
+
+    def test_the_models_report_reads_the_users_override_file_once_under_a_cap(self):
+        store.update_state(lambda state: state.update(max_tier="sonnet"))
+        with mock.patch.object(cfg, "trusted_models", wraps=cfg.trusted_models) as trusted:
+            self.out("models", "--json")
+        self.assertEqual(trusted.call_count, 1)
+
+    def test_a_cheap_hook_loads_neither_the_allowlist_nor_the_health_table(self):
+        with mock.patch.object(allowlist, "read", side_effect=AssertionError("allowlist")), \
+                mock.patch.object(health, "load", side_effect=AssertionError("health")):
+            hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": str(self.project / "a.py")}})
+            hooks.stop({"session_id": "s1", "cwd": str(self.project)})
+            hooks.mod_turn({"session_id": "s1", "text": LOOKUP})
+
+    def test_a_field_is_read_on_first_use_and_then_kept(self):
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        with mock.patch.object(allowlist, "read", wraps=allowlist.read) as read:
+            self.assertIs(snap.allowed, snap.allowed)
+            self.assertEqual(snap.usable, registry.available(snap.config, snap.options.cap, allowed=snap.allowed))
+        self.assertEqual(read.call_count, 1)
 
 
 class Registry(Sandbox):
@@ -883,10 +927,10 @@ class Allowlist(Sandbox):
 
     def test_nothing_left_prints_no_none_in_the_reports(self):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["some-other-model"]}))
-        options = settings.resolve(self.config)
-        self.assertNotIn("None", report.policy(self.config, options))
-        self.assertIn("left as it is", report.policy(self.config, options))
-        text = report.explain(self.config, options, LOOKUP)
+        snap = settings.Snapshot()
+        self.assertNotIn("None", report.policy(snap))
+        self.assertIn("left as it is", report.policy(snap))
+        text = report.explain(snap, LOOKUP)
         self.assertNotIn("None", text)
         self.assertIn("left as it is", text)
         self.options(routing_mode="advise")
@@ -954,6 +998,14 @@ class Options(Sandbox):
 
     def test_defaults(self):
         self.assertEqual(settings.resolve(cfg.load_config()), settings.Settings())
+
+    def test_the_mantle_switch_and_each_prompt_caching_switch_are_read(self):
+        env = {"CLAUDE_CODE_USE_MANTLE": "1", "DISABLE_PROMPT_CACHING": "true", "DISABLE_PROMPT_CACHING_OPUS": "1",
+               "DISABLE_PROMPT_CACHING_NEW_FAMILY": "yes", "DISABLE_PROMPT_CACHING_SONNET": "0", "DISABLE_PROMPT_CACHINGX": "1"}
+        with mock.patch.dict(os.environ, env):
+            options = settings.resolve()
+        self.assertTrue(options.mantle)
+        self.assertEqual(options.cache_off, ("", "new_family", "opus"))
 
     def test_mode_defaults_to_auto(self):
         self.assertEqual(self.mode(), "auto")
@@ -1325,8 +1377,7 @@ class RoutingEvals(Sandbox):
     def test_each_eval_case_routes_as_expected(self):
         cases = sorted((PLUGIN / "evals").glob("*/prompt.md"))
         self.assertGreaterEqual(len(cases), 2)
-        config = cfg.load_config()
-        options = settings.resolve(config)
+        snap = settings.Snapshot()
         for path in cases:
             name = path.parent.name
             want = re.fullmatch(r"['\"]?level (\w+), model (\w+), effort (\w+)['\"]?",
@@ -1335,8 +1386,8 @@ class RoutingEvals(Sandbox):
             body = path.read_text(encoding="utf-8").split("\n---\n", 1)[1].strip()
             # A case that hands a subagent an exact brief is about how that call routes.
             quoted = re.search(r'this exact prompt: "([^"]+)"', body)
-            got = (report.explain(config, options, quoted[1], "general-purpose") if quoted
-                   else report.explain(config, options, body))
+            got = (report.explain(snap, quoted[1], "general-purpose") if quoted
+                   else report.explain(snap, body))
             self.assertIn(f"Level: **{want[1]}**", got, name)
             self.assertIn(f"Model: **{want[2]}**, effort: {want[3]}.", got, name)
 
@@ -1389,8 +1440,8 @@ class Router(Sandbox):
     def test_inside_a_subagent_the_pick_is_always_written_out(self):
         self.session_on("claude-sonnet-5-5")
         hook_input = {**self.call("general-purpose", BUILD), "agent_id": "agent-1", "agent_type": "helper"}
-        config = cfg.load_config()
-        d = router.decide(spawn.facts(hook_input, config, settings.Settings()), config, settings.Settings())
+        snap = settings.Snapshot(hook_input)
+        d = router.decide(spawn.facts(hook_input, snap), snap.config, settings.Settings())
         self.assertEqual((d["action"], d["model"], d["was"]), ("rewrite", "sonnet", None))
 
     def test_decide_needs_only_its_facts(self):
@@ -1616,8 +1667,8 @@ class Router(Sandbox):
                 {"type": "assistant", "isSidechain": True, "message": {"role": "assistant", "model": "claude-haiku-5-5"}}]
         path.write_text("".join(json.dumps(r) + "\n" for r in rows))
         hook_input = {**self.call("general-purpose", BUILD), "transcript_path": str(path)}
-        config = cfg.load_config()
-        d = router.decide(spawn.facts(hook_input, config, settings.Settings()), config, settings.Settings())
+        snap = settings.Snapshot(hook_input)
+        d = router.decide(spawn.facts(hook_input, snap), snap.config, settings.Settings())
         self.assertEqual((d["model"], d["was"]), ("sonnet", "sonnet"))  # not the recorded opus, not the subagent's haiku
 
     def test_hooks_never_break_on_garbage(self):
@@ -1837,8 +1888,7 @@ class Fallback(Sandbox):
 
     def test_a_spawn_decides_without_writing_and_records_the_guarded_decision(self):
         hook_input = self.call("general-purpose", LOOKUP)
-        config = cfg.load_config()
-        spawned = spawn.decide(hook_input, config, settings.resolve(config))
+        spawned = spawn.decide(hook_input, settings.Snapshot(hook_input))
         self.assertEqual((self.ledger(), request.load("s1").top_spawn), ([], None))
         spawned.decision.update(action="keep", model=None, reason="held")
         spawn.record(spawned, "fallback")
@@ -2033,6 +2083,15 @@ class Mod(Sandbox):
         self.assertEqual(turn(first_party=True), {"level": "complex", "effort": "high"})
         self.assertEqual(turn(), {"level": "complex", "effort": "high"})  # not known: raised as before
 
+    def test_prompt_caching_off_for_the_sessions_family_keeps_its_effort(self):
+        self.options(main_effort="true")
+        turn = lambda: hooks.mod_turn({"session_id": "s1", "text": HARD})  # noqa: E731
+        with mock.patch.dict(os.environ, {"DISABLE_PROMPT_CACHING_OPUS": "1"}):
+            session.record("s1", "claude-opus-5-5")
+            self.assertIsNone(turn())
+            session.record("s1", "claude-sonnet-5-5")
+            self.assertEqual(turn(), {"level": "complex", "effort": "high"})
+
     def test_turn_effort_is_off_by_default(self):
         session.record("s1", "claude-opus-5-5")
         self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": HARD}))
@@ -2060,7 +2119,8 @@ class Mod(Sandbox):
                       "claude-fable-6", "claude-sonnet-5-5-20260101", "claude-haiku-5-5"):
             session.record("s1", model)
             self.assertEqual(turn(), {"level": "complex", "effort": "high"}, model)
-        for name in ("ANTHROPIC_BASE_URL", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"):
+        for name in ("ANTHROPIC_BASE_URL", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "CLAUDE_CODE_USE_MANTLE",
+                     "DISABLE_PROMPT_CACHING"):
             with mock.patch.dict(os.environ, {name: "1"}):
                 self.assertIsNone(turn(), name)
         for model in ("claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-opus-4-7", "claude-opus-5-6"):

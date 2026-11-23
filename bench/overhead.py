@@ -179,7 +179,6 @@ def in_process(base: Path, calls: int, runs: int):
     os.environ.update(box.env())
     sys.pycache_prefix = str(box.root / "pycache")
     sys.path.insert(0, str(PLUGIN / "scripts"))
-    from modelrouter import config as cfg
     from modelrouter import hooks, router, settings, spawn, store
 
     project = str(box.root / "project")
@@ -188,9 +187,8 @@ def in_process(base: Path, calls: int, runs: int):
         hook_input = {"session_id": "bench", "cwd": project,
                       "tool_input": {"subagent_type": "general-purpose", "prompt": f"{BRIEFS[i % 3]} ({i})"}}
         started = time.perf_counter()
-        config = cfg.load_config(hook_input)
-        options = settings.resolve(config)
-        router.decide(spawn.facts(hook_input, config, options), config, options)
+        snap = settings.Snapshot(hook_input)
+        router.decide(spawn.facts(hook_input, snap), snap.config, snap.options)
         decide.append((time.perf_counter() - started) * 1000)
 
     def routed_call(session: str, i: int, mod: bool) -> None:

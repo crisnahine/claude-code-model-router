@@ -5,26 +5,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import agents, allowlist, calls, gates, learn, ledger, registry, request, router, session, settings
+from . import agents, calls, gates, learn, ledger, registry, request, router, session, settings
 from . import config as cfg
 
 
 @dataclass
 class Spawn:
     hook_input: dict
-    config: dict
-    options: settings.Settings
+    snap: settings.Snapshot
     key: str
     facts: router.Facts
     decision: router.Decision
 
 
-def facts(hook_input: dict, config: dict, options: settings.Settings,
-          call: tuple[str, str] | None = None) -> router.Facts:
+def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | None = None) -> router.Facts:
+    config = snap.config
     tool_input = cfg.tool_input(hook_input)
     agent, key = call or calls.identify(tool_input)
-    project = cfg.project_dir(hook_input)
-    definition = agents.find(agent, project)
+    definition = agents.find(agent, snap.project)
     if definition is None and hook_input.get("kind") in ("workflow", "teammate"):
         # The engine makes these agents: a workflow stage, or a teammate role with no file
         # of its own. Neither names a model unless the script or the call does.
@@ -41,20 +39,19 @@ def facts(hook_input: dict, config: dict, options: settings.Settings,
                                                        hook_input.get("transcript_path")))
     # A hand-off brief often reads simpler than the request it serves, so the strong role
     # agents start no lower than the request's level; a redo still climbs from there.
-    allowed = allowlist.read(hook_input.get("session_id"), project, hook_input.get("settings"))
     strong = agent in (f"{cfg.PLUGIN_NAME}:architect", f"{cfg.PLUGIN_NAME}:deep-solver")
     floor = request.load(hook_input.get("session_id")).floor if strong else None
-    return router.Facts(agent=agent, tool_input=tool_input, usable=registry.available(config, options.cap, allowed=allowed),
+    return router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable,
                         definition=definition, parent=parent,
                         earlier=calls.finished_run(hook_input.get("session_id"), key), raises=learn.raises(),
                         floor=floor)
 
 
-def decide(hook_input: dict, config: dict, options: settings.Settings) -> Spawn:
+def decide(hook_input: dict, snap: settings.Snapshot) -> Spawn:
     """Decide one spawn. Writes nothing."""
     call = calls.identify(cfg.tool_input(hook_input))
-    found = facts(hook_input, config, options, call)
-    return Spawn(hook_input, config, options, call[1], found, router.decide(found, config, options))
+    found = facts(hook_input, snap, call)
+    return Spawn(hook_input, snap, call[1], found, router.decide(found, snap.config, snap.options))
 
 
 def record(spawned: Spawn, via: str) -> None:
@@ -65,7 +62,7 @@ def record(spawned: Spawn, via: str) -> None:
                  kind=(hook_input.get("kind") or "subagent") if via == "mod" else None)
     if decision["action"] != "deny":
         try:
-            _record(spawned.config, session_id, spawned.key, decision, spawned.facts.raises)
+            _record(spawned.snap.config, session_id, spawned.key, decision, spawned.facts.raises)
         except OSError:
             pass
 

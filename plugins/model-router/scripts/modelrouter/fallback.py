@@ -12,12 +12,12 @@ from . import router
 REFUSED_AFTER = 5
 
 
-def route(hook_input: dict, config: dict, options: settings.Settings) -> dict | None:
+def route(hook_input: dict, snap: settings.Snapshot) -> dict | None:
     """The PreToolUse answer: the decision as the call's rewritten input and a note, or the
     one deny that holds the user's cap."""
-    spawned = spawn.decide(hook_input, config, options)
+    spawned = spawn.decide(hook_input, snap)
     session_id, decision = hook_input.get("session_id"), spawned.decision
-    _guard(session_id, spawned.key, decision, config, options)
+    _guard(session_id, spawned.key, decision, snap.config, snap.options)
     spawn.record(spawned, "fallback")
     if decision["action"] == "rewrite":
         # A rewrite auto mode denies after review gets no result, so it stays pending and

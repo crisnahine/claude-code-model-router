@@ -2,29 +2,24 @@
 fall back to what the last SessionStart recorded."""
 from __future__ import annotations
 
-from . import agents, allowlist, health, ladder, learn, ledger, registry, store, upstream
+from . import agents, ladder, learn, ledger, registry, settings, store, upstream
 from . import config as cfg
 from .profile import profile_call, profile_prompt
-from .settings import Settings
 
 # The --json shapes. A new key keeps the version; removing or renaming one bumps it.
 USAGE_SCHEMA = "model-router.usage/1"
 MODELS_SCHEMA = "model-router.models/1"
 
 
-def _usable(config: dict, settings: Settings) -> list[str]:
-    return registry.available(config, settings.cap, allowed=allowlist.read(None, cfg.project_dir()))
-
-
-def policy(config: dict, settings: Settings) -> str:
-    usable = _usable(config, settings)
-    limit = settings.cap
-    lines = [f"Routing: **{settings.mode}**. Priority: **{settings.priority}**. "
+def policy(snap: settings.Snapshot) -> str:
+    config, options, usable = snap.config, snap.options, snap.usable
+    limit = options.cap
+    lines = [f"Routing: **{options.mode}**. Priority: **{options.priority}**. "
              f"Cap: **{limit or 'none'}**. Strongest model in use: **{usable[-1] if usable else 'none'}**.", "",
              "| Subtask level | Model | Effort |", "| :- | :- | :- |"]
     raises = learn.raises()
     for level in cfg.LEVELS:
-        pick = ladder.pick(config, level, settings.priority, usable, raises)
+        pick = ladder.pick(config, level, options.priority, usable, raises)
         note = " (raised by feedback)" if raises[level] else ""
         lines.append(f"| {level} | {pick.model or 'left as it is'}{note} | {pick.effort or 'as the agent or session sets it'} |")
     lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
@@ -42,17 +37,16 @@ def policy(config: dict, settings: Settings) -> str:
     return "\n".join(lines)
 
 
-def models_data(config: dict, settings: Settings) -> dict:
+def models_data(snap: settings.Snapshot) -> dict:
     """Each registry model's state here, in the `model-router.models/1` shape."""
-    table = health.load()
-    limit = settings.cap
-    usable = _usable(config, settings)
-    allowed = allowlist.read(None, cfg.project_dir()).permitted(config)
+    config, options, table, usable = snap.config, snap.options, snap.health, snap.usable
+    limit = options.cap
+    allowed = snap.allowed.permitted(config)
     rows = []
     for name in registry.by_strength(config):
         if limit and registry.strength(config, name) > registry.strength(config, limit):
             status, detail = "above_cap", "above your cap"
-        elif limit and name not in cfg.trusted_models(config):
+        elif limit and name not in snap.trusted:
             status, detail = "project_model_under_cap", "added by this project, so not used while a cap is set"
         elif name not in allowed:
             status, detail = "not_permitted", "not permitted by the availableModels or deniedModels setting"
@@ -73,7 +67,7 @@ def models_data(config: dict, settings: Settings) -> dict:
         "schema": MODELS_SCHEMA,
         "cap": limit or None,
         "strongest_in_use": usable[-1] if usable else None,
-        "priority": settings.priority,
+        "priority": options.priority,
         "models": rows,
         "levels": levels,
         "doc_aliases": aliases,
@@ -84,8 +78,8 @@ def models_data(config: dict, settings: Settings) -> dict:
     }
 
 
-def models(config: dict, settings: Settings) -> str:
-    data = models_data(config, settings)
+def models(snap: settings.Snapshot) -> str:
+    data = models_data(snap)
     lines = [f"Cap: **{data['cap'] or 'none'}**. Strongest model in use: **{data['strongest_in_use'] or 'none'}**. "
              f"Priority: **{data['priority']}**.",
              "", "| Model | Last ran as | Status |", "| :- | :- | :- |"]
@@ -110,22 +104,22 @@ def models(config: dict, settings: Settings) -> str:
     return "\n".join(lines)
 
 
-def explain(config: dict, settings: Settings, text: str, agent: str | None = None) -> str:
+def explain(snap: settings.Snapshot, text: str, agent: str | None = None) -> str:
     """What the router would make of this task, and why."""
-    usable = _usable(config, settings)
+    config, options, usable = snap.config, snap.options, snap.usable
     result = profile_call({"prompt": text}, agent) if agent else profile_prompt(text)
     level = result["level"]
-    pick = ladder.pick(config, level, settings.priority, usable, learn.raises())
+    pick = ladder.pick(config, level, options.priority, usable, learn.raises())
     why = ", ".join(result["signals"]) or "no risk, scope or ambiguity wording"
     out = [f"Level: **{level}** ({why}).",
            f"Model: **{pick.model or 'left as it is'}**, effort: {pick.effort or 'unchanged'}.",
-           f"Priority {settings.priority}; models in use: {', '.join(usable) or 'none: availableModels and deniedModels leave no registry model open'}."]
+           f"Priority {options.priority}; models in use: {', '.join(usable) or 'none: availableModels and deniedModels leave no registry model open'}."]
     if agent:
-        definition = agents.find(agent, cfg.project_dir())
+        definition = agents.find(agent, snap.project)
         pinned = (definition or {}).get("model")
         if definition is None:
             out.append(f"The definition of `{agent}` wasn't found, so its calls are left alone.")
-        elif pinned and settings.pins == "respect":
+        elif pinned and options.pins == "respect":
             out.append(f"`{agent}` names its own model ({pinned}), which is kept within the cap.")
     return "\n".join(out)
 

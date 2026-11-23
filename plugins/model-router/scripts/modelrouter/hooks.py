@@ -33,8 +33,8 @@ def _context(event: str, text: str) -> dict:
 
 
 def session_start(hook_input: dict) -> dict | None:
-    config = cfg.load_config(hook_input)
-    options = settings.resolve(config)
+    snap = settings.Snapshot(hook_input)
+    options = snap.options
     settings.record(options)
     session.record(hook_input.get("session_id"), hook_input.get("model"))
     parts = []
@@ -62,7 +62,7 @@ def session_start(hook_input: dict) -> dict | None:
         )
     if options.update_check:
         changes = upstream.pending()
-        running = [hook_input.get("model")] + health.load().seen_running()
+        running = [hook_input.get("model")] + snap.health.seen_running()
         for model_id, latest in upstream.behind(running):
             parts.append(
                 f"{model_id} is running here and {latest} is the newest of its family. Tell the user once: a model "
@@ -88,15 +88,15 @@ def session_start(hook_input: dict) -> dict | None:
 def user_prompt(hook_input: dict) -> dict | None:
     """Size up the request against the conversation's own model. Says nothing when there
     is nothing Claude needs to do differently, so an ordinary prompt costs no tokens."""
-    config = cfg.load_config(hook_input)
-    options = settings.resolve(config)
+    snap = settings.Snapshot(hook_input)
+    config, options = snap.config, snap.options
     mode = options.mode
     if mode == "off":
         return None
     prompt = hook_input.get("prompt")
     prompt = prompt if isinstance(prompt, str) else ""
     session_id = hook_input.get("session_id")
-    seen = intake.from_prompt(prompt, cfg.project_dir(hook_input))
+    seen = intake.from_prompt(prompt, snap.project)
     if seen.delivered:
         # Work for someone else's message isn't the user's request, so it doesn't get its floor.
         # A task notification continues the user's request and keeps it.
@@ -106,9 +106,8 @@ def user_prompt(hook_input: dict) -> dict | None:
             pass
     if not seen.person:
         return None
-    usable = registry.available(config, options.cap, allowed=allowlist.read(session_id, cfg.project_dir(hook_input)))
     level = seen.level
-    pick = ladder.pick(config, level, options.priority, usable, learn.raises())
+    pick = ladder.pick(config, level, options.priority, snap.usable, learn.raises())
     need = pick.model
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
     below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
@@ -145,8 +144,7 @@ def mod_active(session_id: str | None) -> bool:
 def pre_agent(hook_input: dict) -> dict | None:
     if mod_active(hook_input.get("session_id")):
         return None  # the plugin's mod routes this call when it spawns
-    config = cfg.load_config(hook_input)
-    return fallback.route(hook_input, config, settings.resolve(config))
+    return fallback.route(hook_input, settings.Snapshot(hook_input))
 
 
 def _asked_for(config: dict, tool_input: dict, routed: str | None) -> str | None:
@@ -156,7 +154,7 @@ def _asked_for(config: dict, tool_input: dict, routed: str | None) -> str | None
 
 
 def post_agent(hook_input: dict) -> dict | None:
-    config = cfg.load_config(hook_input)
+    snap = settings.Snapshot(hook_input)
     tool_input = cfg.tool_input(hook_input)
     response = hook_input.get("tool_response")
     response = response if isinstance(response, dict) else {}
@@ -173,9 +171,9 @@ def post_agent(hook_input: dict) -> dict | None:
                                launched_as=agent_id if launched and isinstance(agent_id, str) else None)
     except OSError:
         pass
-    asked = _asked_for(config, tool_input, routed)
+    asked = _asked_for(snap.config, tool_input, routed)
     try:
-        health.ran(asked, ran_as, registry.family(config, ran_as), settings.resolve(config).force)
+        health.ran(asked, ran_as, registry.family(snap.config, ran_as), snap.options.force)
     except OSError:
         pass
     ledger.result(session_id, agent, asked, ran_as, response.get("status"), response.get("totalTokens"))
@@ -196,15 +194,15 @@ def agent_failed(hook_input: dict) -> dict | None:
     error = str(hook_input.get("error") or "")
     if not health.is_model_error(error, hook_input.get("is_interrupt")):
         return None
-    config = cfg.load_config(hook_input)
+    snap = settings.Snapshot(hook_input)
+    config = snap.config
     asked = _asked_for(config, tool_input, routed)
     if not asked:
         return None
     named = tool_input.get("model")
     newest = None
     if mod_active(hook_input.get("session_id")) and (not named or str(named).lower() == asked):
-        newest = registry.newest_id(config, asked, settings.resolve(config).provider,
-                                    allowlist.read(hook_input.get("session_id"), cfg.project_dir(hook_input)), health.load())
+        newest = registry.newest_id(config, asked, snap.options.provider, snap.allowed, snap.health)
     if newest:
         # The mod sent the family's newest ID, and this provider refused it: the alias runs
         # from now on, and the ID is tried again after the outage.
@@ -215,9 +213,7 @@ def agent_failed(hook_input: dict) -> dict | None:
             f"'{asked}' alias, as Claude Code resolves it for this provider."))
     fails = health.failed(asked, error)
     ledger.model_error(hook_input.get("session_id"), tool_input.get("subagent_type"), asked)
-    cap = settings.resolve(config).cap
-    allowed = allowlist.read(hook_input.get("session_id"), cfg.project_dir(hook_input))
-    usable = [n for n in registry.available(config, cap, allowed=allowed) if n != asked]
+    usable = [n for n in snap.usable if n != asked]
     if not usable:
         return None
     return _context("PostToolUseFailure", (
@@ -249,8 +245,8 @@ def post_edit(hook_input: dict) -> dict | None:
 
 
 def stop(hook_input: dict) -> dict | None:
-    config = cfg.load_config(hook_input)
-    reason = gates.before_stop(hook_input, config, settings.resolve(config))
+    snap = settings.Snapshot(hook_input)
+    reason = gates.before_stop(hook_input, snap.config, snap.options)
     return {"decision": "block", "reason": reason} if reason else None
 
 
@@ -282,38 +278,43 @@ def _mark_mod(session_id: str | None) -> None:
 def mod_spawn(hook_input: dict) -> dict | None:
     _mark_mod(hook_input.get("session_id"))
     # The spawn procedure reads agent_id as "the call comes from inside a subagent".
-    config = cfg.load_config(hook_input)
-    spawned = spawn.decide({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, config, settings.resolve(config))
+    snap = settings.Snapshot(hook_input)
+    spawned = spawn.decide({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, snap)
     spawn.record(spawned, "mod")
     decision = spawned.decision
-    newest = _newest(hook_input, decision)
+    newest = _newest(snap, decision)
     if decision["action"] != "rewrite" and not newest:
         return None
     return {"model": newest or decision["model"], "effort": decision["effort"], "reason": decision["reason"]}
 
 
-def _newest(hook_input: dict, decision: dict) -> str | None:
+def _newest(snap: settings.Snapshot, decision: dict) -> str | None:
     """The newest full ID to send in place of the decided family alias, on a provider whose
     alias lags. Only agent.spawn takes a full ID; the Agent tool's model takes an alias
     (https://code.claude.com/docs/en/sub-agents.md)."""
     if decision["action"] == "deny" or decision["version"]:
         return None
-    config = cfg.load_config(hook_input)
-    allowed = allowlist.read(hook_input.get("session_id"), cfg.project_dir(hook_input), hook_input.get("settings"))
-    return registry.newest_id(config, decision["model"], settings.resolve(config).provider, allowed, health.load())
+    return registry.newest_id(snap.config, decision["model"], snap.options.provider, snap.allowed, snap.health)
 
 
-def _effort_keeps_cache(options: settings.Settings, model: object) -> bool:
-    """Only these models, on Anthropic's API without a gateway or pre-release betas turned
-    off, keep the prompt cache when effort changes. A model with no known version, as after
-    /clear, gets the benefit of the doubt."""
-    if options.cloud or options.base_url or options.no_betas:
+def _effort_keeps_cache(config: dict, options: settings.Settings, model: object) -> bool:
+    """Only the models in `main.effort_keeps_cache`, on Anthropic's API without a gateway,
+    Mantle, pre-release betas turned off or prompt caching turned off for them, keep the prompt
+    cache when effort changes (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level).
+    A model with no known version, as after /clear, gets the benefit of the doubt."""
+    if options.cloud or options.mantle or options.base_url or options.no_betas or "" in options.cache_off:
         return False
     found = upstream.version_of(model)
     if not found:
         return True
     family, version = found
-    return version >= (5, 1) if family == "fable" else family in ("opus", "sonnet", "haiku") and version == (5, 5)
+    if family in options.cache_off:
+        return False
+    rule = ((config.get("main") or {}).get("effort_keeps_cache") or {}).get(family)
+    if not isinstance(rule, str) or not re.fullmatch(r"(?:>=)?\d+(?:\.\d+)*", rule):
+        return False
+    wanted = tuple(int(part) for part in rule.lstrip(">=").split("."))
+    return version >= wanted if rule.startswith(">=") else version == wanted
 
 
 def mod_turn(hook_input: dict) -> dict | None:
@@ -322,8 +323,8 @@ def mod_turn(hook_input: dict) -> dict | None:
     session_id = hook_input.get("session_id")
     _mark_mod(session_id)
     allowlist.remember(session_id, hook_input.get("settings"))
-    config = cfg.load_config(hook_input)
-    options = settings.resolve(config)
+    snap = settings.Snapshot(hook_input)
+    config, options = snap.config, snap.options
     if (options.mode != "auto" or not options.main_effort or options.effort_level
             or hook_input.get("first_party") is False):
         return None
@@ -333,7 +334,7 @@ def mod_turn(hook_input: dict) -> dict | None:
     # The mod's live model, when it is an ID; a record can miss a fallback to another model.
     model = hook_input.get("model")
     model = model if upstream.version_of(model) else session.model(session_id)
-    if not _effort_keeps_cache(options, model):
+    if not _effort_keeps_cache(config, options, model):
         return None
     level = seen.level
     effort = ((config.get("main") or {}).get("effort") or {}).get(level)
@@ -347,7 +348,7 @@ def mod_usage(hook_input: dict) -> dict | None:
     """One ledger row per turn, its cost the sum of its requests, each priced on its own."""
     usage = hook_input.get("usage")
     if isinstance(usage, dict) and isinstance(usage.get("model"), str):
-        ledger.usage(cfg.load_config(hook_input), hook_input.get("session_id"), hook_input.get("agent_id"),
+        ledger.usage(settings.Snapshot(hook_input).config, hook_input.get("session_id"), hook_input.get("agent_id"),
                      usage, hook_input.get("requests"))
     return None
 

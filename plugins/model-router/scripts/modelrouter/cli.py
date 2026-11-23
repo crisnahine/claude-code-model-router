@@ -20,7 +20,6 @@ import sys
 from pathlib import Path
 
 from . import health, hooks, learn, report, settings, store, upstream
-from . import config as cfg
 
 
 # Hook fields the handlers use as text: as file keys, paths, or things to match against.
@@ -100,19 +99,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"model-router {args.cmd}: {exc}", file=sys.stderr)
         return 0
 
-    config = cfg.load_config()
-    options = settings.resolve(config, recorded=True)
+    snap = settings.Snapshot(None, recorded=True)
+    options = snap.options
     if args.cmd == "policy":
-        print(report.policy(config, options))
+        print(report.policy(snap))
     elif args.cmd == "models":
         if args.reset:
             cleared = f"{_reset_health()}\n{_reset_feedback()}\n"
             if not args.json:
                 print(cleared)
-        print(json.dumps(report.models_data(config, options), indent=2) if args.json
-              else report.models(config, options))
+        print(json.dumps(report.models_data(snap), indent=2) if args.json
+              else report.models(snap))
     elif args.cmd == "explain":
-        print(report.explain(config, options, " ".join(args.text), args.agent))
+        print(report.explain(snap, " ".join(args.text), args.agent))
     elif args.cmd == "refresh":
         print(report.status(upstream.pending(upstream.refresh(options, force=args.force))))
     elif args.cmd == "status":

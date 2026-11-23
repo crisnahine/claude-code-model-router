@@ -67,15 +67,15 @@ def newest_id(config: dict, name: str | None, provider: str | None, allowed: all
 
 
 def available(config: dict, cap: str | None = None, *, allowed: allowlist.Allowlist | None = None,
-              table: health.Health | None = None) -> list[str]:
+              table: health.Health | None = None, trusted: list[str] | None = None) -> list[str]:
     """Usable models, weakest first: inside the cap, permitted by `allowed` (none: no
     allowlist filter), and healthy. The health filter is dropped rather than leave nothing
-    to route to; the allowlist's is not."""
+    to route to; the allowlist's is not. `trusted` is read when not given."""
     names = by_strength(config)
     if cap:
         # Under a cap, only models whose strength the user vouches for count: a model a
         # repository added carries the repository's own claim about its rank.
-        trusted = cfg.trusted_models(config) or names
+        trusted = (cfg.trusted_models(config) if trusted is None else trusted) or names
         names = [n for n in names if n in trusted and strength(config, n) <= strength(config, cap)]
     if allowed is not None:
         permitted = allowed.permitted(config)
