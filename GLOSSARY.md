@@ -22,7 +22,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Registry**: the shipped `config/models.json`, merged with the user's and a project's override files: which models exist and their relative strength, speed and cost, the level table, aliases and list prices (`config.py`, `registry.py`).
 
-**Override file**: `~/.claude/model-router.json` or a project's `.claude/model-router.json`, merged over the registry. The user's file is trusted in full. A project's is limited: it can turn routing down but never on, and it can't change the rank of a shipped model or one the user defined.
+**Override file**: `~/.claude/model-router.json` or a project's `.claude/model-router.json`, merged over the registry. The user's file is trusted in full. A project's is limited: it can turn routing down but never on, it can raise a level's `needs` or `effort` but never lower it below the shipped or the user's value, and it can't change the rank of a shipped model or one the user defined. A `needs` that isn't a finite number is dropped from every file.
 
 **Ladder**: the rule that turns a level, the priority and learned feedback into a model and an effort. When the model it lands on is weaker than the level needs, because a cap, the allowlist or model health left nothing at or above it, the pick gets one more effort step, at most `xhigh`, which makes up part of the loss. A pin, a caller's model or a rule that the cap lowers keeps the level's own effort.
 

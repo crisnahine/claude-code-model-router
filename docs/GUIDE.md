@@ -56,7 +56,7 @@ Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours
 }
 ```
 
-Your own file is trusted in full. A project's file can turn routing down to `advise` or `off`, set rules for agents, add models, and raise or lower any level's model and effort. So a repository you clone can make its subagents run on a stronger model or at more effort, and cost more. It can't turn routing on for someone who switched it off, re-rank a model that ships with the plugin or that you defined, or get any model past your cap. To bound what a cloned repository can spend, set `max_tier`: it caps the model, and the effort the project set stays.
+Your own file is trusted in full. A project's file can turn routing down to `advise` or `off`, set rules for agents, add models, and raise any level's model and effort. So a repository you clone can make its subagents run on a stronger model or at more effort, and cost more. It can't lower a level below the shipped value, or below yours when your file sets one: a lowering is dropped without an error. A level's `needs` that isn't a finite number is dropped from every file. It can't turn routing on for someone who switched it off, re-rank a model that ships with the plugin or that you defined, or get any model past your cap. To bound what a cloned repository can spend, set `max_tier`: it caps the model, and the effort the project set stays.
 
 A file may carry `"schema": 1`, the version of this shape; without it, it is read as version 1. A file written for a newer release still loads: the settings this release understands apply, and `/model-router:models` names the file. Older shapes keep working after an update ([ARCHITECTURE.md](ARCHITECTURE.md#compatibility)).
 

@@ -1,6 +1,7 @@
 """The registry file and the user's and a project's override files, merged."""
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -38,7 +39,13 @@ def _merge(base: dict, override: dict) -> dict:
 
 
 def _number(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    """A finite number: json.loads accepts NaN and Infinity, which would poison every comparison."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:  # an integer too large for a float
+        return False
 
 
 def parse_mode(value: Any) -> str | None:
@@ -111,6 +118,21 @@ def trusted_models(config: dict) -> list[str]:
     return sorted(vouched & set(config.get("models") or {}))
 
 
+def _effort_rank(effort: Any) -> int:
+    return EFFORTS.index(effort) if effort in EFFORTS else -1
+
+
+def _raises_only(project: dict, shipped: dict) -> None:
+    """A project's level may ask for a stronger model or more effort than the shipped or the user's
+    value, never less: a cloned repository can't lower a level the user relies on."""
+    for name, spec in (project.get("levels") or {}).items():
+        floor = shipped.get(name) or {}
+        if _number(floor.get("needs")) and spec.get("needs", floor["needs"]) < floor["needs"]:
+            del spec["needs"]
+        if "effort" in spec and _effort_rank(spec["effort"]) < _effort_rank(floor.get("effort")):
+            del spec["effort"]
+
+
 def newer_overrides(hook_input: dict | None = None) -> list[Path]:
     """Override files written for a newer release. They are still read, as far as _clean
     understands them: refusing one would drop its `routing_mode: off` and turn routing back on."""
@@ -130,7 +152,8 @@ def base_config() -> dict:
 def load_config(hook_input: dict | None = None) -> dict:
     """The shipped registry, then the user's own ~/.claude/model-router.json, then the
     project's .claude/model-router.json. The user's file is trusted in full. A project's
-    file may add a model but not re-rank one the user's cap is measured against."""
+    file may add a model but not re-rank one the user's cap is measured against, and may raise a
+    level's needs or effort but not lower them."""
     base = base_config()
     user_file = store.load_dict(store.claude_home() / OVERRIDE_FILE)
     user = _clean(user_file)
@@ -143,7 +166,9 @@ def load_config(hook_input: dict | None = None) -> dict:
         project["models"] = {k: v for k, v in project["models"].items()
                              if not any(k in t or t in k for t in trusted)}
     file_modes = [m for m in (user.pop("routing_mode", None), project.pop("routing_mode", None)) if m]
-    config = _merge(_merge(base, user), project)
+    shipped = _merge(base, user)
+    _raises_only(project, shipped.get("levels") or {})
+    config = _merge(shipped, project)
     # A model needs a strength to be routed to; drop half-defined ones.
     config["models"] = {k: v for k, v in (config.get("models") or {}).items()
                         if isinstance(v, dict) and _number(v.get("strength"))}

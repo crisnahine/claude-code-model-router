@@ -14,6 +14,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 
 - Complex runs on Opus at `high`, where it ran on Sonnet at `high`. Migrations, schema changes, performance work and security review get the stronger model. Hardest runs Opus at `xhigh`, so a redo of a complex call is a fresh subagent on Opus at more effort. The headline benchmark figures predate this ladder.
 - A brief that fixes or hunts a defect profiles at complex at least, not standard, and so does the person's request: a fix request raises the main turn's effort and counts toward the strong-agent check. Only "fix" and "debug" count as verbs ("the fix", "fixture" and "debug logging" don't); the other hunt verbs, such as "investigate" and "diagnose", match anywhere. A fix the brief rules out doesn't count.
+- A project's `.claude/model-router.json` may raise a level's `needs` or `effort` above the shipped (or your own) value and never lower it. A lowering is dropped with no error. A `needs` that isn't a finite number is dropped from every file.
 - The scout, the verifier and lookup run Haiku at `medium`, not `low`.
 - Complex needs Opus, so on a Sonnet or Haiku session a complex request gets the session note and one blocked Stop asking for `model-router:architect`. `strong_agent_gate` controls it and is on by default. `priority: quality` and a learned raise take complex to Fable.
 - Result rows in `ledger.jsonl` carry `models_used` when the run swapped models. Claude gets a one-line note when a risk brief's run swapped models.

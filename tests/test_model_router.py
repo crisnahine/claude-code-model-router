@@ -722,6 +722,41 @@ class Registry(Sandbox):
         (self.project / ".claude" / "model-router.json").write_text("{not json")
         self.assertEqual(len(cfg.load_config()["models"]), 4)
 
+    def test_a_project_file_may_raise_a_level_but_never_lower_it(self):
+        self.override({"levels": {"complex": {"needs": 2, "effort": "low"}, "hardest": {"needs": 4, "effort": "max"},
+                                  "lookup": {"effort": None}, "standard": {"needs": 2, "effort": "medium"}}})
+        levels = cfg.load_config()["levels"]
+        base = cfg.base_config()["levels"]
+        self.assertEqual(levels["complex"], base["complex"])  # both lowerings dropped, without an error
+        self.assertEqual(levels["hardest"], {"needs": 4, "effort": "max"})
+        self.assertEqual(levels["lookup"], base["lookup"])
+        self.assertEqual(levels["standard"], base["standard"])
+        d = self.decide("general-purpose", HARD)
+        self.assertEqual((d["model"], d["effort"]), ("opus", "high"))
+
+    def test_the_floor_a_project_file_cannot_pass_is_the_users_own_value(self):
+        self.override({"levels": {"complex": {"effort": "xhigh", "needs": 4}}}, user=True)
+        self.override({"levels": {"complex": {"effort": "high", "needs": 3}, "hardest": {"effort": "high"}}})
+        levels = cfg.load_config()["levels"]
+        self.assertEqual(levels["complex"], {"needs": 4, "effort": "xhigh"})
+        self.assertEqual(levels["hardest"]["effort"], "xhigh")
+        self.override({"levels": {"complex": {"effort": None}}}, user=True)
+        self.override({"levels": {"complex": {"effort": "high"}}})
+        self.assertEqual(cfg.load_config()["levels"]["complex"]["effort"], "high")  # raises a level the user left open
+
+    def test_non_finite_numbers_are_rejected_in_every_file(self):
+        nan, inf = float("nan"), float("inf")
+        spec = {"levels": {"complex": {"needs": nan}, "hardest": {"needs": inf}, "standard": {"needs": 10 ** 400}},
+                "models": {"saga": {"strength": inf, "speed": nan, "cost": 2}}, "prices": {"claude-x-1": {"input": inf}}}
+        for user in (True, False):
+            with self.subTest(user=user):
+                self.override(spec, user=user)
+                config = cfg.load_config()
+                self.assertEqual(config["levels"], cfg.base_config()["levels"])
+                self.assertNotIn("saga", config["models"])
+                self.assertNotIn("claude-x-1", config["prices"])
+                self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")
+
     def test_a_project_model_name_cannot_capture_a_trusted_models_ids(self):
         self.override({"models": {"claude": {"strength": 0.5}, "opus-5": {"strength": 9}, "saga": {"strength": 2}}})
         config = cfg.load_config()
@@ -1607,7 +1642,7 @@ class Router(Sandbox):
 
     def test_no_output_when_the_model_would_be_the_same(self):
         self.session_on("claude-sonnet-5-5")
-        self.override({"levels": {"standard": {"effort": None}}})
+        self.override({"levels": {"standard": {"effort": None}}}, user=True)
         self.assertIsNone(self.pre("general-purpose", BUILD))
         self.assertEqual(self.ledger()[-1]["action"], "keep")
 
