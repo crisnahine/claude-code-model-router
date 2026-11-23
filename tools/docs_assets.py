@@ -824,16 +824,16 @@ def diagram_stop_checks() -> str:
 
 # ---------------------------------------------------------------- the benchmark chart
 
-BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(config id, legend label, color class)])
+BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(role or config id, legend label, color class)])
     "claude-opus-5-5": ("Opus 5.5 session", [
-        ("plugin-next", "Model Router", "rt"),
+        ("router", "Model Router", "rt"),
         ("defaults", "Claude Code defaults", "faintbar"),
         ("haiku", "All subagents on Haiku", "r2"),
         ("haiku-high", "All subagents on Haiku, high", "r3"),
         ("opusplan", "opusplan (runs Sonnet when headless)", "r4"),
     ]),
     "sonnet": ("Sonnet 5.5 session", [
-        ("plugin-next", "Model Router", "rt"),
+        ("router", "Model Router", "rt"),
         ("defaults", "Claude Code defaults", "faintbar"),
         ("sonnet-medium", "All subagents on Sonnet, medium", "r2"),
         ("sonnet-high", "All subagents on Sonnet, high", "r3"),
@@ -844,21 +844,21 @@ BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(config id, 
 def bench_summary() -> dict:
     sys.path.insert(0, str(ROOT / "bench"))
     import analyze
-    return analyze.summary_data(analyze.load(analyze.default_paths()))
+    return analyze.figures(analyze.load(analyze.default_paths()))
 
 
-def bench_data():
-    data = bench_summary()
+def bench_data(data: dict):
     by_model = {s["model"]: s for s in data["sessions"]}
     sessions = []
     for session, (heading, series) in BENCH_SERIES.items():
         if session not in by_model:
             raise SystemExit(f"bench results have no runs for {session}")
+        roles = by_model[session]["roles"]
         rows = []
         for cls in by_model[session]["classes"]:
             values = []
             for config, _, _ in series:
-                cell = cls["configs"].get(config)
+                cell = cls["configs"].get(roles.get(config) or config)
                 if cell is None:
                     raise SystemExit(f"bench results have no {config} runs for {session}; update BENCH_SERIES")
                 cps = cell["cost_per_solved"]
@@ -875,8 +875,8 @@ def status_summary(rows) -> str:
     return ", ".join(f"{status} in {n} of {len(rows)}" for status, n in counts.items())
 
 
-def bench_chart(phone=False) -> str:
-    sessions, runs, date = bench_data()
+def bench_chart(data: dict, phone=False) -> str:
+    sessions, runs, date = bench_data(data)
     peak = max((v[2] for _, _, rows in sessions for _, vals, _ in rows for v in vals if v[2] is not None), default=0)
     axis = max(0.1, -(-peak // 0.1) * 0.1)
     w = 520 if phone else 920
@@ -978,10 +978,10 @@ CLASS_WORDS = {"security-review": "security review", "root-cause": "root cause"}
 BENCH_ALT = (
     "Cost per solved task by task class, from docs/BENCHMARKS.md, {per_cell} runs per class and configuration. "
     "On an Opus 5.5 session the router cost less than Claude Code's defaults in {opus.below.defaults} classes, "
-    "for example bugfix {opus.cell.bugfix.plugin-next} against {opus.cell.bugfix.defaults}, but more than the "
+    "for example bugfix {opus.cell.bugfix.router} against {opus.cell.bugfix.defaults}, but more than the "
     "cheapest baseline in {opus.status.FAIL} of {opus.classes} (FAIL): opusplan, which runs Sonnet throughout when "
     "headless, in {opus.best_count.opusplan} classes, and every subagent on Haiku in {opus.best.haiku} and "
-    "{opus.best.haiku-high}, for example bugfix {opus.cell.bugfix.plugin-next} against "
+    "{opus.best.haiku-high}, for example bugfix {opus.cell.bugfix.router} against "
     "{opus.cell.bugfix.opusplan} for opusplan. On a Sonnet session the router is cheapest in {sonnet.status.PASS} of "
     "{sonnet.classes} classes (PASS) and costs more than the best baseline in {sonnet.status.FAIL} (FAIL), from "
     "{sonnet.behind.min}% more in {sonnet.behind.min_class} to {sonnet.behind.max}% more in {sonnet.behind.max_class}. "
@@ -1004,54 +1004,51 @@ def session_figures(name: str, session: dict) -> dict:
     f = {}
     router = session["router"]
     classes = session["classes"]
+    roles = {role: cfg for role, cfg in session["roles"].items() if cfg}
     if session.get("plugin_ref"):
         f["commit"] = session["plugin_ref"]
         f["commit_code"] = f"`{session['plugin_ref']}`"  # the span must sit outside the code span
+    f["router_code"] = f"`{router}`"  # the span must sit outside the code span
     f["classes"] = str(len(classes))
+    f["saturated"] = str(session["saturated"])
     for status in ("PASS", "FAIL", "PARTIAL"):
         f[f"status.{status}"] = str(sum(c["status"] == status for c in classes))
     passed = [class_word(c["class"]) for c in classes if c["status"] == "PASS"]
     if passed:
         f["pass_classes"] = words(passed)
-    cps = lambda c, cfg: c["configs"][cfg]["cost_per_solved"]  # noqa: E731
+    # The router is spelled by its role, never by its id; every other configuration by its id, and some by a role too.
+    key = lambda cfg: "router" if cfg == router else cfg  # noqa: E731
     for c in classes:
         for cfg, cell in c["configs"].items():
             v = cell["cost_per_solved"]
-            f[f"cell.{c['class']}.{cfg}"] = "n/a" if v is None else f"${v:.4f}"
-            f[f"cell_solved.{c['class']}.{cfg}"] = f"{cell['solved']} of {cell['runs']}"
+            f[f"cell.{c['class']}.{key(cfg)}"] = "n/a" if v is None else f"${v:.4f}"
+            f[f"cell_solved.{c['class']}.{key(cfg)}"] = f"{cell['solved']} of {cell['runs']}"
     pooled = session["pooled"]
-    for cfg, p in pooled.items():
-        f[f"runs.{cfg}"] = str(p["runs"])
-        f[f"solved.{cfg}"] = f"{p['solved']} of {p['runs']}"
+    spelled = {**{key(cfg): cfg for cfg in pooled}, **roles}
+    for k, cfg in spelled.items():
+        p = pooled[cfg]
+        f[f"runs.{k}"] = str(p["runs"])
+        f[f"solved.{k}"] = f"{p['solved']} of {p['runs']}"
         if p["solved"]:
-            f[f"pooled.{cfg}"] = f"${p['cost_usd'] / p['solved']:.3f}"
-    pr = pooled.get(router)
-    pooled_router = pr["cost_usd"] / pr["solved"] if pr and pr["solved"] else None
-    baselines = sorted({cfg for c in classes for cfg in c["differences"]})
-    for cfg in baselines:
-        if pooled_router is not None and cfg in pooled and pooled[cfg]["solved"]:
-            f[f"pooled_less.{cfg}"] = pct(1 - pooled_router / (pooled[cfg]["cost_usd"] / pooled[cfg]["solved"]))
-        # A class with too few runs, or cells that differ, is no win and no loss, so its interval is never read.
-        diffs = [(c, c["differences"][cfg]) for c in classes
-                 if cfg in c["differences"] and (c["status"] != "PARTIAL" or c["reason"].startswith("not significant"))]
-        below = [c for c, (lo, hi) in diffs if hi < 0]
-        f[f"below.{cfg}"] = str(len(below))
-        level = [class_word(c["class"]) for c, (lo, hi) in diffs if lo <= 0 <= hi]
-        if level:
-            f[f"level.{cfg}"] = words(level)
-        less = [1 - cps(c, router) / cps(c, cfg) for c in below if cps(c, cfg) and cps(c, router) is not None]
-        if less:
-            f[f"less.{cfg}.min"], f[f"less.{cfg}.max"] = pct(min(less)), pct(max(less))
-        best = [class_word(c["class"]) for c in classes if c["best_baseline"] == cfg and c["status"] == "FAIL"]
-        if best:
-            f[f"best.{cfg}"], f[f"best_count.{cfg}"] = words(best), str(len(best))
-    behind = [(cps(c, router) / cps(c, c["best_baseline"]) - 1, class_word(c["class"]))
-              for c in classes if c["status"] == "FAIL" and c["best_baseline"]
-              and cps(c, router) is not None and cps(c, c["best_baseline"])]
-    if behind:
-        lo, hi = min(behind, key=lambda b: b[0]), max(behind, key=lambda b: b[0])
-        f["behind.min"], f["behind.min_class"] = pct(lo[0]), lo[1]
-        f["behind.max"], f["behind.max_class"] = pct(hi[0]), hi[1]
+            f[f"pooled.{k}"] = f"${p['cost_usd'] / p['solved']:.3f}"
+    against = {**{cfg: cfg for cfg in session["against"]}, **{r: roles[r] for r in ("defaults", "best", "strongest")
+                                                              if r in roles and roles[r] in session["against"]}}
+    for k, cfg in against.items():
+        a = session["against"][cfg]
+        if cfg in session["pooled_less"]:
+            f[f"pooled_less.{k}"] = pct(session["pooled_less"][cfg])
+        f[f"below.{k}"] = str(len(a["below"]))
+        if a["level"]:
+            f[f"level.{k}"] = words([class_word(c) for c in a["level"]])
+        if a["less"]:
+            f[f"less.{k}.min"], f[f"less.{k}.max"] = pct(a["less"][0]), pct(a["less"][1])
+    for cfg, a in session["against"].items():
+        if a["best_in"]:
+            f[f"best.{cfg}"], f[f"best_count.{cfg}"] = words([class_word(c) for c in a["best_in"]]), str(len(a["best_in"]))
+    if session["behind"]:
+        (lo, lo_class), (hi, hi_class) = session["behind"]["min"], session["behind"]["max"]
+        f["behind.min"], f["behind.min_class"] = pct(lo), class_word(lo_class)
+        f["behind.max"], f["behind.max_class"] = pct(hi), class_word(hi_class)
     f["trace"] = "; ".join(class_trace(c, router) for c in classes)
     return {f"{name}.{k}": v for k, v in f.items()}
 
@@ -1076,8 +1073,7 @@ def bench_figures(data: dict) -> dict:
     f = {"runs": f"{data['runs']:,}", "usd": f"${data['usd']:,.2f}",
          "dates": " to ".join(dict.fromkeys(data["dates"])),
          "claude": ", ".join(v.replace(" (Claude Code)", "") for v in data["claude_versions"]),
-         "per_cell": " or ".join(str(n) for n in sorted({
-             cell["runs"] for s in data["sessions"] for c in s["classes"] for cell in c["configs"].values()}))}
+         "per_cell": " or ".join(str(n) for n in data["per_cell"])}
     for s in data["sessions"]:
         if s["model"] in SESSION_NAMES:
             f.update(session_figures(SESSION_NAMES[s["model"]], s))
@@ -1246,7 +1242,8 @@ SITE_ASSETS = ["logo-mark.svg", "logo.svg", "routing-call.svg", "badge-version.s
 def build() -> dict:
     LAYOUT.clear()
     check_ladder_against_registry()
-    figures = bench_figures(bench_summary())
+    bench = bench_summary()
+    figures = bench_figures(bench)
     v = version()
     files = {}
     assets = {}
@@ -1260,8 +1257,8 @@ def build() -> dict:
     assets["two-paths.svg"] = diagram_two_paths()
     assets["precedence.svg"] = diagram_precedence()
     assets["stop-checks.svg"] = diagram_stop_checks()
-    assets["benchmark.svg"] = bench_chart()
-    assets["benchmark-phone.svg"] = bench_chart(phone=True)
+    assets["benchmark.svg"] = bench_chart(bench)
+    assets["benchmark-phone.svg"] = bench_chart(bench, phone=True)
     assets["social-preview.svg"] = social_preview()
     panel, css, ph = ladder_panel(1, 1, 518, prefix="c")
     assets["routing-call.svg"] = svg(520, round(ph) + 2, "One agent call, routed and redone", HERO_LABEL, panel, css)

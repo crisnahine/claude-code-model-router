@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import io
 import re
 import sys
@@ -24,16 +25,29 @@ def check() -> tuple:
     return code, err.getvalue()
 
 
-def bench_summary(solved=3, cps=0.12344, runs=4):
-    """A summary_data dict with one session per BENCH_SERIES key and one class that ran every series config."""
-    sessions = []
+def fixture_results(solved=3, cps=0.12344, runs=4, router="mine", cls="lookup"):
+    """analyze.Results for a router and every configuration BENCH_SERIES names, one task class, on each session."""
+    rows, ids = [], {}
     for model, (_, series) in docs_assets.BENCH_SERIES.items():
-        configs = {c: {"runs": runs, "solved": runs, "cost_per_solved": 0.2} for c, _, _ in series}
-        configs["plugin-next"] = {"runs": runs, "solved": solved, "cost_per_solved": cps}
-        sessions.append({"model": model, "router": "plugin-next", "plugin_ref": None, "pooled": {},
-                         "classes": [{"class": "lookup", "status": "PASS", "configs": configs}]})
-    return {"runs": 12, "usd": 1.0, "dates": ["2030-01-01", "2030-01-02"], "claude_versions": ["2.1.0"],
-            "sessions": sessions}
+        ids[model] = [c for c, _, _ in series if c != "router"]
+        for config in [router, *ids[model]]:
+            ok, cost = (solved, cps * solved / runs) if config == router else (runs, 0.2)
+            rows += [{"config": config, "class": cls, "task": f"{cls}-1", "total_cost_usd": cost, "passed": i < ok,
+                      "main_model": model, "started_at": "2030-01-01T10:00:00+00:00", "claude_version": "2.1.0"}
+                     for i in range(runs)]
+    configs = [{"id": router, "plugin": True, "env": {}}, {"id": "defaults", "plugin": False, "env": {}},
+               *({"id": c, "plugin": False, "env": {"X": "1"}} for c in sorted({c for v in ids.values() for c in v})
+                 if c != "defaults")]
+    return analyze.Results(files=[], rows=rows, stale=[], broken=[], aside=[], archive=[], configs=configs, tasks=[],
+                           registry={}, routers=frozenset({router}), own_model=frozenset(), forced={})
+
+
+def bench_data(**kwargs):
+    return analyze.figures(fixture_results(**kwargs))
+
+
+def committed_data():
+    return analyze.figures(analyze.load(analyze.default_paths()))
 
 
 class DocsAssets(unittest.TestCase):
@@ -50,25 +64,33 @@ class DocsAssets(unittest.TestCase):
         self.assertTrue(head.startswith(docs_pages.HEAD_START) and head.endswith(docs_pages.HEAD_END))
         self.assertIs(analyze.HEAD_END, docs_pages.HEAD_END)
 
-    def test_the_chart_draws_from_the_summary_not_the_page(self):
-        with mock.patch.object(docs_assets, "bench_summary", return_value=bench_summary()):
-            svg = docs_assets.bench_chart()
+    def test_the_chart_draws_from_the_figures_not_the_page(self):
+        data = bench_data()
+        svg = docs_assets.bench_chart(data)
         self.assertIn("$0.1234 (3 of 4)", svg)
-        self.assertIn("12 runs on 2030-01-01", svg)
+        self.assertIn(f"{data['runs']} runs on 2030-01-01", svg)
 
     def test_a_cell_with_nothing_solved_is_not_drawn_as_not_run(self):
-        with mock.patch.object(docs_assets, "bench_summary", return_value=bench_summary(0, None)):
-            svg = docs_assets.bench_chart()
+        svg = docs_assets.bench_chart(bench_data(solved=0))
         self.assertIn("none solved (0 of 4)", svg)
         self.assertNotIn("not run", svg)
 
     def test_a_series_configuration_with_no_runs_stops_the_build(self):
-        data = bench_summary()
-        del data["sessions"][0]["classes"][0]["configs"]["defaults"]
-        with mock.patch.object(docs_assets, "bench_summary", return_value=data):
-            with self.assertRaises(SystemExit) as caught:
-                docs_assets.bench_chart()
+        results = fixture_results()
+        results = dataclasses.replace(results, rows=[r for r in results.rows if r["config"] != "defaults"])
+        data = analyze.figures(results)
+        with self.assertRaises(SystemExit) as caught:
+            docs_assets.bench_chart(data)
         self.assertIn(f"no defaults runs for {data['sessions'][0]['model']}; update BENCH_SERIES", str(caught.exception))
+
+    def test_renaming_the_router_changes_no_figure_but_its_own_name(self):
+        old, new = bench_data(), bench_data(router="renamed")
+        self.assertEqual(docs_assets.bench_chart(old), docs_assets.bench_chart(new))
+        a, b = docs_assets.bench_figures(old), docs_assets.bench_figures(new)
+        named = lambda f: {k: v for k, v in f.items() if not k.endswith((".router_code", ".trace"))}  # noqa: E731
+        self.assertEqual(named(a), named(b))
+        self.assertEqual(b["opus.router_code"], "`renamed`")
+        self.assertFalse([k for k in b if "renamed" in k])
 
     def test_the_committed_assets_match_the_script(self):
         code, err = check()
@@ -86,38 +108,38 @@ class DocsAssets(unittest.TestCase):
         self.assertIn("README.md: out of date", err)
 
     def test_the_figures_from_the_committed_results(self):
-        f = docs_assets.bench_figures(docs_assets.bench_summary())
+        f = docs_assets.bench_figures(committed_data())
         self.assertEqual((f["runs"], f["usd"], f["dates"], f["opus.commit"]),
                          ("1,120", "$134.97", "2026-11-22 to 2026-11-23", "780ee86"))
         self.assertEqual(f["opus.commit_code"], "`780ee86`")
-        self.assertEqual((f["opus.pooled.plugin-next"], f["opus.pooled.defaults"], f["opus.pooled_less.defaults"]),
+        self.assertEqual((f["opus.pooled.router"], f["opus.pooled.defaults"], f["opus.pooled_less.defaults"]),
                          ("$0.121", "$0.151", "20"))
         self.assertEqual((f["opus.below.defaults"], f["opus.less.defaults.min"], f["opus.less.defaults.max"],
                           f["opus.level.defaults"]), ("5", "18", "32", "design"))
         self.assertEqual((f["opus.behind.min"], f["opus.behind.max"], f["opus.status.FAIL"]), ("60", "144", "6"))
         self.assertEqual((f["sonnet.status.PASS"], f["sonnet.behind.min"], f["sonnet.behind.max"],
-                          f["sonnet.solved.plugin-next"], f["sonnet.solved.defaults"]),
+                          f["sonnet.solved.router"], f["sonnet.solved.defaults"]),
                          ("0", "7", "63", "69 of 70", "68 of 70"))
         self.assertNotIn("sonnet.pass_classes", f)
 
+    def test_the_figures_are_keyed_by_role(self):
+        f = docs_assets.bench_figures(committed_data())
+        self.assertEqual((f["opus.pooled.best"], f["opus.pooled.strongest"], f["opus.solved.best"]),
+                         (f["opus.pooled.opusplan"], f["opus.pooled.fable-high"], "69 of 70"))
+        self.assertEqual((f["opus.saturated"], f["sonnet.saturated"], f["opus.router_code"]), ("5", "0", "`plugin-next`"))
+        self.assertFalse([k for k in f if "plugin-next" in k])
+
     def test_the_trace_text_lists_every_baseline_with_its_interval(self):
-        data = bench_summary()
-        del data["sessions"][1:]
-        session = data["sessions"][0]
-        session["pooled"] = {"plugin-next": {"runs": 10, "solved": 9, "cost_usd": 1.0},
-                             "defaults": {"runs": 10, "solved": 10, "cost_usd": 1.0}}
-        session["classes"] = [{
-            "class": "root-cause", "status": "FAIL", "best_baseline": "defaults",
-            "configs": {"plugin-next": {"runs": 10, "solved": 9, "cost_per_solved": 0.2},
-                        "defaults": {"runs": 10, "solved": 10, "cost_per_solved": 0.1}},
-            "differences": {"defaults": (0.05, 0.15)}}]
-        f = docs_assets.bench_figures(data)
-        self.assertEqual(f["opus.trace"],
-                         "root cause FAIL (router $0.200, 9 of 10 solved; `defaults` $0.100 (+0.050 to +0.150))")
+        data = bench_data(solved=9, cps=0.2, runs=10, cls="root-cause")
+        trace = docs_assets.bench_figures(data)["opus.trace"]
+        self.assertRegex(trace, r"^root cause (FAIL|PARTIAL) \(router \$0\.200, 9 of 10 solved; `\w[\w-]*` \$0\.200 "
+                                r"\([+-]\d\.\d{3} to [+-]\d\.\d{3}\)")
+        for cfg in ("defaults", "haiku", "haiku-high", "opusplan"):
+            self.assertRegex(trace, rf"`{cfg}` \$0\.200 \([+-]\d\.\d{{3}} to [+-]\d\.\d{{3}}\)")
 
     def test_a_changed_figure_makes_the_docs_stale(self):
         real = docs_assets.bench_figures(docs_assets.bench_summary())
-        with mock.patch.object(docs_assets, "bench_figures", return_value={**real, "opus.pooled.plugin-next": "$9.999"}):
+        with mock.patch.object(docs_assets, "bench_figures", return_value={**real, "opus.pooled.router": "$9.999"}):
             code, err = check()
         self.assertEqual(code, 1)
         for path in ("README.md", "docs/FAQ.md", "site/index.html", "docs/TRACEABILITY.md"):
@@ -133,8 +155,8 @@ class DocsAssets(unittest.TestCase):
 
     def patched_build(self):
         real = docs_assets.bench_figures(docs_assets.bench_summary())
-        with mock.patch.object(docs_assets, "bench_figures", return_value={**real, "opus.pooled.plugin-next": "$9.999",
-                                                                          "opus.cell.bugfix.plugin-next": "$9.9999"}):
+        with mock.patch.object(docs_assets, "bench_figures", return_value={**real, "opus.pooled.router": "$9.999",
+                                                                          "opus.cell.bugfix.router": "$9.9999"}):
             return docs_assets.build()
 
     def test_the_figure_alt_text_follows_the_figures(self):

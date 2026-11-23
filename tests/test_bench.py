@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import importlib.util
 import io
 import json
@@ -195,7 +196,7 @@ class Analysis(unittest.TestCase):
         res = Path(tmp) / "results"
         res.mkdir(exist_ok=True)
         data = rows("plugin", "lookup", [0.1, 0.2], [True, False]) + rows("defaults", "lookup", [0.3, 0.4], [True, True])
-        records = [dict(r, main_model="sonnet", started_at="2026-11-22T10:00:00+00:00", claude_version="2.1.330",
+        records = [dict(r, main_model="fixture-model", started_at="2026-11-22T10:00:00+00:00", claude_version="2.1.330",
                         models={}) for r in data]
         path = res / "a-lookup-2026-11-22.jsonl"
         path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
@@ -272,6 +273,85 @@ class Analysis(unittest.TestCase):
                 pages.append(out.read_text(encoding="utf-8"))
             self.assertEqual(pages[0], pages[1])
             self.assertEqual(pages[1], pages[2])
+
+    @classmethod
+    def committed(cls):
+        if not hasattr(cls, "_committed"):
+            cls._committed = analyze.load(analyze.default_paths())
+        return cls._committed
+
+    def changed(self, edit):
+        """The committed results with `edit(row)` applied to every row, as a new Results."""
+        rows = [dict(r) for r in self.committed().rows]
+        for row in rows:
+            edit(row)
+        return dataclasses.replace(self.committed(), rows=rows)
+
+    def session(self, results, model=None):
+        return next(s for s in analyze.figures(results)["sessions"] if s["model"] == (model or analyze.OPUS))
+
+    def test_figures_are_keyed_by_role(self):
+        opus = self.session(self.committed())
+        self.assertEqual(opus["roles"], {"router": "plugin-next", "defaults": "defaults", "best": "opusplan",
+                                         "strongest": "fable-high"})
+        self.assertEqual((opus["saturated"], opus["against"]["defaults"]["level"]), (5, ["design"]))
+        self.assertEqual(opus["pooled_less"]["defaults"], 1 - (opus["pooled"]["plugin-next"]["cost_usd"] / 70)
+                         / (opus["pooled"]["defaults"]["cost_usd"] / 70))
+
+    def test_the_defaults_are_the_configuration_with_no_plugin_and_no_forced_model(self):
+        base = self.committed()
+        rename = lambda row: dict(row, config="plain") if row["config"] == "defaults" else row  # noqa: E731
+        results = dataclasses.replace(
+            base, rows=[rename(r) for r in base.rows],
+            configs=[dict(c, id="plain") if c["id"] == "defaults" else c for c in base.configs])
+        self.assertEqual(self.session(results)["roles"]["defaults"], "plain")
+
+    def test_renaming_the_router_moves_no_role_fact_or_status(self):
+        base = self.committed()
+        swap = lambda name: "renamed" if name == "plugin-next" else name  # noqa: E731
+        results = dataclasses.replace(
+            base, rows=[dict(r, config=swap(r["config"])) for r in base.rows],
+            configs=[dict(c, id=swap(c["id"])) for c in base.configs],
+            routers=frozenset(map(swap, base.routers)))
+        old, new = analyze.figures(base), analyze.figures(results)
+        for a, b in zip(old["sessions"], new["sessions"]):
+            self.assertEqual((b["router"], b["roles"]["router"], b["facts"]), ("renamed", "renamed", a["facts"]))
+            self.assertEqual((a["pooled_less"], a["behind"]), (b["pooled_less"], b["behind"]))
+            self.assertEqual([c["status"] for c in a["classes"]], [c["status"] for c in b["classes"]])
+
+    def test_the_facts_the_docs_state_hold_for_the_committed_results(self):
+        data = analyze.figures(self.committed())
+        self.assertEqual(analyze.broken_facts(data), [])
+        self.assertEqual({s["model"]: len(s["facts"]) for s in data["sessions"]}, {analyze.OPUS: 14, analyze.SONNET: 9})
+
+    def test_a_fact_turning_false_fails_the_check(self):
+        first = []
+
+        def lose_a_run(row):
+            if row["config"] == "plugin-next" and row["main_model"] == analyze.OPUS and not first:
+                first.append(row)
+                row["passed"] = False
+
+        results = self.changed(lose_a_run)
+        problems = analyze.check(results, Path("page.md"), analyze.build_page(results))
+        self.assertIn(f"{analyze.OPUS}: {analyze.FACT_TEXT['solved_all']} is false now", problems)
+        self.assertEqual(analyze.check(self.committed(), Path("page.md"), analyze.build_page(self.committed())), [])
+
+    def test_each_claim_about_the_opus_session_breaks_on_its_own_row(self):
+        scale = lambda config, by: lambda row: row.update(total_cost_usd=row["total_cost_usd"] * by) \
+            if row["config"] == config else None  # noqa: E731
+        drop = lambda row: row.update(config="gone") if row["config"] == "advisor" else None  # noqa: E731
+        for name, edit in (("strongest_beaten", scale("fable-high", 0.1)), ("not_cheapest", scale("plugin-next", 0.1)),
+                           ("cheaper_everywhere", scale("opusplan", 10)), ("ran", drop)):
+            with self.subTest(name):
+                facts = self.session(self.changed(edit))["facts"]
+                self.assertFalse(facts[name])
+
+    def test_a_session_the_docs_say_nothing_about_has_no_facts(self):
+        results = self.changed(lambda row: row.update(main_model="elsewhere"))
+        data = analyze.figures(results)
+        self.assertEqual([s["facts"] for s in data["sessions"]], [{}])
+        self.assertEqual(analyze.broken_facts(data), [])
 
     def test_main_reads_configurations_and_tasks_once(self):
         with tempfile.TemporaryDirectory() as tmp:
