@@ -30,9 +30,10 @@ PASTED = "<pasted_content"
 # The framings Claude Code wraps a turn in that isn't typed: a background task's notice, a typed command's or a `!`
 # shell's echo, a local command's output, hook context. Observed, not documented.
 MACHINE_TAG = re.compile(r"<(?:task-notification|command-[\w-]+|bash-[\w-]+|local-command-[\w-]+|system-reminder)\b")
-# Nothing but tag elements is framing too, whatever the tag. Each element ends at its first closing tag, so a long
-# prompt can't make the match backtrack.
-ELEMENTS = re.compile(r"(?:\s*<([\w-]+)[^>]*>(?:(?!</\1\s*>).)*</\1\s*>)+\s*", re.S)
+# Nothing but tag elements is framing too, when every tag name is hyphenated, as each framing seen so far is:
+# a person's prompt written in XML tags (<task>, <instructions>) has plain names. Each element ends at its first
+# closing tag and the name's parts are capped, so a long prompt can't make the match backtrack.
+ELEMENTS = re.compile(r"(?:\s*<([A-Za-z0-9_]{1,32}(?:-\w{1,32}){1,8})[^>]*>(?:(?!</\1\s*>).)*</\1\s*>)+\s*", re.S)
 
 
 def is_delivered(text: object) -> bool:
