@@ -19,14 +19,18 @@ PREFIX = work + os.sep
 LOCK_WAIT = 5
 JOIN_WAIT = 20
 
-# name: (call the barrier waits on, seconds it waits, one list of calls per thread)
+# name: (call the barrier waits on, seconds it waits, one list of calls per thread). "get:a" is a get of the key a.
+# A lock held while its holder waits at the barrier is let go as soon as another thread blocks on it, so the seconds
+# only bound a wait for a thread that never comes.
 PLANS = {
-    "A": ("get", 1, [[("credit", "w", 30)], [("credit", "w", 50)]]),
+    "A": ("get", 5, [[("credit", "w", 30)], [("credit", "w", 50)]]),
     "B": ("get", 10, [[("credit", "x", 10)], [("credit", "y", 20)]]),
-    "C": ("lock", 1, [[("transfer", "w1", "w2", 30)], [("transfer", "w2", "w1", 50)]]),
-    "D": ("get", 1, [[("transfer", "w", "a", 70)], [("transfer", "w", "b", 70)]]),
-    "E": (None, 0, [[("transfer", "w", "w", 40), ("transfer", "w", "w", 140)]]),
-    "F": ("get", 1, [[("transfer", "w", "v", 60)], [("credit", "w", 25)]]),
+    "C": ("lock", 5, [[("transfer", "w1", "w2", 30)], [("transfer", "w2", "w1", 50)]]),
+    "D": ("get", 5, [[("transfer", "w", "a", 70)], [("transfer", "w", "b", 70)]]),
+    "E": (None, 0, [[("transfer", "w", "w", 40), ("transfer", "w", "w", 140), ("transfer", "w", "w", 100)]]),
+    "F": ("get", 5, [[("transfer", "w", "v", 60)], [("credit", "w", 25)]]),
+    "G": ("get", 10, [[("transfer", "w1", "w2", 30)], [("transfer", "w3", "w4", 20)]]),
+    "H": ("get:a", 5, [[("transfer", "w", "a", 30)], [("credit", "a", 25)]]),
 }
 
 
@@ -35,7 +39,7 @@ class Store:
     __slots__ = ("data", "mutex", "locks", "kind", "seconds", "barrier", "seen", "met", "deadlock")
 
     def __init__(self, balances, kind, seconds):
-        self.data = dict(balances)
+        self.data = {k: v for k, v in balances.items() if v is not None}  # None: the key starts absent
         self.mutex = threading.Lock()
         self.locks = {}
         self.kind, self.seconds = kind, seconds
@@ -43,8 +47,8 @@ class Store:
         self.seen = threading.local()
         self.met = self.deadlock = False
 
-    def rendezvous(self, kind):
-        if kind != self.kind or getattr(self.seen, "done", False):
+    def rendezvous(self, kind, key):
+        if self.kind not in (kind, f"{kind}:{key}") or getattr(self.seen, "done", False):
             return
         self.seen.done = True
         try:
@@ -56,7 +60,7 @@ class Store:
     def get(self, key):
         with self.mutex:
             value = self.data.get(key)
-        self.rendezvous("get")  # the read is done, the caller doesn't have it yet
+        self.rendezvous("get", key)  # the read is done, the caller doesn't have it yet
         return value
 
     def put(self, key, value):
@@ -74,11 +78,13 @@ class Store:
     def lock(self, key):
         with self.mutex:
             held = self.locks.setdefault(key, threading.Lock())
-        if not held.acquire(timeout=LOCK_WAIT):
-            self.deadlock = True
-            raise TimeoutError(f"lock {key!r} still held after {LOCK_WAIT} s")
+        if not held.acquire(blocking=False):
+            self.barrier.abort()  # the holder may be waiting at the barrier for a thread that is now stuck here
+            if not held.acquire(timeout=LOCK_WAIT):
+                self.deadlock = True
+                raise TimeoutError(f"lock {key!r} still held after {LOCK_WAIT} s")
         try:
-            self.rendezvous("lock")
+            self.rendezvous("lock", key)
             yield
         finally:
             held.release()
@@ -128,11 +134,13 @@ try:
     failure = None
 except BaseException as e:
     copies, failure = None, f"{type(e).__name__}: {e}"
+stuck = False
 for phase in payload["phases"]:
     try:
-        if failure:
-            raise RuntimeError(failure)
+        if failure or stuck:
+            raise RuntimeError(failure or "not run after a phase that never ended")
         out[phase["name"]] = run(phase["name"], phase["balances"], copies)
+        stuck = out[phase["name"]]["hung"]
     except BaseException as e:
         out[phase["name"]] = {"error": f"{type(e).__name__}: {e}", "balances": None, "raised": [], "deadlock": False,
                               "met": False, "hung": False}
