@@ -413,6 +413,24 @@ class Recorder(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(run.ledger_rows({"CLAUDE_CODE_PLUGIN_CACHE_DIR": tmp}))
 
+    def test_a_ledger_that_cannot_be_read_gives_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"CLAUDE_CODE_PLUGIN_CACHE_DIR": tmp}
+            ledger = run.plugin_data_dir(env) / "ledger.jsonl"
+            ledger.parent.mkdir(parents=True)
+            ledger.write_bytes(b'{"event": "spawn"}\n\xff\xfe\n')
+            self.assertIsNone(run.ledger_rows(env))
+            ledger.write_text('{"event": "spawn"}\n', encoding="utf-8")
+            real = Path.read_text
+
+            def deny(path, *args, **kwargs):
+                if path.name == "ledger.jsonl":
+                    raise PermissionError(13, "denied")
+                return real(path, *args, **kwargs)
+
+            with unittest.mock.patch.object(Path, "read_text", deny):
+                self.assertIsNone(run.ledger_rows(env))
+
     def test_ledger_rows_give_spend_by_agent_and_spawns(self):
         self.assertEqual(run.spend_by_agent(LEDGER, AGENT_TYPES),
                          {"model-router:implementer": 0.07, "model-router:verifier": 0.01, "main": 0.03})

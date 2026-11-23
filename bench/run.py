@@ -170,9 +170,16 @@ def session_dir(work: Path, env: dict) -> Path:
 
 
 def ledger_rows(env: dict) -> list[dict] | None:
-    """The router's ledger rows for a run, in order; None when it kept no ledger. Lines that aren't objects are skipped."""
+    """The router's ledger rows for a run, in order; None when it kept no ledger or the file can't be read. Lines that
+    aren't objects are skipped."""
     path = plugin_data_dir(env) / "ledger.jsonl"
-    return read_ledger(path=path) if path.is_file() else None
+    if not path.is_file():
+        return None
+    try:
+        path.read_text(encoding="utf-8")  # read_ledger gives [] for an unreadable file and raises on invalid UTF-8
+    except (OSError, ValueError):
+        return None
+    return read_ledger(path=path)
 
 
 def agent_types(work: Path, env: dict) -> dict[str, str]:
