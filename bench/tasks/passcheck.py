@@ -75,3 +75,20 @@ def tests_pass(work: Path, shipped: Path, test: str) -> bool:
     res = subprocess.run([sys.executable, "-I", "-c", LAUNCHER, str(work), test[:-3]], cwd=work,
                          capture_output=True, text=True, timeout=60)
     return res.returncode == 0 and re.search(r"Ran [1-9]\d* tests?", res.stderr) is not None and "OK" in res.stderr
+
+
+def probe(work: Path, script: Path, payload, timeout: int = 45):
+    """Run script in an isolated child on the work dir, with payload as JSON on stdin; return the JSON its last stdout
+    line holds, or None on a timeout, a non-zero exit, no output or a last line that isn't JSON."""
+    try:
+        res = subprocess.run([sys.executable, "-I", str(script), str(work)], cwd=work, input=json.dumps(payload),
+                             capture_output=True, text=True, timeout=timeout)
+    except (subprocess.TimeoutExpired, UnicodeDecodeError):
+        return None
+    lines = res.stdout.strip().splitlines()
+    if res.returncode != 0 or not lines:
+        return None
+    try:
+        return json.loads(lines[-1])
+    except ValueError:
+        return None

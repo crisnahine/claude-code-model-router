@@ -6,6 +6,7 @@ import io
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -1290,6 +1291,101 @@ class HardTier(unittest.TestCase):
             with self.subTest(change=change):
                 self.assertEqual(self.run_with("research-yanked-release", {"RESEARCH.json": {**good, **change}}),
                                  expected)
+
+
+class ProbeHelper(unittest.TestCase):
+    CASES = (
+        ('import sys, json\nprint("noise")\nprint(json.dumps(json.load(sys.stdin)))', {"x": 1}),
+        ('print("{\\"a\\": 1}")\nprint("trailing")', None),
+        ('import os\nprint("{\\"a\\": 1}", flush=True)\nos._exit(3)', None),
+        ('import os\nos._exit(0)', None),
+        ('import time\ntime.sleep(30)', None),
+        ('import sys, json\nprint(json.dumps(sys.flags.isolated))', 1),
+    )
+
+    def test_probe_returns_the_last_json_line_and_none_on_anything_else(self):
+        for body, want in self.CASES:
+            with self.subTest(body=body), tempfile.TemporaryDirectory() as tmp:
+                script = Path(tmp) / "probe.py"
+                script.write_text(body, encoding="utf-8")
+                self.assertEqual(passcheck.probe(Path(tmp), script, {"x": 1}, timeout=5), want)
+
+
+class QualityTier(unittest.TestCase):
+    """Each quality-tier task's check rejects the mistakes the task is built around and takes a fair right answer."""
+    check, shipped, source, run_with = HardTier.check, HardTier.shipped, HardTier.source, HardTier.run_with
+
+    def test_the_quality_tier_has_one_task_in_each_of_six_classes(self):
+        want = {"impl-merge-customers": "implementation"}
+        tasks = {t["id"]: t for t in run.load_tasks()}
+        self.assertEqual({i: tasks[i]["class"] for i in want}, want)
+        self.assertTrue(all(tasks[i]["revision"] == 1 for i in want))
+
+    def test_sqlite_carries_a_rename_into_foreign_keys(self):
+        self.assertGreaterEqual(sqlite3.sqlite_version_info, (3, 26, 0))
+        conn = sqlite3.connect(":memory:")
+        conn.execute("PRAGMA legacy_alter_table = OFF")  # some builds, such as Apple's, default to ON
+        conn.executescript("CREATE TABLE parent (id INTEGER PRIMARY KEY);"
+                           "CREATE TABLE child (id INTEGER PRIMARY KEY, p INTEGER REFERENCES parent(id));"
+                           "ALTER TABLE parent RENAME TO old_parent;")
+        self.assertEqual([row[2] for row in conn.execute("PRAGMA foreign_key_list(child)")], ["old_parent"])
+
+    def test_the_migration_probe_pins_legacy_transaction_control(self):
+        probe = self.source("impl-merge-customers", "probe.py")
+        db = self.source("impl-merge-customers", "repo/store/db.py")
+        for text in (probe, db):
+            self.assertIn("LEGACY_TRANSACTION_CONTROL", text)
+
+    def test_migration_rejects_each_known_mistake(self):
+        solution = self.source("impl-merge-customers", "solution/store/migrations/m0002_merge_customers.py")
+        rel = "store/migrations/m0002_merge_customers.py"
+        self.assertTrue(self.run_with("impl-merge-customers", {rel: solution}))
+
+        def between(first, last, replacement=""):
+            return solution[:solution.index(first)] + replacement + solution[solution.index(last):]
+
+        rebuild, view, fill = ('        conn.execute("""\n            CREATE TABLE new_customers', '        conn.execute("""\n            CREATE VIEW',
+                               '        conn.execute("""\n            UPDATE customers SET name')
+        copy = 'INSERT INTO {} SELECT id, lower(trim(email)), name, created_at FROM {}'
+        schema = "id INTEGER PRIMARY KEY, email TEXT NOT NULL COLLATE NOCASE UNIQUE, name TEXT, created_at TEXT NOT NULL"
+        mutants = {
+            "pragma inside the transaction": solution.replace(
+                '    conn.execute("PRAGMA foreign_keys = OFF")\n    conn.execute("BEGIN")\n',
+                '    conn.execute("BEGIN")\n').replace(
+                "WHERE name IS NULL OR name = \'\'\"\"\")\n",
+                "WHERE name IS NULL OR name = \'\'\"\"\")\n        conn.execute(\"PRAGMA foreign_keys = OFF\")\n"),
+            "old table renamed first": between(rebuild, view, (
+                '        conn.execute("ALTER TABLE customers RENAME TO old_customers")\n'
+                f'        conn.execute("CREATE TABLE customers ({schema})")\n'
+                f'        conn.execute("{copy.format("customers", "old_customers")}")\n'
+                '        conn.execute("DROP TABLE old_customers")\n')),
+            "newest kept": solution.replace("ORDER BY k.created_at, k.id", "ORDER BY k.created_at DESC, k.id"),
+            "python lower": solution.replace(
+                '    conn.execute("BEGIN")\n',
+                '    conn.execute("BEGIN")\n    for key, email in conn.execute("SELECT id, email FROM customers").fetchall():\n'
+                '        conn.execute("UPDATE customers SET email = ? WHERE id = ?", (email.strip().lower(), key))\n'),
+            "view not recreated": between(view, '        if conn.execute("PRAGMA foreign_key_check")'),
+            "foreign keys left off": solution.replace(
+                '    finally:\n        conn.execute("PRAGMA foreign_keys = ON")\n', ""),
+            "unique index": between(rebuild, view, (
+                '        conn.execute("UPDATE customers SET email = lower(trim(email))")\n'
+                '        conn.execute("CREATE UNIQUE INDEX customers_email ON customers(email COLLATE NOCASE)")\n')),
+            "names not filled": between(fill, '        conn.execute("UPDATE orders'),
+            "view left in place": solution.replace('        conn.execute("DROP VIEW customer_totals")\n', ""),
+            "not committed": solution.replace('        conn.execute("COMMIT")\n', ""),
+        }
+        for name, text in mutants.items():
+            with self.subTest(name):
+                self.assertNotEqual(text, solution)
+                self.assertFalse(self.run_with("impl-merge-customers", {rel: text}))
+        legacy_rename = between(rebuild, view, (
+            '        conn.execute("PRAGMA legacy_alter_table = ON")\n'
+            '        conn.execute("ALTER TABLE customers RENAME TO old_customers")\n'
+            f'        conn.execute("CREATE TABLE customers ({schema})")\n'
+            f'        conn.execute("{copy.format("customers", "old_customers")}")\n'
+            '        conn.execute("DROP TABLE old_customers")\n'
+            '        conn.execute("PRAGMA legacy_alter_table = OFF")\n'))
+        self.assertTrue(self.run_with("impl-merge-customers", {rel: legacy_rename}))
 
 
 if __name__ == "__main__":

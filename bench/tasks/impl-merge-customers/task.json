@@ -1,0 +1,5 @@
+{
+  "class": "implementation",
+  "revision": 1,
+  "brief": "Write the database migration in store/migrations/m0002_merge_customers.py exactly as its docstring specifies. Use the standard library only, and don't change the other files in store/."
+}
