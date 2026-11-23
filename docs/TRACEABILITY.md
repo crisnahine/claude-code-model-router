@@ -158,7 +158,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | ID | Requirement | Implementation | Source | Verification | Evidence | Status |
 | :- | :- | :- | :- | :- | :- | :- |
 | S10.1 | Every subagent, teammate and workflow stage routed on the mod path | See S2.1 | `hooks/router.ts` | Unit, live | Live 2.1.330: subagents, a workflow stage and in-process teammates | PASS |
-| S10.2 | A working fallback where mods don't load | See S2.10 | `scripts/modelrouter/hooks.py` | Unit, live | Live 2.1.330 Agent call path in default and auto mode | PASS |
+| S10.2 | A working fallback where mods don't load | See S2.10 | `scripts/modelrouter/hooks.py`, `fallback.py` | Unit, live | Live 2.1.330 Agent call path in default and auto mode | PASS |
 | S10.3 | Precedence and cap honored in every case | See S2.16 | `scripts/modelrouter/router.py` | Unit | `Router` class; `RepeatGuard.test_the_cap_holds_even_when_a_lowering_rewrite_did_not_take` | PASS |
 | S10.4 | Redo escalation and learning never loop and never lower quality | See S2.18 | `scripts/modelrouter/learn.py`, `calls.py` | Unit | `RepeatGuard.test_redo_escalation_stops_at_the_top_and_skips_named_models`; `Feedback.test_feedback_never_goes_below_what_ships` | PASS |
 | S10.5 | Availability tracking routes around a model that doesn't work here | See S2.20 | `scripts/modelrouter/registry.py` | Unit | `Router.test_an_unavailable_model_is_routed_around` | PASS |
