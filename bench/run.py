@@ -290,6 +290,37 @@ def _git_dirty() -> bool:
     return bool(res.stdout.strip())
 
 
+FINAL_FILE_CHARS = 20_000  # kept per file
+FINAL_ROW_CHARS = 80_000  # kept per row, the reply and every file together
+
+
+def final_answer(shipped: Path, work: Path, reply: str) -> dict:
+    """What the check graded, kept in the row because the work dir is deleted after the run: the full reply, each
+    text file the run added or changed against the task's repo/, the files it removed, and the names of files left out
+    (binary, caches, or over the caps)."""
+    room, files, omitted = FINAL_ROW_CHARS - len(reply), {}, []
+    for path in sorted(p for p in work.rglob("*") if p.is_file()):
+        rel = path.relative_to(work).as_posix()
+        if "__pycache__" in path.parts or rel.startswith((".claude/", ".pytest_cache/")) or path.suffix == ".pyc":
+            continue
+        before = shipped / rel
+        data = path.read_bytes()
+        if before.is_file() and before.read_bytes() == data:
+            continue
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            omitted.append(rel)
+            continue
+        if len(text) > FINAL_FILE_CHARS or len(text) > room:
+            omitted.append(rel)
+            continue
+        files[rel], room = text, room - len(text)
+    removed = sorted(p.relative_to(shipped).as_posix() for p in shipped.rglob("*")
+                     if p.is_file() and "__pycache__" not in p.parts and not (work / p.relative_to(shipped)).exists())
+    return {"reply": reply, "files": files, "removed": removed, "omitted": omitted}
+
+
 def run_one(task: dict, config: dict, options: dict, registry_config: dict) -> dict:
     # No task or configuration name: a brief that quotes its working directory would hand the router signal words.
     scratch = Path(tempfile.mkdtemp(prefix="mrbench-"))
@@ -319,6 +350,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: dict) -> d
     # Read before grading: the check also runs the code the run left, which could rewrite these files.
     ledger = ledger_rows(env) if config.get("plugin") else None
     types = agent_types(work, env) if config.get("plugin") else {}
+    final = final_answer(task["dir"] / "repo", work, answer)
     graded = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
     kept = None
     if options.get("keep"):
@@ -331,7 +363,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: dict) -> d
     shutil.rmtree(scratch, ignore_errors=True)
     return record(task, config, options, registry_config, result,
                   {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr,
-                   "grade": graded._asdict(),
+                   "grade": graded._asdict(), "final_answer": final,
                    "plugin_state": plugin_state, "ledger": ledger, "agent_types": types,
                    "session_dir_removed": session_removed, "kept": kept and str(kept)})
 
@@ -373,7 +405,7 @@ def record(task: dict, config: dict, options: dict, registry_config: dict, resul
         "subagents": {k: agents.get(k) for k in ("spawned", "completed", "failed", "by_type")},
         "permission_denials": [d.get("tool_name") for d in result.get("permission_denials") or []],
         "passed": facts["grade"]["verdict"] == "pass", "grade": facts["grade"],
-        "answer": (result.get("result") or "")[:2000],
+        "answer": (result.get("result") or "")[:2000], "final_answer": facts["final_answer"],
         **({"kept": facts["kept"]} if facts["kept"] else {}),
         "stderr": stderr,
     }

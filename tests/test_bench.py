@@ -435,6 +435,7 @@ class Recorder(unittest.TestCase):
     options = {"model": "sonnet", "budget": 0.5, "claude_version": "2.1.330", "commit": "abc", "dirty": False}
     facts = {"started_at": "2026-11-23T00:00:00+00:00", "wall_ms": 7000, "exit_code": 0, "stderr": "",
              "grade": {"verdict": "pass", "reason": "solved", "check_hash": "0123456789abcdef"},
+             "final_answer": {"reply": "DONE", "files": {}, "removed": [], "omitted": []},
              "plugin_state": None, "ledger": None, "agent_types": {}, "session_dir_removed": True, "kept": None}
 
     def row(self, result, **facts):
@@ -454,6 +455,7 @@ class Recorder(unittest.TestCase):
         self.assertEqual((row["total_cost_usd"], row["cost_known"], row["answer"]),
                          (0.0037657349999999997, True, "DONE"))
         self.assertEqual((row["passed"], row["grade"]), (True, self.facts["grade"]))
+        self.assertEqual(row["final_answer"], self.facts["final_answer"])
         broken = self.row(json.loads(FIXTURE.read_text(encoding="utf-8")),
                           grade={"verdict": "broken", "reason": "NameError: x", "check_hash": "f" * 16})
         self.assertEqual((broken["passed"], broken["grade"]["verdict"]), (False, "broken"))
@@ -570,6 +572,66 @@ class Runner(unittest.TestCase):
     def test_the_runner_stops_before_a_run_could_pass_the_total_cap(self):
         self.assertTrue(run.can_start(spent=2.0, budget=0.5, max_total=3.0))
         self.assertFalse(run.can_start(spent=2.3, budget=0.5, max_total=3.0))
+
+
+FILES_STUB = '''#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+Path("FINDING.json").write_text('{"file": "app/settings.py", "line": 7}')
+Path("app/client.py").write_text("changed\\n")
+Path("app/backoff.py").unlink()
+print(json.dumps({"result": "x" * 3000, "total_cost_usd": 0.01, "modelUsage": {}}))
+'''
+
+
+class FinalAnswer(unittest.TestCase):
+    """A row keeps what the check graded, since the work dir is deleted after the run."""
+
+    def test_the_files_a_run_added_changed_or_removed_are_kept_and_the_rest_is_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
+            for root in (shipped, work):
+                (root / "pkg").mkdir(parents=True)
+                (root / "same.py").write_text("a = 1\n", encoding="utf-8")
+                (root / "pkg" / "edit.py").write_text("b = 1\n", encoding="utf-8")
+            (shipped / "gone.py").write_text("c = 1\n", encoding="utf-8")
+            (work / "pkg" / "edit.py").write_text("b = 2\n", encoding="utf-8")
+            (work / "DESIGN.json").write_text('{"x": 1}', encoding="utf-8")
+            (work / "pkg" / "__pycache__").mkdir()
+            (work / "pkg" / "__pycache__" / "edit.cpython-39.pyc").write_bytes(b"\0\1")
+            (work / ".claude").mkdir()
+            (work / ".claude" / "model-router.json").write_text("{}", encoding="utf-8")
+            (work / "blob.bin").write_bytes(b"\xff\xfe\x00")
+            (work / "big.txt").write_text("z" * (run.FINAL_FILE_CHARS + 1), encoding="utf-8")
+            final = run.final_answer(shipped, work, "the reply")
+        self.assertEqual(final, {"reply": "the reply", "files": {"DESIGN.json": '{"x": 1}', "pkg/edit.py": "b = 2\n"},
+                                 "removed": ["gone.py"], "omitted": ["big.txt", "blob.bin"]})
+
+    def test_the_files_together_stay_under_the_row_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            for n in range(6):
+                (work / f"f{n}.txt").write_text("z" * run.FINAL_FILE_CHARS, encoding="utf-8")
+            final = run.final_answer(shipped, work, "")
+        self.assertEqual(len(final["files"]) * run.FINAL_FILE_CHARS <= run.FINAL_ROW_CHARS, True)
+        self.assertEqual(len(final["files"]) + len(final["omitted"]), 6)
+        self.assertTrue(final["omitted"])
+
+    def test_a_run_row_has_the_whole_reply_and_the_files_the_run_left(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            claude = stub(tmp, FILES_STUB)
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "defaults"), options, {})
+        self.assertEqual((len(row["answer"]), len(row["final_answer"]["reply"])), (2000, 3000))
+        self.assertEqual(row["final_answer"]["files"], {"FINDING.json": '{"file": "app/settings.py", "line": 7}',
+                                                        "app/client.py": "changed\n"})
+        self.assertEqual(row["final_answer"]["removed"], ["app/backoff.py"])
 
 
 class Tasks(unittest.TestCase):
