@@ -1,5 +1,6 @@
-"""Turn bench results into docs/BENCHMARKS.md: pass rate and cost per solved task for each task class and
-configuration, with 95% bootstrap intervals, and the router's standing against the best baseline.
+"""Turn bench results into docs/BENCHMARKS.md: pass rate (exact 95% binomial interval) and cost per solved task
+(95% bootstrap interval) for each task class and configuration, and the router's standing against the best
+baseline.
 
   python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
   python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check
@@ -25,6 +26,7 @@ from overhead import percentile  # noqa: E402
 RESULTS = BENCH / "results"
 HEAD_END = "<!-- End of page head. -->\n\n"  # the same text as docs_assets.HEAD_END
 MIN_RUNS = 10  # fewer runs per configuration than this and no row is called a win or a loss
+ALPHA = 0.05  # the level of the 95% intervals
 
 
 def _interval(draws: list[float]) -> tuple[float, float]:
@@ -34,6 +36,26 @@ def _interval(draws: list[float]) -> tuple[float, float]:
 
 def _finite(value: float) -> float | None:
     return None if math.isinf(value) else value
+
+
+def _head(k: int, n: int, p: float) -> float:
+    """P(X <= k) for X ~ Binomial(n, p)."""
+    return sum(math.comb(n, i) * p ** i * (1 - p) ** (n - i) for i in range(k + 1))
+
+
+def exact_interval(solved: int, n: int) -> tuple[float, float]:
+    """The exact (Clopper-Pearson) 95% interval for a pass rate, by bisection on the binomial tail."""
+    def bound(above: bool, k: int) -> float:
+        low, high = 0.0, 1.0
+        for _ in range(60):
+            mid = (low + high) / 2
+            tail = 1 - _head(k - 1, n, mid) if above else _head(k, n, mid)
+            if (tail < ALPHA / 2) == above:
+                low = mid
+            else:
+                high = mid
+        return (low + high) / 2
+    return (bound(True, solved) if solved else 0.0, bound(False, solved) if solved < n else 1.0)
 
 
 def _cell(runs: list[dict], rng: random.Random, draws: int) -> dict:
@@ -48,7 +70,7 @@ def _cell(runs: list[dict], rng: random.Random, draws: int) -> dict:
         rate.append(hits / n)
     return {"runs": n, "solved": solved, "cost_usd": total, "pass_rate": solved / n,
             "cost_per_solved": total / solved if solved else None,
-            "pass_ci": _interval(rate), "cps_ci": tuple(_finite(v) for v in _interval(cps)),
+            "pass_ci": exact_interval(solved, n), "cps_ci": tuple(_finite(v) for v in _interval(cps)),
             "_cps": cps, "_rate": rate}
 
 
@@ -417,7 +439,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "- A task counts as solved only when its pass check passes. A wrong answer is a failure, the router's too.",
         "- Cost per solved task is a configuration's total spend on a task class divided by the tasks it solved, "
         "so failed runs count against it.",
-        "- Intervals are 95% percentile bootstrap intervals over runs (2,000 resamples, seed 0).",
+        "- Pass-rate intervals are exact 95% binomial (Clopper-Pearson) intervals. Cost intervals are 95% "
+        "percentile bootstrap intervals over runs (2,000 resamples, seed 0).",
         f"- PASS means the router's cost per solved task is below the best baseline's with the whole 95% interval "
         f"of the difference below zero, and its pass rate is not behind beyond noise. FAIL means it is behind on "
         f"either. PARTIAL means a tie, a difference inside the noise, or fewer than {MIN_RUNS} runs per "

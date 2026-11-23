@@ -103,6 +103,16 @@ class Analysis(unittest.TestCase):
         self.assertAlmostEqual(high, -0.2)
         self.assertNotIn("plugin", row["differences"])
 
+    def test_pass_rate_intervals_are_exact_binomial(self):
+        self.assertAlmostEqual(analyze.exact_interval(10, 10)[0], 0.025 ** 0.1, places=6)
+        self.assertEqual(analyze.exact_interval(10, 10)[1], 1.0)
+        self.assertEqual(analyze.exact_interval(0, 10)[0], 0.0)
+        low, high = analyze.exact_interval(3, 10)  # the textbook Clopper-Pearson interval
+        self.assertAlmostEqual(low, 0.0667, places=3)
+        self.assertAlmostEqual(high, 0.6525, places=3)
+        cell = self.summary(rows("plugin", "lookup", [1] * 10, [True] * 10))["lookup"]["configs"]["plugin"]
+        self.assertAlmostEqual(cell["pass_ci"][0], 0.6915, places=3)
+
     def test_a_class_with_no_router_or_baseline_has_no_differences(self):
         self.assertEqual(self.summary(rows("defaults", "lookup", [0.3], [True]))["lookup"]["differences"], {})
 
