@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -74,6 +75,69 @@ class DocsAssets(unittest.TestCase):
             code, err = check()
         self.assertEqual(code, 1)
         self.assertIn("README.md: out of date", err)
+
+    def test_the_figures_from_the_committed_results(self):
+        f = docs_assets.bench_figures(docs_assets.bench_summary())
+        self.assertEqual((f["runs"], f["usd"], f["dates"], f["opus.commit"]),
+                         ("1,280", "$154.94", "2026-11-22 to 2026-11-23", "780ee86"))
+        self.assertEqual((f["opus.pooled.plugin-next"], f["opus.pooled.defaults"], f["opus.pooled_less.defaults"]),
+                         ("$0.119", "$0.152", "21"))
+        self.assertEqual((f["opus.below.defaults"], f["opus.less.defaults.min"], f["opus.less.defaults.max"],
+                          f["opus.level.defaults"]), ("7", "18", "36", "design"))
+        self.assertEqual((f["opus.behind.min"], f["opus.behind.max"], f["opus.status.FAIL"]), ("27", "144", "8"))
+        self.assertEqual((f["sonnet.pass_classes"], f["sonnet.behind.min"], f["sonnet.behind.max"],
+                          f["sonnet.solved.plugin-next"], f["sonnet.solved.defaults"]),
+                         ("lookup", "7", "63", "79 of 80", "78 of 80"))
+
+    def test_the_trace_text_lists_every_baseline_with_its_interval(self):
+        data = bench_summary()
+        del data["sessions"][1:]
+        session = data["sessions"][0]
+        session["pooled"] = {"plugin-next": {"runs": 10, "solved": 9, "cost_usd": 1.0},
+                             "defaults": {"runs": 10, "solved": 10, "cost_usd": 1.0}}
+        session["classes"] = [{
+            "class": "root-cause", "status": "FAIL", "best_baseline": "defaults",
+            "configs": {"plugin-next": {"runs": 10, "solved": 9, "cost_per_solved": 0.2},
+                        "defaults": {"runs": 10, "solved": 10, "cost_per_solved": 0.1}},
+            "differences": {"defaults": (0.05, 0.15)}}]
+        f = docs_assets.bench_figures(data)
+        self.assertEqual(f["opus.trace"],
+                         "root cause FAIL (router $0.200, 9 of 10 solved; `defaults` $0.100 (+0.050 to +0.150))")
+
+    def test_a_changed_figure_makes_the_docs_stale(self):
+        real = docs_assets.bench_figures(docs_assets.bench_summary())
+        with mock.patch.object(docs_assets, "bench_figures", return_value={**real, "opus.pooled.plugin-next": "$9.999"}):
+            code, err = check()
+        self.assertEqual(code, 1)
+        for path in ("README.md", "docs/FAQ.md", "site/index.html", "docs/TRACEABILITY.md"):
+            self.assertIn(f"{path}: out of date", err)
+
+    def test_an_unknown_figure_stops_the_build(self):
+        with self.assertRaises(SystemExit) as raised:
+            docs_assets.with_figures("x.md", "a <!-- bench:nope -->1<!-- /bench --> b", {})
+        self.assertIn("x.md: unknown benchmark figure nope", str(raised.exception))
+        with self.assertRaises(SystemExit) as raised:
+            docs_assets.fill("a {nope} b", {}, "alt")
+        self.assertIn("alt: unknown benchmark figure nope", str(raised.exception))
+
+    def patched_build(self):
+        real = docs_assets.bench_figures(docs_assets.bench_summary())
+        with mock.patch.object(docs_assets, "bench_figures", return_value={**real, "opus.pooled.plugin-next": "$9.999",
+                                                                          "opus.cell.lookup.plugin-next": "$9.9999"}):
+            return docs_assets.build()
+
+    def test_the_figure_alt_text_follows_the_figures(self):
+        files = self.patched_build()
+        for path in ("README.md", "site/index.html"):
+            alt = re.search(r'benchmark\.svg"[^>]*? alt="([^"]*)"', files[path]).group(1)
+            self.assertIn("lookup $9.9999 against", alt, path)
+
+    def test_the_site_faq_shows_figures_without_marks(self):
+        page = self.patched_build()["site/index.html"]
+        for marks in (docs_assets.FAQ_HTML, docs_assets.FAQ_LD):
+            block = page.split(marks[0], 1)[1].split(marks[1], 1)[0]
+            self.assertNotIn("<!-- bench:", block)
+            self.assertIn("$9.999", block)
 
     def test_the_version_badge_alt_text_follows_the_plugin_version(self):
         with mock.patch.object(docs_assets, "version", return_value="9.8.7"), \

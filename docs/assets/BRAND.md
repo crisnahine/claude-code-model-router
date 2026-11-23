@@ -76,4 +76,4 @@ The wordmark is drawn with strokes, so it needs no font. Write the product name 
 
 ## The site
 
-`site/` holds a static landing page that reuses these SVGs. The script copies the files the site uses into `site/assets/`, so run it after any change here. The site's own address is one constant at the top of `site/index.html`.
+`site/` holds a static landing page that reuses these SVGs. The script copies the files the site uses into `site/assets/`, so run it after any change here. The site's own address is one constant at the top of `site/index.html`. The benchmark figures in its text, the chart's alt text and the FAQ come from `bench/analyze.py`'s summary, filled into the `<!-- bench:KEY -->` spans, so rerun analyze and the script, never edit a figure by hand.
