@@ -43,6 +43,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 - Claude Code 2.1.329 or later is required, not 2.1.292. The mod calls `$.process.hookEnv()`, which 2.1.326 added; before it the mod routed nothing and only the fallback path worked. The manifest's `network` field needs 2.1.328, and 2.1.329 fixed the Agent tool's `effort` for named teammates, which the fallback path sets.
 - In `/plugin` and `/config`, Routing mode, Priority, Strongest model allowed and Agents that name their own model are now pickers of their allowed values, so they show their default and a mistyped value can't be saved.
 - A result, a failure or a stop coming back for a call is read by one rule set, `calls.returned`, on a route (`calls.Route`) that every spawn writes on both paths to a new state file, `routes.json`. The fallback path no longer keeps its own copy of the finished run, so the same call gets the same redo model on either path. The mod path used to forget a model the cap had lowered, where the fallback redid it; both now redo it. A call the refused-rewrite guard passed through no longer finishes as the rewrite it replaced. A call still in flight when you upgrade has no route, which costs at most one redo.
+- A redo of a pinned agent or of an agent a rule sets the model for climbs a level and no longer votes that the level was too low, since the router didn't choose that model. Workflow stages and teammates no longer count toward a level's vote threshold, which a hundred workflow stages used to lift from 6 votes to 30.
 
 ### Fixed
 

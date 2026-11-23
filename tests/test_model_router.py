@@ -3259,6 +3259,33 @@ class Feedback(Sandbox):
         self.spawned(source="router", level="standard", pick="sonnet", model="sonnet", escalated_from="lookup")
         self.assertEqual((learn.stats()["standard"]["calls"], learn.stats()["lookup"]["votes"]), (1, 1))
 
+    def test_a_redo_of_a_pinned_or_ruled_agent_casts_no_vote(self):
+        self.agent("pinned", "sonnet")
+        self.override({"agents": {"ruled": {"model": "sonnet"}}}, user=True)
+        for agent in ("pinned", "ruled"):
+            self.pre(agent, LOOKUP)
+            self.done(agent, LOOKUP, "claude-sonnet-5-5")
+            again = self.decide(agent, LOOKUP)
+            self.assertEqual((again["level"], again["escalated_from"]), ("standard", "lookup"), agent)
+            self.pre(agent, LOOKUP)
+        self.assertEqual(learn.stats(), {})
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
+        self.pre("general-purpose", LOOKUP)
+        self.assertEqual(learn.stats()["lookup"]["votes"], 1)  # the router's own redo does
+
+    def test_a_workflow_stage_or_a_teammate_counts_for_no_level(self):
+        mod = lambda kind, i: hooks.mod_spawn({  # noqa: E731
+            "session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5", "kind": kind,
+            "tool_input": {"subagent_type": "workflow-subagent", "prompt": f"list the files under dir{i}"}})
+        for i in range(100):
+            self.assertEqual(mod("workflow", i)["model"], "haiku")
+        mod("teammate", 0)
+        self.assertEqual(learn.stats(), {})
+        for i in range(learn.VOTES_NEEDED):
+            self.spawned(source="caller", model="sonnet")
+        self.assertEqual(learn.raises()["lookup"], 1)  # 6 votes still raise a level no workflow call inflated
+
     def test_feedback_never_goes_below_what_ships(self):
         for i in range(30):
             self.pre("general-purpose", f"implement change {i}", model="haiku")

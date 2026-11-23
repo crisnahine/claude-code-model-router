@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Mapping
 
 from . import store
-from .config import LEVEL_SOURCES, LEVELS, Level
+from .config import LEVELS, Level
 from .registry import Registry
 
 if TYPE_CHECKING:
@@ -73,23 +73,26 @@ def _source(decision: Mapping) -> str | None:
 
 
 def counted(decision: Mapping, kind: str) -> Level | None:
-    """The level this spawn counts toward the vote threshold, or None: only a spawn the router gave its model."""
-    return Level.parse(decision["level"]) if _source(decision) == "router" else None
+    """The level this spawn counts toward the vote threshold, or None. Only a subagent the router
+    gave its model counts: a workflow stage or a teammate is never redone on Claude's judgment."""
+    return Level.parse(decision["level"]) if kind == SUBAGENT and _source(decision) == "router" else None
 
 
 def spawned(reg: Registry, decision: Mapping, kind: str, earlier: Route | None, user_named: bool,
             raised: Mapping[str, int] | None = None) -> Level | None:
     """Count one spawn and cast the votes its facts carry, and return the level it counted toward.
     `earlier` is the route this call had before in the request. A call on the model the user named in
-    the prompt carries no caller votes: the user chose it, not Claude."""
+    the prompt carries no caller votes: the user chose it, not Claude. A redo votes that its first
+    level was too low only when the router chose the model: a pin, a rule or a named model decided
+    it otherwise."""
     level = Level.parse(decision["level"])
-    if level is None:
+    if kind != SUBAGENT or level is None:
         return None
     source = _source(decision)
     counts = counted(decision, kind)
     if counts:
         _update(counts, calls=1)
-    if source in LEVEL_SOURCES and decision["escalated_from"]:
+    if source == "router" and decision["escalated_from"]:
         _update(decision["escalated_from"], up=1)
     if source != "caller" or user_named:
         return counts
