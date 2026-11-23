@@ -1,0 +1,1 @@
+an invalid weight list was accepted

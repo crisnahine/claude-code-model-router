@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import importlib.util
 import io
 import json
@@ -48,12 +49,12 @@ class Analysis(unittest.TestCase):
     def test_a_clear_win_passes_and_ranks_first(self):
         data = rows("plugin", "lookup", [0.10] * 12, [True] * 12) + rows("defaults", "lookup", [0.50] * 12, [True] * 12)
         row = self.summary(data)["lookup"]
-        self.assertEqual((row["status"], row["rank"], row["best_baseline"]), ("PASS", 1, "defaults"))
+        self.assertEqual((row["status"], row["why"], row["rank"], row["best_baseline"]), ("PASS", "cost_below", 1, "defaults"))
 
     def test_too_few_runs_is_never_a_win(self):
         data = rows("plugin", "lookup", [0.10], [True]) + rows("defaults", "lookup", [0.50], [True])
         row = self.summary(data)["lookup"]
-        self.assertEqual(row["status"], "PARTIAL")
+        self.assertEqual((row["status"], row["why"]), ("PARTIAL", "few_runs"))
         self.assertIn("too few runs", row["reason"])
 
     def test_cheaper_but_solving_less_is_not_a_win(self):
@@ -135,12 +136,46 @@ class Analysis(unittest.TestCase):
         weak = rows("haiku", "lookup", [0.2] * n, [True] * 4 + [False] * 6)
         strong = rows("opus", "lookup", [0.4] * n, [True] * n)
         level = self.quality(rows("plugin", "lookup", [0.3] * n, [True] * n) + weak + strong, self.FORCED)["quality"]
-        self.assertEqual((level["saturated"], level["claim"]), (False, "LEVEL"))
+        self.assertEqual((level["saturated"], level["claim"]), (False, "NOT SHOWN BEHIND"))
+        self.assertIn("isn't parity", level["reason"])
         behind = self.quality(rows("plugin", "lookup", [0.3] * n, [True] * 5 + [False] * 5) + weak + strong,
                               self.FORCED)["quality"]
         self.assertEqual((behind["saturated"], behind["claim"]), (False, "BEHIND"))
         self.assertTrue(behind["against"]["opus"]["behind"])
         self.assertFalse(behind["against"]["haiku"]["behind"])
+
+    def test_a_result_that_is_not_significant_is_not_parity(self):
+        n = analyze.MIN_RUNS
+        data = (rows("plugin", "lookup", [0.3] * n, [True] * 7 + [False] * 3)  # 7 of 10 against 10 of 10: p = 0.105
+                + rows("haiku", "lookup", [0.2] * n, [True] * 4 + [False] * 6) + rows("opus", "lookup", [0.4] * n, [True] * n))
+        q = self.quality(data, self.FORCED)["quality"]
+        self.assertEqual((q["saturated"], q["claim"]), (False, "NOT SHOWN BEHIND"))
+        self.assertFalse(q["against"]["opus"]["behind"])
+        self.assertIn(f"{n} runs per cell can't show it", q["reason"])
+
+    def test_behind_is_adjusted_across_the_baselines_and_needs_runs(self):
+        for name, adjusted in {"a": 0.09, "b": 0.09, "c": 0.5}.items():
+            self.assertAlmostEqual(analyze._holm({"a": 0.03, "b": 0.04, "c": 0.5})[name], adjusted)
+        n = analyze.MIN_RUNS
+        weak = rows("haiku", "lookup", [0.2] * n, [True] * 3 + [False] * 7)
+        strong = rows("opus", "lookup", [0.4] * n, [True] * n)
+
+        def against(solved):  # the router at `solved` of 10, a weak and a strong baseline: two tests
+            data = rows("plugin", "lookup", [0.3] * n, [True] * solved + [False] * (n - solved))
+            return self.quality(data + weak + strong, self.FORCED)["quality"]["against"]["opus"]
+
+        six = against(6)  # p = 0.043 alone, 0.087 once adjusted for the second baseline
+        self.assertLess(six["p_behind"], analyze.ALPHA)
+        self.assertFalse(six["behind"])
+        self.assertTrue(against(5)["behind"])  # p = 0.011, 0.022 adjusted
+        few = rows("plugin", "lookup", [0.3] * 5, [False] * 5) + rows("opus", "lookup", [0.4] * 5, [True] * 5)
+        self.assertFalse(self.quality(few, self.FORCED)["quality"]["against"]["opus"]["behind"])  # p = 0.004, 5 runs
+
+    def test_the_page_says_ten_runs_cannot_show_parity_and_names_the_baseline_of_pass_and_fail(self):
+        page = analyze.build_page(self.committed())
+        self.assertIn("NOT SHOWN BEHIND means none did, which is not parity", page)
+        self.assertIn("pass rate is not behind the cheapest baseline's beyond noise", page)
+        self.assertIn("The router and some baselines ran in different batches.", page)
 
     def test_forced_baselines_on_one_model_cannot_show_saturation(self):
         n = analyze.MIN_RUNS
@@ -195,7 +230,7 @@ class Analysis(unittest.TestCase):
         res = Path(tmp) / "results"
         res.mkdir(exist_ok=True)
         data = rows("plugin", "lookup", [0.1, 0.2], [True, False]) + rows("defaults", "lookup", [0.3, 0.4], [True, True])
-        records = [dict(r, main_model="sonnet", started_at="2026-11-22T10:00:00+00:00", claude_version="2.1.330",
+        records = [dict(r, main_model="fixture-model", started_at="2026-11-22T10:00:00+00:00", claude_version="2.1.330",
                         models={}) for r in data]
         path = res / "a-lookup-2026-11-22.jsonl"
         path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
@@ -272,6 +307,85 @@ class Analysis(unittest.TestCase):
                 pages.append(out.read_text(encoding="utf-8"))
             self.assertEqual(pages[0], pages[1])
             self.assertEqual(pages[1], pages[2])
+
+    @classmethod
+    def committed(cls):
+        if not hasattr(cls, "_committed"):
+            cls._committed = analyze.load(analyze.default_paths())
+        return cls._committed
+
+    def changed(self, edit):
+        """The committed results with `edit(row)` applied to every row, as a new Results."""
+        rows = [dict(r) for r in self.committed().rows]
+        for row in rows:
+            edit(row)
+        return dataclasses.replace(self.committed(), rows=rows)
+
+    def session(self, results, model=None):
+        return next(s for s in analyze.figures(results)["sessions"] if s["model"] == (model or analyze.OPUS))
+
+    def test_figures_are_keyed_by_role(self):
+        opus = self.session(self.committed())
+        self.assertEqual(opus["roles"], {"router": "plugin-next", "defaults": "defaults", "best": "opusplan",
+                                         "strongest": "fable-high"})
+        self.assertEqual((opus["saturated"], opus["against"]["defaults"]["level"]), (5, ["design"]))
+        self.assertEqual(opus["pooled_less"]["defaults"], 1 - (opus["pooled"]["plugin-next"]["cost_usd"] / 70)
+                         / (opus["pooled"]["defaults"]["cost_usd"] / 70))
+
+    def test_the_defaults_are_the_configuration_with_no_plugin_and_no_forced_model(self):
+        base = self.committed()
+        rename = lambda row: dict(row, config="plain") if row["config"] == "defaults" else row  # noqa: E731
+        results = dataclasses.replace(
+            base, rows=[rename(r) for r in base.rows],
+            configs=[dict(c, id="plain") if c["id"] == "defaults" else c for c in base.configs])
+        self.assertEqual(self.session(results)["roles"]["defaults"], "plain")
+
+    def test_renaming_the_router_moves_no_role_fact_or_status(self):
+        base = self.committed()
+        swap = lambda name: "renamed" if name == "plugin-next" else name  # noqa: E731
+        results = dataclasses.replace(
+            base, rows=[dict(r, config=swap(r["config"])) for r in base.rows],
+            configs=[dict(c, id=swap(c["id"])) for c in base.configs],
+            routers=frozenset(map(swap, base.routers)))
+        old, new = analyze.figures(base), analyze.figures(results)
+        for a, b in zip(old["sessions"], new["sessions"]):
+            self.assertEqual((b["router"], b["roles"]["router"], b["facts"]), ("renamed", "renamed", a["facts"]))
+            self.assertEqual((a["pooled_less"], a["behind"]), (b["pooled_less"], b["behind"]))
+            self.assertEqual([c["status"] for c in a["classes"]], [c["status"] for c in b["classes"]])
+
+    def test_the_facts_the_docs_state_hold_for_the_committed_results(self):
+        data = analyze.figures(self.committed())
+        self.assertEqual(analyze.broken_facts(data), [])
+        self.assertEqual({s["model"]: len(s["facts"]) for s in data["sessions"]}, {analyze.OPUS: 14, analyze.SONNET: 9})
+
+    def test_a_fact_turning_false_fails_the_check(self):
+        first = []
+
+        def lose_a_run(row):
+            if row["config"] == "plugin-next" and row["main_model"] == analyze.OPUS and not first:
+                first.append(row)
+                row["passed"] = False
+
+        results = self.changed(lose_a_run)
+        problems = analyze.check(results, Path("page.md"), analyze.build_page(results))
+        self.assertIn(f"{analyze.OPUS}: {analyze.FACT_TEXT['solved_all']} is false now", problems)
+        self.assertEqual(analyze.check(self.committed(), Path("page.md"), analyze.build_page(self.committed())), [])
+
+    def test_each_claim_about_the_opus_session_breaks_on_its_own_row(self):
+        scale = lambda config, by: lambda row: row.update(total_cost_usd=row["total_cost_usd"] * by) \
+            if row["config"] == config else None  # noqa: E731
+        drop = lambda row: row.update(config="gone") if row["config"] == "advisor" else None  # noqa: E731
+        for name, edit in (("strongest_beaten", scale("fable-high", 0.1)), ("not_cheapest", scale("plugin-next", 0.1)),
+                           ("cheaper_everywhere", scale("opusplan", 10)), ("ran", drop)):
+            with self.subTest(name):
+                facts = self.session(self.changed(edit))["facts"]
+                self.assertFalse(facts[name])
+
+    def test_a_session_the_docs_say_nothing_about_has_no_facts(self):
+        results = self.changed(lambda row: row.update(main_model="elsewhere"))
+        data = analyze.figures(results)
+        self.assertEqual([s["facts"] for s in data["sessions"]], [{}])
+        self.assertEqual(analyze.broken_facts(data), [])
 
     def test_main_reads_configurations_and_tasks_once(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -361,11 +475,11 @@ class Analysis(unittest.TestCase):
 
     def test_the_page_says_what_the_archive_holds_and_why_it_is_left_out(self):
         real = json.loads((ROOT / "bench" / "tasks" / "lookup-todo-count" / "task.json").read_text())
-        assert real["class"] == "lookup" and real["revision"] == 1
+        revision = real["revision"]  # the rows without a task_revision count as revision 1
         base = {"class": "lookup", "task": "lookup-todo-count", "config": "defaults", "total_cost_usd": 0.05,
                 "passed": True, "claude_version": "2.1.330", "main_model": "sonnet", "models": {},
                 "started_at": "2026-11-23T01:00:00+00:00", "budget_usd": 1.0, "plugin_state": None,
-                "plugin_data_own": True, "sessions_saved": True, "bench_commit": "c" * 40, "task_revision": 1}
+                "plugin_data_own": True, "sessions_saved": True, "bench_commit": "c" * 40, "task_revision": revision}
         old = {k: v for k, v in base.items() if k != "task_revision"}
         kept = [dict(old, bench_commit="a" * 40, task="design-cache-invalidation", **{"class": "design"}),
                 dict(old, bench_commit="b" * 40), dict(base)]
@@ -379,9 +493,11 @@ class Analysis(unittest.TestCase):
             analyze.main([str(res / "new-lookup.jsonl"), "--out", str(out)])
             page = out.read_text(encoding="utf-8")
         raw = page.split("## Raw data and commands")[1]
+        earlier = ("1 on an earlier revision of `design-cache-invalidation`" if revision == 1 else
+                   "2 on an earlier revision of `design-cache-invalidation`, `lookup-todo-count`")
         self.assertIn("- `bench/results/archive/early-builds/` holds 3 rows left out of every table, plus 1 set-aside "
                       "line under its `infra/` and `limited/`: 2 ran on 2 other commits (older builds of the router "
-                      "and the bench), 1 on an earlier revision of `design-cache-invalidation`, and 2 were recorded "
+                      f"and the bench), {earlier}, and 2 were recorded "
                       "while the run's folder name held its task id.", raw)
         self.assertNotIn("$0.15", page.split("## Raw data and commands")[0])  # archived spend is in no table
 
@@ -621,6 +737,44 @@ class FinalAnswer(unittest.TestCase):
         self.assertEqual(len(final["files"]) + len(final["omitted"]), 6)
         self.assertTrue(final["omitted"])
 
+    def test_the_reply_is_cut_to_the_row_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "repo").mkdir()
+            (Path(tmp) / "work").mkdir()
+            final = run.final_answer(Path(tmp) / "repo", Path(tmp) / "work", "r" * (run.FINAL_ROW_CHARS + 5))
+        self.assertEqual(len(final["reply"]), run.FINAL_ROW_CHARS)
+
+    @unittest.skipIf(sys.platform == "win32" or os.geteuid() == 0, "needs POSIX modes that bind the reader")
+    def test_an_unreadable_file_is_omitted_and_the_row_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            (work / "locked.py").write_text("x = 1\n", encoding="utf-8")
+            (work / "open.py").write_text("y = 1\n", encoding="utf-8")
+            (work / "locked.py").chmod(0)
+            try:
+                final = run.final_answer(shipped, work, "")
+            finally:
+                (work / "locked.py").chmod(0o644)
+        self.assertEqual((final["files"], final["omitted"]), ({"open.py": "y = 1\n"}, ["locked.py"]))
+
+    def test_a_link_out_of_the_work_dir_is_never_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            (Path(tmp) / "secret.txt").write_text("outside\n", encoding="utf-8")
+            (work / "inside.txt").write_text("inside\n", encoding="utf-8")
+            try:
+                (work / "out.txt").symlink_to(Path(tmp) / "secret.txt")
+                (work / "in.txt").symlink_to(work / "inside.txt")
+            except OSError:
+                self.skipTest("this system can't make symlinks")
+            final = run.final_answer(shipped, work, "")
+        self.assertEqual((final["files"], final["omitted"]),
+                         ({"in.txt": "inside\n", "inside.txt": "inside\n"}, ["out.txt"]))
+
     def test_a_run_row_has_the_whole_reply_and_the_files_the_run_left(self):
         with tempfile.TemporaryDirectory() as tmp:
             claude = stub(tmp, FILES_STUB)
@@ -666,8 +820,9 @@ def overlay_dirs(task, kind):
 
 
 def build_work(task, overlay, work):
-    """repo/, solution/ over it, then an overlay: `remove.txt` lists paths to delete, `answer.txt` is the reply and
-    stays out of the work dir, and every other file is copied in. Returns the reply."""
+    """repo/, solution/ over it, then an overlay: `remove.txt` lists paths to delete, `answer.txt` is the reply,
+    `expect.txt` is part of the reason a wrong answer must fail with, none of them go in the work dir, and every
+    other file is copied in. Returns the reply."""
     shutil.copytree(task["dir"] / "repo", work)
     if (task["dir"] / "solution").is_dir():
         shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
@@ -678,7 +833,7 @@ def build_work(task, overlay, work):
             (work / line.strip()).unlink()
     for src in sorted(p for p in overlay.rglob("*") if p.is_file()):
         rel = src.relative_to(overlay)
-        if rel.as_posix() in ("answer.txt", "remove.txt"):
+        if rel.as_posix() in ("answer.txt", "remove.txt", "expect.txt"):
             continue
         (work / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, work / rel)
@@ -708,6 +863,10 @@ class KnownAnswers(unittest.TestCase):
                     with self.subTest(task=task["id"], answer=f"{kind}/{overlay.name}"):
                         graded = self.grade(task, overlay)
                         self.assertEqual(graded.verdict, verdict, graded.reason)
+                        if kind == "wrong" and (overlay / "expect.txt").is_file():
+                            self.assertIn((overlay / "expect.txt").read_text(encoding="utf-8").strip(), graded.reason)
+                        elif kind == "wrong":  # a check that gives reasons pins each wrong answer's
+                            self.assertEqual(graded.reason, "the check exited 1", "add an expect.txt")
 
     def test_an_answer_folder_changes_something(self):
         for task in run.load_tasks():
@@ -1236,6 +1395,17 @@ class Isolation(unittest.TestCase):
             (shipped / "test_x.py").write_text(self.FAILS, encoding="utf-8")
             (work / "test_x.py").write_text(self.PASSES, encoding="utf-8")
             self.assertFalse(passcheck.tests_pass(work, shipped, "test_x.py"))
+
+    def test_tests_pass_fails_a_removed_test_and_raises_for_a_missing_shipped_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "shipped", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            (shipped / "test_x.py").write_text(self.PASSES, encoding="utf-8")
+            self.assertFalse(passcheck.tests_pass(work, shipped, "test_x.py"))
+            (work / "test_x.py").write_text(self.PASSES, encoding="utf-8")
+            with self.assertRaises(OSError):  # a check bug, which run.grade reads as broken
+                passcheck.tests_pass(work, shipped, "test_y.py")
 
     def test_planted_stdlib_names_cannot_fake_a_pass(self):
         for task in run.load_tasks():

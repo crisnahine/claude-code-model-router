@@ -15,7 +15,7 @@ passcheck.use_work(WORK)
 players = [{"name": n, "score": s} for n, s in (("a", 3), ("b", 100), ("c", 20), ("d", 1000))]
 with passcheck.agent_code():
     import ranking
-    tests = passcheck.tests_pass(WORK, SHIPPED, "test_ranking.py")
     order = [p["name"] for p in ranking.top(players, 4)]
+tests = passcheck.tests_pass(WORK, SHIPPED, "test_ranking.py")
 passcheck.finish(tests and order == ["d", "b", "c", "a"],
                  "test_ranking.py no longer passes" if not tests else passcheck.differs(order, ["d", "b", "c", "a"]))

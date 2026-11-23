@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import sys
 from dataclasses import dataclass
@@ -102,14 +103,16 @@ def _blocked_family(reg: Registry, entry: str) -> str | None:
 
 def _effective(reg: Registry, entries: tuple[str, ...]) -> tuple[str, ...]:
     """An allow list as Claude Code applies it: an entry naming a specific model in a family (a
-    version prefix, a full ID or a custom ID that embeds the family) turns off the entry that
-    names the family itself (https://code.claude.com/docs/en/model-config.md, Merge behavior)."""
+    version prefix or a full ID) turns off the entry that names the family itself
+    (https://code.claude.com/docs/en/model-config.md, Merge behavior). An entry names a version
+    when it carries a digit or a `claude-` or provider prefix; `opusplan` and `default` don't."""
     plain = set(reg.models) | set(reg.aliases)
 
     def bare(entry: str) -> str:
         return entry.strip().lower().split("[")[0]
 
-    specific = {reg.family(e) for e in entries if bare(e) not in plain} - {None}
+    specific = {reg.family(e) for e in entries
+                if bare(e) not in plain and re.search(r"\d|^claude-|^[\w-]+[./]", bare(e))} - {None}
     return tuple(e for e in entries if bare(e) not in specific)
 
 

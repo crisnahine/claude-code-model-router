@@ -1,0 +1,1 @@
+result 2 is 'caf-au-lait', expected 'cafe-au-lait'

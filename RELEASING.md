@@ -1,4 +1,4 @@
-<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
 <p align="center"><img src="docs/assets/banner-releasing.svg" width="880" alt="Releasing: How is a release cut, step by step?"></p>
 
 <p align="center"><a href="README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="docs/README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="CONTRIBUTING.md">Contributing</a> &nbsp;&middot;&nbsp; Next: <a href="docs/assets/BRAND.md">Brand</a></p>

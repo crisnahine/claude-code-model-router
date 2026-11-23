@@ -17,12 +17,12 @@ FULL = {"pen": 100, "book": 1500, "lamp": 4999}
 with passcheck.agent_code():
     import pricing
     import rates
-    tests = passcheck.tests_pass(WORK, SHIPPED, "test_pricing.py")
     sales = []
     for percent in (10, 25, 50, 10):
         sales.append((dict(pricing.sale_prices("eu", percent)), dict(pricing.price_list("eu"))))
     cached = [{"sku": r["sku"], "price": r["price"]} for r in rates.rate_table("eu")]
     loads, us_lamp = rates.LOADS.count("eu"), pricing.price_list("us")["lamp"]
+tests = passcheck.tests_pass(WORK, SHIPPED, "test_pricing.py")
 want_sales = [({k: v * (100 - percent) // 100 for k, v in FULL.items()}, FULL) for percent in (10, 25, 50, 10)]
 if not tests:
     passcheck.finish(False, "test_pricing.py no longer passes")
