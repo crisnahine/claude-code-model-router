@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Iterator
 
 from . import store
 
@@ -23,6 +24,34 @@ def transcript_tail(transcript_path: object, size: int) -> str | None:
             return fh.read().decode("utf-8", "replace")
     except OSError:
         return None
+
+
+def tool_calls(transcript_path: object, marker: str) -> Iterator[tuple[dict, dict]]:
+    """`(row, block)` for each tool_use block in the transcript's last 1 MiB. Only lines holding
+    `marker` are parsed, and unreadable rows are skipped."""
+    tail = transcript_tail(transcript_path, 1024 * 1024)
+    for line in (tail or "").splitlines():
+        if '"tool_use"' not in line or marker not in line:
+            continue
+        try:
+            row = json.loads(line)
+            content = row["message"]["content"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        if not isinstance(row, dict):
+            continue
+        for block in content if isinstance(content, list) else []:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                yield row, block
+
+
+def handed_back(transcript_path: object) -> bool:
+    """Did the agent deliver a report through SubagentHandback?"""
+    for _, block in tool_calls(transcript_path, '"SubagentHandback"'):
+        message = (block.get("input") or {}).get("message") if isinstance(block.get("input"), dict) else None
+        if block.get("name") == "SubagentHandback" and isinstance(message, str) and message.strip():
+            return True
+    return False
 
 
 def from_transcript(transcript_path: object) -> str | None:

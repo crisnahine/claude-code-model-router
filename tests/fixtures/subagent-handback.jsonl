@@ -1,0 +1,2 @@
+{"type": "assistant", "isSidechain": true, "timestamp": "2026-11-23T10:00:00.000Z", "message": {"model": "claude-haiku-5-5", "content": [{"type": "tool_use", "id": "toolu_1", "name": "SubagentHandback", "input": {"message": "src/a.py and src/b.py"}}]}}
+{"type": "assistant", "isSidechain": true, "timestamp": "2026-11-23T10:00:01.000Z", "message": {"model": "claude-haiku-5-5", "content": [{"type": "text", "text": ""}]}}

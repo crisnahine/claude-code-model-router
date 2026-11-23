@@ -123,9 +123,19 @@ class Sandbox(unittest.TestCase):
         hooks.post_agent({**self.call(agent, prompt, **extra), "tool_response": {
             "resolvedModel": ran_as, "status": "async_launched", "agentId": agent_id}})
 
-    def stopped(self, agent_id: str, answer: str | None = "src/a.py and src/b.py") -> None:
+    def handback(self, message: str) -> str:
+        """A copy of the handback transcript fixture with the delivered report replaced."""
+        rows = [json.loads(line) for line in (FIXTURES / "subagent-handback.jsonl").read_text().splitlines()]
+        rows[0]["message"]["content"][0]["input"]["message"] = message
+        path = Path(self.tmp.name) / f"handback-{abs(hash(message))}.jsonl"
+        path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+        return str(path)
+
+    def stopped(self, agent_id: str, answer: str | None = "src/a.py and src/b.py", transcript: str | None = None) -> None:
         """A subagent finished, as SubagentStop reports it."""
         hook_input = {"session_id": "s1", "agent_id": agent_id, "agent_type": "general-purpose"}
+        if transcript:
+            hook_input["agent_transcript_path"] = transcript
         hooks.agent_stopped(hook_input if answer is None else {**hook_input, "last_assistant_message": answer})
 
     def ledger(self) -> list[dict]:
@@ -463,6 +473,7 @@ class Intake(Sandbox):
         self.assertEqual((seen.person, seen.command, seen.level), (True, "hard", "hardest"))
         self.assertIsNone(intake.from_turn(FRAMING["delivered"][0], command, None).command)
         self.assertIsNone(intake.from_turn(SlashSkills.LINE.format("other", ""), command, None).command)
+        self.assertFalse(intake.from_turn(line, command, "peer").person)
 
 
 class Store(Sandbox):
@@ -473,7 +484,6 @@ class Store(Sandbox):
                     store.save_entry("prompts", key, {"n": i})
         self.assertEqual(sorted(store.load_state_file(self.data / "prompts.json")), ["aa", "bb", "mm"])
 
-        self.assertFalse(intake.from_turn(line, command, "peer").person)
     def test_ledger_survives_junk_lines(self):
         store.append_ledger({"event": "spawn"})
         with store.ledger_path().open("a") as fh:
@@ -1930,6 +1940,19 @@ class Mod(Sandbox):
         self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a2")
         self.stopped("a2", answer=None)  # a Claude Code that doesn't send the answer
         self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "sonnet")
+
+    def test_a_background_agent_that_handed_back_its_report_is_a_result(self):
+        self.spawn("general-purpose", LOOKUP)
+        self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1")
+        self.stopped("a1", answer="", transcript=self.handback("src/a.py and src/b.py"))
+        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "sonnet")
+
+    def test_a_handback_with_no_message_is_no_answer(self):
+        self.spawn("general-purpose", LOOKUP)
+        for agent_id, transcript in (("a1", self.handback(" ")), ("a2", str(Path(self.tmp.name) / "missing.jsonl"))):
+            self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", agent_id)
+            self.stopped(agent_id, answer="", transcript=transcript)
+            self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku", agent_id)
 
     def test_turns_and_spawns_keep_the_mod_marked_after_a_clear(self):
         self.assertFalse(hooks.mod_active("s2"))

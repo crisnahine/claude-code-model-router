@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import datetime as _dt
-import json
 import os
 import re
 import time
@@ -62,24 +61,16 @@ def note_agent_checks(hook_input: dict) -> None:
 
 def checks_ran_since(transcript_path: object, since: float) -> bool:
     """Did a test, lint, type-check or build command run after `since`?"""
-    tail = session.transcript_tail(transcript_path, 1024 * 1024)
-    if tail is None:
-        return False
-    for line in tail.splitlines():
-        if '"tool_use"' not in line or '"command"' not in line:
-            continue
+    for row, block in session.tool_calls(transcript_path, '"command"'):
         try:
-            row = json.loads(line)
             stamp = _dt.datetime.fromisoformat(str(row.get("timestamp", "")).replace("Z", "+00:00")).timestamp()
-            content = row["message"]["content"]
-        except (ValueError, KeyError, TypeError, AttributeError):
+        except ValueError:
             continue
         if stamp < since - _SAME_MESSAGE_SLACK:
             continue
-        for block in content if isinstance(content, list) else []:
-            command = (block.get("input") or {}).get("command") if isinstance(block, dict) else None
-            if isinstance(command, str) and CHECK_COMMAND.search(command):
-                return True
+        command = (block.get("input") or {}).get("command") if isinstance(block.get("input"), dict) else None
+        if isinstance(command, str) and CHECK_COMMAND.search(command):
+            return True
     return False
 
 
