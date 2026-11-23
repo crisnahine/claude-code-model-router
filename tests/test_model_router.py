@@ -4726,7 +4726,7 @@ class MachineReadable(Sandbox):
         self.assertEqual(data["newer_files"], [str(newer)])
 
     def test_models_shows_lock_counts_per_state_file(self):
-        self.assertEqual(self.json_out("models")["locks"], [])
+        self.assertNotIn("locks", self.json_out("models"))
         self.assertNotIn("Lock waits", self.out("models"))
         (store.data_dir() / "sample.json.lock").write_text("")
         with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02):
