@@ -13,8 +13,11 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 ### Changed
 
 - Complex runs on Opus at `medium`, where it ran on Sonnet at `high`. Migrations, schema changes, performance work and security review get the stronger model. Hardest is still Opus at `high`, so a redo of a complex call is a fresh subagent on Opus at a higher effort.
-- A brief that fixes or hunts a defect profiles at complex at least, not standard. "Fix", "debug" and the hunt verbs count only as verbs: "the fix", "fixture" and "debug logging" don't.
+- A brief that fixes or hunts a defect profiles at complex at least, not standard. Only "fix" and "debug" count as verbs ("the fix", "fixture" and "debug logging" don't); the other hunt verbs, such as "investigate" and "diagnose", match anywhere.
 - The scout, the verifier and lookup run Haiku at `medium`, not `low`.
+- Complex needs Opus, so on a Sonnet or Haiku session a complex request gets the session note and one blocked Stop asking for `model-router:architect`. `strong_agent_gate` controls it and is on by default. `priority: quality` and a learned raise take complex to Fable.
+- Result rows in `ledger.jsonl` carry `models_used` when the run swapped models. Claude gets a one-line note when a risk brief's run swapped models.
+- A new state file, `allowlist.json`, holds each session's settings layers.
 - `verify_gate` is on by default. Claude is asked once to run the verifier when code changed and nothing checked it. Set `verify_gate: false` to turn it off.
 - When `availableModels` and `deniedModels` leave no registry model, the call is left as it is, and the ledger row says why. The router no longer picks a model the lists block.
 - When a cap, the allowlist or model health leaves a level's pick weaker than the level needs, the pick gets one more effort step, at most `xhigh`.
