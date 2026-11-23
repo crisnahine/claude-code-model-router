@@ -1,6 +1,6 @@
 ---
-description: From a Haiku session, a security-review subagent should run on Opus at medium effort. Without the router it inherits Haiku.
-expected_outcome: "level complex, model opus, effort medium"
+description: From a Haiku session, a security-review subagent should run on Opus at high effort. Without the router it inherits Haiku.
+expected_outcome: "level complex, model opus, effort high"
 tags: [routing, quality]
 model: haiku
 max_turns: 4

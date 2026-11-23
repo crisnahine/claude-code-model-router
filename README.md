@@ -3,7 +3,7 @@
 <p align="center">
   <picture>
     <source media="(max-width: 600px)" srcset="docs/assets/hero-phone.svg">
-    <img src="docs/assets/hero.svg" width="100%" alt="Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level to complex, Opus at medium effort, and is solved. The ladder runs lookup on Haiku at medium, standard on Sonnet at medium, complex on Opus at medium, hardest on Opus at high and frontier on Fable at high.">
+    <img src="docs/assets/hero.svg" width="100%" alt="Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level to complex, Opus at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.">
   </picture>
 </p>
 
@@ -68,7 +68,7 @@ There is nothing to configure. Claude model routing is on from the first session
 
    > Review the auth middleware change for security holes and race conditions across the api and worker services
    Level: complex (risk, scope).
-   Model: opus, effort: medium.
+   Model: opus, effort: high.
    ```
 
 3. Work as you always do. Every agent call is routed as it starts.
@@ -84,8 +84,8 @@ Each subtask is scored from its own brief: risk (security, data, migrations, pub
 | :- | :- | :- | :- |
 | lookup | Find, list, summarize, run a command | Haiku | medium |
 | standard | Implement to a clear spec, write tests | Sonnet | medium |
-| complex | Fix a bug, design, review, risky change | Opus | medium |
-| hardest | Ambiguous, multi-system and risky at once | Opus | high |
+| complex | Fix a bug, design, review, risky change | Opus | high |
+| hardest | Ambiguous, multi-system and risky at once | Opus | xhigh |
 | frontier | All of that, with no known approach: research, open-ended investigation | Fable | high |
 
 A call Claude re-issues after its result came back runs one level higher: a stronger model, or more effort on the same one. Starting low and re-running what fails follows Anthropic's own measurement: low effort with failures re-run at high solved about 97% of a coding benchmark for $0.17 a task, against 95.3% for $0.29 with every task at high ([research](docs/research/model-control.md), Q7).
@@ -105,7 +105,7 @@ On an Opus 5.5 session, the default model for every account type but Microsoft F
 
 On a Sonnet session the router is behind. It is cheapest only in <!-- bench:sonnet.pass_classes -->lookup<!-- /bench --> (<!-- bench:sonnet.less.defaults.min -->24<!-- /bench -->% less than the defaults, PASS), and in the other <!-- bench:sonnet.status.FAIL -->7<!-- /bench --> classes it costs <!-- bench:sonnet.behind.min -->7<!-- /bench --> to <!-- bench:sonnet.behind.max -->63<!-- /bench -->% more per solved task than the best baseline at the same pass rate (FAIL). On these tasks the cheapest models already solve nearly every run, so the router's Sonnet and Opus picks for harder subtasks cost more without a pass-rate gain to show. [Release readiness](docs/RELEASE_READINESS.md) says why, and the [roadmap](docs/ROADMAP.md) says what comes next: a harder task tier.
 
-The router ran the routing code at commit <!-- bench:opus.commit_code -->`780ee86`<!-- /bench -->, <!-- bench:per_cell -->10<!-- /bench --> runs per class and configuration, beside every baseline on the same Claude Code version and tasks. That run had `verify_gate` off and ran complex on Sonnet; the verify gate is now on by default and complex now runs on Opus, so these figures don't describe the current defaults. [BENCHMARKS.md](docs/BENCHMARKS.md) has every table, the raw data and the commands to rerun it.
+The router ran the routing code at commit <!-- bench:opus.commit_code -->`780ee86`<!-- /bench -->, <!-- bench:per_cell -->10<!-- /bench --> runs per class and configuration, beside every baseline on the same Claude Code version and tasks. That run had `verify_gate` off and ran complex on Sonnet; the verify gate is now on by default and complex now runs on Opus at `high` and hardest at `xhigh`, so these figures don't describe the current defaults. [BENCHMARKS.md](docs/BENCHMARKS.md) has every table, the raw data and the commands to rerun it.
 
 ## Commands
 

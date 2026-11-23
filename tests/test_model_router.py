@@ -1514,25 +1514,25 @@ class Router(Sandbox):
         config = cfg.base_config()
         every = ["haiku", "sonnet", "opus", "fable"]
         picks = [tuple(ladder.pick(config, level, "balanced", every, {})) for level in cfg.LEVELS]
-        self.assertEqual(picks, [("haiku", "medium"), ("sonnet", "medium"), ("opus", "medium"),
-                                 ("opus", "high"), ("fable", "high")])
+        self.assertEqual(picks, [("haiku", "medium"), ("sonnet", "medium"), ("opus", "high"),
+                                 ("opus", "xhigh"), ("fable", "high")])
 
     def test_a_pick_weaker_than_the_levels_need_gets_one_more_effort_step(self):
         config = cfg.base_config()
         pick = lambda level, usable: tuple(ladder.pick(config, level, "balanced", usable, {}))  # noqa: E731
-        self.assertEqual(pick("complex", ["haiku", "sonnet"]), ("sonnet", "high"))
+        self.assertEqual(pick("complex", ["haiku", "sonnet"]), ("sonnet", "xhigh"))
         self.assertEqual(pick("hardest", ["haiku", "sonnet"]), ("sonnet", "xhigh"))
         self.assertEqual(pick("frontier", ["haiku", "sonnet", "opus"]), ("opus", "xhigh"))
-        self.assertEqual(pick("complex", ["haiku"]), ("haiku", "high"))
-        self.assertEqual(ladder.pick(config, "complex", "balanced", [], {}), (None, "medium"))
+        self.assertEqual(pick("complex", ["haiku"]), ("haiku", "xhigh"))
+        self.assertEqual(ladder.pick(config, "complex", "balanced", [], {}), (None, "high"))
 
     def test_a_pick_at_or_above_the_levels_need_gets_no_extra_step(self):
         config = cfg.base_config()
         pick = lambda level, usable, priority="balanced": tuple(ladder.pick(config, level, priority, usable, {}))  # noqa: E731
         self.assertEqual(pick("lookup", ["sonnet"]), ("sonnet", "medium"))  # stronger than needed
         self.assertEqual(pick("standard", ["sonnet", "opus"]), ("sonnet", "medium"))
-        self.assertEqual(pick("complex", ["opus", "fable"]), ("opus", "medium"))
-        self.assertEqual(pick("complex", ["opus", "fable"], "quality"), ("fable", "medium"))
+        self.assertEqual(pick("complex", ["opus", "fable"]), ("opus", "high"))
+        self.assertEqual(pick("complex", ["opus", "fable"], "quality"), ("fable", "high"))
         self.assertEqual(pick("complex", ["sonnet", "opus"], "fast"), ("sonnet", None))  # fast steps down on purpose
 
     def test_the_extra_effort_step_never_goes_past_xhigh(self):
@@ -1542,28 +1542,28 @@ class Router(Sandbox):
             pick = ladder.pick({**config, "levels": levels}, "complex", "balanced", ["sonnet"], {})
             self.assertEqual(pick, ("sonnet", want), effort)
 
-    def test_complex_without_opus_runs_on_sonnet_at_high_and_a_redo_adds_effort(self):
+    def test_complex_without_opus_runs_on_sonnet_at_xhigh_and_a_redo_adds_effort(self):
         self.options(max_tier="sonnet")
         d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["level"], d["model"], d["effort"]), ("complex", "sonnet", "high"))
+        self.assertEqual((d["level"], d["model"], d["effort"]), ("complex", "sonnet", "xhigh"))
         self.pre("general-purpose", HARD)
-        self.done("general-purpose", HARD, "claude-sonnet-5-5", model="sonnet", effort="high")
+        self.done("general-purpose", HARD, "claude-sonnet-5-5", model="sonnet", effort="xhigh")
         again = self.decide("general-purpose", HARD)
-        self.assertEqual((again["level"], again["model"], again["effort"]), ("hardest", "sonnet", "xhigh"))
+        self.assertEqual((again["level"], again["model"], again["effort"]), ("hardest", "sonnet", "max"))
 
-    def test_complex_with_opus_and_fable_routed_around_runs_on_sonnet_at_high_and_a_redo_adds_effort(self):
+    def test_complex_with_opus_and_fable_routed_around_runs_on_sonnet_at_xhigh_and_a_redo_adds_effort(self):
         self.route_around("opus", "fable")
         d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["level"], d["model"], d["effort"]), ("complex", "sonnet", "high"))
+        self.assertEqual((d["level"], d["model"], d["effort"]), ("complex", "sonnet", "xhigh"))
         self.pre("general-purpose", HARD)
-        self.done("general-purpose", HARD, "claude-sonnet-5-5", model="sonnet", effort="high")
+        self.done("general-purpose", HARD, "claude-sonnet-5-5", model="sonnet", effort="xhigh")
         again = self.decide("general-purpose", HARD)
-        self.assertEqual((again["model"], again["effort"]), ("sonnet", "xhigh"))
+        self.assertEqual((again["model"], again["effort"]), ("sonnet", "max"))
 
-    def test_complex_with_only_opus_routed_around_moves_up_to_fable_at_medium(self):
+    def test_complex_with_only_opus_routed_around_moves_up_to_fable_at_high(self):
         self.route_around("opus")
         d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["model"], d["effort"]), ("fable", "medium"))
+        self.assertEqual((d["model"], d["effort"]), ("fable", "high"))
 
     def test_a_pin_or_rule_the_cap_lowers_keeps_the_levels_own_effort(self):
         self.options(max_tier="sonnet")
@@ -1572,18 +1572,18 @@ class Router(Sandbox):
         self.override({"agents": {"ruled": {"model": "opus"}}})
         for name, source in (("pinned", "pin"), ("ruled", "rule")):
             d = self.decide(name, HARD)
-            self.assertEqual((d["source"], d["model"], d["effort"]), (source, "sonnet", "medium"), name)
-        self.assertEqual(self.decide("general-purpose", HARD)["effort"], "high")
+            self.assertEqual((d["source"], d["model"], d["effort"]), (source, "sonnet", "high"), name)
+        self.assertEqual(self.decide("general-purpose", HARD)["effort"], "xhigh")
 
     def test_quality_priority_and_a_learned_raise_take_complex_to_fable(self):
         self.options(priority="quality")
         d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["level"], d["model"], d["effort"]), ("complex", "fable", "medium"))
+        self.assertEqual((d["level"], d["model"], d["effort"]), ("complex", "fable", "high"))
         os.environ.pop("CLAUDE_PLUGIN_OPTION_PRIORITY")
         for _ in range(learn.VOTES_NEEDED):
             learn.decided(cfg.load_config(), source="caller", level="complex", pick="opus", runs_on="fable")
         d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["model"], d["effort"]), ("fable", "medium"))
+        self.assertEqual((d["model"], d["effort"]), ("fable", "high"))
 
     def test_agents_without_a_model_get_the_one_their_subtask_needs(self):
         self.agent("helper")
@@ -1594,7 +1594,7 @@ class Router(Sandbox):
         d = self.decide("helper", BUILD)
         self.assertEqual((d["model"], d["effort"]), ("sonnet", "medium"))
         d = self.decide("helper", HARD)
-        self.assertEqual((d["model"], d["effort"]), ("opus", "medium"))
+        self.assertEqual((d["model"], d["effort"]), ("opus", "high"))
 
     def test_a_rewrite_changes_two_fields_and_approves_nothing(self):
         out = self.pre("general-purpose", LOOKUP, description="d", run_in_background=True)
@@ -1687,9 +1687,9 @@ class Router(Sandbox):
         self.assertEqual(self.decide("model-router:scout", plan.replace("Plan a fix for", "List the files of"))["model"],
                          "haiku")  # the floor is only for the two strong role agents
         d = self.decide("model-router:architect", plan)
-        self.assertEqual((d["level"], d["model"], d["effort"]), ("hardest", "opus", "high"))
+        self.assertEqual((d["level"], d["model"], d["effort"]), ("hardest", "opus", "xhigh"))
         self.pre("model-router:architect", plan)
-        self.done("model-router:architect", plan, "claude-opus-5-5", model="opus", effort="high")
+        self.done("model-router:architect", plan, "claude-opus-5-5", model="opus", effort="xhigh")
         d = self.decide("model-router:architect", plan)
         self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("frontier", "fable", "hardest"))
         check = "Check this proposed fix for the duplicate charge problem and improve it: add a lock."
@@ -1740,13 +1740,13 @@ class Router(Sandbox):
         d = self.decide("model-router:architect", brief)
         self.assertEqual((d["source"], d["level"], d["model"]), ("router", "hardest", "opus"))
         self.pre("model-router:architect", brief)
-        self.done("model-router:architect", brief, "claude-opus-5-5", model="opus", effort="high")
+        self.done("model-router:architect", brief, "claude-opus-5-5", model="opus", effort="xhigh")
         d = self.decide("model-router:architect", brief)
         self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("frontier", "fable", "hardest"))
 
     def test_the_deep_solver_starts_at_hardest_and_can_go_higher(self):
         d = self.decide("model-router:deep-solver", LOOKUP)  # its name floors the level; the ladder sets the model
-        self.assertEqual((d["source"], d["level"], d["model"], d["effort"]), ("router", "hardest", "opus", "high"))
+        self.assertEqual((d["source"], d["level"], d["model"], d["effort"]), ("router", "hardest", "opus", "xhigh"))
         frontier = ("Investigate the unknown root cause of intermittent data loss in the payments database across "
                     "every service and design a fix; there is no known approach.")
         d = self.decide("model-router:deep-solver", frontier)
@@ -1790,7 +1790,7 @@ class Router(Sandbox):
         out = self.pre("general-purpose", LOOKUP)
         self.assertEqual(out["updatedInput"], {"prompt": LOOKUP, "subagent_type": "general-purpose", "effort": "medium"})
         self.assertIn("effort to medium", out["additionalContext"])
-        self.assertEqual(self.decide("general-purpose", HARD)["effort"], "medium")
+        self.assertEqual(self.decide("general-purpose", HARD)["effort"], "high")
         self.options(priority="fast")
         self.assertIsNone(self.decide("general-purpose", HARD)["effort"])
         self.assertEqual(self.decide("general-purpose", LOOKUP)["effort"], None)
@@ -1898,19 +1898,19 @@ class RepeatGuard(Sandbox):
         self.pre("general-purpose", LOOKUP)
         self.assertEqual(learn.stats()["lookup"]["votes"], 1)
 
-    def test_a_standard_redo_moves_to_opus_at_medium(self):
+    def test_a_standard_redo_moves_to_opus_at_high(self):
         self.pre("general-purpose", BUILD)
         self.done("general-purpose", BUILD, "claude-sonnet-5-5", model="sonnet", effort="medium")
         again = self.decide("general-purpose", BUILD)
         self.assertEqual((again["level"], again["model"], again["effort"], again["escalated_from"]),
-                         ("complex", "opus", "medium", "standard"))
+                         ("complex", "opus", "high", "standard"))
 
-    def test_a_complex_redo_stays_on_opus_at_high(self):
+    def test_a_complex_redo_stays_on_opus_at_xhigh(self):
         self.pre("general-purpose", HARD)
-        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="medium")
+        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="high")
         again = self.decide("general-purpose", HARD)
         self.assertEqual((again["level"], again["model"], again["effort"], again["escalated_from"]),
-                         ("hardest", "opus", "high", "complex"))
+                         ("hardest", "opus", "xhigh", "complex"))
 
     def test_redo_counts_only_within_the_same_request(self):
         hooks.user_prompt({"session_id": "s1", "prompt": "check the repo", "prompt_id": "p1"})
@@ -1926,11 +1926,11 @@ class RepeatGuard(Sandbox):
         self.options(max_tier="opus")
         hard = "investigate why auth is flaky and redesign it across every service"
         first = self.decide("general-purpose", hard)
-        self.assertEqual((first["level"], first["model"], first["effort"]), ("hardest", "opus", "high"))
+        self.assertEqual((first["level"], first["model"], first["effort"]), ("hardest", "opus", "xhigh"))
         self.pre("general-purpose", hard)
-        self.done("general-purpose", hard, "claude-opus-5-5", model="opus", effort="high")
+        self.done("general-purpose", hard, "claude-opus-5-5", model="opus", effort="xhigh")
         again = self.decide("general-purpose", hard)
-        self.assertEqual((again["level"], again["model"], again["effort"]), ("frontier", "opus", "xhigh"))
+        self.assertEqual((again["level"], again["model"], again["effort"]), ("frontier", "opus", "max"))
 
     def test_redo_escalation_stops_at_the_top_and_skips_named_models(self):
         hard = "research a novel fix for the auth migration across every service, root cause unknown"
@@ -3537,7 +3537,7 @@ class RefreshBackoff(Sandbox):
 
 class Reports(Sandbox):
     def test_policy_shows_levels_cap_and_the_crew(self):
-        self.assertIn("| complex | opus | medium |", self.out("policy"))
+        self.assertIn("| complex | opus | high |", self.out("policy"))
         store.update_state(lambda state: state.update(max_tier="sonnet", priority="quality"))
         text = self.out("policy")
         self.assertIn("Cap: **sonnet**", text)

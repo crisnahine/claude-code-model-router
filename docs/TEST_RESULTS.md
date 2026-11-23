@@ -72,7 +72,7 @@ Same clean environment as below. Each case tells Claude to make one `Agent` call
 | `route-review-subagent` | Haiku | `ran-on-sonnet` | 1.0, 3 of 3 | 0, 0 of 3 | $0.039 / $0.007 |
 | `route-redo-escalates` | Haiku | `called-twice`, `first-ran-on-haiku`, `redo-ran-on-sonnet` | 1.0, 3 of 3 | 0.67, 0 of 3 | $0.048 / $0.013 |
 
-The table was recorded before complex moved to Opus at `medium`: `route-review-subagent` now expects Opus (`ran-on-opus`) and its live result has not been rerun.
+The table was recorded before complex moved to Opus, and then to `high`: `route-review-subagent` now expects Opus at `high` (`ran-on-opus`) and its live result has not been rerun.
 
 Total $0.352 (no LLM grader, so no judge cost), 70 seconds, not partial. Every with-plugin run passed every grader and no without-plugin run passed, so the suite's mean delta is 0.78 (the redo case's delta is 0.33, since without the plugin the call is still made twice). The trace carries each subagent's model but not its effort, and the spend log lives in the plugin's data folder, which a grader can't read (https://code.claude.com/docs/en/plugin-evals.md#what-a-grader-can-look-at), so effort and spend rows are covered by the unit tests and the live runs in `docs/ARCHITECTURE.md`, not here.
 

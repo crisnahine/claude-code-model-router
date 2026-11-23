@@ -428,8 +428,8 @@ def badge_assets(version: str) -> dict:
 LADDER = [  # level, model, effort, needs, subtask
     ("lookup", "Haiku", "medium", 1, "Find, list, summarize, run a command"),
     ("standard", "Sonnet", "medium", 2, "Implement to a clear spec, write tests"),
-    ("complex", "Opus", "medium", 3, "Fix a bug, design, review, risky change"),
-    ("hardest", "Opus", "high", 3, "Ambiguous, multi-system and risky at once"),
+    ("complex", "Opus", "high", 3, "Fix a bug, design, review, risky change"),
+    ("hardest", "Opus", "xhigh", 3, "Ambiguous, multi-system and risky at once"),
     ("frontier", "Fable", "high", 4, "No known approach: research"),
 ]
 
@@ -520,8 +520,8 @@ def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,),
 HERO_TITLE = "Model Router: every Claude Code agent on the cheapest model that should do the job"
 HERO_LABEL = ("Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and "
               "runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level "
-              "to complex, Opus at medium effort, and is solved. The ladder runs lookup on Haiku at medium, standard on "
-              "Sonnet at medium, complex on Opus at medium, hardest on Opus at high and frontier on Fable at high.")
+              "to complex, Opus at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on "
+              "Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.")
 
 
 def hero(phone=False) -> str:
@@ -608,7 +608,7 @@ def diagram_ladder() -> str:
            + ".lstatic{animation:hide 1s infinite}" + keyframes("hide", [(0, "opacity:0"), (100, "opacity:0")]))
     title = "The ladder: five levels to a model and an effort"
     label = ("With balanced priority, lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on "
-             "Opus at medium, hardest on Opus at high, and frontier on Fable at high. A call climbs one rung each "
+             "Opus at high, hardest on Opus at xhigh, and frontier on Fable at high. A call climbs one rung each "
              "time it comes back for a redo. Quality priority goes one step stronger, fast one step lighter. When "
              "the cap, the availableModels or deniedModels settings, or failures rule a model out, the pick moves "
              "to the nearest usable model above it, or to the strongest one left, and a pick weaker than its level needs "
@@ -624,7 +624,7 @@ def diagram_redo() -> str:
         ("1. Agent call", ["Routed at its level:"], "standard, Sonnet, medium", 2),
         ("2. Result comes back", ["Recorded as finished,", "with the level it ran at."], None, 0),
         ("3. Same call again", ["In the same request:", "the answer fell short."], None, -1),
-        ("4. One level higher", ["Up a model, or up effort:"], "complex, Opus, medium", 3),
+        ("4. One level higher", ["Up a model, or up effort:"], "complex, Opus, high", 3),
     ]
     cw, gap, top = 196, 28, 92
     for k, (head, body, code, accent) in enumerate(steps):
@@ -678,7 +678,7 @@ def diagram_redo() -> str:
     title = "Redo escalation: the same call again runs one level higher"
     label = ("A call is routed at its level, for example standard on Sonnet at medium effort. Its result comes back "
              "and the call is recorded as finished. If Claude issues the same call again in the same request, it "
-             "runs one level higher, complex on Opus at medium, and counts as a vote that standard was routed too "
+             "runs one level higher, complex on Opus at high, and counts as a vote that standard was routed too "
              "low. At least 6 votes that are also at least 30 percent of a level's calls raise that level one step.")
     return svg(w, h, title, label, "".join(out), css)
 
