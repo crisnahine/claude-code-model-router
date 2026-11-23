@@ -29,12 +29,16 @@ The aim is the lowest cost per finished task at a high quality bar. Every subtas
                   spawn · fallback · router.decide · ladder · registry · profile · request · calls · learn · gates
 ```
 
-**The mod** (`hooks/router.ts`, a hooks module loaded from `hooks/hooks.json` under `modules`) is the primary path. It hooks four engine events:
+**The mod** (`hooks/router.ts`, a hooks module loaded from `hooks/hooks.json` under `modules`) is the primary path. It hooks eight engine events:
 
 | Event | What the mod does |
 | :- | :- |
+| `tool.call` | Fires for an `Agent` call. The mod keeps the `effort` Claude put on the call, which `agent.spawn` has no field for, and sends it with the spawn. |
+| `session.start` | Marks the session for the settings hooks (`mod-start`) and sends the settings layers the mod read. |
 | `agent.spawn` | Fires for every subagent, teammate and workflow agent before its model is resolved. The mod asks the router and passes the pick on as `model`. The event names the parent's effective model exactly (`parentModel`), so nothing is guessed from a transcript. Forks and resumed runs are left alone. |
 | `turn.step` | Fires for each model request, the main loop's and each agent's. `agent.spawn` has no effort field, so a routed agent's effort is set here, on each of its requests. The main loop's turn effort is applied here too. Each request's usage is kept for its turn. |
+| `prompt.submit` | Where a prompt came from: a teammate's report or a notification is not the person's request. For a typed `/skill` it keeps the command's name and arguments. Nothing is sent from here. |
+| `skill.prompt` | The body a typed `/skill` renders for its turn, kept so `turn.start` can send it with the command. |
 | `turn.start` | The main loop's request text, after the settings hooks for the prompt ran. The router picks that turn's effort from it. For a typed `/skill`, whose turn text is a `<command-message>` line, the mod sends the command's arguments from `prompt.submit` and the body `skill.prompt` rendered for it instead. |
 | `turn.complete` | Each turn's token usage and model, main loop and agents alike, written to the ledger with its cost: the sum of its requests, each priced on its own, because Haiku 5.5 bills a prompt over 100,000 tokens at a higher rate per request (https://platform.claude.com/docs/en/about-claude/pricing.md, Long context pricing). A turn sent without its requests is priced at the base rate. |
 
@@ -180,7 +184,10 @@ A changelog or docs index that comes back empty, such as an outage page, counts 
 
 ```text
 mod  session.start ─ mod-start      marks the session, so PreToolUse stands down, and keeps the settings layers the mod read
+mod  tool.call                      keeps the effort Claude put on an Agent call
 mod  agent.spawn   ─ mod-spawn      spawn.decide and spawn.record for a subagent, teammate or workflow stage
+mod  prompt.submit                  keeps where the next turn's prompt came from, and a typed command's arguments
+mod  skill.prompt                   keeps the body a typed command renders
 mod  turn.start    ─ mod-turn       the main loop's effort for this turn; keeps the settings layers too
 mod  turn.step                      applies the agent's or the turn's effort to each request; keeps its usage
 mod  turn.complete ─ mod-usage      prices the turn's requests into the ledger
