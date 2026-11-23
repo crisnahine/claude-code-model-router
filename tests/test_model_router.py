@@ -3064,8 +3064,8 @@ class ReadmeDiagrams(unittest.TestCase):
         import xml.etree.ElementTree as ET
         return ET.parse(ROOT / "docs" / "assets" / name).getroot()
 
-    def test_each_diagram_is_valid_titled_svg_linked_from_the_readme(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    def test_each_diagram_is_valid_titled_svg_linked_from_the_architecture_page(self):
+        page = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         for name in self.NAMES:
             root = self.parse(name)
             self.assertEqual(root.tag, f"{self.SVG}svg", name)
@@ -3073,10 +3073,15 @@ class ReadmeDiagrams(unittest.TestCase):
                 self.assertTrue(root.get(attr), f"{name} has no {attr}")
             title = root.find(f"{self.SVG}title")
             self.assertTrue(title is not None and (title.text or "").strip(), f"{name} has no title")
-            self.assertIn(f"](docs/assets/{name})", readme)
+            self.assertIn(f"](assets/{name})", page)
             source = (ROOT / "docs" / "assets" / name).read_text(encoding="utf-8")
             self.assertNotIn("var(", source, f"{name}: librsvg and some viewers render CSS variables black")
             self.assertIn("prefers-color-scheme: dark", source, name)
+
+    def test_the_guide_carries_the_precedence_and_stop_check_diagrams(self):
+        guide = (ROOT / "docs" / "GUIDE.md").read_text(encoding="utf-8")
+        for name in ("precedence.svg", "stop-checks.svg"):
+            self.assertIn(f"](assets/{name})", guide)
 
     def text(self, name: str) -> str:
         return " ".join((cell.text or "").strip() for cell in self.parse(name).iter(f"{self.SVG}text"))

@@ -14,6 +14,8 @@ The aim is the lowest cost per finished task at a high quality bar. Every subtas
 
 ## Two control paths, one router
 
+![Two control paths, one router: Claude Code engine events reach the mod, hooks/router.ts, and the settings hooks in hooks/hooks.json are the fallback and do the bookkeeping. Both run sh model-router.sh, which calls one Python runtime that decides every spawn.](assets/two-paths.svg)
+
 ```text
               Claude Code engine events                      settings hooks
    agent.spawn  turn.start  turn.step  turn.complete      SessionStart, UserPromptSubmit,
@@ -72,13 +74,17 @@ All of it is standard-library Python, plus the one TypeScript file the engine ru
 | hardest | 3 | Opus | high |
 | frontier | 4 | Fable | high |
 
+![The ladder: lookup on Haiku at low effort, standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high, frontier on Fable at high. A call climbs one rung each time it comes back for a redo.](assets/ladder.svg)
+
+The profile scores each subtask from its own brief. It looks for risk (security, data and its consistency, migrations, public APIs), scope (several modules or services), load (performance, latency, throughput, staleness and capacity limits, counted only when the brief also asks for a design or a choice) and ambiguity (design, a decision between approaches, root cause, trade-offs). It also checks whether the subtask changes or reasons about something or only reads, and what the agent's name says the agent is for: a reviewer or an architect needs more than a search agent.
+
 Each step is set from the measurements in the research notes:
 
 - The ladder starts cheap and relies on redo escalation. The earlier ladder (standard at `high`, complex on Opus, hardest at `xhigh`) cost 1.2 to 2.2 times as much per solved task as Claude Code's defaults on 7 of 8 task classes at the same pass rate ([BENCHMARKS.md](BENCHMARKS.md)).
-- Standard and complex share Sonnet and differ in effort: `medium`, Claude Code's own default for Sonnet 5.5, then `high`. Effort is the cheaper lever: on current models it keeps the prompt cache. Hardest runs on Opus at `high`, which came within a point of Fable 5.2 at `high` for under a quarter of the cost.
+- Standard and complex share Sonnet and differ in effort: `medium`, Claude Code's own default for Sonnet 5.5, then `high`. Effort is the cheaper lever: on current models it keeps the prompt cache. Hardest runs on Opus at `high`, which came within a point of Fable 5.2 at `high` on coding (95.5% against 96.3%) for under a quarter of the cost.
 - Fable is kept for frontier work, where the brief is hardest and also open-ended or research-grade, and for redos of hardest work.
 
-A level's `needs` is a strength. `ladder.pick` adds any learned raise, and `registry.select` takes the cheapest usable model at or above it, so a cap or an unavailable model moves the pick without any level naming a model.
+A level's `needs` is a strength. `ladder.pick` adds any learned raise, and `registry.select` takes the cheapest usable model at or above it, so a cap or an unavailable model moves the pick without any level naming a model. With `balanced` priority that is the cheapest model strong enough for the level; `quality` goes one step stronger, and `fast` one step lighter, taking the quickest model that qualifies.
 
 ## The decision
 
@@ -97,7 +103,7 @@ Order of authority, strongest first:
 
 The scout and verifier pin Haiku at low effort and the docs-researcher Haiku at medium in their own definitions, so step 4 keeps them, and they stay on Haiku where the router doesn't route (`advise`, `off`, or no hooks). The implementer, architect, reviewer and deep-solver name no model or effort, so step 6 decides them like any agent without a pin, and where the router doesn't route they run on `CLAUDE_CODE_SUBAGENT_MODEL` if it's set, else on the conversation's model (https://code.claude.com/docs/en/sub-agents.md#choose-a-model). Their names set a floor in the profile: complex for the architect and reviewer, hardest for this plugin's own `model-router:deep-solver` only (`profile.profile_call`); another agent named for a role, such as `sudoku-solver`, gets complex, and a `resolver` none. A brief that profiles higher keeps its level. When the session note or the `Stop` check asks for a strong agent, it names the architect, or the deep-solver for a frontier request, by name only (`gates.strong_agent`), and a call to either starts no lower than the request's level from `UserPromptSubmit` (`spawn.facts`), since a hand-off brief often reads simpler than the request (not while Claude handles a teammate's or another session's message, which isn't the user's request); a redo still climbs from there, which a model named on the call would stop at step 2.
 
-Then `registry.clamp` lowers the result to the nearest usable model. It never raises.
+Then `registry.clamp` moves the result to the closest usable model at or below it, or to the weakest usable model when none is below it, so it raises only when everything usable is stronger than the pick.
 
 Effort is set when the router, a rule or the agent's own model decided the model and nobody chose an effort: not the call, not the agent's definition, not `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT`. A pin is about the model, and an agent that pins Opus with no effort would otherwise run at `medium`.
 
@@ -111,6 +117,8 @@ Some details of how the rules apply:
 - On a provider whose alias for the decided family resolves to an older model (`settings.provider`, from the `CLAUDE_CODE_USE_*` switches), the mod sends that family's newest ID in place of the alias (`registry.newest_id`). It doesn't when the user pinned the family with `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`, set `modelOverrides`, or has `availableModels`, `availableModelsMatch` or `deniedModels` ruling the version out, when the caller or the agent named an exact version, or on Mantle, whose aliases aren't documented. A model error on that ID routes around the ID alone, after one failure, so the alias runs until the ID is retried. Only `agent.spawn` takes a full ID: the `Agent` tool's `model` takes an alias (https://code.claude.com/docs/en/sub-agents.md), so the fallback path sends aliases.
 
 ### Redo escalation
+
+![Redo escalation: a call routed at standard comes back, the same call issued again runs at complex, and the redo counts as a vote that standard was too low. At least 6 votes that are also at least 30% of the level's calls raise the level one step.](assets/redo-escalation.svg)
 
 When an agent's result comes back, the call is remembered with the level it ran at (`done`, per session). For an agent that runs in the background the `Agent` call returns as soon as the agent has launched, so its call waits under the agent's id (`launched`) and counts as finished when the agent stops with an answer. Copies of one brief started together therefore all run at the brief's own level. The `post-agent` hook runs before Claude's next step, so a redo always finds the record. If the same call is issued again, the first answer wasn't good enough, so it runs one level higher, and the redo is a vote that its first level was too low. On the shipped ladder (`levels` in `config/models.json`), lookup to standard, complex to hardest and hardest to frontier move to a stronger model, and standard to complex stays on Sonnet and raises effort to high. Any redo that stays on the model of the run it replaces, as standard to complex does, or under a cap that holds it there, or for a frontier run with no level above it, runs at least one step more effort than that run (`router._above_earlier`). A call that names its own model is never escalated: the caller has decided.
 

@@ -1,7 +1,7 @@
 <!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
 <p align="center"><img src="assets/banner-docs.svg" width="880" alt="Documentation: Every page, and the question each one answers"></p>
 
-<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; Previous: <a href="FAQ.md">Questions</a> &nbsp;&middot;&nbsp; Next: <a href="ARCHITECTURE.md">Architecture</a></p>
+<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; Previous: <a href="GUIDE.md">Guide</a> &nbsp;&middot;&nbsp; Next: <a href="ARCHITECTURE.md">Architecture</a></p>
 <!-- End of page head. -->
 
 # Model Router documentation
@@ -14,6 +14,10 @@ Every page about Model Router, the Claude Code plugin that routes each agent to 
 <tr>
 <td width="50%" valign="top"><img src="assets/icon-readme.svg" width="20" height="20" alt=""> <a href="../README.md"><b>Model Router</b></a><br>What does it do, and how do I install it?</td>
 <td width="50%" valign="top"><img src="assets/icon-faq.svg" width="20" height="20" alt=""> <a href="FAQ.md"><b>Questions</b></a><br>What is Model Router, and how does it pick?</td>
+</tr>
+<tr>
+<td width="50%" valign="top"><img src="assets/icon-guide.svg" width="20" height="20" alt=""> <a href="GUIDE.md"><b>Guide</b></a><br>How do I configure it for my setup?</td>
+<td width="50%"></td>
 </tr>
 <tr><th colspan="2" align="left">How it works<br><sub>The design, its words and sources, and what it costs to run.</sub></th></tr>
 <tr>
@@ -60,9 +64,9 @@ Every delivery item the project keeps, where it lives, and whether it exists yet
 | # | Item | Where | Exists |
 | -: | :- | :- | :- |
 | 1 | Source code and architecture | [ARCHITECTURE.md](ARCHITECTURE.md), [GLOSSARY.md](../GLOSSARY.md) | Yes |
-| 2 | Capabilities and commands | [README.md](../README.md) "Commands", "Configuration" | Yes |
+| 2 | Capabilities and commands | [README.md](../README.md) "Commands", "Configuration", [GUIDE.md](GUIDE.md) | Yes |
 | 3 | Primary-source research | [research/model-control.md](research/model-control.md) | Yes |
-| 4 | Supported Claude Code versions, surfaces, platforms and providers | [README.md](../README.md) "Compatibility", [ARCHITECTURE.md](ARCHITECTURE.md) "Verified live" | Yes |
+| 4 | Supported Claude Code versions, surfaces, platforms and providers | [README.md](../README.md) "Compatibility", [GUIDE.md](GUIDE.md) "Compatibility", [ARCHITECTURE.md](ARCHITECTURE.md) "Verified live" | Yes |
 | 5 | Install and usage | [README.md](../README.md) "Install" | Yes |
 | 6 | Automated test results | [TEST_RESULTS.md](TEST_RESULTS.md) | Yes |
 | 7 | Security assessment | [SECURITY.md](SECURITY.md) | Yes |

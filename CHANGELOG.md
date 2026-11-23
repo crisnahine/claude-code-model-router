@@ -54,4 +54,4 @@ First release. Reviewed against Claude Code 2.1.330 and the platform docs of 202
 
 ### Docs
 
-- A README with diagrams, a FAQ, a glossary, a security assessment, hook latency, state-size and context measurements, and a project site in `site/`, which a workflow deploys to GitHub Pages from `main` once Pages is on for the repository. `tools/docs_assets.py` builds the diagrams, the benchmark chart, the page heads and the site's FAQ and structured data, and `--check` fails when any of them is stale.
+- A short README (what it is, install, a first result, the measured result, options and limits), a guide in `docs/GUIDE.md` with the full reference, diagrams, a FAQ, a glossary, a security assessment, hook latency, state-size and context measurements, and a project site in `site/`, which a workflow deploys to GitHub Pages from `main` once Pages is on for the repository. `tools/docs_assets.py` builds the diagrams, the benchmark chart, the page heads and the site's FAQ and structured data, and `--check` fails when any of them is stale.
