@@ -16,12 +16,13 @@ Branch from `main` and work in a git worktree (`git worktree add ../<name> -b <n
 plugins/model-router/
   .claude-plugin/plugin.json   manifest and options
   config/models.json           the model registry, levels, prices and role agents
-  hooks/router.ts              the mod: agent.spawn, turn.start, turn.step, turn.complete
+  hooks/router.ts              the mod: session.start, agent.spawn, turn.start, turn.step, turn.complete
   hooks/hooks.json             the mod, plus SessionStart, UserPromptSubmit, PreToolUse,
                                PostToolUse, PostToolUseFailure, PostModelSwitch,
                                SubagentStop, Stop
-  scripts/modelrouter/         the runtime: registry, allowlist, health, profile, router, intake, request, learn, gates, agents,
-                               spawn, calls, fallback, session, upstream, report, ledger, hooks, cli, store (standard library only)
+  scripts/modelrouter/         the runtime: config, settings, registry, allowlist, health, profile, ladder, router, intake, request,
+                               learn, gates, agents, spawn, calls, fallback, session, upstream, report, ledger, hooks, cli,
+                               store (standard library only)
   agents/                      the seven role agents
   skills/                      ship, route, models, usage, refresh
   evals/                       routing evals
@@ -35,7 +36,7 @@ docs/assets/                   logo, banners, badges and diagrams, and BRAND.md
 tools/traceability.py          counts the requirement statuses in docs/TRACEABILITY.md
 tools/docs_assets.py           writes the docs' SVGs, page heads, benchmark figures, the site's asset copies and CITATION.cff
 docs/BENCHMARKS.md             cost and quality results against Claude Code without the plugin
-bench/                         the benchmark: pinned tasks, configurations, runner and analysis (not shipped)
+bench/                         the benchmark: pinned tasks and their pass checks, configurations, runner and analysis (not shipped)
 site/                          the project site, sitemap, robots.txt and llms.txt; a workflow deploys it to GitHub Pages from main once Pages is on
 CITATION.cff                   how to cite the project
 ```
@@ -57,7 +58,7 @@ python3 tools/docs_assets.py --check
 python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check
 ```
 
-`sh tests/mod/typecheck.sh` type-checks the mod and its test with `tsc` against Claude Code's published mod API types, pinned to a commit, with the tsconfig in `tests/mod`, outside the plugin folder; CI runs it too. To check against the types your installed Claude Code writes, see [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md). A change to routing reruns `claude plugin eval plugins/model-router --trust-plugin`; it runs live models, so record what it cost.
+`python3 bench/analyze.py ... --check` fails when `docs/BENCHMARKS.md` no longer matches the rows in `bench/results/`; rebuild the page by running it without `--check`. `sh tests/mod/typecheck.sh` type-checks the mod and its test with `tsc` against Claude Code's published mod API types, pinned to a commit, with the tsconfig in `tests/mod`, outside the plugin folder; CI runs it too. To check against the types your installed Claude Code writes, see [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md). A change to routing reruns `claude plugin eval plugins/model-router --trust-plugin`; it runs live models, so record what it cost.
 
 The routing evals also run free in CI. Each case under `plugins/model-router/evals` states its route in `expected_outcome` (`level L, model M, effort E`), and `RoutingEvals` in `tests/test_model_router.py` checks it against what `explain` gives for the case's prompt, as part of the unittest gate above. To run only that check: `python3 -m unittest tests.test_model_router.RoutingEvals`. A change that moves a case's route on purpose updates its `expected_outcome` in the same commit.
 

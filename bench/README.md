@@ -36,7 +36,7 @@ The six quality-tier tasks (one per class) run under `defaults`, `plugin` and th
 python3 bench/run.py --tasks impl-merge-customers bugfix-statement-queries security-admin-route \
     rootcause-wallet-race cross-amount-cents design-checkout-retries \
     --configs defaults plugin haiku sonnet opus --runs 3 --budget 1.5 --max-total 45 \
-    --model claude-opus-5-5 --out bench/results/pilot/quality-pilot-<date>.jsonl
+    --model claude-opus-5-5 --out "bench/results/pilot/quality-pilot-$(date +%F).jsonl"
 python3 bench/analyze.py bench/results/pilot/*.jsonl --out "$TMPDIR/quality-pilot.md"
 ```
 
@@ -45,7 +45,7 @@ The same pilot can run as three processes at once, each with its own two tasks, 
 ```bash
 pilot() {  # <part> <$ share> <task> <task>
     python3 bench/run.py --tasks "$3" "$4" --configs defaults plugin haiku sonnet opus --runs 3 --budget 1.5 \
-        --max-total "$2" --model claude-opus-5-5 --out "bench/results/pilot/quality-pilot-<date>-$1.jsonl"
+        --max-total "$2" --model claude-opus-5-5 --out "bench/results/pilot/quality-pilot-$(date +%F)-$1.jsonl"
 }
 pilot a 15 impl-merge-customers bugfix-statement-queries &
 pilot b 15 security-admin-route rootcause-wallet-race &
@@ -54,7 +54,7 @@ wait
 python3 bench/analyze.py bench/results/pilot/*.jsonl --out "$TMPDIR/quality-pilot.md"
 ```
 
-Each process checks only its own spend, so the shares must add up to $45 or less, and the task sets must not overlap or a cell gets more than 3 runs. Three sessions at once are more likely to hit a rate limit; each runner pauses and retries on its own, as above.
+Each process checks only its own spend, so the shares must add up to $45 or less, and the task sets must not overlap or a cell gets more than 3 runs. Three sessions at once are more likely to hit a rate limit; each runner pauses and retries on its own, as above. Rows the API refused for a rate or usage limit go to `bench/results/pilot/limited/`, so the pilot's tables leave them out.
 
 Run it only on the branch where QB and Q0 to Q5 are merged, since `plugin` is the checkout's router. 6 tasks x 5 configurations is 30 cells, and 3 runs of each is 90 runs. Rows go to `results/pilot/`, so the page's tables, built from `results/*.jsonl`, don't pool these 3-run rows with the 10-run ones. `analyze.py` picks `plugin` as the router there because it is the only plugin configuration in those rows. A task splits the models when `opus` solved at least 2 of 3 and `sonnet` at most 1 of 3. That is a reading rule for 3 runs, not a significance test. The 10-run measurement needs the maintainer's go after the pilot.
 
