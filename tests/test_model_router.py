@@ -31,6 +31,7 @@ FRAMING = json.loads((FIXTURES / "prompt-framing.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
 from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, ladder, learn, ledger, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
+from modelrouter import mod as modpath  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 from modelrouter.config import Level  # noqa: E402
 from modelrouter.registry import LevelSpec, Model, Rule  # noqa: E402
@@ -415,7 +416,7 @@ class Shipped(unittest.TestCase):
     def test_the_effort_cache_rule_is_registry_data(self):
         rule = {k: v for k, v in cfg.base_config()["main"]["effort_keeps_cache"].items() if not k.startswith("$")}
         self.assertEqual(rule, {"fable": ">=5.1", "opus": "5.5", "sonnet": "5.5", "haiku": "5.5"})
-        source = inspect.getsource(hooks._effort_keeps_cache)
+        source = inspect.getsource(modpath._effort_keeps_cache)
         for name in cfg.base_config()["models"]:
             self.assertNotIn(f'"{name}"', source)
 
@@ -490,8 +491,8 @@ class Intake(Sandbox):
         session.record("s1", "claude-opus-5-5")
         for tag in ("teammate-message", "cross-session-message"):
             self.assertFalse(intake.is_user_prompt(self.delivered(tag)), tag)
-            self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": self.delivered(tag)}), tag)
-        self.assertEqual(hooks.mod_turn({"session_id": "s1", "text": HARD}), {"level": "complex", "effort": "high"})
+            self.assertIsNone(modpath.turn({"session_id": "s1", "text": self.delivered(tag)}), tag)
+        self.assertEqual(modpath.turn({"session_id": "s1", "text": HARD}), {"level": "complex", "effort": "high"})
         self.assertTrue(intake.is_user_prompt("Another Claude session sent a message: is that how they phrase it?"))
 
     def test_a_delivered_message_leaves_the_users_request_alone(self):
@@ -636,7 +637,7 @@ class Snapshot(Sandbox):
         os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
         spawned = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5", "kind": "subagent",
                    "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
-        for name, run in (("mod-spawn", lambda: hooks.mod_spawn(spawned)),
+        for name, run in (("mod-spawn", lambda: modpath.spawn(spawned)),
                           ("agent-failed", lambda: hooks.agent_failed(
                               {**spawned, "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})),
                           ("pre-agent", lambda: hooks.pre_agent(self.call("general-purpose", BUILD, session_id="s2"))),
@@ -664,18 +665,18 @@ class Snapshot(Sandbox):
                 mock.patch.object(health, "load", side_effect=AssertionError("health")):
             hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": str(self.project / "a.py")}})
             hooks.stop({"session_id": "s1", "cwd": str(self.project)})
-            hooks.mod_turn({"session_id": "s1", "cwd": str(self.project), "text": LOOKUP})
-            hooks.mod_usage({"session_id": "s1", "cwd": str(self.project), "usage": usage})
+            modpath.turn({"session_id": "s1", "cwd": str(self.project), "text": LOOKUP})
+            modpath.usage({"session_id": "s1", "cwd": str(self.project), "usage": usage})
             hooks.post_agent({**self.call(None, LOOKUP), "tool_response": {"status": "completed"}})
 
     def test_a_spawn_reads_the_allowlist_once(self):
         with mock.patch.object(allowlist, "read", wraps=allowlist.read) as read:
-            hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+            modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                              "kind": "subagent", "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}})
         self.assertEqual(read.call_count, 1)
 
     def test_a_failed_agent_call_filters_the_usable_list_on_the_table_it_just_wrote(self):
-        hooks.mod_start({"session_id": "s1"})
+        modpath.start({"session_id": "s1"})
         self.route_around("sonnet", "opus", "fable")
         health.failed("haiku", "404 model not found")
         out = hooks.agent_failed({**self.call("general-purpose", LOOKUP, model="haiku"),
@@ -911,7 +912,7 @@ class Allowlist(Sandbox):
         self.assertIsNone(allowlist.remember("s1", "not an object"))
 
     def test_only_the_four_keys_are_stored(self):
-        hooks.mod_start({"session_id": "s1", "settings": {"policy": {"availableModels": ["opus"], "env": {"TOKEN": "x"}}}})
+        modpath.start({"session_id": "s1", "settings": {"policy": {"availableModels": ["opus"], "env": {"TOKEN": "x"}}}})
         self.assertNotIn("TOKEN", (self.data / "allowlist.json").read_text(encoding="utf-8"))
 
     def test_managed_drop_ins_merge_in_name_order(self):
@@ -985,9 +986,9 @@ class Allowlist(Sandbox):
 
     def test_a_blanked_engine_policy_never_hides_the_managed_files(self):
         self.managed.write_text(json.dumps({"deniedModels": ["opus"], "availableModels": ["sonnet", "opus", "haiku"]}))
-        hooks.mod_start({"session_id": "s1", "settings": {"policy": {}, "user": {}}})  # another mod answered {}
+        modpath.start({"session_id": "s1", "settings": {"policy": {}, "user": {}}})  # another mod answered {}
         self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet", "haiku"})
-        hooks.mod_start({"session_id": "s1"})  # a later read failed: the stored layers stand, the files still apply
+        modpath.start({"session_id": "s1"})  # a later read failed: the stored layers stand, the files still apply
         self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet", "haiku"})
         self.assertEqual(allowlist.read(None, self.project, {"policy": {}}).permitted(self.config), {"sonnet", "haiku"})
 
@@ -1096,14 +1097,14 @@ class Allowlist(Sandbox):
     def test_a_failed_policy_read_never_leaves_the_users_lists_standing(self):
         self.managed.write_text(json.dumps({"availableModels": ["sonnet"]}))
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["opus"]}))
-        hooks.mod_start({"session_id": "s1", "settings": {"user": {"availableModels": ["opus"]}}})  # policy omitted
+        modpath.start({"session_id": "s1", "settings": {"user": {"availableModels": ["opus"]}}})  # policy omitted
         found = allowlist.read("s1", self.project)
         self.assertEqual((found.permitted(self.config), found.source), ({"sonnet"}, "engine"))
-        hooks.mod_start({"session_id": "s2", "settings": {"policy": {"availableModels": ["haiku"]}}})  # the others omitted
+        modpath.start({"session_id": "s2", "settings": {"policy": {"availableModels": ["haiku"]}}})  # the others omitted
         self.assertEqual(allowlist.read("s2", self.project).permitted(self.config), set())  # haiku and sonnet share nothing
 
     def test_a_turn_remembers_the_layers_too(self):
-        hooks.mod_turn({"session_id": "s2", "text": LOOKUP, "settings": {"policy": {"availableModels": ["opus"]}}})
+        modpath.turn({"session_id": "s2", "text": LOOKUP, "settings": {"policy": {"availableModels": ["opus"]}}})
         self.assertEqual(allowlist.read("s2", self.project).permitted(self.config), {"opus"})
 
     def test_lists_are_capped_and_overrides_are_stored_as_a_flag(self):
@@ -1125,7 +1126,7 @@ class Allowlist(Sandbox):
         found = allowlist.read("s1", self.project, sent)
         self.assertEqual(found.permitted(self.config), {"opus"})
         self.assertFalse((self.data / "allowlist.json").exists())
-        hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "settings": sent, "kind": "subagent",
+        modpath.spawn({"session_id": "s1", "cwd": str(self.project), "settings": sent, "kind": "subagent",
                          "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}})
         self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"opus"})
 
@@ -1174,11 +1175,11 @@ class Allowlist(Sandbox):
 
     def test_a_later_payload_without_policy_keeps_the_stored_policy(self):
         policy = {"availableModels": ["sonnet"]}  # server-managed: no managed file exists
-        hooks.mod_start({"session_id": "s1", "settings": {"policy": policy, "user": {"availableModels": ["opus"]}}})
+        modpath.start({"session_id": "s1", "settings": {"policy": policy, "user": {"availableModels": ["opus"]}}})
         later = {"user": {"availableModels": ["opus"]}, "project": {}, "local": {}, "flag": {}}  # the policy read failed
-        hooks.mod_turn({"session_id": "s1", "text": LOOKUP, "settings": later})
+        modpath.turn({"session_id": "s1", "text": LOOKUP, "settings": later})
         self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet"})
-        hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+        modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                          "tool_input": {"prompt": LOOKUP}, "settings": later})
         self.assertEqual(store.load_entry("allowlist", "s1")["layers"]["policy"], policy)
         self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet"})
@@ -1205,16 +1206,16 @@ class Allowlist(Sandbox):
 
     def test_engine_layers_win_over_files_for_the_whole_session(self):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
-        hooks.mod_start({"session_id": "s1", "settings": {"policy": {"availableModels": ["sonnet"]}}})
+        modpath.start({"session_id": "s1", "settings": {"policy": {"availableModels": ["sonnet"]}}})
         self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet"})
         self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "sonnet")  # a later hook of the session
 
     def test_a_failed_engine_read_falls_back_to_files(self):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
-        hooks.mod_start({"session_id": "s1"})
+        modpath.start({"session_id": "s1"})
         self.assertEqual(allowlist.read("s1", self.project).source, "files")
-        hooks.mod_start({"session_id": "s1", "settings": {"policy": {"availableModels": ["opus"]}}})
-        hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+        modpath.start({"session_id": "s1", "settings": {"policy": {"availableModels": ["opus"]}}})
+        modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                          "tool_input": {"prompt": LOOKUP}})  # this read failed: the latest set stands
         self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"opus"})
 
@@ -2023,7 +2024,7 @@ class Router(Sandbox):
         self.assertEqual((out["updatedInput"]["effort"], out["updatedInput"]["name"]), ("high", "auditor"))
         for kept in ({"isolation": "worktree"}, {"effort": "low"}):
             self.assertEqual(self.decide("general-purpose", HARD, name="auditor", **kept)["action"], "keep", kept)
-        mod = lambda kind: hooks.mod_spawn({"session_id": kind, "cwd": str(self.project), "parent_model": "claude-opus-5-5",  # noqa: E731
+        mod = lambda kind: modpath.spawn({"session_id": kind, "cwd": str(self.project), "parent_model": "claude-opus-5-5",  # noqa: E731
                                             "kind": kind, "tool_input": {"subagent_type": "general-purpose", "prompt": HARD}})
         self.assertEqual(mod("teammate")["effort"], "high")
         self.assertIsNone(mod("subagent"))
@@ -2527,7 +2528,7 @@ class Mod(Sandbox):
 
     def spawn(self, agent: str, prompt: str, parent: str = "claude-opus-5-5", **extra) -> dict | None:
         tool_input = {"subagent_type": agent, "prompt": prompt, "description": "d", **extra}
-        return hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": parent,
+        return modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": parent,
                                 "kind": "subagent", "tool_input": tool_input})
 
     def test_spawns_are_routed_from_the_parents_exact_model(self):
@@ -2540,7 +2541,7 @@ class Mod(Sandbox):
     def test_the_settings_hook_stands_down_once_the_mod_is_running(self):
         self.session_on("claude-opus-5-5")
         self.assertIsNotNone(self.pre("general-purpose", LOOKUP))
-        hooks.mod_start({"session_id": "s1"})
+        modpath.start({"session_id": "s1"})
         count = len(self.ledger())
         self.assertIsNone(self.pre("general-purpose", "list the tests"))
         self.assertEqual(len(self.ledger()), count)
@@ -2607,11 +2608,11 @@ class Mod(Sandbox):
         self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku")
 
     def test_turns_and_spawns_keep_the_mod_marked_after_a_clear(self):
-        self.assertFalse(hooks.mod_active("s2"))
-        hooks.mod_turn({"session_id": "s2", "text": LOOKUP})
-        self.assertTrue(hooks.mod_active("s2"))
-        hooks.mod_spawn({"session_id": "s3", "parent_model": "claude-opus-5-5", "tool_input": {"prompt": LOOKUP}})
-        self.assertTrue(hooks.mod_active("s3"))
+        self.assertFalse(modpath.active("s2"))
+        modpath.turn({"session_id": "s2", "text": LOOKUP})
+        self.assertTrue(modpath.active("s2"))
+        modpath.spawn({"session_id": "s3", "parent_model": "claude-opus-5-5", "tool_input": {"prompt": LOOKUP}})
+        self.assertTrue(modpath.active("s3"))
 
     def test_a_pinned_agent_redone_gets_more_effort(self):
         self.agent("pinned", "opus")
@@ -2622,7 +2623,7 @@ class Mod(Sandbox):
 
     def test_workflow_stages_and_teammate_roles_without_a_file_are_routed(self):
         for kind, agent in (("workflow", "workflow-subagent"), ("teammate", "helper-two")):
-            pick = hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+            pick = modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                                     "kind": kind, "tool_input": {"subagent_type": agent, "prompt": LOOKUP}})
             self.assertEqual((pick["model"], pick["effort"]), ("haiku", "medium"), kind)
         self.assertIsNone(self.spawn("no-such-agent", LOOKUP))
@@ -2635,14 +2636,14 @@ class Mod(Sandbox):
     def test_turn_effort_stays_off_without_a_first_party_credential(self):
         self.options(main_effort="true")  # off by default
         session.record("s1", "claude-opus-5-5")
-        turn = lambda **extra: hooks.mod_turn({"session_id": "s1", "text": HARD, **extra})  # noqa: E731
+        turn = lambda **extra: modpath.turn({"session_id": "s1", "text": HARD, **extra})  # noqa: E731
         self.assertIsNone(turn(first_party=False))  # a gateway: an effort change re-reads the context
         self.assertEqual(turn(first_party=True), {"level": "complex", "effort": "high"})
         self.assertEqual(turn(), {"level": "complex", "effort": "high"})  # not known: raised as before
 
     def test_prompt_caching_off_for_the_sessions_family_keeps_its_effort(self):
         self.options(main_effort="true")
-        turn = lambda: hooks.mod_turn({"session_id": "s1", "text": HARD})  # noqa: E731
+        turn = lambda: modpath.turn({"session_id": "s1", "text": HARD})  # noqa: E731
         with mock.patch.dict(os.environ, {"DISABLE_PROMPT_CACHING_OPUS": "1"}):
             session.record("s1", "claude-opus-5-5")
             self.assertIsNone(turn())
@@ -2651,13 +2652,13 @@ class Mod(Sandbox):
 
     def test_turn_effort_is_off_by_default(self):
         session.record("s1", "claude-opus-5-5")
-        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": HARD}))
+        self.assertIsNone(modpath.turn({"session_id": "s1", "text": HARD}))
         self.assertFalse(settings.resolve().main_effort)
 
     def test_turn_effort_rises_for_hard_requests_only(self):
         self.options(main_effort="true")  # off by default
         session.record("s1", "claude-opus-5-5")
-        turn = lambda text: hooks.mod_turn({"session_id": "s1", "text": text})  # noqa: E731
+        turn = lambda text: modpath.turn({"session_id": "s1", "text": text})  # noqa: E731
         self.assertEqual(turn(HARD), {"level": "complex", "effort": "high"})
         self.assertIsNone(turn(LOOKUP))
         self.assertIsNone(turn("<task-notification>done</task-notification>"))
@@ -2673,13 +2674,13 @@ class Mod(Sandbox):
         self.options(main_effort="true")
         session.record("s1", "claude-opus-5-5")
         capped = {"user": {"maxEffortLevel": "medium"}}
-        spawned = hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+        spawned = modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                                    "kind": "subagent", "settings": capped,
                                    "tool_input": {"subagent_type": "general-purpose", "prompt": HARD}})
         self.assertEqual((spawned["model"], spawned["effort"]), ("opus", "medium"))
         self.assertIn("effort held to medium by maxEffortLevel", spawned["reason"])
         self.assertIn("effort held to medium by maxEffortLevel", self.ledger()[-1]["reason"])
-        self.assertEqual(hooks.mod_turn({"session_id": "s1", "text": HARD, "settings": capped}),
+        self.assertEqual(modpath.turn({"session_id": "s1", "text": HARD, "settings": capped}),
                          {"level": "complex", "effort": "medium"})
         self.assertEqual(self.ledger()[-1]["reason"], "effort held to medium by maxEffortLevel")
         self.assertEqual(self.spawn("general-purpose", LOOKUP)["effort"], "medium")  # at the cap: no reason
@@ -2698,7 +2699,7 @@ class Mod(Sandbox):
 
     def test_turn_effort_is_left_alone_where_an_effort_change_drops_the_cache(self):
         self.options(main_effort="true")  # off by default
-        turn = lambda sid="s1": hooks.mod_turn({"session_id": sid, "text": HARD})  # noqa: E731
+        turn = lambda sid="s1": modpath.turn({"session_id": sid, "text": HARD})  # noqa: E731
         for model in ("claude-opus-5-5[1m]", "claude-opus-5-5[1M]", "claude-fable-5-1", "claude-fable-5-2",
                       "claude-fable-6", "claude-sonnet-5-5-20260101", "claude-haiku-5-5"):
             session.record("s1", model)
@@ -2717,26 +2718,26 @@ class Mod(Sandbox):
             self.assertEqual(turn(sid), {"level": "complex", "effort": "high"}, model)
             with mock.patch.dict(os.environ, {"ANTHROPIC_BASE_URL": "https://gateway"}):
                 self.assertIsNone(turn(sid), model)
-        live = lambda model: hooks.mod_turn({"session_id": "s1", "text": HARD, "model": model})  # noqa: E731
+        live = lambda model: modpath.turn({"session_id": "s1", "text": HARD, "model": model})  # noqa: E731
         self.assertEqual(live("claude-opus-5-5"), {"level": "complex", "effort": "high"})
         session.record("s1", "claude-opus-5-5")
         self.assertIsNone(live("claude-opus-5"))  # the mod's live model beats a stale record
         self.assertEqual(live("Opus"), {"level": "complex", "effort": "high"})  # not an ID: the record decides
 
     def test_usage_is_priced_from_the_registry(self):
-        hooks.mod_usage({"session_id": "s1", "agent_id": "a1", "usage": {
+        modpath.usage({"session_id": "s1", "agent_id": "a1", "usage": {
             "model": "claude-opus-5-5", "input_tokens": 1_000_000, "output_tokens": 100_000,
             "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}})
         row = self.ledger()[-1]
         self.assertEqual((row["event"], row["cost_usd"]), ("usage", 6.0))
         self.assertIsNone(cfg.load().cost("claude-unknown-9", {"input_tokens": 1}))
         # Opus 5.5 cache writes: $5/MTok for five minutes, $8/MTok for one hour.
-        hooks.mod_usage({"session_id": "s1", "agent_id": "a1", "usage": {
+        modpath.usage({"session_id": "s1", "agent_id": "a1", "usage": {
             "model": "claude-opus-5-5", "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
             "cache_creation_input_tokens": 3_000_000, "ephemeral_5m_input_tokens": 1_000_000,
             "ephemeral_1h_input_tokens": 1_000_000}})
         self.assertEqual(self.ledger()[-1]["cost_usd"], 18.0)  # the unnamed million counts as five minutes
-        hooks.mod_usage({"session_id": "s1", "agent_id": "a1", "usage": {
+        modpath.usage({"session_id": "s1", "agent_id": "a1", "usage": {
             "model": "claude-opus-5-5", "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
             "cache_creation_input_tokens": 1_000_000}})
         self.assertEqual(self.ledger()[-1]["cost_usd"], 5.0)  # no split reported
@@ -2955,7 +2956,7 @@ class NewestOnProviders(Sandbox):
         hook_input = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                       "kind": "subagent", **({"tool_use_id": tool_use_id} if tool_use_id else {}),
                       "tool_input": {"subagent_type": agent, "prompt": prompt, "description": "d", **extra}}
-        return hooks.mod_spawn(hook_input), hook_input
+        return modpath.spawn(hook_input), hook_input
 
     def model(self, prompt: str, **extra) -> str | None:
         out = self.spawn(prompt, **extra)[0]
@@ -3061,22 +3062,22 @@ class ModPayloads(Sandbox):
         self.assertEqual(set(self.payloads), {name for name in hooks.HANDLERS if name.startswith("mod-")})
 
     def test_start_marks_the_session(self):
-        hooks.mod_start(self.payloads["mod-start"])
-        self.assertTrue(hooks.mod_active("s1"))
+        modpath.start(self.payloads["mod-start"])
+        self.assertTrue(modpath.active("s1"))
 
     def test_spawn_reads_every_field(self):
         payload = {**self.payloads["mod-spawn"], "cwd": str(self.project)}
         with mock.patch.object(router, "decide", wraps=router.decide) as decide:
-            hooks.mod_spawn(payload)
+            modpath.spawn(payload)
         found = decide.call_args.args[0]
         self.assertEqual((found.agent, found.parent, found.tool_input), ("general-purpose", "opus", payload["tool_input"]))
         with mock.patch.object(router, "decide", wraps=router.decide) as decide:
-            hooks.mod_spawn({**payload, "parent_model": None})
+            modpath.spawn({**payload, "parent_model": None})
         self.assertIsNone(decide.call_args.args[0].parent)  # parent_agent_id: inside a subagent, so unknown
         row = self.ledger()[-1]
         self.assertEqual((row["event"], row["via"], row["kind"], row["agent"], row["model"]),
                          ("spawn", "mod", "subagent", "general-purpose", "haiku"))
-        self.assertTrue(hooks.mod_active("s1"))
+        self.assertTrue(modpath.active("s1"))
 
     def test_siblings_keep_their_sent_ids_when_the_same_call_is_issued_again(self):
         os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
@@ -3084,20 +3085,20 @@ class ModPayloads(Sandbox):
         base = {**self.payloads["mod-spawn"], "cwd": str(self.project), "parent_agent_id": None,
                 "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
         copies = [{**base, "tool_use_id": f"tu{i}"} for i in (1, 2, 3)]
-        self.assertEqual([hooks.mod_spawn(c)["model"] for c in copies[:2]], ["claude-haiku-5-5"] * 2)
+        self.assertEqual([modpath.spawn(c)["model"] for c in copies[:2]], ["claude-haiku-5-5"] * 2)
         self.assertEqual([calls.route_of("s1", "none", f"tu{i}").sent for i in (1, 2)], ["claude-haiku-5-5"] * 2)
         hooks.agent_failed({**copies[0], "error": refused})
-        self.assertEqual(hooks.mod_spawn(copies[2])["model"], "haiku")  # the ID is routed around now
+        self.assertEqual(modpath.spawn(copies[2])["model"], "haiku")  # the ID is routed around now
         hooks.agent_failed({**copies[1], "error": refused})
         self.assertEqual([r["model"] for r in self.ledger() if r["event"] == "model_error"], ["claude-haiku-5-5"] * 2)
         self.assertTrue(health.load().healthy("haiku"))
 
     def test_turn_picks_an_effort(self):
         session.record("s1", "claude-opus-5-5")
-        self.assertEqual(hooks.mod_turn(self.payloads["mod-turn"]), {"level": "complex", "effort": "high"})
+        self.assertEqual(modpath.turn(self.payloads["mod-turn"]), {"level": "complex", "effort": "high"})
 
     def test_usage_is_logged_for_its_agent(self):
-        hooks.mod_usage(self.payloads["mod-usage"])
+        modpath.usage(self.payloads["mod-usage"])
         row = self.ledger()[-1]
         self.assertEqual((row["event"], row["agent_id"], row["cost_usd"]), ("usage", "a1", 6.0))
 
@@ -3311,7 +3312,7 @@ class Feedback(Sandbox):
         self.assertEqual(learn.stats()["lookup"]["votes"], 1)  # the router's own redo does
 
     def test_a_workflow_stage_or_a_teammate_counts_for_no_level(self):
-        mod = lambda kind, i: hooks.mod_spawn({  # noqa: E731
+        mod = lambda kind, i: modpath.spawn({  # noqa: E731
             "session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5", "kind": kind,
             "tool_input": {"subagent_type": "workflow-subagent", "prompt": f"list the files under dir{i}"}})
         for i in range(100):
@@ -4145,7 +4146,7 @@ class Reports(Sandbox):
         self.assertEqual(files(), before)
         self.assertIn("models in use: haiku, sonnet.", text)  # fable is routed around, and the record stays as it was
         state = store.state_path().read_bytes()
-        hooks.mod_spawn({**hook_input, "kind": "subagent", "tool_input": {"subagent_type": "general-purpose",
+        modpath.spawn({**hook_input, "kind": "subagent", "tool_input": {"subagent_type": "general-purpose",
                                                                           "prompt": LOOKUP}})
         self.assertNotEqual(files(), before)  # a real spawn does write
         self.assertNotEqual(store.state_path().read_bytes(), state)  # and settles the outage the reads found
@@ -4159,7 +4160,7 @@ class Reports(Sandbox):
         self.assertIn("| general-purpose | 1 | 1 | lookup x1 | claude-haiku-5-5 x1 |", text)
         self.assertIn("| claude-haiku-5-5 | 1 | 1,200 |", text)
         for agent_id, model in ((None, "claude-opus-5-5"), ("a1", "claude-haiku-5-5"), ("a2", "claude-new-9")):
-            hooks.mod_usage({"session_id": "s1", "agent_id": agent_id, "usage": {
+            modpath.usage({"session_id": "s1", "agent_id": agent_id, "usage": {
                 "model": model, "input_tokens": 0, "output_tokens": 1_000_000,
                 "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}})
         text = self.out("usage", "30")
@@ -4320,7 +4321,7 @@ class SlashSkills(Sandbox):
 
     def turn(self, name: str, args: str, body: str | None, **extra) -> dict | None:
         command = {"name": name, "args": args, **({"body": body} if body is not None else {})}
-        return hooks.mod_turn({"session_id": "s1", "text": self.LINE.format(name, args), "command": command, **extra})
+        return modpath.turn({"session_id": "s1", "text": self.LINE.format(name, args), "command": command, **extra})
 
     def test_a_hard_skill_raises_the_turn_and_a_lookup_does_not(self):
         self.session_on("claude-opus-5-5")
@@ -4407,7 +4408,7 @@ class SlashSkills(Sandbox):
             for origin in ("composer", "peer"):
                 if command and origin == "composer":
                     continue
-                hooks.mod_turn({"session_id": "s1", "text": text, "command": command, "origin": origin})
+                modpath.turn({"session_id": "s1", "text": text, "command": command, "origin": origin})
                 self.assertEqual(request.load("s1").level, "lookup", (text[:30], origin))
         self.options(routing_mode="off")
         self.turn("hard", "", self.HARD_BODY)
@@ -4493,11 +4494,11 @@ class SlashSkills(Sandbox):
         self.session_on("claude-opus-5-5")
         self.assertIsNone(self.turn("hard", "", self.HARD_BODY, origin="peer"))
         delivered = "Another Claude session sent a message:\n<cross-session-message from=\"x\">\n" + HARD
-        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": delivered}))
+        self.assertIsNone(modpath.turn({"session_id": "s1", "text": delivered}))
         # A command left over from a submit whose turn never started can't stand in for another turn's text.
-        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": delivered,
+        self.assertIsNone(modpath.turn({"session_id": "s1", "text": delivered,
                                           "command": {"name": "rename", "args": HARD}}))
-        self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": self.LINE.format("other", ""),
+        self.assertIsNone(modpath.turn({"session_id": "s1", "text": self.LINE.format("other", ""),
                                           "command": {"name": "rename", "args": HARD}}))
 
     def test_the_settings_hook_reads_a_project_or_user_skill_it_can_find(self):
@@ -4702,7 +4703,7 @@ class MachineReadable(Sandbox):
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku")
         for agent_id, model in ((None, "claude-opus-5-5"), ("a1", "claude-new-9")):
-            hooks.mod_usage({"session_id": "s1", "agent_id": agent_id, "usage": {
+            modpath.usage({"session_id": "s1", "agent_id": agent_id, "usage": {
                 "model": model, "input_tokens": 0, "output_tokens": 1_000_000,
                 "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}})
         data = self.json_out("usage", "30")
@@ -4718,7 +4719,7 @@ class MachineReadable(Sandbox):
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5")  # totalTokens 1200, the final request only
         for agent_id, tokens in (("a1", 3000), ("a1", 2000), (None, 9000)):
-            hooks.mod_usage({"session_id": "s1", "agent_id": agent_id, "usage": {
+            modpath.usage({"session_id": "s1", "agent_id": agent_id, "usage": {
                 "model": "claude-haiku-5-5", "input_tokens": tokens - 100, "output_tokens": 50,
                 "cache_read_input_tokens": 40, "cache_creation_input_tokens": 10}})
         self.assertEqual(self.json_out("usage")["models"],
@@ -4758,14 +4759,14 @@ class MachineReadable(Sandbox):
     def test_a_workflow_model_pin_is_reported_and_routing_is_unchanged(self):
         hook_input = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                       "kind": "workflow", "tool_input": {"subagent_type": "stage", "prompt": LOOKUP}}
-        before = hooks.mod_spawn(hook_input)
+        before = modpath.spawn(hook_input)
         self.assertIsNone(self.json_out("models")["workflow_model"])
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="claude-opus-5-5")
         self.assertEqual(self.json_out("models")["workflow_model"], "claude-opus-5-5")
         self.assertIn("pins every workflow agent to claude-opus-5-5", self.out("models"))
         note = hooks.session_start({"session_id": "s1"})["hookSpecificOutput"]["additionalContext"]
         self.assertIn("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on claude-opus-5-5", note)
-        self.assertEqual(hooks.mod_spawn(hook_input), before)
+        self.assertEqual(modpath.spawn(hook_input), before)
 
     def test_models_json_names_state_files_set_aside_or_left_read_only(self):
         data = self.json_out("models")
@@ -4806,7 +4807,7 @@ class JsonOutputs(Sandbox):
             self.pre(agent, brief)
             self.done(agent, brief, ran)
         for agent_id, model in ((None, "claude-opus-5-5"), ("a1", "claude-haiku-5-5"), ("a1", "claude-new-9")):
-            hooks.mod_usage({"session_id": "s1", "agent_id": agent_id, "usage": {
+            modpath.usage({"session_id": "s1", "agent_id": agent_id, "usage": {
                 "model": model, "input_tokens": 1200, "output_tokens": 400_000,
                 "cache_read_input_tokens": 3000, "cache_creation_input_tokens": 500}})
 
@@ -4997,34 +4998,39 @@ class ProfileProperties(unittest.TestCase):
 class SpawnPaths(Sandbox):
     """The mod path and the Agent-call fallback decide the same spawn the same way (S9.8, differential)."""
 
-    def test_mod_spawn_and_pre_agent_pick_the_same_model_effort_and_level(self):
+    def test_the_two_adapters_decide_one_call_the_same_way(self):
         cases = [("general-purpose", LOOKUP, {}), ("general-purpose", BUILD, {}), ("general-purpose", HARD, {}),
                  ("Explore", HARD, {}), (None, "investigate why the checkout test is flaky", {}),
-                 ("general-purpose", LOOKUP, {"model": "opus"}), ("general-purpose", HARD, {"effort": "low"})]
+                 ("general-purpose", LOOKUP, {"model": "opus"}), ("general-purpose", HARD, {"effort": "low"}),
+                 ("general-purpose", LOOKUP, {"model": "sonnet", "effort": "high"})]
         for index, (agent, brief, extra) in enumerate(cases):
             with self.subTest(agent=agent, brief=brief, extra=extra):
-                fallback_session, mod_session = f"f{index}", f"m{index}"
-                self.session_on("claude-opus-5-5", fallback_session)
-                self.session_on("claude-opus-5-5", mod_session)
-                out = hooks.pre_agent(self.call(agent, brief, session_id=fallback_session, **extra))
-                fallback = ((out or {}).get("hookSpecificOutput") or {}).get("updatedInput") or {}
-                tool_input = {"prompt": brief, **extra, **({"subagent_type": agent} if agent else {})}
-                mod = hooks.mod_spawn({"session_id": mod_session, "cwd": str(self.project),
-                                       "parent_model": "claude-opus-5-5", "kind": "subagent",
-                                       "tool_input": tool_input}) or {}
-                # What runs: the fallback returns the whole call, the mod only what it changes.
-                ran = lambda pick: (pick.get("model") or extra.get("model"), pick.get("effort") or extra.get("effort"))  # noqa: E731
-                self.assertEqual(ran(fallback), ran(mod))
-                levels = {r["session"]: r.get("level") for r in self.ledger() if r.get("event") == "spawn"}
-                self.assertEqual(levels.get(fallback_session), levels.get(mod_session))
-
+                call = self.call(agent, brief, tool_use_id=f"t{index}", **extra)
+                key = calls.identify(call["tool_input"])[1]
+                seen = {}
+                for path in ("fallback", "mod"):
+                    session_id = f"{path}{index}"
+                    self.session_on("claude-opus-5-5", session_id)
+                    hook_input = {**call, "session_id": session_id}
+                    if path == "fallback":
+                        out = hooks.pre_agent(hook_input)
+                        answer = ((out or {}).get("hookSpecificOutput") or {}).get("updatedInput") or {}
+                    else:
+                        answer = modpath.spawn({**hook_input, "parent_model": "claude-opus-5-5", "kind": "subagent"}) or {}
+                    # What runs: the fallback returns the whole call, the mod only what it changes.
+                    ran = (answer.get("model") or extra.get("model"), answer.get("effort") or extra.get("effort"))
+                    route = calls.route_of(session_id, key, f"t{index}")
+                    row = next(r for r in self.ledger() if r.get("event") == "spawn" and r["session"] == session_id)
+                    seen[path] = (ran, {k: v for k, v in dataclasses.asdict(route).items() if k not in ("at", "path")},
+                                  {k: v for k, v in row.items() if k not in ("ts", "session", "via", "kind")})
+                self.assertEqual(seen["fallback"], seen["mod"])
 
     def spawn_on(self, path: str, session: str, agent: str, brief: str) -> None:
         self.session_on("claude-opus-5-5", session)
         if path == "fallback":
             hooks.pre_agent(self.call(agent, brief, session_id=session, tool_use_id="t1"))
         else:
-            hooks.mod_spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+            modpath.spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                              "kind": "subagent", **({"tool_use_id": "t1"} if path == "mod with a spawn id" else {}),
                              "tool_input": {"subagent_type": agent, "prompt": brief}})
 
@@ -5066,7 +5072,7 @@ class SpawnPaths(Sandbox):
             if path == "fallback":
                 hooks.pre_agent(self.call("general-purpose", LOOKUP, session_id=session, model=model))
             else:
-                hooks.mod_spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                modpath.spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                                  "kind": "subagent", "tool_input": {"subagent_type": "general-purpose",
                                                                     "prompt": LOOKUP, "model": model}})
             self.done("general-purpose", LOOKUP, "claude-sonnet-5-5", session_id=session)

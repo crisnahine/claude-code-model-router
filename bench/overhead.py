@@ -180,6 +180,7 @@ def in_process(base: Path, calls: int, runs: int):
     sys.pycache_prefix = str(box.root / "pycache")
     sys.path.insert(0, str(PLUGIN / "scripts"))
     from modelrouter import hooks, router, settings, spawn, store
+    from modelrouter import mod as modpath
 
     project = str(box.root / "project")
     decide = []
@@ -195,7 +196,7 @@ def in_process(base: Path, calls: int, runs: int):
         tool_input = {"subagent_type": "general-purpose", "prompt": f"{BRIEFS[i % 3]} (call {i})"}
         call = {"session_id": session, "cwd": project, "tool_input": tool_input}
         if mod:
-            model = (hooks.mod_spawn({**call, "parent_model": SESSION_MODEL, "kind": "subagent"}) or {}).get("model")
+            model = (modpath.spawn({**call, "parent_model": SESSION_MODEL, "kind": "subagent"}) or {}).get("model")
         else:
             out = hooks.pre_agent(call)
             model = ((out or {}).get("hookSpecificOutput") or {}).get("updatedInput", {}).get("model")
@@ -209,7 +210,7 @@ def in_process(base: Path, calls: int, runs: int):
             hooks.post_agent({**call, "tool_response": {"resolvedModel": ran_as, "status": "completed"}})
         if i % 50 == 49:
             hooks.agent_failed({**call, "error": MODEL_ERROR})
-        hooks.mod_usage({"session_id": session, "agent_id": f"a{i}", "usage": {**USAGE, "model": ran_as}})
+        modpath.usage({"session_id": session, "agent_id": f"a{i}", "usage": {**USAGE, "model": ran_as}})
 
     def sizes() -> dict:
         return {p.name: p.stat().st_size for p in store.data_dir().iterdir()
@@ -224,8 +225,8 @@ def in_process(base: Path, calls: int, runs: int):
                 hooks.session_start({"session_id": session, "cwd": project, "source": "startup",
                                      "model": SESSION_MODEL})
                 if mod:
-                    hooks.mod_start({"session_id": session})
-                    hooks.mod_turn({"session_id": session, "text": BRIEFS[i % 3], "model": SESSION_MODEL})
+                    modpath.start({"session_id": session})
+                    modpath.turn({"session_id": session, "text": BRIEFS[i % 3], "model": SESSION_MODEL})
                 else:
                     hooks.user_prompt({"session_id": session, "cwd": project, "prompt": BRIEFS[i % 3]})
             routed_call(session, i, mod)

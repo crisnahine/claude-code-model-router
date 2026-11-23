@@ -26,7 +26,7 @@ The aim is the lowest cost per finished task at a high quality bar. Every subtas
                                 └──────────────┬────────────────────┘
                                                ▼
                                   scripts/modelrouter (Python)
-                  spawn · fallback · router.decide · ladder · registry · profile · request · calls · learn · gates
+                  spawn · mod · fallback · router.decide · ladder · registry · profile · request · calls · learn · gates
 ```
 
 **The mod** (`hooks/router.ts`, a hooks module loaded from `hooks/hooks.json` under `modules`) is the primary path. It hooks eight engine events:
@@ -60,6 +60,7 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 | `ladder` | Turns a level, the priority and learned raises into the pick: a model and an effort |
 | `spawn` | The one procedure both paths call, in two steps: decide (facts and `router.decide`), then record (the ledger row, the spawn's route, its count and votes) |
 | `fallback` | The `Agent` call path's own pieces: the rewrite to `updatedInput`, the rewrite waiting for its result, the refused-rewrite guard and the one deny. It holds no rule for what a result means: that is `calls`, the same on both paths |
+| `mod` | The mod path's adapter: the four calls `hooks/router.ts` makes (`start`, `spawn`, `turn`, `usage`) and whether the mod is running (`active`). A spawn goes through `spawn.decide` and `spawn.record` and answers the model, effort and reason, with the family's newest full ID where the provider's alias lags. A turn's effort comes from the request's level, held back wherever an effort change would drop the prompt cache |
 | `router` | Applies the order of authority and produces one decision per agent, from the facts it is given alone |
 | `intake` | Whether a prompt or a turn is the person's request, and at what level, for both paths; profile scores it |
 | `request` | The current request's record: its level and floor (set by `UserPromptSubmit`, raised by the mod's `turn.start`), whether the session's model is below its need (`Request.below`), the user's named model (`named_model`), the model the user named, the strongest spawn, the escalation ask, and whether code changed |
@@ -72,7 +73,7 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 | `settings` | The plugin's options and the environment facts routing depends on, resolved once per hook call or command, and the snapshot of registry, options, usable models, health and allowlist each hook call builds once (the last three on first use). A read writes nothing, so a dry run leaves the state as it was; a spawn settles what reads noticed (`Snapshot.settle`) |
 | `allowlist` | Which registry models `availableModels` and `deniedModels` leave open, and the `maxEffortLevel` cap of each, from the settings layers the mod reads from the engine, with the settings files for any source the mod didn't send; the managed files always apply as a floor |
 | `ledger` | One append per row kind, the turn Spend rule, and reading rows from the data folder or a given path |
-| `hooks`, `cli`, `report`, `store` | Handlers for settings hooks and mod calls, commands, tables, and state files and the ledger file |
+| `hooks`, `cli`, `report`, `store` | The handler for each settings hook, and the table that maps each command, the mod's included, to its handler (`hooks.HANDLERS`); commands, tables, and state files and the ledger file |
 
 All of it is standard-library Python, plus the one TypeScript file the engine runs. No module names a model: the shipped models, and aliases such as `best`, are entries in `config/models.json`.
 
@@ -189,14 +190,14 @@ A changelog or docs index that comes back empty, such as an outage page, counts 
 ## Hook flow
 
 ```text
-mod  session.start ─ mod-start      marks the session, so PreToolUse stands down, and keeps the settings layers the mod read
+mod  session.start ─ mod-start      mod.start: marks the session, so PreToolUse stands down, and keeps the settings layers the mod read
 mod  tool.call                      keeps the effort Claude put on an Agent call
-mod  agent.spawn   ─ mod-spawn      spawn.decide and spawn.record for a subagent, teammate or workflow stage
+mod  agent.spawn   ─ mod-spawn      mod.spawn: spawn.decide and spawn.record for a subagent, teammate or workflow stage
 mod  prompt.submit                  keeps where the next turn's prompt came from, and a typed command's arguments
 mod  skill.prompt                   keeps the body a typed command renders
-mod  turn.start    ─ mod-turn       the main loop's effort for this turn; keeps the settings layers too
+mod  turn.start    ─ mod-turn       mod.turn: the main loop's effort for this turn; keeps the settings layers too
 mod  turn.step                      applies the agent's or the turn's effort to each request; keeps its usage
-mod  turn.complete ─ mod-usage      prices the turn's requests into the ledger
+mod  turn.complete ─ mod-usage      mod.usage: prices the turn's requests into the ledger
 SessionStart ─┬─ session-start   records options and the session model; explains routing
               └─ refresh-cache   (async) refreshes the upstream cache if older than 24 h,
                                  waiting 1 h to a day after a failed fetch

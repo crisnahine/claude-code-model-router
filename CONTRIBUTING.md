@@ -22,7 +22,7 @@ plugins/model-router/
                                PostToolUse, PostToolUseFailure, PostModelSwitch,
                                SubagentStop, Stop
   scripts/modelrouter/         the runtime: config, settings, registry, allowlist, health, profile, ladder, router, intake, request,
-                               learn, gates, agents, spawn, calls, fallback, session, upstream, report, ledger, hooks, cli,
+                               learn, gates, agents, spawn, calls, mod, fallback, session, upstream, report, ledger, hooks, cli,
                                store (standard library only)
   agents/                      the seven role agents
   skills/                      ship, route, models, usage, refresh

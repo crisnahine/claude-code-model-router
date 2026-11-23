@@ -5,10 +5,9 @@ The plugin never approves a tool call. It rewrites two fields of agent calls, an
 denies only to hold the user's own cap when a lowering rewrite didn't take."""
 from __future__ import annotations
 
-import re
 from typing import Any
 
-from . import allowlist, calls, fallback, gates, health, intake, ledger, profile, request, router, session, settings, spawn, store, upstream
+from . import calls, fallback, gates, health, intake, mod, profile, request, session, settings, upstream
 from . import config as cfg
 from .registry import Registry
 
@@ -121,12 +120,8 @@ def user_prompt(hook_input: dict) -> dict | None:
     return _context("UserPromptSubmit", " ".join(notes)) if notes else None
 
 
-def mod_active(session_id: str | None) -> bool:
-    return bool(store.load_entry("mod", session_id).get("active"))
-
-
 def pre_agent(hook_input: dict) -> dict | None:
-    if mod_active(hook_input.get("session_id")):
+    if mod.active(hook_input.get("session_id")):
         return None  # the plugin's mod routes this call when it spawns
     return fallback.route(hook_input, settings.Snapshot(hook_input))
 
@@ -244,107 +239,8 @@ def refresh_cache(hook_input: dict) -> dict | None:
     return None
 
 
-def mod_start(hook_input: dict) -> dict | None:
-    _mark_mod(hook_input.get("session_id"))
-    allowlist.remember(hook_input.get("session_id"), hook_input.get("settings"))
-    return None
-
-
-def _mark_mod(session_id: str | None) -> None:
-    """The mod's session.start fires once per process, never after /clear, so every
-    turn and spawn says the mod is running."""
-    if session_id and not mod_active(session_id):
-        store.save_entry("mod", session_id, {"active": True, "at": store.now()})
-
-
-def mod_spawn(hook_input: dict) -> dict | None:
-    _mark_mod(hook_input.get("session_id"))
-    allowlist.remember(hook_input.get("session_id"), hook_input.get("settings"))
-    # The spawn procedure reads agent_id as "the call comes from inside a subagent".
-    snap = settings.Snapshot(hook_input)
-    spawned = spawn.decide({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, snap)
-    decision = spawned.decision
-    newest = _newest(snap, decision)
-    spawn.record(spawned, "mod", newest)
-    if decision["action"] != "rewrite" and not newest:
-        return None
-    return {"model": newest or decision["model"], "effort": decision["effort"], "reason": decision["reason"]}
-
-
-def _newest(snap: settings.Snapshot, decision: dict) -> str | None:
-    """The newest full ID to send in place of the decided family alias, on a provider whose
-    alias lags. Only agent.spawn takes a full ID; the Agent tool's model takes an alias
-    (https://code.claude.com/docs/en/sub-agents.md)."""
-    if decision["action"] == "deny" or decision["version"]:
-        return None
-    return snap.registry.newest_id(decision["model"], snap.options.provider, snap.allowed, snap.health)
-
-
-def _effort_keeps_cache(reg: Registry, options: settings.Settings, model: object) -> bool:
-    """Only the models in `main.effort_keeps_cache`, on Anthropic's API without a gateway,
-    Mantle, pre-release betas turned off or prompt caching turned off for them, keep the prompt
-    cache when effort changes (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level).
-    A model with no known version, as after /clear, gets the benefit of the doubt."""
-    if options.cloud or options.mantle or options.base_url or options.no_betas or "" in options.cache_off:
-        return False
-    found = upstream.version_of(model)
-    if not found:
-        return True
-    family, version = found
-    if family in options.cache_off:
-        return False
-    rule = reg.keeps_cache.get(family)
-    if not isinstance(rule, str) or not re.fullmatch(r"(?:>=)?\d+(?:\.\d+)*", rule):
-        return False
-    wanted = tuple(int(part) for part in rule.lstrip(">=").split("."))
-    return version >= wanted if rule.startswith(">=") else version == wanted
-
-
-def mod_turn(hook_input: dict) -> dict | None:
-    """Effort for one main-loop turn, from the request. Effort is the lever that keeps the
-    prompt cache on current models; switching the conversation's model would not."""
-    session_id = hook_input.get("session_id")
-    _mark_mod(session_id)
-    allowlist.remember(session_id, hook_input.get("settings"))
-    snap = settings.Snapshot(hook_input)
-    reg, options = snap.registry, snap.options
-    seen = intake.from_turn(hook_input.get("text"), hook_input.get("command"), hook_input.get("origin"))
-    if options.mode != "off" and seen.person and seen.command:
-        # The level is the request's, which the floor and the Stop check read, whatever the effort switches say.
-        try:
-            request.raise_to(session_id, seen, reg, snap.usable, snap.raises, priority=options.priority)
-        except OSError:
-            pass
-    if (options.mode != "auto" or not options.main_effort or options.effort_level
-            or hook_input.get("first_party") is False):
-        return None
-    if not seen.person:
-        return None
-    # The mod's live model, when it is an ID; a record can miss a fallback to another model.
-    model = hook_input.get("model")
-    model = model if upstream.version_of(model) else session.model(session_id)
-    if not _effort_keeps_cache(reg, options, model):
-        return None
-    level = seen.level
-    effort = reg.main_effort.get(level)
-    if effort not in cfg.EFFORTS:
-        return None
-    effort, held = router.capped(effort, snap.allowed.effort_cap(reg, reg.family(model)))
-    ledger.turn(session_id, level, effort, seen.command, reason=held.lstrip("; ") or None)
-    return {"level": level, "effort": effort}
-
-
-def mod_usage(hook_input: dict) -> dict | None:
-    """One ledger row per turn, its cost the sum of its requests, each priced on its own."""
-    usage = hook_input.get("usage")
-    if isinstance(usage, dict) and isinstance(usage.get("model"), str):
-        ledger.usage(settings.Snapshot(hook_input).registry, hook_input.get("session_id"), hook_input.get("agent_id"),
-                     usage, hook_input.get("requests"))
-    return None
-
-
 HANDLERS = {
-    "mod-start": mod_start, "mod-spawn": mod_spawn, "mod-turn": mod_turn, "mod-usage": mod_usage,
+    "mod-start": mod.start, "mod-spawn": mod.spawn, "mod-turn": mod.turn, "mod-usage": mod.usage,
     "session-start": session_start, "user-prompt": user_prompt, "pre-agent": pre_agent,
     "post-agent": post_agent, "agent-failed": agent_failed, "agent-stopped": agent_stopped,
     "post-edit": post_edit, "stop": stop,
