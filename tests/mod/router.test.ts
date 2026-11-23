@@ -96,9 +96,10 @@ test('a spawn passes the pick model to next', async () => {
   assert.deepEqual(mod.calls.map(c => c.argv), [['sh', '/plugin/scripts/model-router.sh', 'mod-spawn']])
 })
 
-test('mod-start and mod-spawn carry the allowlist and effort cap keys of each settings source', async () => {
+test('mod-start and mod-spawn carry the allowlist and effort cap keys of each settings source, and only the caps of modelSettings', async () => {
   const policy = { availableModels: ['opus'], maxEffortLevel: 'high', modelSettings: { 'claude-opus-5-5': { maxEffortLevel: 'max' } } }
-  const mod = load({ 'mod-spawn': PICK }, {}, { policy: { ...policy, env: { TOKEN: 'x' }, permissions: {} } })
+  const sent = { ...policy, modelSettings: { 'claude-opus-5-5': { maxEffortLevel: 'max', alwaysThinking: true }, 'claude-haiku-5-5': { fastMode: true } } }
+  const mod = load({ 'mod-spawn': PICK }, {}, { policy: { ...sent, env: { TOKEN: 'x' }, permissions: {} } })
   await mod.sessionStart({ source: 'startup' })
   await mod.spawn(spawnEvent())
   assert.equal(mod.calls.length, 2)
