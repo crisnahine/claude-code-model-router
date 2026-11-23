@@ -6,6 +6,7 @@ call, and the feedback loop in learn.py corrects levels that keep proving too lo
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, replace
 
 from .config import LEVELS, PLUGIN_NAME
 
@@ -117,6 +118,43 @@ def _named_for(name: str, pattern: str) -> bool:
     return any(re.fullmatch(pattern, part) for part in re.split(r"[-_:]", name))
 
 
+@dataclass(frozen=True)
+class Role:
+    """What an agent is for, which no brief changes: a heavy role is raised to its floor, a light one held to
+    its cap. `strong` agents start no lower than the request's level, a `checker` reports on finished work, and
+    an agent that doesn't `write` has no Write or Edit tool."""
+    kind: str | None = None
+    floor: str | None = None
+    cap: str | None = None
+    strong: bool = False
+    checker: bool = False
+    writes: bool = True
+
+
+ARCHITECT, REVIEWER, DEEP_SOLVER = "architect", "reviewer", "deep-solver"
+# Our own role agents by full name, then the two kinds any agent's name can show. Another plugin's solver is
+# only a heavy role; ours is for what the others couldn't do.
+ROLES = {
+    f"{PLUGIN_NAME}:{ARCHITECT}": Role("heavy", floor="complex", strong=True, writes=False),
+    f"{PLUGIN_NAME}:{REVIEWER}": Role("heavy", floor="complex", strong=True, writes=False),
+    f"{PLUGIN_NAME}:{DEEP_SOLVER}": Role("heavy", floor="hardest", strong=True),
+    "heavy": Role("heavy", floor="complex"),
+    "light": Role("light", cap="standard"),
+}
+_KIND_NAMES = {"heavy": _HEAVY_NAME, "light": _LIGHT_NAME}
+_CHECKERS = ("verifier", "reviewer")
+
+
+def role(agent_type: object) -> Role:
+    """The role an agent's full name (`plugin:agent` or `agent`) stands for."""
+    name = agent_type if isinstance(agent_type, str) else ""
+    found = ROLES.get(name)
+    if found is None:
+        short = name.split(":")[-1].lower()
+        found = next((ROLES[kind] for kind, pattern in _KIND_NAMES.items() if _named_for(short, pattern)), Role())
+    return replace(found, checker=True) if name.endswith(_CHECKERS) else found
+
+
 LONG_BRIEF = 4000
 # Open-ended work with no known approach: the only level the ladder gives its strongest model.
 _FRONTIER = (r"\b(?:research-grade|open[- ]ended|no known (?:fix|approach|cause|solution)|first principles|"
@@ -169,69 +207,114 @@ def _fixes_a_defect(asked: str) -> bool:
     return bool(re.search(_DEFECT, re.sub(_RULED_OUT, "", asked)))
 
 
+@dataclass(frozen=True)
+class Reading:
+    """What a brief says, read once and the same way for a call and for a request: the difficulty signals,
+    whether it asks for a change or for reasoning, whether it fixes or hunts a defect, frontier and
+    thoroughness wording, whether it is phrased as a lookup, whether it is English, and how long it is.
+    `judgment` (asks to review, design or plan) and `systems` (names several systems in a list) are the
+    call's own extra reasons for complex."""
+    signals: tuple[str, ...]
+    acts: frozenset[str]  # "change" and "reason"
+    defect: bool
+    frontier: bool
+    thorough: bool
+    lookup_form: bool
+    english: bool
+    length: int
+    judgment: bool = False
+    systems: bool = False
+
+
+def read(text: str, limits: bool = True) -> Reading:
+    """Read a brief. A negated limit ("do not change any files") restricts the work and doesn't ask for it, so
+    with `limits` its scope, ambiguity and change words are set aside, and its risk words still count. A request
+    is read with `limits` off: its wording counts as it stands, except for the defect rule."""
+    text = (text or "").lower()
+    asked = re.sub(_NEGATED, "", text)
+    seen = asked if limits else text
+    hits = signals(seen)
+    if limits and "risk" not in hits and "risk" in signals(text):
+        hits.insert(0, "risk")
+    acts = set()
+    if re.search(_CHANGE, seen):
+        acts.add("change")
+    if re.search(_REASONING, seen) or re.search(rf"\b(?:{_DECISION})\b", seen):
+        acts.add("reason")
+    return Reading(signals=tuple(hits), acts=frozenset(acts), defect=_fixes_a_defect(asked),
+                   frontier=bool(re.search(_FRONTIER, seen)), thorough=bool(re.search(_THOROUGH, text)),
+                   lookup_form=bool(re.search(_LOOKUP, text)), english=not _not_english(text), length=len(text),
+                   judgment=bool(re.search(_JUDGMENT, seen)), systems=bool(re.search(rf"\b{_SYSTEMS}\b", seen)))
+
+
+def level(reading: Reading, kind: str, role: Role | None = None) -> dict:
+    """The level a reading needs, as a "call" or as a "request", with the reasons. The two differ on purpose.
+    A call that asks for nothing is a lookup, while a request with signals and no verb still scores; a request
+    over 1,500 characters gains scope, and a call over 4,000 only lifts a lookup to standard."""
+    if kind == "request":
+        return _request_level(reading)
+    return _call_level(reading, role or Role())
+
+
+def _request_level(r: Reading) -> dict:
+    hits = list(r.signals)
+    if r.length > 1500 and "scope" not in hits:
+        hits.append("scope")  # a long brief is rarely a small task
+    if len(hits) >= 3:
+        result = "frontier" if r.frontier else "hardest"
+    elif len(hits) == 2:
+        result = "complex"
+    elif "change" in r.acts or hits:
+        result = "standard"
+    elif (r.lookup_form or r.length < 80) and r.english:
+        result = "lookup"
+    else:
+        result = "standard"
+    if LEVELS.index(result) < LEVELS.index("complex") and r.defect:
+        result, hits = "complex", hits + ["fixes or hunts a defect"]
+    return {"level": result, "signals": hits}
+
+
+def _call_level(r: Reading, held: Role) -> dict:
+    hits = list(r.signals)
+    why = list(hits)
+    if r.acts:
+        if len(hits) >= 3:
+            result = "frontier" if r.frontier else "hardest"
+        elif len(hits) == 2 and r.frontier:
+            result = "hardest"  # research-grade wording on broad or open work
+        elif len(hits) == 2 or "risk" in hits or (hits and r.judgment) or r.systems:
+            result = "complex"
+        else:
+            result = "standard"
+        if LEVELS.index(result) < LEVELS.index("complex") and r.defect:
+            result, why = "complex", why + ["fixes or hunts a defect"]
+    elif len(hits) >= 2:
+        result = "standard"  # finds or explains something broad or sensitive, but only reads
+    elif not r.english:
+        result, why = "standard", why + ["not in English"]
+    else:
+        result = "lookup"
+    if result == "lookup" and (r.thorough or r.length > LONG_BRIEF):
+        result, why = "standard", why + ["thorough or long brief"]
+    if held.floor and LEVELS.index(result) < LEVELS.index(held.floor):
+        result, why = held.floor, why + ["agent's role"]
+    elif held.cap and LEVELS.index(result) > LEVELS.index(held.cap):
+        result, why = held.cap, why + ["search or check agent"]
+    return {"level": result, "signals": why}
+
+
 def profile_prompt(prompt: str) -> dict:
     """The user's request as a whole. Used to tell whether the conversation's own model
     is strong enough for it. Fixing or hunting a defect is at least complex, as in profile_call."""
-    text = (prompt or "").lower()
-    hits = signals(text)
-    changes = bool(re.search(_CHANGE, text))
-    if len(text) > 1500 and "scope" not in hits:
-        hits.append("scope")  # a long brief is rarely a small task
-    if len(hits) >= 3:
-        level = "frontier" if re.search(_FRONTIER, text) else "hardest"
-    elif len(hits) == 2:
-        level = "complex"
-    elif changes or hits:
-        level = "standard"
-    elif (re.search(_LOOKUP, text) or len(text) < 80) and not _not_english(text):
-        level = "lookup"
-    else:
-        level = "standard"
-    if LEVELS.index(level) < LEVELS.index("complex") and _fixes_a_defect(re.sub(_NEGATED, "", text)):
-        level, hits = "complex", hits + ["fixes or hunts a defect"]
-    return {"level": level, "signals": hits, "changes": changes}
+    reading = read(prompt, limits=False)
+    return {**level(reading, "request"), "changes": "change" in reading.acts}
 
 
 def profile_call(tool_input: dict, agent_type: str) -> dict:
     """One agent call, judged by its own brief and by what its agent is for."""
-    text = f"{tool_input.get('description') or ''}\n{tool_input.get('prompt') or ''}".lower()
-    # A limit still names what the work touches, so its risk counts; its scope and ambiguity
-    # words describe what to avoid, so they don't, and neither do its change words.
-    asked = re.sub(_NEGATED, "", text)
-    hits = signals(asked)
-    if "risk" not in hits and "risk" in signals(text):
-        hits.insert(0, "risk")
-    why = list(hits)
-    if re.search(_CHANGE, asked) or re.search(_REASONING, asked) or re.search(rf"\b(?:{_DECISION})\b", asked):
-        if len(hits) >= 3:
-            level = "frontier" if re.search(_FRONTIER, asked) else "hardest"
-        elif len(hits) == 2 and re.search(_FRONTIER, asked):
-            level = "hardest"  # research-grade wording on broad or open work
-        elif (len(hits) == 2 or "risk" in hits or (hits and re.search(_JUDGMENT, asked))
-              or re.search(rf"\b{_SYSTEMS}\b", asked)):
-            level = "complex"
-        else:
-            level = "standard"
-        if LEVELS.index(level) < LEVELS.index("complex") and _fixes_a_defect(asked):
-            level, why = "complex", why + ["fixes or hunts a defect"]
-    elif len(hits) >= 2:
-        level = "standard"  # finds or explains something broad or sensitive, but only reads
-    elif _not_english(text):
-        level, why = "standard", why + ["not in English"]
-    else:
-        level = "lookup"
-    if level == "lookup" and (re.search(_THOROUGH, text) or len(text) > LONG_BRIEF):
-        level, why = "standard", why + ["thorough or long brief"]
-    name = agent_type.split(":")[-1].lower()
-    if _named_for(name, _HEAVY_NAME):
-        # Our deep-solver is for what the others couldn't do; another plugin's solver is only a heavy role.
-        floor = "hardest" if agent_type.lower() == f"{PLUGIN_NAME}:deep-solver" else "complex"
-        if LEVELS.index(level) < LEVELS.index(floor):
-            level, why = floor, why + ["agent's role"]
-    elif _named_for(name, _LIGHT_NAME):
-        if LEVELS.index(level) > LEVELS.index("standard"):
-            level, why = "standard", why + ["search or check agent"]
-    return {"level": level, "signals": why}
+    text = f"{tool_input.get('description') or ''}\n{tool_input.get('prompt') or ''}"
+    return level(read(text), "call", role(agent_type))
 
 
 def asks_for_work(text: str) -> bool:

@@ -16,9 +16,13 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Level**: how much reasoning a call needs: lookup, standard, complex, hardest or frontier. It comes from the call's brief and the agent's name.
 
-**Profile**: the step that reads a brief and an agent's name and gives the level, with the reasons for it (`profile.py`). It looks for signals and for words that mean the call changes something or has to reason, and leaves out what a negated limit such as "do not change any files" says. A brief that fixes or hunts a defect is at least complex, and so is the person's request. A name counts by whole parts (`docs-researcher` is a search agent, `researcher` is not).
+**Profile**: the step that turns a brief and an agent's name into a level, with the reasons for it (`profile.py`). `profile.read` gives the brief's Reading and `profile.level` scores it, as a call or as a request. A brief that fixes or hunts a defect is at least complex, and so is the person's request.
 
-**Signal**: one kind of difficulty the profile looks for in a brief: risk (security, data and its consistency, migrations, public APIs), scope (several modules or services), load (performance, latency, throughput, staleness and capacity limits, counted only when the brief also asks for a design or a choice) or ambiguity (design, a decision between approaches, root cause, trade-offs). More signals mean a higher level.
+**Reading**: what a brief says, read once (`profile.Reading`): its signals, whether it asks for a change or for reasoning, whether it fixes or hunts a defect, frontier and thorough wording, whether it is phrased as a lookup, whether it is English, and its length. A negated limit such as "do not change any files" restricts the work and doesn't ask for it, so a call's reading leaves out what it says, except its risk words. A call and a request read the same way but are scored by their own rules: a call that asks for nothing is a lookup, a request with signals and no verb still scores, a request over 1,500 characters gains scope, and a call over 4,000 only lifts a lookup to standard.
+
+**Role**: what an agent's name stands for (`profile.role`, from the `ROLES` table): a heavy role such as a reviewer or architect is raised to its floor (this plugin's own deep-solver to hardest), a light one such as a scout or verifier is held to standard. A role also says whether the agent is strong (it starts no lower than the request's level), a checker or read-only. A name counts by whole parts (`docs-researcher` is a search agent, `researcher` is not).
+
+**Signal**: one kind of difficulty a Reading looks for in a brief: risk (security, data and its consistency, migrations, public APIs), scope (several modules or services), load (performance, latency, throughput, staleness and capacity limits, counted only when the brief also asks for a design or a choice) or ambiguity (design, a decision between approaches, root cause, trade-offs). More signals mean a higher level.
 
 **Registry**: the shipped `config/models.json`, merged with the user's and a project's override files: which models exist and their relative strength, speed and cost, the level table, aliases and list prices (`config.py`, `registry.py`).
 
@@ -42,9 +46,9 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Allowlist** (`allowlist.py`): the `availableModels` and `deniedModels` settings, read the way Claude Code reads them, from the layers the mod sends or from the settings files. Models they block are not picked. When they leave no registry model open, the call is left as it is. The same layers carry `maxEffortLevel`, the cap every effort the router sets is held to.
 
-**Model health** (`health.py`): what the router has seen of each model here. Two calls that fail with a model error, run as a different model or are rejected route the model around for a day, then three days, then a week, after which it is tried again. A call that runs as asked clears the record.
+**Model health** (`health.py`): what the router has seen of each model here. Two calls that fail with a model error, run as a different model or are rejected route the model around for a day, then three days, then a week, after which it is tried again. A call that runs as asked clears the record. Reading the table writes nothing; an outage a read finds too long for the clock is shortened in memory and written by the next spawn.
 
-**Snapshot** (`settings.Snapshot`): the config, options, usable models, health and allowlist a hook call reads once and passes to every step, so no step re-reads a file another step already read. The last three load on first use.
+**Snapshot** (`settings.Snapshot`): the config, options, usable models, health, allowlist and learned raises a hook call reads once and passes to every step, and the ladder's `pick(level)` bound to them, so no step re-reads a file another step already read. The last three load on first use. A read writes nothing, so a dry run leaves the state as it was; a spawn writes what reads only noticed (`Snapshot.settle`).
 
 **Main-loop effort**: the effort of the conversation's own turn. The mod raises it for one turn when the request profiles as complex or harder, never lowers it, and leaves it alone wherever an effort change would re-read the context uncached. A `maxEffortLevel` cap holds it too.
 

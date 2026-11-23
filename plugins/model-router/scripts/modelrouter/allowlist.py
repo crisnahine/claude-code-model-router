@@ -195,10 +195,9 @@ def from_layers(layers: dict, source: str = "engine", floor: dict | None = None)
 def remember(session_id: str | None, sent: object) -> dict[str, dict] | None:
     """Clean the mod's `settings` payload and keep it for the session's later hooks. None
     when the mod sent no layers. A source it left out is one whose read failed."""
-    if not isinstance(sent, dict):
+    layers, stored = _sent(session_id, sent)
+    if layers is None:
         return None
-    stored = _stored(session_id)
-    layers = {**stored, **_layers(sent)}  # a source the mod left out keeps what it last sent
     try:
         if session_id and layers != stored:
             store.save_entry("allowlist", session_id, {"layers": layers})
@@ -214,12 +213,19 @@ def _stored(session_id: str | None) -> dict[str, dict]:
         return {}
 
 
+def _sent(session_id: str | None, sent: object) -> tuple[dict[str, dict] | None, dict[str, dict]]:
+    """The layers the mod sent over the session's stored ones, None when it sent none, and the stored ones."""
+    stored = _stored(session_id)
+    return ({**stored, **_layers(sent)} if isinstance(sent, dict) else None), stored  # a source left out keeps what it last sent
+
+
 def read(session_id: str | None, project: Path, sent: object = None) -> Allowlist:
     """Each source from the layers sent now, else the latest the session sent, else its
-    settings file. The managed files always apply as a floor."""
-    layers = remember(session_id, sent)
+    settings file. The managed files always apply as a floor. Reading stores nothing: the mod's
+    own hooks call `remember`."""
+    layers, stored = _sent(session_id, sent)
     if layers is None:
-        layers = _stored(session_id)
+        layers = stored
     files = file_layers(project)
     merged = {s: layers[s] if s in layers else files[s] for s in SOURCES}
     return from_layers(merged, "engine" if layers else "files", floor=files["policy"])

@@ -674,6 +674,17 @@ class Snapshot(Sandbox):
                                   "error": "API Error: 404 not_found_error: model: haiku"})
         self.assertIn("looks unavailable", out["hookSpecificOutput"]["additionalContext"])
 
+    def test_the_snapshot_picks_with_its_priority_usable_models_and_raises_read_once(self):
+        store.save_json(learn._path(), {"lookup": {"bump": 1}})
+        self.options(priority="quality")
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        with mock.patch.object(learn, "raises", wraps=learn.raises) as raises:
+            picks = {level: snap.pick(level) for level in cfg.LEVELS}
+            self.assertIs(snap.raises, snap.raises)
+        self.assertEqual(raises.call_count, 1)
+        self.assertEqual(picks["lookup"], ladder.pick(snap.config, "lookup", "quality", snap.usable, {"lookup": 1}))
+        self.assertEqual(picks["complex"], ladder.pick(snap.config, "complex", "quality", snap.usable, {}))
+
     def test_a_field_is_read_on_first_use_and_then_kept(self):
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
         with mock.patch.object(allowlist, "read", wraps=allowlist.read) as read:
@@ -1054,10 +1065,20 @@ class Allowlist(Sandbox):
         self.assertEqual((layers["user"]["modelOverrides"], layers["project"]["modelOverrides"]), (True, False))
         self.assertNotIn('"a"', (self.data / "allowlist.json").read_text(encoding="utf-8"))
 
-    def test_a_failing_store_does_not_stop_the_read(self):
+    def test_a_failing_store_does_not_stop_remembering_the_layers_for_this_call(self):
+        sent = {"policy": {"availableModels": ["opus"]}}
         with mock.patch.object(store, "save_entry", side_effect=ValueError("bad")):
-            found = allowlist.read("s1", self.project, {"policy": {"availableModels": ["opus"]}})
+            layers = allowlist.remember("s1", sent)
+        self.assertEqual(layers["policy"]["availableModels"], ["opus"])
+
+    def test_reading_the_sent_layers_stores_nothing_until_the_mod_hook_remembers_them(self):
+        sent = {"policy": {"availableModels": ["opus"]}}
+        found = allowlist.read("s1", self.project, sent)
         self.assertEqual(found.permitted(self.config), {"opus"})
+        self.assertFalse((self.data / "allowlist.json").exists())
+        hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "settings": sent, "kind": "subagent",
+                         "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}})
+        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"opus"})
 
     @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
     def test_a_settings_file_that_is_not_a_small_regular_file_is_ignored(self):
@@ -1369,6 +1390,26 @@ class Profile(unittest.TestCase):
         self.assertNotIn("ixes", models["sonnet"]["use_for"])
         self.assertTrue(models["opus"]["use_for"].startswith("Defect fixes, migrations and performance work"))
 
+    def test_one_reading_serves_a_call_and_a_request(self):
+        brief = "Fix the auth bug across every service. Do not change the public API."
+        reading = profile.read(brief)
+        self.assertEqual(reading.signals, ("risk", "scope"))
+        self.assertEqual(profile.level(reading, "call", profile.role("general-purpose")),
+                         profile.profile_call({"prompt": brief}, "general-purpose"))
+        wording = profile.read(brief, limits=False)
+        self.assertEqual({**profile.level(wording, "request"), "changes": "change" in wording.acts},
+                         profile.profile_prompt(brief))
+
+    def test_a_request_with_signals_and_no_verb_scores_but_a_call_that_asks_for_nothing_is_a_lookup(self):
+        self.assertEqual(profile.profile_prompt("the payments service")["level"], "standard")
+        self.assertEqual(self.level("the payments service"), "lookup")
+
+    def test_the_two_kinds_have_their_own_length_rules(self):
+        long = "notes " * 300
+        self.assertEqual(profile.profile_prompt(long)["signals"], ["scope"])
+        self.assertEqual(self.level(long), "lookup")
+        self.assertEqual(self.level("list the files. " + "x " * 2100), "standard")
+
     def test_a_search_or_check_agent_stays_at_standard_for_a_fix_brief(self):
         brief = {"prompt": "Fix the off-by-one in page_slice."}
         self.assertEqual(profile.profile_call(brief, "model-router:verifier")["level"], "standard")
@@ -1600,24 +1641,24 @@ class Profile(unittest.TestCase):
 
 class RoutingEvals(Sandbox):
     """Each `claude plugin eval` case routes as its expected_outcome says, with no model call, so a
-    routing regression fails CI instead of waiting for a paid eval run."""
+    routing regression fails CI instead of waiting for a paid eval run. A case hands a subagent an exact
+    brief, and the router decides that call as it would in a session on the case's own model."""
 
     def test_each_eval_case_routes_as_expected(self):
         cases = sorted((PLUGIN / "evals").glob("*/prompt.md"))
         self.assertGreaterEqual(len(cases), 2)
-        snap = settings.Snapshot()
         for path in cases:
             name = path.parent.name
-            want = re.fullmatch(r"['\"]?level (\w+), model (\w+), effort (\w+)['\"]?",
-                                frontmatter(path).get("expected_outcome", ""))
+            fields = frontmatter(path)
+            want = re.fullmatch(r"['\"]?level (\w+), model (\w+), effort (\w+)['\"]?", fields.get("expected_outcome", ""))
             self.assertTrue(want, f"{name}: expected_outcome must read 'level L, model M, effort E'")
-            body = path.read_text(encoding="utf-8").split("\n---\n", 1)[1].strip()
-            # A case that hands a subagent an exact brief is about how that call routes.
-            quoted = re.search(r'this exact prompt: "([^"]+)"', body)
-            got = (report.explain(snap, quoted[1], "general-purpose") if quoted
-                   else report.explain(snap, body))
-            self.assertIn(f"Level: **{want[1]}**", got, name)
-            self.assertIn(f"Model: **{want[2]}**, effort: {want[3]}.", got, name)
+            quoted = re.search(r'this exact prompt: "([^"]+)"', path.read_text(encoding="utf-8").split("\n---\n", 1)[1])
+            self.assertTrue(quoted, f"{name}: the case must quote the brief it hands a subagent")
+            self.session_on(fields["model"], session_id=name)
+            hook_input = {"session_id": name, "cwd": str(self.project),
+                          "tool_input": {"subagent_type": "general-purpose", "prompt": quoted[1]}}
+            d = spawn.decide(hook_input, settings.Snapshot(hook_input)).decision
+            self.assertEqual((d["level"], d["model"], d["effort"]), want.groups(), name)
 
 
 class Router(Sandbox):
@@ -2480,7 +2521,8 @@ class Mod(Sandbox):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         self.assertEqual(self.pre("general-purpose", HARD, session_id="s3")["updatedInput"]["effort"], "low")
         route = self.out("explain", HARD)
-        self.assertIn("effort: low (effort held to low by maxEffortLevel)", route)
+        self.assertIn("effort: low.", route)
+        self.assertIn("effort held to low by maxEffortLevel", route.split("Why:", 1)[1].splitlines()[0])
         self.assertIn("| complex | opus | low (effort held to low by maxEffortLevel) |", self.out("policy"))
 
     def test_turn_effort_is_left_alone_where_an_effort_change_drops_the_cache(self):
@@ -2652,7 +2694,9 @@ class Health(Sandbox):
             health.failed("opus", "model not found")
             health.failed("opus", "model not found")
         with self.at(0):
-            self.assertFalse(health.load().healthy("opus"))
+            seen = health.load()
+            self.assertFalse(seen.healthy("opus"))
+            seen.settle()
         with self.at(health.OUTAGE_DAYS[0] + 0.01):
             self.assertTrue(health.load().healthy("opus"))
 
@@ -2665,17 +2709,20 @@ class Health(Sandbox):
         self.assertEqual([seen.healthy("fable"), seen.healthy("sonnet"), seen.healthy("none")], [False, True, True])
         self.assertEqual(store.state_path().read_bytes(), before)
 
-    def test_a_clamp_checks_the_record_again_under_the_lock(self):
+    def test_reading_a_too_long_outage_writes_nothing_and_settling_checks_the_record_again(self):
         with self.at(19):
             health.failed("opus", "model not found")
             health.failed("opus", "model not found")
-        seen = health.load()
-        # Another writer clears the record after this one read it.
-        health.ran("opus", "claude-opus-5-5", "opus", forced=False)
-        cleared = store.state_path().read_bytes()
+        long_outage = store.state_path().read_bytes()
         with self.at(0):
-            self.assertTrue(seen.healthy("opus"))  # the cleared record wins over the stale read
-        self.assertEqual(store.state_path().read_bytes(), cleared)
+            seen = health.load()
+            self.assertFalse(seen.healthy("opus"))
+            self.assertEqual(store.state_path().read_bytes(), long_outage)
+            # Another writer clears the record after this one read it.
+            health.ran("opus", "claude-opus-5-5", "opus", forced=False)
+            cleared = store.state_path().read_bytes()
+            seen.settle()
+        self.assertEqual(store.state_path().read_bytes(), cleared)  # the cleared record wins over the stale read
 
     def test_a_junk_record_reads_as_healthy(self):
         store.update_state(lambda s: s.update(health={"opus": {"unavailable_until": "soon", "outages": -3},
@@ -3808,6 +3855,56 @@ class Reports(Sandbox):
         self.assertIn("names its own model", self.out("explain", "--agent", "pinned", "list", "files"))
         self.assertIn("wasn't found", self.out("explain", "--agent", "mystery:agent", "list", "files"))
 
+    def test_explain_says_what_the_spawn_decision_says(self):
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        for agent, brief in (("general-purpose", HARD), ("general-purpose", LOOKUP), ("model-router:scout", HARDEST)):
+            d = spawn.decide({"session_id": "s1", "tool_input": {"prompt": brief, "subagent_type": agent}}, snap).decision
+            text = report.explain(snap, brief, agent)
+            self.assertIn(f"Level: **{d['level']}**", text)
+            self.assertIn(f"Model: **{d['model'] or 'left as it is'}**, effort: {d['effort'] or 'unchanged'}.", text)
+            self.assertIn(f"Why: {d['reason']}.", text)
+
+    def test_explain_reports_the_rules_the_old_profile_and_ladder_copy_missed(self):
+        self.override({"agents": {"quiet": {"route": False}}})
+        self.assertIn("leaves this agent alone", self.out("explain", "--agent", "quiet", *LOOKUP.split()))
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        self.assertIn("pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE", self.out("explain", *LOOKUP.split()))
+        for name in ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_CODE_SUBAGENT_MODEL"):
+            del os.environ[name]
+        request.start("s1", prompt_id="p1", level="hardest", need="opus", below=False, session_tier=None, named=None)
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        text = report.explain(snap, LOOKUP, "model-router:architect")
+        self.assertIn("Level: **hardest**", text)  # the request's floor reaches a strong role agent
+        key = calls.identify({"prompt": LOOKUP})[1]
+        request.note_spawn(snap.config, "s1", key, "haiku", level="lookup", effort="medium", source="router")
+        calls.settled("s1", key, None, finished=True)
+        self.assertIn("one level above the lookup run", report.explain(snap, LOOKUP))
+
+    def test_explain_writes_nothing(self):
+        # Every lazy read has something to write: a record too long for the clock, layers the session never stored.
+        with self.clock_at(self.clock + 19 * 86400):
+            health.failed("fable", "model not found")
+            health.failed("fable", "model not found")
+        sent = {"policy": {"availableModels": ["haiku", "sonnet", "fable"]}}
+        hook_input = {"session_id": "s1", "cwd": str(self.project), "settings": sent}
+        self.session_on("claude-sonnet-5-5")
+
+        def files() -> dict:
+            return {str(p): p.read_bytes() for root in (self.data, self.home, self.project)
+                    for p in root.rglob("*") if p.is_file()}
+
+        before = files()
+        text = report.explain(settings.Snapshot(hook_input), HARD)
+        report.explain(settings.Snapshot(hook_input), LOOKUP, "model-router:architect")
+        report.policy(settings.Snapshot(hook_input))
+        self.assertEqual(files(), before)
+        self.assertIn("models in use: haiku, sonnet.", text)  # fable is routed around, and the record stays as it was
+        state = store.state_path().read_bytes()
+        hooks.mod_spawn({**hook_input, "kind": "subagent", "tool_input": {"subagent_type": "general-purpose",
+                                                                          "prompt": LOOKUP}})
+        self.assertNotEqual(files(), before)  # a real spawn does write
+        self.assertNotEqual(store.state_path().read_bytes(), state)  # and settles the outage the reads found
+
     def test_usage_report(self):
         self.assertIn("No activity", self.out("usage"))
         self.session_on("claude-opus-5-5")
@@ -4865,42 +4962,31 @@ class DesignDecisions(unittest.TestCase):
             self.assertIn("load", result["signals"], prompt)
 
 
-class AgentNames(unittest.TestCase):
-    """A name reads as a role only by whole parts: "researcher" holds "search", "relocation" holds "locat"."""
+class Roles(unittest.TestCase):
+    """An agent's name reads as a role by whole parts, from one table: "researcher" holds "search",
+    "relocation" holds "locat". The levels each name gets are in tests/fixtures/agent-name-corpus.json."""
 
-    BRIEF = "investigate why auth is flaky and redesign it across every service"
+    def test_the_table_carries_what_each_of_our_agents_is(self):
+        role = profile.role
+        self.assertEqual(role("model-router:architect"), profile.Role("heavy", floor="complex", strong=True, writes=False))
+        self.assertEqual(role("model-router:reviewer"),
+                         profile.Role("heavy", floor="complex", strong=True, checker=True, writes=False))
+        self.assertEqual(role("model-router:deep-solver"), profile.Role("heavy", floor="hardest", strong=True))
+        self.assertEqual(role("model-router:verifier"), profile.Role("light", cap="standard", checker=True))
+        self.assertEqual(role("model-router:implementer"), profile.Role())
 
-    def level(self, agent: str) -> str:
-        return profile.profile_call({"prompt": self.BRIEF}, agent)["level"]
+    def test_another_plugins_agent_is_only_a_kind_never_strong_or_read_only(self):
+        self.assertEqual(profile.role("acme:deep-solver"), profile.Role("heavy", floor="complex"))
+        self.assertEqual(profile.role("acme:code-reviewer"), profile.Role("heavy", floor="complex", checker=True))
+        self.assertEqual(profile.role("scout"), profile.Role("light", cap="standard"))
 
-    def test_a_name_that_only_contains_a_search_word_is_no_search_agent(self):
-        for agent in ("researcher", "relocation-migrator", "splinter-fixer", "information-extractor",
-                      "allocator-tuner", "helper", "acme:nonlinear_formatted"):
-            self.assertEqual(self.level(agent), "hardest", agent)
+    def test_a_name_that_only_contains_a_role_word_has_no_role(self):
+        for agent in ("researcher", "relocation-migrator", "dependency-resolver", "helper", "", None):
+            self.assertEqual(profile.role(agent), profile.Role(), agent)
 
-    def test_search_and_check_agents_stay_light(self):
-        for agent in ("scout", "explorer", "Explore", "docs-researcher", "model-router:docs-researcher", "verifier",
-                      "lint-runner", "code_search", "acme:summarizer", "grep"):
-            self.assertEqual(self.level(agent), "standard", agent)
-
-    def test_review_and_design_agents_stay_heavy(self):
-        for agent in ("architect", "security-reviewer", "deep-solver", "code_auditor", "debugger", "planner"):
-            self.assertEqual(profile.profile_call({"prompt": "List the files in ./puzzles."}, agent)["level"],
-                             "complex", agent)
-
-
-class SolverNames(unittest.TestCase):
-    """Only this plugin's own deep-solver is floored at hardest; another plugin's solver is a heavy role, a resolver none."""
-
-    def level(self, agent: str) -> str:
-        return profile.profile_call({"prompt": "List the files in ./puzzles."}, agent)["level"]
-
-    def test_only_the_deep_solver_starts_at_hardest(self):
-        self.assertEqual(self.level("model-router:deep-solver"), "hardest")
-        self.assertEqual(self.level("sudoku-solver"), "complex")
-        self.assertEqual(self.level("acme:equation-solver"), "complex")
-        self.assertEqual(self.level("dependency-resolver"), "lookup")
-        self.assertEqual(self.level("acme:deep-solver"), "complex")
+    def test_the_strong_roles_are_the_ones_that_get_the_requests_floor(self):
+        names = {agent.split(":")[1] for agent, held in profile.ROLES.items() if held.strong}
+        self.assertEqual(names, {profile.ARCHITECT, profile.REVIEWER, profile.DEEP_SOLVER})
 
 
 if __name__ == "__main__":

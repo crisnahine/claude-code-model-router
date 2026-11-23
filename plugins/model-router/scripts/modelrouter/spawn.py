@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from . import agents, calls, gates, learn, ledger, registry, request, router, session, settings
+from . import agents, calls, gates, learn, ledger, profile, registry, request, router, session, settings
 from . import config as cfg
 
 
@@ -39,8 +39,7 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
                                                        hook_input.get("transcript_path")))
     # A hand-off brief often reads simpler than the request it serves, so the strong role
     # agents start no lower than the request's level; a redo still climbs from there.
-    strong = agent in tuple(f"{cfg.PLUGIN_NAME}:{role}" for role in ("architect", "deep-solver", "reviewer"))
-    floor = request.load(hook_input.get("session_id")).floor if strong else None
+    floor = request.load(hook_input.get("session_id")).floor if profile.role(agent).strong else None
     # The mod says so. On the fallback, a named call from the main conversation without `isolation` launches
     # as a teammate when agent teams are on (sub-agents.md, Subagent names); that is the one hook-visible sign.
     name = tool_input.get("name")
@@ -49,7 +48,7 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     caps = {n: c for n in registry.models(config) for c in [snap.allowed.effort_cap(config, n)] if c}
     return router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable,
                         definition=definition, parent=parent,
-                        earlier=calls.finished_run(hook_input.get("session_id"), key), raises=learn.raises(),
+                        earlier=calls.finished_run(hook_input.get("session_id"), key), raises=snap.raises,
                         floor=floor, teammate=teammate, effort_caps=caps)
 
 
@@ -65,6 +64,7 @@ def record(spawned: Spawn, via: str, newest: str | None = None) -> None:
     `newest` is the full ID the mod sends in place of the decided alias."""
     hook_input, decision = spawned.hook_input, spawned.decision
     session_id = hook_input.get("session_id")
+    spawned.snap.settle()
     ledger.spawn(session_id, via, decision, spawned.facts.tool_input.get("description"),
                  kind=(hook_input.get("kind") or "subagent") if via == "mod" else None)
     if decision["action"] != "deny":

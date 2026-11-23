@@ -1,4 +1,5 @@
-"""The subtask profiler against a labeled corpus of Agent briefs. Run: python3 -m unittest discover -s tests
+"""The profiler against labeled corpora: Agent briefs, the user's requests and agent names.
+Run: python3 -m unittest discover -s tests
 
 Each brief in tests/fixtures/routing-corpus.json carries the lowest level it needs and the highest that is still a
 sensible spend, set by the rules in that file before the profiler was run on it. A brief marked known_under routes
@@ -17,6 +18,7 @@ sys.path.insert(0, str(ROOT / "plugins" / "model-router" / "scripts"))
 from modelrouter import profile  # noqa: E402
 from modelrouter.config import LEVELS  # noqa: E402
 
+FIXTURES = ROOT / "tests" / "fixtures"
 CORPUS = json.loads((ROOT / "tests" / "fixtures" / "routing-corpus.json").read_text(encoding="utf-8"))["briefs"]
 # 2 of 258 briefs over-routed on 2026-11-23. The margin leaves room for one-level over-routes that closing an
 # under-route may cost; raise it only with the briefs that need it named in the commit.
@@ -65,6 +67,45 @@ class RoutingCorpus(unittest.TestCase):
             self.fail("routed two or more levels too high:\n" + show(far))
         if len(over) / len(CORPUS) > OVER_ROUTE_BUDGET:
             self.fail(f"over-route rate above {OVER_ROUTE_BUDGET:.0%}:\n" + show(over))
+
+
+REQUESTS = json.loads((FIXTURES / "request-corpus.json").read_text(encoding="utf-8"))["requests"]
+NAMES = json.loads((FIXTURES / "agent-name-corpus.json").read_text(encoding="utf-8"))
+
+
+class RequestCorpus(unittest.TestCase):
+    """The user's own prompt is read by the request rules, which differ from a call's: signals without a verb
+    still score, a long prompt gains scope, and there is no thorough or long-brief rule."""
+
+    def test_every_request_keeps_its_level_and_reasons(self):
+        self.assertGreaterEqual(len(REQUESTS), 60)
+        for row in REQUESTS:
+            got = profile.profile_prompt(row["prompt"])
+            self.assertEqual((got["level"], got["signals"]), (row["level"], row["signals"]), row["prompt"][:80])
+
+    def test_the_corpus_holds_the_cases_the_two_rules_split_on(self):
+        self.assertTrue(any(r["signals"] == ["risk"] and r["level"] == "standard" for r in REQUESTS))
+        self.assertTrue(any("scope" in r["signals"] and len(r["prompt"]) > 1500 for r in REQUESTS))
+        self.assertTrue(any(r["level"] == "frontier" for r in REQUESTS))
+        self.assertGreaterEqual(sum(not r["prompt"].isascii() for r in REQUESTS), 4)
+
+
+class AgentNameCorpus(unittest.TestCase):
+    """What an agent's name does to a call: a heavy name lifts a plain brief, a light name caps a hard one."""
+
+    def test_every_name_keeps_its_role_and_levels(self):
+        self.assertGreaterEqual(len(NAMES["agents"]), 20)
+        for row in NAMES["agents"]:
+            low = profile.profile_call({"prompt": NAMES["lookup_brief"]}, row["agent"])["level"]
+            high = profile.profile_call({"prompt": NAMES["hard_brief"]}, row["agent"])["level"]
+            self.assertEqual((low, high), (row["on_lookup"], row["on_hard"]), row["agent"])
+            self.assertEqual(profile.role(row["agent"]).kind, row["kind"], row["agent"])
+
+    def test_a_kind_explains_the_levels(self):
+        for row in NAMES["agents"]:
+            heavy, light = row["kind"] == "heavy", row["kind"] == "light"
+            self.assertEqual(LEVELS.index(row["on_lookup"]) >= LEVELS.index("complex"), heavy, row["agent"])
+            self.assertEqual(row["on_hard"] == "standard", light, row["agent"])
 
 
 if __name__ == "__main__":

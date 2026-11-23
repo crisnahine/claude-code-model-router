@@ -34,6 +34,7 @@ def _outage_days(info: dict) -> int:
 class Health:
     def __init__(self, table: Any = None) -> None:
         self._table = table if isinstance(table, dict) else {}
+        self._clamps: dict[str, float] = {}
 
     def _info(self, name: str) -> dict:
         info = self._table.get(name)
@@ -45,12 +46,15 @@ class Health:
         latest = now + _outage_days(info) * 86400
         if until > latest:
             # A clock moved back would stretch the outage: it lasts at most its own days from now.
-            try:
-                info["unavailable_until"] = _clamp(name, latest)
-            except OSError:
-                info["unavailable_until"] = latest
-            until = info["unavailable_until"]
-        return until <= now
+            # Reading writes nothing; settle() shortens the stored record.
+            self._clamps.setdefault(name, latest)
+        return min(until, self._clamps.get(name, until)) <= now
+
+    def settle(self) -> None:
+        """Write the shortened outages that reads found, so each ends on the day it was clamped to."""
+        for name, latest in list(self._clamps.items()):
+            _clamp(name, latest)
+            del self._clamps[name]
 
     def last_ran_as(self, name: str) -> str | None:
         last = self._info(name).get("last_model")

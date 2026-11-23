@@ -1,0 +1,503 @@
+{
+ "rules": [
+  "Labeled from what profile_prompt gave on 2026-11-23, before the Reading refactor; a row changes only with its reason in the commit.",
+  "A request with signals and no verb still scores; a request over 1500 characters gets scope; a request has no thorough or long-brief rule."
+ ],
+ "requests": [
+  {
+   "prompt": "where is MAX_RETRIES defined?",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "what does the retry helper return",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "list the files under src",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "show me the config loader",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "which tests cover the parser?",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "explain the retry flow",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "explain how the cache is invalidated",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "summarize the last three commits",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "is there a helper that formats dates",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "how many routes does the app have",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "ok",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "thanks, looks good",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "hello",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "add a retry to the fetch helper",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "rename the helper in README.md",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "write a test for the date parser",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "implement the parser change",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "refactor the loader to use a dataclass",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "bump the version to 1.4.0",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "update the docs for the new flag",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "create a script that prints the repo size",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "convert the settings module to use pathlib",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "make the button blue",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "remove the unused import in utils.py",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "fix the typo in the readme",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "fix the off-by-one in page_slice",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "figure out why it times out and fix it",
+   "level": "complex",
+   "signals": [
+    "ambiguity",
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "debug the failing login test",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "investigate the flaky upload test",
+   "level": "complex",
+   "signals": [
+    "ambiguity",
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "why does the build fail on windows",
+   "level": "standard",
+   "signals": [
+    "ambiguity"
+   ]
+  },
+  {
+   "prompt": "the export is wrong for empty rows, can you take a look",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "the payments service",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "authentication and session tokens",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "database migrations",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "the public API and its clients",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "update the auth middleware to refresh session tokens",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "migrate the users table to add a nullable email column",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "review the payment webhook for race conditions",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "encrypt the stored credentials",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "add rate limiting to the public API without breaking existing clients",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "design the caching layer for the search service and decide between redis and memcached",
+   "level": "standard",
+   "signals": [
+    "ambiguity"
+   ]
+  },
+  {
+   "prompt": "redesign the billing flow across the API, the web client and the worker",
+   "level": "complex",
+   "signals": [
+    "risk",
+    "scope"
+   ]
+  },
+  {
+   "prompt": "investigate the intermittent deadlock between the queue worker and the database and propose a fix",
+   "level": "complex",
+   "signals": [
+    "risk",
+    "ambiguity"
+   ]
+  },
+  {
+   "prompt": "choose an approach for rolling out the schema change to production with no data loss",
+   "level": "complex",
+   "signals": [
+    "risk",
+    "ambiguity"
+   ]
+  },
+  {
+   "prompt": "evaluate the trade-offs of moving auth to the gateway and the performance cost at 5k requests per second",
+   "level": "hardest",
+   "signals": [
+    "risk",
+    "load",
+    "ambiguity"
+   ]
+  },
+  {
+   "prompt": "do not change any files, just tell me where the auth check lives",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "without changing the API, fix the race in the session refresh",
+   "level": "complex",
+   "signals": [
+    "risk",
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "review this diff for security problems",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "plan the migration of the monolith to services, touching the api, the worker and the web client",
+   "level": "complex",
+   "signals": [
+    "risk",
+    "scope"
+   ]
+  },
+  {
+   "prompt": "research-grade: find a novel approach to compacting the event log with no known fix for the latency",
+   "level": "standard",
+   "signals": [
+    "ambiguity"
+   ]
+  },
+  {
+   "prompt": "figure out the unknown root cause of the multi-day memory growth, a long-running investigation with no known approach, across the services, the database and the client",
+   "level": "frontier",
+   "signals": [
+    "risk",
+    "scope",
+    "ambiguity"
+   ]
+  },
+  {
+   "prompt": "refactor the whole codebase to a new module layout",
+   "level": "standard",
+   "signals": [
+    "scope"
+   ]
+  },
+  {
+   "prompt": "make sure the tests pass",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "run the tests and tell me what fails",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "arregla el error de autenticación en el servicio de pagos",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "añade una prueba para el analizador de fechas",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "ajoute un test pour le parseur de dates",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "où est défini MAX_RETRIES dans le projet",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "bitte die Konfiguration der Datenbank anpassen",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "データベースの移行を修正してください",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "implemente a função de pagamento com segurança e corrija o erro",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "/review",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "/fix the login bug",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "limit the output to ten lines and list the files",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "port the script to python 3",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "do not add, remove, or rename files; just explain the layout",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "Here is the background for the work. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. The team keeps notes about the project in a shared folder. Please tidy the notes.",
+   "level": "standard",
+   "signals": [
+    "scope"
+   ]
+  },
+  {
+   "prompt": "x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x x ",
+   "level": "standard",
+   "signals": [
+    "scope"
+   ]
+  },
+  {
+   "prompt": "Please look at the project. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. It has many parts and the notes describe each part in detail. ",
+   "level": "standard",
+   "signals": [
+    "scope"
+   ]
+  },
+  {
+   "prompt": "compare the two caching strategies and recommend one",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "should we use a queue here?",
+   "level": "standard",
+   "signals": [
+    "ambiguity"
+   ]
+  },
+  {
+   "prompt": "optimize the slow query on the orders page",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "the dashboard is slow, find the bottleneck and decide how to fix it",
+   "level": "complex",
+   "signals": [
+    "load",
+    "ambiguity"
+   ]
+  },
+  {
+   "prompt": "audit the repo for secrets",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "write a short poem about the build",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "delete the stale branches",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "add logging to the worker",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "debug logging is too noisy, quiet it down",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "update the changelog",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "design a rate limiter",
+   "level": "complex",
+   "signals": [
+    "risk",
+    "ambiguity"
+   ]
+  },
+  {
+   "prompt": "fix #123",
+   "level": "standard",
+   "signals": []
+  },
+  {
+   "prompt": "",
+   "level": "lookup",
+   "signals": []
+  }
+ ]
+}
