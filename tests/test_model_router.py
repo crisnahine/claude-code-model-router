@@ -274,6 +274,10 @@ class Shipped(unittest.TestCase):
         self.assertIn("only parsed or compiled", body)
         self.assertIn("never as a pass", body)
 
+    def test_the_implementer_finishes_the_plan_and_stops_early_only_for_a_wrong_plan(self):
+        body = (PLUGIN / "agents" / "implementer.md").read_text(encoding="utf-8").split("---", 2)[2]
+        self.assertIn("Finish the planned change. Stop early only when the plan is wrong or needs the user's decision", body)
+
     def test_the_architect_hands_back_a_file_it_was_asked_to_write(self):
         # Misrouted to it, a write-the-file task still ends with the content the caller can write.
         body = (PLUGIN / "agents" / "architect.md").read_text(encoding="utf-8").split("---", 2)[2]
