@@ -262,7 +262,7 @@ The top-level `schema` key is `<shape>/<version>`. A new key keeps the version, 
 
 | Key | Contents |
 | :- | :- |
-| `cap`, `strongest_in_use`, `priority` | The cap (`null` for none), the strongest usable model (`null` if none) and the priority |
+| `cap`, `strongest_in_use`, `priority` | The cap (`null` for none), the strongest usable model that the shipped registry or your own file ranks (a model a repository added only when nothing else is usable; `null` if none) and the priority |
 | `models` | One entry per registry model, weakest first: `model`, `last_ran_as` (`null` if never reported), `status` and `detail` (the table's text). `status` is `working`, `not_used`, `above_cap`, `project_model_under_cap`, `not_permitted` or `routed_around` |
 | `levels` | Levels the feedback loop has data for: `level`, `routed_calls`, `votes_too_low`, `raised` |
 | `doc_aliases`, `not_in_registry` | Model aliases in the current docs, and the families among them the registry lacks |
