@@ -661,7 +661,8 @@ class SuiteCoverage(unittest.TestCase):
 
     def test_a_security_finding_given_only_in_the_reply_fails(self):
         for task_id, reply in (("security-sql-injection", "db/users.py:6 builds the SQL with an f-string."),
-                               ("security-path-traversal", "files/server.py:8 joins the name unresolved.")):
+                               ("security-path-traversal", "files/server.py:8 joins the name unresolved."),
+                               ("security-admin-route", "gateway/router.py decodes the path twice.")):
             with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
                 task, work = self.shipped(task_id, tmp)
                 self.assertFalse(self.check(task, work, reply))
@@ -1316,7 +1317,7 @@ class QualityTier(unittest.TestCase):
     check, shipped, source, run_with = HardTier.check, HardTier.shipped, HardTier.source, HardTier.run_with
 
     def test_the_quality_tier_has_one_task_in_each_of_six_classes(self):
-        want = {"impl-merge-customers": "implementation"}
+        want = {"impl-merge-customers": "implementation", "security-admin-route": "security-review"}
         tasks = {t["id"]: t for t in run.load_tasks()}
         self.assertEqual({i: tasks[i]["class"] for i in want}, want)
         self.assertTrue(all(tasks[i]["revision"] == 1 for i in want))
@@ -1419,6 +1420,54 @@ class QualityTier(unittest.TestCase):
             '        conn.execute("DROP TABLE old_customers")\n'
             '        conn.execute("PRAGMA legacy_alter_table = OFF")\n'))
         self.assertTrue(self.run_with("impl-merge-customers", {rel: legacy_rename}))
+
+    def line_of(self, rel, text, nth=1):
+        lines = self.source("security-admin-route", f"repo/{rel}").splitlines()
+        return [n for n, line in enumerate(lines, 1) if text in line][nth - 1]
+
+    def test_the_route_finding_names_the_second_decode_or_the_guard_and_no_decoy(self):
+        first, second = self.line_of("gateway/router.py", 'if "%" in path:'), self.line_of("gateway/router.py", "path = unquote(path)")
+        self.assertEqual(second, first + 1)
+        guard = self.line_of("gateway/guard.py", "path.startswith(")
+        decode = self.line_of("gateway/guard.py", "unquote(")
+        pairs = (
+            [("gateway/router.py", first, True), ("gateway/router.py", second, True), ("gateway/guard.py", guard, True),
+             ("./gateway/router.py", second, True), ("gateway\\router.py", first, True),
+             ("gateway/router.py", self.line_of("gateway/router.py", "path = unquote(raw"), False),
+             ("gateway/guard.py", decode, False),
+             ("gateway/admin.py", self.line_of("gateway/admin.py", 'f"SELECT'), False),
+             ("gateway/hooks.py", self.line_of("gateway/hooks.py", "pickle.loads"), False),
+             ("gateway/releases.py", self.line_of("gateway/releases.py", "subprocess.run"), False),
+             ("gateway/etag.py", self.line_of("gateway/etag.py", "hashlib.md5"), False),
+             ("gateway/files.py", self.line_of("gateway/files.py", "os.path.realpath"), False),
+             ("gateway/router.py", self.line_of("gateway/router.py", "random.uniform"), False),
+             ("auth/session.py", self.line_of("auth/session.py", "compare_digest"), False)])
+        for rel, line, expected in pairs:
+            with self.subTest(file=rel, line=line):
+                self.assertEqual(self.run_with("security-admin-route", {"FINDING.json": {"file": rel, "line": line}}), expected)
+        self.assertTrue(self.run_with("security-admin-route", {"FINDING.json": {
+            "file": "gateway/router.py", "line": second, "why": "It decodes the path a second time."}}))
+        for name, answer in (("two findings", [{"file": "gateway/router.py", "line": second},
+                                               {"file": "gateway/admin.py", "line": 1}]),
+                             ("a string line", {"file": "gateway/router.py", "line": str(second)}),
+                             ("two lines", {"file": "gateway/router.py", "line": [first, second]})):
+            with self.subTest(name):
+                self.assertFalse(self.run_with("security-admin-route", {"FINDING.json": answer}))
+
+    def test_the_shipped_route_serves_the_admin_handler_to_a_user_on_a_double_encoded_path(self):
+        code = ("import json, sys\nsys.path.append(sys.argv[1])\nfrom app import handle\nfrom auth import session\n"
+                "print(json.dumps([list(handle({'cookie': session.issue(who), 'path': path})) for who, path in "
+                "json.loads(sys.argv[2])]))")
+        cases = [["bob", "/%2561dmin/users"], ["bob", "/admin/users"], ["bob", "/%61dmin/users"], ["alice", "/admin/users"]]
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("security-admin-route", tmp)
+            res = subprocess.run([sys.executable, "-I", "-c", code, str(work), json.dumps(cases)], cwd=tmp,
+                                 capture_output=True, text=True, timeout=60)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        sneaked, plain, once, admin = json.loads(res.stdout)
+        self.assertEqual((plain[0], once[0], admin[0], sneaked[0]), (403, 403, 200, 200))
+        self.assertTrue(admin[1])
+        self.assertEqual(sneaked[1], admin[1])
 
 
 if __name__ == "__main__":
