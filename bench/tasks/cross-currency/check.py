@@ -1,6 +1,9 @@
-"""Pass when every formatter takes the currency through: symbol, decimals, and USD unchanged."""
+"""Pass when every formatter takes the currency through: symbol, decimals, and USD unchanged, and when it reads
+them from pricing/symbols.py: on a copy of the work dir with other tables the output follows them."""
 import importlib.util
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location("passcheck", Path(__file__).resolve().parent.parent / "passcheck.py")
@@ -20,4 +23,14 @@ with passcheck.agent_code():
            Invoice([("a", 500)], "JPY").total_line(), summary_line("Q1", 1234, "GBP"), summary_line("Q1", 1234)]
 WANT = ["$12.34", "$0.05", "€12.34", "£12.34", "¥1234", "Total: €12.34", "Total: $12.34", "Total: ¥500",
         "Q1: £12.34", "Q1: $12.34"]
-passcheck.finish(got == WANT, passcheck.differs(got, WANT))
+if got != WANT:
+    passcheck.finish(False, passcheck.differs(got, WANT))
+OTHER_TABLES = 'SYMBOLS = {"USD": "$", "CHF": "Fr", "XAF": "F", "SEK": "kr"}\nDECIMALS = {"CHF": 0, "XAF": 0}\n'
+FOLLOWS = ["Fr1234", "F1234", "kr12.34", "Total: kr12.34", "Q: F1234", "$12.34"]
+with tempfile.TemporaryDirectory() as tmp:
+    copy = Path(tmp) / "work"
+    shutil.copytree(WORK, copy, ignore=shutil.ignore_patterns("__pycache__"))
+    (copy / "pricing" / "symbols.py").write_text(OTHER_TABLES, encoding="utf-8")
+    seen = passcheck.probe(copy, Path(__file__).resolve().parent / "probe.py", None)
+passcheck.finish(seen == FOLLOWS, "with other tables in pricing/symbols.py the output is "
+                 f"{seen!r}, expected {FOLLOWS!r}: the symbols and decimals must come from SYMBOLS and DECIMALS")

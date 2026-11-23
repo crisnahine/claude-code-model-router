@@ -84,16 +84,16 @@ class DocsAssets(unittest.TestCase):
     def test_the_figures_from_the_committed_results(self):
         f = docs_assets.bench_figures(docs_assets.bench_summary())
         self.assertEqual((f["runs"], f["usd"], f["dates"], f["opus.commit"]),
-                         ("1,200", "$148.44", "2026-11-22 to 2026-11-23", "780ee86"))
+                         ("1,120", "$134.97", "2026-11-22 to 2026-11-23", "780ee86"))
         self.assertEqual(f["opus.commit_code"], "`780ee86`")
         self.assertEqual((f["opus.pooled.plugin-next"], f["opus.pooled.defaults"], f["opus.pooled_less.defaults"]),
-                         ("$0.123", "$0.155", "21"))
+                         ("$0.121", "$0.151", "20"))
         self.assertEqual((f["opus.below.defaults"], f["opus.less.defaults.min"], f["opus.less.defaults.max"],
-                          f["opus.level.defaults"]), ("6", "18", "32", "design"))
-        self.assertEqual((f["opus.behind.min"], f["opus.behind.max"], f["opus.status.FAIL"]), ("60", "144", "7"))
+                          f["opus.level.defaults"]), ("5", "18", "32", "design"))
+        self.assertEqual((f["opus.behind.min"], f["opus.behind.max"], f["opus.status.FAIL"]), ("60", "144", "6"))
         self.assertEqual((f["sonnet.status.PASS"], f["sonnet.behind.min"], f["sonnet.behind.max"],
                           f["sonnet.solved.plugin-next"], f["sonnet.solved.defaults"]),
-                         ("0", "7", "63", "74 of 75", "73 of 75"))
+                         ("0", "7", "63", "69 of 70", "68 of 70"))
         self.assertNotIn("sonnet.pass_classes", f)
 
     def test_the_trace_text_lists_every_baseline_with_its_interval(self):
