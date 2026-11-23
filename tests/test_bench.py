@@ -1317,7 +1317,8 @@ class QualityTier(unittest.TestCase):
     check, shipped, source, run_with = HardTier.check, HardTier.shipped, HardTier.source, HardTier.run_with
 
     def test_the_quality_tier_has_one_task_in_each_of_six_classes(self):
-        want = {"impl-merge-customers": "implementation", "security-admin-route": "security-review"}
+        want = {"impl-merge-customers": "implementation", "security-admin-route": "security-review",
+                "cross-amount-cents": "cross-module"}
         tasks = {t["id"]: t for t in run.load_tasks()}
         self.assertEqual({i: tasks[i]["class"] for i in want}, want)
         self.assertTrue(all(tasks[i]["revision"] == 1 for i in want))
@@ -1473,6 +1474,75 @@ class QualityTier(unittest.TestCase):
         self.assertEqual((plain[0], once[0], admin[0], sneaked[0]), (403, 403, 200, 200))
         self.assertTrue(admin[1])
         self.assertEqual(sneaked[1], admin[1])
+
+    def solution_with(self, rel, old, new):
+        text = self.source("cross-amount-cents", f"solution/{rel}")
+        self.assertIn(old, text)
+        return {rel: text.replace(old, new, 1)}
+
+    def shipped_module(self, rel):
+        return {rel: self.source("cross-amount-cents", f"repo/{rel}")}
+
+    def test_cents_check_rejects_each_known_mistake(self):
+        convert = 'int(round(Decimal(str(event["amount"])) * 100))'
+        zero = 'if "amount" not in event:\n        return dict(event)\n    cents = ' + convert
+        totals_hand = ("from shop import events\n\n\ndef order_total(log, order_id):\n    total = 0\n    for e in log:\n"
+                       "        cents = e[\"amount_cents\"] if \"amount_cents\" in e else round(e[\"amount\"] * 100)\n"
+                       "        if e[\"order_id\"] == order_id:\n"
+                       "            total += cents if e[\"kind\"] == \"charge\" else -cents\n    return total\n")
+        mutants = {
+            "truncated cents": self.solution_with("shop/events.py", convert, 'int(event["amount"] * 100)'),
+            "refund rounded the other way": self.solution_with(
+                "shop/events.py", "    new = {", '    if event["kind"] == "refund":\n        cents = int(event["amount"] * 100)\n    new = {'),
+            "rewritten in place": self.solution_with(
+                "shop/events.py", 'new = {k: v for k, v in event.items() if k != "amount"}\n    new["amount_cents"] = cents\n    return new',
+                'event.pop("amount")\n    event["amount_cents"] = cents\n    return event'),
+            "zero falls through": self.solution_with(
+                "shop/events.py", zero, 'cents = event.get("amount_cents") or ' + convert),
+            "float left in the total": self.solution_with(
+                "shop/totals.py", 'total += e["amount_cents"] if e["kind"] == "charge" else -e["amount_cents"]',
+                'cents = int(e["amount_cents"] / 100 * 100)\n            total += cents if e["kind"] == "charge" else -cents'),
+            "float left in the report": self.solution_with(
+                "reports/daily.py", "return charges - refunds", "return (charges - refunds) / 100 * 100"),
+            "refund bound off by one": self.solution_with("shop/refunds.py", "<= refundable(", "< refundable("),
+            "export header kept": self.solution_with(
+                "shop/export.py", 'HEADER = "kind,order_id,amount_cents"', 'HEADER = "kind,order_id,amount"'),
+            "export rows in dollars": self.solution_with(
+                "shop/export.py", "{amount_cents}", "{amount_cents / 100}"),
+            "second converter": {"shop/totals.py": totals_hand},
+        }
+        for module in ("events", "totals", "refunds", "invoice", "export", "audit"):
+            mutants[f"{module} untouched"] = self.shipped_module(f"shop/{module}.py")
+        mutants["report untouched"] = self.shipped_module("reports/daily.py")
+        self.assertTrue(self.run_with("cross-amount-cents", {}))
+        for name, files in mutants.items():
+            with self.subTest(name):
+                self.assertFalse(self.run_with("cross-amount-cents", files))
+
+    def test_cents_check_takes_a_round_based_converter(self):
+        files = self.solution_with("shop/events.py", 'int(round(Decimal(str(event["amount"])) * 100))',
+                                   'int(round(event["amount"] * 100))')
+        self.assertTrue(self.run_with("cross-amount-cents", files))
+
+    def test_the_cents_check_does_not_read_a_comment_or_a_longer_string_as_the_old_key(self):
+        files = self.solution_with("shop/totals.py", "from shop import events\n",
+                                   "from shop import events\n\n# the old amount key is gone\nNOTE = \"amount_cents, not amount\"\n")
+        self.assertTrue(self.run_with("cross-amount-cents", files))
+
+    def test_the_cents_repo_has_no_comment(self):
+        for path in (run.BENCH / "tasks" / "cross-amount-cents" / "repo").rglob("*.py"):
+            with self.subTest(path=path.name):
+                self.assertFalse([l for l in path.read_text(encoding="utf-8").splitlines() if l.lstrip().startswith("#")])
+
+    def test_the_shipped_cents_repo_still_works_in_dollars(self):
+        code = ("import json, sys\nsys.path.append(sys.argv[1])\nfrom shop import events, invoice\n"
+                "log = []\nevents.record(log, 'charge', 'o1', 19.99)\n"
+                "print(json.dumps([log, invoice.lines(log, 'o1')]))")
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("cross-amount-cents", tmp)
+            res = subprocess.run([sys.executable, "-I", "-c", code, str(work)], cwd=tmp, capture_output=True, text=True, timeout=60)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(json.loads(res.stdout), [[{"kind": "charge", "order_id": "o1", "amount": 19.99}], ["charge 19.99"]])
 
 
 if __name__ == "__main__":
