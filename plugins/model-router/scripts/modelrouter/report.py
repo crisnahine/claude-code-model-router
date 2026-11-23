@@ -26,7 +26,7 @@ def policy(config: dict, settings: Settings) -> str:
     for level in cfg.LEVELS:
         pick = ladder.pick(config, level, settings.priority, usable, raises)
         note = " (raised by feedback)" if raises[level] else ""
-        lines.append(f"| {level} | {pick.model}{note} | {pick.effort or 'as the agent or session sets it'} |")
+        lines.append(f"| {level} | {pick.model or 'left as it is'}{note} | {pick.effort or 'as the agent or session sets it'} |")
     lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
     for name in registry.by_strength(config):
         info = registry.models(config)[name]
@@ -118,8 +118,8 @@ def explain(config: dict, settings: Settings, text: str, agent: str | None = Non
     pick = ladder.pick(config, level, settings.priority, usable, learn.raises())
     why = ", ".join(result["signals"]) or "no risk, scope or ambiguity wording"
     out = [f"Level: **{level}** ({why}).",
-           f"Model: **{pick.model}**, effort: {pick.effort or 'unchanged'}.",
-           f"Priority {settings.priority}; models in use: {', '.join(usable)}."]
+           f"Model: **{pick.model or 'left as it is'}**, effort: {pick.effort or 'unchanged'}.",
+           f"Priority {settings.priority}; models in use: {', '.join(usable) or 'none: availableModels and deniedModels leave no registry model open'}."]
     if agent:
         definition = agents.find(agent, cfg.project_dir())
         pinned = (definition or {}).get("model")

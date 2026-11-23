@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import type { On, PluginOptions } from 'claude-code'
 import { register } from '../../plugins/model-router/hooks/router.ts'
@@ -22,6 +22,12 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}, 
   }
   const $ = {
     plugin: { root: '/plugin' },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        const id = setTimeout(fn, ms)
+        return { cancel: () => clearTimeout(id) }
+      },
+    },
     settings: {
       read: async ({ source }: { source: string }) => {
         const v = settings[source]
@@ -102,12 +108,45 @@ test('mod-start and mod-spawn carry the four allowlist keys of each settings sou
   }
 })
 
-test('a settings read that fails sends no layers at all', async () => {
+test('a settings read that fails leaves that source out and sends the others', async () => {
   const mod = load({ 'mod-spawn': PICK }, {}, { policy: new Error('denied'), user: { availableModels: ['haiku'] } })
   await mod.sessionStart({ source: 'startup' })
   await mod.spawn(spawnEvent())
   assert.equal(mod.calls.length, 2)
+  for (const call of mod.calls) {
+    assert.deepEqual(Object.keys(call.stdin.settings).sort(), ['flag', 'local', 'project', 'user'])
+    assert.deepEqual(call.stdin.settings.user, { availableModels: ['haiku'] })
+  }
+})
+
+test('settings reads that all fail send no settings', async () => {
+  const failing = Object.fromEntries(['policy', 'user', 'project', 'local', 'flag'].map(s => [s, new Error('no')]))
+  const mod = load({ 'mod-spawn': PICK }, {}, failing)
+  await mod.sessionStart({ source: 'startup' })
+  await mod.spawn(spawnEvent())
   for (const call of mod.calls) assert.equal('settings' in call.stdin, false)
+})
+
+test('a settings read that hangs is left out after two seconds', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    const mod = load({}, {}, { user: { availableModels: ['haiku'] } })
+    mod.$.settings.read = async ({ source }: { source: string }) =>
+      source === 'policy' ? new Promise(() => {}) : source === 'user' ? { availableModels: ['haiku'] } : {}
+    const started = mod.sessionStart({ source: 'startup' })
+    await new Promise(resolve => setImmediate(resolve))
+    mock.timers.tick(2000)
+    await started
+    assert.deepEqual(Object.keys(mod.calls[0]!.stdin.settings).sort(), ['flag', 'local', 'project', 'user'])
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test('a main-loop turn carries the settings layers too', async () => {
+  const mod = load({}, {}, { policy: { deniedModels: ['opus'] } })
+  await mod.start({ turnId: 't1', text: 'list the files under src' })
+  assert.deepEqual(mod.calls[0]!.stdin.settings.policy, { deniedModels: ['opus'] })
 })
 
 test('forks and resumed runs pass through with no CLI call', async () => {

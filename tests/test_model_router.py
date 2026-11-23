@@ -708,9 +708,123 @@ class Allowlist(Sandbox):
 
     def test_the_windows_managed_folder_ignores_ProgramFiles(self):
         with mock.patch.dict(os.environ, {"ProgramFiles": r"D:\Planted"}), mock.patch.object(allowlist, "MANAGED_ROOT", None):
-            self.assertEqual(str(allowlist.managed_root("win32")), r"C:\Program Files\ClaudeCode")
-            self.assertEqual(str(allowlist.managed_root("darwin")), "/Library/Application Support/ClaudeCode")
-            self.assertEqual(str(allowlist.managed_root("linux")), "/etc/claude-code")
+            self.assertEqual(allowlist.managed_root("win32"), Path(r"C:\Program Files\ClaudeCode"))
+            self.assertEqual(allowlist.managed_root("darwin"), Path("/Library/Application Support/ClaudeCode"))
+            self.assertEqual(allowlist.managed_root("linux"), Path("/etc/claude-code"))
+
+    def test_a_blanked_engine_policy_never_hides_the_managed_files(self):
+        self.managed.write_text(json.dumps({"deniedModels": ["opus"], "availableModels": ["sonnet", "opus", "haiku"]}))
+        hooks.mod_start({"session_id": "s1", "settings": {"policy": {}, "user": {}}})  # another mod answered {}
+        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet", "haiku"})
+        hooks.mod_start({"session_id": "s1"})  # a later read failed: the stored layers stand, the files still apply
+        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet", "haiku"})
+        self.assertEqual(allowlist.read(None, self.project, {"policy": {}}).permitted(self.config), {"sonnet", "haiku"})
+
+    def test_the_engine_policy_and_the_managed_files_both_have_to_permit(self):
+        self.managed.write_text(json.dumps({"availableModels": ["opus", "haiku"], "deniedModels": ["haiku"]}))
+        sent = {"policy": {"availableModels": ["claude-opus-5-5", "sonnet"], "deniedModels": ["fable"]}}
+        self.assertEqual(allowlist.read(None, self.project, sent).permitted(self.config), {"opus"})
+        self.assertFalse(allowlist.read(None, self.project, {"policy": {"availableModels": ["haiku"]}}).permitted(self.config))
+        self.assertFalse(allowlist.read(None, self.project, {"policy": {"availableModels": ["haiku"]}}).permits_id("opus", "claude-opus-5-5"))
+        self.assertFalse(allowlist.read(None, self.project, {"policy": {}}).exact)
+        self.managed.write_text(json.dumps({"availableModelsMatch": "exact"}))
+        self.assertTrue(allowlist.read(None, self.project, {"policy": {"availableModelsMatch": "prefix"}}).exact)
+        self.managed.write_text(json.dumps({"modelOverrides": {"claude-opus-5-5": "arn:x"}}))
+        self.assertTrue(allowlist.read(None, self.project, {"policy": {}}).overrides)
+
+    def test_deny_entries_match_after_trimming_and_by_family_name(self):
+        every = {"haiku", "sonnet", "opus", "fable"}
+        for entry in ("opus ", " opus", "claude-opus", "OPUS\t"):
+            self.assertEqual(self.permitted(policy={"deniedModels": [entry]}), every - {"opus"}, repr(entry))
+        for entry in ("claude-opus-5-5", "sonnet[1m]", "claude-opus-5"):
+            self.assertEqual(self.permitted(policy={"deniedModels": [entry]}), every, repr(entry))
+        self.assertFalse(allowlist.from_layers({"policy": {"deniedModels": ["claude-opus"]}}).permits_id("opus", "claude-opus-5-5"))
+        self.assertFalse(allowlist.from_layers({"policy": {"deniedModels": [" opus "]}}).permits_id("opus", "claude-opus-5-5"))
+        self.assertTrue(allowlist.from_layers({"policy": {"availableModels": [" opus "]}}).permits_id("opus", "claude-opus-5-5"))
+
+    def test_a_managed_file_that_is_there_but_unreadable_permits_no_models(self):
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(registry.models(self.config)))  # absent
+        drop_ins = self.home / "managed-settings.d"
+        drop_ins.mkdir()
+        (drop_ins / "50-bad.json").write_text("{not json")
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
+        (drop_ins / "50-bad.json").write_text("[]")
+        self.assertEqual(allowlist.read(None, self.project, {"policy": {}}).permitted(self.config), set())  # the floor holds
+        (drop_ins / "50-bad.json").unlink()
+        self.managed.write_text("")
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
+        self.managed.unlink()
+        (drop_ins / "60-folder.json").mkdir()
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
+
+    def test_a_failed_policy_read_never_leaves_the_users_lists_standing(self):
+        self.managed.write_text(json.dumps({"availableModels": ["sonnet"]}))
+        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["opus"]}))
+        hooks.mod_start({"session_id": "s1", "settings": {"user": {"availableModels": ["opus"]}}})  # policy omitted
+        found = allowlist.read("s1", self.project)
+        self.assertEqual((found.permitted(self.config), found.source), ({"sonnet"}, "engine"))
+        hooks.mod_start({"session_id": "s2", "settings": {"policy": {"availableModels": ["haiku"]}}})  # the others omitted
+        self.assertEqual(allowlist.read("s2", self.project).permitted(self.config), set())  # haiku and sonnet share nothing
+
+    def test_a_turn_remembers_the_layers_too(self):
+        hooks.mod_turn({"session_id": "s2", "text": LOOKUP, "settings": {"policy": {"availableModels": ["opus"]}}})
+        self.assertEqual(allowlist.read("s2", self.project).permitted(self.config), {"opus"})
+
+    def test_lists_are_capped_and_overrides_are_stored_as_a_flag(self):
+        sent = {"user": {"availableModels": ["x" * 500] + ["opus"] * 300, "modelOverrides": {"a": {"b": [1] * 50}}},
+                "project": {"modelOverrides": {}}}
+        layers = allowlist.remember("s1", sent)
+        self.assertEqual(layers["user"]["availableModels"], ["opus"] * allowlist.MAX_ENTRIES)
+        self.assertEqual((layers["user"]["modelOverrides"], layers["project"]["modelOverrides"]), (True, False))
+        self.assertNotIn('"a"', (self.data / "allowlist.json").read_text(encoding="utf-8"))
+
+    def test_a_failing_store_does_not_stop_the_read(self):
+        with mock.patch.object(store, "save_entry", side_effect=ValueError("bad")):
+            found = allowlist.read("s1", self.project, {"policy": {"availableModels": ["opus"]}})
+        self.assertEqual(found.permitted(self.config), {"opus"})
+
+    @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
+    def test_a_settings_file_that_is_not_a_small_regular_file_is_ignored(self):
+        os.symlink("/dev/zero", self.home / "settings.json")
+        (self.project / ".claude").mkdir()
+        (self.project / ".claude" / "settings.json").write_text(json.dumps({"availableModels": ["haiku"], "pad": "x" * allowlist.MAX_BYTES}))
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(registry.models(self.config)))
+        real = self.project / "real.json"
+        real.write_text(json.dumps({"availableModels": ["haiku"]}))
+        (self.home / "settings.json").unlink()
+        os.symlink(real, self.home / "settings.json")  # a symlink to a regular file is how dotfile managers work
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), {"haiku"})
+
+    @unittest.skipIf(os.name == "nt", "on Windows the local file stays beside settings.json")
+    def test_a_crafted_git_file_does_not_move_the_local_file(self):
+        other = Path(self.tmp.name) / "other"
+        (other / ".git").mkdir(parents=True)
+        (other / ".claude").mkdir()
+        (other / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["opus"]}))
+        (other / "stuff" / "w").mkdir(parents=True)
+        (other / "stuff" / "w" / "commondir").write_text("../../.git\n")  # not under a worktrees folder
+        tree = Path(self.tmp.name) / "tree"
+        tree.mkdir()
+        (tree / ".git").write_text(f"gitdir: {other / 'stuff' / 'w'}\n")
+        self.assertEqual(allowlist.read(None, tree).permitted(self.config), set(registry.models(self.config)))
+        (other / "elsewhere" / ".git").mkdir(parents=True)
+        (other / "elsewhere" / ".claude").mkdir()
+        (other / "elsewhere" / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["opus"]}))
+        (other / ".git" / "worktrees" / "w").mkdir(parents=True)
+        (other / ".git" / "worktrees" / "w" / "commondir").write_text("../../../elsewhere/.git\n")  # not the checkout's own .git
+        (tree / ".git").write_text(f"gitdir: {other / '.git' / 'worktrees' / 'w'}\n")
+        self.assertEqual(allowlist.read(None, tree).permitted(self.config), set(registry.models(self.config)))
+
+    def test_nothing_left_prints_no_none_in_the_reports(self):
+        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["some-other-model"]}))
+        options = settings.resolve(self.config)
+        self.assertNotIn("None", report.policy(self.config, options))
+        self.assertIn("left as it is", report.policy(self.config, options))
+        text = report.explain(self.config, options, LOOKUP)
+        self.assertNotIn("None", text)
+        self.assertIn("left as it is", text)
+        self.options(routing_mode="advise")
+        self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARD}))
 
     def test_engine_layers_win_over_files_for_the_whole_session(self):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))

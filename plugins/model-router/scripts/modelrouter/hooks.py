@@ -213,8 +213,9 @@ def user_prompt(hook_input: dict) -> dict | None:
     why = f" (wording suggests: {', '.join(result['signals'])})" if result["signals"] else ""
     notes = []
     if mode == "advise":
-        notes.append(f"Routing estimate for this request: {level}{why}, about {need}-level reasoning. "
-                     "It reads only the wording; route by what the code shows.")
+        if need:
+            notes.append(f"Routing estimate for this request: {level}{why}, about {need}-level reasoning. "
+                         "It reads only the wording; route by what the code shows.")
     elif below:
         agent = gates.strong_agent(config, need, level)
         asked = "; you will be asked to before finishing" if options.strong_agent_gate else ""
@@ -461,6 +462,7 @@ def mod_turn(hook_input: dict) -> dict | None:
     prompt cache on current models; switching the conversation's model would not."""
     session_id = hook_input.get("session_id")
     _mark_mod(session_id)
+    allowlist.remember(session_id, hook_input.get("settings"))
     config = cfg.load_config(hook_input)
     options = settings.resolve(config)
     text = hook_input.get("text")
