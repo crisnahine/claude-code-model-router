@@ -58,7 +58,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Snapshot** (`settings.Snapshot`): the registry, options, usable models, health, allowlist and learned raises a hook call reads once and passes to every step, and the ladder's `pick(level)` bound to them, so no step re-reads a file another step already read. The last three load on first use. A read writes nothing, so a dry run leaves the state as it was; a spawn writes what reads only noticed (`Snapshot.settle`).
 
-**Main-loop effort**: the effort of the conversation's own turn. The mod raises it for one turn when the request profiles as complex or harder, never lowers it, and leaves it alone wherever an effort change would re-read the context uncached. A `maxEffortLevel` cap holds it too.
+**Main-loop effort**: the effort of the conversation's own turn. The mod raises it for one turn when the request profiles as complex or harder, never lowers it, and leaves it alone wherever an effort change would re-read the context uncached. A `maxEffortLevel` cap holds it too. It is a decision over the turn's facts (`mod.turn_effort`, `mod.TurnFacts`) that gives an effort or none with the reason, and a turn at complex or above that gets none writes the reason to the ledger.
 
 **Fork**: an agent that starts from its parent's conversation. It runs on its parent's model and reads its parent's cache, so the router leaves it alone. A skill with `context: fork` is not a fork, despite the name ([skills](https://code.claude.com/docs/en/skills.md#run-skills-in-a-subagent)). It starts a new subagent of its `agent` type without an `agent.spawn` event, so it isn't routed either, and its model comes from the skill's `model` field, else from its agent type and the session.
 

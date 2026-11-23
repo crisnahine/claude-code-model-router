@@ -416,7 +416,7 @@ class Shipped(unittest.TestCase):
     def test_the_effort_cache_rule_is_registry_data(self):
         rule = {k: v for k, v in cfg.base_config()["main"]["effort_keeps_cache"].items() if not k.startswith("$")}
         self.assertEqual(rule, {"fable": ">=5.1", "opus": "5.5", "sonnet": "5.5", "haiku": "5.5"})
-        source = inspect.getsource(modpath._effort_keeps_cache)
+        source = inspect.getsource(modpath._cache_drop)
         for name in cfg.base_config()["models"]:
             self.assertNotIn(f'"{name}"', source)
 
@@ -2700,17 +2700,14 @@ class Mod(Sandbox):
     def test_turn_effort_is_left_alone_where_an_effort_change_drops_the_cache(self):
         self.options(main_effort="true")  # off by default
         turn = lambda sid="s1": modpath.turn({"session_id": sid, "text": HARD})  # noqa: E731
-        for model in ("claude-opus-5-5[1m]", "claude-opus-5-5[1M]", "claude-fable-5-1", "claude-fable-5-2",
-                      "claude-fable-6", "claude-sonnet-5-5-20260101", "claude-haiku-5-5"):
-            session.record("s1", model)
-            self.assertEqual(turn(), {"level": "complex", "effort": "high"}, model)
+        session.record("s1", "claude-opus-5-5")
+        self.assertEqual(turn(), {"level": "complex", "effort": "high"})
         for name in ("ANTHROPIC_BASE_URL", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "CLAUDE_CODE_USE_MANTLE",
                      "DISABLE_PROMPT_CACHING"):
             with mock.patch.dict(os.environ, {name: "1"}):
                 self.assertIsNone(turn(), name)
-        for model in ("claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-opus-4-7", "claude-opus-5-6"):
-            session.record("s1", model)
-            self.assertIsNone(turn(), model)
+        session.record("s1", "claude-opus-5")
+        self.assertIsNone(turn())
         for model in ("opus", "opus[1m]", None):  # no version to judge, as after /clear: today's behavior
             sid = "s1" if model else "no-model"
             if model:
@@ -3048,6 +3045,94 @@ class NewestOnProviders(Sandbox):
         hook_input = {"session_id": "s9", "cwd": str(self.project),
                       "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
         self.assertEqual(hooks.pre_agent(hook_input)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
+
+
+class TurnEffortTable(Sandbox):
+    """modpath.turn_effort: the main loop's effort, and the reason for every case it is left alone."""
+
+    OPUS = "claude-opus-5-5"
+
+    def decide(self, **facts) -> tuple:
+        found = modpath.turn_effort(modpath.TurnFacts(**{"level": Level.complex, "model": self.OPUS, **facts}), cfg.shipped())
+        return found.effort, found.reason
+
+    def test_a_turn_nothing_stops_is_raised_by_its_level(self):
+        for level, want in ((Level.complex, "high"), (Level.hardest, "xhigh"), (Level.frontier, "xhigh")):
+            self.assertEqual(self.decide(level=level), (want, None), level)
+        for level in (Level.lookup, Level.standard):
+            self.assertEqual(self.decide(level=level), (None, f"no main-loop effort is set for {level}"), level)
+        self.assertEqual(self.decide(level=None), (None, "the turn isn't the person's request"))
+
+    def test_each_reason_an_effort_change_is_skipped_has_its_own_words(self):
+        cases = [
+            ({"mode": "advise"}, "routing is advise"),
+            ({"mode": "off"}, "routing is off"),
+            ({"main_effort": False}, "the main_effort option is off"),
+            ({"effort_level": True}, "CLAUDE_CODE_EFFORT_LEVEL sets the effort"),
+            ({"first_party": False}, "no first-party credential"),
+            ({"cloud": "bedrock"}, "drops the prompt cache on bedrock"),
+            ({"cloud": "vertex"}, "drops the prompt cache on vertex"),
+            ({"cloud": "foundry"}, "the docs don't list Foundry"),
+            ({"mantle": True}, "Mantle endpoint"),
+            ({"gateway": True}, "ANTHROPIC_BASE_URL sets a gateway"),
+            ({"no_betas": True}, "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS"),
+            ({"cache_off": ("",)}, "prompt caching is turned off (DISABLE_PROMPT_CACHING)"),
+            ({"cache_off": ("opus",)}, "prompt caching is turned off for opus"),
+            ({"model": "claude-opus-5"}, "drops the prompt cache on opus 5"),
+            ({"model": "claude-opus-5-6"}, "drops the prompt cache on opus 5.6"),
+            ({"model": "claude-fable-5"}, "drops the prompt cache on fable 5"),
+            ({"model": "claude-sonnet-5"}, "drops the prompt cache on sonnet 5"),
+            ({"model": "claude-opus-4-7"}, "drops the prompt cache on opus 4.7"),
+        ]
+        for facts, words in cases:
+            effort, reason = self.decide(**facts)
+            self.assertIsNone(effort, facts)
+            self.assertIn(words, reason, facts)
+
+    def test_what_keeps_the_cache_is_raised(self):
+        for facts in ({"first_party": True}, {"first_party": None}, {"cache_off": ("sonnet",)},
+                      {"model": "claude-opus-5-5[1m]"}, {"model": "claude-opus-5-5[1M]"}, {"model": "claude-fable-5-1"},
+                      {"model": "claude-fable-5-2"}, {"model": "claude-fable-6"},
+                      {"model": "claude-sonnet-5-5-20260101"}, {"model": "claude-haiku-5-5"},
+                      {"model": "opus"}, {"model": None}):  # no version to judge, as after /clear
+            self.assertEqual(self.decide(**facts), ("high", None), facts)
+
+    def test_the_first_reason_found_is_the_one_given(self):
+        self.assertEqual(self.decide(main_effort=False, cloud="bedrock", effort_level=True)[1],
+                         "the main_effort option is off")
+        self.assertEqual(self.decide(first_party=False, cloud="bedrock")[1],
+                         "the session holds no first-party credential (a gateway or a third-party provider)")
+        self.assertIn("drops the prompt cache on bedrock", self.decide(cloud="bedrock", gateway=True, no_betas=True)[1])
+
+    def test_a_max_effort_level_holds_the_effort_and_says_so(self):
+        self.assertEqual(self.decide(effort_cap="medium"), ("medium", "effort held to medium by maxEffortLevel"))
+        self.assertEqual(self.decide(level=Level.hardest, effort_cap="high"), ("high", "effort held to high by maxEffortLevel"))
+        self.assertEqual(self.decide(effort_cap="xhigh"), ("high", None))
+
+    def test_a_complex_turn_left_alone_says_why_in_the_ledger(self):
+        self.options(main_effort="true")
+        session.record("s1", self.OPUS)
+        turn = lambda text="fix the auth migration across every service", **extra: modpath.turn(  # noqa: E731
+            {"session_id": "s1", "text": text, **extra})
+        with mock.patch.dict(os.environ, {"ANTHROPIC_BASE_URL": "https://gateway"}):
+            self.assertIsNone(turn())
+        row = [r for r in self.ledger() if r["event"] == "turn"][-1]
+        self.assertEqual((row["level"], row["effort"]), ("complex", None))
+        self.assertIn("ANTHROPIC_BASE_URL sets a gateway", row["reason"])
+        self.assertEqual(turn(), {"level": "complex", "effort": "high"})
+        self.assertEqual([r["effort"] for r in self.ledger() if r["event"] == "turn"], [None, "high"])
+        rows = len(self.ledger())
+        with mock.patch.dict(os.environ, {"ANTHROPIC_BASE_URL": "https://gateway"}):
+            turn("list the files under src")  # below complex: most turns, so no row
+            turn("<task-notification>done</task-notification>")  # not the person's
+        self.options(routing_mode="off")
+        turn()
+        self.assertEqual(len(self.ledger()), rows)
+
+    def test_a_complex_turn_with_the_option_off_is_logged_as_skipped(self):
+        modpath.turn({"session_id": "s1", "text": "fix the auth migration across every service"})
+        row = self.ledger()[-1]
+        self.assertEqual((row["event"], row["effort"], row["reason"]), ("turn", None, "the main_effort option is off"))
 
 
 class ModPayloads(Sandbox):
