@@ -249,6 +249,17 @@ def sessions(results: Results, router: str | None = None) -> list[tuple[str, str
     return out
 
 
+def _quality_lines(summary: list[dict]) -> list[str]:
+    lines = ["### Quality", ""]
+    for row in summary:
+        q = row["quality"]
+        tag = "saturated" if q["saturated"] else (q["claim"] or "no claim")
+        split = ("" if q["splits"] is None else
+                 f" Tasks that split `{SPLIT_STRONG}` from `{SPLIT_WEAK}`: " + (", ".join(f"`{t}`" for t in q["splits"]) or "none") + ".")
+        lines.append(f"- {row['class']}: {tag}, {q['reason']}.{split}")
+    return lines
+
+
 def _cache_share(rows: list[dict]) -> float | None:
     """Cache reads over all input tokens, which are input plus cache reads plus cache writes."""
     read = total = 0
@@ -309,7 +320,8 @@ def render_sessions(parts: list[tuple[str, str, list[dict], list[dict]]], meta: 
         own = sorted({r["config"] for r in rows if r.get("main_model") != model})
         but = f", except {', '.join(f'`{c}`' for c in own)}, which sets its own" if own else ""
         body += [f"## Results: session model `{model}`", "", f"Every run here had `{model}` as its session model{but}; "
-                 f"router: `{router}`.", "", *_table(summary), "", *_metrics(summary, rows, routers), ""]
+                 f"router: `{router}`.", "", *_table(summary), "", *_quality_lines(summary), "",
+                 *_metrics(summary, rows, routers), ""]
     return "\n".join([meta.get("header", "# Benchmarks"), "", *body, meta.get("body", "")]).rstrip() + "\n"
 
 
@@ -522,6 +534,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
     borrowed = sum(1 for r in rows if r.get("plugin_state") is not None and "plugin_data_own" not in r)
     plan = estimate(rows, tasks, results.configs, results.prices)
     budget = max((r.get("budget_usd") or 0.5 for r in rows), default=0.5)
+    saturated = sum(bool(row["quality"]["saturated"]) for row in summary)
     header = "\n".join([
         "# Benchmarks", "",
         f"Cost and quality of Model Router against Claude Code without it. {len(rows)} runs, "
@@ -530,7 +543,11 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "This is a pilot. Every row is PARTIAL because each configuration ran each task too few times to tell "
         "a difference from noise. Claim nothing from it beyond what the raw data shows."
         if all(row["status"] == "PARTIAL" for row in summary) else
-        "Claim \"cheapest\" or \"best\" only for a PASS row, and link its raw data.",
+        "Claim \"cheapest\" only for a PASS row, and link its raw data.",
+        *(["", f"{saturated} of {len(summary)} class rows below are saturated: the weakest forced baseline solved "
+              "as many runs as the strongest, within noise, so these tasks can't tell models apart. No claim about "
+              "quality, for or against the router, rests on a saturated row, and its PASS or FAIL is a cost result "
+              "only. See each table's Quality list."] if saturated else []),
     ])
     body = "\n".join([
         "## How to read it", "",
@@ -539,6 +556,11 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "so failed runs count against it.",
         "- Pass-rate intervals are exact 95% binomial (Clopper-Pearson) intervals. Cost intervals are 95% "
         "percentile bootstrap intervals over runs (2,000 resamples, seed 0).",
+        "- Quality: the router's pass rate is tested against every baseline with an exact one-sided test (5%). A "
+        "class is saturated when the weakest forced baseline (every subagent on the weakest model) can't be told "
+        "from the strongest by the same test; then the tasks can't show a quality difference and no quality claim "
+        "is made. Without forced baselines on two models the class has no quality claim either. A class is PARTIAL "
+        "when its configurations didn't run the same tasks the same number of times.",
         f"- PASS means the router's cost per solved task is below the best baseline's with the whole 95% interval "
         f"of the difference below zero, and its pass rate is not behind beyond noise. FAIL means it is behind on "
         f"either. PARTIAL means a tie, a difference inside the noise, or fewer than {MIN_RUNS} runs per "

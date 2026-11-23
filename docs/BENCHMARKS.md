@@ -8,7 +8,9 @@
 
 Cost and quality of Model Router against Claude Code without it. 1280 runs, $154.94 at list price, on 2026-11-22 to 2026-11-23.
 
-Claim "cheapest" or "best" only for a PASS row, and link its raw data.
+Claim "cheapest" only for a PASS row, and link its raw data.
+
+7 of 16 class rows below are saturated: the weakest forced baseline solved as many runs as the strongest, within noise, so these tasks can't tell models apart. No claim about quality, for or against the router, rests on a saturated row, and its PASS or FAIL is a cost result only. See each table's Quality list.
 
 ## Results: session model `claude-opus-5-5`
 
@@ -33,6 +35,17 @@ Every run here had `claude-opus-5-5` as its session model, except `opusplan`, wh
 - root-cause: FAIL, cost per solved task above haiku's; 95% interval of the difference $0.0342 to $0.0450.
 - design: FAIL, cost per solved task above opusplan's; 95% interval of the difference $0.0757 to $0.1463.
 - research: FAIL, cost per solved task above haiku-high's; 95% interval of the difference $0.0427 to $0.0515.
+
+### Quality
+
+- lookup: saturated, haiku solved 10 of 10, fable-high 10 of 10 (exact p = 1.000), a gap that could be chance, so these tasks can't tell models apart; no quality claim.
+- implementation: saturated, haiku solved 10 of 10, fable-high 10 of 10 (exact p = 1.000), a gap that could be chance, so these tasks can't tell models apart; no quality claim.
+- bugfix: saturated, haiku solved 10 of 10, fable-high 10 of 10 (exact p = 1.000), a gap that could be chance, so these tasks can't tell models apart; no quality claim.
+- cross-module: saturated, haiku solved 10 of 10, fable-high 10 of 10 (exact p = 1.000), a gap that could be chance, so these tasks can't tell models apart; no quality claim.
+- security-review: LEVEL, haiku solved 6 of 10, fable-high 10 of 10 (exact p = 0.043); no baseline solved more than the router beyond noise.
+- root-cause: saturated, haiku solved 10 of 10, fable-high 10 of 10 (exact p = 1.000), a gap that could be chance, so these tasks can't tell models apart; no quality claim.
+- design: saturated, haiku solved 10 of 10, fable-high 10 of 10 (exact p = 1.000), a gap that could be chance, so these tasks can't tell models apart; no quality claim.
+- research: saturated, haiku solved 10 of 10, fable-high 10 of 10 (exact p = 1.000), a gap that could be chance, so these tasks can't tell models apart; no quality claim.
 
 ### Run metrics
 
@@ -71,6 +84,17 @@ Every run here had `sonnet` as its session model, except `opusplan`, which sets 
 - design: FAIL, cost per solved task above sonnet-medium's; 95% interval of the difference $0.0137 to $0.0858.
 - research: FAIL, cost per solved task above defaults's; 95% interval of the difference $0.0055 to $0.0194.
 
+### Quality
+
+- lookup: no claim, forced baselines on fewer than 2 models, so the class can't show whether the tasks tell models apart; no quality claim.
+- implementation: no claim, forced baselines on fewer than 2 models, so the class can't show whether the tasks tell models apart; no quality claim.
+- bugfix: no claim, forced baselines on fewer than 2 models, so the class can't show whether the tasks tell models apart; no quality claim.
+- cross-module: no claim, forced baselines on fewer than 2 models, so the class can't show whether the tasks tell models apart; no quality claim.
+- security-review: no claim, forced baselines on fewer than 2 models, so the class can't show whether the tasks tell models apart; no quality claim.
+- root-cause: no claim, forced baselines on fewer than 2 models, so the class can't show whether the tasks tell models apart; no quality claim.
+- design: no claim, forced baselines on fewer than 2 models, so the class can't show whether the tasks tell models apart; no quality claim.
+- research: no claim, forced baselines on fewer than 2 models, so the class can't show whether the tasks tell models apart; no quality claim.
+
 ### Run metrics
 
 | Task class | plugin-next | defaults | opusplan | plugin | sonnet-high | sonnet-medium |
@@ -89,6 +113,7 @@ Every run here had `sonnet` as its session model, except `opusplan`, which sets 
 - A task counts as solved only when its pass check passes. A wrong answer is a failure, the router's too.
 - Cost per solved task is a configuration's total spend on a task class divided by the tasks it solved, so failed runs count against it.
 - Pass-rate intervals are exact 95% binomial (Clopper-Pearson) intervals. Cost intervals are 95% percentile bootstrap intervals over runs (2,000 resamples, seed 0).
+- Quality: the router's pass rate is tested against every baseline with an exact one-sided test (5%). A class is saturated when the weakest forced baseline (every subagent on the weakest model) can't be told from the strongest by the same test; then the tasks can't show a quality difference and no quality claim is made. Without forced baselines on two models the class has no quality claim either. A class is PARTIAL when its configurations didn't run the same tasks the same number of times.
 - PASS means the router's cost per solved task is below the best baseline's with the whole 95% interval of the difference below zero, and its pass rate is not behind beyond noise. FAIL means it is behind on either. PARTIAL means a tie, a difference inside the noise, or fewer than 10 runs per configuration. The best baseline is the one with the lowest cost per solved task.
 - Rank is the router's place among the baselines by cost per solved task, 1 being cheapest. A router variant (another configuration that loads the plugin) has its own column but is never a baseline.
 - Run metrics, per class and configuration: p50 and p90 are nearest-rank percentiles of each run's wall time (`wall_ms`, the runner's clock around the `claude` process). Cache is cache-read tokens over all input tokens, which are input plus cache reads plus cache writes (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md), summed over every model that ran. For a router configuration, accuracy by level is the pass rate of its runs grouped by the level the router gave the run's first subagent. Escalated counts the spawns the router moved one level up because the same call came back for a redo, over the spawns whose ledger row says either way. Both come from the run's `routed` line, and n/a means no run in the cell has it.
