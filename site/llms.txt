@@ -24,5 +24,6 @@ Facts, each with its source:
 ## Optional
 
 - [Research](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/research/model-control.md): what a plugin can and can't control in Claude Code, from primary sources
+- [Quality research](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/research/quality-first-routing.md): what the router can save without losing quality, from primary sources
 - [Changelog](https://github.com/crisnahine/claude-code-model-router/blob/main/CHANGELOG.md)
 - [Roadmap](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/ROADMAP.md)

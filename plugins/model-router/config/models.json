@@ -12,7 +12,7 @@
       "strength": 2,
       "speed": 3,
       "cost": 2,
-      "use_for": "Everyday implementation at medium effort: features and fixes with a clear spec, tests, refactors inside one module. Design, review and risky or cross-module changes at high."
+      "use_for": "Everyday implementation at medium effort: features with a clear spec, tests, refactors inside one module. Fixes, design, review and risky or cross-module changes at high."
     },
     "opus": {
       "strength": 3,

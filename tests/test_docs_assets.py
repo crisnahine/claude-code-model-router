@@ -25,6 +25,11 @@ class DocsAssets(unittest.TestCase):
         code, err = check()
         self.assertEqual(code, 0, "python3 tools/docs_assets.py --check:\n" + err)
 
+    def test_every_page_under_docs_research_is_in_PAGES(self):
+        listed = {row[0] for row in docs_assets.PAGES}
+        found = {p.relative_to(ROOT).as_posix() for p in (ROOT / "docs" / "research").glob("*.md")}
+        self.assertEqual(found - listed, set())
+
     def test_a_stale_file_fails_the_check(self):
         with mock.patch.object(docs_assets, "build", return_value={"README.md": "stale"}):
             code, err = check()

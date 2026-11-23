@@ -65,13 +65,14 @@ _CHANGE = rf"\b{_CHANGE_VERB}"
 # often a noun ends it only with an object after it, so "the config and build scripts" doesn't,
 # and no verb ends it as the first half of a compound noun such as "debug logs" or "audit trails".
 _JUDGMENT_VERBS = r"review|audit|design|plan|evaluate|assess|propose"
-_HUNT_VERBS = (r"debug|diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|prove|"
+_HUNT_OTHER = (r"diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|prove|"
                r"verify the logic|figure out")
+_HUNT_VERBS = rf"debug|{_HUNT_OTHER}"
 _REASONING_WORDS = (rf"{_JUDGMENT_VERBS}|{_HUNT_VERBS}|find out (?:why|how|whether|what caus\w*)|root.?caus\w*|"
                     r"compare|recommend")
 # Asked for a judgment (review it, design it, plan it), not a hunt for a known kind of bug. Only the verb
 # counts, where it starts a sentence or follows and/then/to/please; "the design doc" is a noun.
-_JUDGMENT = rf"(?:^\s*|\n\s*|[.;:!?]\s+|\b(?:and|then|to|please)\s+)(?:{_JUDGMENT_VERBS})\b"
+_JUDGMENT = rf"(?:^[ \t]*|\n[ \t]*|[.;:!?]\s+|\b(?:and|then|to|please)\s+)(?:{_JUDGMENT_VERBS})\b"
 _TASK_VERB = (r"(?:implement|fix|refactor|rename|migrate|optimi[sz]e|rewrite|convert|upgrade|redesign|audit|"
               rf"{_HUNT_VERBS}|encrypt|harden|bump)\b(?!-)")
 _NOUN_VERB = (r"(?:build|update|change|design|plan|review|add|write|create|delete|remove|replace|make(?! sure)|"
@@ -91,6 +92,14 @@ _LIST = rf",\s*(?:{_ITEM}(?:\s*,\s*{_ITEM}){{0,8}}?(?:\s*,)?\s+)?(?:or|nor)\s+{_
 _NEGATED = (rf"\bwithout\b{_CLAUSE}|\b(?:do not|don't|never|no need to)\b(?:\s*,(?:[^.,;:!?\n]{{0,40}},)?)?"
             rf"(?:\s*(?={_LIST_VERB}){_CLAUSE}(?:{_LIST})*|{_CLAUSE})")
 _REASONING = rf"\b(?:{_REASONING_WORDS})\b"
+# Ruled out for the defect check only: stripping these clauses from the whole brief would also drop a task
+# that follows ("avoid breaking the format and add tests").
+_RULED_OUT = rf"\b(?:avoid|must not|not to|out of scope)\b:?{_CLAUSE}"
+# Work whose point is a defect. "fix" and "debug" count only as verbs ("the fix", "fixture", "debug logging" don't),
+# and "fix" before "#" is a closing keyword. The other hunt verbs are matched as they are.
+_VERB_START = r"(?:^|\n)[ \t]*|[.;:!?,]\s+|\b(?:and|then|to|please|must|should|or|so)\s+"
+_DEFECT = (rf"(?:{_VERB_START})(?:fix(?:es|ing)?\b(?!\s*#)|debug\b(?!{_COMPOUND}|\s+logging\b))|"
+           rf"\bfix(?:es|ing)?(?={_OBJECT})|\b(?:{_HUNT_OTHER})\b")
 _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"
 _LOOKUP = (r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|describe|summari[sz]e|"
            r"is there|does)\b")
@@ -136,7 +145,7 @@ def _not_english(text: str) -> bool:
 
 # A load limit only makes a brief harder when a design or a choice has to be worked out against it.
 # Asking forms only: "the plan", "as designed", "the selected approach" report a choice already made.
-_PLAN = r"(?:(?<![\w])(?:to|and|then|please|let's)\s+plan|^\s*plan|\n\s*plan|[.;:!?]\s+plan)\b|\bplanning\b"
+_PLAN = r"(?:(?<![\w])(?:to|and|then|please|let's)\s+plan|^[ \t]*plan|\n[ \t]*plan|[.;:!?]\s+plan)\b|\bplanning\b"
 _CHOICE = (rf"\b(?:design(?:s|ing)?|{_ASK_CHOICE}|choices?|trade.?offs?|strateg\w*|siz(?:e|es|ing)|"
            rf"select(?:s|ing)?|how many|estimat(?:e|es|ing)|targets?|budgets?)\b|{_PLAN}")
 
@@ -187,6 +196,8 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
             level = "complex"
         else:
             level = "standard"
+        if LEVELS.index(level) < LEVELS.index("complex") and re.search(_DEFECT, re.sub(_RULED_OUT, "", asked)):
+            level, why = "complex", why + ["fixes or hunts a defect"]
     elif len(hits) >= 2:
         level = "standard"  # finds or explains something broad or sensitive, but only reads
     elif _not_english(text):

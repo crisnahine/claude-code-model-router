@@ -1,7 +1,7 @@
 <!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
 <p align="center"><img src="assets/banner-performance.svg" width="880" alt="Performance: What does the router cost in time and disk?"></p>
 
-<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="research/model-control.md">Research</a> &nbsp;&middot;&nbsp; Next: <a href="SECURITY.md">Security</a></p>
+<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="research/quality-first-routing.md">Quality research</a> &nbsp;&middot;&nbsp; Next: <a href="SECURITY.md">Security</a></p>
 <!-- End of page head. -->
 
 # Performance

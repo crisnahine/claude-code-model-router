@@ -37,6 +37,8 @@ Judge the task on these signals. The router reads the same ones from each brief'
 | Scope | One file or function | Several modules, services or repositories |
 | Risk | Easy to revert, covered by tests | Security, data, money, public API, migrations |
 
+A brief that fixes or hunts a defect routes at complex or above, however small the fix.
+
 - Don't delegate what takes you one or two tool calls.
 - Split into independent pieces and start them in one message so they run in parallel, when they don't touch the same files.
 - Give each agent a complete brief: goal, files, constraints, how to verify, what to report. The brief is what the model is chosen from, so say what makes a piece hard (the security angle, the cross-service reach) in the brief itself.

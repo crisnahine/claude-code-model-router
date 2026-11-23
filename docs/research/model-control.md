@@ -1,7 +1,7 @@
 <!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
 <p align="center"><img src="../assets/banner-research.svg" width="880" alt="Research: What can a plugin control in Claude Code?"></p>
 
-<p align="center"><a href="../../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="../README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="../../GLOSSARY.md">Glossary</a> &nbsp;&middot;&nbsp; Next: <a href="../PERFORMANCE.md">Performance</a></p>
+<p align="center"><a href="../../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="../README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="../../GLOSSARY.md">Glossary</a> &nbsp;&middot;&nbsp; Next: <a href="quality-first-routing.md">Quality research</a></p>
 <!-- End of page head. -->
 
 # Model control in Claude Code: what a plugin can and can't do

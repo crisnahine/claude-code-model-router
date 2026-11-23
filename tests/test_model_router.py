@@ -347,7 +347,7 @@ class Shipped(unittest.TestCase):
 
     def test_nothing_still_carries_the_old_name(self):
         old = re.compile("orchestr" + "ator", re.I)
-        skip = {".git", "fixtures", "__pycache__", "results"}
+        skip = {".git", ".superpowers", "fixtures", "__pycache__", "results"}
         for path in ROOT.rglob("*"):
             if path.is_file() and not skip & set(path.parts) and path.suffix != ".pyc":
                 self.assertIsNone(old.search(str(path.relative_to(ROOT))), path)
@@ -1188,10 +1188,63 @@ class Profile(unittest.TestCase):
         self.assertEqual(self.level(LOOKUP), "lookup")
         self.assertEqual(self.level("run the test suite and report failures"), "lookup")
         self.assertEqual(self.level(BUILD), "standard")
-        self.assertEqual(self.level("investigate why the checkout test is flaky"), "standard")
+        self.assertEqual(self.level("investigate why the checkout test is flaky"), "complex")
         self.assertEqual(self.level(HARD), "complex")
         self.assertEqual(self.level("review the auth module"), "complex")
         self.assertEqual(self.level("investigate why auth is flaky and redesign it across every service"), "hardest")
+
+    def test_fixing_or_hunting_a_defect_is_complex_or_above(self):
+        for brief in ("Fix the off-by-one in page_slice.", "Do not touch the tests, fix the parser.",
+                      "investigate why the checkout test is flaky", "Debug why the job fails.",
+                      "Figure out why it times out and fix it."):
+            self.assertEqual(self.level(brief), "complex", brief)
+        self.assertIn("fixes or hunts a defect",
+                      profile.profile_call({"prompt": "Fix the off-by-one in page_slice."}, "general-purpose")["signals"])
+
+    def test_words_that_only_look_like_a_fix_stay_put(self):
+        for brief in ("Find the commit that landed the fix for the CSV export and give its hash.",
+                      "Add a prefix to each key.", "Add debug logging to the retry loop.",
+                      "Decide whether to log at debug or info.", "Rename the helper. Fixes #123"):
+            self.assertNotEqual(self.level(brief), "complex", brief)
+        for brief in ("Report which commit fixed the flaky test.", "Find where the test fixtures are loaded.",
+                      "List the failing tests. Do not fix anything."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+
+    def test_a_debug_compound_is_not_a_fix_even_when_the_description_leads(self):
+        for description, prompt in (("Debug logging for the retry loop", "Add debug logging to the retry loop."),
+                                    ("Debug mode flag", "Add a debug mode flag to the CLI."),
+                                    ("Debug output", "Implement debug output for the exporter.")):
+            result = profile.profile_call({"description": description, "prompt": prompt}, "general-purpose")
+            self.assertEqual(result["level"], "standard", description)
+            self.assertNotIn("fixes or hunts a defect", result["signals"], description)
+
+    def test_a_fix_the_brief_rules_out_does_not_floor_it(self):
+        for brief in ("Rename the helper. Avoid fixing the unrelated tests.",
+                      "Rename the helper. You must not fix the tests.",
+                      "Rename the helper and try not to fix the tests.",
+                      "Rename the helper. Out of scope: fixing the unrelated tests.",
+                      "Rename the helper. Avoid investigating the flaky tests."):
+            self.assertEqual(self.level(brief), "standard", brief)
+
+    def test_ruling_out_a_change_keeps_the_task_after_it(self):
+        for brief in ("Avoid breaking the CSV format and add tests for the parser.",
+                      "You must not rename the public symbols and write tests for the loader.",
+                      "Be careful not to touch the config and create a migration guide."):
+            self.assertEqual(self.level(brief), "standard", brief)
+
+    def test_the_standard_model_text_does_not_call_fixes_standard(self):
+        use_for = json.loads((ROOT / "plugins/model-router/config/models.json").read_text())["models"]["sonnet"]["use_for"]
+        self.assertNotIn("fixes with a clear spec", use_for)
+        self.assertRegex(use_for, r"at high\.$")
+        self.assertIn("Fixes", use_for.split("refactors inside one module.")[1])
+
+    def test_a_search_or_check_agent_stays_at_standard_for_a_fix_brief(self):
+        brief = {"prompt": "Fix the off-by-one in page_slice."}
+        self.assertEqual(profile.profile_call(brief, "model-router:verifier")["level"], "standard")
+        self.assertEqual(profile.profile_call(brief, "model-router:architect")["level"], "complex")
+
+    def test_the_request_prompt_is_not_floored_by_a_fix(self):
+        self.assertEqual(profile.profile_prompt("Fix the off-by-one in page_slice.")["level"], "standard")
 
     def test_reading_about_something_sensitive_or_broad_is_still_a_lookup(self):
         self.assertEqual(self.level("read the auth module and list its functions"), "lookup")
@@ -1280,11 +1333,15 @@ class Profile(unittest.TestCase):
         self.level("do not add" + " and remove" * 20_000 + " files")
         self.level("never x" + " and then just" * 20_000 + " fix it")
         self.level("do not touch tests" + " " * 64_000 + "and fix it")
+        self.level("add" + "\n" * 64_000)
+        self.level("add" + "\n \t" * 32_000 + "x")
+        self.level("add across" + "\n" * 64_000)
+        self.level("add latency" + "\n" * 64_000)
         self.assertLess(time.monotonic() - started, LINEAR_SECONDS)
 
     def test_a_hyphenated_word_before_and_still_ends_a_limit(self):
         # "edit-mode" and "review-ready" are nouns, not the limit verbs edit and review.
-        for brief in ("Do not touch the edit-mode and fix the bug.", "Do not touch the review-ready and fix the crash."):
+        for brief in ("Do not touch the edit-mode and rename the helper.", "Do not touch the review-ready and implement the parser."):
             self.assertEqual(self.level(brief), "standard", brief)
 
     def test_a_long_hyphen_or_apostrophe_run_after_a_limit_stays_fast(self):
@@ -1324,8 +1381,8 @@ class Profile(unittest.TestCase):
                       "Do not ask questions, fix the auth bug or remove the check.",
                       "Never guess, fix the flaky auth test or delete it."):
             self.assertEqual(self.level(brief), "complex", brief)
-        for brief in ("Do not modify tests, fix the parser, update the docs, and run the suite.",
-                      "Do not touch the API, fix it or roll it back."):
+        for brief in ("Do not modify tests, rename the parser, update the docs, and run the suite.",
+                      "Do not touch the API, rename it or roll it back."):
             self.assertEqual(self.level(brief), "standard", brief)
 
     def test_a_limit_keeps_an_aside_and_list_verbs_outside_the_change_words(self):
@@ -4337,7 +4394,7 @@ class DesignDecisions(unittest.TestCase):
                          "lookup")
 
     def test_a_load_word_without_a_design_choice_adds_nothing(self):
-        for prompt in ("Fix the flaky latency test in test_client.py.",
+        for prompt in ("Rename the flaky latency test in test_client.py.",
                        "Review this function for performance issues."):
             result = profile.profile_call({"prompt": prompt}, "general-purpose")
             self.assertEqual(result["level"], "standard", prompt)
@@ -4381,7 +4438,7 @@ class DesignDecisions(unittest.TestCase):
 
     def test_only_a_millisecond_budget_counts_as_load(self):
         for prompt in ("Plan the release notes for 2.0; the API answers in 120 ms.",
-                       "Plan the sprint: fix the 300 ms login delay."):
+                       "Plan the sprint: rename the 300 ms login delay."):
             result = profile.profile_call({"prompt": prompt}, "general-purpose")
             self.assertEqual(result["level"], "standard", prompt)
             self.assertNotIn("load", result["signals"], prompt)

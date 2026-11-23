@@ -84,7 +84,7 @@ Each subtask is scored from its own brief: risk (security, data, migrations, pub
 | :- | :- | :- | :- |
 | lookup | Find, list, summarize, run a command | Haiku | medium |
 | standard | Implement to a clear spec, write tests | Sonnet | medium |
-| complex | Design, review, risky or cross-module change | Sonnet | high |
+| complex | Fix a bug, design, review, risky change | Sonnet | high |
 | hardest | Ambiguous, multi-system and risky at once | Opus | high |
 | frontier | All of that, with no known approach: research, open-ended investigation | Fable | high |
 

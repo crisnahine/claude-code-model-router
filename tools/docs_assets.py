@@ -263,6 +263,8 @@ PAGES = [
     ("GLOSSARY.md", "glossary", "Glossary", "What do call, level, pick and redo mean?", "glossary", 2),
     ("docs/research/model-control.md", "research", "Research", "What can a plugin control in Claude Code?",
      "research", 2),
+    ("docs/research/quality-first-routing.md", "research-quality", "Quality research",
+     "What can the router save without losing quality?", "research", 2),
     ("docs/PERFORMANCE.md", "performance", "Performance", "What does the router cost in time and disk?",
      "performance", 2),
     ("docs/SECURITY.md", "security", "Security", "What reaches the network, and who can steer it?", "security", 2),
@@ -427,7 +429,7 @@ def badge_assets(version: str) -> dict:
 LADDER = [  # level, model, effort, needs, subtask
     ("lookup", "Haiku", "medium", 1, "Find, list, summarize, run a command"),
     ("standard", "Sonnet", "medium", 2, "Implement to a clear spec, write tests"),
-    ("complex", "Sonnet", "high", 2, "Design, review, risky or cross-module change"),
+    ("complex", "Sonnet", "high", 2, "Fix a bug, design, review, risky change"),
     ("hardest", "Opus", "high", 3, "Ambiguous, multi-system and risky at once"),
     ("frontier", "Fable", "high", 4, "No known approach: research"),
 ]
