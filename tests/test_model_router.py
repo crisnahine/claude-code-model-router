@@ -597,7 +597,7 @@ class Snapshot(Sandbox):
             self.out("models", "--json")
         self.assertEqual(trusted.call_count, 1)
 
-    def test_a_cheap_hook_loads_neither_the_allowlist_nor_the_health_table(self):
+    def test_a_cheap_hook_and_a_result_naming_no_model_load_neither_the_allowlist_nor_the_health_table(self):
         self.options(main_effort="true")
         usage = {"model": "claude-haiku-5-5", "input_tokens": 1, "output_tokens": 1}
         with mock.patch.object(allowlist, "read", side_effect=AssertionError("allowlist")), \
