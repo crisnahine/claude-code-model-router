@@ -1319,7 +1319,7 @@ class QualityTier(unittest.TestCase):
 
     def test_the_quality_tier_has_one_task_in_each_of_six_classes(self):
         want = {"impl-merge-customers": "implementation", "security-admin-route": "security-review",
-                "cross-amount-cents": "cross-module"}
+                "cross-amount-cents": "cross-module", "design-checkout-retries": "design"}
         tasks = {t["id"]: t for t in run.load_tasks()}
         self.assertEqual({i: tasks[i]["class"] for i in want}, want)
         self.assertTrue(all(tasks[i]["revision"] == 1 for i in want))
@@ -1575,6 +1575,44 @@ class QualityTier(unittest.TestCase):
             res = subprocess.run([sys.executable, "-I", "-c", code, str(work)], cwd=tmp, capture_output=True, text=True, timeout=60)
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(json.loads(res.stdout), [[{"kind": "charge", "order_id": "o1", "amount": 19.99}], ["charge 19.99"]])
+
+    def test_the_retry_design_must_hold_every_constraint(self):
+        good = {"retry_at": "payments_client", "attempts": 2, "per_try_timeout_ms": 1000, "backoff_ms": 100,
+                "idempotency_key": "per_checkout", "gateway_retries": "off", "reasons": ["x"]}
+        for change, expected in (({}, True), ({"per_try_timeout_ms": 600, "backoff_ms": 1500}, True),
+                                 ({"per_try_timeout_ms": 1325, "backoff_ms": 50}, True),
+                                 ({"per_try_timeout_ms": 1326, "backoff_ms": 50}, False),
+                                 ({"per_try_timeout_ms": 1400}, False), ({"per_try_timeout_ms": 599}, False),
+                                 ({"backoff_ms": 40}, False), ({"attempts": 3}, False), ({"attempts": 1}, False),
+                                 ({"retry_at": "checkout"}, False), ({"retry_at": "gateway"}, False),
+                                 ({"gateway_retries": "on"}, False), ({"idempotency_key": "per_attempt"}, False),
+                                 ({"per_try_timeout_ms": 1000.0}, False), ({"attempts": True}, False),
+                                 ({"reasons": []}, False), ({"extra": 1}, False)):
+            with self.subTest(change=change):
+                self.assertEqual(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}),
+                                 expected)
+
+    def test_the_retry_check_rejects_the_other_wrong_designs(self):
+        good = json.loads(self.source("design-checkout-retries", "solution/DESIGN.json"))
+        self.assertTrue(self.run_with("design-checkout-retries", {}))
+        for change in ({"retry_at": "none"}, {"retry_at": "none", "attempts": 1}, {"idempotency_key": "none"},
+                       {"attempts": "2"}, {"backoff_ms": 100.0}, {"gateway_retries": False}, {"reasons": "x"},
+                       {"reasons": [" "]}, {"per_try_timeout_ms": 1400, "backoff_ms": 50}):
+            with self.subTest(change=change):
+                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
+        for key in good:
+            with self.subTest(missing=key):
+                self.assertFalse(self.run_with("design-checkout-retries",
+                                               {"DESIGN.json": {k: v for k, v in good.items() if k != key}}))
+        for text in ("", "not json", json.dumps([good])):
+            with self.subTest(text=text):
+                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": text}))
+
+    def test_a_retry_design_given_only_in_the_reply_fails(self):
+        reply = json.dumps(json.loads(self.source("design-checkout-retries", "solution/DESIGN.json")))
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("design-checkout-retries", tmp)
+            self.assertFalse(self.check(task, work, reply))
 
 
 if __name__ == "__main__":
