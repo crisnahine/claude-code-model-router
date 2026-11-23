@@ -2,7 +2,7 @@
 
 Example (the pilot):
   python3 bench/run.py --tasks lookup-retry-limit bugfix-pagination --configs plugin defaults haiku \\
-      --runs 1 --budget 0.5 --max-total 3 --out bench/results/pilot-2026-11-22.jsonl
+      --runs 1 --budget 0.5 --max-total 3 --out bench/results/pilot/pilot-2026-11-22.jsonl
 """
 from __future__ import annotations
 
