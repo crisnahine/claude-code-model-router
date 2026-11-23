@@ -194,7 +194,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 
 | ID | Requirement | Implementation | Source | Verification | Evidence | Status |
 | :- | :- | :- | :- | :- | :- | :- |
-| S12.1 | Many agents spawned in one message | Copies routed together; votes all counted | `scripts/modelrouter/calls.py`, `learn.py` | Unit | `RepeatGuard.test_copies_of_one_call_issued_together_are_all_routed`; `Feedback.test_votes_from_calls_issued_at_once_are_all_counted` | PASS |
+| S12.1 | Many agents spawned in one message | Copies routed together; votes all counted; each spawn keeps its own route, so copies that fail together on the ID the mod sent strike that ID even after the call is issued again | `scripts/modelrouter/calls.py`, `learn.py` | Unit | `RepeatGuard.test_copies_of_one_call_issued_together_are_all_routed`; `Feedback.test_votes_from_calls_issued_at_once_are_all_counted`; `NewestOnProviders.test_parallel_failures_of_a_sent_id_never_strike_the_alias` | PASS |
 | S12.2 | Background agents | `launched` until `SubagentStop` | `scripts/modelrouter/calls.py` | Unit, live | `Mod.test_a_background_spawn_is_redone_one_level_up_only_after_it_stops`; `Mod.test_a_background_agent_that_handed_back_its_report_is_a_result`; `Mod.test_a_handback_with_no_message_is_no_answer`; live 2.1.330 background copies on Haiku | PASS |
 | S12.3 | Resumed agents | Pass-through | `hooks/router.ts` | Node | "forks and resumed runs pass through with no CLI call" | PASS |
 | S12.4 | Forks | Pass-through | `hooks/router.ts`, `scripts/modelrouter/router.py` | Unit, Node | `Router.test_fork_is_never_touched` | PASS |

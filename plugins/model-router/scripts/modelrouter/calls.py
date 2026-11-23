@@ -69,6 +69,7 @@ class Outcome:
     kind: Literal["result", "failure", "stop"]
     key: str = ""
     agent: str = ""
+    spawn_id: str | None = None
     agent_id: str | None = None
     named: str | None = None
     ran_as: object = None
@@ -127,33 +128,47 @@ def _route(record: object) -> Route | None:
                  rewrote=record.get("rewrote") is True)
 
 
-def _record(route: Route) -> dict:
+def _record(route: Route, key: str) -> dict:
     record = {"model": route.model, "sent": route.sent, "level": route.level.value if route.level else None,
               "effort": route.effort, "source": route.source, "path": route.path,
               "counted": route.counted.value if route.counted else None, "prompt_id": route.prompt_id,
-              "rewrote": route.rewrote or None}
+              "rewrote": route.rewrote or None, "call": key}
     return {k: v for k, v in record.items() if v is not None}
 
 
-def routed(session_id: str | None, key: str, route: Route) -> Route | None:
-    """Write where a spawn went, under its call's key. Returns the route this call had earlier in the
-    request and ran at its level, which the votes compare with."""
+def _latest(routes: dict, key: str) -> list[dict]:
+    """The records of this call, newest first."""
+    found = [r for r in routes.values() if isinstance(r, dict) and r.get("call") == key]
+    return sorted(found, key=lambda r: r.get("at") or 0, reverse=True)
+
+
+def routed(session_id: str | None, key: str, route: Route, spawn_id: str | None = None) -> Route | None:
+    """Write where a spawn went, under its own id when the path has one (a copy of the same call can't
+    overwrite it) and else under the call's key. Returns the route this call had earlier in the request
+    and ran at its level, which the votes compare with."""
     earlier: list[Route] = []
 
     def update(entry: dict) -> None:
         # Under the lock: calls issued together record at the same moment.
-        before = _route(entry.get(key))
-        if before and before.leveled and _same_request(before.prompt_id, before.at, route.prompt_id):
-            earlier.append(before)
-        store.keep(entry, key, _record(route))
+        for record in _latest(entry, key):
+            before = _route(record)
+            if before and before.leveled and _same_request(before.prompt_id, before.at, route.prompt_id):
+                earlier.append(before)
+                break
+        store.keep(entry, spawn_id or key, _record(route, key))
 
     store.mutate_entry("routes", session_id, update)
     return earlier[0] if earlier else None
 
 
-def route_of(session_id: str | None, key: str) -> Route | None:
-    """The route of this call's latest spawn."""
-    return _route(store.load_entry("routes", session_id).get(key))
+def route_of(session_id: str | None, key: str, spawn_id: str | None = None) -> Route | None:
+    """The route of this spawn, else the call's latest one: a path that sent no spawn id still finds it."""
+    entry = store.load_entry("routes", session_id)
+    record = entry.get(spawn_id) if spawn_id else None
+    if not isinstance(record, dict):
+        found = _latest(entry, key)
+        record = found[0] if found else None
+    return _route(record)
 
 
 def returned(session_id: str | None, outcome: Outcome) -> Returned:
@@ -163,7 +178,7 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
     sent, or else the model it was routed to."""
     if outcome.kind == "stop":
         return _stopped(session_id, outcome)
-    route = route_of(session_id, outcome.key)
+    route = route_of(session_id, outcome.key, outcome.spawn_id)
     asked = route.model if route and route.model else outcome.named
     if outcome.kind == "failure":
         return _failed(session_id, outcome, route, asked)

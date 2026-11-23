@@ -2337,10 +2337,10 @@ class RepeatGuard(Sandbox):
 
 
 class Calls(Sandbox):
-    def route(self, tool_input: dict, model: str = "haiku", **fields) -> calls.Route | None:
+    def route(self, tool_input: dict, model: str = "haiku", spawn_id: str | None = None, **fields) -> calls.Route | None:
         """A spawn of this call was routed, as `spawn.record` writes it; returns the earlier route."""
         fields = {"level": cfg.Level.lookup, "effort": "low", "source": "router", "path": "mod", "sent": None, **fields}
-        return calls.routed("s1", calls.identify(tool_input)[1], calls.Route(model=model, **fields))
+        return calls.routed("s1", calls.identify(tool_input)[1], calls.Route(model=model, **fields), spawn_id)
 
     def came_back(self, tool_input: dict, kind: str = "result", **fields) -> calls.Returned:
         agent, key = calls.identify(tool_input)
@@ -2410,19 +2410,21 @@ class Calls(Sandbox):
         self.came_back(call, models_used=("claude-haiku-5-5", "claude-haiku-5"))
         self.assertEqual(learn.stats()["lookup"]["calls"], 0)
 
-    def test_the_earlier_route_is_this_requests_and_stood_at_its_level(self):
+    def test_a_route_is_kept_per_spawn_and_the_earlier_one_is_this_requests(self):
         call = {"prompt": LOOKUP}
-        self.assertIsNone(self.route(call))
-        self.assertEqual(self.route(call).model, "haiku")
-        self.assertEqual(calls.route_of("s1", calls.identify(call)[1]).model, "haiku")
+        self.assertIsNone(self.route(call, spawn_id="t1", sent="claude-haiku-5-5"))
+        self.assertEqual(self.route(call, spawn_id="t2").model, "haiku")  # t1 stood earlier in this request
+        self.assertEqual(calls.route_of("s1", calls.identify(call)[1], "t1").sent, "claude-haiku-5-5")
+        self.assertIsNone(calls.route_of("s1", calls.identify(call)[1], "t2").sent)
+        self.assertIsNotNone(calls.route_of("s1", calls.identify(call)[1], "no-such-id"))  # the call's latest
         request.begin("s1", prompt_id="p2", level="lookup", need="haiku", session_tier=None, named=None)
-        self.assertIsNone(self.route(call, prompt_id="p2"))
+        self.assertIsNone(self.route(call, spawn_id="t3", prompt_id="p2"))
         self.assertIsNone(self.route({"prompt": "other"}, source="caller"))
         self.assertIsNone(self.route({"prompt": "other"}))  # a caller's run is no run to be redone
 
     def test_a_route_with_junk_in_it_reads_as_none(self):
         key = calls.identify({"prompt": LOOKUP})[1]
-        store.save_entry("routes", "s1", {key: {"model": 7, "level": "nope", "at": "later"}, "x": 3})
+        store.save_entry("routes", "s1", {key: {"call": key, "model": 7, "level": "nope", "at": "later"}, "x": 3})
         route = calls.route_of("s1", key)
         self.assertEqual((route.model, route.level, route.at), (None, None, 0.0))
         self.assertIsNone(calls.route_of("s1", "unknown"))
@@ -2926,9 +2928,10 @@ class NewestOnProviders(Sandbox):
             "anthropic_aws": ("sonnet", "haiku"), "anthropic_google_cloud": ("haiku",)}
     NEWEST = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
 
-    def spawn(self, prompt: str, agent: str = "general-purpose", **extra) -> tuple[dict | None, dict]:
+    def spawn(self, prompt: str, agent: str = "general-purpose", tool_use_id: str | None = None,
+              **extra) -> tuple[dict | None, dict]:
         hook_input = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
-                      "kind": "subagent",
+                      "kind": "subagent", **({"tool_use_id": tool_use_id} if tool_use_id else {}),
                       "tool_input": {"subagent_type": agent, "prompt": prompt, "description": "d", **extra}}
         return hooks.mod_spawn(hook_input), hook_input
 
@@ -2998,14 +3001,24 @@ class NewestOnProviders(Sandbox):
 
     def test_parallel_failures_of_a_sent_id_never_strike_the_alias(self):
         os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
-        copies = [self.spawn(LOOKUP) for _ in range(3)]
+        refused = "API Error: 404 not_found_error: model: claude-haiku-5-5"
+        copies = [self.spawn(LOOKUP, tool_use_id=f"t{i}") for i in range(3)]
         self.assertEqual({out["model"] for out, _ in copies}, {"claude-haiku-5-5"})
-        self.assertEqual(calls.route_of("s1", calls.identify(copies[0][1]["tool_input"])[1]).sent, "claude-haiku-5-5")
-        for _, hook_input in copies:
-            hooks.agent_failed({**hook_input, "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})
+        hooks.agent_failed({**copies[0][1], "error": refused})
+        # The call comes again, now on the alias, before its siblings' failures arrive.
+        self.assertEqual(self.spawn(LOOKUP, tool_use_id="t3")[0], {"model": "haiku", "effort": "medium", "reason": "lookup subtask"})
+        for _, hook_input in copies[1:]:
+            hooks.agent_failed({**hook_input, "error": refused})
         self.assertEqual([r["model"] for r in self.ledger() if r["event"] == "model_error"], ["claude-haiku-5-5"] * 3)
         self.assertEqual([health.load().healthy("haiku"), health.load().healthy("claude-haiku-5-5")], [True, False])
         self.assertEqual(self.model(LOOKUP), "haiku")
+
+    def test_a_failure_with_no_spawn_id_reads_the_calls_latest_route(self):
+        os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
+        copies = [self.spawn(LOOKUP) for _ in range(2)]
+        for _, hook_input in copies:
+            hooks.agent_failed({**hook_input, "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})
+        self.assertEqual([health.load().healthy("haiku"), health.load().healthy("claude-haiku-5-5")], [True, False])
 
     def test_the_agent_call_fallback_sends_only_aliases(self):
         os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
@@ -4946,17 +4959,17 @@ class SpawnPaths(Sandbox):
     def spawn_on(self, path: str, session: str, agent: str, brief: str) -> None:
         self.session_on("claude-opus-5-5", session)
         if path == "fallback":
-            hooks.pre_agent(self.call(agent, brief, session_id=session))
+            hooks.pre_agent(self.call(agent, brief, session_id=session, tool_use_id="t1"))
         else:
             hooks.mod_spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
-                             "kind": "subagent",
+                             "kind": "subagent", **({"tool_use_id": "t1"} if path == "mod with a spawn id" else {}),
                              "tool_input": {"subagent_type": agent, "prompt": brief}})
 
     def test_every_kind_of_outcome_leaves_the_same_redo_on_both_paths(self):
         agent, brief = "general-purpose", LOOKUP
         swapped = SWAP["swapped"]["modelsUsed"]
         outcomes = {
-            "a result": (lambda s: self.done(agent, brief, "claude-haiku-5-5", session_id=s), True),
+            "a result": (lambda s: self.done(agent, brief, "claude-haiku-5-5", session_id=s, tool_use_id="t1"), True),
             "a result on the rewritten call": (lambda s: self.done(agent, brief, "claude-haiku-5-5", session_id=s,
                                                                     model="haiku", effort="medium"), True),
             "a swapped result": (lambda s: self.done(agent, brief, "claude-haiku-5-5", swapped, session_id=s), False),
@@ -4971,7 +4984,7 @@ class SpawnPaths(Sandbox):
         }
         for name, (came_back, redo) in outcomes.items():
             seen = {}
-            for number, path in enumerate(("fallback", "mod")):
+            for number, path in enumerate(("fallback", "mod", "mod with a spawn id")):
                 with self.subTest(outcome=name, path=path):
                     session = f"{name}-{number}"
                     self.spawn_on(path, session, agent, brief)
@@ -4979,7 +4992,7 @@ class SpawnPaths(Sandbox):
                     again = self.decide(agent, brief, session_id=session)
                     seen[path] = (again["level"], again["model"], again["effort"], again["escalated_from"])
             want = ("standard", "sonnet", "medium", "lookup") if redo else ("lookup", "haiku", "medium", None)
-            self.assertEqual(seen, {path: want for path in ("fallback", "mod")}, name)
+            self.assertEqual(seen, {path: want for path in ("fallback", "mod", "mod with a spawn id")}, name)
 
     def test_a_model_the_cap_lowered_is_redone_on_both_paths_and_one_the_caller_kept_is_not(self):
         self.options(max_tier="sonnet")

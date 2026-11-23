@@ -47,7 +47,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 ### Fixed
 
 - `/model-router:usage` labels its per-model token column "Final-request tokens": Claude Code's `totalTokens` counts a subagent's final request, not its whole run. A new column and the `run_tokens` key in `usage --json` sum every request of the runs from the mod's usage rows. `tokens` keeps its value, so the schema stays `model-router.usage/1`.
-- Copies of one call that fail together on the newest ID the mod sent strike that ID, never the alias. A failure worked out which ID was sent from the current health table, and after the first failure the ID was already routed around, so the rest struck the alias.
+- Copies of one call that fail together on the newest ID the mod sent strike that ID, never the alias. A failure worked out which ID was sent from the current health table, and after the first failure the ID was already routed around, so the rest struck the alias. Each spawn now keeps its own route, so the rest still strike the ID when the same call is issued again before their failures arrive.
 - Calls that fail together on one model count as one outage. Each strike past the second started a new, longer outage, so a burst of parallel failures could route a model around for a week.
 - An `availableModels` entry naming a specific model, such as `claude-sonnet-4-5` beside `sonnet`, turns off the family's own entry, as Claude Code applies the list. The mod could send `claude-sonnet-5-5` on a lagging provider when the list allowed only Sonnet 4.5.
 - A hook command that fails exits 1, never 2. The launcher passed the router's exit code through, and argparse exits 2 on a bad argument, which blocks a tool call, a prompt or a stop.

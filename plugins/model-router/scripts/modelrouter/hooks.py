@@ -135,7 +135,9 @@ def _outcome(kind: str, hook_input: dict, reg: Registry, **fields: Any) -> calls
     """What came back for an Agent call, as the one record `calls.returned` reads."""
     tool_input = cfg.tool_input(hook_input)
     agent, key = calls.identify(tool_input)
-    return calls.Outcome(kind, key=key, agent=agent, named=reg.family(tool_input.get("model")), **fields)
+    spawn_id = hook_input.get("tool_use_id")
+    return calls.Outcome(kind, key=key, agent=agent, named=reg.family(tool_input.get("model")),
+                         spawn_id=spawn_id if isinstance(spawn_id, str) and spawn_id else None, **fields)
 
 
 def _settled(session_id: str | None, key: str) -> None:
