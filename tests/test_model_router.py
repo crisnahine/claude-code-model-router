@@ -1251,8 +1251,14 @@ class Profile(unittest.TestCase):
         self.assertEqual(profile.profile_call(brief, "model-router:verifier")["level"], "standard")
         self.assertEqual(profile.profile_call(brief, "model-router:architect")["level"], "complex")
 
-    def test_the_request_prompt_is_not_floored_by_a_fix(self):
-        self.assertEqual(profile.profile_prompt("Fix the off-by-one in page_slice.")["level"], "standard")
+    def test_the_request_prompt_is_floored_by_a_fix_like_a_call(self):
+        fixed = profile.profile_prompt("Fix the off-by-one in page_slice.")
+        self.assertEqual(fixed["level"], "complex")
+        self.assertIn("fixes or hunts a defect", fixed["signals"])
+        self.assertEqual(profile.profile_prompt("Figure out why it times out and fix it.")["level"], "complex")
+        for brief in ("Rename the helper. Avoid fixing the unrelated tests.", "Do not fix the tests. Rename the helper.",
+                      "Find the commit that landed the fix for the CSV export.", "Add debug logging to the retry loop."):
+            self.assertNotEqual(profile.profile_prompt(brief)["level"], "complex", brief)
 
     def test_reading_about_something_sensitive_or_broad_is_still_a_lookup(self):
         self.assertEqual(self.level("read the auth module and list its functions"), "lookup")
@@ -3744,8 +3750,12 @@ class SlashSkills(Sandbox):
         self.session_on("claude-opus-5-5")
         raw = (PLUGIN / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8")
         body = "Base directory for this skill: /p/skills/ship\n\n" + raw.split("---\n", 2)[2]
-        typo = "fix the typo in README.md"
+        typo = "rename the helper in README.md"
         self.assertIsNone(self.turn("model-router:ship", typo, body.replace("$ARGUMENTS", typo)))
+        # A fix is complex whatever its size, so a typo fix raises the turn.
+        fix = "fix the typo in README.md"
+        self.assertEqual(self.turn("model-router:ship", fix, body.replace("$ARGUMENTS", fix)),
+                         {"level": "complex", "effort": "high"})
         hard = body.replace("$ARGUMENTS", HARD)
         self.assertEqual(self.turn("model-router:ship", HARD, hard), {"level": "complex", "effort": "high"})
         self.assertEqual(self.turn("model-router:ship", "", body.replace("$ARGUMENTS", ""))["level"], "frontier")
@@ -3789,9 +3799,13 @@ class SlashSkills(Sandbox):
         self.assertEqual(self.turn("model-router:ship", "1234", ship_body("1234")), {"level": "complex",
                                                                                   "effort": "high"})
         # A task in the arguments still decides, the m3-02 case.
-        for args in ("fix the typo in README.md", "explain the retry flow", "fix it"):
+        for args in ("rename the helper in README.md", "explain the retry flow"):
             with self.subTest(args=args):
                 self.assertIsNone(self.turn("model-router:ship", args, ship_body(args)))
+        for args in ("fix the typo in README.md", "fix it"):
+            with self.subTest(args=args):
+                self.assertEqual(self.turn("model-router:ship", args, ship_body(args)),
+                                 {"level": "complex", "effort": "high"})
         # No listed verb: a description without an instruction leaves the task to ship's body, capped at complex.
         for args in ("the README typo near the top", "tidy the imports please"):
             with self.subTest(args=args):

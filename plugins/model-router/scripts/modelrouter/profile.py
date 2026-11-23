@@ -165,9 +165,13 @@ def signals(text: str) -> list[str]:
     return [name for name in found if name != "load" or re.search(_CHOICE, text)]
 
 
+def _fixes_a_defect(asked: str) -> bool:
+    return bool(re.search(_DEFECT, re.sub(_RULED_OUT, "", asked)))
+
+
 def profile_prompt(prompt: str) -> dict:
     """The user's request as a whole. Used to tell whether the conversation's own model
-    is strong enough for it."""
+    is strong enough for it. Fixing or hunting a defect is at least complex, as in profile_call."""
     text = (prompt or "").lower()
     hits = signals(text)
     changes = bool(re.search(_CHANGE, text))
@@ -183,6 +187,8 @@ def profile_prompt(prompt: str) -> dict:
         level = "lookup"
     else:
         level = "standard"
+    if LEVELS.index(level) < LEVELS.index("complex") and _fixes_a_defect(re.sub(_NEGATED, "", text)):
+        level, hits = "complex", hits + ["fixes or hunts a defect"]
     return {"level": level, "signals": hits, "changes": changes}
 
 
@@ -206,7 +212,7 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
             level = "complex"
         else:
             level = "standard"
-        if LEVELS.index(level) < LEVELS.index("complex") and re.search(_DEFECT, re.sub(_RULED_OUT, "", asked)):
+        if LEVELS.index(level) < LEVELS.index("complex") and _fixes_a_defect(asked):
             level, why = "complex", why + ["fixes or hunts a defect"]
     elif len(hits) >= 2:
         level = "standard"  # finds or explains something broad or sensitive, but only reads
