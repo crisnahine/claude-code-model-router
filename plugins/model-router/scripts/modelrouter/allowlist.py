@@ -87,6 +87,19 @@ def _blocked_family(config: dict, entry: str) -> str | None:
     return None if any(c.isdigit() for c in e) else registry.family(config, e)
 
 
+def _effective(config: dict, entries: tuple[str, ...]) -> tuple[str, ...]:
+    """An allow list as Claude Code applies it: an entry naming a specific model in a family (a
+    version prefix, a full ID or a custom ID that embeds the family) turns off the entry that
+    names the family itself (https://code.claude.com/docs/en/model-config.md, Merge behavior)."""
+    plain = set(registry.models(config)) | set(config.get("aliases") or {})
+
+    def bare(entry: str) -> str:
+        return entry.strip().lower().split("[")[0]
+
+    specific = {registry.family(config, e) for e in entries if bare(e) not in plain} - {None}
+    return tuple(e for e in entries if bare(e) not in specific)
+
+
 @dataclass(frozen=True)
 class Allowlist:
     allow: tuple[str, ...] | None  # None: no source set availableModels
@@ -102,7 +115,7 @@ class Allowlist:
         names = set(registry.models(config))
         for entries in (self.allow, self.floor_allow):
             if entries is not None:
-                found = {registry.family(config, e) for e in entries}
+                found = {registry.family(config, e) for e in _effective(config, entries)}
                 names = {n for n in names if n in found}
         if self.deny is not None:
             blocked = {_blocked_family(config, e) for e in self.deny} - {None}
@@ -110,7 +123,7 @@ class Allowlist:
             names = {n for n in names if registry.family(config, n) not in blocked}
         return names
 
-    def permits_id(self, name: str, model_id: str) -> bool:
+    def permits_id(self, config: dict, name: str, model_id: str) -> bool:
         """Whether the full ID of family `name` may run: not ruled out by the lists or by
         modelOverrides, which Claude Code applies to the ID itself."""
         def names(entries: tuple[str, ...], prefix: bool) -> bool:
@@ -118,7 +131,7 @@ class Allowlist:
                        for e in entries)
 
         for entries in (self.allow, self.floor_allow):
-            if entries is not None and not names(entries, not self.exact):
+            if entries is not None and not names(_effective(config, entries), not self.exact):
                 return False
         if self.deny is not None and names(self.deny, True):
             return False

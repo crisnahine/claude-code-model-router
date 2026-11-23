@@ -917,7 +917,7 @@ class Allowlist(Sandbox):
         sent = {"policy": {"availableModels": ["claude-opus-5-5", "sonnet"], "deniedModels": ["fable"]}}
         self.assertEqual(allowlist.read(None, self.project, sent).permitted(self.config), {"opus"})
         self.assertFalse(allowlist.read(None, self.project, {"policy": {"availableModels": ["haiku"]}}).permitted(self.config))
-        self.assertFalse(allowlist.read(None, self.project, {"policy": {"availableModels": ["haiku"]}}).permits_id("opus", "claude-opus-5-5"))
+        self.assertFalse(allowlist.read(None, self.project, {"policy": {"availableModels": ["haiku"]}}).permits_id(self.config, "opus", "claude-opus-5-5"))
         self.assertFalse(allowlist.read(None, self.project, {"policy": {}}).exact)
         self.managed.write_text(json.dumps({"availableModelsMatch": "exact"}))
         self.assertTrue(allowlist.read(None, self.project, {"policy": {"availableModelsMatch": "prefix"}}).exact)
@@ -930,9 +930,28 @@ class Allowlist(Sandbox):
             self.assertEqual(self.permitted(policy={"deniedModels": [entry]}), every - {"opus"}, repr(entry))
         for entry in ("claude-opus-5-5", "sonnet[1m]", "claude-opus-5"):
             self.assertEqual(self.permitted(policy={"deniedModels": [entry]}), every, repr(entry))
-        self.assertFalse(allowlist.from_layers({"policy": {"deniedModels": ["claude-opus"]}}).permits_id("opus", "claude-opus-5-5"))
-        self.assertFalse(allowlist.from_layers({"policy": {"deniedModels": [" opus "]}}).permits_id("opus", "claude-opus-5-5"))
-        self.assertTrue(allowlist.from_layers({"policy": {"availableModels": [" opus "]}}).permits_id("opus", "claude-opus-5-5"))
+        self.assertFalse(allowlist.from_layers({"policy": {"deniedModels": ["claude-opus"]}}).permits_id(self.config, "opus", "claude-opus-5-5"))
+        self.assertFalse(allowlist.from_layers({"policy": {"deniedModels": [" opus "]}}).permits_id(self.config, "opus", "claude-opus-5-5"))
+        self.assertTrue(allowlist.from_layers({"policy": {"availableModels": [" opus "]}}).permits_id(self.config, "opus", "claude-opus-5-5"))
+
+    def test_a_specific_entry_turns_off_its_familys_wildcard(self):
+        # model-config.md, Merge behavior: with ["sonnet", "claude-sonnet-4-5"] only what claude-sonnet-4-5 matches.
+        def permits(entries, name, model_id, source="policy"):
+            return allowlist.from_layers({source: {"availableModels": entries}}).permits_id(self.config, name, model_id)
+
+        pinned = ["sonnet", "claude-sonnet-4-5"]
+        self.assertFalse(permits(pinned, "sonnet", "claude-sonnet-5-5"))
+        self.assertFalse(permits(pinned, "sonnet", "claude-sonnet-5-5", source="user"))
+        self.assertTrue(permits(pinned, "sonnet", "claude-sonnet-4-5-20250929"))
+        self.assertTrue(permits(["sonnet"], "sonnet", "claude-sonnet-5-5"))
+        self.assertTrue(permits(["sonnet", "sonnet[1m]", "best"], "sonnet", "claude-sonnet-5-5"))
+        self.assertTrue(permits(["sonnet", "claude-opus-4-6"], "sonnet", "claude-sonnet-5-5"))
+        self.assertFalse(permits(["opus", "claude-opus-4-6"], "opus", "claude-opus-5-5"))
+        self.assertFalse(permits(["sonnet", "anthropic.claude-sonnet-5-5-v1:0"], "sonnet", "claude-sonnet-5-5"))
+        # The family keeps a permitted version, which its alias moves to, so it stays routable.
+        self.assertEqual(self.permitted(policy={"availableModels": pinned}), {"sonnet"})
+        managed = allowlist.from_layers({}, floor={"availableModels": pinned})
+        self.assertFalse(managed.permits_id(self.config, "sonnet", "claude-sonnet-5-5"))
 
     def test_a_managed_file_that_is_there_but_unreadable_permits_no_models(self):
         self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(registry.models(self.config)))  # absent

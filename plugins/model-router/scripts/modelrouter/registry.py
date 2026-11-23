@@ -63,7 +63,7 @@ def newest_id(config: dict, name: str | None, provider: str | None, allowed: all
     if (not isinstance(model_id, str) or name not in ((config.get("older_aliases") or {}).get(provider or "") or ())
             or os.environ.get(f"ANTHROPIC_DEFAULT_{str(name).upper()}_MODEL")):
         return None
-    return model_id if allowed.permits_id(name, model_id) and table.healthy(model_id) else None
+    return model_id if allowed.permits_id(config, name, model_id) and table.healthy(model_id) else None
 
 
 def available(config: dict, cap: str | None = None, *, allowed: allowlist.Allowlist | None = None,
