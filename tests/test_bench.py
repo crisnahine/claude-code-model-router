@@ -333,6 +333,81 @@ class Analysis(unittest.TestCase):
         self.assertIn("`defaults` old (3); `plugin` new (2)", page)
 
 
+FIXTURE = ROOT / "tests" / "fixtures" / "claude-2.1.330-result.json"
+
+LEDGER = [
+    {"event": "spawn", "agent": "model-router:implementer", "level": "standard", "model": "sonnet",
+     "effort": "medium", "escalated_from": None, "reason": "standard subtask"},
+    {"event": "spawn", "agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"},
+    {"event": "usage", "agent_id": "a1", "cost_usd": 0.05}, {"event": "usage", "agent_id": "a2", "cost_usd": 0.01},
+    {"event": "usage", "agent_id": None, "cost_usd": 0.03}, {"event": "usage", "agent_id": "a1", "cost_usd": 0.02}]
+AGENT_TYPES = {"a1": "model-router:implementer", "a2": "model-router:verifier"}
+
+
+def stub(tmp: Path, source: str) -> list[str]:
+    """A stub claude run as `python stub.py`, the same on every OS."""
+    path = Path(tmp) / "stub.py"
+    path.write_text(source, encoding="utf-8")
+    return [sys.executable, str(path)]
+
+
+class Recorder(unittest.TestCase):
+    task = {"id": "t", "class": "lookup"}
+    config = {"id": "plugin", "plugin": True}
+    options = {"model": "sonnet", "budget": 0.5, "claude_version": "2.1.330", "commit": "abc", "dirty": False}
+    facts = {"started_at": "2026-11-23T00:00:00+00:00", "wall_ms": 7000, "exit_code": 0, "stderr": "", "passed": True,
+             "plugin_state": None, "ledger": None, "agent_types": {}, "session_dir_removed": True, "kept": None}
+
+    def row(self, result, **facts):
+        return run.record(self.task, self.config, self.options, {}, result, {**self.facts, **facts})
+
+    def test_a_real_2_1_330_result_becomes_a_row(self):
+        row = self.row(json.loads(FIXTURE.read_text(encoding="utf-8")))
+        self.assertEqual(row["subagents"], {"spawned": 1, "completed": 1, "failed": 0,
+                                            "by_type": {"general-purpose": 1}})
+        self.assertEqual((row["subtype"], row["is_error"], row["num_turns"], row["api_error_status"]),
+                         ("success", False, 1, None))
+        self.assertEqual((row["duration_ms"], row["duration_api_ms"], row["wall_ms"]), (1026, 5062, 7000))
+        self.assertEqual(row["permission_denials"], [])
+        self.assertEqual(row["models"], {"claude-haiku-5-5": {
+            "inputTokens": 8, "outputTokens": 300, "cacheReadInputTokens": 51466, "cacheCreationInputTokens": 19374,
+            "costUSD": 0.0037657349999999997, "costBasis": "list"}})
+        self.assertEqual((row["total_cost_usd"], row["cost_known"], row["answer"]),
+                         (0.0037657349999999997, True, "DONE"))
+
+    def test_a_zeroed_cost_on_an_error_counts_the_whole_budget(self):
+        base = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        zeroed = self.row(dict(base, subtype="error_during_execution", is_error=True, total_cost_usd=0))
+        self.assertEqual((zeroed["total_cost_usd"], zeroed["cost_known"]), (0.5, False))
+        free = self.row(dict(base, subtype="success", total_cost_usd=0))
+        self.assertEqual((free["total_cost_usd"], free["cost_known"]), (0, True))
+        base.pop("total_cost_usd")
+        self.assertEqual(self.row(base)["cost_known"], False)
+        self.assertEqual(self.row(base)["total_cost_usd"], 0.5)
+
+    def test_ledger_rows_give_spend_by_agent_and_spawns(self):
+        self.assertEqual(run.spend_by_agent(LEDGER, AGENT_TYPES),
+                         {"model-router:implementer": 0.07, "model-router:verifier": 0.01, "main": 0.03})
+        spawned = run.spawns(LEDGER)
+        self.assertIsNone(spawned[0]["escalated_from"])
+        self.assertNotIn("escalated_from", spawned[1])
+        row = self.row({}, ledger=LEDGER, agent_types=AGENT_TYPES)
+        self.assertEqual(row["agent_costs"]["main"], 0.03)
+        self.assertEqual(len(row["routed"]), 2)
+        row = self.row({}, ledger=None)
+        self.assertEqual((row["agent_costs"], row["routed"]), (None, None))
+
+    def test_the_schedule_rotates_configurations_and_numbers_runs(self):
+        got = [(i, t["id"], c["id"]) for i, t, c in
+               run.schedule([{"id": "t"}], [{"id": "a"}, {"id": "b"}, {"id": "c"}], 2, 1)]
+        self.assertEqual(got, [(1, "t", "b"), (1, "t", "c"), (1, "t", "a"), (2, "t", "c"), (2, "t", "a"), (2, "t", "b")])
+
+    def test_a_claude_prefix_passes_through_whole(self):
+        options = {"claude": ["C:/Program Files/Python313/python.exe", "stub.py"], "model": "sonnet", "budget": 0.5}
+        cmd, _ = run.command("x", {"id": "d", "env": {}}, options, {})
+        self.assertEqual(cmd[:3], ["C:/Program Files/Python313/python.exe", "stub.py", "-p"])
+
+
 class Runner(unittest.TestCase):
     def test_each_run_starts_clean_and_only_the_configuration_differs(self):
         base = {"PATH": "/bin", "CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
@@ -340,7 +415,7 @@ class Runner(unittest.TestCase):
                 "CLAUDE_CODE_SESSION_ID": "parent", "CLAUDE_CODE_MESSAGING_SOCKET": "/tmp/s.sock",
                 "CLAUDE_PLUGIN_ROOT": "/elsewhere", "CLAUDE_CODE_USE_BEDROCK": "1"}
         configs = {c["id"]: c for c in run.load_configs()}
-        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
         cmd, env = run.command("do it", configs["haiku"], options, base)
         self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]), ("haiku", "1"))
         for name in ("CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_EFFORT", "CLAUDECODE", "CLAUDE_CODE_SESSION_ID",
@@ -362,7 +437,7 @@ class Runner(unittest.TestCase):
 
     def test_token_auth_and_test_pipes_still_work(self):
         configs = {c["id"]: c for c in run.load_configs()}
-        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
         cmd, env = run.command("do it", configs["plugin"], options, {"CLAUDE_CODE_OAUTH_TOKEN": "t",
                                                                      "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "3"})
         self.assertEqual(env, {"CLAUDE_CODE_OAUTH_TOKEN": "t", **run.ISOLATION})
@@ -433,7 +508,6 @@ print(json.dumps({"result": answer, "total_cost_usd": 0.01, "modelUsage": {}}))
 '''
 
 
-@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class PluginState(unittest.TestCase):
     """Router runs keep their state in a plugins root of their own, never the one other sessions share."""
 
@@ -444,12 +518,10 @@ class PluginState(unittest.TestCase):
             shared.mkdir(parents=True)
             (shared / "learned.json").write_text('{"lookup": {"calls": 2}}')
             os.utime(shared / "learned.json", (1000, 1000))
-            stub = Path(tmp) / "claude"
-            stub.write_text(STUB)
-            stub.chmod(0o755)
+            claude = stub(tmp, STUB)
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
             configs = {c["id"]: c for c in run.load_configs()}
-            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             shared.chmod(0)  # any read or write of the shared folder now fails
             try:
@@ -470,7 +542,7 @@ class PluginState(unittest.TestCase):
             self.assertIn("bench_dirty", first)
 
     def test_every_run_gets_the_same_plugins_root_setting(self):
-        options = {"claude": "claude", "model": "sonnet", "budget": 0.5, "plugin_dir": "/p", "plugins_root": "/s/plugins"}
+        options = {"claude": ["claude"], "model": "sonnet", "budget": 0.5, "plugin_dir": "/p", "plugins_root": "/s/plugins"}
         # A plugin_ref export needs that commit in the clone, which a shallow CI checkout lacks.
         with unittest.mock.patch.object(run, "plugin_dir_for", return_value="/p"):
             for config in run.load_configs():
@@ -497,15 +569,15 @@ print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_u
 '''
 
 
-@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class Sessions(unittest.TestCase):
     """Runs keep their transcripts, as real sessions do, and the bench removes only its own afterwards."""
 
     def test_runs_save_their_sessions(self):
-        cmd, _ = run.command("do it", next(c for c in run.load_configs() if c["id"] == "plugin"), {"claude": "claude", "model": "sonnet", "budget": 0.5,
+        cmd, _ = run.command("do it", next(c for c in run.load_configs() if c["id"] == "plugin"), {"claude": ["claude"], "model": "sonnet", "budget": 0.5,
                                                              "plugin_dir": "/p"}, {})
         self.assertNotIn("--no-session-persistence", cmd)
 
+    @unittest.skipIf(sys.platform == "win32", "the folder name is built from a POSIX absolute path")
     def test_a_folder_is_named_as_claude_code_names_it(self):
         self.assertEqual(run.session_dir(Path("/private/var/folders/ab/x_y.z/T/mrbench-a-b/work"), {"CLAUDE_CONFIG_DIR": "/c"}),
                          Path("/c/projects/-private-var-folders-ab-x-y-z-T-mrbench-a-b-work"))
@@ -516,11 +588,9 @@ class Sessions(unittest.TestCase):
             other = home / "projects" / "-Users-someone-project"
             other.mkdir(parents=True)
             (other / "keep.jsonl").write_text("{}")
-            stub = Path(tmp) / "claude"
-            stub.write_text(SESSION_STUB)
-            stub.chmod(0o755)
+            claude = stub(tmp, SESSION_STUB)
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
-            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
                 row = run.run_one(task, run.load_configs()[1], options, {})
@@ -531,11 +601,9 @@ class Sessions(unittest.TestCase):
     def test_keep_saves_the_scratch_folder_and_the_transcripts_before_cleanup(self):
         with tempfile.TemporaryDirectory() as tmp:
             home, kept = Path(tmp) / "config", Path(tmp) / "kept"
-            stub = Path(tmp) / "claude"
-            stub.write_text(SESSION_STUB)
-            stub.chmod(0o755)
+            claude = stub(tmp, SESSION_STUB)
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
-            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60, "keep": str(kept),
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60, "keep": str(kept),
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
                 row = run.run_one(task, run.load_configs()[1], options, {})
@@ -651,7 +719,7 @@ class SuiteCoverage(unittest.TestCase):
 
     def test_each_new_baseline_sets_what_its_name_says(self):
         configs = {c["id"]: c for c in run.load_configs()}
-        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
         cmd, env = run.command("x", configs["opusplan"], options, {})
         self.assertEqual(cmd[cmd.index("--model") + 1], "opusplan")
         cmd, env = run.command("x", configs["advisor"], options, {})
@@ -716,7 +784,6 @@ print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_u
 '''
 
 
-@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class RouterVariants(unittest.TestCase):
     """A router variant is the shipped plugin plus a project model-router.json and plugin option values."""
 
@@ -724,12 +791,10 @@ class RouterVariants(unittest.TestCase):
         variant = {"id": "v", "plugin": True, "env": {}, "router_config": {"levels": {"standard": {"effort": "medium"}}},
                    "plugin_options": {"main_effort": False}}
         with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "claude"
-            stub.write_text(VARIANT_STUB)
-            stub.chmod(0o755)
+            claude = stub(tmp, VARIANT_STUB)
             seen = Path(tmp) / "seen.json"
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
-            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
                 row = run.run_one(task, variant, options, {})
@@ -771,7 +836,7 @@ print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_u
 
 class PluginRef(unittest.TestCase):
     def test_a_configuration_can_run_the_plugin_from_a_commit(self):
-        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
         cmd, _ = run.command("x", {"id": "r", "plugin": True, "env": {}, "plugin_ref": "HEAD"}, options, {})
         exported = Path(cmd[cmd.index("--plugin-dir") + 1])
         self.assertNotEqual(exported, Path("/p/model-router"))
@@ -782,15 +847,12 @@ class PluginRef(unittest.TestCase):
         self.assertEqual(plain[plain.index("--plugin-dir") + 1], "/p/model-router")
 
 
-@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class AgentCosts(unittest.TestCase):
     def test_a_router_run_records_its_spend_by_agent_type(self):
         with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "claude"
-            stub.write_text(COST_STUB)
-            stub.chmod(0o755)
+            claude = stub(tmp, COST_STUB)
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
-            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
                 row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
@@ -805,39 +867,23 @@ class AgentCosts(unittest.TestCase):
             {"agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"}])
 
 
-@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class Limits(unittest.TestCase):
     """A rate or usage limit pauses the bench and retries the run; it is never recorded as a failed task."""
 
     def bench(self, limited: int) -> tuple[int, list[dict], list[dict], list[float]]:
         with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "claude"
-            stub.write_text(LIMIT_STUB)
-            stub.chmod(0o755)
+            claude = stub(tmp, LIMIT_STUB)
             out = Path(tmp) / "out.jsonl"
             env = {"STUB_CALLS": str(Path(tmp) / "calls"), "STUB_LIMITED": str(limited)}
             pauses: list[float] = []
             with unittest.mock.patch.dict("os.environ", env), \
                     unittest.mock.patch.object(run.time, "sleep", pauses.append):
                 code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "1",
-                                 "--max-total", "3", "--claude", str(stub), "--out", str(out)])
+                                 "--max-total", "3", "--claude", *claude, "--out", str(out)])
             read = lambda p: [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []  # noqa: E731
             self.assertEqual(sorted(p.name for p in Path(tmp).glob("*.jsonl")), ["out.jsonl"] if out.exists() else [])
             # subprocess also calls time.sleep in short steps while it waits on a slow child.
             return code, read(out), read(Path(tmp) / "limited" / "out.jsonl"), [p for p in pauses if p >= run.LIMIT_PAUSE]
-
-    def test_a_later_round_keeps_its_run_number_and_rotation(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "claude"
-            stub.write_text(LIMIT_STUB)
-            stub.chmod(0o755)
-            out = Path(tmp) / "out.jsonl"
-            with unittest.mock.patch.dict("os.environ", {"STUB_CALLS": str(Path(tmp) / "calls"), "STUB_LIMITED": "0"}):
-                code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "sonnet", "--runs", "1",
-                                 "--first-run", "1", "--max-total", "3", "--claude", str(stub), "--out", str(out)])
-            rows = [json.loads(line) for line in out.read_text().splitlines()]
-        self.assertEqual(code, 0)
-        self.assertEqual([(r["config"], r["run"]) for r in rows], [("sonnet", 1), ("defaults", 1)])
 
     def test_a_limited_run_pauses_and_is_retried(self):
         code, rows, limited, pauses = self.bench(limited=2)
@@ -917,15 +963,12 @@ print(json.dumps({"result": os.getcwd(), "total_cost_usd": 0.0, "modelUsage": {}
 class TaskIdentity(unittest.TestCase):
     """A run's folder can't hand the router signal words, and a changed task is never pooled silently."""
 
-    @unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
     def test_no_task_id_or_signal_word_reaches_a_runs_working_directory(self):
         sys.path.insert(0, str(ROOT / "plugins" / "model-router" / "scripts"))
         from modelrouter import profile
         with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "claude"
-            stub.write_text(CWD_STUB)
-            stub.chmod(0o755)
-            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+            claude = stub(tmp, CWD_STUB)
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             base = str(Path(tempfile.gettempdir()).resolve())
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
