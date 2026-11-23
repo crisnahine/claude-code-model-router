@@ -3772,6 +3772,16 @@ class SlashSkills(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": "/named " + typo, "cwd": str(self.project)})
         self.assertEqual(request.load("s1").level, "standard")
 
+    def test_a_typed_plugin_skill_is_profiled_by_its_arguments(self):
+        # Its body isn't under .claude, and the skill's own name must not count as wording.
+        for typed, level in (("/acme:code-review", "lookup"), ("/acme:code-review 482", "lookup"),
+                             ("/acme:go fix the typo in README.md", "complex"),
+                             (f"/acme:go {HARD}", "complex"), (f"/acme:go {HARDEST}", "hardest"),
+                             ("/acme:go list the files under src", "lookup")):
+            with self.subTest(typed=typed):
+                got = intake.from_prompt(typed, self.project)
+                self.assertEqual((got.person, got.level), (True, level))
+
     def test_an_argument_that_only_names_the_target_leaves_the_task_to_the_body(self):
         self.session_on("claude-opus-5-5")
         raw = ("---\nname: security-review\nargument-hint: <pr-number>\n---\nReview pull request #$ARGUMENTS for "

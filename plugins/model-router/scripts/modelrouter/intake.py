@@ -96,12 +96,15 @@ def profile_skill(args: object, body: object, rendered: bool) -> dict:
 
 
 def _typed_skill(prompt: str, project: Path) -> dict | None:
-    """The profile behind "/name args" when name is a project or user skill or command on disk.
-    UserPromptSubmit sees only the typed line; a plugin's skill isn't found this way."""
-    match = re.match(r"/([A-Za-z0-9_.-]+)(?:\s+(.*))?\Z", prompt.strip(), re.S)
+    """The profile behind "/name args" when name is a project or user skill or command on disk, or
+    "/plugin:name args". UserPromptSubmit sees only the typed line, and a plugin's skill body isn't
+    under .claude, so its arguments alone are profiled; the mod's turn.start reads the body too."""
+    match = re.match(r"/(?:([A-Za-z0-9_.-]+):)?([A-Za-z0-9_.-]+)(?:\s+(.*))?\Z", prompt.strip(), re.S)
     if not match:
         return None
-    name, args = match.group(1), match.group(2) or ""
+    plugin, name, args = match.group(1), match.group(2), match.group(3) or ""
+    if plugin:
+        return profile_skill(args, "", rendered=False)
     project, home = project / ".claude", store.claude_home()
     for path in (project / "skills" / name / "SKILL.md", home / "skills" / name / "SKILL.md",
                  project / "commands" / f"{name}.md", home / "commands" / f"{name}.md"):

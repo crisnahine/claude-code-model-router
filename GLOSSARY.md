@@ -56,7 +56,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Vote**: evidence that a level was routed too low: a redo, or Claude naming a stronger model than the pick. Enough votes raise the level one step, and a raise that keeps being overruled with a weaker model is undone the same way.
 
-**Intake**: the step that decides whether a prompt or a turn is the person's request and at what level (`intake.py`). A teammate's report, another session's message and a background notification are not. A typed skill is read from its arguments and its body.
+**Intake**: the step that decides whether a prompt or a turn is the person's request and at what level (`intake.py`). A teammate's report, another session's message and a background notification are not. A typed skill is read from its arguments and its body; a plugin's skill, whose body the settings hook can't see, from its arguments.
 
 **Request**: one prompt from the user and the turns it starts. Redos count only within one request. Its record is kept by `request.py`.
 

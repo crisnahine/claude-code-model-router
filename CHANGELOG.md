@@ -29,6 +29,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 ### Fixed
 
 - An agent name is read by whole parts, so `researcher`, `relocation-migrator`, `splinter-fixer`, `information-extractor` and `allocator-tuner` are no longer capped as search agents. `docs-researcher`, `lint-runner`, `scout`, `explorer` and `verifier` still are.
+- A typed `/plugin:skill args` is profiled by its arguments, not by the skill's own name.
 - A background agent that hands its report back through `SubagentHandback` counts as answered. Its call used to stay open, and a re-issue wasn't seen as a redo.
 - A stopped agent is counted as stopped even when its transcript can't be read.
 - On Bedrock's Mantle endpoint, and with prompt caching turned off, `main_effort` leaves the main loop's effort alone, since an effort change there drops the cache.
