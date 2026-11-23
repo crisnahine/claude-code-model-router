@@ -115,35 +115,41 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
                        reason=f"{level} subtask; the model is pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE, so only effort is set{held}")
         return out
 
-    rule_model = reg.family(rule.model)
-    suggested = reg.family(rule.suggested)
-    if not rule_model and suggested and reg.stronger(pick, suggested):
-        # A project's model applies only when it isn't weaker than the pick.
-        out["held"] = f"a project rule names {suggested} for {agent}, weaker than the pick {pick}"
-        suggested = None
-    rule_model = rule_model or suggested
     override = settings.pins == "override"
+    basis = None  # what the call would run on, and in which words, when no rule names a model
     if requested:
         target, source, why = requested, "caller", "the call names a model"
-    elif rule_model:
-        target, source, why = rule_model, "rule", "a rule in model-router.json sets this agent's model"
     elif definition is None and not override:
-        out["reason"] = "this agent's definition wasn't found, so it is left alone"
-        return out
+        target, source, why = None, None, "this agent's definition wasn't found, so it is left alone"
     elif own_model and not pinned and not override:
-        out["reason"] = f"the agent names a model outside the registry ({own_model})"
-        return out
+        target, source, why = None, None, f"the agent names a model outside the registry ({own_model})"
     elif pinned and not override:
-        target, source, why = pinned, "pin", "the agent names its own model"
+        target, source, why, basis = pinned, "pin", "the agent names its own model", "the agent's own model"
     elif env_default and not override:
-        out["reason"] = "CLAUDE_CODE_SUBAGENT_MODEL sets the model for agents without one"
-        return out
+        target, source, basis = None, None, "the CLAUDE_CODE_SUBAGENT_MODEL default"
+        why = "CLAUDE_CODE_SUBAGENT_MODEL sets the model for agents without one"
     else:
-        target, source, why = pick, "router", f"{level} subtask"
+        target, source, why, basis = pick, "router", f"{level} subtask", "the pick"
         if out.get("escalated_from"):
             why += f", one level above the {out['escalated_from']} run that came back before"
         elif redo:
             why += ", redone with more effort than the run that came back before"
+
+    rule_model = reg.family(rule.model)
+    if not requested and not rule_model and reg.family(rule.suggested):
+        # A project's model applies only when it isn't weaker than what the call would run on without it.
+        suggested, runs_on = reg.family(rule.suggested), target or out["was"]
+        if runs_on and not reg.stronger(runs_on, suggested):
+            rule_model = suggested
+        else:
+            asked = f"a project rule names {suggested} for {agent}"
+            out["held"] = (f"{asked}, weaker than {basis} {runs_on}" if runs_on
+                           else f"{asked}, and the model the call would run on isn't known")
+    if rule_model and not requested:
+        target, source, why = rule_model, "rule", "a rule in model-router.json sets this agent's model"
+    elif target is None:
+        out["reason"] = why + (f"; {out['held']}" if out["held"] else "")
+        return out
 
     named = tool_input.get("model") if source == "caller" else own_model if source == "pin" else None
     out["version"] = named if isinstance(named, str) and named.lower() != target else None

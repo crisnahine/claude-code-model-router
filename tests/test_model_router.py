@@ -2151,6 +2151,40 @@ class Router(Sandbox):
         raised = self.decide("worker", LOOKUP)
         self.assertEqual((raised["source"], raised["model"], raised["held"]), ("rule", "fable", None))
 
+    def test_a_project_rule_model_never_lowers_what_the_call_would_run_on_without_it(self):
+        self.override({"agents": {"deep": {"model": "haiku"}, "ghost": {"model": "haiku"}}})
+        self.agent("deep", "opus")  # the user's own agent pins opus; the brief is a lookup, so the pick is haiku
+        pinned = self.decide("deep", LOOKUP)
+        self.assertEqual((pinned["source"], pinned["model"]), ("pin", "opus"))
+        self.assertIn("weaker than the agent's own model opus", pinned["held"])
+        self.agent("plain")
+        self.override({"agents": {"deep": {"model": "haiku"}, "ghost": {"model": "haiku"}, "plain": {"model": "haiku"}}})
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus")
+        env = self.decide("plain", LOOKUP)
+        self.assertEqual((env["action"], env["source"], env["model"]), ("keep", None, None))
+        self.assertIn("weaker than the CLAUDE_CODE_SUBAGENT_MODEL default opus", env["held"])
+        self.assertIn(env["held"], env["reason"])
+        os.environ.pop("CLAUDE_CODE_SUBAGENT_MODEL")
+        ghost = self.decide("ghost", LOOKUP)  # no definition: what it would run on isn't known
+        self.assertEqual((ghost["action"], ghost["source"], ghost["model"]), ("keep", None, None))
+        self.assertIn("the model the call would run on isn't known", ghost["held"])
+        self.override({"agents": {"deep": {"model": "fable"}, "plain": {"model": "sonnet"}}})
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        stronger = self.decide("deep", LOOKUP)  # fable is above the pin: a raise applies
+        self.assertEqual((stronger["source"], stronger["model"], stronger["held"]), ("rule", "fable", None))
+        equal = self.decide("plain", LOOKUP)
+        self.assertEqual((equal["source"], equal["model"], equal["held"]), ("rule", "sonnet", None))
+        self.override({"agents": {"deep": {"model": "haiku"}}}, user=True)  # the user's own rule still lowers
+        self.assertEqual(self.decide("deep", LOOKUP)["model"], "haiku")
+
+    def test_a_project_rule_model_is_not_held_when_it_would_not_have_been_used(self):
+        self.agent("worker", "opus")
+        self.override({"agents": {"worker": {"model": "haiku"}}})
+        named = self.decide("worker", LOOKUP, model="sonnet")  # the call names its own model
+        self.assertEqual((named["source"], named["model"], named["held"]), ("caller", "sonnet", None))
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+        self.assertIsNone(self.decide("worker", LOOKUP)["held"])
+
     def test_the_users_own_rule_keeps_full_control(self):
         self.agent("worker")
         self.override({"agents": {"worker": {"model": "haiku", "level": "lookup"}}}, user=True)
