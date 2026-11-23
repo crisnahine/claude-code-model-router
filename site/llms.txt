@@ -1,13 +1,13 @@
 # Model Router
 
-> Model Router (`model-router`) is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts (subagents, agent-team teammates and workflow stages), choosing the cheapest model that should do the job and running a call one level higher when its work comes back for a redo. Apache-2.0 license. Needs Claude Code 2.1.292 or later and Python 3.9 or later.
+> Model Router (`model-router`) is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts (subagents, agent-team teammates and workflow stages), choosing the cheapest model that should do the job and running a call one level higher when its work comes back for a redo. Apache-2.0 license. Needs Claude Code 2.1.326 or later and Python 3.9 or later.
 
 Facts, each with its source:
 
-- The ladder: lookup runs on Haiku at low effort, standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high, frontier on Fable at high. Source: plugins/model-router/config/models.json.
+- The ladder: lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on Opus at medium, hardest on Opus at high, frontier on Fable at high. Source: plugins/model-router/config/models.json.
 - Redo escalation: the same call issued again in the same request after its result came back runs one level higher. At least 6 votes that are also at least 30% of a level's calls raise that level. Source: docs/ARCHITECTURE.md.
 - Who decides the model, strongest first: CLAUDE_CODE_SUBAGENT_MODEL_FORCE, a model named on the call, a per-agent rule in model-router.json, the agent's own model field, CLAUDE_CODE_SUBAGENT_MODEL, then the router's pick. Source: docs/ARCHITECTURE.md.
-- Measured on the routing code at commit 780ee86, 10 runs per task class and configuration. On an Opus 5.5 session the router cost $0.119 per solved task against $0.152 for Claude Code's defaults (21% less), 80 of 80 runs solved each, with the saving outside the noise in 7 of 8 task classes (PASS) and design level. On a Sonnet session it is cheapest only in lookup and costs more per solved task than the best baseline in 7 of 8 classes at the same pass rate (FAIL). Source: docs/BENCHMARKS.md and docs/TRACEABILITY.md row S4.15.
+- Measured on the routing code at commit 780ee86, 10 runs per task class and configuration, beside every baseline. That run had verify_gate off and ran complex on Sonnet; the verify gate is now on by default and complex now runs on Opus, so these figures don't describe the current defaults. On an Opus 5.5 session the router cost $0.119 per solved task against $0.152 for Claude Code's defaults (21% less), 80 of 80 runs solved each, but more than opusplan ($0.069) and every subagent on Haiku at high effort ($0.075) in all 8 task classes (FAIL against the best baseline). On a Sonnet session it is cheapest only in lookup and costs more per solved task than the best baseline in 7 of 8 classes at the same pass rate (FAIL). Source: docs/BENCHMARKS.md and docs/TRACEABILITY.md row S4.15.
 - Privacy: no prompt, brief, path or code leaves the machine. The only network traffic is a daily fetch from code.claude.com and platform.claude.com, and api.anthropic.com for the account's model list when an Anthropic API key is set. Source: docs/SECURITY.md.
 
 ## Docs
@@ -24,5 +24,6 @@ Facts, each with its source:
 ## Optional
 
 - [Research](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/research/model-control.md): what a plugin can and can't control in Claude Code, from primary sources
+- [Quality research](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/research/quality-first-routing.md): what the router can save without losing quality, from primary sources
 - [Changelog](https://github.com/crisnahine/claude-code-model-router/blob/main/CHANGELOG.md)
 - [Roadmap](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/ROADMAP.md)

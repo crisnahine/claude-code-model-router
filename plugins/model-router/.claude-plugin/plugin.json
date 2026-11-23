@@ -21,7 +21,7 @@
     "code-review"
   ],
   "engines": {
-    "claude-code": ">=2.1.292"
+    "claude-code": ">=2.1.326"
   },
   "network": {
     "hosts": [
@@ -35,30 +35,51 @@
       "type": "string",
       "title": "Routing mode",
       "description": "auto (default): the model and reasoning effort of every subagent call are set automatically. advise: Claude is told the estimate but nothing is changed. off: no routing.",
-      "default": "auto"
+      "default": "auto",
+      "options": [
+        "auto",
+        "advise",
+        "off"
+      ]
     },
     "priority": {
       "type": "string",
       "title": "Priority",
       "description": "What routing favors. balanced (default): the cheapest model strong enough for each subtask. quality: one step stronger. fast: one step lighter, and the quickest that qualifies.",
-      "default": "balanced"
+      "default": "balanced",
+      "options": [
+        "balanced",
+        "quality",
+        "fast"
+      ]
     },
     "max_tier": {
       "type": "string",
       "title": "Strongest model allowed",
       "description": "The most capable model subagents may run on: haiku, sonnet, opus or fable. Anything stronger is lowered to it. Leave as none for no cap.",
-      "default": "none"
+      "default": "none",
+      "options": [
+        "none",
+        "haiku",
+        "sonnet",
+        "opus",
+        "fable"
+      ]
     },
     "agent_pins": {
       "type": "string",
       "title": "Agents that name their own model",
       "description": "respect (default): an agent whose definition names a model keeps it, within the cap. override: those agents are routed by task like every other.",
-      "default": "respect"
+      "default": "respect",
+      "options": [
+        "respect",
+        "override"
+      ]
     },
     "main_effort": {
       "type": "boolean",
       "title": "Effort for the main conversation",
-      "description": "Raise the main conversation's reasoning effort for a request that looks complex or hardest, for that turn only. It never lowers what you set. It stays off when CLAUDE_CODE_EFFORT_LEVEL is set, and wherever an effort change re-reads the context uncached: on Bedrock, Vertex and Foundry, behind ANTHROPIC_BASE_URL, a Claude apps gateway or another third-party provider, with CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS set, and on a session model other than Fable 5.1 or later, Opus 5.5, Sonnet 5.5 or Haiku 5.5. The router doesn't detect a HIPAA organization, and in the Claude Desktop app it can't tell a gateway sign-in from a subscription, so leave this off in a HIPAA organization, or if Claude Desktop reaches Claude through a Claude apps gateway.",
+      "description": "Raise the main conversation's reasoning effort for a request that looks complex or hardest, for that turn only. It never lowers what you set. It stays off when CLAUDE_CODE_EFFORT_LEVEL is set, and wherever an effort change re-reads the context uncached: on Bedrock (including its Mantle endpoint), Vertex and Foundry, behind ANTHROPIC_BASE_URL, a Claude apps gateway or another third-party provider, with CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS set, with prompt caching turned off (DISABLE_PROMPT_CACHING or a per-model variant), and on a session model other than Fable 5.1 or later, Opus 5.5, Sonnet 5.5 or Haiku 5.5. The router doesn't detect a HIPAA organization, and in the Claude Desktop app it can't tell a gateway sign-in from a subscription, so leave this off in a HIPAA organization, or if Claude Desktop reaches Claude through a Claude apps gateway.",
       "default": false
     },
     "update_check": {
@@ -70,8 +91,8 @@
     "verify_gate": {
       "type": "boolean",
       "title": "Test run before finishing",
-      "description": "Off by default, since it adds turns and often an agent. When on, Claude is asked once, before it finishes a turn, to run the verifier when code in the project changed and no test, lint or build ran afterwards. Turn it on if you want a check before every finish.",
-      "default": false
+      "description": "On by default. Claude is asked once, before it finishes a turn, to run the verifier when code in the project changed and no test, lint or build ran afterwards. This check is the failure signal that lets the router start cheap and re-run what fails. Turn it off to skip the ask.",
+      "default": true
     },
     "strong_agent_gate": {
       "type": "boolean",

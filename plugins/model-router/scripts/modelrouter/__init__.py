@@ -9,6 +9,7 @@
     ladder     turns a level, the priority and learned raises into a model and an effort
     router     decides the model and effort for one agent call
     calls      what happened to each call: routed, waiting for a result, finished
+    ledger     one append per row kind, the turn Spend rule, and reading the rows
     spawn      the one procedure both paths run for a spawn: facts, decision, ledger, records
     learn      feedback: raises a level when routed work keeps being redone stronger
     gates      checks before a turn ends

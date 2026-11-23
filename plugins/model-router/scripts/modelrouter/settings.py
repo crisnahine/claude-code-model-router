@@ -7,8 +7,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from functools import cached_property
+from pathlib import Path
 
-from . import store
+from . import allowlist, health, registry, store
+from . import config as cfg
 from .config import MODES, PRIORITIES, parse_mode
 
 CLOUDS = ("bedrock", "vertex", "foundry")
@@ -24,7 +27,7 @@ class Settings:
     pins: str = "respect"  # agent_pins: respect or override
     main_effort: bool = False
     update_check: bool = True
-    verify_gate: bool = False
+    verify_gate: bool = True
     strong_agent_gate: bool = True
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
     force: bool = False  # CLAUDE_CODE_SUBAGENT_MODEL_FORCE
@@ -35,6 +38,8 @@ class Settings:
     api_key: str | None = field(default=None, repr=False)  # ANTHROPIC_API_KEY
     base_url: bool = False  # ANTHROPIC_BASE_URL is set
     no_betas: bool = False  # CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
+    mantle: bool = False  # CLAUDE_CODE_USE_MANTLE
+    cache_off: tuple[str, ...] = ()  # the suffix of each DISABLE_PROMPT_CACHING* switch that is on: "" for all models
 
 
 def truthy(value: str | None) -> bool:
@@ -56,6 +61,14 @@ def _provider(on: set) -> str | None:
     if "anthropic_google_cloud" in on:
         on = on - {"vertex"}
     return next(iter(on)) if len(on) == 1 else None
+
+
+def _cache_off() -> tuple[str, ...]:
+    """Found by prefix, so a new per-model variant needs no code
+    (https://code.claude.com/docs/en/env-vars.md)."""
+    prefix = "DISABLE_PROMPT_CACHING"
+    return tuple(sorted(name[len(prefix):].lstrip("_").lower() for name, value in os.environ.items()
+                        if name.startswith(prefix) and name[len(prefix):len(prefix) + 1] in ("", "_") and truthy(value)))
 
 
 def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
@@ -84,7 +97,7 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
         pins="override" if option("agent_pins") == "override" else "respect",
         main_effort=truthy(option("main_effort")),
         update_check=_on(option("update_check")),
-        verify_gate=truthy(option("verify_gate")),
+        verify_gate=_on(option("verify_gate")),
         strong_agent_gate=_on(option("strong_agent_gate")),
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),
         force=truthy(env("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")),
@@ -95,7 +108,39 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
         api_key=env("ANTHROPIC_API_KEY"),
         base_url=bool(env("ANTHROPIC_BASE_URL")),
         no_betas=truthy(env("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")),
+        mantle=truthy(env("CLAUDE_CODE_USE_MANTLE")),
+        cache_off=_cache_off(),
     )
+
+
+class Snapshot:
+    """What one hook call or command knows about this setup, built once at its entry. The
+    config and options are read at once; the rest on first use, so a hook that never asks
+    for the allowlist or the health table never reads them."""
+
+    def __init__(self, hook_input: dict | None = None, recorded: bool = False) -> None:
+        self.hook_input = hook_input
+        self.session_id = (hook_input or {}).get("session_id")
+        self.config = cfg.load_config(hook_input)
+        self.options = resolve(self.config, recorded)
+        self.project: Path = cfg.project_dir(hook_input)
+
+    @cached_property
+    def health(self) -> health.Health:
+        return health.load()
+
+    @cached_property
+    def allowed(self) -> allowlist.Allowlist:
+        return allowlist.read(self.session_id, self.project, (self.hook_input or {}).get("settings"))
+
+    @cached_property
+    def trusted(self) -> list[str]:
+        return cfg.trusted_models(self.config)
+
+    @cached_property
+    def usable(self) -> list[str]:
+        return registry.available(self.config, self.options.cap, allowed=self.allowed, table=self.health,
+                                  trusted=self.trusted if self.options.cap else None)
 
 
 def record(settings: Settings) -> None:

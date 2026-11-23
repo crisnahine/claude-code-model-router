@@ -1,16 +1,13 @@
 """Pass when FINDING.json is one finding, exactly {"file": ..., "line": ...} plus an optional "why" string,
 naming db/users.py line 6."""
-import json
+import importlib.util
 import sys
 from pathlib import Path
 
-TARGET, LINES = "db/users.py", {6}
+_spec = importlib.util.spec_from_file_location("passcheck", Path(__file__).resolve().parent.parent / "passcheck.py")
+passcheck = importlib.util.module_from_spec(_spec)
+sys.modules["passcheck"] = passcheck
+_spec.loader.exec_module(passcheck)
 
-try:
-    d = json.loads((Path(sys.argv[1]) / "FINDING.json").read_text(encoding="utf-8"))
-except (OSError, ValueError):
-    d = None
-ok = (isinstance(d, dict) and set(d) - {"why"} == {"file", "line"} and isinstance(d.get("why", ""), str)
-      and isinstance(d["file"], str) and ("/" + d["file"].replace("\\", "/")).endswith("/" + TARGET)
-      and type(d["line"]) is int and d["line"] in LINES)
-sys.exit(0 if ok else 1)
+TARGET, LINES = "db/users.py", {6}
+sys.exit(0 if passcheck.finding(Path(sys.argv[1]), TARGET, LINES) else 1)

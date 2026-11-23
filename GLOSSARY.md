@@ -12,11 +12,11 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Spawn**: the moment a call starts an agent. The mod sees it as the engine's `agent.spawn` event, the fallback as a `PreToolUse` hook on the `Agent` tool.
 
-**Path**: how a call reaches the router. The **mod path** runs in `hooks/router.ts` on engine events. The **fallback path** rewrites the `Agent` tool call and stands down when the mod runs.
+**Path**: how a call reaches the router. The **mod path** runs in `hooks/router.ts` on engine events. The **fallback path** (`fallback.py`) rewrites the `Agent` tool call and stands down when the mod runs.
 
 **Level**: how much reasoning a call needs: lookup, standard, complex, hardest or frontier. It comes from the call's brief and the agent's name.
 
-**Profile**: the step that reads a brief and an agent's name and gives the level, with the reasons for it (`profile.py`). It looks for signals and for words that mean the call changes something or has to reason, and leaves out what a negated limit such as "do not change any files" says.
+**Profile**: the step that reads a brief and an agent's name and gives the level, with the reasons for it (`profile.py`). It looks for signals and for words that mean the call changes something or has to reason, and leaves out what a negated limit such as "do not change any files" says. A brief that fixes or hunts a defect is at least complex.
 
 **Signal**: one kind of difficulty the profile looks for in a brief: risk (security, data and its consistency, migrations, public APIs), scope (several modules or services), load (performance, latency, throughput, staleness and capacity limits, counted only when the brief also asks for a design or a choice) or ambiguity (design, a decision between approaches, root cause, trade-offs). More signals mean a higher level.
 
@@ -24,7 +24,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Override file**: `~/.claude/model-router.json` or a project's `.claude/model-router.json`, merged over the registry. The user's file is trusted in full. A project's is limited: it can turn routing down but never on, and it can't change the rank of a shipped model or one the user defined.
 
-**Ladder**: the rule that turns a level, the priority and learned feedback into a model and an effort.
+**Ladder**: the rule that turns a level, the priority and learned feedback into a model and an effort. When the model it lands on is weaker than the level needs, because a cap, the allowlist or model health left nothing at or above it, the pick gets one more effort step, at most `xhigh`, which makes up part of the loss. A pin, a caller's model or a rule that the cap lowers keeps the level's own effort.
 
 **Pick**: the model and effort the ladder gives a call before anyone else's choice is applied.
 
@@ -40,25 +40,31 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Routing mode**: `auto` sets each call's model and effort, `advise` only tells Claude the estimate, and `off` does nothing (`routing_mode`). When the option and the override files disagree, the most cautious one wins.
 
-**Allowlist**: the `availableModels` and `deniedModels` settings, read the way Claude Code reads them, managed drop-in files included. Models they block are not picked unless nothing else would be left.
+**Allowlist** (`allowlist.py`): the `availableModels` and `deniedModels` settings, read the way Claude Code reads them, from the layers the mod sends or from the settings files. Models they block are not picked. When they leave no registry model open, the call is left as it is.
 
-**Model health**: what the router has seen of each model here. Two calls that fail with a model error, run as a different model or are rejected route the model around for a day, then three days, then a week, after which it is tried again. A call that runs as asked clears the record.
+**Model health** (`health.py`): what the router has seen of each model here. Two calls that fail with a model error, run as a different model or are rejected route the model around for a day, then three days, then a week, after which it is tried again. A call that runs as asked clears the record.
+
+**Snapshot** (`settings.Snapshot`): the config, options, usable models, health and allowlist a hook call reads once and passes to every step, so no step re-reads a file another step already read. The last three load on first use.
 
 **Main-loop effort**: the effort of the conversation's own turn. The mod raises it for one turn when the request profiles as complex or harder, never lowers it, and leaves it alone wherever an effort change would re-read the context uncached.
 
 **Fork**: an agent that starts from its parent's conversation. It runs on its parent's model and reads its parent's cache, so the router leaves it alone. A skill with `context: fork` is not a fork, despite the name ([skills](https://code.claude.com/docs/en/skills.md#run-skills-in-a-subagent)). It starts a new subagent of its `agent` type without an `agent.spawn` event, so it isn't routed either, and its model comes from the skill's `model` field, else from its agent type and the session.
 
-**Redo**: the same call issued again in the same request after its result came back. A redo runs one level higher and counts as a vote that its first level was too low.
+**Redo**: the same call issued again in the same request after its result came back. A redo runs one level higher and counts as a vote that its first level was too low. A run that swapped models never finishes a call, so issuing it again is no redo.
+
+**Model swap**: a run whose model changed mid-run, reported as `modelsUsed` on the `Agent` result ([hooks](https://code.claude.com/docs/en/hooks.md)). A content-classifier fallback causes it: Sonnet 5.5 to Sonnet 5, Opus 5.5 and Fable to Opus 4.8 or Opus 5 ([model config](https://code.claude.com/docs/en/model-config.md), "Automatic model fallback"). Sonnet 5 scored 10.3% against 70.6% on Terminal-Bench 4.0 ([announcement](https://www.anthropic.com/news/claude-sonnet-5-5)). A swapped run is no health evidence, no redo and no count for its level.
 
 **Vote**: evidence that a level was routed too low: a redo, or Claude naming a stronger model than the pick. Enough votes raise the level one step, and a raise that keeps being overruled with a weaker model is undone the same way.
 
-**Request**: one prompt from the user and the turns it starts. Redos count only within one request.
+**Intake**: the step that decides whether a prompt or a turn is the person's request and at what level (`intake.py`). A teammate's report, another session's message and a background notification are not. A typed skill is read from its arguments and its body.
 
-**Ledger**: the append-only log of every spawn, result, turn effort and turn's spend, with the reason for each decision.
+**Request**: one prompt from the user and the turns it starts. Redos count only within one request. Its record is kept by `request.py`.
 
-**Spend**: a request's tokens priced at list price from the registry, summed per turn. A model with no price is counted as unpriced, never priced as its neighbour.
+**Ledger** (`ledger.py`): the append-only log of every spawn, result, turn effort and turn's spend, with the reason for each decision. A result row names the models of a swapped run in `models_used`.
 
-**Gate**: a check before a turn ends (`gates.py`). One asks for a test run when code in the project changed and nothing checked it. The other asks for a stronger agent's review when a weak session model answered a hard request alone. Each asks once and then lets go. The test-run check needs the `verify_gate` option on (off by default); the stronger-agent check is on unless `strong_agent_gate` is off.
+**Spend** (`ledger.py`): a request's tokens priced at list price from the registry, summed per turn. A model with no price is counted as unpriced, never priced as its neighbour.
+
+**Gate**: a check before a turn ends (`gates.py`). One asks for a test run when code in the project changed and nothing checked it. The other asks for a stronger agent's review when a weak session model answered a hard request alone. Each asks once and then lets go. Both are on by default; `verify_gate` and `strong_agent_gate` set to `false` turn them off.
 
 **Schema**: the version number written into every state file and allowed in override files. An older file is upgraded as it is read and saved at the current version on its next write. A file from a newer release is read but never overwritten.
 

@@ -1,28 +1,23 @@
 """Pass when test_pricing.py, unchanged, passes, a region is still read from the source once however often it
 is priced, and pricing never changes the cached rows."""
-import re
-import subprocess
+import importlib.util
 import sys
 from pathlib import Path
+
+_spec = importlib.util.spec_from_file_location("passcheck", Path(__file__).resolve().parent.parent / "passcheck.py")
+passcheck = importlib.util.module_from_spec(_spec)
+sys.modules["passcheck"] = passcheck
+_spec.loader.exec_module(passcheck)
 
 WORK = Path(sys.argv[1])
 SHIPPED = Path(__file__).resolve().parent / "repo"
 
-
-def tests_pass(test):
-    if (WORK / test).read_bytes() != (SHIPPED / test).read_bytes():
-        return False  # the test is the spec; changing it doesn't count
-    res = subprocess.run([sys.executable, "-m", "unittest", test[:-3]], cwd=WORK, capture_output=True, text=True,
-                         timeout=60)
-    return res.returncode == 0 and re.search(r"Ran [1-9]\d* tests?", res.stderr) is not None and "OK" in res.stderr
-
-
-sys.path.insert(0, str(WORK))
+passcheck.use_work(WORK)
 try:
     import pricing
     import rates
     full = {"pen": 100, "book": 1500, "lamp": 4999}
-    ok = tests_pass("test_pricing.py")
+    ok = passcheck.tests_pass(WORK, SHIPPED, "test_pricing.py")
     for percent in (10, 25, 50, 10):
         ok = ok and pricing.sale_prices("eu", percent) == {k: v * (100 - percent) // 100 for k, v in full.items()}
         ok = ok and pricing.price_list("eu") == full

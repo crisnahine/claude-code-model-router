@@ -26,11 +26,11 @@ Every page about Model Router, the Claude Code plugin that routes each agent to 
 </tr>
 <tr>
 <td width="50%" valign="top"><img src="assets/icon-research.svg" width="20" height="20" alt=""> <a href="research/model-control.md"><b>Research</b></a><br>What can a plugin control in Claude Code?</td>
-<td width="50%" valign="top"><img src="assets/icon-performance.svg" width="20" height="20" alt=""> <a href="PERFORMANCE.md"><b>Performance</b></a><br>What does the router cost in time and disk?</td>
+<td width="50%" valign="top"><img src="assets/icon-research-quality.svg" width="20" height="20" alt=""> <a href="research/quality-first-routing.md"><b>Quality research</b></a><br>What can the router save without losing quality?</td>
 </tr>
 <tr>
+<td width="50%" valign="top"><img src="assets/icon-performance.svg" width="20" height="20" alt=""> <a href="PERFORMANCE.md"><b>Performance</b></a><br>What does the router cost in time and disk?</td>
 <td width="50%" valign="top"><img src="assets/icon-security.svg" width="20" height="20" alt=""> <a href="SECURITY.md"><b>Security</b></a><br>What reaches the network, and who can steer it?</td>
-<td width="50%"></td>
 </tr>
 <tr><th colspan="2" align="left">Evidence<br><sub>What was measured and tested, and what is still open.</sub></th></tr>
 <tr>
@@ -65,7 +65,7 @@ Every delivery item the project keeps, where it lives, and whether it exists yet
 | -: | :- | :- | :- |
 | 1 | Source code and architecture | [ARCHITECTURE.md](ARCHITECTURE.md), [GLOSSARY.md](../GLOSSARY.md) | Yes |
 | 2 | Capabilities and commands | [README.md](../README.md) "Commands", "Configuration", [GUIDE.md](GUIDE.md) | Yes |
-| 3 | Primary-source research | [research/model-control.md](research/model-control.md) | Yes |
+| 3 | Primary-source research | [research/model-control.md](research/model-control.md), [research/quality-first-routing.md](research/quality-first-routing.md) | Yes |
 | 4 | Supported Claude Code versions, surfaces, platforms and providers | [README.md](../README.md) "Compatibility", [GUIDE.md](GUIDE.md) "Compatibility", [ARCHITECTURE.md](ARCHITECTURE.md) "Verified live" | Yes |
 | 5 | Install and usage | [README.md](../README.md) "Install" | Yes |
 | 6 | Automated test results | [TEST_RESULTS.md](TEST_RESULTS.md) | Yes |

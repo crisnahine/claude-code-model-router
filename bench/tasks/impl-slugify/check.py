@@ -2,26 +2,14 @@ import importlib.util
 import sys
 from pathlib import Path
 
-
-def load(name):
-    spec = importlib.util.spec_from_file_location(name, Path(sys.argv[1]) / f"{name}.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def raises(fn, *args):
-    try:
-        fn(*args)
-    except ValueError:
-        return True
-    except Exception:
-        return False
-    return False
+_spec = importlib.util.spec_from_file_location("passcheck", Path(__file__).resolve().parent.parent / "passcheck.py")
+passcheck = importlib.util.module_from_spec(_spec)
+sys.modules["passcheck"] = passcheck
+_spec.loader.exec_module(passcheck)
 
 
 try:
-    slugify = load("text_utils").slugify
+    slugify = passcheck.load(Path(sys.argv[1]), "text_utils").slugify
     cases = {
         "Hello, World!": "hello-world",
         "  Café au lait  ": "cafe-au-lait",

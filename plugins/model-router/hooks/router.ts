@@ -1,4 +1,4 @@
-import type { EngineInterface, ModelEffort, PluginOptions, Register, TurnUsage } from 'claude-code'
+import type { EngineInterface, ModelEffort, PluginOptions, Register, SettingsSource, TurnUsage } from 'claude-code'
 
 // The engine's own events, forwarded to the Python runtime the settings hooks use, so
 // one router decides everything. agent.spawn sees every subagent, teammate and workflow
@@ -6,6 +6,9 @@ import type { EngineInterface, ModelEffort, PluginOptions, Register, TurnUsage }
 
 const EFFORTS: readonly ModelEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const KEPT = 500
+const SETTINGS_MS = 2000
+const SOURCES: readonly SettingsSource[] = ['policy', 'user', 'project', 'local', 'flag']
+const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides']
 
 type Pick = { model?: string; effort?: ModelEffort } | null
 
@@ -46,6 +49,24 @@ async function hasFirstPartyCredential($: EngineInterface): Promise<boolean | un
   return surfaces && !surfaces.includes('desktop') ? false : undefined
 }
 
+// Only these keys cross to the runtime. A source whose read fails or is still pending after
+// two seconds is left out, and the runtime fills it from the files.
+async function modelSettings($: EngineInterface): Promise<Record<string, Record<string, unknown>> | undefined> {
+  const layers: Record<string, Record<string, unknown>> = {}
+  const reads = SOURCES.map(async source => {
+    try {
+      const read = (await $.settings.read({ source })) as Record<string, unknown>
+      layers[source] = Object.fromEntries(KEYS.filter(key => key in read).map(key => [key, read[key]]))
+    } catch {
+      // left out
+    }
+  })
+  let timer: { cancel: () => void } | undefined
+  await Promise.race([Promise.all(reads), new Promise<void>(resolve => { timer = $.clock.after(SETTINGS_MS, resolve) })])
+  timer?.cancel()
+  return Object.keys(layers).length ? { ...layers } : undefined
+}
+
 function effortRank(effort: ModelEffort | undefined): number {
   return effort === undefined ? -1 : EFFORTS.indexOf(effort)
 }
@@ -73,14 +94,17 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await ask($, opts, 'mod-start', {})
+    const layers = await modelSettings($)
+    await ask($, opts, 'mod-start', { ...(layers ? { settings: layers } : {}) })
     return started
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     if (e.fork || e.resume) return next(e)
     const effort = callerEffort.get(e.tool_use_id)
+    const layers = await modelSettings($)
     const pick = await ask($, opts, 'mod-spawn', {
+      ...(layers ? { settings: layers } : {}),
       cwd: e.cwd,
       parent_agent_id: e.parentAgentId,
       parent_model: e.parentModel,
@@ -135,7 +159,9 @@ export const register: Register = (on, options) => {
       idleCommand = undefined
       const model = await Promise.resolve().then(() => $.session.model()).catch(() => undefined)
       const firstParty = options.main_effort === false ? undefined : await hasFirstPartyCredential($)
+      const layers = await modelSettings($)
       const pick = await ask($, opts, 'mod-turn', {
+        ...(layers ? { settings: layers } : {}),
         text: e.text, ...(model ? { model } : {}), ...(firstParty !== undefined ? { first_party: firstParty } : {}),
         ...(origin ? { origin } : {}), ...(command && e.text.trimStart().startsWith('<command-') ? { command } : {}),
       })

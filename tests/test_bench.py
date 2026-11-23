@@ -1,19 +1,27 @@
 """Tests for the cost and quality benchmark under bench/. Run: python3 -m unittest discover -s tests"""
 from __future__ import annotations
 
+import contextlib
+import importlib.util
+import io
 import json
 import os
+import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bench"))
+sys.path.insert(0, str(ROOT / "bench" / "tasks"))
 import analyze  # noqa: E402
+import passcheck  # noqa: E402
 import run  # noqa: E402
 
 
@@ -24,7 +32,8 @@ def rows(config, cls, costs, passes):
 
 class Analysis(unittest.TestCase):
     def summary(self, data):
-        return {s["class"]: s for s in analyze.summarize(data, router="plugin", draws=500, seed=1)}
+        routers = analyze.router_ids(run.load_configs())
+        return {s["class"]: s for s in analyze.summarize(data, routers=routers, router="plugin", draws=500, seed=1)}
 
     def test_pass_rate_and_cost_per_solved_task(self):
         cell = self.summary(rows("plugin", "lookup", [1, 1, 1, 1], [True, True, False, True]))["lookup"]["configs"]["plugin"]
@@ -67,13 +76,15 @@ class Analysis(unittest.TestCase):
 
     def test_the_same_data_and_seed_give_the_same_intervals(self):
         data = rows("plugin", "lookup", [0.1, 0.3, 0.2, 0.4, 0.1], [True, False, True, True, True])
-        first = analyze.summarize(data, router="plugin", draws=300, seed=7)
-        self.assertEqual(first, analyze.summarize(data, router="plugin", draws=300, seed=7))
+        routers = frozenset({"plugin"})
+        first = analyze.summarize(data, routers=routers, router="plugin", draws=300, seed=7)
+        self.assertEqual(first, analyze.summarize(data, routers=routers, router="plugin", draws=300, seed=7))
 
     def test_the_table_has_a_row_per_class_and_a_column_per_configuration(self):
         data = (rows("plugin", "lookup", [0.1], [True]) + rows("defaults", "lookup", [0.2], [True])
                 + rows("plugin", "bugfix", [0.3], [False]) + rows("defaults", "bugfix", [0.4], [True]))
-        text = analyze.render(analyze.summarize(data, router="plugin", draws=100, seed=0), {"total_cost_usd": 1.0})
+        summary = analyze.summarize(data, routers=frozenset({"plugin"}), router="plugin", draws=100, seed=0)
+        text = analyze.render(summary, {"total_cost_usd": 1.0})
         header = next(line for line in text.splitlines() if line.startswith("| Task class"))
         self.assertIn("| plugin |", header)
         self.assertIn("| defaults |", header)
@@ -90,6 +101,113 @@ class Analysis(unittest.TestCase):
         self.assertEqual(verdict["best_baseline"], "defaults")
         self.assertEqual(verdict["rank"], 2)
         self.assertIn("plugin-cheap", verdict["configs"])  # still shown on the page
+
+    def test_the_bootstrap_draws_with_random_only(self):
+        # randrange has no cross-version guarantee; random() does.
+        with unittest.mock.patch.object(analyze.random.Random, "randrange", side_effect=AssertionError):
+            analyze.summarize(rows("plugin", "lookup", [0.1, 0.2], [True, False]), routers=frozenset({"plugin"}))
+
+    def test_every_baseline_gets_its_difference_interval(self):
+        n = analyze.MIN_RUNS
+        data = rows("plugin", "lookup", [0.1] * n, [True] * n) + rows("defaults", "lookup", [0.3] * n, [True] * n)
+        row = self.summary(data)["lookup"]
+        low, high = row["differences"]["defaults"]
+        self.assertAlmostEqual(low, -0.2)
+        self.assertAlmostEqual(high, -0.2)
+        self.assertNotIn("plugin", row["differences"])
+
+    def test_a_class_with_no_router_or_baseline_has_no_differences(self):
+        self.assertEqual(self.summary(rows("defaults", "lookup", [0.3], [True]))["lookup"]["differences"], {})
+
+    def page_args(self, tmp, name="page.md"):
+        res = Path(tmp) / "results"
+        res.mkdir(exist_ok=True)
+        data = rows("plugin", "lookup", [0.1, 0.2], [True, False]) + rows("defaults", "lookup", [0.3, 0.4], [True, True])
+        records = [dict(r, main_model="sonnet", started_at="2026-11-22T10:00:00+00:00", claude_version="2.1.330",
+                        models={}) for r in data]
+        path = res / "a-lookup-2026-11-22.jsonl"
+        path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+        return path, Path(tmp) / name
+
+    def check(self, *args):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = analyze.main([*map(str, args), "--check"])
+        return code, err.getvalue()
+
+    def test_check_fails_on_a_stale_page_and_passes_on_a_fresh_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, out = self.page_args(tmp)
+            self.assertEqual(analyze.main([str(path), "--out", str(out)]), 0)
+            self.assertEqual(self.check(path, "--out", out), (0, ""))
+            fresh = out.read_text(encoding="utf-8")
+            out.write_text(fresh + "x", encoding="utf-8")
+            code, err = self.check(path, "--out", out)
+            self.assertEqual(code, 1)
+            self.assertIn("page.md: out of date, run python3 bench/analyze.py", err)
+            self.assertEqual(out.read_text(encoding="utf-8"), fresh + "x")
+            out.unlink()
+            self.assertEqual(self.check(path, "--out", out)[0], 1)
+            self.assertFalse(out.exists())
+
+    def test_the_page_keeps_the_head_docs_assets_wrote(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, out = self.page_args(tmp)
+            out.write_text("<!-- Page head, x -->\nhead\n<!-- End of page head. -->\n\n# old\n", encoding="utf-8")
+            analyze.main([str(path), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+            self.assertTrue(page.startswith("<!-- Page head, x -->\nhead\n<!-- End of page head. -->\n\n# Benchmarks\n"))
+            self.assertEqual(self.check(path, "--out", out), (0, ""))
+            out.unlink()
+            analyze.main([str(path), "--out", str(out)])
+            self.assertTrue(out.read_text(encoding="utf-8").startswith("# Benchmarks\n"))
+
+    def test_an_unreadable_page_is_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, out = self.page_args(tmp)
+            out.write_bytes(b"\xff\xfe\x00 not utf-8")
+            code, err = self.check(path, "--out", out)
+        self.assertEqual(code, 1)
+        self.assertIn("out of date", err)
+
+    def test_one_results_file_in_two_spellings_counts_its_aside_lines_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _ = self.page_args(tmp)
+            (path.parent / "infra").mkdir()
+            line = json.dumps({"task": "t", "config": "plugin", "started_at": "2026-11-22T10:00:00+00:00",
+                               "infra_reason": "x"})
+            (path.parent / "infra" / "a.jsonl").write_text(line + "\n", encoding="utf-8")
+            relative = Path(os.path.relpath(path))
+            results = analyze.load([path, relative])
+        self.assertEqual(len(results.files), 1)
+        self.assertEqual(len(results.aside), 1)
+
+    def test_check_reads_the_page_as_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, out = self.page_args(tmp)
+            analyze.main([str(path), "--out", str(out)])
+            out.write_bytes(out.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+            self.assertEqual(self.check(path, "--out", out), (0, ""))
+
+    def test_argv_order_and_repeats_do_not_change_the_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, out = self.page_args(tmp)
+            b = a.with_name("b-lookup-2026-11-22.jsonl")
+            b.write_text(a.read_text(encoding="utf-8").replace("0.3", "0.35").replace("0.1", "0.15"), encoding="utf-8")
+            pages = []
+            for argv in ([b, a], [a, b], [a, b, a]):
+                analyze.main([*map(str, argv), "--out", str(out)])
+                pages.append(out.read_text(encoding="utf-8"))
+            self.assertEqual(pages[0], pages[1])
+            self.assertEqual(pages[1], pages[2])
+
+    def test_main_reads_configurations_and_tasks_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, out = self.page_args(tmp)
+            with unittest.mock.patch.object(run, "load_configs", wraps=run.load_configs) as configs, \
+                    unittest.mock.patch.object(run, "load_tasks", wraps=run.load_tasks) as tasks:
+                analyze.main([str(path), "--out", str(out)])
+        self.assertEqual((configs.call_count, tasks.call_count), (1, 1))
 
     def test_each_session_model_gets_its_own_table_and_router(self):
         real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
@@ -113,6 +231,28 @@ class Analysis(unittest.TestCase):
         self.assertIn("router: `plugin`", sonnet_part)
         self.assertIn("bugfix: FAIL", sonnet_part)
         self.assertNotIn("$0.9000", sonnet_part)
+
+    def test_a_configuration_with_its_own_session_model_joins_every_table(self):
+        # opusplan sets its own --model, so its runs are the same whichever session the batch used.
+        real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl")
+                          .read_text().splitlines()[0])
+        n = analyze.MIN_RUNS
+        rows = [dict(real, main_model=m, config=c, total_cost_usd=usd, passed=True)
+                for m, c, usd in (("claude-opus-5-5", "plugin-next", 0.5), ("claude-opus-5-5", "defaults", 0.9),
+                                  ("sonnet", "plugin-next", 0.3), ("sonnet", "defaults", 0.2),
+                                  ("opusplan", "opusplan", 0.1)) for _ in range(n)]
+        with tempfile.TemporaryDirectory() as tmp:
+            res = Path(tmp) / "results"
+            res.mkdir()
+            (res / "a-bugfix.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            out = Path(tmp) / "page.md"
+            analyze.main([str(res / "a-bugfix.jsonl"), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        self.assertNotIn("## Results: session model `opusplan`", page)
+        for model in ("claude-opus-5-5", "sonnet"):
+            part = page.split(f"## Results: session model `{model}`")[1].split("## ")[0]
+            self.assertIn("| opusplan |", part)
+            self.assertIn("bugfix: FAIL, cost per solved task above opusplan's", part)
 
     def test_the_page_reports_latency_cache_level_accuracy_and_escalation(self):
         real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
@@ -199,6 +339,103 @@ class Analysis(unittest.TestCase):
         self.assertIn("`defaults` old (3); `plugin` new (2)", page)
 
 
+FIXTURE = ROOT / "tests" / "fixtures" / "claude-2.1.330-result.json"
+
+LEDGER = [
+    {"event": "spawn", "agent": "model-router:implementer", "level": "standard", "model": "sonnet",
+     "effort": "medium", "escalated_from": None, "reason": "standard subtask"},
+    {"event": "spawn", "agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"},
+    {"event": "usage", "agent_id": "a1", "cost_usd": 0.05}, {"event": "usage", "agent_id": "a2", "cost_usd": 0.01},
+    {"event": "usage", "agent_id": None, "cost_usd": 0.03}, {"event": "usage", "agent_id": "a1", "cost_usd": 0.02}]
+AGENT_TYPES = {"a1": "model-router:implementer", "a2": "model-router:verifier"}
+
+
+def stub(tmp: Path, source: str) -> list[str]:
+    """A stub claude run as `python stub.py`, the same on every OS."""
+    path = Path(tmp) / "stub.py"
+    path.write_text(source, encoding="utf-8")
+    return [sys.executable, str(path)]
+
+
+class Recorder(unittest.TestCase):
+    task = {"id": "t", "class": "lookup"}
+    config = {"id": "plugin", "plugin": True}
+    options = {"model": "sonnet", "budget": 0.5, "claude_version": "2.1.330", "commit": "abc", "dirty": False}
+    facts = {"started_at": "2026-11-23T00:00:00+00:00", "wall_ms": 7000, "exit_code": 0, "stderr": "", "passed": True,
+             "plugin_state": None, "ledger": None, "agent_types": {}, "session_dir_removed": True, "kept": None}
+
+    def row(self, result, **facts):
+        return run.record(self.task, self.config, self.options, {}, result, {**self.facts, **facts})
+
+    def test_a_real_2_1_330_result_becomes_a_row(self):
+        row = self.row(json.loads(FIXTURE.read_text(encoding="utf-8")))
+        self.assertEqual(row["subagents"], {"spawned": 1, "completed": 1, "failed": 0,
+                                            "by_type": {"general-purpose": 1}})
+        self.assertEqual((row["subtype"], row["is_error"], row["num_turns"], row["api_error_status"]),
+                         ("success", False, 1, None))
+        self.assertEqual((row["duration_ms"], row["duration_api_ms"], row["wall_ms"]), (1026, 5062, 7000))
+        self.assertEqual(row["permission_denials"], [])
+        self.assertEqual(row["models"], {"claude-haiku-5-5": {
+            "inputTokens": 8, "outputTokens": 300, "cacheReadInputTokens": 51466, "cacheCreationInputTokens": 19374,
+            "costUSD": 0.0037657349999999997, "costBasis": "list"}})
+        self.assertEqual((row["total_cost_usd"], row["cost_known"], row["answer"]),
+                         (0.0037657349999999997, True, "DONE"))
+
+    def test_a_zeroed_cost_on_an_error_counts_the_whole_budget(self):
+        base = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        zeroed = self.row(dict(base, subtype="error_during_execution", is_error=True, total_cost_usd=0))
+        self.assertEqual((zeroed["total_cost_usd"], zeroed["cost_known"]), (0.5, False))
+        free = self.row(dict(base, subtype="success", total_cost_usd=0))
+        self.assertEqual((free["total_cost_usd"], free["cost_known"]), (0, True))
+        base.pop("total_cost_usd")
+        self.assertEqual(self.row(base)["cost_known"], False)
+        self.assertEqual(self.row(base)["total_cost_usd"], 0.5)
+
+    def test_a_refused_run_that_reports_zero_cost_cost_nothing(self):
+        base = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        limited = self.row(dict(base, subtype="error_during_execution", is_error=True, api_error_status=429,
+                                total_cost_usd=0))
+        self.assertEqual((limited["total_cost_usd"], limited["cost_known"]), (0, True))
+        offline = self.row(dict(base, subtype="error_during_execution", is_error=True, total_cost_usd=0,
+                                result="API Error: Can't reach the API server"), exit_code=1)
+        self.assertEqual((offline["total_cost_usd"], offline["cost_known"]), (0, True))
+
+    def test_ledger_rows_keep_only_json_objects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"CLAUDE_CODE_PLUGIN_CACHE_DIR": tmp}
+            ledger = run.plugin_data_dir(env) / "ledger.jsonl"
+            ledger.parent.mkdir(parents=True)
+            ledger.write_text('{"event": "spawn"}\n5\nnull\n[]\n"x"\nnot json\n\n{"event": "usage"}\n',
+                              encoding="utf-8")
+            self.assertEqual(run.ledger_rows(env), [{"event": "spawn"}, {"event": "usage"}])
+
+    def test_a_run_with_no_ledger_gives_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(run.ledger_rows({"CLAUDE_CODE_PLUGIN_CACHE_DIR": tmp}))
+
+    def test_ledger_rows_give_spend_by_agent_and_spawns(self):
+        self.assertEqual(run.spend_by_agent(LEDGER, AGENT_TYPES),
+                         {"model-router:implementer": 0.07, "model-router:verifier": 0.01, "main": 0.03})
+        spawned = run.spawns(LEDGER)
+        self.assertIsNone(spawned[0]["escalated_from"])
+        self.assertNotIn("escalated_from", spawned[1])
+        row = self.row({}, ledger=LEDGER, agent_types=AGENT_TYPES)
+        self.assertEqual(row["agent_costs"]["main"], 0.03)
+        self.assertEqual(len(row["routed"]), 2)
+        row = self.row({}, ledger=None)
+        self.assertEqual((row["agent_costs"], row["routed"]), (None, None))
+
+    def test_the_schedule_rotates_configurations_and_numbers_runs(self):
+        got = [(i, t["id"], c["id"]) for i, t, c in
+               run.schedule([{"id": "t"}], [{"id": "a"}, {"id": "b"}, {"id": "c"}], 2, 1)]
+        self.assertEqual(got, [(1, "t", "b"), (1, "t", "c"), (1, "t", "a"), (2, "t", "c"), (2, "t", "a"), (2, "t", "b")])
+
+    def test_a_claude_prefix_passes_through_whole(self):
+        options = {"claude": ["C:/Program Files/Python313/python.exe", "stub.py"], "model": "sonnet", "budget": 0.5}
+        cmd, _ = run.command("x", {"id": "d", "env": {}}, options, {})
+        self.assertEqual(cmd[:3], ["C:/Program Files/Python313/python.exe", "stub.py", "-p"])
+
+
 class Runner(unittest.TestCase):
     def test_each_run_starts_clean_and_only_the_configuration_differs(self):
         base = {"PATH": "/bin", "CLAUDE_CODE_SUBAGENT_MODEL": "opus", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1",
@@ -206,7 +443,7 @@ class Runner(unittest.TestCase):
                 "CLAUDE_CODE_SESSION_ID": "parent", "CLAUDE_CODE_MESSAGING_SOCKET": "/tmp/s.sock",
                 "CLAUDE_PLUGIN_ROOT": "/elsewhere", "CLAUDE_CODE_USE_BEDROCK": "1"}
         configs = {c["id"]: c for c in run.load_configs()}
-        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
         cmd, env = run.command("do it", configs["haiku"], options, base)
         self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]), ("haiku", "1"))
         for name in ("CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_EFFORT", "CLAUDECODE", "CLAUDE_CODE_SESSION_ID",
@@ -228,7 +465,7 @@ class Runner(unittest.TestCase):
 
     def test_token_auth_and_test_pipes_still_work(self):
         configs = {c["id"]: c for c in run.load_configs()}
-        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
         cmd, env = run.command("do it", configs["plugin"], options, {"CLAUDE_CODE_OAUTH_TOKEN": "t",
                                                                      "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "3"})
         self.assertEqual(env, {"CLAUDE_CODE_OAUTH_TOKEN": "t", **run.ISOLATION})
@@ -246,9 +483,7 @@ class Tasks(unittest.TestCase):
     def check(self, task, workdir, answer):
         result = Path(workdir) / ".." / "result.txt"
         result.write_text(answer, encoding="utf-8")
-        res = subprocess.run([sys.executable, str(task["dir"] / "check.py"), str(workdir), str(result)],
-                             capture_output=True, text=True, timeout=60)
-        return res.returncode == 0
+        return run.grade(task["dir"] / "check.py", Path(workdir), result, timeout=60)
 
     def test_every_task_has_a_known_class_and_a_check_that_tells_right_from_wrong(self):
         tasks = run.load_tasks()
@@ -299,7 +534,6 @@ print(json.dumps({"result": answer, "total_cost_usd": 0.01, "modelUsage": {}}))
 '''
 
 
-@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class PluginState(unittest.TestCase):
     """Router runs keep their state in a plugins root of their own, never the one other sessions share."""
 
@@ -310,12 +544,10 @@ class PluginState(unittest.TestCase):
             shared.mkdir(parents=True)
             (shared / "learned.json").write_text('{"lookup": {"calls": 2}}')
             os.utime(shared / "learned.json", (1000, 1000))
-            stub = Path(tmp) / "claude"
-            stub.write_text(STUB)
-            stub.chmod(0o755)
+            claude = stub(tmp, STUB)
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
             configs = {c["id"]: c for c in run.load_configs()}
-            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             shared.chmod(0)  # any read or write of the shared folder now fails
             try:
@@ -336,7 +568,7 @@ class PluginState(unittest.TestCase):
             self.assertIn("bench_dirty", first)
 
     def test_every_run_gets_the_same_plugins_root_setting(self):
-        options = {"claude": "claude", "model": "sonnet", "budget": 0.5, "plugin_dir": "/p", "plugins_root": "/s/plugins"}
+        options = {"claude": ["claude"], "model": "sonnet", "budget": 0.5, "plugin_dir": "/p", "plugins_root": "/s/plugins"}
         # A plugin_ref export needs that commit in the clone, which a shallow CI checkout lacks.
         with unittest.mock.patch.object(run, "plugin_dir_for", return_value="/p"):
             for config in run.load_configs():
@@ -363,15 +595,15 @@ print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_u
 '''
 
 
-@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class Sessions(unittest.TestCase):
     """Runs keep their transcripts, as real sessions do, and the bench removes only its own afterwards."""
 
     def test_runs_save_their_sessions(self):
-        cmd, _ = run.command("do it", next(c for c in run.load_configs() if c["id"] == "plugin"), {"claude": "claude", "model": "sonnet", "budget": 0.5,
+        cmd, _ = run.command("do it", next(c for c in run.load_configs() if c["id"] == "plugin"), {"claude": ["claude"], "model": "sonnet", "budget": 0.5,
                                                              "plugin_dir": "/p"}, {})
         self.assertNotIn("--no-session-persistence", cmd)
 
+    @unittest.skipIf(sys.platform == "win32", "the folder name is built from a POSIX absolute path")
     def test_a_folder_is_named_as_claude_code_names_it(self):
         self.assertEqual(run.session_dir(Path("/private/var/folders/ab/x_y.z/T/mrbench-a-b/work"), {"CLAUDE_CONFIG_DIR": "/c"}),
                          Path("/c/projects/-private-var-folders-ab-x-y-z-T-mrbench-a-b-work"))
@@ -382,11 +614,9 @@ class Sessions(unittest.TestCase):
             other = home / "projects" / "-Users-someone-project"
             other.mkdir(parents=True)
             (other / "keep.jsonl").write_text("{}")
-            stub = Path(tmp) / "claude"
-            stub.write_text(SESSION_STUB)
-            stub.chmod(0o755)
+            claude = stub(tmp, SESSION_STUB)
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
-            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
                 row = run.run_one(task, run.load_configs()[1], options, {})
@@ -397,11 +627,9 @@ class Sessions(unittest.TestCase):
     def test_keep_saves_the_scratch_folder_and_the_transcripts_before_cleanup(self):
         with tempfile.TemporaryDirectory() as tmp:
             home, kept = Path(tmp) / "config", Path(tmp) / "kept"
-            stub = Path(tmp) / "claude"
-            stub.write_text(SESSION_STUB)
-            stub.chmod(0o755)
+            claude = stub(tmp, SESSION_STUB)
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
-            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60, "keep": str(kept),
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60, "keep": str(kept),
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
                 row = run.run_one(task, run.load_configs()[1], options, {})
@@ -440,7 +668,8 @@ class SuiteCoverage(unittest.TestCase):
 
     def test_a_security_finding_given_only_in_the_reply_fails(self):
         for task_id, reply in (("security-sql-injection", "db/users.py:6 builds the SQL with an f-string."),
-                               ("security-path-traversal", "files/server.py:8 joins the name unresolved.")):
+                               ("security-path-traversal", "files/server.py:8 joins the name unresolved."),
+                               ("security-admin-route", "gateway/router.py decodes the path twice.")):
             with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
                 task, work = self.shipped(task_id, tmp)
                 self.assertFalse(self.check(task, work, reply))
@@ -517,7 +746,7 @@ class SuiteCoverage(unittest.TestCase):
 
     def test_each_new_baseline_sets_what_its_name_says(self):
         configs = {c["id"]: c for c in run.load_configs()}
-        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
         cmd, env = run.command("x", configs["opusplan"], options, {})
         self.assertEqual(cmd[cmd.index("--model") + 1], "opusplan")
         cmd, env = run.command("x", configs["advisor"], options, {})
@@ -531,6 +760,13 @@ class SuiteCoverage(unittest.TestCase):
             self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)  # that one would move the main loop too
             self.assertNotIn("--plugin-dir", cmd)
             self.assertEqual(configs[name]["price_model"], model)
+        for name in ("haiku", "sonnet", "opus"):
+            cmd, env = run.command("x", configs[name], options, {})
+            self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]),
+                             (name, "1"), name)
+            self.assertNotIn("CLAUDE_CODE_SUBAGENT_EFFORT", env)
+            self.assertNotIn("--plugin-dir", cmd)
+            self.assertEqual(configs[name]["price_model"], name)
         cmd, env = run.command("x", configs["fable"], options, {})
         self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "fable")
         for config in configs.values():
@@ -582,7 +818,6 @@ print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_u
 '''
 
 
-@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class RouterVariants(unittest.TestCase):
     """A router variant is the shipped plugin plus a project model-router.json and plugin option values."""
 
@@ -590,12 +825,10 @@ class RouterVariants(unittest.TestCase):
         variant = {"id": "v", "plugin": True, "env": {}, "router_config": {"levels": {"standard": {"effort": "medium"}}},
                    "plugin_options": {"main_effort": False}}
         with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "claude"
-            stub.write_text(VARIANT_STUB)
-            stub.chmod(0o755)
+            claude = stub(tmp, VARIANT_STUB)
             seen = Path(tmp) / "seen.json"
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
-            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
                 row = run.run_one(task, variant, options, {})
@@ -637,7 +870,7 @@ print(json.dumps({"result": "read_retry_limit in app/settings.py", "total_cost_u
 
 class PluginRef(unittest.TestCase):
     def test_a_configuration_can_run_the_plugin_from_a_commit(self):
-        options = {"model": "sonnet", "budget": 0.5, "claude": "claude", "plugin_dir": "/p/model-router"}
+        options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
         cmd, _ = run.command("x", {"id": "r", "plugin": True, "env": {}, "plugin_ref": "HEAD"}, options, {})
         exported = Path(cmd[cmd.index("--plugin-dir") + 1])
         self.assertNotEqual(exported, Path("/p/model-router"))
@@ -648,15 +881,12 @@ class PluginRef(unittest.TestCase):
         self.assertEqual(plain[plain.index("--plugin-dir") + 1], "/p/model-router")
 
 
-@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class AgentCosts(unittest.TestCase):
     def test_a_router_run_records_its_spend_by_agent_type(self):
         with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "claude"
-            stub.write_text(COST_STUB)
-            stub.chmod(0o755)
+            claude = stub(tmp, COST_STUB)
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
-            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
                 row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
@@ -671,38 +901,23 @@ class AgentCosts(unittest.TestCase):
             {"agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"}])
 
 
-@unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
 class Limits(unittest.TestCase):
     """A rate or usage limit pauses the bench and retries the run; it is never recorded as a failed task."""
 
     def bench(self, limited: int) -> tuple[int, list[dict], list[dict], list[float]]:
         with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "claude"
-            stub.write_text(LIMIT_STUB)
-            stub.chmod(0o755)
+            claude = stub(tmp, LIMIT_STUB)
             out = Path(tmp) / "out.jsonl"
             env = {"STUB_CALLS": str(Path(tmp) / "calls"), "STUB_LIMITED": str(limited)}
             pauses: list[float] = []
             with unittest.mock.patch.dict("os.environ", env), \
                     unittest.mock.patch.object(run.time, "sleep", pauses.append):
                 code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "1",
-                                 "--max-total", "3", "--claude", str(stub), "--out", str(out)])
+                                 "--max-total", "3", "--claude", *claude, "--out", str(out)])
             read = lambda p: [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []  # noqa: E731
             self.assertEqual(sorted(p.name for p in Path(tmp).glob("*.jsonl")), ["out.jsonl"] if out.exists() else [])
-            return code, read(out), read(Path(tmp) / "limited" / "out.jsonl"), pauses
-
-    def test_a_later_round_keeps_its_run_number_and_rotation(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "claude"
-            stub.write_text(LIMIT_STUB)
-            stub.chmod(0o755)
-            out = Path(tmp) / "out.jsonl"
-            with unittest.mock.patch.dict("os.environ", {"STUB_CALLS": str(Path(tmp) / "calls"), "STUB_LIMITED": "0"}):
-                code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "sonnet", "--runs", "1",
-                                 "--first-run", "1", "--max-total", "3", "--claude", str(stub), "--out", str(out)])
-            rows = [json.loads(line) for line in out.read_text().splitlines()]
-        self.assertEqual(code, 0)
-        self.assertEqual([(r["config"], r["run"]) for r in rows], [("sonnet", 1), ("defaults", 1)])
+            # subprocess also calls time.sleep in short steps while it waits on a slow child.
+            return code, read(out), read(Path(tmp) / "limited" / "out.jsonl"), [p for p in pauses if p >= run.LIMIT_PAUSE]
 
     def test_a_limited_run_pauses_and_is_retried(self):
         code, rows, limited, pauses = self.bench(limited=2)
@@ -782,15 +997,12 @@ print(json.dumps({"result": os.getcwd(), "total_cost_usd": 0.0, "modelUsage": {}
 class TaskIdentity(unittest.TestCase):
     """A run's folder can't hand the router signal words, and a changed task is never pooled silently."""
 
-    @unittest.skipIf(sys.platform == "win32", "the stub claude is a shebang script")
     def test_no_task_id_or_signal_word_reaches_a_runs_working_directory(self):
         sys.path.insert(0, str(ROOT / "plugins" / "model-router" / "scripts"))
         from modelrouter import profile
         with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "claude"
-            stub.write_text(CWD_STUB)
-            stub.chmod(0o755)
-            options = {"claude": str(stub), "model": "sonnet", "budget": 0.5, "timeout": 60,
+            claude = stub(tmp, CWD_STUB)
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             base = str(Path(tempfile.gettempdir()).resolve())
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
@@ -827,53 +1039,124 @@ class TaskIdentity(unittest.TestCase):
         self.assertIn("- Bias: 1 router-arm runs", page)  # the one router row with no task_revision
         self.assertIn("`design-cache-invalidation`", page.split("- Bias: ")[1].split("\n")[0])
 
-    def test_the_committed_page_states_revision_and_bias_only_when_the_rows_call_for_it(self):
-        raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
-        data = [json.loads(line) for path in raw for line in path.read_text(encoding="utf-8").splitlines() if line]
-        page = (ROOT / "docs" / "BENCHMARKS.md").read_text(encoding="utf-8")
-        old = sum(r["task"] == "design-cache-invalidation" and r.get("task_revision", 1) < 2 for r in data)
-        line = f"`design-cache-invalidation` is at revision 2; {old} of its runs here ran on an earlier revision"
-        (self.assertIn if old else self.assertNotIn)(line if old else "is at revision 2;", page)
-        early = sum("task_revision" not in r and r["config"].startswith("plugin") for r in data)
-        (self.assertIn if early else self.assertNotIn)("- Bias: ", page)
+
+class Isolation(unittest.TestCase):
+    """Code a run leaves behind can't shadow the check's modules or fake a pass."""
+
+    PLANT = 'import sys\nsys.stderr.write("Ran 1 test\\n\\nOK\\n")\nimport os\nos._exit(0)\n'
+    FAILS = "import unittest\n\n\nclass T(unittest.TestCase):\n    def test_x(self):\n        self.fail('no')\n"
+    PASSES = "import unittest\n\n\nclass T(unittest.TestCase):\n    def test_x(self):\n        pass\n"
+
+    def test_tests_pass_ignores_a_planted_unittest_and_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "shipped", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            for text, want in ((self.FAILS, False), (self.PASSES, True)):
+                (shipped / "test_x.py").write_text(text, encoding="utf-8")
+                (work / "test_x.py").write_text(text, encoding="utf-8")
+                for name in ("unittest.py", "json.py"):
+                    (work / name).write_text(self.PLANT, encoding="utf-8")
+                self.assertEqual(passcheck.tests_pass(work, shipped, "test_x.py"), want)
+
+    def test_tests_pass_needs_the_shipped_test_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "shipped", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            (shipped / "test_x.py").write_text(self.FAILS, encoding="utf-8")
+            (work / "test_x.py").write_text(self.PASSES, encoding="utf-8")
+            self.assertFalse(passcheck.tests_pass(work, shipped, "test_x.py"))
+
+    def test_planted_stdlib_names_cannot_fake_a_pass(self):
+        for task in run.load_tasks():
+            with self.subTest(task=task["id"]), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp) / "work"
+                shutil.copytree(task["dir"] / "repo", work)
+                for name in ("json.py", "unittest.py"):
+                    (work / name).write_text(self.PLANT, encoding="utf-8")
+                answer = Path(tmp) / "answer.txt"
+                answer.write_text(task.get("wrong_answer", ""), encoding="utf-8")
+                self.assertFalse(run.grade(task["dir"] / "check.py", work, answer))
+                if (task["dir"] / "solution").is_dir():  # the same planted files don't cost an honest run its pass
+                    shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
+                    answer.write_text(task.get("reference_answer", ""), encoding="utf-8")
+                    self.assertTrue(run.grade(task["dir"] / "check.py", work, answer))
+
+    def test_a_check_runs_isolated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            check = Path(tmp) / "check.py"
+            check.write_text("import sys\nsys.exit(0 if sys.flags.isolated else 1)\n", encoding="utf-8")
+            self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt"))
+
+    def test_a_check_sees_no_credentials(self):
+        secret = {"CLAUDE_CODE_OAUTH_TOKEN": "t", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "3", "ANTHROPIC_API_KEY": "k",
+                  "ANTHROPIC_BASE_URL": "u", "GITHUB_TOKEN": "g", "AWS_SECRET_ACCESS_KEY": "s", "DB_PASSWORD": "p",
+                  "api_key": "lower"}
+        with tempfile.TemporaryDirectory() as tmp:
+            check = Path(tmp) / "check.py"
+            check.write_text("import os, sys\n"
+                             f"sys.exit(0 if not set({sorted(secret)!r}) & set(os.environ) "
+                             "and os.environ.get('MRBENCH_KEPT') == 'yes' and 'PATH' in os.environ else 1)\n",
+                             encoding="utf-8")
+            with unittest.mock.patch.dict("os.environ", {**secret, "MRBENCH_KEPT": "yes"}):
+                self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt"))
+                self.assertEqual(sorted(set(secret) & set(run.grading_env(dict(os.environ)))), [])
+
+    def test_a_check_that_hangs_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            check = Path(tmp) / "check.py"
+            check.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+            self.assertFalse(run.grade(check, Path(tmp), Path(tmp) / "answer.txt", timeout=1))
+
+    def test_no_work_module_name_resolves_without_the_work_dir(self):
+        names = set()
+        for task in run.load_tasks():
+            for folder in ("repo", "solution"):
+                if (task["dir"] / folder).is_dir():
+                    names |= {p.stem if p.is_file() else p.name for p in (task["dir"] / folder).iterdir()
+                              if p.suffix == ".py" or p.is_dir()}
+        names.discard("__pycache__")
+        res = subprocess.run([sys.executable, "-I", "-c", "import importlib.util, sys; "
+                              "print([n for n in sys.argv[1:] if importlib.util.find_spec(n)])", *sorted(names)],
+                             capture_output=True, text=True)
+        self.assertEqual(res.stdout.strip(), "[]")
+
+    def test_checks_load_the_helper_by_path_and_append_the_work_dir(self):
+        for check in (run.BENCH / "tasks").glob("*/check.py"):
+            text = check.read_text(encoding="utf-8")
+            self.assertNotIn("sys.path.insert", text, check)
+            if "passcheck" in text:
+                self.assertIn('sys.modules["passcheck"] = passcheck', text, check)
 
 
 class Pilot(unittest.TestCase):
-    def test_committed_results_match_the_published_table(self):
+    def test_the_committed_page_is_what_analyze_writes(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
         self.assertTrue(raw, "no raw results committed")
-        data = [json.loads(line) for path in raw for line in path.read_text(encoding="utf-8").splitlines() if line]
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = analyze.main([*map(str, raw), "--out", str(ROOT / "docs" / "BENCHMARKS.md"), "--check"])
+        self.assertEqual(code, 0, err.getvalue())
+
+    def test_the_page_keeps_its_cost_and_isolation_notes(self):
         page = (ROOT / "docs" / "BENCHMARKS.md").read_text(encoding="utf-8")
-        for path in raw:
-            self.assertIn(f"bench/results/{path.name}", page)
-        self.assertIn(f"${sum(r['total_cost_usd'] for r in data):.2f}", page)
-        self.assertIn(f"{len(data)} runs", page)
         self.assertIn("plus anything that subagents still running", page)
         self.assertIn("margin, not a bound", page)
-        stale = sum("plugin_state" not in r for r in data)
-        if stale:
-            self.assertIn(f"{stale} run(s) here predate", page)
         self.assertIn("`Bash(tail *)`", page)
         self.assertNotIn("`--no-session-persistence`, `--permission-mode", page)
         self.assertNotIn("puts it back afterwards", page)
-        borrowed = sum(r.get("plugin_state") is not None and "plugin_data_own" not in r for r in data)
-        if borrowed:
-            self.assertIn(f"{borrowed} router run(s) here borrowed the shared folder", page)
-        aside = sum(1 for sub in ("infra", "limited") for path in (ROOT / "bench" / "results" / sub).glob("*.jsonl")
-                    for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
-        if aside:
-            self.assertIn(f"{aside} run(s) are set aside", page)
-        unsaved = sum("sessions_saved" not in r for r in data)
-        if unsaved:
-            self.assertIn(f"{unsaved} run(s) here ran with `--no-session-persistence`", page)
+
+    def test_recorded_lookup_answers_still_grade_the_same(self):
+        raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
+        data = [json.loads(line) for path in raw for line in path.read_text(encoding="utf-8").splitlines() if line]
         for row in data:  # a lookup is graded from its answer alone, so today's check must agree with the record
             if row["class"] == "lookup" and len(row["answer"]) < 2000:  # the line keeps 2,000 characters
                 with tempfile.TemporaryDirectory() as tmp:
                     answer = Path(tmp) / "answer.txt"
                     answer.write_text(row["answer"], encoding="utf-8")
                     check = ROOT / "bench" / "tasks" / row["task"] / "check.py"
-                    res = subprocess.run([sys.executable, str(check), tmp, str(answer)], capture_output=True)
-                    self.assertEqual(res.returncode == 0, row["passed"], row["config"])
+                    self.assertEqual(run.grade(check, Path(tmp), answer), row["passed"], row["config"])
 
 
 class HardTier(unittest.TestCase):
@@ -1024,6 +1307,575 @@ class HardTier(unittest.TestCase):
                 self.assertEqual(self.run_with("research-yanked-release", {"RESEARCH.json": {**good, **change}}),
                                  expected)
 
+
+class ProbeHelper(unittest.TestCase):
+    CASES = (
+        ('import sys, json\nprint("noise")\nprint(json.dumps(json.load(sys.stdin)))', {"x": 1}),
+        ('print("{\\"a\\": 1}")\nprint("trailing")', None),
+        ('import os\nprint("{\\"a\\": 1}", flush=True)\nos._exit(3)', None),
+        ('import os\nos._exit(0)', None),
+        ('import time\ntime.sleep(30)', None),
+        ('import sys, json\nprint(json.dumps(sys.flags.isolated))', 1),
+    )
+
+    def test_probe_returns_the_last_json_line_and_none_on_anything_else(self):
+        for body, want in self.CASES:
+            with self.subTest(body=body), tempfile.TemporaryDirectory() as tmp:
+                script = Path(tmp) / "probe.py"
+                script.write_text(body, encoding="utf-8")
+                self.assertEqual(passcheck.probe(Path(tmp), script, {"x": 1}, timeout=5), want)
+
+
+class QualityTier(unittest.TestCase):
+    """Each quality-tier task's check rejects the mistakes the task is built around and takes a fair right answer."""
+    check, shipped, source, run_with = HardTier.check, HardTier.shipped, HardTier.source, HardTier.run_with
+
+    def test_the_quality_tier_has_one_task_in_each_of_six_classes(self):
+        want = {"impl-merge-customers": "implementation", "bugfix-statement-queries": "bugfix",
+                "security-admin-route": "security-review", "rootcause-wallet-race": "root-cause",
+                "cross-amount-cents": "cross-module", "design-checkout-retries": "design"}
+        tasks = {t["id"]: t for t in run.load_tasks()}
+        self.assertEqual({i: tasks[i]["class"] for i in want}, want)
+        self.assertTrue(all(tasks[i]["revision"] == 1 for i in want))
+
+    def test_sqlite_carries_a_rename_into_foreign_keys(self):
+        self.assertGreaterEqual(sqlite3.sqlite_version_info, (3, 26, 0))
+        conn = sqlite3.connect(":memory:")
+        conn.execute("PRAGMA legacy_alter_table = OFF")  # some builds, such as Apple's, default to ON
+        conn.executescript("CREATE TABLE parent (id INTEGER PRIMARY KEY);"
+                           "CREATE TABLE child (id INTEGER PRIMARY KEY, p INTEGER REFERENCES parent(id));"
+                           "ALTER TABLE parent RENAME TO old_parent;")
+        self.assertEqual([row[2] for row in conn.execute("PRAGMA foreign_key_list(child)")], ["old_parent"])
+
+    def test_the_migration_probe_pins_legacy_transaction_control(self):
+        probe = self.source("impl-merge-customers", "probe.py")
+        db = self.source("impl-merge-customers", "repo/store/db.py")
+        for text in (probe, db):
+            self.assertIn("LEGACY_TRANSACTION_CONTROL", text)
+            self.assertIn("legacy_alter_table", text)
+
+    def test_sqlite_lower_folds_ascii_only(self):
+        conn = sqlite3.connect(":memory:")
+        self.assertEqual(conn.execute("SELECT lower('\u00c9'), lower('A')").fetchone(), ("\u00c9", "a"),
+                         "this SQLite is built with ICU, so lower() folds non-ASCII letters and the task's data is wrong")
+
+    def test_migration_rejects_each_known_mistake(self):
+        solution = self.source("impl-merge-customers", "solution/store/migrations/m0002_merge_customers.py")
+        rel = "store/migrations/m0002_merge_customers.py"
+        self.assertTrue(self.run_with("impl-merge-customers", {rel: solution}))
+
+        def between(first, last, replacement=""):
+            return solution[:solution.index(first)] + replacement + solution[solution.index(last):]
+
+        rebuild, view, fill = ('        conn.execute("""\n            CREATE TABLE new_customers', '        conn.execute("""\n            CREATE VIEW',
+                               '        conn.execute("""\n            UPDATE customers SET name')
+        copy = 'INSERT INTO {} SELECT id, lower(trim(email)), name, created_at FROM {}'
+        schema = "id INTEGER PRIMARY KEY, email TEXT NOT NULL COLLATE NOCASE UNIQUE, name TEXT, created_at TEXT NOT NULL"
+        mutants = {
+            "pragma inside the transaction": solution.replace(
+                '    conn.execute("PRAGMA foreign_keys = OFF")\n    conn.execute("BEGIN")\n',
+                '    conn.execute("BEGIN")\n').replace(
+                "WHERE name IS NULL OR name = \'\'\"\"\")\n",
+                "WHERE name IS NULL OR name = \'\'\"\"\")\n        conn.execute(\"PRAGMA foreign_keys = OFF\")\n"),
+            "old table renamed first": between(rebuild, view, (
+                '        conn.execute("ALTER TABLE customers RENAME TO old_customers")\n'
+                f'        conn.execute("CREATE TABLE customers ({schema})")\n'
+                f'        conn.execute("{copy.format("customers", "old_customers")}")\n'
+                '        conn.execute("DROP TABLE old_customers")\n')),
+            "newest kept": solution.replace("ORDER BY k.created_at, k.id", "ORDER BY k.created_at DESC, k.id"),
+            "python lower": solution.replace(
+                '    conn.execute("BEGIN")\n',
+                '    conn.execute("BEGIN")\n    for key, email in conn.execute("SELECT id, email FROM customers").fetchall():\n'
+                '        conn.execute("UPDATE customers SET email = ? WHERE id = ?", (email.strip().lower(), key))\n'),
+            "view not recreated": between(view, '        if conn.execute("PRAGMA foreign_key_check")'),
+            "foreign keys left off": solution.replace(
+                '    finally:\n        conn.execute("PRAGMA foreign_keys = ON")\n', ""),
+            "unique index": between(rebuild, view, (
+                '        conn.execute("UPDATE customers SET email = lower(trim(email))")\n'
+                '        conn.execute("CREATE UNIQUE INDEX customers_email ON customers(email COLLATE NOCASE)")\n')),
+            "names not filled": between(fill, '        conn.execute("UPDATE orders'),
+            "tie goes to the highest id": solution.replace("ORDER BY k.created_at, k.id", "ORDER BY k.created_at, k.id DESC"),
+            "latest donor names the kept customer": solution.replace(
+                "ORDER BY d.created_at, d.id LIMIT 1), name)", "ORDER BY d.created_at DESC, d.id LIMIT 1), name)"),
+            "backup table left behind": solution.replace(
+                '        conn.execute("DROP TABLE customers")\n',
+                '        conn.execute("CREATE TABLE customers_backup AS SELECT * FROM customers")\n'
+                '        conn.execute("DROP TABLE customers")\n'),
+            "view turned into a table": between(view, '        if conn.execute("PRAGMA foreign_key_check")', (
+                '        conn.execute("""\n            CREATE TABLE customer_totals AS\n'
+                '            SELECT c.id, c.email, COUNT(o.id) AS orders, COALESCE(SUM(o.total_cents), 0) AS cents\n'
+                '            FROM customers c LEFT JOIN orders o ON o.customer_id = c.id\n'
+                '            GROUP BY c.id""")\n')),
+            "created_at no longer required": solution.replace(
+                "created_at TEXT NOT NULL\n            )", "created_at TEXT\n            )"),
+            "primary key lost": solution.replace("id INTEGER PRIMARY KEY,\n                email", "id INTEGER,\n                email"),
+            "view left in place": solution.replace('        conn.execute("DROP VIEW customer_totals")\n', ""),
+            "not committed": solution.replace('        conn.execute("COMMIT")\n', ""),
+        }
+        for name, text in mutants.items():
+            with self.subTest(name):
+                self.assertNotEqual(text, solution)
+                self.assertFalse(self.run_with("impl-merge-customers", {rel: text}))
+        noise = {
+            "writes to stdout": solution.replace("def upgrade(conn):\n", 'def upgrade(conn):\n    import sys\n'
+                                                 '    sys.stdout.write("done")\n'),
+            "swaps stdout": solution.replace("def upgrade(conn):\n", 'def upgrade(conn):\n    import os, sys\n'
+                                             '    sys.stdout = open(os.devnull, "w")\n'),
+            "prints at exit": solution.replace("import sqlite3\n", 'import atexit\nimport sqlite3\n\n'
+                                               'atexit.register(lambda: print(\'{"error": "late"}\'))\n', 1),
+        }
+        for name, text in noise.items():
+            with self.subTest(name):
+                self.assertNotEqual(text, solution)
+                self.assertTrue(self.run_with("impl-merge-customers", {rel: text}))
+        legacy_rename = between(rebuild, view, (
+            '        conn.execute("PRAGMA legacy_alter_table = ON")\n'
+            '        conn.execute("ALTER TABLE customers RENAME TO old_customers")\n'
+            f'        conn.execute("CREATE TABLE customers ({schema})")\n'
+            f'        conn.execute("{copy.format("customers", "old_customers")}")\n'
+            '        conn.execute("DROP TABLE old_customers")\n'
+            '        conn.execute("PRAGMA legacy_alter_table = OFF")\n'))
+        self.assertTrue(self.run_with("impl-merge-customers", {rel: legacy_rename}))
+
+    def line_of(self, rel, text, nth=1):
+        lines = self.source("security-admin-route", f"repo/{rel}").splitlines()
+        return [n for n, line in enumerate(lines, 1) if text in line][nth - 1]
+
+    def test_the_route_finding_names_the_second_decode_or_the_guard_and_no_decoy(self):
+        first, second = self.line_of("gateway/router.py", 'if "%" in path:'), self.line_of("gateway/router.py", "path = unquote(path)")
+        self.assertEqual(second, first + 1)
+        guard = self.line_of("gateway/guard.py", "path.startswith(")
+        decode = self.line_of("gateway/guard.py", "unquote(")
+        pairs = (
+            [("gateway/router.py", first, True), ("gateway/router.py", second, True), ("gateway/guard.py", guard, True),
+             ("./gateway/router.py", second, True), ("gateway\\router.py", first, True),
+             ("gateway/router.py", self.line_of("gateway/router.py", "path = unquote(raw"), False),
+             ("gateway/guard.py", decode, True),
+             ("gateway/admin.py", self.line_of("gateway/admin.py", 'f"SELECT'), False),
+             ("gateway/hooks.py", self.line_of("gateway/hooks.py", "pickle.loads"), False),
+             ("gateway/releases.py", self.line_of("gateway/releases.py", "subprocess.run"), False),
+             ("gateway/etag.py", self.line_of("gateway/etag.py", "hashlib.md5"), False),
+             ("gateway/files.py", self.line_of("gateway/files.py", "path = os.path.realpath"), False),
+             ("gateway/router.py", self.line_of("gateway/router.py", "random.uniform"), False),
+             ("auth/session.py", self.line_of("auth/session.py", "compare_digest"), False)])
+        for rel, line, expected in pairs:
+            with self.subTest(file=rel, line=line):
+                self.assertEqual(self.run_with("security-admin-route", {"FINDING.json": {"file": rel, "line": line}}), expected)
+        self.assertTrue(self.run_with("security-admin-route", {"FINDING.json": {
+            "file": "gateway/router.py", "line": second, "why": "It decodes the path a second time."}}))
+        for name, answer in (("two findings", [{"file": "gateway/router.py", "line": second},
+                                               {"file": "gateway/admin.py", "line": 1}]),
+                             ("a string line", {"file": "gateway/router.py", "line": str(second)}),
+                             ("two lines", {"file": "gateway/router.py", "line": [first, second]})):
+            with self.subTest(name):
+                self.assertFalse(self.run_with("security-admin-route", {"FINDING.json": answer}))
+
+    def test_the_shipped_repo_has_no_comment_that_names_the_trap_or_clears_a_decoy(self):
+        for path in (run.BENCH / "tasks" / "security-admin-route" / "repo").rglob("*.py"):
+            with self.subTest(path=path.name):
+                self.assertFalse([l for l in path.read_text(encoding="utf-8").splitlines() if l.lstrip().startswith("#")])
+
+    def test_the_shipped_route_serves_the_admin_handler_to_a_user_on_a_double_encoded_path(self):
+        code = ("import json, sys\nsys.path.append(sys.argv[1])\nfrom app import handle\nfrom auth import session\n"
+                "print(json.dumps([list(handle({'cookie': session.issue(who), 'path': path})) for who, path in "
+                "json.loads(sys.argv[2])]))")
+        cases = [["bob", "/%2561dmin/users"], ["bob", "/admin/users"], ["bob", "/%61dmin/users"], ["alice", "/admin/users"]]
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("security-admin-route", tmp)
+            res = subprocess.run([sys.executable, "-I", "-c", code, str(work), json.dumps(cases)], cwd=tmp,
+                                 capture_output=True, text=True, timeout=60)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        sneaked, plain, once, admin = json.loads(res.stdout)
+        self.assertEqual((plain[0], once[0], admin[0], sneaked[0]), (403, 403, 200, 200))
+        self.assertTrue(admin[1])
+        self.assertEqual(sneaked[1], admin[1])
+
+    def solution_with(self, rel, old, new):
+        text = self.source("cross-amount-cents", f"solution/{rel}")
+        self.assertIn(old, text)
+        return {rel: text.replace(old, new, 1)}
+
+    def shipped_module(self, rel):
+        return {rel: self.source("cross-amount-cents", f"repo/{rel}")}
+
+    def cents_mutants(self):
+        convert = 'int(round(Decimal(str(event["amount"])) * 100))'
+        zero = 'if "amount" not in event:\n        return dict(event)\n    cents = ' + convert
+        totals_hand = ("from shop import events\n\n\ndef order_total(log, order_id):\n    total = 0\n    for e in log:\n"
+                       "        cents = e[\"amount_cents\"] if \"amount_cents\" in e else round(e[\"amount\"] * 100)\n"
+                       "        if e[\"order_id\"] == order_id:\n"
+                       "            total += cents if e[\"kind\"] == \"charge\" else -cents\n    return total\n")
+        mutants = {
+            "truncated cents": self.solution_with("shop/events.py", convert, 'int(event["amount"] * 100)'),
+            "refund rounded the other way": self.solution_with(
+                "shop/events.py", "    new = {", '    if event["kind"] == "refund":\n        cents = int(event["amount"] * 100)\n    new = {'),
+            "rewritten in place": self.solution_with(
+                "shop/events.py", 'new = {k: v for k, v in event.items() if k != "amount"}\n    new["amount_cents"] = cents\n    return new',
+                'event.pop("amount")\n    event["amount_cents"] = cents\n    return event'),
+            "zero falls through": self.solution_with(
+                "shop/events.py", zero, 'cents = event.get("amount_cents") or ' + convert),
+            "float left in the total": self.solution_with(
+                "shop/totals.py", 'total += e["amount_cents"] if e["kind"] == "charge" else -e["amount_cents"]',
+                'cents = int(e["amount_cents"] / 100 * 100)\n            total += cents if e["kind"] == "charge" else -cents'),
+            "float left in the report": self.solution_with(
+                "reports/daily.py", "return charges - refunds", "return (charges - refunds) / 100 * 100"),
+            "refund bound off by one": self.solution_with("shop/refunds.py", "<= refundable(", "< refundable("),
+            "export header kept": self.solution_with(
+                "shop/export.py", 'HEADER = "kind,order_id,amount_cents"', 'HEADER = "kind,order_id,amount"'),
+            "export rows in dollars": self.solution_with(
+                "shop/export.py", "{amount_cents}", "{amount_cents / 100}"),
+            "second converter": {"shop/totals.py": totals_hand},
+            "zero dollars skip the conversion": self.solution_with(
+                "shop/events.py", 'if "amount" not in event:', 'if not event.get("amount"):'),
+            "upcast keeps the old key": self.solution_with(
+                "shop/events.py", 'new = {k: v for k, v in event.items() if k != "amount"}', "new = dict(event)"),
+            "upcast under another name": {
+                rel: text.replace("upcast", "to_cents") for rel, text in (
+                    (f"{d}/{m}.py", self.source("cross-amount-cents", f"solution/{d}/{m}.py"))
+                    for d, m in (("shop", "events"), ("shop", "totals"), ("shop", "refunds"), ("shop", "invoice"),
+                                 ("shop", "export"), ("shop", "audit"), ("reports", "daily")))},
+        }
+        for module in ("events", "totals", "refunds", "invoice", "export", "audit"):
+            mutants[f"{module} untouched"] = self.shipped_module(f"shop/{module}.py")
+        mutants["report untouched"] = self.shipped_module("reports/daily.py")
+        return mutants
+
+    def test_cents_check_rejects_each_known_mistake(self):
+        self.assertTrue(self.run_with("cross-amount-cents", {}))
+        for name, files in self.cents_mutants().items():
+            with self.subTest(name):
+                self.assertFalse(self.run_with("cross-amount-cents", files))
+
+    def test_cents_check_gives_the_same_verdicts_on_other_seeds(self):
+        spec = importlib.util.spec_from_file_location("cents_check", run.BENCH / "tasks" / "cross-amount-cents" / "check.py")
+        check, saved = importlib.util.module_from_spec(spec), sys.modules.get("passcheck")
+        try:
+            spec.loader.exec_module(check)
+        finally:
+            sys.modules["passcheck"] = saved
+        solution = run.BENCH / "tasks" / "cross-amount-cents" / "solution"
+        builds = {"the solution": {}, **self.cents_mutants()}
+        with tempfile.TemporaryDirectory() as tmp:
+            for n, (name, files) in enumerate(builds.items()):
+                work = Path(tmp) / str(n)
+                shutil.copytree(solution, work)
+                for rel, text in files.items():
+                    (work / rel).write_text(text, encoding="utf-8")
+                for seed in range(1, 11):
+                    with self.subTest(build=name, seed=seed):
+                        self.assertEqual(check.passes(work, seed), name == "the solution")
+
+    def test_cents_check_takes_a_round_based_converter(self):
+        files = self.solution_with("shop/events.py", 'int(round(Decimal(str(event["amount"])) * 100))',
+                                   'int(round(event["amount"] * 100))')
+        self.assertTrue(self.run_with("cross-amount-cents", files))
+
+    def test_the_cents_check_does_not_read_a_comment_or_a_longer_string_as_the_old_key(self):
+        files = self.solution_with("shop/totals.py", "from shop import events\n",
+                                   "from shop import events\n\n# the old amount key is gone\nNOTE = \"amount_cents, not amount\"\n")
+        self.assertTrue(self.run_with("cross-amount-cents", files))
+
+    def test_the_cents_repo_has_no_comment(self):
+        for path in (run.BENCH / "tasks" / "cross-amount-cents" / "repo").rglob("*.py"):
+            with self.subTest(path=path.name):
+                self.assertFalse([l for l in path.read_text(encoding="utf-8").splitlines() if l.lstrip().startswith("#")])
+
+    def test_the_shipped_cents_repo_still_works_in_dollars(self):
+        code = ("import json, sys\nsys.path.append(sys.argv[1])\nfrom shop import events, invoice\n"
+                "log = []\nevents.record(log, 'charge', 'o1', 19.99)\n"
+                "print(json.dumps([log, invoice.lines(log, 'o1')]))")
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("cross-amount-cents", tmp)
+            res = subprocess.run([sys.executable, "-I", "-c", code, str(work)], cwd=tmp, capture_output=True, text=True, timeout=60)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(json.loads(res.stdout), [[{"kind": "charge", "order_id": "o1", "amount": 19.99}], ["charge 19.99"]])
+
+    def test_the_retry_design_must_hold_every_constraint(self):
+        good = {"retry_at": "payments_client", "attempts": 2, "per_try_timeout_ms": 1000, "backoff_ms": 100,
+                "idempotency_key": "per_checkout", "gateway_retries": "off", "reasons": ["x"]}
+        for change, expected in (({}, True), ({"per_try_timeout_ms": 600, "backoff_ms": 1500}, True),
+                                 ({"per_try_timeout_ms": 1325, "backoff_ms": 50}, True),
+                                 ({"per_try_timeout_ms": 1326, "backoff_ms": 50}, False),
+                                 ({"per_try_timeout_ms": 1400}, False), ({"per_try_timeout_ms": 599}, False),
+                                 ({"backoff_ms": 40}, False), ({"attempts": 3}, False), ({"attempts": 1}, False),
+                                 ({"retry_at": "checkout"}, False), ({"retry_at": "gateway"}, False),
+                                 ({"gateway_retries": "on"}, False), ({"idempotency_key": "per_attempt"}, False),
+                                 ({"per_try_timeout_ms": 1000.0}, False), ({"attempts": True}, False),
+                                 ({"reasons": []}, False), ({"extra": 1}, False)):
+            with self.subTest(change=change):
+                self.assertEqual(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}),
+                                 expected)
+
+    def test_the_retry_check_rejects_the_other_wrong_designs(self):
+        good = json.loads(self.source("design-checkout-retries", "solution/DESIGN.json"))
+        self.assertTrue(self.run_with("design-checkout-retries", {}))
+        for change in ({"retry_at": "none"}, {"retry_at": "none", "attempts": 1}, {"idempotency_key": "none"},
+                       {"attempts": "2"}, {"backoff_ms": 100.0}, {"gateway_retries": False}, {"reasons": "x"},
+                       {"reasons": [" "]}, {"per_try_timeout_ms": 1400, "backoff_ms": 50}):
+            with self.subTest(change=change):
+                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
+        for key in good:
+            with self.subTest(missing=key):
+                self.assertFalse(self.run_with("design-checkout-retries",
+                                               {"DESIGN.json": {k: v for k, v in good.items() if k != key}}))
+        for text in ("", "not json", json.dumps([good])):
+            with self.subTest(text=text):
+                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": text}))
+
+    def test_each_rejected_retry_design_breaks_a_fact_spec_md_states(self):
+        good = json.loads(self.source("design-checkout-retries", "solution/DESIGN.json"))
+        spec = " ".join(self.source("design-checkout-retries", "repo/SPEC.md").split())
+        for change, facts in (({"retry_at": "checkout"}, ("running the whole handler again", "reserves the stock twice")),
+                              ({"retry_at": "gateway"}, ("calling the checkout service again", "reserves the stock twice")),
+                              ({"gateway_retries": "on"}, ("on by default with 3 attempts", "twice the normal request rate")),
+                              ({"attempts": 3}, ("twice the normal request rate",)),
+                              ({"attempts": 1}, ("survive one failed or slow provider call",)),
+                              ({"idempotency_key": "per_attempt"}, ("may still have charged", "idempotent only when"))):
+            with self.subTest(change=change):
+                for fact in facts:
+                    self.assertIn(fact, spec)
+                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
+
+        def ms(pattern):
+            return int(re.search(pattern, spec).group(1).replace(",", ""))
+
+        self.assertIn("At most 1 in 100 charges may need a second try", spec)
+        self.assertIn("even when every try times out", spec)
+        p99, gap = ms(r"p99 ([\d,]+) ms"), ms(r"at least ([\d,]+) ms between attempts")
+        before, after, deadline = ms(r"up to ([\d,]+) ms before"), ms(r"([\d,]+) ms after"), ms(r"after ([\d,]+) ms\.")
+        self.assertEqual((p99, gap, before, after, deadline), (600, 50, 200, 100, 3000))
+
+        def holds(d):
+            return (d["per_try_timeout_ms"] >= p99 and d["backoff_ms"] >= gap and before + d["attempts"]
+                    * d["per_try_timeout_ms"] + (d["attempts"] - 1) * d["backoff_ms"] + after <= deadline)
+
+        self.assertTrue(holds(good))
+        for change in ({"per_try_timeout_ms": 550}, {"backoff_ms": 40}, {"per_try_timeout_ms": 1400, "backoff_ms": 50},
+                       {"per_try_timeout_ms": 1326, "backoff_ms": 50}):
+            with self.subTest(change=change):
+                self.assertFalse(holds({**good, **change}))
+                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
+
+    def test_a_retry_design_given_only_in_the_reply_fails(self):
+        reply = json.dumps(json.loads(self.source("design-checkout-retries", "solution/DESIGN.json")))
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("design-checkout-retries", tmp)
+            self.assertFalse(self.check(task, work, reply))
+
+
+    def test_statement_check_rejects_each_known_mistake(self):
+        task = "bugfix-statement-queries"
+        rel = "billing/statement.py"
+        solution = self.source(task, "solution/billing/statement.py")
+        shipped = self.source(task, "repo/billing/statement.py")
+        self.assertTrue(self.run_with(task, {rel: solution}))
+        header = solution[:solution.index("    result = {")]
+        mutants = {
+            "shipped": shipped,
+            "join fan-out": header + (
+                '    sql = ("SELECT a.id, COALESCE(SUM(i.amount_cents), 0) - COALESCE(SUM(p.amount_cents), 0) FROM accounts a "\n'
+                '           "LEFT JOIN invoices i ON i.account_id = a.id AND i.voided = 0 "\n'
+                '           "LEFT JOIN payments p ON p.invoice_id = i.id GROUP BY a.id")\n'
+                '    return {a: c for a, c in conn.execute(sql)}\n'),
+            "rule dropped": solution.replace("if rules.counts(status, method):", "if True:"),
+            "pending bank counted": solution.replace("if rules.counts(status, method):", 'if status != "failed":'),
+            "voided kept": solution.replace(" WHERE voided = 0", "").replace(" WHERE i.voided = 0", ""),
+            "voided invoices' payments kept": solution.replace(" WHERE i.voided = 0", ""),
+            "payments per invoice": header + (
+                '    result = {a: 0 for (a,) in conn.execute("SELECT id FROM accounts")}\n'
+                '    for invoice_id, account_id, cents in conn.execute("SELECT id, account_id, amount_cents FROM invoices WHERE voided = 0").fetchall():\n'
+                '        result[account_id] += cents\n'
+                '        for paid, status, method in conn.execute("SELECT amount_cents, status, method FROM payments WHERE invoice_id = ?", (invoice_id,)).fetchall():\n'
+                '            if rules.counts(status, method):\n'
+                '                result[account_id] -= paid\n'
+                '    return result\n'),
+            "trace removed": shipped.replace("    result = {}", "    conn.set_trace_callback(None)\n    result = {}"),
+            "trace and progress removed": shipped.replace(
+                "    result = {}", "    conn.set_trace_callback(None)\n    conn.set_progress_handler(None, 0)\n    result = {}"),
+            "progress handler removed": solution.replace("    result = {", "    conn.set_progress_handler(None, 0)\n    result = {", 1),
+            "line tracing removed": solution.replace("    result = {", "    import sys\n    sys.settrace(None)\n    result = {", 1),
+            "index added": solution.replace(
+                "    result = {", '    conn.execute("CREATE INDEX payments_by_status ON payments(status)")\n    result = {', 1),
+            "temp table left": header + (
+                '    conn.execute("CREATE TEMP TABLE owed AS SELECT a.id AS id, COALESCE((SELECT SUM(amount_cents) FROM invoices '
+                'WHERE account_id = a.id AND voided = 0), 0) AS cents FROM accounts a")\n'
+                '    result = {a: c for a, c in conn.execute("SELECT id, cents FROM owed")}\n'
+                '    for account_id, paid, status, method in conn.execute("SELECT i.account_id, p.amount_cents, p.status, p.method FROM payments p '
+                'JOIN invoices i ON i.id = p.invoice_id WHERE i.voided = 0"):\n'
+                '        if rules.counts(status, method):\n'
+                '            result[account_id] -= paid\n'
+                '    return result\n'),
+            "string keys": solution.replace("    return result", "    return {str(k): v for k, v in result.items()}"),
+            "bool values": solution.replace("    return result", "    return {k: (True if v == 0 else v) for k, v in result.items()}"),
+            "float values": solution.replace("    return result", "    return {k: float(v) for k, v in result.items()}"),
+            "accounts without invoices left out": solution.replace("    return result", "    return {k: v for k, v in result.items() if v}"),
+            "not a dict": solution.replace("    return result", "    return list(result.items())"),
+            "raises": solution.replace("    return result", "    raise RuntimeError('no')"),
+        }
+        for name, text in mutants.items():
+            with self.subTest(name):
+                self.assertNotEqual(text, solution if name != "shipped" else "")
+                self.assertFalse(self.run_with(task, {rel: text}))
+        noise = {
+            "writes to stdout": solution.replace("    result = {", '    print("done")\n    result = {', 1),
+            "prints at exit": "import atexit\n" + solution.replace(
+                "from billing import rules\n", "from billing import rules\n\natexit.register(lambda: print('[]'))\n", 1),
+        }
+        for name, text in noise.items():
+            with self.subTest(name):
+                self.assertNotEqual(text, solution)
+                self.assertTrue(self.run_with(task, {rel: text}))
+
+    def test_statement_check_rejects_quadratic_python_and_takes_a_linear_rewrite(self):
+        task = "bugfix-statement-queries"
+        rel = "billing/statement.py"
+        solution = self.source(task, "solution/billing/statement.py")
+        header = solution[:solution.index("    result = {")]
+        quadratic = header + (
+            '    result = {a: 0 for (a,) in conn.execute("SELECT id FROM accounts")}\n'
+            '    invoices = conn.execute("SELECT id, account_id, amount_cents FROM invoices WHERE voided = 0").fetchall()\n'
+            '    payments = conn.execute("SELECT invoice_id, amount_cents, status, method FROM payments").fetchall()\n'
+            '    for invoice_id, account_id, cents in invoices:\n'
+            '        result[account_id] += cents - sum(p[1] for p in payments if p[0] == invoice_id and rules.counts(p[2], p[3]))\n'
+            '    return result\n')
+        self.assertFalse(self.run_with(task, {rel: quadratic}))
+        one_statement = header + (
+            '    sql = ("SELECT a.id, COALESCE(i.cents, 0) - COALESCE(p.cents, 0) FROM accounts a "\n'
+            '           "LEFT JOIN (SELECT account_id, SUM(amount_cents) AS cents FROM invoices WHERE voided = 0 GROUP BY account_id) i ON i.account_id = a.id "\n'
+            '           "LEFT JOIN (SELECT i.account_id AS account_id, SUM(p.amount_cents) AS cents FROM payments p JOIN invoices i ON i.id = p.invoice_id "\n'
+            '           "WHERE i.voided = 0 AND (p.status = \'settled\' OR (p.status = \'pending\' AND p.method = \'card\')) GROUP BY i.account_id) p "\n'
+            '           "ON p.account_id = a.id")\n'
+            '    return dict(conn.execute(sql).fetchall())\n')
+        self.assertTrue(self.run_with(task, {rel: one_statement}))
+        by_invoice = header + (
+            '    import collections\n'
+            '    paid = collections.defaultdict(int)\n'
+            '    for invoice_id, cents, status, method in conn.execute("SELECT invoice_id, amount_cents, status, method FROM payments"):\n'
+            '        if rules.counts(status, method):\n'
+            '            paid[invoice_id] += cents\n'
+            '    result = collections.defaultdict(int, {a: 0 for (a,) in conn.execute("SELECT id FROM accounts")})\n'
+            '    for invoice_id, account_id, cents in conn.execute("SELECT id, account_id, amount_cents FROM invoices WHERE voided = 0"):\n'
+            '        result[account_id] += cents - paid[invoice_id]\n'
+            '    return result\n')
+        self.assertTrue(self.run_with(task, {rel: by_invoice}))
+
+    def wallet_phases(self, files):
+        """The probe output for the wallet solution with `files` written over it, and the phases the check calls wrong."""
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("rootcause-wallet-race", tmp)
+            shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
+            for rel, text in files.items():
+                (work / rel).write_text(text, encoding="utf-8")
+            kept = sys.modules.get("passcheck")
+            try:
+                spec = importlib.util.spec_from_file_location("wallet_check", task["dir"] / "check.py")
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                got = module.run_probe(work)
+            finally:
+                sys.modules["passcheck"] = kept
+            return got, module.wrong_phases(got)
+
+    def test_wallet_check_rejects_each_known_mistake(self):
+        task = "rootcause-wallet-race"
+        rel = "ledger/wallet.py"
+        solution = self.source(task, "solution/ledger/wallet.py")
+        shipped = self.source(task, "repo/ledger/wallet.py")
+        self.assertEqual(self.wallet_phases({rel: solution})[1], [])
+        guard = "import threading\n\n_MUTEX = threading.Lock()\n"
+        credit = solution[solution.index("def credit"):solution.index("def transfer")]
+        local = solution.replace("store.lock(wallet)", "_MUTEX").replace(
+            "contextlib.ExitStack() as locks", "_MUTEX").replace("            locks.enter_context(store.lock(key))\n", "").replace(
+            "        for key in sorted({src, dst}):\n", "")
+        self.assertIn("with _MUTEX:\n        available", local)
+        keys = "sorted({src, dst})"
+        cas_add = ("def _add(store, wallet, cents):\n    while True:\n        seen = store.get(wallet)\n"
+                   "        if store.compare_and_put(wallet, seen or 0, (seen or 0) + cents):\n            return\n\n\n")
+        livelock = ("class InsufficientFunds(Exception):\n    pass\n\n\ndef balance(store, wallet):\n    return store.get(wallet) or 0\n\n\n"
+                    + cas_add + "def credit(store, wallet, cents):\n    _add(store, wallet, cents)\n\n\n"
+                    "def transfer(store, src, dst, cents):\n    while True:\n        seen = store.get(src)\n"
+                    "        if (seen or 0) < cents:\n            raise InsufficientFunds(src)\n        if src == dst:\n            return\n"
+                    "        if store.compare_and_put(src, seen, seen - cents):\n            break\n    _add(store, dst, cents)\n")
+        # name: (files, a phase the check must call wrong)
+        mutants = {
+            "shipped": ({rel: shipped}, "C"),
+            "locks in argument order": ({rel: solution.replace(keys, "dict.fromkeys((src, dst))")}, "C"),
+            "process-local lock": ({rel: guard + local}, "A"),
+            "process-local lock in a helper module": ({"ledger/guard.py": guard, rel: "from ledger.guard import _MUTEX\n" + local}, "A"),
+            "one global key": ({rel: solution.replace("store.lock(wallet)", 'store.lock("wallets")').replace(
+                "store.lock(key)", 'store.lock("wallets")').replace(keys, "{src}")}, "B"),
+            "global transfers lock": ({rel: solution.replace(
+                "        for key in " + keys, '        locks.enter_context(store.lock("transfers"))\n        for key in ' + keys)}, "G"),
+            "locks source only": ({rel: solution.replace(keys, "[src]")}, "H"),
+            "locks destination only": ({rel: solution.replace(keys, "[dst]")}, "D"),
+            "self transfer locks twice": ({rel: solution.replace(keys, "sorted([src, dst])")}, "E"),
+            "self transfer creates money": ({rel: solution.replace(
+                "        if src != dst:\n            store.put(src, available - cents)\n            store.put(dst, balance(store, dst) + cents)",
+                "        target = balance(store, dst)\n        store.put(src, available - cents)\n        store.put(dst, target + cents)")}, "E"),
+            "funds check refuses an exact balance": ({rel: solution.replace("available < cents", "available <= cents")}, "E"),
+            "funds read outside the lock": ({rel: solution.replace(
+                "    with contextlib.ExitStack() as locks:", "    available = balance(store, src)\n    with contextlib.ExitStack() as locks:").replace(
+                "        available = balance(store, src)\n", "")}, "D"),
+            "credit unlocked": ({rel: solution.replace(credit, "def credit(store, wallet, cents):\n    store.put(wallet, balance(store, wallet) + cents)\n\n\n")}, "A"),
+            "credit put and verify": ({rel: solution.replace(credit, (
+                "def credit(store, wallet, cents):\n    while True:\n        want = balance(store, wallet) + cents\n"
+                "        store.put(wallet, want)\n        if balance(store, wallet) == want:\n            return\n\n\n"))}, "A"),
+            "no funds check": ({rel: solution.replace("        if available < cents:\n            raise InsufficientFunds(src)\n", "")}, "D"),
+            "compare and put that never takes an absent wallet": ({rel: livelock}, "A"),
+        }
+        for name, (files, phase) in mutants.items():
+            with self.subTest(name):
+                self.assertNotEqual(files[rel], solution if name != "shipped" else "")
+                got, wrong = self.wallet_phases(files)
+                self.assertIsNotNone(got, "the probe must answer inside its own timeout")
+                self.assertIn(phase, wrong, wrong)
+                if name.startswith("compare and put"):
+                    self.assertIs(got["A"]["hung"], True)
+                    self.assertEqual(wrong[0], "A")
+
+    def test_wallet_check_takes_a_compare_and_put_solution(self):
+        task = "rootcause-wallet-race"
+        rel = "ledger/wallet.py"
+        solution = self.source(task, "solution/ledger/wallet.py")
+        cas = (
+            "class InsufficientFunds(Exception):\n    pass\n\n\n"
+            "def balance(store, wallet):\n    return store.get(wallet) or 0\n\n\n"
+            "def _add(store, wallet, cents):\n    while True:\n        seen = store.get(wallet)\n"
+            "        if store.compare_and_put(wallet, seen, (seen or 0) + cents):\n            return\n\n\n"
+            "def credit(store, wallet, cents):\n    _add(store, wallet, cents)\n\n\n"
+            "def transfer(store, src, dst, cents):\n    while True:\n        seen = store.get(src)\n"
+            "        if (seen or 0) < cents:\n            raise InsufficientFunds(src)\n"
+            "        if src == dst:\n            return\n"
+            "        if store.compare_and_put(src, seen, seen - cents):\n            break\n    _add(store, dst, cents)\n")
+        self.assertTrue(self.run_with(task, {rel: cas}))
+        noisy = solution.replace("    with store.lock(wallet):", '    print("credit")\n    with store.lock(wallet):', 1)
+        self.assertNotEqual(noisy, solution)
+        self.assertTrue(self.run_with(task, {rel: noisy}))
+        ordered = {"ledger/order.py": "def ordered(*keys):\n    return sorted(set(keys))\n",
+                   rel: "from . import order\n" + solution.replace("sorted({src, dst})", "order.ordered(src, dst)")}
+        self.assertTrue(self.run_with(task, ordered))
+
+    def test_a_locked_wallet_solution_does_not_wait_out_the_barriers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("rootcause-wallet-race", tmp)
+            shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
+            (Path(tmp) / "result.txt").write_text("", encoding="utf-8")
+            start = time.monotonic()
+            verdict = run.grade(task["dir"] / "check.py", work, Path(tmp) / "result.txt")
+            took = time.monotonic() - start
+        self.assertTrue(verdict)
+        self.assertLess(took, 15)  # five 5 s barriers would take 25 s
+
+    def test_the_wallet_check_ends_inside_the_grade_timeout_on_the_shipped_deadlock(self):
+        task_id = "rootcause-wallet-race"
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped(task_id, tmp)
+            (Path(tmp) / "result.txt").write_text("", encoding="utf-8")
+            start = time.monotonic()
+            verdict = run.grade(task["dir"] / "check.py", work, Path(tmp) / "result.txt")
+            took = time.monotonic() - start
+        self.assertFalse(verdict)
+        self.assertLess(took, 40)
 
 if __name__ == "__main__":
     unittest.main()

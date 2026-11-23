@@ -1,5 +1,5 @@
 {
-  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength, speed and cost are relative ranks. A model's name must be an alias the Agent tool accepts (haiku, sonnet, opus, fable). The crew lists the plugin's role agents and their roles. A crew model must match the agent's own frontmatter, which the tests check: the always-cheap agents keep theirs, and the others carry none, so the router routes each by its brief. Levels pair a strength with an effort: on current models effort is the cheaper lever, so standard and complex share Sonnet and differ in effort. Prices are USD per million tokens on the Anthropic API, used only to report spend: a key is one model version, or ends in -* to cover every version of a family, and a version with no entry is reported as unpriced. Prices can be added or changed in your own ~/.claude/model-router.json only, not a project's file. cache_write is the five-minute cache write price and cache_write_1h the one-hour one, which is twice input when left out. A shipped long_prompt block holds the prices a request pays when its prompt (input, cache reads and cache writes) is over its `over` tokens; each request is priced on its own (https://platform.claude.com/docs/en/about-claude/pricing.md, Long context pricing). `schema` is the version of this shape; an override may carry it too, and docs/ARCHITECTURE.md \"Compatibility\" says what changes it.",
+  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength, speed and cost are relative ranks. A model's name must be an alias the Agent tool accepts (haiku, sonnet, opus, fable). The crew lists the plugin's role agents and their roles. A crew model must match the agent's own frontmatter, which the tests check: the always-cheap agents keep theirs, and the others carry none, so the router routes each by its brief. Levels pair a strength with an effort: on current models effort is the cheaper lever, so standard runs on Sonnet and complex on Opus, both at medium, and hardest differs from complex in effort on the same model. Prices are USD per million tokens on the Anthropic API, used only to report spend: a key is one model version, or ends in -* to cover every version of a family, and a version with no entry is reported as unpriced. Prices can be added or changed in your own ~/.claude/model-router.json only, not a project's file. cache_write is the five-minute cache write price and cache_write_1h the one-hour one, which is twice input when left out. A shipped long_prompt block holds the prices a request pays when its prompt (input, cache reads and cache writes) is over its `over` tokens; each request is priced on its own (https://platform.claude.com/docs/en/about-claude/pricing.md, Long context pricing). `schema` is the version of this shape; an override may carry it too, and docs/ARCHITECTURE.md \"Compatibility\" says what changes it.",
   "schema": 1,
   "models": {
     "haiku": {
@@ -12,13 +12,13 @@
       "strength": 2,
       "speed": 3,
       "cost": 2,
-      "use_for": "Everyday implementation at medium effort: features and fixes with a clear spec, tests, refactors inside one module. Design, review and risky or cross-module changes at high."
+      "use_for": "Everyday implementation at medium effort: features with a clear spec, tests, refactors inside one module."
     },
     "opus": {
       "strength": 3,
       "speed": 2,
       "cost": 3,
-      "use_for": "Design and planning, cross-module changes, subtle bugs, security-sensitive code, adversarial review. On coding it came within a point of Fable at the same effort for under a quarter of the cost."
+      "use_for": "Defect fixes, migrations and performance work, design and planning, cross-module changes, subtle bugs, security-sensitive code, adversarial review. On coding it came within a point of Fable at the same effort for under a quarter of the cost."
     },
     "fable": {
       "strength": 4,
@@ -47,15 +47,15 @@
   "levels": {
     "lookup": {
       "needs": 1,
-      "effort": "low"
+      "effort": "medium"
     },
     "standard": {
       "needs": 2,
       "effort": "medium"
     },
     "complex": {
-      "needs": 2,
-      "effort": "high"
+      "needs": 3,
+      "effort": "medium"
     },
     "hardest": {
       "needs": 3,
@@ -72,6 +72,13 @@
       "complex": "high",
       "hardest": "xhigh",
       "frontier": "xhigh"
+    },
+    "effort_keeps_cache": {
+      "$comment": "Families whose prompt cache survives an effort change, with an API key or a subscription (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level). A '>=' prefix means that version or later; a bare version means that version only.",
+      "fable": ">=5.1",
+      "opus": "5.5",
+      "sonnet": "5.5",
+      "haiku": "5.5"
     }
   },
   "prices": {

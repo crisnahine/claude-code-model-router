@@ -1,8 +1,8 @@
 {
  "rules": [
   "lookup: reads, finds, lists, counts, runs a command and reports; a narrow explanation.",
-  "standard: implements to a clear spec, writes tests, fixes a bug whose cause is stated, refactors inside one module, explains how a whole system works.",
-  "complex: touches security, auth, payments, data, schemas, migrations, a public API or concurrency; changes across modules; reviews; designs a module; hunts an unclear cause in one area.",
+  "standard: implements to a clear spec, writes tests, refactors inside one module, explains how a whole system works.",
+  "complex: touches security, auth, payments, data, schemas, migrations, a public API or concurrency; changes across modules; reviews; designs a module; fixes or hunts a defect, whatever its size or how clear its cause (Claude Code's effort guide puts fixing a bug in an existing codebase at `high`: https://code.claude.com/docs/en/model-config.md, choose an effort level).",
   "hardest: ambiguous, multi-system and risky at once.",
   "frontier: research-grade or open-ended, with no known approach.",
   "lowest is the least a brief needs for a high pass rate; highest is the most that is still a sensible spend."
@@ -346,10 +346,11 @@
   },
   {
    "lowest": "standard",
-   "highest": "standard",
+   "highest": "complex",
    "agent": "general-purpose",
    "description": "Fix page off-by-one",
-   "prompt": "page_slice in pages.py treats pages as 0-based but they're 1-based. Fix the start index and add a test for page 1."
+   "prompt": "page_slice in pages.py treats pages as 0-based but they're 1-based. Fix the start index and add a test for page 1.",
+   "defect": true
   },
   {
    "lowest": "standard",
@@ -395,10 +396,11 @@
   },
   {
    "lowest": "standard",
-   "highest": "standard",
+   "highest": "complex",
    "agent": "general-purpose",
    "description": "Fix long lines",
-   "prompt": "Fix the 12 ruff E501 line-too-long errors in app/views.py without changing behavior."
+   "prompt": "Fix the 12 ruff E501 line-too-long errors in app/views.py without changing behavior.",
+   "defect": true
   },
   {
    "lowest": "standard",
@@ -430,10 +432,11 @@
   },
   {
    "lowest": "standard",
-   "highest": "standard",
+   "highest": "complex",
    "agent": "general-purpose",
    "description": "Fix even median",
-   "prompt": "median() in stats.py returns the upper middle value for even-length input instead of the mean of the two middle values. Fix it and keep odd-length behavior."
+   "prompt": "median() in stats.py returns the upper middle value for even-length input instead of the mean of the two middle values. Fix it and keep odd-length behavior.",
+   "defect": true
   },
   {
    "lowest": "standard",
@@ -444,10 +447,11 @@
   },
   {
    "lowest": "standard",
-   "highest": "standard",
+   "highest": "complex",
    "agent": "general-purpose",
    "description": "Fix negative zero",
-   "prompt": "Write a failing test for `formatCurrency(0)`, which currently returns '$-0.00', then fix formatCurrency so it returns '$0.00'."
+   "prompt": "Write a failing test for `formatCurrency(0)`, which currently returns '$-0.00', then fix formatCurrency so it returns '$0.00'.",
+   "defect": true
   },
   {
    "lowest": "standard",
@@ -479,10 +483,11 @@
   },
   {
    "lowest": "standard",
-   "highest": "standard",
+   "highest": "complex",
    "agent": "general-purpose",
    "description": "Fix receive typo",
-   "prompt": "Fix the typo 'recieve' in all user-facing strings under src/ui/ and update the snapshot tests."
+   "prompt": "Fix the typo 'recieve' in all user-facing strings under src/ui/ and update the snapshot tests.",
+   "defect": true
   },
   {
    "lowest": "standard",
@@ -542,10 +547,11 @@
   },
   {
    "lowest": "standard",
-   "highest": "standard",
+   "highest": "complex",
    "agent": "general-purpose",
    "description": "Fix CSV last row",
-   "prompt": "The CSV export drops the last row because the loop stops at len-1. Fix the loop in export/csv.py and add a regression test."
+   "prompt": "The CSV export drops the last row because the loop stops at len-1. Fix the loop in export/csv.py and add a regression test.",
+   "defect": true
   },
   {
    "lowest": "standard",
@@ -629,7 +635,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Fix token refresh",
-   "prompt": "Fix the bug where the access token isn't refreshed when it expires during a long upload; the refresh happens in src/auth/session.ts. Add a test that simulates expiry mid-request."
+   "prompt": "Fix the bug where the access token isn't refreshed when it expires during a long upload; the refresh happens in src/auth/session.ts. Add a test that simulates expiry mid-request.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -664,7 +671,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Fix job claim race",
-   "prompt": "Fix the race condition in the job queue worker where two workers can claim the same job; claims happen in worker/claim.go. Add a test with concurrent claims."
+   "prompt": "Fix the race condition in the job queue worker where two workers can claim the same job; claims happen in worker/claim.go. Add a test with concurrent claims.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -685,7 +693,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Empty export file",
-   "prompt": "Investigate why the nightly export job sometimes produces an empty file. Look at jobs/export.py and its logs; find the root cause and propose a fix."
+   "prompt": "Investigate why the nightly export job sometimes produces an empty file. Look at jobs/export.py and its logs; find the root cause and propose a fix.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -706,7 +715,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Fix search injection",
-   "prompt": "Do not touch the tests and fix the SQL injection in the search endpoint (api/search.py builds the query with string formatting)."
+   "prompt": "Do not touch the tests and fix the SQL injection in the search endpoint (api/search.py builds the query with string formatting).",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -734,7 +744,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Fix transfer deadlock",
-   "prompt": "The service deadlocks under load when two requests update the same account; the locks are taken in services/accounts/transfer.py. Fix the lock ordering and add a stress test."
+   "prompt": "The service deadlocks under load when two requests update the same account; the locks are taken in services/accounts/transfer.py. Fix the lock ordering and add a stress test.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -748,7 +759,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Lost drafts on reconnect",
-   "prompt": "Users report losing unsaved drafts when the editor reconnects. The reconnect logic is in src/editor/sync.ts. Find why drafts are dropped and fix it without changing the sync protocol."
+   "prompt": "Users report losing unsaved drafts when the editor reconnects. The reconnect logic is in src/editor/sync.ts. Find why drafts are dropped and fix it without changing the sync protocol.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -776,7 +788,8 @@
    "highest": "complex",
    "agent": "general-purpose",
    "description": "Flaky checkout total",
-   "prompt": "The test test_checkout_total is flaky on CI (fails about 1 in 20 runs). Figure out why and fix the cause, not the test."
+   "prompt": "The test test_checkout_total is flaky on CI (fails about 1 in 20 runs). Figure out why and fix the cause, not the test.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -797,7 +810,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Logout on all devices",
-   "prompt": "Do not change the session format and fix the bug where logging out on one device logs out every device. The logic is in auth/sessions.py."
+   "prompt": "Do not change the session format and fix the bug where logging out on one device logs out every device. The logic is in auth/sessions.py.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -839,7 +853,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Invalidate price caches",
-   "prompt": "Fix stale prices after an update: the product cache in three services isn't invalidated. Add invalidation on update events in each service."
+   "prompt": "Fix stale prices after an update: the product cache in three services isn't invalidated. Add invalidation on update events in each service.",
+   "defect": true
   },
   {
    "lowest": "standard",
@@ -867,7 +882,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Fix editor delete check",
-   "prompt": "Run the tests and then fix the failing authorization check in api/permissions.py so editors can't delete projects."
+   "prompt": "Run the tests and then fix the failing authorization check in api/permissions.py so editors can't delete projects.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -896,28 +912,31 @@
    "agent": "general-purpose",
    "description": "Find memory leak",
    "prompt": "Investigate a memory leak in the Node API: RSS grows ~50MB/hour. Use the heap snapshots in /tmp/heaps/ to find what's retained and fix it.",
-   "known_under": "one signal stays standard"
+   "defect": true
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Check CSRF token",
-   "prompt": "Do not change the tests, fix the auth bug in the login handler where the CSRF token isn't checked."
+   "prompt": "Do not change the tests, fix the auth bug in the login handler where the CSRF token isn't checked.",
+   "defect": true
   },
   {
    "lowest": "hardest",
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Intermittent logouts",
-   "prompt": "Users intermittently get logged out across the web app, the API gateway and the mobile backend since last week's deploy. Investigate the root cause across all three services (token refresh, clock skew, cache), fix it, and keep backward compatibility for existing sessions."
+   "prompt": "Users intermittently get logged out across the web app, the API gateway and the mobile backend since last week's deploy. Investigate the root cause across all three services (token refresh, clock skew, cache), fix it, and keep backward compatibility for existing sessions.",
+   "defect": true
   },
   {
    "lowest": "hardest",
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Order total mismatch",
-   "prompt": "Some orders end up with a total that doesn't match their line items, maybe 1 in 10,000, across the checkout service, the pricing service and the billing database. Figure out where the mismatch is introduced and fix it without downtime."
+   "prompt": "Some orders end up with a total that doesn't match their line items, maybe 1 in 10,000, across the checkout service, the pricing service and the billing database. Figure out where the mismatch is introduced and fix it without downtime.",
+   "defect": true
   },
   {
    "lowest": "hardest",
@@ -931,7 +950,8 @@
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Duplicate charges",
-   "prompt": "Duplicate charges happen rarely when the payment service and the order service both retry after a timeout. Investigate across both services and the queue, find the root cause and design a fix that is safe under retries."
+   "prompt": "Duplicate charges happen rarely when the payment service and the order service both retry after a timeout. Investigate across both services and the queue, find the root cause and design a fix that is safe under retries.",
+   "defect": true
   },
   {
    "lowest": "hardest",
@@ -945,21 +965,24 @@
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Flaky CI end-to-end",
-   "prompt": "The end-to-end suite fails intermittently only in CI across the API, worker and websocket services. Find out why; we're not sure whether it's a race condition, a timeout or test pollution."
+   "prompt": "The end-to-end suite fails intermittently only in CI across the API, worker and websocket services. Find out why; we're not sure whether it's a race condition, a timeout or test pollution.",
+   "defect": true
   },
   {
    "lowest": "hardest",
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Privilege escalation",
-   "prompt": "We suspect a privilege escalation: a viewer account edited a project last night. Investigate the authorization checks across the API, the admin service and the GraphQL layer, find how it happened and fix it."
+   "prompt": "We suspect a privilege escalation: a viewer account edited a project last night. Investigate the authorization checks across the API, the admin service and the GraphQL layer, find how it happened and fix it.",
+   "defect": true
   },
   {
    "lowest": "hardest",
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Checkout latency doubled",
-   "prompt": "p99 latency for checkout doubled after the last release, touching the cart service, the pricing service and the payments gateway. Find the root cause and fix it without changing the public API."
+   "prompt": "p99 latency for checkout doubled after the last release, touching the cart service, the pricing service and the payments gateway. Find the root cause and fix it without changing the public API.",
+   "defect": true
   },
   {
    "lowest": "hardest",
@@ -980,14 +1003,16 @@
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Pipeline deadlock",
-   "prompt": "Under heavy load the order pipeline stalls: the inventory service, the order service and the payment service all wait on each other. Investigate the deadlock across services and fix it."
+   "prompt": "Under heavy load the order pipeline stalls: the inventory service, the order service and the payment service all wait on each other. Investigate the deadlock across services and fix it.",
+   "defect": true
   },
   {
    "lowest": "hardest",
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Refresh races logout",
-   "prompt": "Token refresh sometimes races with logout in all services that share the session store, leaving revoked tokens usable. Find the cause and fix it everywhere."
+   "prompt": "Token refresh sometimes races with logout in all services that share the session store, leaving revoked tokens usable. Find the cause and fix it everywhere.",
+   "defect": true
   },
   {
    "lowest": "hardest",
@@ -1008,7 +1033,8 @@
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Codec memory corruption",
-   "prompt": "Long-running investigation: a memory corruption bug in the native image codec crashes production about once a week across all regions, with an unknown root cause. Figure out the best approach to reproduce it, find the cause and fix it safely."
+   "prompt": "Long-running investigation: a memory corruption bug in the native image codec crashes production about once a week across all regions, with an unknown root cause. Figure out the best approach to reproduce it, find the cause and fix it safely.",
+   "defect": true
   },
   {
    "lowest": "hardest",
@@ -1036,7 +1062,8 @@
    "highest": "frontier",
    "agent": "general-purpose",
    "description": "Bad query plans",
-   "prompt": "Unsolved problem: the query planner picks a bad plan for the reporting queries about 5% of the time across all tenants' databases and nobody has found why. Investigate from first principles and propose a durable fix."
+   "prompt": "Unsolved problem: the query planner picks a bad plan for the reporting queries about 5% of the time across all tenants' databases and nobody has found why. Investigate from first principles and propose a durable fix.",
+   "defect": true
   },
   {
    "lowest": "hardest",
@@ -1131,7 +1158,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Don't break the public API and fix the authentication bug in the login service."
+   "prompt": "Don't break the public API and fix the authentication bug in the login service.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -1159,7 +1187,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Don't break the API and fix auth token refresh in the login service."
+   "prompt": "Don't break the API and fix auth token refresh in the login service.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -1180,42 +1209,48 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Don't touch the UI and also fix the race condition in the payments worker."
+   "prompt": "Don't touch the UI and also fix the race condition in the payments worker.",
+   "defect": true
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Never edit generated code and instead fix the auth bug in the source."
+   "prompt": "Never edit generated code and instead fix the auth bug in the source.",
+   "defect": true
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and just fix the auth bug."
+   "prompt": "Do not touch tests and just fix the auth bug.",
+   "defect": true
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and please fix the auth bug."
+   "prompt": "Do not touch tests and please fix the auth bug.",
+   "defect": true
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and debug why payments fail intermittently."
+   "prompt": "Do not touch tests and debug why payments fail intermittently.",
+   "defect": true
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and fix scripts that rotate the production credentials."
+   "prompt": "Do not touch tests and fix scripts that rotate the production credentials.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -1229,7 +1264,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not change the UI and fix builds that leak secrets."
+   "prompt": "Do not change the UI and fix builds that leak secrets.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -1243,14 +1279,16 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and fix paths in the auth middleware."
+   "prompt": "Do not touch tests and fix paths in the auth middleware.",
+   "defect": true
   },
   {
    "lowest": "complex",
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and then also fix the deadlock."
+   "prompt": "Do not touch tests and then also fix the deadlock.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -1292,7 +1330,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and investigate why the billing migration deadlocks."
+   "prompt": "Do not touch tests and investigate why the billing migration deadlocks.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -1313,7 +1352,8 @@
    "highest": "complex",
    "agent": "general-purpose",
    "description": "Fix retry bug",
-   "prompt": "Fix the retry bug. Do not change the public API."
+   "prompt": "Fix the retry bug. Do not change the public API.",
+   "defect": true
   },
   {
    "lowest": "lookup",
@@ -1460,7 +1500,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Fix search injection",
-   "prompt": "No new files; just fix the SQL injection in the search endpoint."
+   "prompt": "No new files; just fix the SQL injection in the search endpoint.",
+   "defect": true
   },
   {
    "lowest": "lookup",
@@ -1499,10 +1540,11 @@
   },
   {
    "lowest": "standard",
-   "highest": "standard",
+   "highest": "complex",
    "agent": "general-purpose",
    "description": "Fix deprecation typo",
-   "prompt": "Fix the typo in the deprecation notice."
+   "prompt": "Fix the typo in the deprecation notice.",
+   "defect": true
   },
   {
    "lowest": "lookup",
@@ -1541,10 +1583,11 @@
   },
   {
    "lowest": "standard",
-   "highest": "standard",
+   "highest": "complex",
    "agent": "general-purpose",
    "description": "Fix token count rounding",
-   "prompt": "Fix the rounding of the token counts in the usage report."
+   "prompt": "Fix the rounding of the token counts in the usage report.",
+   "defect": true
   },
   {
    "lowest": "hardest",
@@ -1569,10 +1612,11 @@
   },
   {
    "lowest": "standard",
-   "highest": "standard",
+   "highest": "complex",
    "agent": "general-purpose",
    "description": "Fix flaky latency test",
-   "prompt": "Fix the flaky latency test in test_client.py."
+   "prompt": "Fix the flaky latency test in test_client.py.",
+   "defect": true
   },
   {
    "lowest": "standard",
@@ -1652,6 +1696,13 @@
    "prompt": "Plan the release notes for 2.0; the API answers in 120 ms."
   },
   {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "general-purpose",
+   "description": "Add parser tests",
+   "prompt": "Avoid breaking the CSV format and add tests for the parser."
+  },
+  {
    "lowest": "complex",
    "highest": "complex",
    "agent": "general-purpose",
@@ -1727,6 +1778,27 @@
    "agent": "general-purpose",
    "description": "List renamed options",
    "prompt": "Read the migration guides under docs/ and list every renamed option."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find fixing commit",
+   "prompt": "Report which commit fixed the flaky test in test_client.py."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find test fixture loading",
+   "prompt": "Find where the test fixtures are loaded and list the files."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "List failing tests",
+   "prompt": "List the failing tests. Do not fix anything."
   },
   {
    "lowest": "standard",

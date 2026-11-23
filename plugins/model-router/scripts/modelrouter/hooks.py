@@ -8,105 +8,10 @@ from __future__ import annotations
 import re
 import time
 
-from . import calls, gates, ladder, learn, registry, session, settings, spawn, store, upstream
+from . import allowlist, calls, fallback, gates, health, intake, ladder, learn, ledger, profile, registry, request, session, settings, spawn, store, upstream
 from . import config as cfg
-from .profile import asks_for_work, profile_prompt
 
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
-
-
-# Where the mod saw a turn's prompt come from (prompt.submit's origin.kind) when it wasn't
-# the person. Left out: unclassified, which a same-user socket's typed prompt also gets, and
-# a coordinator's hand-off, which is a worker's real task. An unknown kind counts as the person's.
-MACHINE_ORIGINS = {"task-notification", "peer", "peer-send-message", "observer", "observer-activity"}
-_DELIVERED = "Another Claude session sent a message:"
-
-
-def is_delivered(prompt: str) -> bool:
-    """A teammate's report or another session's message, framed as Claude Code delivers it."""
-    first, _, rest = (prompt or "").lstrip().partition("\n")
-    return first.strip() == _DELIVERED and rest.lstrip().startswith(("<teammate-message", "<cross-session-message"))
-
-
-def is_user_prompt(prompt: str) -> bool:
-    """UserPromptSubmit also fires for background-task notifications, teammates' reports
-    and other sessions' messages. Those must not reset what is known about the user's
-    request. Pasted text is the user's, though it arrives wrapped in a <pasted_content> tag."""
-    prompt = (prompt or "").lstrip()
-    if is_delivered(prompt):
-        return False
-    return not prompt.startswith("<") or prompt.startswith("<pasted_content")
-
-
-# A skill's body is standing instructions, not the request: only its opening counts, so its length
-# never reads as scope and a !`cmd` output or checklist further down can't make every use hard.
-_SKILL_BODY_CHARS = 1500
-
-
-_FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*\r?\n", re.S)
-
-
-def _receives(body: str, frontmatter: str, count: int) -> bool:
-    """Whether a raw skill file has a placeholder that receives one of `count` arguments: an unescaped
-    $ARGUMENTS, $N or $ARGUMENTS[N] with N below count (0-based), or a declared name the body uses.
-    A $ followed by an amount ($500, $1.00) is prose."""
-    if re.search(r"(?<!\\)\$ARGUMENTS\b(?!\[)", body):
-        return True
-    for index in re.findall(r"(?<!\\)\$(?:ARGUMENTS\[(\d+)\]|(\d+)(?![\d.,]))", body):
-        if int(index[0] or index[1]) < count:
-            return True
-    block = re.search(r"(?ms)^arguments\s*:(.*?)(?=^\S|\Z)", frontmatter)
-    names = re.findall(r"[A-Za-z_]\w*", block.group(1)) if block else []
-    return any(re.search(rf"(?<!\\)\${re.escape(name)}\b", body) for name in names)
-
-
-def _profile_skill(args: object, body: object, rendered: bool) -> dict:
-    """A typed skill's profile. A skill whose content takes its arguments (a $ARGUMENTS, $1 or named
-    placeholder) and is given a task in them runs that task, so the arguments alone set the level: its own
-    instructions, a pipeline's say, are the same on every use. Arguments that only name a target leave the
-    task to the body, at most complex. A skill that takes no placeholder, or is typed with no arguments, is
-    its body: the higher of the arguments' level and the body's opening counts. `rendered` is the engine's expansion, where a skill that takes no
-    placeholder gets the arguments appended as "ARGUMENTS: ..."; otherwise body is the raw file."""
-    args = args.strip() if isinstance(args, str) else ""
-    body = (body if isinstance(body, str) else "").lstrip("\ufeff")
-    body = re.sub(r"\A\s*Base directory for this skill: [^\n]*\n", "", body)
-    front = _FRONTMATTER.match(body)
-    body = body[front.end():] if front else body
-    if rendered:
-        # The engine appends the trailer last, so only its last occurrence counts, and any trailer at all
-        # means no placeholder took them: an unexpected format errs toward the higher level.
-        head, trailer, _ = body.rpartition("\nARGUMENTS: ")
-        takes_args = bool(args) and not trailer
-        body = head if trailer else body
-    else:
-        takes_args = bool(args) and _receives(body, front.group(1) if front else "", len(args.split()))
-    if takes_args and asks_for_work(args):
-        return profile_prompt(args)
-    parts = [profile_prompt(text) for text in (args, body[:_SKILL_BODY_CHARS])]
-    if takes_args and cfg.LEVELS.index(parts[1]["level"]) > cfg.LEVELS.index("complex"):
-        # A template that serves any target: its own wording, a pipeline's gates say, isn't one task's depth.
-        parts[1] = {**parts[1], "level": "complex"}
-    return max(parts, key=lambda p: cfg.LEVELS.index(p["level"]))
-
-
-def _typed_skill(prompt: str, hook_input: dict) -> dict | None:
-    """The profile behind "/name args" when name is a project or user skill or command on disk.
-    UserPromptSubmit sees only the typed line; a plugin's skill isn't found this way."""
-    match = re.match(r"/([A-Za-z0-9_.-]+)(?:\s+(.*))?\Z", prompt.strip(), re.S)
-    if not match:
-        return None
-    name, args = match.group(1), match.group(2) or ""
-    project, home = cfg.project_dir(hook_input) / ".claude", store.claude_home()
-    for path in (project / "skills" / name / "SKILL.md", home / "skills" / name / "SKILL.md",
-                 project / "commands" / f"{name}.md", home / "commands" / f"{name}.md"):
-        try:
-            if not path.is_file():  # a FIFO or device would hang or never end
-                continue
-            with path.open("rb") as fh:
-                return _profile_skill(args, fh.read(64 * 1024).decode("utf-8", "replace"), rendered=False)
-        except OSError:
-            continue
-    return None
 
 
 def named_model(config: dict, prompt: str) -> str | None:
@@ -128,8 +33,8 @@ def _context(event: str, text: str) -> dict:
 
 
 def session_start(hook_input: dict) -> dict | None:
-    config = cfg.load_config(hook_input)
-    options = settings.resolve(config)
+    snap = settings.Snapshot(hook_input)
+    options = snap.options
     settings.record(options)
     session.record(hook_input.get("session_id"), hook_input.get("model"))
     parts = []
@@ -157,8 +62,7 @@ def session_start(hook_input: dict) -> dict | None:
         )
     if options.update_check:
         changes = upstream.pending()
-        running = [hook_input.get("model")] + [info.get("last_model") for info in registry.health().values()
-                                               if isinstance(info, dict)]
+        running = [hook_input.get("model")] + snap.health.seen_running()
         for model_id, latest in upstream.behind(running):
             parts.append(
                 f"{model_id} is running here and {latest} is the newest of its family. Tell the user once: a model "
@@ -184,38 +88,38 @@ def session_start(hook_input: dict) -> dict | None:
 def user_prompt(hook_input: dict) -> dict | None:
     """Size up the request against the conversation's own model. Says nothing when there
     is nothing Claude needs to do differently, so an ordinary prompt costs no tokens."""
-    config = cfg.load_config(hook_input)
-    options = settings.resolve(config)
+    snap = settings.Snapshot(hook_input)
+    config, options = snap.config, snap.options
     mode = options.mode
+    if mode == "off":
+        return None
     prompt = hook_input.get("prompt")
     prompt = prompt if isinstance(prompt, str) else ""
     session_id = hook_input.get("session_id")
-    if mode != "off" and is_delivered(prompt):
+    seen = intake.from_prompt(prompt, snap.project)
+    if seen.delivered:
         # Work for someone else's message isn't the user's request, so it doesn't get its floor.
         # A task notification continues the user's request and keeps it.
         try:
-            store.update_entry("prompts", session_id, floor_off=True)
+            request.deliver(session_id)
         except OSError:
             pass
-    if mode == "off" or not is_user_prompt(prompt):
+    if not seen.person:
         return None
-    usable = registry.available(config, cfg.project_dir(hook_input), options.cap)
-    result = _typed_skill(prompt, hook_input) or profile_prompt(prompt)
-    level = result["level"]
-    pick = ladder.pick(config, level, options.priority, usable, learn.raises())
+    level = seen.level
+    pick = ladder.pick(config, level, options.priority, snap.usable, learn.raises())
     need = pick.model
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
     below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
     wanted = named_model(config, prompt)
-    store.save_entry("prompts", session_id, {
-        "prompt_id": hook_input.get("prompt_id"), "level": level, "need": need,
-        "below": below,
-        "session_tier": current, "named": wanted})
-    why = f" (wording suggests: {', '.join(result['signals'])})" if result["signals"] else ""
+    request.start(session_id, prompt_id=hook_input.get("prompt_id"), level=level, need=need, below=below,
+                  session_tier=current, named=wanted)
+    why = f" (wording suggests: {', '.join(seen.signals)})" if seen.signals else ""
     notes = []
     if mode == "advise":
-        notes.append(f"Routing estimate for this request: {level}{why}, about {need}-level reasoning. "
-                     "It reads only the wording; route by what the code shows.")
+        if need:
+            notes.append(f"Routing estimate for this request: {level}{why}, about {need}-level reasoning. "
+                         "It reads only the wording; route by what the code shows.")
     elif below:
         agent = gates.strong_agent(config, need, level)
         asked = "; you will be asked to before finishing" if options.strong_agent_gate else ""
@@ -238,67 +142,9 @@ def mod_active(session_id: str | None) -> bool:
 
 
 def pre_agent(hook_input: dict) -> dict | None:
-    """The fallback path: the decision becomes the call's rewritten input and a note, or
-    the one deny that holds the user's cap."""
     if mod_active(hook_input.get("session_id")):
         return None  # the plugin's mod routes this call when it spawns
-    session_id = hook_input.get("session_id")
-    decision = spawn.run(hook_input, "fallback", guard=lambda *args: _refused_rewrite(session_id, *args))
-    if decision["action"] == "rewrite":
-        return {"hookSpecificOutput": {
-            "hookEventName": "PreToolUse", "updatedInput": _rewritten_input(cfg.tool_input(hook_input), decision),
-            "additionalContext": _note(decision)}}
-    if decision["action"] == "deny":
-        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                       "permissionDecisionReason": decision["reason"]}}
-    return None
-
-
-def _refused_rewrite(session_id: str | None, decision: dict, key: str, config: dict,
-                     options: settings.Settings) -> None:
-    """We rewrote this very call before and no result came back: the rewrite wasn't
-    accepted, or something else stopped the call. Rewriting it again could loop."""
-    if decision["action"] != "rewrite" or not decision["model"]:
-        return
-    earlier = calls.refused_rewrite(session_id, key)
-    if earlier is None:
-        return
-    cap, untouched = options.cap, decision["was"]
-    if cap and registry.strength(config, untouched) > registry.strength(config, cap):
-        decision.update(action="deny", reason=(
-            f"Model Router: subagents are capped at {cap} by the user, and this call would run on "
-            f"{untouched}. Re-issue it with model: \"{decision['model']}\"."))
-        return
-    decision.update(action="keep", model=None, repeat_of=earlier.get("model"), reason=(
-        "this call was rewritten once and came back without having run, so it is passed through unchanged"))
-    repeat_of = decision["repeat_of"]
-    if repeat_of and not (registry.health().get(repeat_of) or {}).get("last_model"):
-        # A rewrite to a model that has never once run here didn't run this time either.
-        try:
-            registry.record_failure(repeat_of, "a call rewritten to this model came back without having run")
-        except OSError:
-            pass
-
-
-def _rewritten_input(tool_input: dict, decision: dict) -> dict:
-    """The whole call as it should run: Claude Code replaces the input, it doesn't merge."""
-    updated = dict(tool_input)
-    if decision.get("model"):
-        updated["model"] = decision["model"]
-    if decision.get("effort"):
-        updated["effort"] = decision["effort"]
-    return updated
-
-
-def _note(decision: dict) -> str:
-    """One line for Claude, delivered with the agent's result."""
-    if decision.get("model"):
-        effort = f" at {decision['effort']} effort" if decision.get("effort") else ""
-        what = f"model to {decision['model']}{effort}"
-    else:
-        what = f"effort to {decision['effort']}"
-    return (f"Model Router set this agent's {what} ({decision['reason']}). "
-            "If the result falls short, re-issue the same call: it runs one level higher.")
+    return fallback.route(hook_input, settings.Snapshot(hook_input))
 
 
 def _asked_for(config: dict, tool_input: dict, routed: str | None) -> str | None:
@@ -308,7 +154,7 @@ def _asked_for(config: dict, tool_input: dict, routed: str | None) -> str | None
 
 
 def post_agent(hook_input: dict) -> dict | None:
-    config = cfg.load_config(hook_input)
+    snap = settings.Snapshot(hook_input)
     tool_input = cfg.tool_input(hook_input)
     response = hook_input.get("tool_response")
     response = response if isinstance(response, dict) else {}
@@ -317,23 +163,34 @@ def post_agent(hook_input: dict) -> dict | None:
     # is back when the agent stops (agent_stopped), not here.
     launched = response.get("status") == "async_launched"
     agent_id = response.get("agentId")
+    agent, key = calls.identify(tool_input)
+    session_id = hook_input.get("session_id")
+    swapped = [] if launched else calls.models_used(response)
     routed = None
     try:
-        routed = calls.settled(hook_input.get("session_id"), tool_input, finished=not launched,
+        routed = calls.settled(session_id, key, fallback.take(session_id, key), finished=not launched and not swapped,
                                launched_as=agent_id if launched and isinstance(agent_id, str) else None)
     except OSError:
         pass
-    asked = _asked_for(config, tool_input, routed)
+    asked = _asked_for(snap.config, tool_input, routed)
     try:
-        # Under the force setting every agent runs on the forced model, which isn't a substitution.
-        if asked and registry.family(config, ran_as) and not settings.resolve(config).force:
-            registry.record_result(asked, ran_as, registry.family(config, ran_as))
+        health.ran(asked, ran_as, registry.family(snap.config, ran_as), snap.options.force, swapped=bool(swapped))
     except OSError:
         pass
-    store.append_ledger({
-        "event": "result", "session": hook_input.get("session_id"),
-        "agent": calls.identify(tool_input)[0], "asked": asked,
-        "resolved_model": ran_as, "status": response.get("status"), "total_tokens": response.get("totalTokens")})
+    ledger.result(session_id, agent, asked, ran_as, response.get("status"), response.get("totalTokens"),
+                  models_used=swapped or None)
+    if not swapped:
+        return None
+    try:
+        record = request.load(session_id).calls.get(key)
+        if isinstance(record, dict) and record.get("source") == "router":
+            learn.uncount(record.get("level"))
+    except OSError:
+        pass
+    if "risk" in profile.profile_call(tool_input, agent)["signals"]:
+        return _context("PostToolUse", (
+            f"Model Router: this agent switched models mid-run ({swapped[0]} to {swapped[-1]}). "
+            "Check its result before relying on it."))
     return None
 
 
@@ -341,36 +198,38 @@ def agent_failed(hook_input: dict) -> dict | None:
     """An agent call failed. If the error says the model itself isn't usable, count it,
     and route around that model once it has happened twice."""
     tool_input = cfg.tool_input(hook_input)
+    session_id = hook_input.get("session_id")
+    key = calls.identify(tool_input)[1]
     routed = None
     try:
-        routed = calls.settled(hook_input.get("session_id"), tool_input)
+        routed = calls.settled(session_id, key, fallback.take(session_id, key))
     except OSError:
         pass
     error = str(hook_input.get("error") or "")
-    if hook_input.get("is_interrupt") or not registry.MODEL_ERROR.search(error):
+    if not health.is_model_error(error, hook_input.get("is_interrupt")):
         return None
-    config = cfg.load_config(hook_input)
+    snap = settings.Snapshot(hook_input)
+    config = snap.config
     asked = _asked_for(config, tool_input, routed)
     if not asked:
         return None
     named = tool_input.get("model")
     newest = None
     if mod_active(hook_input.get("session_id")) and (not named or str(named).lower() == asked):
-        newest = registry.newest_id(config, asked, settings.resolve(config).provider, cfg.project_dir(hook_input))
+        newest = registry.newest_id(config, asked, snap.options.provider, snap.allowed, snap.health)
     if newest:
         # The mod sent the family's newest ID, and this provider refused it: the alias runs
         # from now on, and the ID is tried again after the outage.
-        registry.record_failure(newest, error, strikes=1)
-        store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
-                             "agent": tool_input.get("subagent_type"), "model": newest})
+        health.failed(newest, error, newest=True)
+        ledger.model_error(hook_input.get("session_id"), tool_input.get("subagent_type"), newest)
         return _context("PostToolUseFailure", (
             f"{newest} isn't available here. Re-issue this agent call unchanged: it now runs on the "
             f"'{asked}' alias, as Claude Code resolves it for this provider."))
-    fails = registry.record_failure(asked, error)
-    store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
-                         "agent": tool_input.get("subagent_type"), "model": asked})
-    cap = settings.resolve(config).cap
-    usable = [n for n in registry.available(config, cfg.project_dir(hook_input), cap) if n != asked]
+    fails = health.failed(asked, error)
+    ledger.model_error(hook_input.get("session_id"), tool_input.get("subagent_type"), asked)
+    # snap.health may predate the strike just written, so the list reads the table again.
+    usable = [n for n in registry.available(config, snap.options.cap, allowed=snap.allowed, table=health.load(),
+                                            trusted=snap.trusted if snap.options.cap else None) if n != asked]
     if not usable:
         return None
     return _context("PostToolUseFailure", (
@@ -383,8 +242,15 @@ def agent_stopped(hook_input: dict) -> dict | None:
     """A subagent stopped. For one launched in the background, this is when its result
     comes back, so its call counts as finished from here."""
     message = hook_input.get("last_assistant_message")
-    calls.stopped(hook_input.get("session_id"), hook_input.get("agent_id"),
-                  answered=not (isinstance(message, str) and not message.strip()))
+    # A SubagentHandback report isn't in last_assistant_message, only the closing text is
+    # (https://code.claude.com/docs/en/hooks.md#subagentstop).
+    answered = not (isinstance(message, str) and not message.strip())
+    if not answered:
+        try:
+            answered = session.handed_back(hook_input.get("agent_transcript_path"))
+        except Exception:
+            pass
+    calls.stopped(hook_input.get("session_id"), hook_input.get("agent_id"), answered=answered)
     gates.note_agent_checks(hook_input)
     return None
 
@@ -395,8 +261,8 @@ def post_edit(hook_input: dict) -> dict | None:
 
 
 def stop(hook_input: dict) -> dict | None:
-    config = cfg.load_config(hook_input)
-    reason = gates.before_stop(hook_input, config, settings.resolve(config))
+    snap = settings.Snapshot(hook_input)
+    reason = gates.before_stop(hook_input, snap.config, snap.options)
     return {"decision": "block", "reason": reason} if reason else None
 
 
@@ -414,6 +280,7 @@ def refresh_cache(hook_input: dict) -> dict | None:
 
 def mod_start(hook_input: dict) -> dict | None:
     _mark_mod(hook_input.get("session_id"))
+    allowlist.remember(hook_input.get("session_id"), hook_input.get("settings"))
     return None
 
 
@@ -427,34 +294,43 @@ def _mark_mod(session_id: str | None) -> None:
 def mod_spawn(hook_input: dict) -> dict | None:
     _mark_mod(hook_input.get("session_id"))
     # The spawn procedure reads agent_id as "the call comes from inside a subagent".
-    decision = spawn.run({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, "mod")
-    newest = _newest(hook_input, decision)
+    snap = settings.Snapshot(hook_input)
+    spawned = spawn.decide({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, snap)
+    spawn.record(spawned, "mod")
+    decision = spawned.decision
+    newest = _newest(snap, decision)
     if decision["action"] != "rewrite" and not newest:
         return None
     return {"model": newest or decision["model"], "effort": decision["effort"], "reason": decision["reason"]}
 
 
-def _newest(hook_input: dict, decision: dict) -> str | None:
+def _newest(snap: settings.Snapshot, decision: dict) -> str | None:
     """The newest full ID to send in place of the decided family alias, on a provider whose
     alias lags. Only agent.spawn takes a full ID; the Agent tool's model takes an alias
     (https://code.claude.com/docs/en/sub-agents.md)."""
     if decision["action"] == "deny" or decision["version"]:
         return None
-    config = cfg.load_config(hook_input)
-    return registry.newest_id(config, decision["model"], settings.resolve(config).provider, cfg.project_dir(hook_input))
+    return registry.newest_id(snap.config, decision["model"], snap.options.provider, snap.allowed, snap.health)
 
 
-def _effort_keeps_cache(options: settings.Settings, model: object) -> bool:
-    """Only these models, on Anthropic's API without a gateway or pre-release betas turned
-    off, keep the prompt cache when effort changes. A model with no known version, as after
-    /clear, gets the benefit of the doubt."""
-    if options.cloud or options.base_url or options.no_betas:
+def _effort_keeps_cache(config: dict, options: settings.Settings, model: object) -> bool:
+    """Only the models in `main.effort_keeps_cache`, on Anthropic's API without a gateway,
+    Mantle, pre-release betas turned off or prompt caching turned off for them, keep the prompt
+    cache when effort changes (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level).
+    A model with no known version, as after /clear, gets the benefit of the doubt."""
+    if options.cloud or options.mantle or options.base_url or options.no_betas or "" in options.cache_off:
         return False
     found = upstream.version_of(model)
     if not found:
         return True
     family, version = found
-    return version >= (5, 1) if family == "fable" else family in ("opus", "sonnet", "haiku") and version == (5, 5)
+    if family in options.cache_off:
+        return False
+    rule = ((config.get("main") or {}).get("effort_keeps_cache") or {}).get(family)
+    if not isinstance(rule, str) or not re.fullmatch(r"(?:>=)?\d+(?:\.\d+)*", rule):
+        return False
+    wanted = tuple(int(part) for part in rule.lstrip(">=").split("."))
+    return version >= wanted if rule.startswith(">=") else version == wanted
 
 
 def mod_turn(hook_input: dict) -> dict | None:
@@ -462,62 +338,34 @@ def mod_turn(hook_input: dict) -> dict | None:
     prompt cache on current models; switching the conversation's model would not."""
     session_id = hook_input.get("session_id")
     _mark_mod(session_id)
-    config = cfg.load_config(hook_input)
-    options = settings.resolve(config)
-    text = hook_input.get("text")
-    text = text if isinstance(text, str) else ""
-    # Only a turn that opens with the command's own line is that command's turn.
-    command = hook_input.get("command")
-    command = command if (isinstance(command, dict) and text.lstrip().startswith("<command-")
-                          and f"<command-name>/{command.get('name')}</command-name>" in text) else None
-    asked = command is not None or is_user_prompt(text)
+    allowlist.remember(session_id, hook_input.get("settings"))
+    snap = settings.Snapshot(hook_input)
+    config, options = snap.config, snap.options
+    if (options.mode != "auto" or not options.main_effort or options.effort_level
+            or hook_input.get("first_party") is False):
+        return None
+    seen = intake.from_turn(hook_input.get("text"), hook_input.get("command"), hook_input.get("origin"))
+    if not seen.person:
+        return None
     # The mod's live model, when it is an ID; a record can miss a fallback to another model.
     model = hook_input.get("model")
     model = model if upstream.version_of(model) else session.model(session_id)
-    if (options.mode != "auto" or not options.main_effort or not asked
-            or options.effort_level or hook_input.get("first_party") is False
-            or str(hook_input.get("origin")) in MACHINE_ORIGINS
-            or not _effort_keeps_cache(options, model)):
+    if not _effort_keeps_cache(config, options, model):
         return None
-    level = (_profile_skill(command.get("args"), command.get("body"), rendered=True) if command
-             else profile_prompt(text))["level"]
+    level = seen.level
     effort = ((config.get("main") or {}).get("effort") or {}).get(level)
     if effort not in cfg.EFFORTS:
         return None
-    store.append_ledger({"event": "turn", "session": hook_input.get("session_id"), "level": level,
-                         "effort": effort, **({"command": command.get("name")} if command else {})})
+    ledger.turn(session_id, level, effort, seen.command)
     return {"level": level, "effort": effort}
-
-
-def _tokens(usage: dict) -> dict:
-    tokens = {k: int(usage.get(k) or 0) for k in
-              ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
-    if "ephemeral_1h_input_tokens" in usage:
-        tokens["ephemeral_1h_input_tokens"] = int(usage.get("ephemeral_1h_input_tokens") or 0)
-    return tokens
-
-
-def _usage(value: object) -> bool:
-    return isinstance(value, dict) and isinstance(value.get("model"), str)
 
 
 def mod_usage(hook_input: dict) -> dict | None:
     """One ledger row per turn, its cost the sum of its requests, each priced on its own."""
     usage = hook_input.get("usage")
-    if not _usage(usage):
-        return None
-    config = cfg.load_config(hook_input)
-    tokens = _tokens(usage)
-    requests = hook_input.get("requests")
-    requests = [r for r in requests if _usage(r)] if isinstance(requests, list) else []
-    if requests:
-        costs = [registry.cost(config, r["model"], _tokens(r)) for r in requests]
-        spent = None if None in costs else round(sum(costs), 6)
-    else:
-        spent = registry.cost(config, usage["model"], tokens, whole_turn=True)
-    store.append_ledger({"event": "usage", "session": hook_input.get("session_id"),
-                         "agent_id": hook_input.get("agent_id"), "model": usage["model"], **tokens,
-                         "cost_usd": spent})
+    if isinstance(usage, dict) and isinstance(usage.get("model"), str):
+        ledger.usage(settings.Snapshot(hook_input).config, hook_input.get("session_id"), hook_input.get("agent_id"),
+                     usage, hook_input.get("requests"))
     return None
 
 

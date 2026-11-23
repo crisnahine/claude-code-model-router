@@ -33,7 +33,7 @@ MODEL_IDS = {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus":
 SESSION_MODEL = "claude-opus-5-5"
 USAGE = {"model": "claude-sonnet-5-5", "input_tokens": 12000, "output_tokens": 800,
          "cache_read_input_tokens": 40000, "cache_creation_input_tokens": 2000}
-MODEL_ERROR = "model claude-fable-5-2 is not available on this account"  # matches registry.MODEL_ERROR
+MODEL_ERROR = "model claude-fable-5-2 is not available on this account"  # matches health.MODEL_ERROR
 
 # Hook input per settings hook command, from the documented fields
 # (https://code.claude.com/docs/en/hooks.md); hook_input() adds the common ones.
@@ -179,8 +179,6 @@ def in_process(base: Path, calls: int, runs: int):
     os.environ.update(box.env())
     sys.pycache_prefix = str(box.root / "pycache")
     sys.path.insert(0, str(PLUGIN / "scripts"))
-    from modelrouter import calls as call_log
-    from modelrouter import config as cfg
     from modelrouter import hooks, router, settings, spawn, store
 
     project = str(box.root / "project")
@@ -189,9 +187,8 @@ def in_process(base: Path, calls: int, runs: int):
         hook_input = {"session_id": "bench", "cwd": project,
                       "tool_input": {"subagent_type": "general-purpose", "prompt": f"{BRIEFS[i % 3]} ({i})"}}
         started = time.perf_counter()
-        config = cfg.load_config(hook_input)
-        options = settings.resolve(config)
-        router.decide(spawn.facts(hook_input, config, options), config, options)
+        snap = settings.Snapshot(hook_input)
+        router.decide(spawn.facts(hook_input, snap), snap.config, snap.options)
         decide.append((time.perf_counter() - started) * 1000)
 
     def routed_call(session: str, i: int, mod: bool) -> None:
@@ -246,7 +243,7 @@ def in_process(base: Path, calls: int, runs: int):
     # so a file trimmed by halving isn't judged by where its saw-tooth happens to stand.
     # Once with one call per session, so the per-session files hold far more sessions than
     # their cap, and once with one long session, for the per-session lists.
-    caps = {(store, "LEDGER_MAX_BYTES"): 16 * 1024, (store, "KEEP_ENTRIES"): 5, (call_log, "KEPT"): 10}
+    caps = {(store, "LEDGER_MAX_BYTES"): 16 * 1024, (store, "KEEP_ENTRIES"): 5, (store, "KEPT_RECORDS"): 10}
     saved = {key: getattr(*key) for key in caps}
     verdict: dict = {}
     for per_session, rounds in ((1, max(40, calls // 5)), (10 ** 9, max(50, calls // 5))):

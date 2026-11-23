@@ -1,35 +1,15 @@
 """Pass when DESIGN.json picks a shared token bucket per API key at 5/s with a burst of 20."""
-import json
-import re
+import importlib.util
 import sys
 from pathlib import Path
 
+_spec = importlib.util.spec_from_file_location("passcheck", Path(__file__).resolve().parent.parent / "passcheck.py")
+passcheck = importlib.util.module_from_spec(_spec)
+sys.modules["passcheck"] = passcheck
+_spec.loader.exec_module(passcheck)
 
-def answer(name):
-    try:
-        data = json.loads((Path(sys.argv[1]) / name).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def reasons(data):
-    return isinstance(data.get("reasons"), list) and bool(data["reasons"]) and all(
-        isinstance(r, str) and r.strip() for r in data["reasons"])
-
-
-def number(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def numeric(value):
-    try:
-        return float(value) if not isinstance(value, bool) else None
-    except (TypeError, ValueError):
-        return None
-
-d = answer("DESIGN.json")
+d = passcheck.answer(Path(sys.argv[1]), "DESIGN.json")
 ok = (d.get("algorithm") == "token_bucket" and d.get("store") == "redis" and d.get("key") == "api_key"
-      and number(d.get("rate_per_second")) and d["rate_per_second"] == 5
-      and number(d.get("burst")) and d["burst"] == 20 and reasons(d))
+      and passcheck.number(d.get("rate_per_second")) and d["rate_per_second"] == 5
+      and passcheck.number(d.get("burst")) and d["burst"] == 20 and passcheck.reasons(d))
 sys.exit(0 if ok else 1)

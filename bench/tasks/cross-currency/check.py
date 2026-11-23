@@ -1,13 +1,15 @@
 """Pass when every formatter takes the currency through: symbol, decimals, and USD unchanged."""
-import importlib
-import json
-import os
+import importlib.util
 import sys
-import tempfile
 from pathlib import Path
 
+_spec = importlib.util.spec_from_file_location("passcheck", Path(__file__).resolve().parent.parent / "passcheck.py")
+passcheck = importlib.util.module_from_spec(_spec)
+sys.modules["passcheck"] = passcheck
+_spec.loader.exec_module(passcheck)
+
 WORK = Path(sys.argv[1])
-sys.path.insert(0, str(WORK))  # after the stdlib imports, so the work dir can't replace them
+passcheck.use_work(WORK)
 
 try:
     fmt = importlib.import_module("pricing.money").format_price
