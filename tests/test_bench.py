@@ -1280,6 +1280,17 @@ class Isolation(unittest.TestCase):
             (work / "test_x.py").write_text(self.PASSES, encoding="utf-8")
             self.assertFalse(passcheck.tests_pass(work, shipped, "test_x.py"))
 
+    def test_tests_pass_fails_a_removed_test_and_raises_for_a_missing_shipped_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "shipped", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            (shipped / "test_x.py").write_text(self.PASSES, encoding="utf-8")
+            self.assertFalse(passcheck.tests_pass(work, shipped, "test_x.py"))
+            (work / "test_x.py").write_text(self.PASSES, encoding="utf-8")
+            with self.assertRaises(OSError):  # a check bug, which run.grade reads as broken
+                passcheck.tests_pass(work, shipped, "test_y.py")
+
     def test_planted_stdlib_names_cannot_fake_a_pass(self):
         for task in run.load_tasks():
             with self.subTest(task=task["id"]), tempfile.TemporaryDirectory() as tmp:
