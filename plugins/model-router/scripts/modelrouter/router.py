@@ -5,7 +5,7 @@ docs/ARCHITECTURE.md. decide reads no state: every input arrives as a fact."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional, TypedDict
+from typing import Literal, Mapping, Optional, TypedDict
 
 from . import ladder, registry
 from . import config as cfg
@@ -45,6 +45,7 @@ class Facts:
     raises: dict = field(default_factory=dict)  # learn.raises: the learned raise of each level
     floor: str | None = None  # the request's level, for a hand-off to a strong role agent
     teammate: bool = False  # an agent-team teammate, which CLAUDE_CODE_SUBAGENT_EFFORT doesn't reach
+    effort_caps: Mapping[str, str] = field(default_factory=dict)  # maxEffortLevel per registry model, where set
 
 
 def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
@@ -104,8 +105,9 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
                    reason="CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent's model")
         effort = None if _effort_decided(tool_input, definition, settings, facts.teammate) else level_effort
         if effort and not tool_input.get("model"):
+            effort, held = capped(effort, facts.effort_caps.get(out["was"] or ""))
             out.update(action="rewrite", effort=effort, source="router",
-                       reason=f"{level} subtask; the model is pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE, so only effort is set")
+                       reason=f"{level} subtask; the model is pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE, so only effort is set{held}")
         return out
 
     rule_model = registry.family(config, rule.get("model"))
@@ -144,11 +146,19 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
         effort = pick_effort if source == "router" else level_effort
     if redo:
         effort = _above_earlier(config, effort, final, done)
-    out.update(model=final, source=source, reason=why)
+    effort, held = capped(effort, facts.effort_caps.get(final))
+    out.update(model=final, source=source, reason=why + held)
     if final == out["was"] and not effort:
         return out  # it would run on this model anyway
     out.update(action="rewrite", effort=effort)
     return out
+
+
+def capped(effort: str | None, cap: str | None) -> tuple[str | None, str]:
+    """An effort held to the maxEffortLevel cap, and the reason to add when it was."""
+    if effort in cfg.EFFORTS and cap in cfg.EFFORTS and cfg.EFFORTS.index(effort) > cfg.EFFORTS.index(cap):
+        return cap, f"; effort held to {cap} by maxEffortLevel"
+    return effort, ""
 
 
 def _above_earlier(config: dict, effort: str | None, model: str | None, done: dict) -> str | None:

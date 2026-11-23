@@ -46,10 +46,11 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     name = tool_input.get("name")
     named = isinstance(name, str) and bool(name.strip()) and not tool_input.get("isolation") and not hook_input.get("agent_id")
     teammate = hook_input.get("kind") == "teammate" or named
+    caps = {n: c for n in registry.models(config) for c in [snap.allowed.effort_cap(config, n)] if c}
     return router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable,
                         definition=definition, parent=parent,
                         earlier=calls.finished_run(hook_input.get("session_id"), key), raises=learn.raises(),
-                        floor=floor, teammate=teammate)
+                        floor=floor, teammate=teammate, effort_caps=caps)
 
 
 def decide(hook_input: dict, snap: settings.Snapshot) -> Spawn:

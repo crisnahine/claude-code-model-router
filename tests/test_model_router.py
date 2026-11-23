@@ -953,6 +953,31 @@ class Allowlist(Sandbox):
         managed = allowlist.from_layers({}, floor={"availableModels": pinned})
         self.assertFalse(managed.permits_id(self.config, "sonnet", "claude-sonnet-5-5"))
 
+    def test_max_effort_level_caps_each_family_at_the_lowest_source(self):
+        # settings-reference.md, maxEffortLevel: the lowest of any scope applies; a modelSettings entry replaces
+        # that source's top-level cap for the model; "max" sets none.
+        def caps(floor=None, **layers):
+            found = allowlist.from_layers(layers, floor=floor)
+            return {n: found.effort_cap(self.config, n) for n in ("haiku", "sonnet", "opus", "fable")}
+
+        self.assertEqual(caps(), dict.fromkeys(("haiku", "sonnet", "opus", "fable")))
+        self.assertEqual(caps(user={"maxEffortLevel": "high"}, project={"maxEffortLevel": "medium"}),
+                         dict.fromkeys(("haiku", "sonnet", "opus", "fable"), "medium"))
+        own = {"maxEffortLevel": "low", "modelSettings": {"claude-opus-5-5": {"maxEffortLevel": "max"},
+                                                          "sonnet": {"maxEffortLevel": "medium"}, "x": "junk"}}
+        self.assertEqual(caps(user=own), {"haiku": "low", "sonnet": "medium", "opus": None, "fable": "low"})
+        self.assertEqual(caps(user=own, policy={"maxEffortLevel": "high"})["opus"], "high")
+        self.assertEqual(caps(floor={"maxEffortLevel": "medium"}, user={"maxEffortLevel": "max"})["fable"], "medium")
+        self.assertEqual(caps(user={"maxEffortLevel": "turbo", "modelSettings": ["opus"]})["opus"], None)
+        (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "medium"}))
+        self.assertEqual(allowlist.read(None, self.project).effort_cap(self.config, "opus"), "medium")
+        drop_ins = self.home / "managed-settings.d"
+        drop_ins.mkdir()
+        (drop_ins / "10-a.json").write_text(json.dumps({"modelSettings": {"haiku": {"maxEffortLevel": "low"}}}))
+        (drop_ins / "20-b.json").write_text(json.dumps({"modelSettings": {"opus": {"maxEffortLevel": "low"}}}))
+        read = allowlist.read(None, self.project)
+        self.assertEqual([read.effort_cap(self.config, n) for n in ("haiku", "opus", "sonnet")], ["low", "low", "medium"])
+
     def test_a_managed_file_that_is_there_but_unreadable_permits_no_models(self):
         self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(registry.models(self.config)))  # absent
         drop_ins = self.home / "managed-settings.d"
@@ -2410,6 +2435,32 @@ class Mod(Sandbox):
             with mock.patch.dict(os.environ):
                 self.options(**{name: value})
                 self.assertIsNone(turn(HARD), name)
+
+    def test_a_max_effort_level_holds_every_effort_the_router_sets(self):
+        self.options(main_effort="true")
+        session.record("s1", "claude-opus-5-5")
+        capped = {"user": {"maxEffortLevel": "medium"}}
+        spawned = hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                                   "kind": "subagent", "settings": capped,
+                                   "tool_input": {"subagent_type": "general-purpose", "prompt": HARD}})
+        self.assertEqual((spawned["model"], spawned["effort"]), ("opus", "medium"))
+        self.assertIn("effort held to medium by maxEffortLevel", spawned["reason"])
+        self.assertIn("effort held to medium by maxEffortLevel", self.ledger()[-1]["reason"])
+        self.assertEqual(hooks.mod_turn({"session_id": "s1", "text": HARD, "settings": capped}),
+                         {"level": "complex", "effort": "medium"})
+        self.assertEqual(self.ledger()[-1]["reason"], "effort held to medium by maxEffortLevel")
+        self.assertEqual(self.spawn("general-purpose", LOOKUP)["effort"], "medium")  # at the cap: no reason
+        self.assertNotIn("maxEffortLevel", self.ledger()[-1]["reason"])
+        # Without the mod, the settings files say it.
+        (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "low"}))
+        out = self.pre("general-purpose", HARD, session_id="s2")
+        self.assertEqual(out["updatedInput"]["effort"], "low")
+        self.assertIn("effort held to low by maxEffortLevel", out["additionalContext"])
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+        self.assertEqual(self.pre("general-purpose", HARD, session_id="s3")["updatedInput"]["effort"], "low")
+        route = self.out("explain", HARD)
+        self.assertIn("effort: low (effort held to low by maxEffortLevel)", route)
+        self.assertIn("| complex | opus | low (effort held to low by maxEffortLevel) |", self.out("policy"))
 
     def test_turn_effort_is_left_alone_where_an_effort_change_drops_the_cache(self):
         self.options(main_effort="true")  # off by default

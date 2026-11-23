@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import time
 
-from . import allowlist, calls, fallback, gates, health, intake, ladder, learn, ledger, profile, registry, request, session, settings, spawn, store, upstream
+from . import allowlist, calls, fallback, gates, health, intake, ladder, learn, ledger, profile, registry, request, router, session, settings, spawn, store, upstream
 from . import config as cfg
 
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
@@ -356,7 +356,8 @@ def mod_turn(hook_input: dict) -> dict | None:
     effort = ((config.get("main") or {}).get("effort") or {}).get(level)
     if effort not in cfg.EFFORTS:
         return None
-    ledger.turn(session_id, level, effort, seen.command)
+    effort, held = router.capped(effort, snap.allowed.effort_cap(config, registry.family(config, model)))
+    ledger.turn(session_id, level, effort, seen.command, reason=held.lstrip("; ") or None)
     return {"level": level, "effort": effort}
 
 

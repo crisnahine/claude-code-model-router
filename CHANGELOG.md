@@ -12,6 +12,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 
 ### Changed
 
+- Every effort the router sets, for an agent or a main-loop turn, is held to `maxEffortLevel` from your settings, managed ones included, with a `modelSettings` entry replacing its source's cap for that model. The ledger reason and `/model-router:route` say when the cap held it. Claude Code applies the cap itself, so this changes what is reported, and what a redo asks for, to what runs.
 - Complex runs on Opus at `high`, where it ran on Sonnet at `high`. Migrations, schema changes, performance work and security review get the stronger model. Hardest runs Opus at `xhigh`, so a redo of a complex call is a fresh subagent on Opus at more effort. The headline benchmark figures predate this ladder.
 - A brief that fixes or hunts a defect profiles at complex at least, not standard, and so does the person's request: a fix request raises the main turn's effort and counts toward the strong-agent check. Only "fix" and "debug" count as verbs ("the fix", "fixture" and "debug logging" don't); the other hunt verbs, such as "investigate" and "diagnose", match anywhere. A fix the brief rules out doesn't count.
 - A project's `.claude/model-router.json` may raise a level's `needs` or `effort` above the shipped (or your own) value and never lower it. A lowering is dropped with no error. A `needs` that isn't a finite number is dropped from every file.

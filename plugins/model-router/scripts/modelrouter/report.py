@@ -2,13 +2,19 @@
 fall back to what the last SessionStart recorded."""
 from __future__ import annotations
 
-from . import agents, ladder, learn, ledger, registry, settings, store, upstream
+from . import agents, ladder, learn, ledger, registry, router, settings, store, upstream
 from . import config as cfg
 from .profile import profile_call, profile_prompt
 
 # The --json shapes. A new key keeps the version; removing or renaming one bumps it.
 USAGE_SCHEMA = "model-router.usage/1"
 MODELS_SCHEMA = "model-router.models/1"
+
+
+def _effort(snap: settings.Snapshot, pick: ladder.Pick) -> str | None:
+    """The pick's effort as it runs, held to any maxEffortLevel cap, and saying so."""
+    effort, held = router.capped(pick.effort, snap.allowed.effort_cap(snap.config, pick.model))
+    return f"{effort} ({held.lstrip('; ')})" if held else effort
 
 
 def policy(snap: settings.Snapshot) -> str:
@@ -21,7 +27,7 @@ def policy(snap: settings.Snapshot) -> str:
     for level in cfg.LEVELS:
         pick = ladder.pick(config, level, options.priority, usable, raises)
         note = " (raised by feedback)" if raises[level] else ""
-        lines.append(f"| {level} | {pick.model or 'left as it is'}{note} | {pick.effort or 'as the agent or session sets it'} |")
+        lines.append(f"| {level} | {pick.model or 'left as it is'}{note} | {_effort(snap, pick) or 'as the agent or session sets it'} |")
     lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
     for name in registry.by_strength(config):
         info = registry.models(config)[name]
@@ -112,7 +118,7 @@ def explain(snap: settings.Snapshot, text: str, agent: str | None = None) -> str
     pick = ladder.pick(config, level, options.priority, usable, learn.raises())
     why = ", ".join(result["signals"]) or "no risk, scope or ambiguity wording"
     out = [f"Level: **{level}** ({why}).",
-           f"Model: **{pick.model or 'left as it is'}**, effort: {pick.effort or 'unchanged'}.",
+           f"Model: **{pick.model or 'left as it is'}**, effort: {_effort(snap, pick) or 'unchanged'}.",
            f"Priority {options.priority}; models in use: {', '.join(usable) or 'none: availableModels and deniedModels leave no registry model open'}."]
     if agent:
         definition = agents.find(agent, snap.project)

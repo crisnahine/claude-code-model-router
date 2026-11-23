@@ -33,9 +33,10 @@ def model_error(session_id: str | None, agent: object, model: str) -> None:
     store.append_ledger({"event": "model_error", "session": session_id, "agent": agent, "model": model})
 
 
-def turn(session_id: str | None, level: str, effort: str, command: str | None = None) -> None:
+def turn(session_id: str | None, level: str, effort: str, command: str | None = None,
+         reason: str | None = None) -> None:
     store.append_ledger({"event": "turn", "session": session_id, "level": level, "effort": effort,
-                         **({"command": command} if command else {})})
+                         **({"command": command} if command else {}), **({"reason": reason} if reason else {})})
 
 
 def _tokens(usage: dict) -> dict:

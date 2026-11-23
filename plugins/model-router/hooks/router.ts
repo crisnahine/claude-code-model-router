@@ -8,7 +8,7 @@ const EFFORTS: readonly ModelEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'
 const KEPT = 500
 const SETTINGS_MS = 2000
 const SOURCES: readonly SettingsSource[] = ['policy', 'user', 'project', 'local', 'flag']
-const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides']
+const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides', 'maxEffortLevel', 'modelSettings']
 
 type Pick = { model?: string; effort?: ModelEffort } | null
 
