@@ -1,0 +1,1 @@
+Not read_timeout, it reads REQUEST_TIMEOUT. The answer is read_retry_limit in app/settings.py.
