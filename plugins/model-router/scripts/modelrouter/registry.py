@@ -42,10 +42,14 @@ class LevelSpec:
 
 @dataclass(frozen=True)
 class Rule:
-    """What an override file says about one agent."""
+    """What an override file says about one agent. The user's file sets `model`, `level` and `route` in
+    full. A project's file only raises: its `level` becomes `floor`, its `model` becomes `suggested` and
+    applies only when it isn't weaker than the router's pick, and its `route` is held back."""
     model: str | None = None
     level: Level | None = None
     route: bool | None = None
+    floor: Level | None = None
+    suggested: str | None = None
 
 
 @dataclass(frozen=True)

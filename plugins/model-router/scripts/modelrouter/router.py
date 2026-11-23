@@ -32,6 +32,7 @@ class Decision(TypedDict):
     repeat_of: Optional[str]
     escalated_from: Optional[str]
     version: Optional[str]  # an exact model ID the caller or the agent named, not just a family
+    held: Optional[str]  # what a project's rule asked for that this call didn't take, and why
 
 
 @dataclass(frozen=True)
@@ -53,7 +54,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     tool_input, agent, definition, usable = facts.tool_input, facts.agent, facts.definition, facts.usable
     out: Decision = {"agent": agent, "action": "keep", "model": None, "effort": None, "level": None,
            "signals": [], "source": None, "pick": None, "was": None, "reason": "", "repeat_of": None,
-           "escalated_from": None, "version": None}
+           "escalated_from": None, "version": None, "held": None}
     if agent == "fork":
         out["reason"] = "a fork runs on its conversation's model"
         return out
@@ -73,8 +74,10 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     rule = reg.rules.get(agent) or Rule()
     profile = profile_call(tool_input, agent)
     level = rule.level or profile["level"]
-    if facts.floor and facts.floor > level:
-        level = facts.floor
+    # A project's rule can raise a level, never lower it; so can the request's own.
+    for floor in (rule.floor, facts.floor):
+        if floor and floor > level:
+            level = floor
     done = facts.earlier
     done_level = Level.parse(done.get("level")) if done else None
     redo = bool(done_level and not tool_input.get("model"))
@@ -113,6 +116,12 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         return out
 
     rule_model = reg.family(rule.model)
+    suggested = reg.family(rule.suggested)
+    if not rule_model and suggested and reg.stronger(pick, suggested):
+        # A project's model applies only when it isn't weaker than the pick.
+        out["held"] = f"a project rule names {suggested} for {agent}, weaker than the pick {pick}"
+        suggested = None
+    rule_model = rule_model or suggested
     override = settings.pins == "override"
     if requested:
         target, source, why = requested, "caller", "the call names a model"
@@ -149,7 +158,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if redo:
         effort = _above_earlier(reg, effort, final, done)
     effort, held = capped(effort, facts.effort_caps.get(final))
-    out.update(model=final, source=source, reason=why + held)
+    out.update(model=final, source=source, reason=why + held + (f"; {out['held']}" if out["held"] else ""))
     if final == out["was"] and not effort:
         return out  # it would run on this model anyway
     out.update(action="rewrite", effort=effort)

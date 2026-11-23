@@ -92,8 +92,11 @@ def models_data(snap: settings.Snapshot) -> dict:
 
 
 def _held_back(reg: registry.Registry) -> list[dict]:
-    """What a project's override file asked for that the registry did not apply."""
-    return [{"kind": h.kind, "name": h.name, "reason": h.reason} for h in reg.held]
+    """What a project's override file asked for that was not applied: what the registry held at load, and
+    each rule model a spawn in the last week found weaker than the router's pick."""
+    found = [{"kind": h.kind, "name": h.name, "reason": h.reason} for h in reg.held]
+    seen = {(r.get("agent"), r["held"]) for r in ledger.read(7) if isinstance(r.get("held"), str)}
+    return found + [{"kind": "rule", "name": str(agent), "reason": reason} for agent, reason in sorted(seen, key=str)]
 
 
 def models(snap: settings.Snapshot) -> str:

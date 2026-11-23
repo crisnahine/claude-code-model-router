@@ -268,9 +268,16 @@ def _levels(raw: dict, problems: list[str]) -> dict[Level, LevelSpec]:
     return found
 
 
-def _rules(base: dict, user: dict, project: dict) -> dict[str, Rule]:
-    return {name: Rule(model=spec.get("model"), level=Level.parse(spec.get("level")), route=spec.get("route"))
-            for name, spec in _merge(_merge(base, user), project).items() if isinstance(spec, dict)}
+def _rules(base: dict, user: dict, project: dict, held: list[Held]) -> dict[str, Rule]:
+    rules: dict[str, Rule] = {}
+    for name, spec in _merge(base, user).items():
+        if isinstance(spec, dict):
+            rules[name] = Rule(model=spec.get("model"), level=Level.parse(spec.get("level")), route=spec.get("route"))
+    for name, spec in project.items():
+        if spec.get("route") is False:
+            held.append(Held("rule", name, "route false is ignored: a project can't switch routing off for an agent"))
+        rules[name] = replace(rules.get(name, Rule()), floor=Level.parse(spec.get("level")), suggested=spec.get("model"))
+    return rules
 
 
 def build(base: dict, user: dict | None = None, project: dict | None = None) -> Registry:
@@ -317,7 +324,7 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
         older_aliases={k: tuple(v) for k, v in (base.get("older_aliases") or {}).items()
                        if not k.startswith("$") and isinstance(v, list)},
         crew=dict(base.get("crew") or {}),
-        rules=_rules(base.get("agents") or {}, mine.get("agents") or {}, theirs.get("agents") or {}),
+        rules=_rules(base.get("agents") or {}, mine.get("agents") or {}, theirs.get("agents") or {}, held),
         routing_mode=min(file_modes, key=MODES.index) if file_modes else None,
         problems=tuple(problems),
         held=tuple(held),

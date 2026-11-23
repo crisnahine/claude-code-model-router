@@ -20,6 +20,8 @@ def spawn(session_id: str | None, via: str, decision: router.Decision, descripti
            "description": str(description or "")[:120]}
     if kind is not None:
         row["kind"] = kind
+    if decision.get("held"):
+        row["held"] = decision["held"]
     store.append_ledger(row)
 
 

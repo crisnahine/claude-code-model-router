@@ -19,6 +19,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 - Complex runs on Opus at `high`, where it ran on Sonnet at `high`. Migrations, schema changes, performance work and security review get the stronger model. Hardest runs Opus at `xhigh`, so a redo of a complex call is a fresh subagent on Opus at more effort. The headline benchmark figures predate this ladder.
 - A brief that fixes or hunts a defect profiles at complex at least, not standard, and so does the person's request: a fix request raises the main turn's effort and counts toward the strong-agent check. Only "fix" and "debug" count as verbs ("the fix", "fixture" and "debug logging" don't); the other hunt verbs, such as "investigate" and "diagnose", match anywhere. A fix the brief rules out doesn't count.
 - A project's `.claude/model-router.json` may raise a level's `needs` or `effort` above the shipped (or your own) value and never lower it. A lowering is dropped with no error. A `needs` that isn't a finite number is dropped from every file.
+- A rule in a project's `.claude/model-router.json` only raises. Its `level` is a floor under the level the brief earns, its `model` applies only when it isn't weaker than the router's pick for that call, and its `route: false` is ignored. Your own `~/.claude/model-router.json` keeps full control. `/model-router:models` lists what a project's file asked for and wasn't applied, and a spawn that held a rule's model writes why in the ledger's `held` field.
 - A level's `needs` never falls below the level under it. A raise to one level, such as a project setting lookup to 3, lifts every level above it to at least that, where before the levels above kept their own values.
 - `/model-router:models` lists the keys an override file had wrong and Model Router left out (`config_problems` in `--json`), such as a `needs` of `NaN`, and the project settings it held back (`held_back`). Both keys appear only when they have something to say; `models --json` and `usage --json` are otherwise unchanged.
 - `CLAUDE_CODE_SUBAGENT_EFFORT` no longer stops the router from setting a teammate's effort, since Claude Code doesn't apply that variable to teammates.
@@ -59,6 +60,10 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 - A brief that opens with "Debug logging for ...", or rules a fix out ("avoid fixing", "must not fix"), no longer profiles as a fix. A long run of newlines in a brief no longer makes the profiler's regex scans quadratic.
 - A bench check can no longer be fooled by a `unittest.py` the agent leaves in the work directory: every check runs isolated, and the root-cause checks run the work directory's tests in a child that imports `unittest` first.
 - A bench run that errored during execution with a zero cost counts as an unknown cost and books the whole budget. A run the API refused for a rate limit or a lost network keeps its zero, since nothing started.
+
+### Security
+
+- A project's `.claude/model-router.json` can no longer hold an agent below the router's pick: its rule's `model` applies only when it isn't weaker than the pick, its `level` is a floor, and its `route: false` is ignored. With the earlier limit on lowering a level, a cloned repository can only make its subagents cost more, never run weaker than the shipped ladder. A file that relied on either keeps loading and the part that lowered is dropped; the override shape's `schema` stays 1.
 
 ### Internal
 

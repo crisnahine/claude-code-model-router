@@ -149,7 +149,7 @@ Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours
 }
 ```
 
-A project's file can raise any level's model and effort, so a repository you clone can make its subagents cost more. It can't get any model past your `max_tier`. Every key, the trust rules and the file's version are in the [guide](docs/GUIDE.md#configuration).
+A project's file only raises: it can raise any level's model and effort and set a floor for an agent, so a repository you clone can make its subagents cost more, never run weaker. It can't get any model past your `max_tier`. Every key, the trust rules and the file's version are in the [guide](docs/GUIDE.md#configuration).
 
 ## What it can't do
 

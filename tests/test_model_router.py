@@ -849,13 +849,14 @@ class Registry(Sandbox):
         self.assertEqual((reg.family("best"), reg.family("top")), ("opus", None))
         self.assertEqual(reg.problems, ("aliases.top names no model, dropped",))
 
-    def test_what_a_project_file_asked_for_and_was_held_back_is_listed(self):
-        self.override({"levels": {"complex": {"needs": 2}}, "models": {"opus-x": {"strength": 9}}})
+    def test_a_rule_a_project_file_cannot_apply_is_held_back_and_listed(self):
+        self.override({"agents": {"quiet": {"route": False, "level": "complex"}}, "models": {"opus-x": {"strength": 9}}})
         reg = cfg.load()
-        self.assertEqual([(h.kind, h.name) for h in reg.held], [("model", "opus-x"), ("level", "complex")])
+        self.assertEqual([(h.kind, h.name) for h in reg.held], [("model", "opus-x"), ("rule", "quiet")])
+        self.assertEqual(reg.rules["quiet"], Rule(floor=Level.complex))
         data = json.loads(self.out("models", "--json"))
-        self.assertEqual([(h["kind"], h["name"]) for h in data["held_back"]], [("model", "opus-x"), ("level", "complex")])
-        self.assertIn("- level complex: needs 2 is below 3", self.out("models"))
+        self.assertEqual([(h["kind"], h["name"]) for h in data["held_back"]], [("model", "opus-x"), ("rule", "quiet")])
+        self.assertIn("- rule quiet: route false is ignored", self.out("models"))
         self.assertNotIn("config_problems", data)
 
 
@@ -1302,7 +1303,7 @@ class ConfigSchema(Sandbox):
         self.override({"levels": {"complex": {"effort": "xhigh"}}}, user=True)
         self.override({"agents": {"my-agent": {"level": "lookup"}}})
         config = cfg.load()
-        self.assertEqual((config.levels[Level.complex].effort, config.rules["my-agent"].level),
+        self.assertEqual((config.levels[Level.complex].effort, config.rules["my-agent"].floor),
                          ("xhigh", Level.lookup))
         self.assertEqual(config.newer, ())
 
@@ -1312,7 +1313,7 @@ class ConfigSchema(Sandbox):
         self.override({"schema": cfg.CONFIG_SCHEMA + 1, "agents": {"my-agent": {"level": "lookup"}}})
         config = cfg.load()
         self.assertEqual((config.routing_mode, config.levels[Level.complex].effort), ("off", "xhigh"))
-        self.assertEqual(config.rules["my-agent"].level, Level.lookup)
+        self.assertEqual(config.rules["my-agent"].floor, Level.lookup)
         newer = [str(self.home / "model-router.json"), str(self.project / ".claude" / "model-router.json")]
         self.assertEqual([str(p) for p in config.newer], newer)
         self.assertEqual(json.loads(self.out("models", "--json"))["newer_config"], newer)
@@ -2052,9 +2053,59 @@ class Router(Sandbox):
         self.agent("pinned", "opus")
         self.assertEqual(self.decide("pinned", LOOKUP)["model"], "haiku")  # a named model is only ever lowered
 
+    def test_a_project_rule_model_applies_only_when_it_is_not_weaker_than_the_pick(self):
+        self.agent("worker")
+        self.override({"agents": {"worker": {"model": "haiku"}}})
+        held = self.decide("worker", HARD)  # the pick is opus
+        self.assertEqual((held["source"], held["model"], held["effort"]), ("router", "opus", "high"))
+        self.assertIn("a project rule names haiku for worker, weaker than the pick opus", held["held"])
+        self.assertIn(held["held"], held["reason"])
+        same = self.decide("worker", LOOKUP)  # the pick is haiku: not weaker
+        self.assertEqual((same["source"], same["model"], same["held"]), ("rule", "haiku", None))
+        self.override({"agents": {"worker": {"model": "fable"}}})
+        raised = self.decide("worker", LOOKUP)
+        self.assertEqual((raised["source"], raised["model"], raised["held"]), ("rule", "fable", None))
+
+    def test_the_users_own_rule_keeps_full_control(self):
+        self.agent("worker")
+        self.override({"agents": {"worker": {"model": "haiku", "level": "lookup"}}}, user=True)
+        d = self.decide("worker", HARD)
+        self.assertEqual((d["source"], d["level"], d["model"], d["held"]), ("rule", "lookup", "haiku", None))
+        self.override({"agents": {"worker": {"model": "sonnet"}}})  # a project can't take it back or lower it
+        self.assertEqual(self.decide("worker", HARD)["model"], "haiku")
+
+    def test_a_project_rule_level_is_a_floor(self):
+        self.agent("worker")
+        self.override({"agents": {"worker": {"level": "complex"}}})
+        d = self.decide("worker", LOOKUP)
+        self.assertEqual((d["level"], d["model"]), ("complex", "opus"))
+        self.override({"agents": {"worker": {"level": "lookup"}}})
+        d = self.decide("worker", HARD)  # it never lowers what the brief needs
+        self.assertEqual((d["level"], d["model"]), ("complex", "opus"))
+
+    def test_a_project_rule_cannot_switch_routing_off_but_the_users_can(self):
+        self.agent("worker")
+        self.override({"agents": {"worker": {"route": False}}})
+        d = self.decide("worker", LOOKUP)
+        self.assertEqual((d["action"], d["model"]), ("rewrite", "haiku"))
+        self.override({"agents": {"worker": {"route": False}}}, user=True)
+        self.assertEqual(self.decide("worker", LOOKUP)["action"], "keep")
+
+    def test_a_spawn_that_held_a_project_rule_says_so_in_the_ledger_and_in_models(self):
+        self.agent("worker")
+        self.override({"agents": {"worker": {"model": "haiku"}}})
+        self.session_on("claude-sonnet-5-5")
+        self.pre("worker", HARD)
+        row = self.ledger()[-1]
+        self.assertIn("weaker than the pick opus", row["held"])
+        found = json.loads(self.out("models", "--json"))["held_back"]
+        self.assertEqual(found, [{"kind": "rule", "name": "worker", "reason": row["held"]}])
+        self.pre("general-purpose", LOOKUP)
+        self.assertNotIn("held", self.ledger()[-1])
+
     def test_rules_in_override_files(self):
-        self.override({"agents": {"general-purpose": {"model": "sonnet"}, "Explore": {"route": False},
-                                  "Plan": {"level": "frontier"}}})
+        self.override({"agents": {"Explore": {"route": False}}}, user=True)
+        self.override({"agents": {"general-purpose": {"model": "sonnet"}, "Plan": {"level": "frontier"}}})
         self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "sonnet")
         self.assertEqual(self.decide("Explore", LOOKUP)["action"], "keep")
         self.assertEqual(self.decide("Plan", LOOKUP)["model"], "fable")
@@ -3907,7 +3958,7 @@ class Reports(Sandbox):
             self.assertIn(f"Why: {d['reason']}.", text)
 
     def test_explain_reports_the_rules_the_old_profile_and_ladder_copy_missed(self):
-        self.override({"agents": {"quiet": {"route": False}}})
+        self.override({"agents": {"quiet": {"route": False}}}, user=True)
         self.assertIn("leaves this agent alone", self.out("explain", "--agent", "quiet", *LOOKUP.split()))
         self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         self.assertIn("pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE", self.out("explain", *LOOKUP.split()))

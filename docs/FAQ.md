@@ -34,7 +34,7 @@ In the benchmark of the routing code at commit <!-- bench:opus.commit_code -->`7
 
 ## How do I turn Model Router off, or turn parts of it off?
 
-Set the plugin's `routing_mode` option to `off` in `/config`, and the router changes nothing and only keeps its ledger. `advise` tells Claude the estimate without changing any call. The other parts each have their own option: `strong_agent_gate` (on) and `verify_gate` (on) for the checks before a turn ends, `main_effort` (off) for the main conversation's effort, and `update_check` (on) for the daily fetch. To leave one agent alone, give it `"route": false` under `agents` in `~/.claude/model-router.json` or the project's `.claude/model-router.json` ([README](../README.md#configuration)).
+Set the plugin's `routing_mode` option to `off` in `/config`, and the router changes nothing and only keeps its ledger. `advise` tells Claude the estimate without changing any call. The other parts each have their own option: `strong_agent_gate` (on) and `verify_gate` (on) for the checks before a turn ends, `main_effort` (off) for the main conversation's effort, and `update_check` (on) for the daily fetch. To leave one agent alone, give it `"route": false` under `agents` in `~/.claude/model-router.json` (a project's file can't switch routing off for an agent) ([README](../README.md#configuration)).
 
 ## Can I cap the strongest model, or force one model?
 
