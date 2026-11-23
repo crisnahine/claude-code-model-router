@@ -21,7 +21,7 @@
     "code-review"
   ],
   "engines": {
-    "claude-code": ">=2.1.326"
+    "claude-code": ">=2.1.329"
   },
   "network": {
     "hosts": [

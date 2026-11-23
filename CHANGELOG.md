@@ -32,7 +32,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 - When a cap, the allowlist or model health leaves a level's pick weaker than the level needs, the pick gets one more effort step, at most `xhigh`.
 - A run that swapped models mid-run (Claude Code reports it as `modelsUsed` on the Agent result) is its own result. It no longer counts as the level's result, as a strike against the model it left, or as a redo when the call is issued again.
 - The allowlist reads the settings layers through the mod, so managed policy from server-managed, MDM and registry sources reaches it. The managed settings files stay as a floor: their deny entries always apply, and their allow list must permit a model too. Without the mod, or when a read fails, it reads the files. A policy list that isn't a list, or a deny list over 200 entries, leaves no model open.
-- Claude Code 2.1.326 or later is required, not 2.1.292. The mod calls `$.process.hookEnv()`, which older versions don't have; on them the mod routed nothing and only the fallback path worked.
+- Claude Code 2.1.329 or later is required, not 2.1.292. The mod calls `$.process.hookEnv()`, which 2.1.326 added; before it the mod routed nothing and only the fallback path worked. The manifest's `network` field needs 2.1.328, and 2.1.329 fixed the Agent tool's `effort` for named teammates, which the fallback path sets.
 - In `/plugin` and `/config`, Routing mode, Priority, Strongest model allowed and Agents that name their own model are now pickers of their allowed values, so they show their default and a mistyped value can't be saved.
 
 ### Fixed

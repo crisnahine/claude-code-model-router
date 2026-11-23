@@ -168,15 +168,15 @@ class Shipped(unittest.TestCase):
         for name in ("main_effort", "update_check", "verify_gate", "strong_agent_gate"):
             self.assertEqual(fields[name]["default"], getattr(settings.Settings(), name), name)
 
-    def test_the_claude_code_floor_is_the_version_the_mod_api_needs(self):
-        # $.process.hookEnv() needs v2.1.326: https://code.claude.com/docs/en/plugins/mods/reference.md
+    def test_the_claude_code_floor_is_the_version_the_manifest_and_teammate_effort_need(self):
+        # `network` needs v2.1.328 (plugins/manifest-reference.md); v2.1.329 fixed `effort` for named teammates.
         manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-        self.assertEqual(manifest["engines"]["claude-code"], ">=2.1.326")
+        self.assertEqual(manifest["engines"]["claude-code"], ">=2.1.329")
         for path in (ROOT / "README.md", PLUGIN / "README.md", ROOT / "docs" / "FAQ.md", ROOT / "docs" / "GUIDE.md",
                      ROOT / "site" / "llms.txt", ROOT / "site" / "index.html",
                      ROOT / "docs" / "assets" / "badge-claude-code.svg"):
-            self.assertNotIn("2.1.292 or later", path.read_text(encoding="utf-8"), path)
-        self.assertIn("Claude Code 2.1.326 or later", (ROOT / "README.md").read_text(encoding="utf-8"))
+            self.assertNotIn("2.1.326 or later", path.read_text(encoding="utf-8"), path)
+            self.assertIn("2.1.329 or later", path.read_text(encoding="utf-8"), path)
 
     def test_each_choice_option_is_a_picker_the_runtime_accepts(self):
         # A string option with no `options` list shows as an empty text box in /plugin.

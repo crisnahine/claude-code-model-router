@@ -49,7 +49,7 @@
       "operatingSystem": "macOS",
       "softwareVersion": "0.1.0",
       "datePublished": "2026-11-23",
-      "softwareRequirements": "Claude Code 2.1.326 or later; Python 3.9 or later",
+      "softwareRequirements": "Claude Code 2.1.329 or later; Python 3.9 or later",
       "installUrl": "https://github.com/crisnahine/claude-code-model-router#install-the-claude-code-plugin",
       "downloadUrl": "https://github.com/crisnahine/claude-code-model-router",
       "releaseNotes": "https://github.com/crisnahine/claude-code-model-router/blob/main/CHANGELOG.md",
@@ -92,7 +92,7 @@
       "name": "What is Model Router?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Model Router is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts, and moves a call one level up when its work comes back for a redo. It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages. The agent the caller chose, its prompt and its tools stay as they were. It is Apache-2.0 licensed and needs Claude Code 2.1.326 or later and Python 3.9 or later."
+        "text": "Model Router is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts, and moves a call one level up when its work comes back for a redo. It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages. The agent the caller chose, its prompt and its tools stay as they were. It is Apache-2.0 licensed and needs Claude Code 2.1.329 or later and Python 3.9 or later."
       }
     },
     {
@@ -347,7 +347,7 @@ footer nav { display: flex; flex-wrap: wrap; gap: 18px; }
       </div>
       <div class="badges">
         <img src="assets/badge-version.svg" width="144" height="28" alt="version 0.1.0">
-        <img src="assets/badge-claude-code.svg" width="254" height="28" alt="Claude Code 2.1.326 or later">
+        <img src="assets/badge-claude-code.svg" width="254" height="28" alt="Claude Code 2.1.329 or later">
         <img src="assets/badge-python.svg" width="188" height="28" alt="Python 3.9 or later">
         <img src="assets/badge-license.svg" width="180" height="28" alt="license: Apache-2.0">
       </div>
@@ -429,7 +429,7 @@ footer nav { display: flex; flex-wrap: wrap; gap: 18px; }
     <p>On versions without the one-step form, add the marketplace first:</p>
 <pre><code>/plugin marketplace add crisnahine/claude-code-model-router
 /plugin install model-router@claude-code-model-router</code></pre>
-    <p>Requirements: Claude Code 2.1.326 or later, <code>sh</code>, and Python 3.9 or later as <code>python3</code> or <code>python</code> on your <code>PATH</code>. Without Python the plugin stays out of the way. It is installed and run live on macOS, and its unit tests also run on Linux and Windows in CI. Then try <code>/model-router:route &lt;task&gt;</code> to see which model a task would get and why.</p>
+    <p>Requirements: Claude Code 2.1.329 or later, <code>sh</code>, and Python 3.9 or later as <code>python3</code> or <code>python</code> on your <code>PATH</code>. Without Python the plugin stays out of the way. It is installed and run live on macOS, and its unit tests also run on Linux and Windows in CI. Then try <code>/model-router:route &lt;task&gt;</code> to see which model a task would get and why.</p>
   </div>
 </section>
 
@@ -460,7 +460,7 @@ footer nav { display: flex; flex-wrap: wrap; gap: 18px; }
     <h2>Questions about Model Router</h2>
     <p class="intro">The same answers as <a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/FAQ.md">docs/FAQ.md</a>.</p>
 <!-- FAQ, written by tools/docs_assets.py from docs/FAQ.md. -->
-<details open><summary><h3>What is Model Router?</h3></summary><p>Model Router is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts, and moves a call one level up when its work comes back for a redo. It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages. The agent the caller chose, its prompt and its tools stay as they were. It is Apache-2.0 licensed and needs Claude Code 2.1.326 or later and Python 3.9 or later (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/README.md#install-the-claude-code-plugin">README</a>).</p></details>
+<details open><summary><h3>What is Model Router?</h3></summary><p>Model Router is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts, and moves a call one level up when its work comes back for a redo. It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages. The agent the caller chose, its prompt and its tools stay as they were. It is Apache-2.0 licensed and needs Claude Code 2.1.329 or later and Python 3.9 or later (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/README.md#install-the-claude-code-plugin">README</a>).</p></details>
 <details><summary><h3>How does Model Router pick a model for a subagent?</h3></summary><p>Model Router reads the subagent's brief and the agent's name, gives the call one of five levels, and runs it on the cheapest usable model and effort for that level. The levels are lookup (Haiku at medium effort), standard (Sonnet at medium), complex (Opus at high), hardest (Opus at xhigh) and frontier (Fable at high). The brief is scored for risk, scope, load and ambiguity, and for whether the call changes something or only reads. A model you or the caller named still wins: the order is <code>CLAUDE_CODE_SUBAGENT_MODEL_FORCE</code>, a model named on the call, a per-agent rule, the agent's own <code>model</code> field, <code>CLAUDE_CODE_SUBAGENT_MODEL</code>, and only then the router's pick (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/ARCHITECTURE.md#the-decision">ARCHITECTURE.md</a>).</p></details>
 <details><summary><h3>What happens when the cheap model gets it wrong?</h3></summary><p>When Claude issues the same call again in the same request after its result came back, that call runs one level higher. Lookup, standard and hardest move to a stronger model on a redo, complex moves to hardest and stays on Opus at more effort, and a frontier redo runs at one more step of effort. Each redo is also a vote that the first level was too low: at least 6 votes that are also at least 30% of a level's calls raise that level for later calls (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/ARCHITECTURE.md#redo-escalation">ARCHITECTURE.md</a>).</p></details>
 <details><summary><h3>What does Model Router cost?</h3></summary><p>The plugin is free under the Apache-2.0 license, and it adds 683 tokens to each request's context, measured on a headless Sonnet run. Each of its hooks takes about 54 to 60 ms warm on the measuring machine, and a spawn decision settled in about 110 ms in live runs, starting Python included (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/PERFORMANCE.md">PERFORMANCE.md</a>). The models it routes to are billed by your Claude plan or API account as usual. <code>/model-router:usage</code> shows what each turn cost at list price, main conversation and subagents apart.</p></details>

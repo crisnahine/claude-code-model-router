@@ -1,6 +1,6 @@
 # Model Router
 
-> Model Router (`model-router`) is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts (subagents, agent-team teammates and workflow stages), choosing the cheapest model that should do the job and running a call one level higher when its work comes back for a redo. Apache-2.0 license. Needs Claude Code 2.1.326 or later and Python 3.9 or later.
+> Model Router (`model-router`) is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts (subagents, agent-team teammates and workflow stages), choosing the cheapest model that should do the job and running a call one level higher when its work comes back for a redo. Apache-2.0 license. Needs Claude Code 2.1.329 or later and Python 3.9 or later.
 
 Facts, each with its source:
 

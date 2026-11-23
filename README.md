@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="CHANGELOG.md"><img src="docs/assets/badge-version.svg" height="28" alt="version 0.1.0"></a>
-  <a href="#install-the-claude-code-plugin"><img src="docs/assets/badge-claude-code.svg" height="28" alt="Claude Code 2.1.326 or later"></a>
+  <a href="#install-the-claude-code-plugin"><img src="docs/assets/badge-claude-code.svg" height="28" alt="Claude Code 2.1.329 or later"></a>
   <a href="#install-the-claude-code-plugin"><img src="docs/assets/badge-python.svg" height="28" alt="Python 3.9 or later"></a>
   <a href="CONTRIBUTING.md#rules-for-a-change"><img src="docs/assets/badge-dependencies.svg" height="28" alt="dependencies: none, standard library only"></a>
   <a href="LICENSE"><img src="docs/assets/badge-license.svg" height="28" alt="license: Apache-2.0"></a>
@@ -48,7 +48,7 @@ In Claude Code:
 
 Or from your shell: `claude plugin install model-router --marketplace crisnahine/claude-code-model-router`.
 
-Requirements: Claude Code 2.1.326 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. Without Python the plugin stays out of the way: its hooks do nothing and its skills say why.
+Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. Without Python the plugin stays out of the way: its hooks do nothing and its skills say why.
 
 There is nothing to configure. Claude model routing is on from the first session. To try it from a clone without installing, run `claude --plugin-dir ./plugins/model-router`.
 
@@ -167,7 +167,7 @@ A project's file can raise any level's model and effort, so a repository you clo
 - Other plugins, skills and agents: their agents are routed too. The router never changes which agent runs and never refuses a call to steer it. Another plugin's hook that denies or asks about a call still applies.
 - Permissions: the plugin never approves a tool call. Your permission rules and auto mode review every spawn as they would without it.
 - Amazon Bedrock, Google Cloud's Agent Platform (Vertex AI) and Microsoft Foundry: routing uses the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves for your provider. Where an alias resolves to an older model, the mod sends the family's newest model ID, and falls back to the alias if the provider refuses it ([details](docs/GUIDE.md#third-party-providers)).
-- Versions and status: Claude Code 2.1.326 or later. Tested live on 2.1.330 on macOS, and the unit tests also run on Linux and Windows in CI. Version 0.1.0; what is still open is in [release readiness](docs/RELEASE_READINESS.md).
+- Versions and status: Claude Code 2.1.329 or later. Tested live on 2.1.330 on macOS, and the unit tests also run on Linux and Windows in CI. Version 0.1.0; what is still open is in [release readiness](docs/RELEASE_READINESS.md).
 - Failure: every hook and mod hook fails open. A bug can cost routing, but it can't block a tool call, a spawn or a session.
 
 <a id="security"></a>
