@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import datetime as _dt
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -30,6 +31,15 @@ def now() -> float:
     """The wall-clock time stamped into state and compared with it. Lock waits and stale-lock
     checks read the real clocks, so a frozen clock never stalls a lock."""
     return (_clock or time.time)()
+
+
+def stamp(value: Any) -> float:
+    """A stored time to sort by: the number itself, or 0 when it is junk, nan or infinite."""
+    try:
+        ok = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    except OverflowError:
+        return 0
+    return value if ok else 0
 
 
 def set_clock(clock: Callable[[], float] | None) -> None:
@@ -321,7 +331,7 @@ def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any]) -> N
         data[key] = entry
         if len(data) > KEEP_ENTRIES:
             def written(k: str) -> float:
-                return data[k].get("_at", 0) if isinstance(data[k], dict) else 0
+                return stamp(data[k].get("_at")) if isinstance(data[k], dict) else 0
             for old in sorted(data, key=written)[:len(data) - KEEP_ENTRIES]:
                 del data[old]
 
@@ -344,7 +354,7 @@ def keep(records: dict, key: str, record: dict, kept: int | None = None) -> None
     kept = KEPT_RECORDS if kept is None else kept
     records[key] = {**record, "at": now()}
     keys = [k for k, v in records.items() if isinstance(v, dict)]
-    for old in sorted(keys, key=lambda k: records[k].get("at") or 0)[:-kept]:
+    for old in sorted(keys, key=lambda k: stamp(records[k].get("at")))[:-kept]:
         del records[old]
 
 

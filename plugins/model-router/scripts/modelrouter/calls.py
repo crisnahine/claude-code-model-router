@@ -140,7 +140,7 @@ def _record(route: Route, key: str) -> dict:
 def _latest(routes: dict, key: str) -> list[dict]:
     """The records of this call, newest first."""
     found = [r for r in routes.values() if isinstance(r, dict) and r.get("call") == key]
-    return sorted(found, key=lambda r: r.get("at") or 0, reverse=True)
+    return sorted(found, key=lambda r: store.stamp(r.get("at")), reverse=True)
 
 
 def routed(session_id: str | None, key: str, route: Route, spawn_id: str | None = None) -> Route | None:

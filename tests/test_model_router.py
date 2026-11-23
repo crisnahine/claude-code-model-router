@@ -2540,6 +2540,20 @@ class Calls(Sandbox):
         self.assertEqual((route.model, route.level, route.at), (None, None, 0.0))
         self.assertIsNone(calls.route_of("s1", "unknown"))
 
+    def test_a_stored_time_that_is_not_a_number_sorts_as_oldest(self):
+        key = calls.identify({"prompt": LOOKUP})[1]
+        for odd in ("x", None, True, float("nan"), 10 ** 400):
+            store.save_entry("routes", "s1", {"a": {"call": key, "model": "opus", "at": odd},
+                                              "b": {"call": key, "model": "haiku", "at": 5}})
+            self.assertEqual(calls.route_of("s1", key, "no-such-id").model, "haiku", odd)
+            records = {"a": {"at": odd}, "b": {"at": 5}, "c": {"at": 6}}
+            store.keep(records, "d", {}, kept=3)
+            self.assertEqual(sorted(records), ["b", "c", "d"], odd)
+            store.update_dict(store._keyed("routes"), lambda data: data.update(junk={"_at": odd}))
+            for number in range(store.KEEP_ENTRIES):
+                store.mutate_entry("routes", f"other{number}", lambda entry: None)
+            self.assertNotIn("junk", store.load_state_file(store._keyed("routes")), odd)
+
 
 class Fallback(Sandbox):
     def pending(self, key: str, at: float) -> None:
