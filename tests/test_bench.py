@@ -1450,6 +1450,7 @@ class QualityTier(unittest.TestCase):
             "trace removed": shipped.replace("    result = {}", "    conn.set_trace_callback(None)\n    result = {}"),
             "trace and progress removed": shipped.replace(
                 "    result = {}", "    conn.set_trace_callback(None)\n    conn.set_progress_handler(None, 0)\n    result = {}"),
+            "progress handler removed": solution.replace("    result = {", "    conn.set_progress_handler(None, 0)\n    result = {", 1),
             "line tracing removed": solution.replace("    result = {", "    import sys\n    sys.settrace(None)\n    result = {", 1),
             "index added": solution.replace(
                 "    result = {", '    conn.execute("CREATE INDEX payments_by_status ON payments(status)")\n    result = {', 1),

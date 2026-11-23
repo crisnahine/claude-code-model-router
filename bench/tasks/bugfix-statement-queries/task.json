@@ -1,5 +1,5 @@
 {
   "class": "bugfix",
   "revision": 1,
-  "brief": "balances in billing/statement.py makes the month-end run on 40,000 accounts take hours. The cause: it runs one query per account and one per invoice. Make it run at most 3 SQL statements however many rows there are, with work that grows in proportion to the data, and return exactly what it returns now. Don't change the schema or billing/rules.py."
+  "brief": "balances in billing/statement.py makes the month-end run on 40,000 accounts take hours. The cause: it runs one query per account and one per invoice. Make it run at most 3 SQL statements however many rows there are, with work that grows in proportion to the data, and return exactly what it returns now. Don't change the schema or billing/rules.py, and leave no temp tables behind."
 }
