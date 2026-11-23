@@ -1,0 +1,1 @@
+the count line gives ['6'], not just 4

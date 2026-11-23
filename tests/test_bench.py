@@ -666,8 +666,9 @@ def overlay_dirs(task, kind):
 
 
 def build_work(task, overlay, work):
-    """repo/, solution/ over it, then an overlay: `remove.txt` lists paths to delete, `answer.txt` is the reply and
-    stays out of the work dir, and every other file is copied in. Returns the reply."""
+    """repo/, solution/ over it, then an overlay: `remove.txt` lists paths to delete, `answer.txt` is the reply,
+    `expect.txt` is part of the reason a wrong answer must fail with, none of them go in the work dir, and every
+    other file is copied in. Returns the reply."""
     shutil.copytree(task["dir"] / "repo", work)
     if (task["dir"] / "solution").is_dir():
         shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
@@ -678,7 +679,7 @@ def build_work(task, overlay, work):
             (work / line.strip()).unlink()
     for src in sorted(p for p in overlay.rglob("*") if p.is_file()):
         rel = src.relative_to(overlay)
-        if rel.as_posix() in ("answer.txt", "remove.txt"):
+        if rel.as_posix() in ("answer.txt", "remove.txt", "expect.txt"):
             continue
         (work / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, work / rel)
@@ -708,6 +709,10 @@ class KnownAnswers(unittest.TestCase):
                     with self.subTest(task=task["id"], answer=f"{kind}/{overlay.name}"):
                         graded = self.grade(task, overlay)
                         self.assertEqual(graded.verdict, verdict, graded.reason)
+                        if kind == "wrong" and (overlay / "expect.txt").is_file():
+                            self.assertIn((overlay / "expect.txt").read_text(encoding="utf-8").strip(), graded.reason)
+                        elif kind == "wrong":  # a check that gives reasons pins each wrong answer's
+                            self.assertEqual(graded.reason, "the check exited 1", "add an expect.txt")
 
     def test_an_answer_folder_changes_something(self):
         for task in run.load_tasks():
