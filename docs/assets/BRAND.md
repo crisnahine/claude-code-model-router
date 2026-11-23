@@ -64,7 +64,7 @@ The wordmark is drawn with strokes, so it needs no font. Write the product name 
 - Light and dark through `@media (prefers-color-scheme: dark)` inside the file, with colors as classes. CSS variables render black in some viewers.
 - Self-contained: no script, no external font, image or stylesheet.
 - Valid XML and under 40 KB. `--check` enforces all of this.
-- Numbers in a diagram come from the code or the docs. The benchmark chart reads `docs/BENCHMARKS.md` each time the script runs.
+- Numbers in a diagram come from the code or the docs. The benchmark chart takes its numbers from `bench/analyze.py` each time the script runs.
 
 ## Making a new banner
 
@@ -72,7 +72,7 @@ The wordmark is drawn with strokes, so it needs no font. Write the product name 
 2. Run `python3 tools/docs_assets.py`. It writes `banner-<slug>.svg` and `icon-<slug>.svg`, puts the page head (banner and previous and next links) at the top of the page, and adds the page's card to the [documentation index](../README.md).
 3. Run `python3 tools/docs_assets.py --check` and look at the banner in a browser in both themes.
 
-`docs/BENCHMARKS.md` is written by `bench/analyze.py`, so its page head lives in that script's header; `--check` says when the two differ.
+`docs/BENCHMARKS.md` gets its page head from `PAGES` like every other page; `bench/analyze.py` writes everything below it and keeps the head when it rewrites the page.
 
 ## The site
 

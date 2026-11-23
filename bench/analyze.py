@@ -22,6 +22,8 @@ sys.path.insert(0, str(run.PLUGIN / "scripts"))
 from modelrouter import config as mrconfig, profile  # noqa: E402
 from overhead import percentile  # noqa: E402
 
+RESULTS = BENCH / "results"
+HEAD_END = "<!-- End of page head. -->\n\n"  # the same text as docs_assets.HEAD_END
 MIN_RUNS = 10  # fewer runs per configuration than this and no row is called a win or a loss
 
 
@@ -259,13 +261,17 @@ class Results:
     own_model: frozenset[str]
 
 
+def default_paths() -> list[Path]:
+    return sorted(RESULTS.glob("*.jsonl"))
+
+
 def router_ids(configs: list[dict]) -> frozenset[str]:
     return frozenset(c["id"] for c in configs if c.get("plugin"))
 
 
 def load(paths: list[Path]) -> Results:
     """Everything the page is built from, read once. The order and repeats of `paths` don't matter."""
-    files = sorted({p.resolve(): p for p in paths}.values())
+    files = sorted({p.resolve() for p in paths})
     rows = [dict(row, _batch=_batch(path)) for path in files for row in _jsonl([path])]
     folders = sorted({f.parent for f in files})
     aside = [(sub, row) for folder in folders for sub in ("infra", "limited") for row in _jsonl((folder / sub).glob("*.jsonl"))]
@@ -402,7 +408,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
     plan = estimate(rows, tasks, results.configs, results.prices)
     budget = max((r.get("budget_usd") or 0.5 for r in rows), default=0.5)
     header = "\n".join([
-        "<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->\n<p align=\"center\"><img src=\"assets/banner-benchmarks.svg\" width=\"880\" alt=\"Benchmarks: What does a solved task cost, with and without it?\"></p>\n\n<p align=\"center\"><a href=\"../README.md\">Model Router</a> &nbsp;&middot;&nbsp; <a href=\"README.md\">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href=\"SECURITY.md\">Security</a> &nbsp;&middot;&nbsp; Next: <a href=\"TEST_RESULTS.md\">Test results</a></p>\n<!-- End of page head. -->", "", "# Benchmarks", "",
+        "# Benchmarks", "",
         f"Cost and quality of Model Router against Claude Code without it. {len(rows)} runs, "
         f"${total:.2f} at list price, on {dates[0] if dates else 'n/a'}"
         + (f" to {dates[-1]}" if dates and dates[-1] != dates[0] else "") + ".", "",
@@ -521,10 +527,31 @@ def _page(results: Results, summary: list[dict]) -> dict:
     return {"header": header, "body": body}
 
 
-def build_page(results: Results, router: str | None = None) -> str:
+def build_page(results: Results, router: str | None = None, current: str | None = None) -> str:
     parts = sessions(results, router)
     summary = [row for _, _, part, _ in parts for row in part]
-    return render_sessions(parts, _page(results, summary), results.routers)
+    kept = bool(current and current.startswith("<!-- Page head") and HEAD_END in current)
+    head = current.split(HEAD_END, 1)[0] + HEAD_END if kept else ""
+    return head + render_sessions(parts, _page(results, summary), results.routers)
+
+
+def summary_data(results: Results, router: str | None = None) -> dict:
+    """The page's figures as data, for the docs chart."""
+    rows = results.rows
+    dates = sorted(r["started_at"][:10] for r in rows)
+    out = []
+    for model, chosen, classes, group in sessions(results, router):
+        pooled: dict[str, dict] = {}
+        for r in group:
+            cell = pooled.setdefault(r["config"], {"runs": 0, "solved": 0, "cost_usd": 0.0})
+            cell["runs"] += 1
+            cell["solved"] += bool(r["passed"])
+            cell["cost_usd"] += float(r["total_cost_usd"])
+        ref = next((c.get("plugin_ref") for c in results.configs if c["id"] == chosen), None)
+        out.append({"model": model, "router": chosen, "plugin_ref": ref, "classes": classes, "pooled": pooled})
+    return {"runs": len(rows), "usd": sum(float(r["total_cost_usd"]) for r in rows),
+            "dates": [dates[0], dates[-1]] if dates else [], "claude_versions": sorted({r["claude_version"] for r in rows}),
+            "sessions": out}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -535,12 +562,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--check", action="store_true", help="fail when --out differs from the page the results give")
     args = parser.parse_args(argv)
-    page = build_page(load(args.results), args.router)
+    try:
+        # As text, so a checkout that turned the page's line endings to CRLF still matches.
+        current = args.out.read_text(encoding="utf-8") if args.out.is_file() else None
+    except (OSError, UnicodeDecodeError):
+        current = None
+    page = build_page(load(args.results), args.router, current)
     if not args.check:
         args.out.write_text(page, encoding="utf-8")
         return 0
-    # As text, so a checkout that turned the page's line endings to CRLF still matches.
-    if args.out.is_file() and args.out.read_text(encoding="utf-8") == page:
+    if current == page:
         return 0
     print(f"{args.out}: out of date, run python3 bench/analyze.py bench/results/*.jsonl --out {args.out}",
           file=sys.stderr)

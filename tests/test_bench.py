@@ -144,6 +144,38 @@ class Analysis(unittest.TestCase):
             self.assertEqual(self.check(path, "--out", out)[0], 1)
             self.assertFalse(out.exists())
 
+    def test_the_page_keeps_the_head_docs_assets_wrote(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, out = self.page_args(tmp)
+            out.write_text("<!-- Page head, x -->\nhead\n<!-- End of page head. -->\n\n# old\n", encoding="utf-8")
+            analyze.main([str(path), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+            self.assertTrue(page.startswith("<!-- Page head, x -->\nhead\n<!-- End of page head. -->\n\n# Benchmarks\n"))
+            self.assertEqual(self.check(path, "--out", out), (0, ""))
+            out.unlink()
+            analyze.main([str(path), "--out", str(out)])
+            self.assertTrue(out.read_text(encoding="utf-8").startswith("# Benchmarks\n"))
+
+    def test_an_unreadable_page_is_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, out = self.page_args(tmp)
+            out.write_bytes(b"\xff\xfe\x00 not utf-8")
+            code, err = self.check(path, "--out", out)
+        self.assertEqual(code, 1)
+        self.assertIn("out of date", err)
+
+    def test_one_results_file_in_two_spellings_counts_its_aside_lines_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, _ = self.page_args(tmp)
+            (path.parent / "infra").mkdir()
+            line = json.dumps({"task": "t", "config": "plugin", "started_at": "2026-11-22T10:00:00+00:00",
+                               "infra_reason": "x"})
+            (path.parent / "infra" / "a.jsonl").write_text(line + "\n", encoding="utf-8")
+            relative = Path(os.path.relpath(path))
+            results = analyze.load([path, relative])
+        self.assertEqual(len(results.files), 1)
+        self.assertEqual(len(results.aside), 1)
+
     def test_check_reads_the_page_as_text(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, out = self.page_args(tmp)

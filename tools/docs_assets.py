@@ -6,6 +6,7 @@ Run: python3 tools/docs_assets.py            write everything
 """
 from __future__ import annotations
 
+import functools
 import html
 import json
 import re
@@ -310,8 +311,6 @@ def with_cards(current: str) -> str:
         before, rest = current.split(CARDS_START, 1)
         return before + cards() + rest.split(CARDS_END, 1)[1]
     return current
-# Written by bench/analyze.py instead, so this script only checks that page's head.
-GENERATED_ELSEWHERE = {"docs/BENCHMARKS.md"}
 
 
 def banner(slug, title, question, icon, group) -> str:
@@ -896,31 +895,32 @@ BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(config id, 
         ("opusplan", "opusplan (runs Sonnet when headless)", "r4"),
     ]),
 }
-CELL = re.compile(r"(\d+) of (\d+) solved .*?\$([\d.]+) per solved")
+@functools.lru_cache(maxsize=1)
+def bench_summary() -> dict:
+    sys.path.insert(0, str(ROOT / "bench"))
+    import analyze
+    return analyze.summary_data(analyze.load(analyze.default_paths()))
 
 
 def bench_data():
-    page = (ROOT / "docs" / "BENCHMARKS.md").read_text(encoding="utf-8")
-    head = re.search(r"(\d[\d,]*) runs, \$[\d.]+ at list price, on ([\d-]+)", page)
+    data = bench_summary()
+    by_model = {s["model"]: s for s in data["sessions"]}
     sessions = []
     for session, (heading, series) in BENCH_SERIES.items():
-        section = page.split(f"## Results: session model `{session}`", 1)
-        if len(section) < 2:
-            raise SystemExit(f"docs/BENCHMARKS.md has no results table for {session}")
-        table = [ln for ln in section[1].split("\n## ")[0].split("### ")[0].splitlines() if ln.startswith("|")]
-        cols = [c.strip() for c in table[0].strip("|").split("|")]
+        if session not in by_model:
+            raise SystemExit(f"bench results have no runs for {session}")
         rows = []
-        for line in table[2:]:
-            cells = [c.strip() for c in line.strip("|").split("|")]
+        for cls in by_model[session]["classes"]:
             values = []
             for config, _, _ in series:
-                if config not in cols:
-                    raise SystemExit(f"docs/BENCHMARKS.md has no {config} column for {session}; update BENCH_SERIES")
-                m = CELL.search(cells[cols.index(config)])
-                values.append((int(m.group(1)), int(m.group(2)), float(m.group(3))) if m else None)
-            rows.append((cells[0], values, cells[-1]))
+                cell = cls["configs"].get(config)
+                if cell is None:
+                    raise SystemExit(f"bench results have no {config} runs for {session}; update BENCH_SERIES")
+                cps = cell["cost_per_solved"]
+                values.append((cell["solved"], cell["runs"], None if cps is None else float(f"{cps:.4f}")))
+            rows.append((cls["class"], values, cls["status"]))
         sessions.append((heading, series, rows))
-    return sessions, head.group(1), head.group(2)
+    return sessions, str(data["runs"]), data["dates"][0]
 
 
 def status_summary(rows) -> str:
@@ -932,7 +932,7 @@ def status_summary(rows) -> str:
 
 def bench_chart(phone=False) -> str:
     sessions, runs, date = bench_data()
-    peak = max(v[2] for _, _, rows in sessions for _, vals, _ in rows for v in vals if v)
+    peak = max((v[2] for _, _, rows in sessions for _, vals, _ in rows for v in vals if v[2] is not None), default=0)
     axis = max(0.1, -(-peak // 0.1) * 0.1)
     w = 520 if phone else 920
     label_w = 0 if phone else 150
@@ -978,18 +978,19 @@ def bench_chart(phone=False) -> str:
                 room("benchmark.svg: class name", 32 + width_of(cls_name, 13.5, bold=True), bar_x - 8)
             for k, v in enumerate(vals):
                 by = y + k * (bh + gap)
-                if not v:
-                    out.append(text(bar_x, by + bh - 1, "not run", "mono mut", 11))
-                    continue
                 solved, total, cost = v
                 runs_per_cell.add(total)
+                if cost is None:
+                    out.append(text(bar_x, by + bh - 1, f"none solved ({solved} of {total})", "mono mut", 11))
+                    continue
                 bw = max(2.0, bar_w * cost / axis)
                 out.append(f'<rect x="{bar_x}" y="{by}" width="{bw:.1f}" height="{bh}" rx="3" '
                            f'class="{series[k][2]} bar" style="animation-delay:{delay * 0.04 + k * 0.05:.2f}s"/>')
                 out.append(text(bar_x + bw + 8, by + bh - 1.5, f"${cost:.4f} ({solved} of {total})", "mono mut",
                                 12.5 if phone else 11))
             delay += 1
-            bits = [f"{series[k][1]} ${v[2]:.4f} ({v[0]} of {v[1]} solved)" for k, v in enumerate(vals) if v]
+            bits = [f"{series[k][1]} " + (f"${v[2]:.4f} ({v[0]} of {v[1]} solved)" if v[2] is not None
+                                          else f"none solved ({v[0]} of {v[1]})") for k, v in enumerate(vals)]
             parts.append(f"{heading}, {cls_name}, {status}: " + ", ".join(bits))
         y0 = bottom + 80
     each = " or ".join(str(n) for n in sorted(runs_per_cell))
@@ -1186,8 +1187,6 @@ def build() -> dict:
     for name, body in assets.items():
         files[f"docs/assets/{name}"] = body
     for path, *_ in PAGES:
-        if path in GENERATED_ELSEWHERE:
-            continue
         p = ROOT / path
         if p.exists():
             files[path] = with_head(path, p.read_text(encoding="utf-8"))
@@ -1258,10 +1257,6 @@ def main(argv: list) -> int:
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(body.encode("utf-8"))
-    for path in GENERATED_ELSEWHERE:
-        text_now = (ROOT / path).read_text(encoding="utf-8")
-        if not text_now.startswith(page_head(path)):
-            problems.append(f"{path}: its head differs from page_head(); fix the header in bench/analyze.py")
     for name in SITE_ASSETS:
         src, dst = ASSETS / name, SITE / "assets" / name
         if src.exists() and (not dst.exists() or dst.read_bytes() != src.read_bytes()):
