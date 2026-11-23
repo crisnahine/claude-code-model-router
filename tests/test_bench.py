@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -1611,19 +1612,35 @@ class QualityTier(unittest.TestCase):
     def test_each_rejected_retry_design_breaks_a_fact_spec_md_states(self):
         good = json.loads(self.source("design-checkout-retries", "solution/DESIGN.json"))
         spec = " ".join(self.source("design-checkout-retries", "repo/SPEC.md").split())
-        for change, facts in (({"per_try_timeout_ms": 550}, ("p99 600 ms", "at most 1 in 100 charges to a second try")),
-                              ({"retry_at": "checkout"}, ("running the whole handler again", "reserves the stock twice")),
+        for change, facts in (({"retry_at": "checkout"}, ("running the whole handler again", "reserves the stock twice")),
                               ({"retry_at": "gateway"}, ("calling the checkout service again", "reserves the stock twice")),
                               ({"gateway_retries": "on"}, ("on by default with 3 attempts", "twice the normal request rate")),
                               ({"attempts": 3}, ("twice the normal request rate",)),
                               ({"attempts": 1}, ("survive one failed or slow provider call",)),
-                              ({"idempotency_key": "per_attempt"}, ("may still have charged", "idempotent only when")),
-                              ({"backoff_ms": 40}, ("at least 50 ms between attempts",)),
-                              ({"per_try_timeout_ms": 1400, "backoff_ms": 50}, ("p99.9 1,400 ms", "gives up after 3,000 ms",
-                                                                                "up to 200 ms before", "100 ms after"))):
+                              ({"idempotency_key": "per_attempt"}, ("may still have charged", "idempotent only when"))):
             with self.subTest(change=change):
                 for fact in facts:
                     self.assertIn(fact, spec)
+                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
+
+        def ms(pattern):
+            return int(re.search(pattern, spec).group(1).replace(",", ""))
+
+        self.assertIn("At most 1 in 100 charges may need a second try", spec)
+        self.assertIn("even when every try times out", spec)
+        p99, gap = ms(r"p99 ([\d,]+) ms"), ms(r"at least ([\d,]+) ms between attempts")
+        before, after, deadline = ms(r"up to ([\d,]+) ms before"), ms(r"([\d,]+) ms after"), ms(r"after ([\d,]+) ms\.")
+        self.assertEqual((p99, gap, before, after, deadline), (600, 50, 200, 100, 3000))
+
+        def holds(d):
+            return (d["per_try_timeout_ms"] >= p99 and d["backoff_ms"] >= gap and before + d["attempts"]
+                    * d["per_try_timeout_ms"] + (d["attempts"] - 1) * d["backoff_ms"] + after <= deadline)
+
+        self.assertTrue(holds(good))
+        for change in ({"per_try_timeout_ms": 550}, {"backoff_ms": 40}, {"per_try_timeout_ms": 1400, "backoff_ms": 50},
+                       {"per_try_timeout_ms": 1326, "backoff_ms": 50}):
+            with self.subTest(change=change):
+                self.assertFalse(holds({**good, **change}))
                 self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
 
     def test_a_retry_design_given_only_in_the_reply_fails(self):
