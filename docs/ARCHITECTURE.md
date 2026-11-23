@@ -242,7 +242,7 @@ The top-level `schema` key is `<shape>/<version>`. A new key keeps the version, 
 | :- | :- |
 | `days` | The window read from the ledger |
 | `agents` | One entry per agent type, most calls first: `agent` (`?` when the call named none), `calls`, `routed` (calls whose model the router set), `levels` (level to count), `ran_on` (reported model to count) |
-| `models` | One entry per reported model, by name: `model`, `runs`, `tokens`. A background agent whose model wasn't reported counts under `background (not reported)`, here and in `ran_on` |
+| `models` | One entry per reported model, by name: `model`, `runs`, `tokens` (the sum of each run's `totalTokens`, which counts only the run's final request: https://code.claude.com/docs/en/hooks.md) and `run_tokens` (every request of those runs, summed from the mod's per-turn usage of subagents on that model; `null` where the mod reported none, as on the fallback path). A background agent whose model wasn't reported counts under `background (not reported)`, here and in `ran_on` |
 | `model_errors` | Agent calls that failed with a model error |
 | `spend` | `total_usd`, `rows` (most spend first: `loop` as `main` or `subagent`, `model`, `turns`, `output_tokens`, `usd` at list price) and `unpriced` (models with no price, counted as 0) |
 

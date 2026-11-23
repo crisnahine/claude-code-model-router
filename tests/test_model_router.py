@@ -4244,10 +4244,21 @@ class MachineReadable(Sandbox):
         self.assertEqual(data["days"], 30)
         self.assertEqual(data["agents"], [{"agent": "general-purpose", "calls": 1, "routed": 1,
                                            "levels": {"lookup": 1}, "ran_on": {"claude-haiku-5-5": 1}}])
-        self.assertEqual(data["models"], [{"model": "claude-haiku-5-5", "runs": 1, "tokens": 1200}])
+        self.assertEqual(data["models"], [{"model": "claude-haiku-5-5", "runs": 1, "tokens": 1200, "run_tokens": None}])
         self.assertEqual(data["spend"], {"total_usd": 20.0, "unpriced": ["claude-new-9"], "rows": [
             {"loop": "main", "model": "claude-opus-5-5", "turns": 1, "output_tokens": 1_000_000, "usd": 20.0},
             {"loop": "subagent", "model": "claude-new-9", "turns": 1, "output_tokens": 1_000_000, "usd": 0}]})
+
+    def test_usage_json_sums_an_agents_turns_beside_its_final_request(self):
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")  # totalTokens 1200, the final request only
+        for agent_id, tokens in (("a1", 3000), ("a1", 2000), (None, 9000)):
+            hooks.mod_usage({"session_id": "s1", "agent_id": agent_id, "usage": {
+                "model": "claude-haiku-5-5", "input_tokens": tokens - 100, "output_tokens": 50,
+                "cache_read_input_tokens": 40, "cache_creation_input_tokens": 10}})
+        self.assertEqual(self.json_out("usage")["models"],
+                         [{"model": "claude-haiku-5-5", "runs": 1, "tokens": 1200, "run_tokens": 5000}])
+        self.assertIn("| claude-haiku-5-5 | 1 | 1,200 | 5,000 |", self.out("usage"))
 
     def test_models_json(self):
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)

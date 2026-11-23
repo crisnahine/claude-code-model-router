@@ -178,9 +178,15 @@ def usage_data(days: int, exact: bool = False) -> dict:
             model = str(r.get("resolved_model") or "background (not reported)")
             a = row(r.get("agent"))
             a["ran_on"][model] = a["ran_on"].get(model, 0) + 1
-            m = by_model.setdefault(model, {"model": model, "runs": 0, "tokens": 0})
+            m = by_model.setdefault(model, {"model": model, "runs": 0, "tokens": 0, "run_tokens": None})
             m["runs"] += 1
+            # totalTokens is the run's final request only (https://code.claude.com/docs/en/hooks.md).
             m["tokens"] += r.get("total_tokens") if isinstance(r.get("total_tokens"), int) else 0
+    for r in rows:
+        m = by_model.get(str(r.get("model"))) if r.get("event") == "usage" and r.get("agent_id") else None
+        if m is not None:
+            m["run_tokens"] = (m["run_tokens"] or 0) + sum(int(r.get(k) or 0) for k in (
+                "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
     spend: dict[tuple[str, str], dict] = {}
     unpriced = set()
     for r in rows:
@@ -223,8 +229,9 @@ def usage(days: int) -> str:
         ran = ", ".join(f"{m} x{n}" for m, n in sorted(a["ran_on"].items())) or "-"
         lines.append(f"| {a['agent']} | {a['calls']} | {a['routed']} | {levels} | {ran} |")
     if data["models"]:
-        lines += ["", "| Model | Agent runs | Tokens |", "| :- | -: | -: |"]
-        lines += [f"| {m['model']} | {m['runs']} | {m['tokens']:,} |" for m in data["models"]]
+        lines += ["", "| Model | Agent runs | Final-request tokens | Tokens over the runs |", "| :- | -: | -: | -: |"]
+        lines += [f"| {m['model']} | {m['runs']} | {m['tokens']:,} | "
+                  f"{'-' if m['run_tokens'] is None else format(m['run_tokens'], ',')} |" for m in data["models"]]
     if data["model_errors"]:
         lines += ["", f"Agent calls that failed with a model error: {data['model_errors']}."]
     if spend["rows"]:
