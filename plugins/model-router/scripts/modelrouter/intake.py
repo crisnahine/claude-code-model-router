@@ -27,6 +27,12 @@ MACHINE_ORIGINS = frozenset(k for k, person in ORIGINS.items() if not person)
 DELIVERED = "Another Claude session sent a message:"
 DELIVERED_TAGS = ("<teammate-message", "<cross-session-message")
 PASTED = "<pasted_content"
+# The framings Claude Code wraps a turn in that isn't typed: a background task's notice, a typed command's or a `!`
+# shell's echo, a local command's output, hook context. Observed, not documented.
+MACHINE_TAG = re.compile(r"<(?:task-notification|command-[\w-]+|bash-[\w-]+|local-command-[\w-]+|system-reminder)\b")
+# Nothing but tag elements is framing too, whatever the tag. Each element ends at its first closing tag, so a long
+# prompt can't make the match backtrack.
+ELEMENTS = re.compile(r"(?:\s*<([\w-]+)[^>]*>(?:(?!</\1\s*>).)*</\1\s*>)+\s*", re.S)
 
 
 def is_delivered(text: object) -> bool:
@@ -38,11 +44,12 @@ def is_delivered(text: object) -> bool:
 def is_user_prompt(text: object) -> bool:
     """UserPromptSubmit also fires for background-task notifications, teammates' reports
     and other sessions' messages. Those must not reset what is known about the user's
-    request. Pasted text is the user's, though it arrives wrapped in a <pasted_content> tag."""
+    request. Pasted text is the user's, though it arrives wrapped in a <pasted_content> tag, and so is
+    a request that opens with a tag of its own, such as `<button> does nothing`."""
     text = (text if isinstance(text, str) else "").lstrip()
     if is_delivered(text):
         return False
-    return not text.startswith("<") or text.startswith(PASTED)
+    return text.startswith(PASTED) or not (MACHINE_TAG.match(text) or ELEMENTS.fullmatch(text))
 
 
 # A skill's body is standing instructions, not the request: only its opening counts, so its length
