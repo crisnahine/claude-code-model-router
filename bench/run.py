@@ -468,11 +468,11 @@ def main(argv: list[str] | None = None) -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     spent, errors = 0.0, 0
     for run_index, task, config in schedule(tasks, configs, args.runs, args.first_run):
-        if not can_start(spent, args.budget, args.max_total):
-            print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
-            return 1
         begin = time.time()
         for attempt in range(LIMIT_RETRIES + 1):
+            if not can_start(spent, args.budget, args.max_total):  # a retry spends too
+                print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
+                return 1
             row = run_one(task, config, options, registry_config)
             row["run"] = run_index
             spent += row["total_cost_usd"]
