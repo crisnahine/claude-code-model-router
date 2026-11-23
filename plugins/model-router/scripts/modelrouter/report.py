@@ -2,7 +2,7 @@
 fall back to what the last SessionStart recorded."""
 from __future__ import annotations
 
-from . import agents, ladder, learn, registry, store, upstream
+from . import agents, health, ladder, learn, registry, store, upstream
 from . import config as cfg
 from .profile import profile_call, profile_prompt
 from .settings import Settings
@@ -44,28 +44,25 @@ def policy(config: dict, settings: Settings) -> str:
 
 def models_data(config: dict, settings: Settings) -> dict:
     """Each registry model's state here, in the `model-router.models/1` shape."""
-    table = registry.health()
+    table = health.load()
     limit = settings.cap
     usable = _usable(config, settings)
     allowed = registry.permitted(config, cfg.project_dir())
     rows = []
     for name in registry.by_strength(config):
-        info = table.get(name) if isinstance(table.get(name), dict) else {}
         if limit and registry.strength(config, name) > registry.strength(config, limit):
             status, detail = "above_cap", "above your cap"
         elif limit and name not in cfg.trusted_models(config):
             status, detail = "project_model_under_cap", "added by this project, so not used while a cap is set"
         elif name not in allowed:
             status, detail = "not_permitted", "not permitted by the availableModels or deniedModels setting"
-        elif not registry.healthy(name, table):
-            why = (f"ran as {info.get('substituted_by')} instead" if info.get("substituted")
-                   else str(info.get("last_error") or "calls failed with a model error"))
-            status, detail = "routed_around", f"routed around until retried ({why})"
-        elif info.get("last_model"):
+        elif not table.healthy(name):
+            status, detail = "routed_around", f"routed around until retried ({table.why_routed_around(name)})"
+        elif table.last_ran_as(name):
             status, detail = "working", "working"
         else:
             status, detail = "not_used", "not used yet"
-        rows.append({"model": name, "last_ran_as": info.get("last_model") or None, "status": status, "detail": detail})
+        rows.append({"model": name, "last_ran_as": table.last_ran_as(name), "status": status, "detail": detail})
     learned = learn.stats()
     levels = [{"level": level, "routed_calls": info.get("calls", 0), "votes_too_low": info.get("votes", 0),
                "raised": bool(info.get("bump"))}

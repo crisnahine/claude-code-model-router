@@ -48,6 +48,7 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 
 | Module | Job |
 | :- | :- |
+| `health` | What the router has seen of each model: a model error, a substitution or a refused rewrite in; healthy, last ran as and why it is routed around out |
 | `registry` | Which models exist, which are usable right now, the `select` and `clamp` rules, and list prices |
 | `profile` | Turns a brief and an agent's name into a level and the reasons for it |
 | `ladder` | Turns a level, the priority and learned raises into the pick: a model and an effort |

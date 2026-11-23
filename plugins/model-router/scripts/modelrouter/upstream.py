@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from . import config as cfg
-from . import registry, store
+from . import health, store
 from .settings import Settings
 
 CHANGELOG_RSS = "https://code.claude.com/docs/en/changelog/rss.xml"
@@ -338,8 +338,7 @@ def pending(data: dict | None = None) -> dict | None:
     data = load() if data is None else data
     if not data.get("cache") or not data.get("reviewed"):
         return None
-    in_use = [i.get("last_model") for i in registry.health().values() if isinstance(i, dict)]
-    return diff(data["reviewed"], data["cache"], in_use=[m for m in in_use if isinstance(m, str)])
+    return diff(data["reviewed"], data["cache"], in_use=health.load().seen_running())
 
 
 def has_pending(changes: dict | None) -> bool:

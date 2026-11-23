@@ -9,18 +9,11 @@ from __future__ import annotations
 import os
 import re
 import sys
-import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from . import config as cfg
-from . import store
-
-# How long a model is routed around after each run of trouble: 1 day, then 3, then 7.
-OUTAGE_DAYS = (1, 3, 7)
-MODEL_ERROR = re.compile(
-    r"model.{0,80}(?:not[ _]found|not available|unavailable|does not exist|not supported|no access|"
-    r"not allowed|invalid|permission)|(?:not_found_error|invalid model|unknown model).{0,80}", re.I | re.S)
+from . import health, store
 
 
 def models(config: dict) -> dict[str, dict]:
@@ -56,84 +49,6 @@ def family(config: dict, model: Any) -> str | None:
         if name in m:
             return name
     return None
-
-
-def health() -> dict:
-    table = store.load_state().get("health")
-    return table if isinstance(table, dict) else {}
-
-
-def healthy(name: str, table: dict | None = None) -> bool:
-    info = (health() if table is None else table).get(name)
-    if not isinstance(info, dict):
-        return True
-    now, until = time.time(), info.get("unavailable_until") or 0
-    if until <= now:
-        return True
-    # A clock moved back would stretch the outage: it lasts at most its own days from now.
-    latest = now + _outage_days(info) * 86400
-    if until > latest:
-        update_health(name, unavailable_until=latest)
-    return False
-
-
-def _outage_days(info: dict) -> int:
-    outages = int(info.get("outages") or 0)
-    return OUTAGE_DAYS[min(max(outages, 1), len(OUTAGE_DAYS)) - 1]
-
-
-def edit_health(name: str, change: Callable[[dict], Any]) -> dict:
-    result: dict = {}
-
-    def apply(state: dict) -> None:
-        table = state.get("health") if isinstance(state.get("health"), dict) else {}
-        info = table.get(name) if isinstance(table.get(name), dict) else {}
-        change(info)
-        table[name] = info
-        state["health"] = table
-        result.update(info)
-
-    store.update_state(apply)
-    return result
-
-
-def update_health(name: str, **changes: Any) -> dict:
-    return edit_health(name, lambda info: info.update(changes))
-
-
-def _route_around(info: dict) -> None:
-    info["outages"] = int(info.get("outages") or 0) + 1
-    info["unavailable_until"] = time.time() + _outage_days(info) * 86400
-
-
-def record_failure(name: str, error: str, strikes: int = 2) -> int:
-    """A call on this model failed in a way that points at the model itself. The second
-    time, it is routed around. After that outage, one more failure is enough."""
-    def change(info: dict) -> None:
-        info["fail"] = int(info.get("fail") or 0) + 1
-        info["last_error"] = error[:200]
-        if info["fail"] >= strikes:
-            _route_around(info)
-    return int(edit_health(name, change).get("fail") or 0)
-
-
-def record_result(name: str, ran_as: str | None, ran_family: str | None) -> None:
-    """We asked for `name`; Claude Code reports the model that really ran."""
-    info = health().get(name)
-    info = info if isinstance(info, dict) else {}
-    if ran_family == name:
-        if (info.get("last_model") != ran_as or info.get("fail") or info.get("substituted")
-                or info.get("outages") or info.get("unavailable_until")):
-            update_health(name, last_model=ran_as, fail=0, substituted=0, outages=0, unavailable_until=0)
-        return
-
-    # Asked for one model, ran on another: the provider or an allowlist substituted it.
-    def change(current: dict) -> None:
-        current["substituted"] = int(current.get("substituted") or 0) + 1
-        current["substituted_by"] = ran_as
-        if current["substituted"] >= 2:
-            _route_around(current)
-    edit_health(name, change)
 
 
 def _settings_files(project: Path) -> list[Path]:
@@ -207,7 +122,8 @@ def permitted(config: dict, project: Path) -> set[str]:
     return names
 
 
-def newest_id(config: dict, name: str | None, provider: str | None, project: Path) -> str | None:
+def newest_id(config: dict, name: str | None, provider: str | None, project: Path,
+              table: health.Health | None = None) -> str | None:
     """The newest full ID of `name`'s family, where `provider`'s alias for it resolves to an
     older model, or None to send the alias. Never past the user's own choices: an
     ANTHROPIC_DEFAULT_<FAMILY>_MODEL pin, modelOverrides, or availableModels and deniedModels
@@ -229,10 +145,11 @@ def newest_id(config: dict, name: str | None, provider: str | None, project: Pat
     overrides = [store.load_dict(path).get("modelOverrides") for path in _settings_files(project)]
     if managed.get("modelOverrides") or any(isinstance(o, dict) and o for o in overrides):
         return None
-    return model_id if healthy(model_id) else None
+    return model_id if (table or health.load()).healthy(model_id) else None
 
 
-def available(config: dict, project: Path | None = None, cap: str | None = None) -> list[str]:
+def available(config: dict, project: Path | None = None, cap: str | None = None, *,
+              table: health.Health | None = None) -> list[str]:
     """Usable models, weakest first: inside the cap, permitted by settings, and healthy.
     The settings and health filters are dropped rather than leave nothing to route to."""
     names = by_strength(config)
@@ -244,8 +161,8 @@ def available(config: dict, project: Path | None = None, cap: str | None = None)
     if project is not None:
         allowed = permitted(config, project)
         names = [n for n in names if n in allowed] or names
-    table = health()
-    return [n for n in names if healthy(n, table)] or names
+    table = table or health.load()
+    return [n for n in names if table.healthy(n)] or names
 
 
 def clamp(config: dict, name: str, usable: list[str]) -> str:

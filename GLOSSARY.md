@@ -42,7 +42,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Allowlist**: the `availableModels` and `deniedModels` settings, read the way Claude Code reads them, managed drop-in files included. Models they block are not picked unless nothing else would be left.
 
-**Model health**: what the router has seen of each model here. Two calls that fail with a model error, run as a different model or are rejected route the model around for a day, then three days, then a week, after which it is tried again. A call that runs as asked clears the record.
+**Model health** (`health.py`): what the router has seen of each model here. Two calls that fail with a model error, run as a different model or are rejected route the model around for a day, then three days, then a week, after which it is tried again. A call that runs as asked clears the record.
 
 **Main-loop effort**: the effort of the conversation's own turn. The mod raises it for one turn when the request profiles as complex or harder, never lowers it, and leaves it alone wherever an effort change would re-read the context uncached.
 

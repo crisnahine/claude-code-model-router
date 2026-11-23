@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import time
 
-from . import calls, gates, ladder, learn, registry, session, settings, spawn, store, upstream
+from . import calls, gates, health, ladder, learn, registry, session, settings, spawn, store, upstream
 from . import config as cfg
 from .profile import asks_for_work, profile_prompt
 
@@ -157,8 +157,7 @@ def session_start(hook_input: dict) -> dict | None:
         )
     if options.update_check:
         changes = upstream.pending()
-        running = [hook_input.get("model")] + [info.get("last_model") for info in registry.health().values()
-                                               if isinstance(info, dict)]
+        running = [hook_input.get("model")] + health.load().seen_running()
         for model_id, latest in upstream.behind(running):
             parts.append(
                 f"{model_id} is running here and {latest} is the newest of its family. Tell the user once: a model "
@@ -272,12 +271,10 @@ def _refused_rewrite(session_id: str | None, decision: dict, key: str, config: d
     decision.update(action="keep", model=None, repeat_of=earlier.get("model"), reason=(
         "this call was rewritten once and came back without having run, so it is passed through unchanged"))
     repeat_of = decision["repeat_of"]
-    if repeat_of and not (registry.health().get(repeat_of) or {}).get("last_model"):
-        # A rewrite to a model that has never once run here didn't run this time either.
-        try:
-            registry.record_failure(repeat_of, "a call rewritten to this model came back without having run")
-        except OSError:
-            pass
+    try:
+        health.refused(repeat_of)
+    except OSError:
+        pass
 
 
 def _rewritten_input(tool_input: dict, decision: dict) -> dict:
@@ -325,9 +322,7 @@ def post_agent(hook_input: dict) -> dict | None:
         pass
     asked = _asked_for(config, tool_input, routed)
     try:
-        # Under the force setting every agent runs on the forced model, which isn't a substitution.
-        if asked and registry.family(config, ran_as) and not settings.resolve(config).force:
-            registry.record_result(asked, ran_as, registry.family(config, ran_as))
+        health.ran(asked, ran_as, registry.family(config, ran_as), settings.resolve(config).force)
     except OSError:
         pass
     store.append_ledger({
@@ -347,7 +342,7 @@ def agent_failed(hook_input: dict) -> dict | None:
     except OSError:
         pass
     error = str(hook_input.get("error") or "")
-    if hook_input.get("is_interrupt") or not registry.MODEL_ERROR.search(error):
+    if not health.is_model_error(error, hook_input.get("is_interrupt")):
         return None
     config = cfg.load_config(hook_input)
     asked = _asked_for(config, tool_input, routed)
@@ -360,13 +355,13 @@ def agent_failed(hook_input: dict) -> dict | None:
     if newest:
         # The mod sent the family's newest ID, and this provider refused it: the alias runs
         # from now on, and the ID is tried again after the outage.
-        registry.record_failure(newest, error, strikes=1)
+        health.failed(newest, error, newest=True)
         store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
                              "agent": tool_input.get("subagent_type"), "model": newest})
         return _context("PostToolUseFailure", (
             f"{newest} isn't available here. Re-issue this agent call unchanged: it now runs on the "
             f"'{asked}' alias, as Claude Code resolves it for this provider."))
-    fails = registry.record_failure(asked, error)
+    fails = health.failed(asked, error)
     store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
                          "agent": tool_input.get("subagent_type"), "model": asked})
     cap = settings.resolve(config).cap

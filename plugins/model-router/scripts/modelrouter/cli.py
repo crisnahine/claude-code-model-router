@@ -19,7 +19,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import hooks, learn, report, settings, store, upstream
+from . import health, hooks, learn, report, settings, store, upstream
 from . import config as cfg
 
 
@@ -41,13 +41,13 @@ _NEWER = "left as is: {} was written by a newer Model Router release."
 
 
 def _reset_health() -> str:
-    removed: list = []
+    removed = False
     try:
-        status = store.try_update(store.state_path(), lambda state: removed.append(state.pop("health", None)))[1]
+        removed, status = health.forget()
     except OSError:
         status = "unreadable"
     if status == "saved":
-        return "Learned availability cleared." if removed and removed[0] else "No learned availability to clear."
+        return "Learned availability cleared." if removed else "No learned availability to clear."
     if status == "newer":
         return "Learned availability " + _NEWER.format("state.json")
     return "Learned availability left as is: state.json could not be read or written."

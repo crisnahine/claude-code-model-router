@@ -20,7 +20,7 @@ plugins/model-router/
   hooks/hooks.json             the mod, plus SessionStart, UserPromptSubmit, PreToolUse,
                                PostToolUse, PostToolUseFailure, PostModelSwitch,
                                SubagentStop, Stop
-  scripts/modelrouter/         the runtime: registry, profile, router, learn, gates, agents,
+  scripts/modelrouter/         the runtime: registry, health, profile, router, learn, gates, agents,
                                session, upstream, report, hooks, cli, store (standard library only)
   agents/                      the seven role agents
   skills/                      ship, route, models, usage, refresh

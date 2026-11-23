@@ -23,9 +23,10 @@ PLUGIN = ROOT / "plugins" / "model-router"
 SCRIPTS = PLUGIN / "scripts"
 SCRIPT = SCRIPTS / "model-router.py"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+ERRORS = json.loads((FIXTURES / "model-errors.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, calls, cli, gates, hooks, learn, profile, registry, report, router, session, settings, spawn, store, upstream  # noqa: E402
+from modelrouter import agents, calls, cli, gates, health, hooks, learn, profile, registry, report, router, session, settings, spawn, store, upstream  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 
 LOOKUP = "list the files under src"
@@ -80,6 +81,11 @@ class Sandbox(unittest.TestCase):
         self.tmp.cleanup()
 
     # helpers ---------------------------------------------------------------
+    def route_around(self, *names):
+        for name in names:
+            for _ in range(2):
+                health.failed(name, "404 model not found")
+
     def options(self, **values):
         """Set plugin options, or any CLAUDE_ variable, for the rest of the test."""
         for key, value in values.items():
@@ -615,33 +621,6 @@ class Registry(Sandbox):
     def test_an_allowlist_that_excludes_everything_is_ignored(self):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["some-other-model"]}))
         self.assertEqual(len(registry.available(self.config, self.project)), 4)
-
-    def test_two_model_errors_route_around_a_model_and_outages_grow(self):
-        self.assertEqual(registry.record_failure("fable", "404 model not found"), 1)
-        self.assertEqual(registry.available(self.config)[-1], "fable")
-        registry.record_failure("fable", "404 model not found")
-        self.assertEqual(registry.available(self.config)[-1], "opus")
-        first = registry.health()["fable"]["unavailable_until"] - time.time()
-        self.assertTrue(0.9 * 86400 < first < 1.1 * 86400)
-        registry.update_health("fable", unavailable_until=time.time() - 1)  # the day has passed
-        self.assertEqual(registry.available(self.config)[-1], "fable")
-        registry.record_failure("fable", "404 model not found")  # one more failure is now enough
-        second = registry.health()["fable"]["unavailable_until"] - time.time()
-        self.assertTrue(2.9 * 86400 < second < 3.1 * 86400)
-
-    def test_a_working_result_clears_trouble_and_records_the_real_model(self):
-        registry.record_failure("opus", "model not found")
-        registry.record_failure("opus", "model not found")
-        registry.record_result("opus", "claude-opus-5-5", "opus")
-        info = registry.health()["opus"]
-        self.assertTrue(registry.healthy("opus"))
-        self.assertEqual((info["last_model"], info["fail"], info["outages"]), ("claude-opus-5-5", 0, 0))
-
-    def test_two_substitutions_route_around_a_model(self):
-        registry.record_result("fable", "claude-opus-5-5", "opus")
-        self.assertTrue(registry.healthy("fable"))
-        registry.record_result("fable", "claude-opus-5-5", "opus")
-        self.assertFalse(registry.healthy("fable"))
 
     def test_project_can_add_a_model_but_not_rerank_or_slip_under_the_cap(self):
         self.override({"models": {"saga": {"strength": 0.5, "cost": 9}, "fable": {"strength": 0}}})
@@ -1337,11 +1316,10 @@ class Router(Sandbox):
         self.assertEqual(self.decide("general-purpose", LOOKUP)["effort"], "low")
 
     def test_an_unavailable_model_is_routed_around(self):
-        registry.update_health("sonnet", unavailable_until=time.time() + 999)
+        self.route_around("sonnet")
         self.session_on("claude-sonnet-5-5")
         self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")  # the next one strong enough
-        registry.update_health("fable", unavailable_until=time.time() + 999)
-        registry.update_health("opus", unavailable_until=time.time() + 999)
+        self.route_around("fable", "opus")
         self.agent("pinned", "opus")
         self.assertEqual(self.decide("pinned", LOOKUP)["model"], "haiku")  # a named model is only ever lowered
 
@@ -1469,7 +1447,7 @@ class RepeatGuard(Sandbox):
         self.pre("general-purpose", LOOKUP)
         self.assertIsNone(self.pre("general-purpose", LOOKUP, model="haiku", effort="low"))
         self.assertEqual(self.ledger()[-1]["source"], "caller")
-        self.assertEqual(registry.health(), {})
+        self.assertTrue(health.load().healthy("haiku"))
         self.assertEqual(learn.stats()["lookup"]["votes"], 0)
 
     def test_a_model_that_never_runs_is_routed_around_after_two_refused_rewrites(self):
@@ -1477,17 +1455,17 @@ class RepeatGuard(Sandbox):
             self.pre("general-purpose", prompt)
             self.next_message()
             self.pre("general-purpose", prompt)
-        self.assertFalse(registry.healthy("haiku"))
+        self.assertFalse(health.load().healthy("haiku"))
         self.assertEqual(self.decide("general-purpose", "list the files under c")["model"], "sonnet")
-        self.assertIn("came back without having run", self.out("models"))
+        self.assertIn(health.REFUSED, self.out("models"))
 
     def test_a_model_known_to_work_is_not_blamed(self):
-        registry.record_result("haiku", "claude-haiku-5-5", "haiku")
+        health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
         for prompt in ("list the files under a", "list the files under b"):
             self.pre("general-purpose", prompt)
             self.next_message()
             self.pre("general-purpose", prompt)
-        self.assertTrue(registry.healthy("haiku"))
+        self.assertTrue(health.load().healthy("haiku"))
 
     def test_the_cap_holds_even_when_a_lowering_rewrite_did_not_take(self):
         self.options(max_tier="sonnet")
@@ -1517,7 +1495,7 @@ class RepeatGuard(Sandbox):
     def test_copies_of_one_call_issued_together_are_all_routed(self):
         for _ in range(3):
             self.assertEqual(self.pre("general-purpose", LOOKUP)["updatedInput"]["model"], "haiku")
-        self.assertEqual(registry.health(), {})
+        self.assertTrue(health.load().healthy("haiku"))
 
     def test_a_redo_at_the_top_of_the_ladder_gets_more_effort(self):
         hard = "research a novel fix for the auth migration across every service, root cause unknown"
@@ -1758,19 +1736,144 @@ class Mod(Sandbox):
         for prompt in ("list the files under a", "list the files under b"):
             self.assertEqual(self.spawn("rev", prompt)["model"], "haiku")
             self.done("rev", prompt, "claude-haiku-5-5")
-        self.assertTrue(registry.healthy("opus"))
+        self.assertTrue(health.load().healthy("opus"))
         self.assertEqual(self.ledger()[-1]["asked"], "haiku")
         hooks.agent_failed({**self.call("rev", "list the files under a"),
                             "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})
-        self.assertEqual((registry.health()["haiku"]["fail"], "opus" in registry.health()), (1, False))
+        seen = health.load()
+        self.assertEqual([seen.healthy("haiku"), seen.healthy("opus")], [True, True])
+        hooks.agent_failed({**self.call("rev", "list the files under a"),
+                            "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})
+        seen = health.load()
+        self.assertEqual([seen.healthy("haiku"), seen.healthy("opus")], [False, True])
 
     def test_a_result_reads_no_agent_files(self):
         self.agent("rev", "opus")
         self.spawn("rev", LOOKUP)
         with mock.patch.object(agents, "find", side_effect=AssertionError("agents.find on a result")):
             self.done("rev", LOOKUP, "claude-opus-5-5")
-            hooks.agent_failed({**self.call("rev", LOOKUP), "error": "API Error: 404 not_found_error: model"})
-        self.assertEqual(registry.health()["opus"]["fail"], 1)
+            for _ in range(2):
+                hooks.agent_failed({**self.call("rev", LOOKUP), "error": "API Error: 404 not_found_error: model"})
+        seen = health.load()
+        self.assertEqual([seen.healthy("opus"), seen.healthy("haiku")], [False, True])
+
+
+class Health(Sandbox):
+    def setUp(self):
+        super().setUp()
+        self.now = time.time()
+
+    def at(self, days):
+        return mock.patch.object(health.time, "time", return_value=self.now + days * 86400)
+
+    def test_only_a_model_error_counts_and_an_interrupt_never_does(self):
+        for text in ERRORS["model_error"]:
+            self.assertTrue(health.is_model_error(text), text)
+            self.assertFalse(health.is_model_error(text, interrupted=True), text)
+        for text in ERRORS["other"]:
+            self.assertFalse(health.is_model_error(text), text)
+
+    def test_two_model_errors_route_a_model_around_and_outages_grow(self):
+        with self.at(0):
+            self.assertEqual(health.failed("fable", "404 model not found"), 1)
+            self.assertTrue(health.load().healthy("fable"))
+            health.failed("fable", "404 model not found")
+            self.assertEqual(health.load().why_routed_around("fable"), "404 model not found")
+        with self.at(0.9):
+            self.assertFalse(health.load().healthy("fable"))
+        with self.at(1.1):
+            self.assertTrue(health.load().healthy("fable"))
+            health.failed("fable", "404 model not found")  # after an outage one failure is enough
+        with self.at(1.1 + 2.9):
+            self.assertFalse(health.load().healthy("fable"))
+        with self.at(1.1 + 3.1):
+            self.assertTrue(health.load().healthy("fable"))
+
+    def test_a_run_as_asked_clears_trouble_and_names_the_model(self):
+        health.failed("opus", "model not found")
+        health.failed("opus", "model not found")
+        health.ran("opus", "claude-opus-5-5", "opus", forced=False)
+        seen = health.load()
+        self.assertEqual((seen.healthy("opus"), seen.why_routed_around("opus"), seen.last_ran_as("opus")),
+                         (True, None, "claude-opus-5-5"))
+        self.assertEqual(seen.seen_running(), ["claude-opus-5-5"])
+
+    def test_two_substitutions_route_a_model_around(self):
+        health.ran("fable", "claude-opus-5-5", "opus", forced=False)
+        self.assertTrue(health.load().healthy("fable"))
+        health.ran("fable", "claude-opus-5-5", "opus", forced=False)
+        self.assertEqual(health.load().why_routed_around("fable"), "ran as claude-opus-5-5 instead")
+
+    def test_a_forced_run_or_an_unknown_family_is_no_evidence(self):
+        for _ in range(2):
+            health.ran("fable", "claude-opus-5-5", "opus", forced=True)
+            health.ran("fable", "claude-x", None, forced=False)
+            health.ran(None, "claude-opus-5-5", "opus", forced=False)
+        self.assertEqual(store.load_state().get("health"), None)
+
+    def test_a_newest_id_is_routed_around_after_one_failure(self):
+        health.failed("claude-haiku-5-5", "404 not_found_error", newest=True)
+        self.assertFalse(health.load().healthy("claude-haiku-5-5"))
+
+    def test_a_refused_rewrite_counts_only_against_a_model_never_seen_running(self):
+        health.refused("haiku")
+        health.refused("haiku")
+        self.assertEqual(health.load().why_routed_around("haiku"), health.REFUSED)
+        health.ran("sonnet", "claude-sonnet-5-5", "sonnet", forced=False)
+        health.refused("sonnet")
+        health.refused("sonnet")
+        self.assertTrue(health.load().healthy("sonnet"))
+
+    def test_an_outage_lasts_no_longer_than_its_days_after_the_clock_moves_back(self):
+        with self.at(19):  # recorded before a 19-day jump back
+            health.failed("opus", "model not found")
+            health.failed("opus", "model not found")
+        with self.at(0):
+            self.assertFalse(health.load().healthy("opus"))
+        with self.at(health.OUTAGE_DAYS[0] + 0.01):
+            self.assertTrue(health.load().healthy("opus"))
+
+    def test_an_ordinary_read_writes_nothing(self):
+        health.failed("fable", "model not found")
+        health.failed("fable", "model not found")
+        health.ran("sonnet", "claude-sonnet-5-5", "sonnet", forced=False)
+        before = store.state_path().read_bytes()
+        seen = health.load()
+        self.assertEqual([seen.healthy("fable"), seen.healthy("sonnet"), seen.healthy("none")], [False, True, True])
+        self.assertEqual(store.state_path().read_bytes(), before)
+
+    def test_a_clamp_checks_the_record_again_under_the_lock(self):
+        with self.at(19):
+            health.failed("opus", "model not found")
+            health.failed("opus", "model not found")
+        seen = health.load()
+        # Another writer clears the record after this one read it.
+        health.ran("opus", "claude-opus-5-5", "opus", forced=False)
+        cleared = store.state_path().read_bytes()
+        with self.at(0):
+            self.assertTrue(seen.healthy("opus"))  # the cleared record wins over the stale read
+        self.assertEqual(store.state_path().read_bytes(), cleared)
+
+    def test_a_junk_record_reads_as_healthy(self):
+        store.update_state(lambda s: s.update(health={"opus": {"unavailable_until": "soon", "outages": -3},
+                                                      "sonnet": "x", "haiku": {"last_model": 5}}))
+        seen = health.load()
+        self.assertEqual([seen.healthy(n) for n in ("opus", "sonnet", "haiku")], [True, True, True])
+        self.assertEqual(seen.seen_running(), [])
+
+    def test_the_record_keeps_its_shape(self):
+        health.failed("opus", "model not found")
+        health.failed("opus", "model not found")
+        health.ran("fable", "claude-opus-5-5", "opus", forced=False)
+        record = store.load_state()["health"]
+        self.assertEqual(set(record["opus"]), {"fail", "last_error", "outages", "unavailable_until"})
+        self.assertEqual(set(record["fable"]), {"substituted", "substituted_by"})
+
+    def test_forget_says_whether_it_removed_a_record(self):
+        self.assertEqual(health.forget(), (False, "saved"))
+        health.failed("opus", "model not found")
+        self.assertEqual(health.forget(), (True, "saved"))
+        self.assertNotIn("health", store.load_state())
 
 
 class NewestOnProviders(Sandbox):
@@ -1850,7 +1953,7 @@ class NewestOnProviders(Sandbox):
         self.assertIn("claude-haiku-5-5", failed["hookSpecificOutput"]["additionalContext"])
         self.assertEqual(self.ledger()[-1]["model"], "claude-haiku-5-5")  # the model_error row names the ID
         self.assertEqual(self.model(LOOKUP), "haiku")
-        self.assertTrue(registry.healthy("haiku"))
+        self.assertTrue(health.load().healthy("haiku"))
 
     def test_the_agent_call_fallback_sends_only_aliases(self):
         os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
@@ -2119,10 +2222,10 @@ class Hooks(Sandbox):
         self.agent("pinned", "opus")
         for _ in range(2):
             self.done("x", "p", "claude-opus-5-5", model="fable")
-        self.assertFalse(registry.healthy("fable"))
+        self.assertFalse(health.load().healthy("fable"))
         self.pre("pinned", "p")
         self.done("pinned", "p", "claude-opus-5-5")
-        self.assertEqual(registry.health()["opus"]["last_model"], "claude-opus-5-5")
+        self.assertEqual(health.load().last_ran_as("opus"), "claude-opus-5-5")
         hooks.post_agent({"session_id": "s1", "tool_input": {"subagent_type": "x"}, "tool_response": "text"})
         self.assertEqual(self.ledger()[-1]["event"], "result")
 
@@ -2134,10 +2237,10 @@ class Hooks(Sandbox):
         self.pre("deep", "x")
         self.assertIn('model: "opus"', self.text(hooks.agent_failed(failed)))
         self.assertIn("route around", self.text(hooks.agent_failed(failed)))
-        self.assertFalse(registry.healthy("fable"))
+        self.assertFalse(health.load().healthy("fable"))
         self.assertIsNone(hooks.agent_failed({**failed, "error": "Command timed out", "tool_input": {"model": "opus"}}))
         self.assertIsNone(hooks.agent_failed({**failed, "is_interrupt": True, "tool_input": {"model": "opus"}}))
-        self.assertTrue(registry.healthy("opus"))
+        self.assertTrue(health.load().healthy("opus"))
 
     def test_model_switch_is_recorded(self):
         hooks.model_switch({"session_id": "s1", "to_model": "claude-fable-5-2"})
@@ -2147,7 +2250,7 @@ class Hooks(Sandbox):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         for _ in range(2):
             self.done("general-purpose", LOOKUP, "claude-sonnet-5-5", model="opus")
-        self.assertTrue(registry.healthy("opus"))
+        self.assertTrue(health.load().healthy("opus"))
 
 
 class GatesDefault(Sandbox):
@@ -2671,9 +2774,9 @@ class Reports(Sandbox):
         self.assertIn("| lookup | sonnet |", text)
 
     def test_models_report(self):
-        registry.record_result("fable", "claude-opus-5-5", "opus")
-        registry.record_result("fable", "claude-opus-5-5", "opus")
-        registry.record_result("haiku", "claude-haiku-5-5", "haiku")
+        health.ran("fable", "claude-opus-5-5", "opus", forced=False)
+        health.ran("fable", "claude-opus-5-5", "opus", forced=False)
+        health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "opus", "fable"]}))
         store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga"]}})
         text = self.out("models")
@@ -2804,7 +2907,7 @@ class ResetCommand(Sandbox):
         return self.out("models", "--reset").split("\n\n")[0]
 
     def test_clears_both_when_it_can(self):
-        registry.record_failure("opus", "404 model not found")
+        health.failed("opus", "404 model not found")
         store.save_json(self.data / "learned.json", {"lookup": {"calls": 3, "bump": 1}})
         self.assertEqual(self.reset(), "Learned availability cleared.\nFeedback cleared.")
         self.assertNotIn("health", store.load_state())
@@ -3176,9 +3279,9 @@ class MachineReadable(Sandbox):
             {"loop": "subagent", "model": "claude-new-9", "turns": 1, "output_tokens": 1_000_000, "usd": 0}]})
 
     def test_models_json(self):
-        registry.record_result("fable", "claude-opus-5-5", "opus")
-        registry.record_result("fable", "claude-opus-5-5", "opus")
-        registry.record_result("haiku", "claude-haiku-5-5", "haiku")
+        health.ran("fable", "claude-opus-5-5", "opus", forced=False)
+        health.ran("fable", "claude-opus-5-5", "opus", forced=False)
+        health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "opus", "fable"]}))
         store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga"]}})
         data = self.json_out("models")
@@ -3462,16 +3565,20 @@ class EdgeCases(Sandbox):
         self.done("general-purpose", LOOKUP, "claude-sonnet-5-5")
         rows = [r for r in self.ledger() if r.get("event") == "result"]
         self.assertEqual((rows[-1]["asked"], rows[-1]["resolved_model"]), ("haiku", "claude-sonnet-5-5"))
-        self.assertEqual(registry.health()["haiku"]["substituted"], 1)
+        self.assertTrue(health.load().healthy("haiku"))
         # A model that ran as asked clears it, so one stray change never takes a model out of rotation.
         self.pre("general-purpose", LOOKUP + " again")
         self.done("general-purpose", LOOKUP + " again", "claude-haiku-5-5")
-        self.assertEqual(registry.health()["haiku"]["substituted"], 0)
+        self.pre("general-purpose", LOOKUP + " third")
+        self.done("general-purpose", LOOKUP + " third", "claude-sonnet-5-5")
+        self.assertTrue(health.load().healthy("haiku"))  # a second substitution in a row would have routed it around
         # Under CLAUDE_CODE_SUBAGENT_MODEL_FORCE every agent runs on the forced model: never a substitution.
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         self.pre("general-purpose", LOOKUP + " forced")
+        for _ in range(2):
+            self.done("general-purpose", LOOKUP + " forced", "claude-sonnet-5-5")
+        self.assertTrue(health.load().healthy("haiku"))
         self.done("general-purpose", LOOKUP + " forced", "claude-opus-5-5")
-        self.assertEqual(registry.health()["haiku"]["substituted"], 0)
         self.assertEqual([r for r in self.ledger() if r.get("event") == "result"][-1]["resolved_model"],
                          "claude-opus-5-5")
 
@@ -3595,14 +3702,6 @@ class ClockAndCleanup(Sandbox):
                 self.assertIsNone(calls.refused_rewrite("s1", "k"), back)
         with mock.patch.object(calls.time, "time", return_value=written + 1):
             self.assertIsNone(calls.refused_rewrite("s1", "k"))
-
-    def test_an_outage_lasts_no_longer_than_its_days_after_the_clock_moves_back(self):
-        now = time.time()
-        registry.update_health("opus", outages=1, unavailable_until=now + 20 * 86400)  # set before a 19-day jump back
-        with mock.patch.object(registry.time, "time", return_value=now):
-            self.assertFalse(registry.healthy("opus"))
-        with mock.patch.object(registry.time, "time", return_value=now + registry.OUTAGE_DAYS[0] * 86400 + 1):
-            self.assertTrue(registry.healthy("opus"))
 
     def test_only_the_newest_copies_of_an_unreadable_file_are_kept(self):
         learned = store.data_dir() / "learned.json"
