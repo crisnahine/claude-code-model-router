@@ -1124,6 +1124,28 @@ class Profile(unittest.TestCase):
                       "List the failing tests. Do not fix anything."):
             self.assertEqual(self.level(brief), "lookup", brief)
 
+    def test_a_debug_compound_is_not_a_fix_even_when_the_description_leads(self):
+        for description, prompt in (("Debug logging for the retry loop", "Add debug logging to the retry loop."),
+                                    ("Debug mode flag", "Add a debug mode flag to the CLI."),
+                                    ("Debug output", "Implement debug output for the exporter.")):
+            result = profile.profile_call({"description": description, "prompt": prompt}, "general-purpose")
+            self.assertEqual(result["level"], "standard", description)
+            self.assertNotIn("fixes or hunts a defect", result["signals"], description)
+
+    def test_a_fix_the_brief_rules_out_does_not_floor_it(self):
+        for brief in ("Rename the helper. Avoid fixing the unrelated tests.",
+                      "Rename the helper. You must not fix the tests.",
+                      "Rename the helper and try not to fix the tests.",
+                      "Rename the helper. Out of scope: fixing the unrelated tests.",
+                      "Rename the helper. Avoid investigating the flaky tests."):
+            self.assertEqual(self.level(brief), "standard", brief)
+
+    def test_the_standard_model_text_does_not_call_fixes_standard(self):
+        use_for = json.loads((ROOT / "plugins/model-router/config/models.json").read_text())["models"]["sonnet"]["use_for"]
+        self.assertNotIn("fixes with a clear spec", use_for)
+        self.assertRegex(use_for, r"at high\.$")
+        self.assertIn("Fixes", use_for.split("refactors inside one module.")[1])
+
     def test_a_search_or_check_agent_stays_at_standard_for_a_fix_brief(self):
         brief = {"prompt": "Fix the off-by-one in page_slice."}
         self.assertEqual(profile.profile_call(brief, "model-router:verifier")["level"], "standard")
@@ -1219,6 +1241,8 @@ class Profile(unittest.TestCase):
         self.level("do not add" + " and remove" * 20_000 + " files")
         self.level("never x" + " and then just" * 20_000 + " fix it")
         self.level("do not touch tests" + " " * 64_000 + "and fix it")
+        self.level("add" + "\n" * 64_000)
+        self.level("add" + "\n \t" * 32_000 + "x")
         self.assertLess(time.monotonic() - started, LINEAR_SECONDS)
 
     def test_a_hyphenated_word_before_and_still_ends_a_limit(self):

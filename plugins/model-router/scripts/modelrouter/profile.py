@@ -65,8 +65,9 @@ _CHANGE = rf"\b{_CHANGE_VERB}"
 # often a noun ends it only with an object after it, so "the config and build scripts" doesn't,
 # and no verb ends it as the first half of a compound noun such as "debug logs" or "audit trails".
 _JUDGMENT_VERBS = r"review|audit|design|plan|evaluate|assess|propose"
-_HUNT_VERBS = (r"debug|diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|prove|"
+_HUNT_OTHER = (r"diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|prove|"
                r"verify the logic|figure out")
+_HUNT_VERBS = rf"debug|{_HUNT_OTHER}"
 _REASONING_WORDS = (rf"{_JUDGMENT_VERBS}|{_HUNT_VERBS}|find out (?:why|how|whether|what caus\w*)|root.?caus\w*|"
                     r"compare|recommend")
 # Asked for a judgment (review it, design it, plan it), not a hunt for a known kind of bug. Only the verb
@@ -88,14 +89,15 @@ _LIST_VERB = rf"\b(?:{_CHANGE_VERB}|(?:edit|modify|move|touch)\b(?!-))"
 _ITEM = rf"{_LIST_VERB}(?:\s+[\w'-]+){{0,3}}?"
 # At most eight more items, so a pasted run of negations inside one list stays linear.
 _LIST = rf",\s*(?:{_ITEM}(?:\s*,\s*{_ITEM}){{0,8}}?(?:\s*,)?\s+)?(?:or|nor)\s+{_LIST_VERB}{_CLAUSE}"
-_NEGATED = (rf"\bwithout\b{_CLAUSE}|\b(?:do not|don't|never|no need to)\b(?:\s*,(?:[^.,;:!?\n]{{0,40}},)?)?"
+_NEGATED = (rf"\bwithout\b{_CLAUSE}|\b(?:do not|don't|never|no need to|avoid|must not|not to|out of scope)\b:?"
+            rf"(?:\s*,(?:[^.,;:!?\n]{{0,40}},)?)?"
             rf"(?:\s*(?={_LIST_VERB}){_CLAUSE}(?:{_LIST})*|{_CLAUSE})")
 _REASONING = rf"\b(?:{_REASONING_WORDS})\b"
 # Work whose point is a defect. "fix" and "debug" count only as verbs ("the fix", "fixture", "debug logging" don't),
 # and "fix" before "#" is a closing keyword. The other hunt verbs are matched as they are.
-_VERB_START = r"(?:^\s*|\n\s*|[.;:!?,]\s+|\b(?:and|then|to|please|must|should|or|so)\s+)"
-_DEFECT = (rf"{_VERB_START}(?:fix(?:es|ing)?|debug)\b(?!\s*#)|\bfix(?:es|ing)?(?={_OBJECT})|"
-           rf"\b(?:{_HUNT_VERBS.replace('debug|', '', 1)})\b")
+_VERB_START = r"(?:^|\n)[ \t]*|[.;:!?,]\s+|\b(?:and|then|to|please|must|should|or|so)\s+"
+_DEFECT = (rf"(?:{_VERB_START})(?:fix(?:es|ing)?\b(?!\s*#)|debug\b(?!{_COMPOUND}|\s+logging\b))|"
+           rf"\bfix(?:es|ing)?(?={_OBJECT})|\b(?:{_HUNT_OTHER})\b")
 _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"
 _LOOKUP = (r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|describe|summari[sz]e|"
            r"is there|does)\b")

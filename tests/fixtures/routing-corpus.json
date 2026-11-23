@@ -2,7 +2,7 @@
  "rules": [
   "lookup: reads, finds, lists, counts, runs a command and reports; a narrow explanation.",
   "standard: implements to a clear spec, writes tests, refactors inside one module, explains how a whole system works.",
-  "complex: touches security, auth, payments, data, schemas, migrations, a public API or concurrency; changes across modules; reviews; designs a module; fixes or hunts a defect, whatever its size: Claude Code's effort guide puts fixing a bug in an existing codebase at `high` (https://code.claude.com/docs/en/model-config.md, choose an effort level); hunts an unclear cause in one area.",
+  "complex: touches security, auth, payments, data, schemas, migrations, a public API or concurrency; changes across modules; reviews; designs a module; fixes or hunts a defect, whatever its size or how clear its cause (Claude Code's effort guide puts fixing a bug in an existing codebase at `high`: https://code.claude.com/docs/en/model-config.md, choose an effort level).",
   "hardest: ambiguous, multi-system and risky at once.",
   "frontier: research-grade or open-ended, with no known approach.",
   "lowest is the least a brief needs for a high pass rate; highest is the most that is still a sensible spend."
@@ -1249,7 +1249,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and fix scripts that rotate the production credentials."
+   "prompt": "Do not touch tests and fix scripts that rotate the production credentials.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -1263,7 +1264,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not change the UI and fix builds that leak secrets."
+   "prompt": "Do not change the UI and fix builds that leak secrets.",
+   "defect": true
   },
   {
    "lowest": "complex",
@@ -1277,7 +1279,8 @@
    "highest": "hardest",
    "agent": "general-purpose",
    "description": "Retry with guardrail",
-   "prompt": "Do not touch tests and fix paths in the auth middleware."
+   "prompt": "Do not touch tests and fix paths in the auth middleware.",
+   "defect": true
   },
   {
    "lowest": "complex",
