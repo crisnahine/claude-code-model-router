@@ -136,12 +136,46 @@ class Analysis(unittest.TestCase):
         weak = rows("haiku", "lookup", [0.2] * n, [True] * 4 + [False] * 6)
         strong = rows("opus", "lookup", [0.4] * n, [True] * n)
         level = self.quality(rows("plugin", "lookup", [0.3] * n, [True] * n) + weak + strong, self.FORCED)["quality"]
-        self.assertEqual((level["saturated"], level["claim"]), (False, "LEVEL"))
+        self.assertEqual((level["saturated"], level["claim"]), (False, "NOT SHOWN BEHIND"))
+        self.assertIn("isn't parity", level["reason"])
         behind = self.quality(rows("plugin", "lookup", [0.3] * n, [True] * 5 + [False] * 5) + weak + strong,
                               self.FORCED)["quality"]
         self.assertEqual((behind["saturated"], behind["claim"]), (False, "BEHIND"))
         self.assertTrue(behind["against"]["opus"]["behind"])
         self.assertFalse(behind["against"]["haiku"]["behind"])
+
+    def test_a_result_that_is_not_significant_is_not_parity(self):
+        n = analyze.MIN_RUNS
+        data = (rows("plugin", "lookup", [0.3] * n, [True] * 7 + [False] * 3)  # 7 of 10 against 10 of 10: p = 0.105
+                + rows("haiku", "lookup", [0.2] * n, [True] * 4 + [False] * 6) + rows("opus", "lookup", [0.4] * n, [True] * n))
+        q = self.quality(data, self.FORCED)["quality"]
+        self.assertEqual((q["saturated"], q["claim"]), (False, "NOT SHOWN BEHIND"))
+        self.assertFalse(q["against"]["opus"]["behind"])
+        self.assertIn(f"{n} runs per cell can't show it", q["reason"])
+
+    def test_behind_is_adjusted_across_the_baselines_and_needs_runs(self):
+        for name, adjusted in {"a": 0.09, "b": 0.09, "c": 0.5}.items():
+            self.assertAlmostEqual(analyze._holm({"a": 0.03, "b": 0.04, "c": 0.5})[name], adjusted)
+        n = analyze.MIN_RUNS
+        weak = rows("haiku", "lookup", [0.2] * n, [True] * 3 + [False] * 7)
+        strong = rows("opus", "lookup", [0.4] * n, [True] * n)
+
+        def against(solved):  # the router at `solved` of 10, a weak and a strong baseline: two tests
+            data = rows("plugin", "lookup", [0.3] * n, [True] * solved + [False] * (n - solved))
+            return self.quality(data + weak + strong, self.FORCED)["quality"]["against"]["opus"]
+
+        six = against(6)  # p = 0.043 alone, 0.087 once adjusted for the second baseline
+        self.assertLess(six["p_behind"], analyze.ALPHA)
+        self.assertFalse(six["behind"])
+        self.assertTrue(against(5)["behind"])  # p = 0.011, 0.022 adjusted
+        few = rows("plugin", "lookup", [0.3] * 5, [False] * 5) + rows("opus", "lookup", [0.4] * 5, [True] * 5)
+        self.assertFalse(self.quality(few, self.FORCED)["quality"]["against"]["opus"]["behind"])  # p = 0.004, 5 runs
+
+    def test_the_page_says_ten_runs_cannot_show_parity_and_names_the_baseline_of_pass_and_fail(self):
+        page = analyze.build_page(self.committed())
+        self.assertIn("NOT SHOWN BEHIND means none did, which is not parity", page)
+        self.assertIn("pass rate is not behind the cheapest baseline's beyond noise", page)
+        self.assertIn("The router and some baselines ran in different batches.", page)
 
     def test_forced_baselines_on_one_model_cannot_show_saturation(self):
         n = analyze.MIN_RUNS

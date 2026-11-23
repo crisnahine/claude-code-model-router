@@ -151,15 +151,27 @@ def splitting_tasks(runs: list[dict], strong: str = SPLIT_STRONG, weak: str = SP
     return out
 
 
+def _holm(ps: dict[str, float]) -> dict[str, float]:
+    """Holm's step-down adjustment of one-sided p values, so a family of tests holds ALPHA as a whole."""
+    out, running = {}, 0.0
+    for i, (name, p) in enumerate(sorted(ps.items(), key=lambda kv: (kv[1], kv[0]))):
+        running = max(running, min(1.0, (len(ps) - i) * p))
+        out[name] = running
+    return out
+
+
 def _quality(cells: dict, runs: list[dict], router: str, routers: frozenset[str], forced: dict, gap: str | None) -> dict:
     """What the pass rates say about quality. The router's rate is set against every baseline with an exact
-    one-sided test. When the weakest forced baseline can't be told from the strongest, the tasks can't tell models
-    apart, so the class is `saturated` and no claim is made either way."""
+    one-sided test, Holm-adjusted across the baselines, and only against a baseline with MIN_RUNS runs. When the
+    weakest forced baseline can't be told from the strongest, the tasks can't tell models apart, so the class is
+    `saturated` and no claim is made either way. A result that isn't significant is not parity."""
     base = {name: cell for name, cell in cells.items() if name != router and name not in routers}
     ours = cells.get(router)
-    against = {name: {"pass_rate": cell["pass_rate"], "pass_ci": cell["pass_ci"],
-                      "behind": _lower_p(ours["solved"], ours["runs"], cell["solved"], cell["runs"]) < ALPHA,
-                      "ahead": _lower_p(cell["solved"], cell["runs"], ours["solved"], ours["runs"]) < ALPHA}
+    tested = {name: _lower_p(ours["solved"], ours["runs"], cell["solved"], cell["runs"])
+              for name, cell in base.items() if ours and min(ours["runs"], cell["runs"]) >= MIN_RUNS}
+    holm = _holm(tested)
+    against = {name: {"pass_rate": cell["pass_rate"], "pass_ci": cell["pass_ci"], "p_behind": tested.get(name),
+                      "behind": holm.get(name, 1.0) < ALPHA}
                for name, cell in sorted(base.items())} if ours else {}
     ladder = sorted((n for n in base if n in forced), key=lambda n: (forced[n], n))
     weak, strong = (ladder[0], ladder[-1]) if ladder else (None, None)
@@ -180,12 +192,17 @@ def _quality(cells: dict, runs: list[dict], router: str, routers: frozenset[str]
     if p >= ALPHA:
         return {**out, "saturated": True, "reason": f"{seen}, a gap that could be chance, so these tasks can't "
                                                     "tell models apart; no quality claim"}
+    batches = {c: {r.get("_batch") for r in runs if r["config"] == c} for c in (router, *base)}
+    mixed = " The router and some baselines ran in different batches." if any(
+        batches[c] != batches[router] for c in base) else ""
     behind = [n for n, a in against.items() if a["behind"]]
     if behind:
         return {**out, "saturated": False, "claim": "BEHIND",
-                "reason": f"{seen}; the router solved fewer than {', '.join(behind)} beyond noise"}
-    return {**out, "saturated": False, "claim": "LEVEL",
-            "reason": f"{seen}; no baseline solved more than the router beyond noise"}
+                "reason": f"{seen}; the router solved fewer than {', '.join(behind)} beyond noise (Holm-adjusted "
+                          f"across the baselines).{mixed}".rstrip(".")}
+    return {**out, "saturated": False, "claim": "NOT SHOWN BEHIND",
+            "reason": f"{seen}; no baseline solved more than the router beyond noise, which isn't parity: "
+                      f"{MIN_RUNS} runs per cell can't show it.{mixed}".rstrip(".")}
 
 
 def summarize(rows: list[dict], *, routers: frozenset[str], router: str = "plugin", draws: int = 2000,
@@ -587,7 +604,12 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "percentile bootstrap intervals over runs (2,000 resamples), and each cell resamples from a generator "
         "seeded by its session model, class and configuration, so a cell's interval doesn't change when another "
         "configuration is added.",
-        "- Quality: the router's pass rate is tested against every baseline with an exact one-sided test (5%). A "
+        f"- Quality: the router's pass rate is tested against every baseline that has {MIN_RUNS} runs, with an exact "
+        "one-sided test (5%) adjusted across the baselines (Holm). BEHIND means a baseline solved more beyond "
+        "noise. NOT SHOWN BEHIND means none did, which is not parity: a test that finds no gap in "
+        f"{MIN_RUNS} runs per cell can't rule out a large one (a router at 7 of 10 against 10 of 10 isn't "
+        "significant), so the page claims no parity. The router's rows and a baseline's may come from different "
+        "batches, which the Quality line notes. A "
         "class is saturated when the weakest forced baseline (every subagent on the weakest model) can't be told "
         "from the strongest by the same test; then the tasks can't show a quality difference and no quality claim "
         "is made. Without forced baselines on two models the class has no quality claim either. A class is PARTIAL "
@@ -802,11 +824,17 @@ def facts(session: dict, routers: frozenset[str], forced: dict) -> dict[str, boo
     solved = lambda name: name in pooled and pooled[name]["solved"] == pooled[name]["runs"]  # noqa: E731
     fails = [c for c in classes if c["status"] == "FAIL"]
     against = lambda c: c["quality"]["against"].get(c["best_baseline"])  # noqa: E731
+
+    def ahead(c):  # the router's rate above its best baseline's beyond noise, with the same run gate as BEHIND
+        ours, theirs = c["configs"].get(router), c["configs"].get(c["best_baseline"])
+        return bool(ours and theirs and min(ours["runs"], theirs["runs"]) >= MIN_RUNS
+                    and _lower_p(theirs["solved"], theirs["runs"], ours["solved"], ours["runs"]) < ALPHA)
+
     out = {
         "partial_for_runs": all(c["why"] == "few_runs" for c in classes if c["status"] == "PARTIAL"),
         "fail_on_cost": all(c["why"] == "cost_above" for c in fails),
         "not_behind": all(against(c) is not None and not against(c)["behind"] for c in classes if c["best_baseline"]),
-        "no_gain": all(against(c) is not None and not against(c)["ahead"] for c in classes if c["best_baseline"]),
+        "no_gain": all(not ahead(c) for c in classes if c["best_baseline"]),
         "no_pass": not any(c["status"] == "PASS" for c in classes),
         "nearly_all": best is not None and pooled[best]["solved"] >= NEARLY * pooled[best]["runs"],
         "ran": {c for c in pooled if c != router and c not in routers} == named["ran"],
