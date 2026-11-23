@@ -1,0 +1,1 @@
+with other tables in pricing/symbols.py the output is ['Fr12.34', 'F12.34', 'kr12.34', 'Total: kr12.34', 'Q: F12.34', '$12.34']

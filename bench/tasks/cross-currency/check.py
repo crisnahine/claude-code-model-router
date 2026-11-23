@@ -25,12 +25,15 @@ WANT = ["$12.34", "$0.05", "€12.34", "£12.34", "¥1234", "Total: €12.34", "
         "Q1: £12.34", "Q1: $12.34"]
 if got != WANT:
     passcheck.finish(False, passcheck.differs(got, WANT))
-OTHER_TABLES = 'SYMBOLS = {"USD": "$", "CHF": "Fr", "XAF": "F", "SEK": "kr"}\nDECIMALS = {"CHF": 0, "XAF": 0}\n'
+# Appended and swapped in place, so a helper the run added to symbols.py stays and still reads the tables.
+OTHER_TABLES = ('\nSYMBOLS.clear()\nSYMBOLS.update({"USD": "$", "CHF": "Fr", "XAF": "F", "SEK": "kr"})\n'
+                'DECIMALS.clear()\nDECIMALS.update({"CHF": 0, "XAF": 0})\n')
 FOLLOWS = ["Fr1234", "F1234", "kr12.34", "Total: kr12.34", "Q: F1234", "$12.34"]
 with tempfile.TemporaryDirectory() as tmp:
     copy = Path(tmp) / "work"
     shutil.copytree(WORK, copy, ignore=shutil.ignore_patterns("__pycache__"))
-    (copy / "pricing" / "symbols.py").write_text(OTHER_TABLES, encoding="utf-8")
+    with open(copy / "pricing" / "symbols.py", "a", encoding="utf-8") as tables:
+        tables.write(OTHER_TABLES)
     seen = passcheck.probe(copy, Path(__file__).resolve().parent / "probe.py", None)
 passcheck.finish(seen == FOLLOWS, "with other tables in pricing/symbols.py the output is "
                  f"{seen!r}, expected {FOLLOWS!r}: the symbols and decimals must come from SYMBOLS and DECIMALS")

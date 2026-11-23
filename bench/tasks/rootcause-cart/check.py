@@ -16,5 +16,6 @@ with passcheck.agent_code():
     import cart
     a, b = cart.add_item("a", 1), cart.add_item("b", 1)
     kept = cart.add_item("c", 1, items=a)
-    got = [passcheck.tests_pass(WORK, SHIPPED, "test_cart.py"), len(b), kept is a, len(a)]
+    shape = [len(b), kept is a, len(a)]
+got = [passcheck.tests_pass(WORK, SHIPPED, "test_cart.py"), *shape]
 passcheck.finish(got == [True, 1, True, 2], passcheck.differs(got, [True, 1, True, 2]))

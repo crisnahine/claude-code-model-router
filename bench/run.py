@@ -298,14 +298,22 @@ FINAL_ROW_CHARS = 80_000  # kept per row, the reply and every file together
 def final_answer(shipped: Path, work: Path, reply: str) -> dict:
     """What the check graded, kept in the row because the work dir is deleted after the run: the full reply, each
     text file the run added or changed against the task's repo/, the files it removed, and the names of files left out
-    (binary, caches, or over the caps)."""
-    room, files, omitted = FINAL_ROW_CHARS - len(reply), {}, []
+    (binary, unreadable, a link out of the work dir, caches, or over the caps). The reply alone is cut to the row cap."""
+    reply = reply[:FINAL_ROW_CHARS]
+    room, files, omitted, root = FINAL_ROW_CHARS - len(reply), {}, [], work.resolve()
     for path in sorted(p for p in work.rglob("*") if p.is_file()):
         rel = path.relative_to(work).as_posix()
         if "__pycache__" in path.parts or rel.startswith((".claude/", ".pytest_cache/")) or path.suffix == ".pyc":
             continue
         before = shipped / rel
-        data = path.read_bytes()
+        try:  # the money for the run is spent by now, so a file that can't be read must not lose the row
+            if root not in path.resolve().parents:
+                omitted.append(rel)
+                continue
+            data = path.read_bytes()
+        except OSError:
+            omitted.append(rel)
+            continue
         if before.is_file() and before.read_bytes() == data:
             continue
         try:

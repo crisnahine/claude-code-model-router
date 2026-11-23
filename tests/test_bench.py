@@ -737,6 +737,44 @@ class FinalAnswer(unittest.TestCase):
         self.assertEqual(len(final["files"]) + len(final["omitted"]), 6)
         self.assertTrue(final["omitted"])
 
+    def test_the_reply_is_cut_to_the_row_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "repo").mkdir()
+            (Path(tmp) / "work").mkdir()
+            final = run.final_answer(Path(tmp) / "repo", Path(tmp) / "work", "r" * (run.FINAL_ROW_CHARS + 5))
+        self.assertEqual(len(final["reply"]), run.FINAL_ROW_CHARS)
+
+    @unittest.skipIf(sys.platform == "win32" or os.geteuid() == 0, "needs POSIX modes that bind the reader")
+    def test_an_unreadable_file_is_omitted_and_the_row_kept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            (work / "locked.py").write_text("x = 1\n", encoding="utf-8")
+            (work / "open.py").write_text("y = 1\n", encoding="utf-8")
+            (work / "locked.py").chmod(0)
+            try:
+                final = run.final_answer(shipped, work, "")
+            finally:
+                (work / "locked.py").chmod(0o644)
+        self.assertEqual((final["files"], final["omitted"]), ({"open.py": "y = 1\n"}, ["locked.py"]))
+
+    def test_a_link_out_of_the_work_dir_is_never_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            (Path(tmp) / "secret.txt").write_text("outside\n", encoding="utf-8")
+            (work / "inside.txt").write_text("inside\n", encoding="utf-8")
+            try:
+                (work / "out.txt").symlink_to(Path(tmp) / "secret.txt")
+                (work / "in.txt").symlink_to(work / "inside.txt")
+            except OSError:
+                self.skipTest("this system can't make symlinks")
+            final = run.final_answer(shipped, work, "")
+        self.assertEqual((final["files"], final["omitted"]),
+                         ({"in.txt": "inside\n", "inside.txt": "inside\n"}, ["out.txt"]))
+
     def test_a_run_row_has_the_whole_reply_and_the_files_the_run_left(self):
         with tempfile.TemporaryDirectory() as tmp:
             claude = stub(tmp, FILES_STUB)
@@ -782,8 +820,9 @@ def overlay_dirs(task, kind):
 
 
 def build_work(task, overlay, work):
-    """repo/, solution/ over it, then an overlay: `remove.txt` lists paths to delete, `answer.txt` is the reply and
-    stays out of the work dir, and every other file is copied in. Returns the reply."""
+    """repo/, solution/ over it, then an overlay: `remove.txt` lists paths to delete, `answer.txt` is the reply,
+    `expect.txt` is part of the reason a wrong answer must fail with, none of them go in the work dir, and every
+    other file is copied in. Returns the reply."""
     shutil.copytree(task["dir"] / "repo", work)
     if (task["dir"] / "solution").is_dir():
         shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
@@ -794,7 +833,7 @@ def build_work(task, overlay, work):
             (work / line.strip()).unlink()
     for src in sorted(p for p in overlay.rglob("*") if p.is_file()):
         rel = src.relative_to(overlay)
-        if rel.as_posix() in ("answer.txt", "remove.txt"):
+        if rel.as_posix() in ("answer.txt", "remove.txt", "expect.txt"):
             continue
         (work / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, work / rel)
@@ -824,6 +863,10 @@ class KnownAnswers(unittest.TestCase):
                     with self.subTest(task=task["id"], answer=f"{kind}/{overlay.name}"):
                         graded = self.grade(task, overlay)
                         self.assertEqual(graded.verdict, verdict, graded.reason)
+                        if kind == "wrong" and (overlay / "expect.txt").is_file():
+                            self.assertIn((overlay / "expect.txt").read_text(encoding="utf-8").strip(), graded.reason)
+                        elif kind == "wrong":  # a check that gives reasons pins each wrong answer's
+                            self.assertEqual(graded.reason, "the check exited 1", "add an expect.txt")
 
     def test_an_answer_folder_changes_something(self):
         for task in run.load_tasks():
@@ -1352,6 +1395,17 @@ class Isolation(unittest.TestCase):
             (shipped / "test_x.py").write_text(self.FAILS, encoding="utf-8")
             (work / "test_x.py").write_text(self.PASSES, encoding="utf-8")
             self.assertFalse(passcheck.tests_pass(work, shipped, "test_x.py"))
+
+    def test_tests_pass_fails_a_removed_test_and_raises_for_a_missing_shipped_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "shipped", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            (shipped / "test_x.py").write_text(self.PASSES, encoding="utf-8")
+            self.assertFalse(passcheck.tests_pass(work, shipped, "test_x.py"))
+            (work / "test_x.py").write_text(self.PASSES, encoding="utf-8")
+            with self.assertRaises(OSError):  # a check bug, which run.grade reads as broken
+                passcheck.tests_pass(work, shipped, "test_y.py")
 
     def test_planted_stdlib_names_cannot_fake_a_pass(self):
         for task in run.load_tasks():

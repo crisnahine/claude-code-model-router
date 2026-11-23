@@ -21,16 +21,17 @@ def attempts(fn):
     return len(calls)
 
 
-with passcheck.agent_code():
-    fetch = importlib.import_module("fetcher").fetch
-    upload = importlib.import_module("uploader").upload
-    os.environ.pop("APP_CONFIG", None)
-    seen = [(attempts(fetch), attempts(upload))]
-    with tempfile.TemporaryDirectory() as tmp:
-        for retries in (5, 1):
-            path = os.path.join(tmp, f"c{retries}.json")
-            with open(path, "w", encoding="utf-8") as fh:
-                json.dump({"retries": retries}, fh)
+with tempfile.TemporaryDirectory() as tmp:
+    configs = [os.path.join(tmp, f"c{retries}.json") for retries in (5, 1)]
+    for path, retries in zip(configs, (5, 1)):
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"retries": retries}, fh)
+    with passcheck.agent_code():
+        fetch = importlib.import_module("fetcher").fetch
+        upload = importlib.import_module("uploader").upload
+        os.environ.pop("APP_CONFIG", None)
+        seen = [(attempts(fetch), attempts(upload))]
+        for path in configs:
             os.environ["APP_CONFIG"] = path
             seen.append((attempts(fetch), attempts(upload)))
 passcheck.finish(seen == [(3, 3), (5, 5), (1, 1)],
