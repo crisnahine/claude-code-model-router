@@ -5231,7 +5231,8 @@ class SpawnPaths(Sandbox):
         cases = [("general-purpose", LOOKUP, {}), ("general-purpose", BUILD, {}), ("general-purpose", HARD, {}),
                  ("Explore", HARD, {}), (None, "investigate why the checkout test is flaky", {}),
                  ("general-purpose", LOOKUP, {"model": "opus"}), ("general-purpose", HARD, {"effort": "low"}),
-                 ("general-purpose", LOOKUP, {"model": "sonnet", "effort": "high"})]
+                 ("general-purpose", LOOKUP, {"model": "sonnet", "effort": "high"}),
+                 ("general-purpose", LOOKUP, {"name": "auditor"})]  # a named call: a teammate, which casts no votes
         for index, (agent, brief, extra) in enumerate(cases):
             with self.subTest(agent=agent, brief=brief, extra=extra):
                 call = self.call(agent, brief, tool_use_id=f"t{index}", **extra)
@@ -5245,7 +5246,8 @@ class SpawnPaths(Sandbox):
                         out = hooks.pre_agent(hook_input)
                         answer = ((out or {}).get("hookSpecificOutput") or {}).get("updatedInput") or {}
                     else:
-                        answer = modpath.spawn({**hook_input, "parent_model": "claude-opus-5-5", "kind": "subagent"}) or {}
+                        kind = "teammate" if "name" in extra else "subagent"
+                        answer = modpath.spawn({**hook_input, "parent_model": "claude-opus-5-5", "kind": kind}) or {}
                     # What runs: the fallback returns the whole call, the mod only what it changes.
                     ran = (answer.get("model") or extra.get("model"), answer.get("effort") or extra.get("effort"))
                     route = calls.route_of(session_id, key, f"t{index}")

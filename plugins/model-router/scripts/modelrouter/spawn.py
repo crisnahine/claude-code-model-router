@@ -76,7 +76,9 @@ def record(spawned: Spawn, via: str, newest: str | None = None) -> None:
 
 def _record(spawned: Spawn, via: str, newest: str | None) -> None:
     hook_input, decision = spawned.hook_input, spawned.decision
-    session_id, kind = hook_input.get("session_id"), hook_input.get("kind") or learn.SUBAGENT
+    # The fallback's input has no kind; a named call it flags as a teammate must not vote as a subagent.
+    session_id = hook_input.get("session_id")
+    kind = hook_input.get("kind") or ("teammate" if spawned.facts.teammate else learn.SUBAGENT)
     reg, current = spawned.snap.registry, request.load(session_id)
     runs_on = decision["model"] or decision["was"]
     source = None if decision["repeat_of"] else decision["source"]  # passed through untouched: no pick, no level
