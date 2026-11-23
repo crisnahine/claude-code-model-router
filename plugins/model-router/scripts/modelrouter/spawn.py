@@ -1,5 +1,5 @@
 """One procedure for every spawn, whichever path it came by, in two steps: decide (the facts
-and the router's decision, writing nothing), then record (the ledger row, the call and the
+and the router's decision, writing nothing), then record (the ledger row, the route and the
 votes it carries). A path may adjust the decision between them."""
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from . import agents, calls, gates, learn, ledger, profile, request, router, session, settings
 from . import config as cfg
-from .registry import Registry
+from .config import Level
 
 
 @dataclass
@@ -60,7 +60,7 @@ def decide(hook_input: dict, snap: settings.Snapshot) -> Spawn:
 
 
 def record(spawned: Spawn, via: str, newest: str | None = None) -> None:
-    """Write the spawn's ledger row and, unless it is denied, its call and votes. `via` is "mod" or "fallback";
+    """Write the spawn's ledger row and, unless it is denied, its route and votes. `via` is "mod" or "fallback";
     `newest` is the full ID the mod sends in place of the decided alias."""
     hook_input, decision = spawned.hook_input, spawned.decision
     session_id = hook_input.get("session_id")
@@ -69,21 +69,24 @@ def record(spawned: Spawn, via: str, newest: str | None = None) -> None:
                  kind=(hook_input.get("kind") or "subagent") if via == "mod" else None)
     if decision["action"] != "deny":
         try:
-            sent = newest or (decision["model"] if decision["action"] == "rewrite" else None)
-            _record(spawned.snap.registry, session_id, spawned.key, decision, spawned.facts.raises, sent)
+            _record(spawned, via, newest)
         except OSError:
             pass
 
 
-def _record(reg: Registry, session_id: str | None, key: str, decision: dict, raises: dict, sent: str | None) -> None:
-    level, source = decision["level"], decision["source"]
+def _record(spawned: Spawn, via: str, newest: str | None) -> None:
+    hook_input, decision = spawned.hook_input, spawned.decision
+    session_id, kind = hook_input.get("session_id"), hook_input.get("kind") or learn.SUBAGENT
+    reg, current = spawned.snap.registry, request.load(session_id)
     runs_on = decision["model"] or decision["was"]
-    if decision["repeat_of"]:
-        source = None  # passed through untouched: neither the pick nor the level applied
-    earlier = request.note_spawn(reg, session_id, key, runs_on, level=level, effort=decision["effort"],
-                                 source=source, sent=sent)
-    user_named = source == "caller" and decision["was"] == request.load(session_id).named
-    learn.decided(reg, source=source, level=level, pick=decision["pick"], runs_on=runs_on, raised=raises,
-                  earlier=earlier, escalated_from=decision["escalated_from"], user_named=user_named)
+    source = None if decision["repeat_of"] else decision["source"]  # passed through untouched: no pick, no level
+    rewrote = decision["action"] == "rewrite"
+    route = calls.Route(model=runs_on, sent=newest or (decision["model"] if rewrote else None),
+                        level=Level.parse(decision["level"]), effort=decision["effort"], source=source, path=via,
+                        counted=learn.counted(decision, kind), prompt_id=current.prompt_id, rewrote=rewrote)
+    earlier = calls.routed(session_id, spawned.key, route)
+    request.note_spawn(reg, session_id, runs_on)
+    user_named = source == "caller" and decision["was"] == current.named
+    learn.spawned(reg, decision, kind, earlier, user_named, spawned.facts.raises)
     if gates.is_checker(decision["agent"]):
         gates.note_check(session_id)

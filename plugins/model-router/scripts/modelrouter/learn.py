@@ -5,10 +5,14 @@ itself is never measured."""
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Mapping
 
 from . import store
-from .registry import Registry
 from .config import LEVEL_SOURCES, LEVELS, Level
+from .registry import Registry
+
+if TYPE_CHECKING:
+    from .calls import Route
 
 VOTES_NEEDED = 6
 SHARE_NEEDED = 0.3
@@ -60,33 +64,50 @@ def _update(level: str, calls: int = 0, up: int = 0, down: int = 0) -> None:
         pass
 
 
-def uncount(level: str | None) -> None:
-    """Take one routed call back out of the level's count."""
-    if level:
-        _update(level, calls=-1)
+SUBAGENT = "subagent"
 
 
-def decided(reg: Registry, *, source: str | None, level: str | None, pick: str | None, runs_on: str | None,
-            raised: dict | None = None, earlier: str | None = None, escalated_from: str | None = None,
-            user_named: bool = False) -> None:
-    """Count one spawn and cast the votes its facts carry. `source` is None for a call
-    that ran untouched. A call on the model the user named in the prompt carries no
-    caller votes: the user chose it, not Claude."""
-    if not level:
-        return
-    if source == "router":
-        _update(level, calls=1)
-    if source in LEVEL_SOURCES and escalated_from:
-        _update(escalated_from, up=1)
+def _source(decision: Mapping) -> str | None:
+    """A call the repeat guard passed through untouched: neither the pick nor the level applied."""
+    return None if decision["repeat_of"] else decision["source"]
+
+
+def counted(decision: Mapping, kind: str) -> Level | None:
+    """The level this spawn counts toward the vote threshold, or None: only a spawn the router gave its model."""
+    return Level.parse(decision["level"]) if _source(decision) == "router" else None
+
+
+def spawned(reg: Registry, decision: Mapping, kind: str, earlier: Route | None, user_named: bool,
+            raised: Mapping[str, int] | None = None) -> Level | None:
+    """Count one spawn and cast the votes its facts carry, and return the level it counted toward.
+    `earlier` is the route this call had before in the request. A call on the model the user named in
+    the prompt carries no caller votes: the user chose it, not Claude."""
+    level = Level.parse(decision["level"])
+    if level is None:
+        return None
+    source = _source(decision)
+    counts = counted(decision, kind)
+    if counts:
+        _update(counts, calls=1)
+    if source in LEVEL_SOURCES and decision["escalated_from"]:
+        _update(decision["escalated_from"], up=1)
     if source != "caller" or user_named:
-        return
+        return counts
+    pick, runs_on = decision["pick"], decision["model"] or decision["was"]
     # The same call routed weaker earlier in this request counts double: it was redone.
-    if earlier and reg.stronger(runs_on, earlier):
+    if earlier and earlier.source == "router" and reg.stronger(runs_on, earlier.model):
         _update(level, up=2)
     elif reg.stronger(runs_on, pick):
         _update(level, up=1)
     elif reg.stronger(pick, runs_on) and (raises() if raised is None else raised).get(level, 0) > 0:
         _update(level, down=1)
+    return counts
+
+
+def swapped(route: Route | None) -> None:
+    """A run that swapped models mid-run is no result for its level: take back the count it made."""
+    if route and route.counted:
+        _update(route.counted, calls=-1)
 
 
 def reset() -> str:

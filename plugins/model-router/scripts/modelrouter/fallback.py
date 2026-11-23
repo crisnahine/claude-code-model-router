@@ -1,7 +1,7 @@
 """The Agent call path's own pieces when no mod routes the spawn: the rewrite to `updatedInput`,
-the rewrite waiting for its result, the refused-rewrite guard and the one deny."""
+the rewrite waiting for its result, the refused-rewrite guard and the one deny. What a result means
+for the call is `calls.py`'s, the same on both paths."""
 from __future__ import annotations
-
 
 from . import health, settings, spawn, store
 from . import config as cfg
@@ -37,16 +37,14 @@ def route(hook_input: dict, snap: settings.Snapshot) -> dict | None:
 
 def remember(session_id: str | None, key: str, decision: router.Decision) -> None:
     """A rewrite waits here for its result."""
-    pending = {"model": decision["model"] or decision["was"], "level": decision["level"], "effort": decision["effort"]}
+    pending = {"model": decision["model"] or decision["was"]}
     store.mutate_entry("pending", session_id, lambda waiting: store.keep(waiting, key, pending))
 
 
-def take(session_id: str | None, key: str) -> dict | None:
-    """The call's waiting rewrite, removed: a result or an error came back."""
-    taken = store.load_entry("pending", session_id).get(key)
-    if taken is not None:
+def forget(session_id: str | None, key: str) -> None:
+    """A result or an error came back, so the call's waiting rewrite was accepted."""
+    if key in store.load_entry("pending", session_id):
         store.mutate_entry("pending", session_id, lambda waiting: waiting.pop(key, None))
-    return taken
 
 
 def refused(session_id: str | None, key: str) -> dict | None:

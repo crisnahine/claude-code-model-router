@@ -6,8 +6,9 @@ denies only to hold the user's own cap when a lowering rewrite didn't take."""
 from __future__ import annotations
 
 import re
+from typing import Any
 
-from . import allowlist, calls, fallback, gates, health, intake, learn, ledger, profile, request, router, session, settings, spawn, store, upstream
+from . import allowlist, calls, fallback, gates, health, intake, ledger, profile, request, router, session, settings, spawn, store, upstream
 from . import config as cfg
 from .registry import Registry
 
@@ -130,10 +131,18 @@ def pre_agent(hook_input: dict) -> dict | None:
     return fallback.route(hook_input, settings.Snapshot(hook_input))
 
 
-def _asked_for(reg: Registry, tool_input: dict, routed: str | None) -> str | None:
-    """The model a finished or failed call was meant to run on: the one it was routed to,
-    or the one it named."""
-    return routed or reg.family(tool_input.get("model"))
+def _outcome(kind: str, hook_input: dict, reg: Registry, **fields: Any) -> calls.Outcome:
+    """What came back for an Agent call, as the one record `calls.returned` reads."""
+    tool_input = cfg.tool_input(hook_input)
+    agent, key = calls.identify(tool_input)
+    return calls.Outcome(kind, key=key, agent=agent, named=reg.family(tool_input.get("model")), **fields)
+
+
+def _settled(session_id: str | None, key: str) -> None:
+    try:
+        fallback.forget(session_id, key)
+    except OSError:
+        pass
 
 
 def post_agent(hook_input: dict) -> dict | None:
@@ -146,72 +155,41 @@ def post_agent(hook_input: dict) -> dict | None:
     # is back when the agent stops (agent_stopped), not here.
     launched = response.get("status") == "async_launched"
     agent_id = response.get("agentId")
-    agent, key = calls.identify(tool_input)
     session_id = hook_input.get("session_id")
-    swapped = [] if launched else calls.models_used(response)
-    routed = None
-    try:
-        routed = calls.settled(session_id, key, fallback.take(session_id, key), finished=not launched and not swapped,
-                               launched_as=agent_id if launched and isinstance(agent_id, str) else None)
-    except OSError:
-        pass
-    asked = _asked_for(snap.registry, tool_input, routed)
-    try:
-        health.ran(asked, ran_as, snap.registry.family(ran_as), snap.options.force, swapped=bool(swapped))
-    except OSError:
-        pass
-    ledger.result(session_id, agent, asked, ran_as, response.get("status"), response.get("totalTokens"),
-                  models_used=swapped or None)
-    if not swapped:
+    outcome = _outcome("result", hook_input, snap.registry, ran_as=ran_as, ran_family=snap.registry.family(ran_as),
+                       forced=snap.options.force, status=response.get("status"), tokens=response.get("totalTokens"),
+                       launched=launched, agent_id=agent_id if launched and isinstance(agent_id, str) else None,
+                       models_used=() if launched else tuple(calls.models_used(response)))
+    _settled(session_id, outcome.key)
+    returned = calls.returned(session_id, outcome)
+    if returned.note != calls.SWAPPED:
         return None
-    try:
-        now = request.load(session_id)
-        record = now.run(key)
-        # The key ignores the model, so a caller's own run of K can follow an earlier router run of K.
-        if record and record.get("source") == "router" and now.routed_by(key) == "router":
-            learn.uncount(record.get("level"))
-    except OSError:
-        pass
-    if "risk" in profile.profile_call(tool_input, agent)["signals"]:
+    if "risk" in profile.profile_call(tool_input, outcome.agent)["signals"]:
         return _context("PostToolUse", (
-            f"Model Router: this agent switched models mid-run ({swapped[0]} to {swapped[-1]}), so its result "
-            "needs a check before it is relied on."))
+            f"Model Router: this agent switched models mid-run ({outcome.models_used[0]} to {outcome.models_used[-1]}), "
+            "so its result needs a check before it is relied on."))
     return None
 
 
 def agent_failed(hook_input: dict) -> dict | None:
     """An agent call failed. If the error says the model itself isn't usable, count it,
     and route around that model once it has happened twice."""
-    tool_input = cfg.tool_input(hook_input)
-    session_id = hook_input.get("session_id")
-    key = calls.identify(tool_input)[1]
-    routed = None
-    try:
-        routed = calls.settled(session_id, key, fallback.take(session_id, key))
-    except OSError:
-        pass
-    error = str(hook_input.get("error") or "")
-    if not health.is_model_error(error, hook_input.get("is_interrupt")):
-        return None
     snap = settings.Snapshot(hook_input)
     reg = snap.registry
-    asked = _asked_for(reg, tool_input, routed)
-    if not asked:
-        return None
-    # The ID the mod sent, not today's newest_id: after the first of several parallel failures the
-    # ID is routed around, and recomputing it would strike the alias for the rest.
-    sent = request.load(session_id).sent_to(key)
-    newest = sent if sent and sent.lower() != asked and reg.family(sent) == asked else None
-    if newest:
+    session_id = hook_input.get("session_id")
+    outcome = _outcome("failure", hook_input, reg, error=str(hook_input.get("error") or ""),
+                       interrupted=bool(hook_input.get("is_interrupt")))
+    _settled(session_id, outcome.key)
+    returned = calls.returned(session_id, outcome)
+    if returned.note == calls.ID_FAILED and returned.route:
         # The mod sent the family's newest ID, and this provider refused it: the alias runs
         # from now on, and the ID is tried again after the outage.
-        health.failed(newest, error, newest=True)
-        ledger.model_error(hook_input.get("session_id"), tool_input.get("subagent_type"), newest)
         return _context("PostToolUseFailure", (
-            f"{newest} isn't available here. The '{asked}' alias runs from now on, as Claude Code resolves it for "
-            "this provider; the same agent call re-issued unchanged uses it."))
-    fails = health.failed(asked, error)
-    ledger.model_error(hook_input.get("session_id"), tool_input.get("subagent_type"), asked)
+            f"{returned.route.sent} isn't available here. The '{returned.asked}' alias runs from now on, as Claude Code "
+            "resolves it for this provider; the same agent call re-issued unchanged uses it."))
+    if returned.note not in (calls.MODEL_FAILED, calls.ROUTED_AROUND) or not returned.asked:
+        return None
+    asked = returned.asked
     # snap.health may predate the strike just written, so the list reads the table again.
     usable = [n for n in reg.available(snap.options.cap, allowed=snap.allowed, table=health.load()) if n != asked]
     if not usable:
@@ -219,7 +197,7 @@ def agent_failed(hook_input: dict) -> dict | None:
     return _context("PostToolUseFailure", (
         f"The '{asked}' model looks unavailable here. This agent call re-issued with model: "
         f"\"{reg.clamp(asked, usable)}\" runs on the nearest usable one."
-        + (" Model Router will route around it for now." if fails >= 2 else "")))
+        + (" Model Router will route around it for now." if returned.note == calls.ROUTED_AROUND else "")))
 
 
 def agent_stopped(hook_input: dict) -> dict | None:
@@ -234,7 +212,9 @@ def agent_stopped(hook_input: dict) -> dict | None:
             answered = session.handed_back(hook_input.get("agent_transcript_path"))
         except Exception:
             pass
-    calls.stopped(hook_input.get("session_id"), hook_input.get("agent_id"), answered=answered)
+    agent_id = hook_input.get("agent_id")
+    calls.returned(hook_input.get("session_id"), calls.Outcome("stop", agent_id=agent_id if isinstance(agent_id, str) else None,
+                                                               answered=answered))
     gates.note_agent_checks(hook_input)
     return None
 

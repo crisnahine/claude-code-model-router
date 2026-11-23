@@ -98,15 +98,16 @@ The note keeps what Claude must act on: don't name a model or effort, say what m
 
 | File | Bytes after 1,000 calls | Bounded | What bounds it |
 | :- | -: | :- | :- |
-| `ledger.jsonl` | 773,494 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
-| `prompts.json` | 178,447 | yes | The 200 most recently written sessions (`store.KEEP_ENTRIES`) |
-| `done.json` | 112,775 | yes | Same, and 100 calls per session (`store.KEPT_RECORDS`) |
-| `edits.json` | 3,120 | yes | The 200 most recently written sessions |
-| `sessions.json` | 2,911 | yes | Same |
-| `mod.json` | 1,738 | yes | Same |
-| `launched.json` | 1,614 | yes | Same |
-| `pending.json` | 812 | yes | Same |
-| `state.json` | 685 | yes | One record of options |
+| `ledger.jsonl` | 798,174 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
+| `routes.json` | 206,956 | yes | The 200 most recently written sessions (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
+| `done.json` | 114,457 | yes | Same |
+| `prompts.json` | 5,383 | yes | The 200 most recently written sessions |
+| `edits.json` | 3,129 | yes | Same |
+| `sessions.json` | 2,913 | yes | Same |
+| `mod.json` | 1,747 | yes | Same |
+| `launched.json` | 1,608 | yes | Same |
+| `pending.json` | 815 | yes | Same |
+| `state.json` | 713 | yes | One record of options |
 | `learned.json` | 144 | yes | One entry per level |
 
 "Bounded" was checked, not read from the code. The script lowers the three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them twice: once with one call per session, 40 sessions and then 80, so every per-session file holds far more sessions than its cap, and once with one long session. It records each file's largest size during each round. A file counts as bounded when its peak in the second round, which runs twice as many calls, is at most 25% plus 256 bytes above its peak in the first. The check was proven by removing each trim in turn: without the session cap, all seven per-session files report unbounded; without the ledger's halving, `ledger.jsonl` does; without the per-session call cap, `done.json` and `prompts.json` do.

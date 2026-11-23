@@ -144,6 +144,14 @@ class Sandbox(unittest.TestCase):
         hooks.post_agent({**self.call(agent, prompt, **extra), "tool_response": {
             "resolvedModel": ran_as, "status": "async_launched", "agentId": agent_id}})
 
+    def spawned(self, kind: str = "subagent", earlier: str | None = None, user_named: bool = False, **facts):
+        """One spawn's decision as `learn.spawned` reads it; `earlier` is the model of the call's route before."""
+        decision = {"level": "lookup", "pick": "haiku", "model": "haiku", "was": None, "source": "router",
+                    "escalated_from": None, "repeat_of": None, **facts}
+        before = earlier and calls.Route(model=earlier, sent=None, level=cfg.Level.lookup, effort="low",
+                                         source="router", path="mod")
+        return learn.spawned(cfg.load(), decision, kind, before, user_named)
+
     def handback(self, message: str) -> str:
         """A copy of the handback transcript fixture with the delivered report replaced."""
         rows = [json.loads(line) for line in (FIXTURES / "subagent-handback.jsonl").read_text().splitlines()]
@@ -1789,7 +1797,7 @@ class Router(Sandbox):
         self.assertEqual((d["level"], d["model"], d["effort"]), ("complex", "fable", "high"))
         os.environ.pop("CLAUDE_PLUGIN_OPTION_PRIORITY")
         for _ in range(learn.VOTES_NEEDED):
-            learn.decided(cfg.load(), source="caller", level="complex", pick="opus", runs_on="fable")
+            self.spawned(source="caller", level="complex", pick="opus", model="fable")
         d = self.decide("general-purpose", HARD)
         self.assertEqual((d["model"], d["effort"]), ("fable", "high"))
 
@@ -2329,14 +2337,14 @@ class RepeatGuard(Sandbox):
 
 
 class Calls(Sandbox):
-    def setUp(self):
-        super().setUp()
-        self.config = cfg.load()
+    def route(self, tool_input: dict, model: str = "haiku", **fields) -> calls.Route | None:
+        """A spawn of this call was routed, as `spawn.record` writes it; returns the earlier route."""
+        fields = {"level": cfg.Level.lookup, "effort": "low", "source": "router", "path": "mod", "sent": None, **fields}
+        return calls.routed("s1", calls.identify(tool_input)[1], calls.Route(model=model, **fields))
 
-    def route(self, tool_input: dict, model: str = "haiku", **facts) -> str | None:
-        facts = {"level": "lookup", "effort": "low", "source": "router", **facts}
-        key = calls.identify(tool_input)[1]
-        return request.note_spawn(self.config, "s1", key, model, **facts)
+    def came_back(self, tool_input: dict, kind: str = "result", **fields) -> calls.Returned:
+        agent, key = calls.identify(tool_input)
+        return calls.returned("s1", calls.Outcome(kind, key=key, agent=agent, **fields))
 
     def test_a_call_is_known_by_its_agent_and_prompt(self):
         agent, key = calls.identify({"prompt": "x"})
@@ -2357,22 +2365,67 @@ class Calls(Sandbox):
         self.assertEqual(calls.models_used({"modelsUsed": ["a", "a", "a", "a", "a", "b"]}), [])
 
     def test_only_runs_at_their_level_are_redone(self):
-        for source in ("caller", None):
-            call = {"prompt": f"list {source}"}
-            self.route(call, source=source)
-            calls.settled("s1", calls.identify(call)[1], None, finished=True)
-            self.assertIsNone(calls.finished_run("s1", calls.identify(call)[1]), source)
+        for source, rewrote in (("caller", False), (None, False), ("caller", True), ("router", False), ("pin", False),
+                                ("rule", False)):
+            call = {"prompt": f"list {source} {rewrote}"}
+            self.route(call, source=source, rewrote=rewrote)
+            self.assertTrue(self.came_back(call).finished, source)  # every foreground result finishes its call
+            self.assertEqual(calls.finished_run("s1", calls.identify(call)[1]) is not None,
+                             source in ("router", "pin", "rule") or rewrote, (source, rewrote))
 
     def test_a_finished_run_counts_in_its_own_request_or_window(self):
         call = {"prompt": LOOKUP}
         key = calls.identify(call)[1]
         self.route(call)
-        calls.settled("s1", calls.identify(call)[1], None, finished=True)
+        self.came_back(call)
         self.assertIsNotNone(calls.finished_run("s1", key))
         with self.clock_at(self.clock + calls.REDO_WINDOW + 1):
             self.assertIsNone(calls.finished_run("s1", key))
         request.begin("s1", prompt_id="p1", level="lookup", need="haiku", session_tier=None, named=None)
         self.assertIsNone(calls.finished_run("s1", key))
+
+    def test_each_outcome_kind_says_whether_it_finished_the_call(self):
+        call = {"prompt": LOOKUP}
+        key = calls.identify(call)[1]
+        finished = lambda: calls.finished_run("s1", key) is not None  # noqa: E731
+        self.route(call)
+        for kind, fields, says in (
+                ("failure", {"error": "timed out"}, False),
+                ("result", {"launched": True, "agent_id": "a1"}, False),
+                ("result", {"models_used": ("claude-haiku-5-5", "claude-haiku-5")}, False),
+                ("stop", {"agent_id": "a9"}, False)):  # an agent this session never launched
+            self.assertEqual((self.came_back(call, kind, **fields).finished, finished()), (says, False), (kind, fields))
+        self.assertEqual((self.came_back(call, "stop", agent_id="a1", answered=False).finished, finished()), (False, False))
+        self.came_back(call, launched=True, agent_id="a1")
+        self.assertEqual((self.came_back(call, "stop", agent_id="a1").finished, finished()), (True, True))
+
+    def test_a_swap_takes_back_the_count_its_own_route_made(self):
+        call = {"prompt": LOOKUP}
+        self.route(call, counted=cfg.Level.lookup)
+        self.spawned()
+        self.assertEqual(learn.stats()["lookup"]["calls"], 1)
+        got = self.came_back(call, models_used=("claude-haiku-5-5", "claude-haiku-5"))
+        self.assertEqual((got.note, got.finished, learn.stats()["lookup"]["calls"]), (calls.SWAPPED, False, 0))
+        self.route(call, source="caller")  # a later run of the same call that counted nothing
+        self.came_back(call, models_used=("claude-haiku-5-5", "claude-haiku-5"))
+        self.assertEqual(learn.stats()["lookup"]["calls"], 0)
+
+    def test_the_earlier_route_is_this_requests_and_stood_at_its_level(self):
+        call = {"prompt": LOOKUP}
+        self.assertIsNone(self.route(call))
+        self.assertEqual(self.route(call).model, "haiku")
+        self.assertEqual(calls.route_of("s1", calls.identify(call)[1]).model, "haiku")
+        request.begin("s1", prompt_id="p2", level="lookup", need="haiku", session_tier=None, named=None)
+        self.assertIsNone(self.route(call, prompt_id="p2"))
+        self.assertIsNone(self.route({"prompt": "other"}, source="caller"))
+        self.assertIsNone(self.route({"prompt": "other"}))  # a caller's run is no run to be redone
+
+    def test_a_route_with_junk_in_it_reads_as_none(self):
+        key = calls.identify({"prompt": LOOKUP})[1]
+        store.save_entry("routes", "s1", {key: {"model": 7, "level": "nope", "at": "later"}, "x": 3})
+        route = calls.route_of("s1", key)
+        self.assertEqual((route.model, route.level, route.at), (None, None, 0.0))
+        self.assertIsNone(calls.route_of("s1", "unknown"))
 
 
 class Fallback(Sandbox):
@@ -2381,15 +2434,16 @@ class Fallback(Sandbox):
             fallback.remember("s1", key, {"model": "haiku", "was": None, "level": "lookup", "effort": None})
 
     def test_a_rewrite_waits_for_its_result_and_only_a_result_finishes_the_run(self):
+        self.session_on("claude-opus-5-5")
         key = calls.identify({"prompt": LOOKUP})[1]
-        fallback.remember("s1", key, self.decide("general-purpose", LOOKUP))
-        request.note_spawn(cfg.load(), "s1", key, "haiku", level="lookup", effort="low", source="router")
+        self.pre("general-purpose", LOOKUP)
         self.assertIsNone(fallback.refused("s1", key))  # a copy issued alongside it
         self.next_message()
         self.assertEqual(fallback.refused("s1", key)["model"], "haiku")
-        calls.settled("s1", key, fallback.take("s1", key))  # an error: accepted, nothing finished
+        hooks.agent_failed({**self.call("general-purpose", LOOKUP), "error": "timed out"})  # accepted, nothing finished
         self.assertEqual((fallback.refused("s1", key), calls.finished_run("s1", key)), (None, None))
-        calls.settled("s1", key, fallback.take("s1", key), finished=True)
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
         self.assertEqual(calls.finished_run("s1", key)["level"], "lookup")
 
     def test_a_spawn_decides_without_writing_and_records_the_guarded_decision(self):
@@ -2435,21 +2489,15 @@ class Request(Sandbox):
         request.begin("s1", **{"prompt_id": "p1", "level": "hardest", "need": "opus",
                                "session_tier": "sonnet", "named": None, **fields})
 
-    def note(self, key, model, source, level="lookup"):
-        return request.note_spawn(self.config, "s1", key, model, level=level, effort="low", source=source)
-
-    def test_a_new_request_clears_its_runs_and_strongest_spawn(self):
+    def test_a_new_request_clears_its_strongest_spawn(self):
         self.start()
-        self.assertIsNone(self.note("k", "haiku", "router"))
-        self.assertEqual(self.note("k", "opus", "caller"), "haiku")
-        self.note("j", "fable", "pin", level="complex")
-        now = request.load("s1")
-        self.assertEqual((now.top_spawn, now.routed_to("k"), now.run("j")["model"]), ("fable", "opus", "fable"))
+        request.note_spawn(self.config, "s1", "haiku")
+        request.note_spawn(self.config, "s1", "fable")
+        request.note_spawn(self.config, "s1", "opus")
+        self.assertEqual(request.load("s1").top_spawn, "fable")
         self.start(prompt_id="p2", level="lookup")
         now = request.load("s1")
-        self.assertEqual((now.prompt_id, now.level, now.top_spawn, now.routed_to("k"), now.run("j")),
-                         ("p2", "lookup", None, None, None))
-        self.assertIsNone(self.note("k", "opus", "caller"))
+        self.assertEqual((now.prompt_id, now.level, now.top_spawn), ("p2", "lookup", None))
 
     def test_the_floor_is_the_requests_level_until_a_delivered_message(self):
         self.start()
@@ -2952,7 +3000,7 @@ class NewestOnProviders(Sandbox):
         os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
         copies = [self.spawn(LOOKUP) for _ in range(3)]
         self.assertEqual({out["model"] for out, _ in copies}, {"claude-haiku-5-5"})
-        self.assertEqual(request.load("s1").sent_to(calls.identify(copies[0][1]["tool_input"])[1]), "claude-haiku-5-5")
+        self.assertEqual(calls.route_of("s1", calls.identify(copies[0][1]["tool_input"])[1]).sent, "claude-haiku-5-5")
         for _, hook_input in copies:
             hooks.agent_failed({**hook_input, "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})
         self.assertEqual([r["model"] for r in self.ledger() if r["event"] == "model_error"], ["claude-haiku-5-5"] * 3)
@@ -3153,7 +3201,7 @@ class Feedback(Sandbox):
         self.options(verify_gate="true")
         self.session_on("claude-sonnet-5-5")
         for _ in range(learn.VOTES_NEEDED):
-            learn.decided(cfg.load(), source="caller", level="complex", pick="opus", runs_on="fable")
+            self.spawned(source="caller", level="complex", pick="opus", model="fable")
         hooks.user_prompt({"session_id": "s1", "prompt": HARD})  # opus would do, but complex is raised
         entry = request.load("s1")
         self.assertEqual((entry.level, entry.need, entry.below(cfg.load(), "claude-sonnet-5-5")), ("complex", "fable", True))
@@ -3181,22 +3229,21 @@ class Feedback(Sandbox):
         self.assertEqual(learn.raises()["lookup"], 0)
 
     def test_each_kind_of_spawn_casts_its_own_votes(self):
-        config = cfg.load()
-
         def votes(**facts) -> dict:
             learn.reset()
-            learn.decided(config, **{"level": "lookup", "pick": "haiku", "runs_on": "haiku", **facts})
+            self.spawned(**facts)
             return {k: v for k, v in (learn.stats().get("lookup") or {}).items() if v}
 
         self.assertEqual(votes(source="router"), {"calls": 1})
-        self.assertEqual(votes(source="pin", runs_on="opus"), {})
-        self.assertEqual(votes(source="caller", runs_on="sonnet"), {"votes": 1})
-        self.assertEqual(votes(source="caller", runs_on="sonnet", earlier="haiku"), {"votes": 2})
-        self.assertEqual(votes(source="caller", runs_on="sonnet", earlier="opus"), {"votes": 1})
-        self.assertEqual(votes(source=None, runs_on="opus"), {})
+        self.assertEqual(votes(source="pin", model="opus"), {})
+        self.assertEqual(votes(source="rule", model="opus"), {})
+        self.assertEqual(votes(source="caller", model="sonnet"), {"votes": 1})
+        self.assertEqual(votes(source="caller", model="sonnet", earlier="haiku"), {"votes": 2})
+        self.assertEqual(votes(source="caller", model="sonnet", earlier="opus"), {"votes": 1})
+        self.assertEqual(votes(source=None, model="opus"), {})
+        self.assertEqual(votes(source="router", repeat_of="haiku"), {})  # passed through untouched
         learn.reset()
-        learn.decided(config, source="router", level="standard", pick="sonnet", runs_on="sonnet",
-                      escalated_from="lookup")
+        self.spawned(source="router", level="standard", pick="sonnet", model="sonnet", escalated_from="lookup")
         self.assertEqual((learn.stats()["standard"]["calls"], learn.stats()["lookup"]["votes"]), (1, 1))
 
     def test_feedback_never_goes_below_what_ships(self):
@@ -3208,8 +3255,9 @@ class Feedback(Sandbox):
         code = ("import sys; sys.path.insert(0, sys.argv[1])\n"
                 "from modelrouter import config, learn, store\n"
                 "store.LOCK_WAIT_SECONDS = 60\n"
-                "facts = dict(source='router', level='lookup', pick='haiku', runs_on='haiku')\n"
-                "for _ in range(10): learn.decided(config.load(), **facts)\n")
+                "decision = dict(source='router', level='lookup', pick='haiku', model='haiku', was=None,\n"
+                "                escalated_from=None, repeat_of=None)\n"
+                "for _ in range(10): learn.spawned(config.load(), decision, 'subagent', None, False)\n")
         workers = [subprocess.Popen([sys.executable, "-c", code, str(SCRIPTS)], env={**os.environ})
                    for _ in range(5)]
         for worker in workers:
@@ -3996,8 +4044,9 @@ class Reports(Sandbox):
         text = report.explain(snap, LOOKUP, "model-router:architect")
         self.assertIn("Level: **hardest**", text)  # the request's floor reaches a strong role agent
         key = calls.identify({"prompt": LOOKUP})[1]
-        request.note_spawn(snap.registry, "s1", key, "haiku", level="lookup", effort="medium", source="router")
-        calls.settled("s1", key, None, finished=True)
+        calls.routed("s1", key, calls.Route(model="haiku", sent=None, level=cfg.Level.lookup, effort="medium",
+                                            source="router", path="mod", prompt_id="p1"))
+        calls.returned("s1", calls.Outcome("result", key=key))
         self.assertIn("one level above the lookup run", report.explain(snap, LOOKUP))
 
     def test_explain_writes_nothing(self):
@@ -4894,6 +4943,73 @@ class SpawnPaths(Sandbox):
                 self.assertEqual(levels.get(fallback_session), levels.get(mod_session))
 
 
+    def spawn_on(self, path: str, session: str, agent: str, brief: str) -> None:
+        self.session_on("claude-opus-5-5", session)
+        if path == "fallback":
+            hooks.pre_agent(self.call(agent, brief, session_id=session))
+        else:
+            hooks.mod_spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                             "kind": "subagent",
+                             "tool_input": {"subagent_type": agent, "prompt": brief}})
+
+    def test_every_kind_of_outcome_leaves_the_same_redo_on_both_paths(self):
+        agent, brief = "general-purpose", LOOKUP
+        swapped = SWAP["swapped"]["modelsUsed"]
+        outcomes = {
+            "a result": (lambda s: self.done(agent, brief, "claude-haiku-5-5", session_id=s), True),
+            "a result on the rewritten call": (lambda s: self.done(agent, brief, "claude-haiku-5-5", session_id=s,
+                                                                    model="haiku", effort="medium"), True),
+            "a swapped result": (lambda s: self.done(agent, brief, "claude-haiku-5-5", swapped, session_id=s), False),
+            "an error": (lambda s: hooks.agent_failed({**self.call(agent, brief, session_id=s), "error": "timed out"}), False),
+            "a background launch": (lambda s: self.launched(agent, brief, "claude-haiku-5-5", "a1", session_id=s), False),
+            "a stop with an answer": (lambda s: (self.launched(agent, brief, "claude-haiku-5-5", "a1", session_id=s),
+                                                 hooks.agent_stopped({"session_id": s, "agent_id": "a1",
+                                                                      "last_assistant_message": "src/a.py"})), True),
+            "a stop with no answer": (lambda s: (self.launched(agent, brief, "claude-haiku-5-5", "a1", session_id=s),
+                                                 hooks.agent_stopped({"session_id": s, "agent_id": "a1",
+                                                                      "last_assistant_message": " "})), False),
+        }
+        for name, (came_back, redo) in outcomes.items():
+            seen = {}
+            for number, path in enumerate(("fallback", "mod")):
+                with self.subTest(outcome=name, path=path):
+                    session = f"{name}-{number}"
+                    self.spawn_on(path, session, agent, brief)
+                    came_back(session)
+                    again = self.decide(agent, brief, session_id=session)
+                    seen[path] = (again["level"], again["model"], again["effort"], again["escalated_from"])
+            want = ("standard", "sonnet", "medium", "lookup") if redo else ("lookup", "haiku", "medium", None)
+            self.assertEqual(seen, {path: want for path in ("fallback", "mod")}, name)
+
+    def test_a_model_the_cap_lowered_is_redone_on_both_paths_and_one_the_caller_kept_is_not(self):
+        self.options(max_tier="sonnet")
+        for number, (path, model, redo) in enumerate((("fallback", "fable", True), ("mod", "fable", True),
+                                                      ("fallback", "sonnet", False), ("mod", "sonnet", False))):
+            session = f"s{number}"
+            self.session_on("claude-opus-5-5", session)
+            if path == "fallback":
+                hooks.pre_agent(self.call("general-purpose", LOOKUP, session_id=session, model=model))
+            else:
+                hooks.mod_spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                                 "kind": "subagent", "tool_input": {"subagent_type": "general-purpose",
+                                                                    "prompt": LOOKUP, "model": model}})
+            self.done("general-purpose", LOOKUP, "claude-sonnet-5-5", session_id=session)
+            again = self.decide("general-purpose", LOOKUP, session_id=session)
+            self.assertEqual((again["escalated_from"], again["level"]), ("lookup", "standard") if redo else (None, "lookup"),
+                             (path, model))
+
+    def test_a_result_leaves_the_same_records_on_both_paths(self):
+        for number, path in enumerate(("fallback", "mod")):
+            self.spawn_on(path, f"s{number}", "general-purpose", LOOKUP)
+            self.done("general-purpose", LOOKUP, "claude-haiku-5-5", session_id=f"s{number}")
+        key = calls.identify({"subagent_type": "general-purpose", "prompt": LOOKUP})[1]
+        done = [{k: v for k, v in store.load_entry("done", f"s{n}")[key].items() if k != "at"} for n in (0, 1)]
+        self.assertEqual(done[0], done[1])
+        routes = [{k: v for k, v in calls.route_of(f"s{n}", key).__dict__.items() if k not in ("at", "path")} for n in (0, 1)]
+        self.assertEqual(routes[0], routes[1])
+        self.assertEqual([calls.route_of(f"s{n}", key).path for n in (0, 1)], ["fallback", "mod"])
+
+
 class EdgeCases(Sandbox):
     """Compaction, empty briefs and a spawn another mod changed (S12.7, S12.11, S12.14)."""
 
@@ -4902,11 +5018,10 @@ class EdgeCases(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": HARD, "cwd": str(self.project)})
         self.pre("general-purpose", LOOKUP)
         def snapshot() -> dict:
-            return {"prompts": request.load("s1"), "pending": store.load_entry("pending", "s1"),
-                    "sessions": store.load_entry("sessions", "s1")}
+            return {"prompts": request.load("s1"), "routes": store.load_entry("routes", "s1"),
+                    "pending": store.load_entry("pending", "s1"), "sessions": store.load_entry("sessions", "s1")}
         state = snapshot()
         self.assertTrue(all(state.values()), state)
-        self.assertTrue(state["prompts"].routed)
         out = hooks.session_start({"session_id": "s1", "source": "compact", "cwd": str(self.project)})
         self.assertEqual(snapshot(), state)  # no model: kept as is
         self.assertIn("Model Router sets", json.dumps(out))  # compaction drops the old note, so it is sent again
@@ -5058,11 +5173,13 @@ class ClockAndCleanup(Sandbox):
     """A clock moved backwards, and copies of unreadable state files piling up."""
 
     def test_a_run_stamped_in_the_future_is_not_a_redo(self):
+        route = calls.Route(model="haiku", sent=None, level=cfg.Level.lookup, effort="low", source="router", path="mod")
+        calls.routed("s1", "k", route)
         with self.clock_at(self.clock + 3600):
-            calls.settled("s1", "k", {"level": "lookup"}, finished=True)
+            calls.returned("s1", calls.Outcome("result", key="k"))
         self.assertIsNone(calls.finished_run("s1", "k"))
         with self.clock_at(self.clock - 60):
-            calls.settled("s1", "k", {"level": "lookup"}, finished=True)
+            calls.returned("s1", calls.Outcome("result", key="k"))
         self.assertEqual(calls.finished_run("s1", "k")["level"], "lookup")
 
     def test_only_the_newest_copies_of_an_unreadable_file_are_kept(self):
