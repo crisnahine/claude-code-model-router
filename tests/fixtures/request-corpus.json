@@ -541,6 +541,73 @@
    "signals": [
     "ambiguity"
    ]
+  },
+  {
+   "prompt": "find why the checkout total is wrong",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "find the race condition between the api and worker services that drops jobs",
+   "level": "complex",
+   "signals": [
+    "risk",
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "find where the auth middleware is defined",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
+  },
+  {
+   "prompt": "find all callers of parse_date",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "find the file that defines the User model",
+   "level": "lookup",
+   "signals": []
+  },
+  {
+   "prompt": "find why the build is slow",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "find the bug in parse_date",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "find the leak in the worker",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "find the regression",
+   "level": "complex",
+   "signals": [
+    "fixes or hunts a defect"
+   ]
+  },
+  {
+   "prompt": "find the files that import auth",
+   "level": "standard",
+   "signals": [
+    "risk"
+   ]
   }
  ]
 }

@@ -1864,6 +1864,82 @@
    "agent": "lint-runner",
    "description": "Fix lint failures",
    "prompt": "Run the linter and fix the failures it reports in src/."
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Find checkout total bug",
+   "prompt": "Find why the checkout total is wrong",
+   "defect": true
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "general-purpose",
+   "description": "Find dropped-jobs race",
+   "prompt": "Find the race condition between the api and worker services that drops jobs",
+   "defect": true
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find auth middleware",
+   "prompt": "Find where the auth middleware is defined"
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find parse_date callers",
+   "prompt": "Find all callers of parse_date"
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find User model file",
+   "prompt": "Find the file that defines the User model"
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Find slow build cause",
+   "prompt": "Find why the build is slow",
+   "defect": true
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Find parse_date bug",
+   "prompt": "Find the bug in parse_date",
+   "defect": true
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Find worker leak",
+   "prompt": "Find the leak in the worker",
+   "defect": true
+  },
+  {
+   "lowest": "standard",
+   "highest": "complex",
+   "agent": "general-purpose",
+   "description": "Find the regression",
+   "prompt": "Find the regression",
+   "defect": true
+  },
+  {
+   "lowest": "lookup",
+   "highest": "lookup",
+   "agent": "general-purpose",
+   "description": "Find auth importers",
+   "prompt": "Find the files that import auth"
   }
  ]
 }
