@@ -429,7 +429,7 @@ def badge_assets(version: str) -> dict:
 LADDER = [  # level, model, effort, needs, subtask
     ("lookup", "Haiku", "low", 1, "Find, list, summarize, run a command"),
     ("standard", "Sonnet", "medium", 2, "Implement to a clear spec, write tests"),
-    ("complex", "Sonnet", "high", 2, "Design, review, risky or cross-module change"),
+    ("complex", "Sonnet", "high", 2, "Fix a bug, design, review, risky change"),
     ("hardest", "Opus", "high", 3, "Ambiguous, multi-system and risky at once"),
     ("frontier", "Fable", "high", 4, "No known approach: research"),
 ]

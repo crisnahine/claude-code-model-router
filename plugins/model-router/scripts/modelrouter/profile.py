@@ -91,6 +91,11 @@ _LIST = rf",\s*(?:{_ITEM}(?:\s*,\s*{_ITEM}){{0,8}}?(?:\s*,)?\s+)?(?:or|nor)\s+{_
 _NEGATED = (rf"\bwithout\b{_CLAUSE}|\b(?:do not|don't|never|no need to)\b(?:\s*,(?:[^.,;:!?\n]{{0,40}},)?)?"
             rf"(?:\s*(?={_LIST_VERB}){_CLAUSE}(?:{_LIST})*|{_CLAUSE})")
 _REASONING = rf"\b(?:{_REASONING_WORDS})\b"
+# Work whose point is a defect. "fix" and "debug" count only as verbs ("the fix", "fixture", "debug logging" don't),
+# and "fix" before "#" is a closing keyword. The other hunt verbs are matched as they are.
+_VERB_START = r"(?:^\s*|\n\s*|[.;:!?,]\s+|\b(?:and|then|to|please|must|should|or|so)\s+)"
+_DEFECT = (rf"{_VERB_START}(?:fix(?:es|ing)?|debug)\b(?!\s*#)|\bfix(?:es|ing)?(?={_OBJECT})|"
+           rf"\b(?:{_HUNT_VERBS.replace('debug|', '', 1)})\b")
 _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"
 _LOOKUP = (r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|describe|summari[sz]e|"
            r"is there|does)\b")
@@ -187,6 +192,8 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
             level = "complex"
         else:
             level = "standard"
+        if LEVELS.index(level) < LEVELS.index("complex") and re.search(_DEFECT, asked):
+            level, why = "complex", why + ["fixes or hunts a defect"]
     elif len(hits) >= 2:
         level = "standard"  # finds or explains something broad or sensitive, but only reads
     elif _not_english(text):
