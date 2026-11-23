@@ -962,6 +962,8 @@ def social_preview() -> str:
 
 # ---------------------------------------------------------------- the headline figures in the docs
 
+FIGURE_PAGES = ("README.md", "docs/ARCHITECTURE.md", "docs/FAQ.md", "docs/RELEASE_READINESS.md", "docs/ROADMAP.md",
+                "docs/TRACEABILITY.md")
 BENCH_SPAN = re.compile(r"<!-- bench:([\w.-]+) -->(.*?)<!-- /bench -->")
 SESSION_NAMES = {"claude-opus-5-5": "opus", "sonnet": "sonnet"}
 CLASS_WORDS = {"security-review": "security review", "root-cause": "root cause"}
@@ -1006,6 +1008,9 @@ def session_figures(name: str, session: dict) -> dict:
     passed = [class_word(c["class"]) for c in classes if c["status"] == "PASS"]
     if passed:
         f["pass_classes"] = words(passed)
+    partial = [class_word(c["class"]) for c in classes if c["status"] == "PARTIAL"]
+    if partial:
+        f["partial_classes"] = words(partial)
     # The router is spelled by its role, never by its id; every other configuration by its id, and some by a role too.
     key = lambda cfg: "router" if cfg == router else cfg  # noqa: E731
     for c in classes:
@@ -1063,7 +1068,8 @@ def bench_figures(data: dict) -> dict:
     f = {"runs": f"{data['runs']:,}", "usd": f"${data['usd']:,.2f}",
          "dates": " to ".join(dict.fromkeys(data["dates"])),
          "claude": ", ".join(v.replace(" (Claude Code)", "") for v in data["claude_versions"]),
-         "per_cell": " or ".join(str(n) for n in data["per_cell"])}
+         "per_cell": " or ".join(str(n) for n in data["per_cell"]),
+         "tasks": str(data["tasks"]), "tasks_total": str(data["tasks_total"])}
     for s in data["sessions"]:
         if s["model"] in SESSION_NAMES:
             f.update(session_figures(SESSION_NAMES[s["model"]], s))
@@ -1282,7 +1288,7 @@ def build(snap: Snapshot) -> dict:
                 files[path] = with_cards(files[path], snap.pages)
     readme = badge_alt(snap.texts["README.md"], v)
     files["README.md"] = bench_alt(readme, figures)
-    for path in ("README.md", "docs/FAQ.md", "docs/TRACEABILITY.md"):
+    for path in FIGURE_PAGES:
         if path in files:
             files[path] = with_figures(path, files[path], figures)
     files["CITATION.cff"] = citation(v, snap.released)

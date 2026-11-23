@@ -866,6 +866,7 @@ def figures(results: Results, router: str | None = None) -> dict:
     return {"runs": len(rows), "usd": sum(float(r["total_cost_usd"]) for r in rows),
             "dates": [dates[0], dates[-1]] if dates else [], "claude_versions": sorted({r["claude_version"] for r in rows}),
             "per_cell": sorted({cell["runs"] for s in out for c in s["classes"] for cell in c["configs"].values()}),
+            "tasks": len({r["task"] for r in rows}), "tasks_total": len(results.tasks),
             "sessions": out}
 
 
