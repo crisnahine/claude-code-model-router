@@ -4457,6 +4457,15 @@ class Reports(Sandbox):
         self.assertIn("| main | claude-opus-5-5 | 1 | 1,000,000 | 20.00 |", text)
         self.assertIn("No price in the registry for: claude-new-9", text)
 
+    def test_usage_of_zero_days_reads_the_default_window_it_names(self):
+        old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=20)).isoformat(timespec="seconds")
+        store.append_ledger({"ts": old, "event": "usage", "session": "s1", "agent_id": None, "model": "claude-opus-5-5",
+                             "input_tokens": 0, "output_tokens": 1_000_000, "cost_usd": 20.0})
+        self.assertIn("Spend at list price: $20.00", self.out("usage", "30"))
+        self.assertEqual(self.out("usage", "0").strip(), "No activity recorded in the last 7 days.")
+        data = json.loads(self.out("usage", "0", "--json"))
+        self.assertEqual((data["days"], data["spend"]["total_usd"]), (7, 0))
+
     def test_data_dir_flag(self):
         other = Path(self.tmp.name) / "other"
         other.mkdir()
