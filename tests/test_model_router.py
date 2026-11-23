@@ -750,12 +750,33 @@ class Allowlist(Sandbox):
         self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
         (drop_ins / "50-bad.json").write_text("[]")
         self.assertEqual(allowlist.read(None, self.project, {"policy": {}}).permitted(self.config), set())  # the floor holds
-        (drop_ins / "50-bad.json").unlink()
-        self.managed.write_text("")
+        (drop_ins / "50-bad.json").write_text("   {\"availableModels\": ")  # content that stops short
         self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
-        self.managed.unlink()
+
+    def test_an_empty_or_blank_managed_file_and_a_folder_in_the_drop_ins_are_no_policy(self):
+        everything = set(registry.models(self.config))
+        drop_ins = self.home / "managed-settings.d"
+        drop_ins.mkdir()
+        for text in ("", " \n\t "):
+            self.managed.write_text(text)
+            (drop_ins / "50-blank.json").write_text(text)
+            self.assertEqual(allowlist.read(None, self.project).permitted(self.config), everything, repr(text))
         (drop_ins / "60-folder.json").mkdir()
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), everything)
+        (drop_ins / "70-real.json").write_text(json.dumps({"deniedModels": ["opus"]}))
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), everything - {"opus"})
+
+    def test_a_deny_list_over_the_cap_leaves_no_model_open_while_an_allow_list_is_only_cut(self):
+        for denied in (["opus"] + ["x"] * allowlist.MAX_ENTRIES, ["opus", "y" * (allowlist.MAX_CHARS + 1)]):
+            self.assertEqual(self.permitted(policy={"deniedModels": denied}), set())
+        self.assertEqual(self.permitted(policy={"deniedModels": ["x"] * allowlist.MAX_ENTRIES}),
+                         set(registry.models(self.config)))  # exactly at the cap is fine
+        self.assertEqual(self.permitted(user={"deniedModels": ["x"] * 300}), set(registry.models(self.config)))  # not policy: ignored
+        self.assertEqual(self.permitted(user={"availableModels": ["z" * 300, "haiku"] + ["q"] * 300}), {"haiku"})
+        self.managed.write_text(json.dumps({"deniedModels": ["opus"] + ["x"] * allowlist.MAX_ENTRIES}))
         self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
+        self.assertEqual(allowlist.read(None, self.project, {"policy": {}}).permitted(self.config), set())
+        self.assertEqual(allowlist.read("s1", self.project, {"policy": {"deniedModels": ["x"] * 300}}).permitted(self.config), set())
 
     def test_a_failed_policy_read_never_leaves_the_users_lists_standing(self):
         self.managed.write_text(json.dumps({"availableModels": ["sonnet"]}))

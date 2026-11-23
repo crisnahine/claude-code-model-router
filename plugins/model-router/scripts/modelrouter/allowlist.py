@@ -31,19 +31,34 @@ def managed_root(platform: str = sys.platform) -> Path:
 
 
 def _entries(raw: list) -> list[str]:
+    """An allow list cut to the cap: fewer entries allow less, so a cut is the safe direction."""
     found = (e.strip() for e in raw if isinstance(e, str))
     return [e for e in found if 0 < len(e) <= MAX_CHARS][:MAX_ENTRIES]
 
 
+def _denied(raw: list) -> list[str] | None:
+    """A deny list as it is, or None when it is over the cap: a cut would let a denied model through."""
+    found = [e for e in (e.strip() for e in raw if isinstance(e, str)) if e]
+    return None if len(found) > MAX_ENTRIES or any(len(e) > MAX_CHARS for e in found) else found
+
+
 def _layer(raw: object) -> dict:
     """One source cut to the four keys, each with the right shape; a bad key counts as unset.
-    modelOverrides keeps only whether it holds anything."""
+    modelOverrides keeps only whether it holds anything. A deny list over the cap marks the layer
+    "unreadable", which from_layers turns into no model open."""
     if not isinstance(raw, dict):
         return {}
     layer: dict = {}
-    for key in ("availableModels", "deniedModels"):
-        if isinstance(raw.get(key), list):
-            layer[key] = _entries(raw[key])
+    if isinstance(raw.get("availableModels"), list):
+        layer["availableModels"] = _entries(raw["availableModels"])
+    if isinstance(raw.get("deniedModels"), list):
+        denied = _denied(raw["deniedModels"])
+        if denied is None:
+            layer["unreadable"] = True
+        else:
+            layer["deniedModels"] = denied
+    if raw.get("unreadable") is True:
+        layer["unreadable"] = True
     if isinstance(raw.get("availableModelsMatch"), str):
         layer["availableModelsMatch"] = raw["availableModelsMatch"]
     if isinstance(raw.get("modelOverrides"), (dict, bool)):
@@ -114,6 +129,8 @@ def from_layers(layers: dict, source: str = "engine", floor: dict | None = None)
     cleaned = _layers(layers)
     layers = {s: cleaned.get(s, {}) for s in SOURCES}
     policy, floor = layers["policy"], _layer(floor)
+    if policy.get("unreadable") or floor.get("unreadable"):
+        policy, floor = {"availableModels": []}, {"availableModels": []}  # a policy we can't trust leaves nothing open
     allow = policy.get("availableModels", floor.get("availableModels"))
     if allow is None:
         lists = [layers[s]["availableModels"] for s in SOURCES[1:] if "availableModels" in layers[s]]
@@ -163,14 +180,16 @@ def file_layers(project: Path) -> dict[str, dict]:
 
 
 def _load(path: Path) -> tuple[dict, bool]:
-    """A settings file's object and whether it could be read. A file that isn't there reads as
-    empty. One that is there but isn't a small regular file holding a JSON object doesn't:
+    """A settings file's object and whether it could be read. A file that isn't there, or is empty
+    or blank, reads as empty. One that is there but isn't a small regular file holding a JSON object doesn't:
     a symlink to a device or a pipe must not hang the hook."""
     try:
         if not stat.S_ISREG(path.stat().st_mode):
             return {}, False
         with path.open("rb") as handle:
             raw = handle.read(MAX_BYTES + 1)
+        if not raw.strip():
+            return {}, True  # an empty file holds no setting
         value = json.loads(raw.decode("utf-8")) if len(raw) <= MAX_BYTES else None
     except (FileNotFoundError, NotADirectoryError):
         return {}, True
@@ -186,12 +205,13 @@ def _file(path: Path) -> dict:
 def _policy() -> dict:
     """managed-settings.json, then each non-hidden managed-settings.d/*.json in name order:
     lists combine, a later single value replaces an earlier one. A file that is there but
-    can't be read leaves no model open: reading it as no policy would drop a deny."""
+    can't be read leaves no model open: reading it as no policy would drop a deny. Folders are
+    skipped, since Claude Code reads files."""
     main = managed_root() / "managed-settings.json"
     readable = True
     try:
         drop_ins = sorted(p for p in (main.parent / "managed-settings.d").iterdir()
-                          if p.suffix == ".json" and not p.name.startswith("."))
+                          if p.suffix == ".json" and not p.name.startswith(".") and not p.is_dir())
     except (FileNotFoundError, NotADirectoryError):
         drop_ins = []
     except OSError:
@@ -206,7 +226,7 @@ def _policy() -> dict:
             elif isinstance(value, bool):
                 value = merged.get(key, False) or value
             merged[key] = value
-    return merged if readable else {**merged, "availableModels": []}
+    return merged if readable else {**merged, "unreadable": True}
 
 
 def _local(project: Path) -> dict:
