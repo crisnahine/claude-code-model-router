@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import io
 import json
 import os
@@ -1483,7 +1484,7 @@ class QualityTier(unittest.TestCase):
     def shipped_module(self, rel):
         return {rel: self.source("cross-amount-cents", f"repo/{rel}")}
 
-    def test_cents_check_rejects_each_known_mistake(self):
+    def cents_mutants(self):
         convert = 'int(round(Decimal(str(event["amount"])) * 100))'
         zero = 'if "amount" not in event:\n        return dict(event)\n    cents = ' + convert
         totals_hand = ("from shop import events\n\n\ndef order_total(log, order_id):\n    total = 0\n    for e in log:\n"
@@ -1510,14 +1511,45 @@ class QualityTier(unittest.TestCase):
             "export rows in dollars": self.solution_with(
                 "shop/export.py", "{amount_cents}", "{amount_cents / 100}"),
             "second converter": {"shop/totals.py": totals_hand},
+            "zero dollars skip the conversion": self.solution_with(
+                "shop/events.py", 'if "amount" not in event:', 'if not event.get("amount"):'),
+            "upcast keeps the old key": self.solution_with(
+                "shop/events.py", 'new = {k: v for k, v in event.items() if k != "amount"}', "new = dict(event)"),
+            "upcast under another name": {
+                rel: text.replace("upcast", "to_cents") for rel, text in (
+                    (f"{d}/{m}.py", self.source("cross-amount-cents", f"solution/{d}/{m}.py"))
+                    for d, m in (("shop", "events"), ("shop", "totals"), ("shop", "refunds"), ("shop", "invoice"),
+                                 ("shop", "export"), ("shop", "audit"), ("reports", "daily")))},
         }
         for module in ("events", "totals", "refunds", "invoice", "export", "audit"):
             mutants[f"{module} untouched"] = self.shipped_module(f"shop/{module}.py")
         mutants["report untouched"] = self.shipped_module("reports/daily.py")
+        return mutants
+
+    def test_cents_check_rejects_each_known_mistake(self):
         self.assertTrue(self.run_with("cross-amount-cents", {}))
-        for name, files in mutants.items():
+        for name, files in self.cents_mutants().items():
             with self.subTest(name):
                 self.assertFalse(self.run_with("cross-amount-cents", files))
+
+    def test_cents_check_gives_the_same_verdicts_on_other_seeds(self):
+        spec = importlib.util.spec_from_file_location("cents_check", run.BENCH / "tasks" / "cross-amount-cents" / "check.py")
+        check, saved = importlib.util.module_from_spec(spec), sys.modules.get("passcheck")
+        try:
+            spec.loader.exec_module(check)
+        finally:
+            sys.modules["passcheck"] = saved
+        solution = run.BENCH / "tasks" / "cross-amount-cents" / "solution"
+        builds = {"the solution": {}, **self.cents_mutants()}
+        with tempfile.TemporaryDirectory() as tmp:
+            for n, (name, files) in enumerate(builds.items()):
+                work = Path(tmp) / str(n)
+                shutil.copytree(solution, work)
+                for rel, text in files.items():
+                    (work / rel).write_text(text, encoding="utf-8")
+                for seed in range(1, 11):
+                    with self.subTest(build=name, seed=seed):
+                        self.assertEqual(check.passes(work, seed), name == "the solution")
 
     def test_cents_check_takes_a_round_based_converter(self):
         files = self.solution_with("shop/events.py", 'int(round(Decimal(str(event["amount"])) * 100))',

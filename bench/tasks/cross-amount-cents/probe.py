@@ -12,8 +12,10 @@ _spec.loader.exec_module(passcheck)
 passcheck.use_work(Path(sys.argv[1]))
 payload = json.load(sys.stdin)
 log, orders, asks = payload["log"], payload["orders"], payload["refund_asks"]
+upcast_inputs = payload["upcast_inputs"]
 out = {"error": None, "order_total": None, "refundable": None, "can_refund": None, "lines": None, "csv": None,
-       "fingerprints": None, "revenue": None, "recorded": None, "log_after": None}
+       "fingerprints": None, "revenue": None, "recorded": None, "upcast": None, "upcast_inputs_after": None,
+       "log_after": None}
 try:
     from reports import daily
     from shop import audit, events, export, invoice, refunds, totals
@@ -28,6 +30,8 @@ try:
     recorded = []
     events.record(recorded, "charge", "o9", 1999)
     out["recorded"] = recorded
+    out["upcast"] = [events.upcast(e) for e in upcast_inputs]
+    out["upcast_inputs_after"] = upcast_inputs
 except BaseException as e:  # whatever was read so far still goes out
     out["error"] = f"{type(e).__name__}: {e}"
 try:

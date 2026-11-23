@@ -29,7 +29,7 @@ def generate(seed):
         rows.append(("charge", ORDERS[i % 3], cents, amount))
         rows.append(("refund", ORDERS[3 + i % 2], cents, amount))
     rows += [("charge", "o1", 1999, None), ("charge", "o2", 29, None), ("charge", "o3", 0, None),
-             ("refund", "o4", 0, None), ("refund", "o5", 435, None),
+             ("refund", "o4", 0, None), ("refund", "o5", 435, None), ("charge", "o1", 0, 0), ("refund", "o5", 0, 0.0),
              ("charge", "o6", 500, 5), ("refund", "o6", 1500, None)]
     for _ in range(14):
         cents = rng.choice([0, rng.randrange(1, 30000), rng.randrange(1, 100) * 100])
@@ -46,6 +46,10 @@ def generate(seed):
     return log, rows, totals, asks
 
 
+OLD_EVENT = {"kind": "refund", "order_id": "o7", "amount": 0.29}
+NEW_EVENT = {"kind": "charge", "order_id": "o8", "amount_cents": 0}
+
+
 def expected(log, rows, totals, asks):
     left = {o: max(0, t) for o, t in totals.items()}
     return {"error": None,
@@ -57,6 +61,9 @@ def expected(log, rows, totals, asks):
             "fingerprints": [f"{k}|{o}|{c}" for k, o, c, _ in rows],
             "revenue": sum(c if k == "charge" else -c for k, _, c, _ in rows),
             "recorded": [{"kind": "charge", "order_id": "o9", "amount_cents": 1999}],
+            "upcast": [{"kind": "refund", "order_id": "o7", "amount_cents": 29},
+                       {"kind": "charge", "order_id": "o8", "amount_cents": 0}],
+            "upcast_inputs_after": [OLD_EVENT, NEW_EVENT],
             "log_after": log}
 
 
@@ -84,7 +91,12 @@ def names_old_key(work):
     return False
 
 
-work = Path(sys.argv[1])
-log, rows, totals, asks = generate(31)
-got = passcheck.probe(work, HERE / "probe.py", {"log": log, "orders": ORDERS, "refund_asks": asks})
-sys.exit(0 if same(got, expected(log, rows, totals, asks)) and not names_old_key(work) else 1)
+def passes(work, seed):
+    log, rows, totals, asks = generate(seed)
+    got = passcheck.probe(work, HERE / "probe.py", {"log": log, "orders": ORDERS, "refund_asks": asks,
+                                                     "upcast_inputs": [OLD_EVENT, NEW_EVENT]})
+    return same(got, expected(log, rows, totals, asks)) and not names_old_key(work)
+
+
+if __name__ == "__main__":
+    sys.exit(0 if passes(Path(sys.argv[1]), 31) else 1)
