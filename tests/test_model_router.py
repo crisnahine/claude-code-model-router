@@ -4562,6 +4562,30 @@ class DesignDecisions(unittest.TestCase):
             self.assertIn("load", result["signals"], prompt)
 
 
+class AgentNames(unittest.TestCase):
+    """A name reads as a role only by whole parts: "researcher" holds "search", "relocation" holds "locat"."""
+
+    BRIEF = "investigate why auth is flaky and redesign it across every service"
+
+    def level(self, agent: str) -> str:
+        return profile.profile_call({"prompt": self.BRIEF}, agent)["level"]
+
+    def test_a_name_that_only_contains_a_search_word_is_no_search_agent(self):
+        for agent in ("researcher", "relocation-migrator", "splinter-fixer", "information-extractor",
+                      "allocator-tuner", "helper", "acme:nonlinear_formatted"):
+            self.assertEqual(self.level(agent), "hardest", agent)
+
+    def test_search_and_check_agents_stay_light(self):
+        for agent in ("scout", "explorer", "Explore", "docs-researcher", "model-router:docs-researcher", "verifier",
+                      "lint-runner", "code_search", "acme:summarizer", "grep"):
+            self.assertEqual(self.level(agent), "standard", agent)
+
+    def test_review_and_design_agents_stay_heavy(self):
+        for agent in ("architect", "security-reviewer", "deep-solver", "code_auditor", "debugger", "planner"):
+            self.assertEqual(profile.profile_call({"prompt": "List the files in ./puzzles."}, agent)["level"],
+                             "complex", agent)
+
+
 class SolverNames(unittest.TestCase):
     """Only this plugin's own deep-solver is floored at hardest; another plugin's solver is a heavy role, a resolver none."""
 

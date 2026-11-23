@@ -1806,6 +1806,64 @@
    "agent": "general-purpose",
    "description": "Research fetchkit retry docs",
    "prompt": "Using ONLY the files under docs/ in this directory, answer: in which fetchkit version did the default of Client.retry change from 3 to 5, in which version could it first be set through an environment variable, and what is that variable? Read all relevant docs files carefully (changelogs, migration guides, config references). Then write RESEARCH.json in that directory's root with the keys default_changed_in, configurable_in, variable and sources."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "researcher",
+   "description": "Fix the token refresh race",
+   "prompt": "Investigate why the session token refresh races with logout and fix it across the API and the web client.",
+   "defect": true
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "relocation-migrator",
+   "description": "Move invoices table",
+   "prompt": "Write the migration that moves the invoices table into the billing schema, and update the three services that read it without losing any rows."
+  },
+  {
+   "lowest": "complex",
+   "highest": "complex",
+   "agent": "splinter-fixer",
+   "description": "Fix page off-by-one",
+   "prompt": "page_slice in pages.py treats pages as 0-based but they're 1-based. Fix the start index and add a test for page 1.",
+   "defect": true
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "information-extractor",
+   "description": "Rework invoice parsing",
+   "prompt": "Decide how invoice fields should be extracted, then change the parser and migrate the stored records to the new format."
+  },
+  {
+   "lowest": "complex",
+   "highest": "hardest",
+   "agent": "allocator-tuner",
+   "description": "Tune pool allocator",
+   "prompt": "Decide how large the connection pool allocator should be so p99 latency stays under 50 ms at 2000 requests per second, then change the config."
+  },
+  {
+   "lowest": "hardest",
+   "highest": "hardest",
+   "agent": "helper",
+   "description": "Redesign auth",
+   "prompt": "Investigate why auth is flaky and redesign it across every service."
+  },
+  {
+   "lowest": "lookup",
+   "highest": "standard",
+   "agent": "scout",
+   "description": "Find the refresh race",
+   "prompt": "Find where the session token is refreshed and explain how it could race with logout. Do not change any files."
+  },
+  {
+   "lowest": "standard",
+   "highest": "standard",
+   "agent": "lint-runner",
+   "description": "Fix lint failures",
+   "prompt": "Run the linter and fix the failures it reports in src/."
   }
  ]
 }

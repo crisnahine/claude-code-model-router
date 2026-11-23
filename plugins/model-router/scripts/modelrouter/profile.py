@@ -104,9 +104,19 @@ _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|ex
 _LOOKUP = (r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|describe|summari[sz]e|"
            r"is there|does)\b")
 # What an agent is for, read from its name. Names are short and deliberate; descriptions
-# mention too many things in passing to be read this way.
-_HEAVY_NAME = r"architect|review|audit|secur|debug|design|plann|(?:^|[-_])solver(?:$|[-_])"
-_LIGHT_NAME = r"explor|search|scout|find|lookup|locat|fetch|summar|format|lint|runner|verif|docs?[-_]|grep"
+# mention too many things in passing to be read this way. Each pattern must match a whole part of
+# the name, so "researcher", "relocation-migrator" and "information-extractor" aren't search agents.
+_HEAVY_NAME = (r"architects?|review(?:s|ers?|ing)?|audit(?:s|ors?|ing)?|secur(?:e|ity)|debug(?:gers?|ging)?|"
+               r"design(?:ers?|ing)?|plann(?:ers?|ing)|solver")
+_LIGHT_NAME = (r"explor(?:e|ers?|ing)|search(?:ers?|ing)?|scouts?|find(?:ers?)?|lookups?|locat(?:e|ors?)|"
+               r"fetch(?:ers?)?|summar(?:y|ies|i[sz]ers?)|format(?:ters?)?|lint(?:ers?)?|runners?|"
+               r"verif(?:y|iers?|ication)|docs?|grep")
+
+
+def _named_for(name: str, pattern: str) -> bool:
+    return any(re.fullmatch(pattern, part) for part in re.split(r"[-_:]", name))
+
+
 LONG_BRIEF = 4000
 # Open-ended work with no known approach: the only level the ladder gives its strongest model.
 _FRONTIER = (r"\b(?:research-grade|open[- ]ended|no known (?:fix|approach|cause|solution)|first principles|"
@@ -207,12 +217,12 @@ def profile_call(tool_input: dict, agent_type: str) -> dict:
     if level == "lookup" and (re.search(_THOROUGH, text) or len(text) > LONG_BRIEF):
         level, why = "standard", why + ["thorough or long brief"]
     name = agent_type.split(":")[-1].lower()
-    if re.search(_HEAVY_NAME, name):
+    if _named_for(name, _HEAVY_NAME):
         # Our deep-solver is for what the others couldn't do; another plugin's solver is only a heavy role.
         floor = "hardest" if agent_type.lower() == f"{PLUGIN_NAME}:deep-solver" else "complex"
         if LEVELS.index(level) < LEVELS.index(floor):
             level, why = floor, why + ["agent's role"]
-    elif re.search(_LIGHT_NAME, name):
+    elif _named_for(name, _LIGHT_NAME):
         if LEVELS.index(level) > LEVELS.index("standard"):
             level, why = "standard", why + ["search or check agent"]
     return {"level": level, "signals": why}

@@ -18,7 +18,7 @@ from modelrouter import profile  # noqa: E402
 from modelrouter.config import LEVELS  # noqa: E402
 
 CORPUS = json.loads((ROOT / "tests" / "fixtures" / "routing-corpus.json").read_text(encoding="utf-8"))["briefs"]
-# 2 of 250 briefs over-routed on 2026-11-23. The margin leaves room for one-level over-routes that closing an
+# 2 of 258 briefs over-routed on 2026-11-23. The margin leaves room for one-level over-routes that closing an
 # under-route may cost; raise it only with the briefs that need it named in the commit.
 OVER_ROUTE_BUDGET = 0.02
 
