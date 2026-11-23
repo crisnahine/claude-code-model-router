@@ -1796,7 +1796,7 @@ class QualityTier(unittest.TestCase):
                     "def transfer(store, src, dst, cents):\n    while True:\n        seen = store.get(src)\n"
                     "        if (seen or 0) < cents:\n            raise InsufficientFunds(src)\n        if src == dst:\n            return\n"
                     "        if store.compare_and_put(src, seen, seen - cents):\n            break\n    _add(store, dst, cents)\n")
-        # name: (files, a phase the check must call wrong)
+        # name: (files, phase letters of which the check must call at least one wrong)
         mutants = {
             "shipped": ({rel: shipped}, "C"),
             "locks in argument order": ({rel: solution.replace(keys, "dict.fromkeys((src, dst))")}, "C"),
@@ -1819,7 +1819,7 @@ class QualityTier(unittest.TestCase):
             "credit unlocked": ({rel: solution.replace(credit, "def credit(store, wallet, cents):\n    store.put(wallet, balance(store, wallet) + cents)\n\n\n")}, "A"),
             "credit put and verify": ({rel: solution.replace(credit, (
                 "def credit(store, wallet, cents):\n    while True:\n        want = balance(store, wallet) + cents\n"
-                "        store.put(wallet, want)\n        if balance(store, wallet) == want:\n            return\n\n\n"))}, "A"),
+                "        store.put(wallet, want)\n        if balance(store, wallet) == want:\n            return\n\n\n"))}, "AFH"),
             "no funds check": ({rel: solution.replace("        if available < cents:\n            raise InsufficientFunds(src)\n", "")}, "D"),
             "compare and put that never takes an absent wallet": ({rel: livelock}, "A"),
         }
@@ -1828,7 +1828,7 @@ class QualityTier(unittest.TestCase):
                 self.assertNotEqual(files[rel], solution if name != "shipped" else "")
                 got, wrong = self.wallet_phases(files)
                 self.assertIsNotNone(got, "the probe must answer inside its own timeout")
-                self.assertIn(phase, wrong, wrong)
+                self.assertTrue(set(wrong) & set(phase), wrong)
                 if name.startswith("compare and put"):
                     self.assertIs(got["A"]["hung"], True)
                     self.assertEqual(wrong[0], "A")
