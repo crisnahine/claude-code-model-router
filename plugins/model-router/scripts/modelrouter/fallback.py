@@ -2,7 +2,6 @@
 the rewrite waiting for its result, the refused-rewrite guard and the one deny."""
 from __future__ import annotations
 
-import time
 
 from . import health, registry, settings, spawn, store
 from . import config as cfg
@@ -55,7 +54,7 @@ def refused(session_id: str | None, key: str) -> dict | None:
     it: a clock stepped back a little mustn't pass a fan-out's copies through unrouted, and one
     stamped far ahead still counts as refused, so a big jump back can't loop a rewrite."""
     rewrite = store.load_entry("pending", session_id).get(key)
-    if not isinstance(rewrite, dict) or abs(time.time() - (rewrite.get("at") or 0)) < REFUSED_AFTER:
+    if not isinstance(rewrite, dict) or abs(store.now() - (rewrite.get("at") or 0)) < REFUSED_AFTER:
         return None
     return rewrite
 

@@ -72,13 +72,28 @@ class Sandbox(unittest.TestCase):
         self.managed = self.home / "managed-settings.json"
         self.managed_root = mock.patch.object(allowlist, "MANAGED_ROOT", self.home)
         self.managed_root.start()
+        self.clock = time.time()
+        store.set_clock(lambda: self.clock)
 
     def tearDown(self):
+        store.set_clock(None)
         self.managed_root.stop()
         self.patch.stop()
         self.tmp.cleanup()
 
     # helpers ---------------------------------------------------------------
+    def advance(self, seconds: float) -> None:
+        self.clock += seconds
+
+    @contextlib.contextmanager
+    def clock_at(self, when: float):
+        """The state clock reads `when` inside the block."""
+        before, self.clock = self.clock, when
+        try:
+            yield
+        finally:
+            self.clock = before
+
     def route_around(self, *names):
         for name in names:
             for _ in range(2):
@@ -521,9 +536,14 @@ class Store(Sandbox):
     def test_keyed_files_drop_the_least_recently_written(self):
         with mock.patch.object(store, "KEEP_ENTRIES", 3):
             for i, key in enumerate(("zz", "aa", "mm", "bb")):
-                with mock.patch.object(store.time, "time", return_value=1000.0 + i):
+                with self.clock_at(1000.0 + i):
                     store.save_entry("prompts", key, {"n": i})
         self.assertEqual(sorted(store.load_state_file(self.data / "prompts.json")), ["aa", "bb", "mm"])
+
+    def test_the_state_clock_can_be_replaced_and_restored(self):
+        self.assertEqual(store.now(), self.clock)
+        store.set_clock(None)
+        self.assertAlmostEqual(store.now(), time.time(), delta=5)
 
     def test_ledger_survives_junk_lines(self):
         store.append_ledger({"event": "spawn"})
@@ -2144,7 +2164,7 @@ class Calls(Sandbox):
         self.route(call)
         calls.settled("s1", calls.identify(call)[1], None, finished=True)
         self.assertIsNotNone(calls.finished_run("s1", key))
-        with mock.patch.object(calls.time, "time", return_value=time.time() + calls.REDO_WINDOW + 1):
+        with self.clock_at(self.clock + calls.REDO_WINDOW + 1):
             self.assertIsNone(calls.finished_run("s1", key))
         request.start("s1", prompt_id="p1", level="lookup", need="haiku", below=False, session_tier=None, named=None)
         self.assertIsNone(calls.finished_run("s1", key))
@@ -2177,6 +2197,7 @@ class Fallback(Sandbox):
     def test_waiting_rewrites_keep_the_most_recent(self):
         for i in range(store.KEPT_RECORDS + 2):
             fallback.remember("s1", calls.identify({"prompt": f"list {i}"})[1], self.decide("general-purpose", f"list {i}"))
+            self.advance(0.001)
         self.next_message()
         self.assertIsNone(fallback.refused("s1", calls.identify({"prompt": "list 0"})[1]))
         self.assertIsNone(fallback.refused("s1", calls.identify({"prompt": "list 1"})[1]))
@@ -2190,12 +2211,12 @@ class Fallback(Sandbox):
 
     def test_a_copy_after_a_small_step_back_is_still_a_copy(self):
         # A fan-out's copies, with the clock stepped back a few seconds between their hooks (an NTP correction).
-        written = time.time()
+        written = self.clock
         self.pending("k", written)
         for back in (0.5, 3, fallback.REFUSED_AFTER - 0.5):
-            with mock.patch.object(fallback.time, "time", return_value=written - back):
+            with self.clock_at(written - back):
                 self.assertIsNone(fallback.refused("s1", "k"), back)
-        with mock.patch.object(fallback.time, "time", return_value=written + 1):
+        with self.clock_at(written + 1):
             self.assertIsNone(fallback.refused("s1", "k"))
 
 
@@ -2475,10 +2496,10 @@ class Mod(Sandbox):
 class Health(Sandbox):
     def setUp(self):
         super().setUp()
-        self.now = time.time()
+        self.now = self.clock
 
     def at(self, days):
-        return mock.patch.object(health.time, "time", return_value=self.now + days * 86400)
+        return self.clock_at(self.now + days * 86400)
 
     def test_a_swapped_run_is_no_evidence(self):
         health.ran("fable", "claude-opus-4-8", "opus", False, swapped=True)
@@ -3624,7 +3645,7 @@ class RefreshBackoff(Sandbox):
     def refresh(self, at: float, fails: bool):
         effect = OSError("offline") if fails else None
         result = {"releases": [], "pages": {}, "aliases": ["haiku"], "fetched_at": int(at)}
-        with mock.patch.object(upstream.time, "time", return_value=at), \
+        with self.clock_at(at), \
                 mock.patch.object(upstream, "fetch", side_effect=effect, return_value=result) as fetch:
             try:
                 upstream.refresh(settings.Settings(), force=False)

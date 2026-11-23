@@ -4,7 +4,6 @@ from __future__ import annotations
 import datetime as _dt
 import os
 import re
-import time
 from pathlib import Path
 
 from . import registry, request, session, store
@@ -30,7 +29,7 @@ def note_edit(hook_input: dict) -> None:
     tool_input = cfg.tool_input(hook_input)
     path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
     if path and not path.lower().endswith(_NON_CODE) and _in_project(hook_input, path):
-        store.update_entry("edits", hook_input.get("session_id"), edited_at=time.time())
+        store.update_entry("edits", hook_input.get("session_id"), edited_at=store.now())
         request.note_edit(hook_input.get("session_id"))
 
 
@@ -48,7 +47,7 @@ def _in_project(hook_input: dict, path: str) -> bool:
 
 
 def note_check(session_id: str | None) -> None:
-    store.update_entry("edits", session_id, verified_at=time.time())
+    store.update_entry("edits", session_id, verified_at=store.now())
 
 
 def note_agent_checks(hook_input: dict) -> None:
