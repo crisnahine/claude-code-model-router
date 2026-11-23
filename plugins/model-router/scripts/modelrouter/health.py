@@ -133,10 +133,11 @@ def refused(name: str | None) -> None:
     _edit(name, change)
 
 
-def ran(name: str | None, ran_as: object, ran_family: str | None, forced: bool) -> None:
+def ran(name: str | None, ran_as: object, ran_family: str | None, forced: bool, swapped: bool = False) -> None:
     """We asked for `name`; Claude Code reports the model that really ran. Under the force
-    setting every agent runs on the forced model, which isn't a substitution."""
-    if forced or not name or not ran_family:
+    setting every agent runs on the forced model, which isn't a substitution, and a run that
+    swapped models mid-run says nothing about either model."""
+    if forced or swapped or not name or not ran_family:
         return
     if ran_family == name:
         info = load()._info(name)

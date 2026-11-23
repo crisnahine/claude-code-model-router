@@ -42,7 +42,7 @@ def _update(level: str, calls: int = 0, up: int = 0, down: int = 0) -> None:
     def change(data: dict) -> None:
         info = data.get(level) if isinstance(data.get(level), dict) else {}
         for field, amount in (("calls", calls), ("votes", up), ("relax", down)):
-            info[field] = int(info.get(field) or 0) + amount
+            info[field] = max(0, int(info.get(field) or 0) + amount)
         raised = int(info.get("bump") or 0)
         enough = max(VOTES_NEEDED, SHARE_NEEDED * info["calls"])
         if raised < MAX_BUMP and info["votes"] >= enough:
@@ -55,6 +55,12 @@ def _update(level: str, calls: int = 0, up: int = 0, down: int = 0) -> None:
         store.update_dict(_path(), change)
     except OSError:
         pass
+
+
+def uncount(level: str | None) -> None:
+    """Take one routed call back out of the level's count."""
+    if level:
+        _update(level, calls=-1)
 
 
 def decided(config: dict, *, source: str | None, level: str | None, pick: str | None, runs_on: str | None,

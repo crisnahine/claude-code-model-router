@@ -57,7 +57,7 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 | `router` | Applies the order of authority and produces one decision per agent, from the facts it is given alone |
 | `intake` | Whether a prompt or a turn is the person's request, and at what level, for both paths; profile scores it |
 | `request` | The current request's record: its level and floor, the model the user named, the routed spawns and the strongest one, and the escalation ask |
-| `calls` | Per-call records both paths use: background runs waiting for their agent, finished runs for redos |
+| `calls` | Per-call records both paths use: background runs waiting for their agent, finished runs for redos, and the models a run swapped between |
 | `learn` | Decides from each spawn's facts which votes it casts, counts votes that a level was routed too low, and raises it |
 | `agents` | Finds an agent's definition in the project, the user folder, this plugin or another installed plugin |
 | `session` | Tracks the model the conversation itself runs on |
@@ -128,6 +128,8 @@ Some details of how the rules apply:
 
 When an agent's result comes back, the call is remembered with the level it ran at (`done`, per session). For an agent that runs in the background the `Agent` call returns as soon as the agent has launched, so its call waits under the agent's id (`launched`) and counts as finished when the agent stops with an answer: a closing message, or a report it handed back through `SubagentHandback` (https://code.claude.com/docs/en/hooks.md#subagentstop). Copies of one brief started together therefore all run at the brief's own level. The `post-agent` hook runs before Claude's next step, so a redo always finds the record. If the same call is issued again, the first answer wasn't good enough, so it runs one level higher, and the redo is a vote that its first level was too low. On the shipped ladder (`levels` in `config/models.json`), lookup to standard, complex to hardest and hardest to frontier move to a stronger model, and standard to complex stays on Sonnet and raises effort to high. Any redo that stays on the model of the run it replaces, as standard to complex does, or under a cap that holds it there, or for a frontier run with no level above it, runs at least one step more effort than that run (`router._above_earlier`). A call that names its own model is never escalated: the caller has decided.
 
+A run whose model changed mid-run is its own result. Claude Code reports it as `modelsUsed` on a finished foreground `Agent` result (https://code.claude.com/docs/en/hooks.md), and a content-classifier fallback can cause it, such as Sonnet 5.5 re-run on Sonnet 5 (https://code.claude.com/docs/en/model-config.md, "Automatic model fallback"). Sonnet 5 scored 10.3% against 70.6% on Terminal-Bench 4.0 (https://www.anthropic.com/news/claude-sonnet-5-5), so such a run says nothing about the level or the model that was asked for. It isn't health evidence, isn't recorded as finished (a re-issue is a fresh call, not a redo), and comes back out of its level's count when the router routed it. The result row in the ledger carries `models_used`, and when the brief had a risk signal Claude is told in one line to check the result.
+
 ### Rewrites that don't take
 
 On the fallback path, the `Agent` tool validates a rewritten call, and Claude Code reports no event when it rejects one. That includes auto mode denying a call because a hook changed its input after the mode reviewed it (https://code.claude.com/docs/en/hooks.md#pretooluse-decision-control). A hook that rewrote the retry the same way would loop. So every rewrite is remembered until its result or failure arrives. If the same call shows up again first, and more than a few seconds later, the earlier rewrite didn't run, and a call the router would give a model is passed through untouched. Copies of one call issued in one message arrive together, so they are each routed as usual. This guard belongs to the fallback adapter alone (`fallback.py`); `router.decide` doesn't know about it. When the target was a model that has never run in this setup, that counts as a strike against it, and two strikes route around it.
@@ -187,7 +189,7 @@ SessionStart ─┬─ session-start   records options and the session model; ex
 UserPromptSubmit ─ user-prompt   profiles the request; notes a model the user may be asking for
 PostModelSwitch ─ model-switch   records the session's new model
 PreToolUse (Agent|Task) ─ pre-agent      fallback: fallback.route, returns updatedInput
-PostToolUse (Agent|Task) ─ post-agent    the model that ran; a returned result finishes the call for redos
+PostToolUse (Agent|Task) ─ post-agent    the model that ran; a returned result finishes the call for redos, unless the run swapped models
 SubagentStop ─ agent-stopped    a background agent's result, or its handback, is back; finishes its call for redos;
                                 counts the checks the agent ran
 PostToolUseFailure (Agent|Task) ─ agent-failed   counts model errors
@@ -208,7 +210,7 @@ In `${CLAUDE_PLUGIN_DATA}`:
 | `allowlist.json` | Per session: the four allowlist keys of each settings source, as the mod last read them. A source whose read failed is left out: the last set kept for it stands, else its file is read |
 | `learned.json` | Calls and votes per level, and which levels are raised |
 | `sessions.json`, `prompts.json`, `edits.json`, `pending.json`, `launched.json`, `done.json`, `mod.json` | Per session: its model, the current request's profile and routed calls, edit and check times, rewrites waiting for a result, background agents still running, finished calls for redo escalation, and whether the mod is running. The 200 most recently written sessions are kept |
-| `ledger.jsonl` | One line per agent start, result, turn effort and turn usage, with the decision, its reason and the list-price cost. Trimmed at 4 MB |
+| `ledger.jsonl` | One line per agent start, result, turn effort and turn usage, with the decision, its reason and the list-price cost. A result row has `models_used` only when Claude Code reported a mid-run swap. Trimmed at 4 MB |
 
 Writes are atomic, and the state files are written as compact JSON. Each read-modify-write cycle takes a lock file, because agents started in one message run their hooks at the same moment. A lock that can't be had within two seconds is skipped, so a hook never hangs a session.
 

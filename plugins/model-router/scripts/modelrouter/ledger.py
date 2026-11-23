@@ -23,9 +23,10 @@ def spawn(session_id: str | None, via: str, decision: router.Decision, descripti
 
 
 def result(session_id: str | None, agent: str, asked: str | None, resolved_model: object, status: object,
-           total_tokens: object) -> None:
+           total_tokens: object, models_used: list[str] | None = None) -> None:
     store.append_ledger({"event": "result", "session": session_id, "agent": agent, "asked": asked,
-                         "resolved_model": resolved_model, "status": status, "total_tokens": total_tokens})
+                         "resolved_model": resolved_model, "status": status, "total_tokens": total_tokens,
+                         **({"models_used": models_used} if models_used else {})})
 
 
 def model_error(session_id: str | None, agent: object, model: str) -> None:

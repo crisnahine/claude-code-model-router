@@ -25,6 +25,7 @@ SCRIPTS = PLUGIN / "scripts"
 SCRIPT = SCRIPTS / "model-router.py"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ERRORS = json.loads((FIXTURES / "model-errors.json").read_text())
+SWAP = json.loads((FIXTURES / "agent-model-swap.json").read_text())
 FRAMING = json.loads((FIXTURES / "prompt-framing.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
@@ -113,10 +114,12 @@ class Sandbox(unittest.TestCase):
         out = hooks.pre_agent(self.call(agent, prompt, **extra))
         return out["hookSpecificOutput"] if out else None
 
-    def done(self, agent: str | None, prompt: str, ran_as: str, **extra) -> None:
+    def done(self, agent: str | None, prompt: str, ran_as: str, models_used: object = None, **extra) -> dict | None:
         """The agent call finished and Claude Code reports the model it ran on."""
-        hooks.post_agent({**self.call(agent, prompt, **extra),
-                          "tool_response": {"resolvedModel": ran_as, "status": "completed", "totalTokens": 1200}})
+        response = {"resolvedModel": ran_as, "status": "completed", "totalTokens": 1200}
+        if models_used is not None:
+            response["modelsUsed"] = models_used
+        return hooks.post_agent({**self.call(agent, prompt, **extra), "tool_response": response})
 
     def launched(self, agent: str | None, prompt: str, ran_as: str, agent_id: str, **extra) -> None:
         """The agent call returned at once: the agent runs on in the background."""
@@ -1882,6 +1885,16 @@ class Calls(Sandbox):
         self.assertNotEqual(key, calls.identify({"subagent_type": "Explore", "prompt": "x"})[1])
         self.assertEqual(calls.identify({"subagent_type": ["a"], "prompt": "x"})[0], "general-purpose")
 
+    def test_models_used_reads_only_a_list_of_model_ids(self):
+        self.assertEqual(calls.models_used(SWAP["swapped"]), ["claude-sonnet-5-5", "claude-sonnet-5"])
+        for junk in (["a-1", "a-1"], ["claude-sonnet-5-5"], "claude-sonnet-5", [1, None],
+                     ["claude-sonnet-5-5", "has spaces"], ["a-1", "a-1", "x" * 101], {}, None, "text", []):
+            self.assertEqual(calls.models_used({"modelsUsed": junk}), [], junk)
+        self.assertEqual(calls.models_used(SWAP["plain"]), [])
+        self.assertEqual(calls.models_used({"modelsUsed": ["a", 3, "b"]}), ["a", "b"])
+        many = [f"m{i}" for i in range(7)]
+        self.assertEqual(calls.models_used({"modelsUsed": many}), many[:5])
+
     def test_only_runs_at_their_level_are_redone(self):
         for source in ("caller", None):
             call = {"prompt": f"list {source}"}
@@ -2231,6 +2244,12 @@ class Health(Sandbox):
     def at(self, days):
         return mock.patch.object(health.time, "time", return_value=self.now + days * 86400)
 
+    def test_a_swapped_run_is_no_evidence(self):
+        health.ran("fable", "claude-opus-4-8", "opus", False, swapped=True)
+        self.assertEqual(store.load_state().get("health"), None)
+        health.ran("fable", "claude-opus-4-8", "opus", False)
+        self.assertEqual(store.load_state()["health"]["fable"]["substituted"], 1)
+
     def test_only_a_model_error_counts_and_an_interrupt_never_does(self):
         for text in ERRORS["model_error"]:
             self.assertTrue(health.is_model_error(text), text)
@@ -2469,6 +2488,15 @@ class ModPayloads(Sandbox):
 
 
 class Ledger(Sandbox):
+    def test_a_result_row_carries_models_used_only_after_a_swap(self):
+        ledger.result("s1", "general-purpose", "sonnet", "claude-sonnet-5-5", "completed", 1200,
+                      ["claude-sonnet-5-5", "claude-sonnet-5"])
+        ledger.result("s1", "general-purpose", "sonnet", "claude-sonnet-5-5", "completed", 1200)
+        swapped, plain = ledger.read()
+        self.assertEqual(list(swapped)[-2:], ["total_tokens", "models_used"])
+        self.assertEqual(swapped["models_used"], ["claude-sonnet-5-5", "claude-sonnet-5"])
+        self.assertNotIn("models_used", plain)
+
     def test_each_row_kind_keeps_its_shape(self):
         decision = self.decide("general-purpose", LOOKUP)
         ledger.spawn("s1", "mod", decision, "d" * 200, kind="subagent")
@@ -2555,6 +2583,24 @@ class Feedback(Sandbox):
         for i in range(3):
             self.pre("general-purpose", f"list the files under dir{i}")
             self.pre("general-purpose", f"list the files under dir{i}", model="sonnet")
+
+    def test_a_swapped_run_is_not_a_redo_and_does_not_count_for_its_level(self):
+        key = calls.identify({"subagent_type": "general-purpose", "prompt": LOOKUP})[1]
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", models_used=SWAP["swapped"]["modelsUsed"])
+        self.assertEqual(learn.stats()["lookup"]["calls"], 0)
+        self.assertIsNone(calls.finished_run("s1", key))
+        again = self.decide("general-purpose", LOOKUP)
+        self.assertEqual((again["level"], again["escalated_from"]), ("lookup", None))
+        self.pre("general-purpose", LOOKUP)
+        self.assertEqual(learn.stats()["lookup"]["votes"], 0)
+
+    def test_a_plain_run_counts_for_its_level_and_finishes(self):
+        key = calls.identify({"subagent_type": "general-purpose", "prompt": LOOKUP})[1]
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
+        self.assertEqual(learn.stats()["lookup"]["calls"], 1)
+        self.assertIsNotNone(calls.finished_run("s1", key))
 
     def test_redoing_routed_calls_on_a_stronger_model_raises_the_level(self):
         self.raise_lookup()
@@ -2648,6 +2694,33 @@ class Feedback(Sandbox):
 class Hooks(Sandbox):
     def text(self, output: dict | None) -> str:
         return output["hookSpecificOutput"]["additionalContext"]
+
+    def test_a_swapped_run_of_a_risk_brief_tells_claude(self):
+        out = self.done("general-purpose", HARD, "claude-sonnet-5-5", models_used=SWAP["swapped"]["modelsUsed"])
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
+        self.assertEqual(self.text(out), "Model Router: this agent switched models mid-run "
+                         "(claude-sonnet-5-5 to claude-sonnet-5). Check its result before relying on it.")
+
+    def test_a_swapped_run_of_a_plain_brief_says_nothing(self):
+        self.assertIsNone(self.done("general-purpose", LOOKUP, "claude-haiku-5-5", models_used=["claude-haiku-5-5", "x-1"]))
+        self.assertEqual(ledger.read()[-1]["models_used"], ["claude-haiku-5-5", "x-1"])
+
+    def test_a_run_with_junk_models_used_is_recorded_as_any_other_run(self):
+        key = calls.identify({"subagent_type": "general-purpose", "prompt": HARD})[1]
+        self.pre("general-purpose", HARD)
+        for junk in ([1, 2], "claude-sonnet-5", ["claude-sonnet-5-5"]):
+            self.assertIsNone(self.done("general-purpose", HARD, "claude-sonnet-5-5", models_used=junk))
+            self.assertNotIn("models_used", ledger.read()[-1])
+        self.assertIsNotNone(calls.finished_run("s1", key))
+
+    def test_a_background_launch_is_never_read_as_a_swap(self):
+        self.pre("general-purpose", HARD)
+        out = hooks.post_agent({**self.call("general-purpose", HARD), "tool_response": {
+            "resolvedModel": "claude-sonnet-5-5", "status": "async_launched", "agentId": "a9",
+            "modelsUsed": ["claude-sonnet-5-5", "claude-sonnet-5"]}})
+        self.assertIsNone(out)
+        self.assertNotIn("models_used", ledger.read()[-1])
+        self.assertIn("a9", store.load_entry("launched", "s1"))
 
     def test_session_start_explains_automatic_routing(self):
         self.options(max_tier="opus")

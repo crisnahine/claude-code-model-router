@@ -1,0 +1,15 @@
+{
+  "swapped": {
+    "status": "completed",
+    "agentId": "a1b2c3d4",
+    "resolvedModel": "claude-sonnet-5-5",
+    "modelsUsed": ["claude-sonnet-5-5", "claude-sonnet-5"],
+    "totalTokens": 4210
+  },
+  "plain": {
+    "status": "completed",
+    "agentId": "a1b2c3d5",
+    "resolvedModel": "claude-sonnet-5-5",
+    "totalTokens": 3980
+  }
+}

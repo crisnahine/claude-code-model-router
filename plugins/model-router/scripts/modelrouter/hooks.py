@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import time
 
-from . import allowlist, calls, fallback, gates, health, intake, ladder, learn, ledger, registry, request, session, settings, spawn, store, upstream
+from . import allowlist, calls, fallback, gates, health, intake, ladder, learn, ledger, profile, registry, request, session, settings, spawn, store, upstream
 from . import config as cfg
 
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
@@ -165,18 +165,32 @@ def post_agent(hook_input: dict) -> dict | None:
     agent_id = response.get("agentId")
     agent, key = calls.identify(tool_input)
     session_id = hook_input.get("session_id")
+    swapped = [] if launched else calls.models_used(response)
     routed = None
     try:
-        routed = calls.settled(session_id, key, fallback.take(session_id, key), finished=not launched,
+        routed = calls.settled(session_id, key, fallback.take(session_id, key), finished=not launched and not swapped,
                                launched_as=agent_id if launched and isinstance(agent_id, str) else None)
     except OSError:
         pass
     asked = _asked_for(snap.config, tool_input, routed)
     try:
-        health.ran(asked, ran_as, registry.family(snap.config, ran_as), snap.options.force)
+        health.ran(asked, ran_as, registry.family(snap.config, ran_as), snap.options.force, swapped=bool(swapped))
     except OSError:
         pass
-    ledger.result(session_id, agent, asked, ran_as, response.get("status"), response.get("totalTokens"))
+    ledger.result(session_id, agent, asked, ran_as, response.get("status"), response.get("totalTokens"),
+                  models_used=swapped or None)
+    if not swapped:
+        return None
+    try:
+        record = request.load(session_id).calls.get(key)
+        if isinstance(record, dict) and record.get("source") == "router":
+            learn.uncount(record.get("level"))
+    except OSError:
+        pass
+    if "risk" in profile.profile_call(tool_input, agent)["signals"]:
+        return _context("PostToolUse", (
+            f"Model Router: this agent switched models mid-run ({swapped[0]} to {swapped[-1]}). "
+            "Check its result before relying on it."))
     return None
 
 

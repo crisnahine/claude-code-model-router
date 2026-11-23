@@ -7,6 +7,7 @@ request's runs, routes and strongest spawn live in the request record (`request.
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 
 from . import request, store
@@ -15,6 +16,9 @@ from .config import LEVELS
 # Without a request id to compare, a call seen again within this long counts as a redo.
 REDO_WINDOW = 30 * 60
 
+_MODEL_ID = re.compile(r"[A-Za-z0-9._:/\[\]-]{1,100}")
+MAX_SWAPPED = 5
+
 
 def identify(tool_input: dict) -> tuple[str, str]:
     """The call's agent, and a key that recognizes the same call issued again."""
@@ -22,6 +26,16 @@ def identify(tool_input: dict) -> tuple[str, str]:
     agent = agent if isinstance(agent, str) and agent else "general-purpose"
     text = agent + "\0" + str(tool_input.get("prompt") or "")
     return agent, hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def models_used(response: object) -> list[str]:
+    """The model ids a run switched between, in order, or [] when it didn't switch. The engine's
+    list is untrusted: only well-formed ids count, and a swap needs two different ones."""
+    used = response.get("modelsUsed") if isinstance(response, dict) else None
+    if not isinstance(used, list):
+        return []
+    ids = [m for m in used if isinstance(m, str) and _MODEL_ID.fullmatch(m)]
+    return ids[:MAX_SWAPPED] if len(set(ids)) >= 2 else []
 
 
 def settled(session_id: str | None, key: str, rewrite: dict | None, finished: bool = False,
