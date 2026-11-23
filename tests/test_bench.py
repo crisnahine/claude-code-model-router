@@ -1222,6 +1222,7 @@ class HardTier(unittest.TestCase):
             if solution.is_dir():
                 shutil.copytree(solution, work, dirs_exist_ok=True)
             for rel, text in files.items():
+                (work / rel).parent.mkdir(parents=True, exist_ok=True)
                 (work / rel).write_text(text if isinstance(text, str) else json.dumps(text), encoding="utf-8")
             return self.check(task, work, answer)
 
@@ -1618,6 +1619,18 @@ class QualityTier(unittest.TestCase):
         files = self.solution_with("shop/totals.py", "from shop import events\n",
                                    "from shop import events\n\n# the old amount key is gone\nNOTE = \"amount_cents, not amount\"\n")
         self.assertTrue(self.run_with("cross-amount-cents", files))
+
+    def test_the_cents_check_lets_a_test_file_hold_the_old_key(self):
+        test = 'from shop import events\n\n\ndef test_upcast():\n    assert events.upcast([{"amount": 0.29}])\n'
+        for rel in ("test_events.py", "events_test.py", "tests/check_events.py"):
+            with self.subTest(rel):
+                files = {rel: test}
+                self.assertTrue(self.run_with("cross-amount-cents", files))
+
+    def test_the_cents_check_still_fails_a_new_non_test_module_with_the_old_key(self):
+        for rel in ("legacy.py", "attests.py", "shop/contest.py"):
+            with self.subTest(rel):
+                self.assertFalse(self.run_with("cross-amount-cents", {rel: 'def dollars(event):\n    return event["amount"]\n'}))
 
     def test_the_cents_repo_has_no_comment(self):
         for path in (run.BENCH / "tasks" / "cross-amount-cents" / "repo").rglob("*.py"):
