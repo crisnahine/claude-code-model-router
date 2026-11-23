@@ -14,9 +14,10 @@ LAUNCHER = ("import sys, unittest; sys.path.append(sys.argv[1]); "
 
 
 def finish(ok: bool, reason: str = "") -> None:
-    """End the check: exit 0 for a solved task, 1 for an unsolved one. The last line printed is the reason a row records.
-    A check exits 2 only by raising, which the launcher in run.py reads as the check itself being broken."""
-    print(reason or ("solved" if ok else "not solved"), flush=True)
+    """End the check: exit 0 for a solved task, 1 for an unsolved one. The last line printed is the reason a row records:
+    `reason` says why it failed and is ignored for a pass. A check exits 2 only by raising, which the launcher in run.py
+    reads as the check itself being broken."""
+    print("solved" if ok else reason or "not solved", flush=True)
     sys.exit(0 if ok else 1)
 
 

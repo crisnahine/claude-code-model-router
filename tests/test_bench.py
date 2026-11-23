@@ -1322,6 +1322,15 @@ class Grading(unittest.TestCase):
         self.assertEqual((no.verdict, no.passed, no.reason), ("fail", False, "the count is 5, not 4"))
         self.assertEqual(self.grade("import os\nos._exit(3)\n").verdict, "fail")
 
+    def test_finish_records_why_a_task_failed_and_solved_for_a_pass(self):
+        for ok, want in ((True, "solved"), (False, "the count is 5"), (False, "not solved")):
+            with self.subTest(ok=ok):
+                body = ("import importlib.util\n_s = importlib.util.spec_from_file_location('passcheck', "
+                        f"{str(run.BENCH / 'tasks' / 'passcheck.py')!r})\npasscheck = importlib.util.module_from_spec(_s)\n"
+                        f"_s.loader.exec_module(passcheck)\npasscheck.finish({ok}, {'the count is 5' if want != 'not solved' else ''!r})\n")
+                graded = self.grade(body)
+                self.assertEqual((graded.verdict, graded.reason), ("pass" if ok else "fail", want))
+
     def test_an_error_in_the_check_is_broken_not_failed(self):
         for body in ("undefined_name\n", "import no_such_module\n", "raise SystemExit('x' + 1)\n",
                      "def f(:\n"):
