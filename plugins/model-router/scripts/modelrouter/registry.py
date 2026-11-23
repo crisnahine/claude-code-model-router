@@ -133,11 +133,13 @@ class Registry:
         return [n for n in names if table.healthy(n)] or names
 
     def clamp(self, name: str, usable: list[str]) -> str:
-        """The usable model closest to `name` without exceeding it, else the weakest usable."""
+        """The usable model closest to `name` without exceeding it, else the weakest usable. The
+        stand-in is never a model a repository added, whose rank is only that repository's claim."""
         if name in usable or not usable:
             return name
-        lower = [n for n in usable if self.strength(n) <= self.strength(name)]
-        return lower[-1] if lower else usable[0]
+        trusted = [n for n in usable if self.models[n].trusted] or usable
+        lower = [n for n in trusted if self.strength(n) <= self.strength(name)]
+        return lower[-1] if lower else trusted[0]
 
     def select(self, needs: float, priority: str, usable: list[str]) -> str | None:
         """balanced: the cheapest model strong enough. quality: one step stronger than needed.
