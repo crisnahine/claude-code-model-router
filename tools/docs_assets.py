@@ -1091,7 +1091,9 @@ def session_figures(name: str, session: dict) -> dict:
     for cfg in baselines:
         if pooled_router is not None and cfg in pooled and pooled[cfg]["solved"]:
             f[f"pooled_less.{cfg}"] = pct(1 - pooled_router / (pooled[cfg]["cost_usd"] / pooled[cfg]["solved"]))
-        diffs = [(c, c["differences"][cfg]) for c in classes if cfg in c["differences"]]
+        # A class with too few runs, or cells that differ, is no win and no loss, so its interval is never read.
+        diffs = [(c, c["differences"][cfg]) for c in classes
+                 if cfg in c["differences"] and (c["status"] != "PARTIAL" or c["reason"].startswith("not significant"))]
         below = [c for c, (lo, hi) in diffs if hi < 0]
         f[f"below.{cfg}"] = str(len(below))
         level = [class_word(c["class"]) for c, (lo, hi) in diffs if lo <= 0 <= hi]

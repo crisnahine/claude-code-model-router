@@ -89,7 +89,7 @@ class DocsAssets(unittest.TestCase):
         self.assertEqual((f["opus.pooled.plugin-next"], f["opus.pooled.defaults"], f["opus.pooled_less.defaults"]),
                          ("$0.123", "$0.155", "21"))
         self.assertEqual((f["opus.below.defaults"], f["opus.less.defaults.min"], f["opus.less.defaults.max"],
-                          f["opus.level.defaults"]), ("7", "18", "36", "design"))
+                          f["opus.level.defaults"]), ("6", "18", "32", "design"))
         self.assertEqual((f["opus.behind.min"], f["opus.behind.max"], f["opus.status.FAIL"]), ("60", "144", "7"))
         self.assertEqual((f["sonnet.status.PASS"], f["sonnet.behind.min"], f["sonnet.behind.max"],
                           f["sonnet.solved.plugin-next"], f["sonnet.solved.defaults"]),
