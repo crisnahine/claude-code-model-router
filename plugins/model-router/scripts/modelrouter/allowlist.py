@@ -42,13 +42,16 @@ def _denied(raw: list) -> list[str] | None:
     return None if len(found) > MAX_ENTRIES or any(len(e) > MAX_CHARS for e in found) else found
 
 
-def _layer(raw: object) -> dict:
+def _layer(raw: object, policy: bool = False) -> dict:
     """One source cut to the four keys, each with the right shape; a bad key counts as unset.
-    modelOverrides keeps only whether it holds anything. A deny list over the cap marks the layer
-    "unreadable", which from_layers turns into no model open."""
+    modelOverrides keeps only whether it holds anything. A deny list over the cap, or in the
+    policy a list key that isn't a list, marks the layer "unreadable", which from_layers turns
+    into no model open: dropping it would drop a deny."""
     if not isinstance(raw, dict):
         return {}
     layer: dict = {}
+    if policy and any(key in raw and not isinstance(raw[key], list) for key in ("availableModels", "deniedModels")):
+        layer["unreadable"] = True
     if isinstance(raw.get("availableModels"), list):
         layer["availableModels"] = _entries(raw["availableModels"])
     if isinstance(raw.get("deniedModels"), list):
@@ -69,7 +72,7 @@ def _layer(raw: object) -> dict:
 def _layers(raw: object) -> dict[str, dict]:
     """The sources present in `raw`, cleaned. A source that is not there is left out."""
     raw = raw if isinstance(raw, dict) else {}
-    return {source: _layer(raw[source]) for source in SOURCES if source in raw}
+    return {source: _layer(raw[source], source == "policy") for source in SOURCES if source in raw}
 
 
 def _blocked_family(config: dict, entry: str) -> str | None:
@@ -128,7 +131,7 @@ def from_layers(layers: dict, source: str = "engine", floor: dict | None = None)
     "exact" makes matching exact. A stricter answer is the safe one."""
     cleaned = _layers(layers)
     layers = {s: cleaned.get(s, {}) for s in SOURCES}
-    policy, floor = layers["policy"], _layer(floor)
+    policy, floor = layers["policy"], _layer(floor, True)
     if policy.get("unreadable") or floor.get("unreadable"):
         policy, floor = {"availableModels": []}, {"availableModels": []}  # a policy we can't trust leaves nothing open
     allow = policy.get("availableModels", floor.get("availableModels"))
@@ -149,24 +152,29 @@ def remember(session_id: str | None, sent: object) -> dict[str, dict] | None:
     when the mod sent no layers. A source it left out is one whose read failed."""
     if not isinstance(sent, dict):
         return None
-    layers = _layers(sent)
+    stored = _stored(session_id)
+    layers = {**stored, **_layers(sent)}  # a source the mod left out keeps what it last sent
     try:
-        if session_id and store.load_entry("allowlist", session_id).get("layers") != layers:
+        if session_id and layers != stored:
             store.save_entry("allowlist", session_id, {"layers": layers})
     except Exception:
         pass  # these layers still answer this call
     return layers
 
 
+def _stored(session_id: str | None) -> dict[str, dict]:
+    try:
+        return _layers(store.load_entry("allowlist", session_id).get("layers"))
+    except Exception:
+        return {}
+
+
 def read(session_id: str | None, project: Path, sent: object = None) -> Allowlist:
-    """The layers sent now, else the latest the session sent, for the sources they hold; every
-    other source from the settings files. The managed files always apply as a floor."""
+    """Each source from the layers sent now, else the latest the session sent, else its
+    settings file. The managed files always apply as a floor."""
     layers = remember(session_id, sent)
     if layers is None:
-        try:
-            layers = _layers(store.load_entry("allowlist", session_id).get("layers"))
-        except Exception:
-            layers = {}
+        layers = _stored(session_id)
     files = file_layers(project)
     merged = {s: layers[s] if s in layers else files[s] for s in SOURCES}
     return from_layers(merged, "engine" if layers else "files", floor=files["policy"])
@@ -193,7 +201,7 @@ def _load(path: Path) -> tuple[dict, bool]:
         value = json.loads(raw.decode("utf-8")) if len(raw) <= MAX_BYTES else None
     except (FileNotFoundError, NotADirectoryError):
         return {}, True
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         return {}, False
     return (value, True) if isinstance(value, dict) else ({}, False)
 
@@ -220,7 +228,7 @@ def _policy() -> dict:
     for path in [main, *drop_ins]:
         data, ok = _load(path)
         readable = readable and ok
-        for key, value in _layer(data).items():
+        for key, value in _layer(data, True).items():
             if isinstance(value, list):
                 value = merged.get(key, []) + [e for e in value if e not in merged.get(key, [])]
             elif isinstance(value, bool):

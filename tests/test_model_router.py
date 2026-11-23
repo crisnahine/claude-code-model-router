@@ -635,7 +635,8 @@ class Allowlist(Sandbox):
                                                 "deniedModels": [{"id": "sonnet"}]}), {"sonnet"})
 
     def test_junk_engine_layers_count_as_unset(self):
-        sent = {"policy": {"availableModels": "opus", "deniedModels": [1, None]}, "user": "x", "bogus": {"a": 1}}
+        sent = {"policy": {"deniedModels": [1, None]}, "user": "x", "project": {"availableModels": "opus"},
+                "bogus": {"a": 1}}
         self.assertEqual(allowlist.read("s1", self.project, sent).permitted(self.config), set(registry.models(self.config)))
         self.assertIsNone(allowlist.remember("s1", "not an object"))
 
@@ -846,6 +847,37 @@ class Allowlist(Sandbox):
         self.assertIn("left as it is", text)
         self.options(routing_mode="advise")
         self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARD}))
+
+    def test_a_later_payload_without_policy_keeps_the_stored_policy(self):
+        policy = {"availableModels": ["sonnet"]}  # server-managed: no managed file exists
+        hooks.mod_start({"session_id": "s1", "settings": {"policy": policy, "user": {"availableModels": ["opus"]}}})
+        later = {"user": {"availableModels": ["opus"]}, "project": {}, "local": {}, "flag": {}}  # the policy read failed
+        hooks.mod_turn({"session_id": "s1", "text": LOOKUP, "settings": later})
+        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet"})
+        hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                         "tool_input": {"prompt": LOOKUP}, "settings": later})
+        self.assertEqual(store.load_entry("allowlist", "s1")["layers"]["policy"], policy)
+        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet"})
+        self.assertEqual(self.ledger()[-1]["model"], "sonnet")
+        newer = {"policy": {"availableModels": ["haiku"]}}  # a policy that is sent again replaces the stored one
+        self.assertEqual(allowlist.read("s1", self.project, newer).permitted(self.config), {"haiku"})
+
+    def test_a_deeply_nested_settings_file_is_unreadable_not_a_crash(self):
+        deep = "[" * 400000
+        (self.home / "settings.json").write_text(deep)
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(registry.models(self.config)))
+        self.managed.write_text(deep)
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
+
+    def test_a_malformed_policy_list_permits_nothing_while_a_soft_one_is_unset(self):
+        everything = set(registry.models(self.config))
+        for key in ("deniedModels", "availableModels"):
+            for junk in ("opus", None, 5, {"a": 1}):
+                self.assertEqual(self.permitted(policy={key: junk}), set(), (key, junk))
+                self.assertEqual(self.permitted(user={key: junk}, project={key: junk}), everything, (key, junk))
+        self.managed.write_text(json.dumps({"deniedModels": "opus"}))
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
+        self.assertEqual(allowlist.read(None, self.project, {"policy": {}}).permitted(self.config), set())
 
     def test_engine_layers_win_over_files_for_the_whole_session(self):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))

@@ -201,7 +201,7 @@ In `${CLAUDE_PLUGIN_DATA}`:
 | :- | :- |
 | `state.json` | Every plugin option as SessionStart recorded it, for skill commands, which run without them; and model health |
 | `upstream.json` | The upstream cache and what was last reviewed |
-| `allowlist.json` | Per session: the four allowlist keys of each settings source, as the mod last read them. A source whose read failed is left out and read from its file |
+| `allowlist.json` | Per session: the four allowlist keys of each settings source, as the mod last read them. A source whose read failed is left out: the last set kept for it stands, else its file is read |
 | `learned.json` | Calls and votes per level, and which levels are raised |
 | `sessions.json`, `prompts.json`, `edits.json`, `pending.json`, `launched.json`, `done.json`, `mod.json` | Per session: its model, the current request's profile and routed calls, edit and check times, rewrites waiting for a result, background agents still running, finished calls for redo escalation, and whether the mod is running. The 200 most recently written sessions are kept |
 | `ledger.jsonl` | One line per agent start, result, turn effort and turn usage, with the decision, its reason and the list-price cost. Trimmed at 4 MB |
