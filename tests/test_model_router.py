@@ -531,9 +531,14 @@ class Intake(Sandbox):
             self.assertEqual((seen.delivered, seen.person, seen.level), (True, False, None), text)
             self.assertFalse(intake.from_turn(text, None, None).person, text)
         for text in FRAMING["machine"]:
-            self.assertEqual((intake.from_prompt(text, self.project).delivered, intake.is_user_prompt(text)), (False, False))
+            with self.subTest(machine=text):
+                self.assertEqual((intake.from_prompt(text, self.project).delivered, intake.is_user_prompt(text)),
+                                 (False, False))
+                self.assertFalse(intake.from_turn(text, None, "composer").person)
         for text in FRAMING["person"]:
-            self.assertTrue(intake.from_prompt(text, self.project).person, text)
+            with self.subTest(person=text):
+                self.assertTrue(intake.from_prompt(text, self.project).person)
+                self.assertTrue(intake.from_turn(text, None, "composer").person)
 
     def test_a_command_is_this_turns_only_when_its_line_opens_the_turn(self):
         line = SlashSkills.LINE.format("hard", "")  # no arguments: the body is the task
