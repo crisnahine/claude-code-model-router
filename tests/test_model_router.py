@@ -3971,10 +3971,29 @@ class Gates(Sandbox):
         self.assertIsNone(hooks.stop({"session_id": "s1", "transcript_path": self.transcript("pytest", stamp)}))
 
     def test_check_command_patterns(self):
-        for command in ("pytest -q", "npm test", "pnpm run lint", "cargo test", "go vet ./...", "tsc --noEmit"):
-            self.assertTrue(gates.CHECK_COMMAND.search(command), command)
-        for command in ("ls -la", "git status", "cat test.txt"):
-            self.assertFalse(gates.CHECK_COMMAND.search(command), command)
+        for command in ("pytest -q", "npm test", "pnpm run lint", "cargo test", "go vet ./...", "tsc --noEmit",
+                        "python -m pytest", "python3 -m unittest discover -s tests", "npx jest", "cd x && pytest",
+                        "uv run pytest", "poetry run mypy .", "make test", "CI=1 npm test", "env CI=1 pytest",
+                        "time pytest", "timeout 600 pytest -x", "bundle exec rspec", "./node_modules/.bin/eslint .",
+                        ".venv/bin/python -m pytest", "docker compose run web pytest", "docker exec -it app rspec",
+                        "sh -c 'pytest -q'", "(cd api && rubocop)", "git add -A; pytest", "ruff check . | tail -5",
+                        "./gradlew build", "cargo clippy --all-targets", "nice -n 19 cargo test",
+                        "timeout 200 uv run --python 3.9 python -m unittest discover -s tests",
+                        "xargs bundle exec rspec < f", 'PATH="$HOME/.cargo/bin:$PATH" cargo clippy --workspace',
+                        "$P -m pytest -q", "sudo -E make check", "uv pip install -e . && pytest",
+                        "rspec spec 2>&1 | grep -c failures"):
+            self.assertTrue(gates.is_check(command), command)
+        for command in ("ls -la", "git status", "cat test.txt", "pip install pytest", "npm install --save-dev jest eslint",
+                        "which pytest", "grep -rn ruff pyproject.toml", "cat jest.config.js", "brew install golangci-lint",
+                        "git commit -m 'Run mypy in CI'", "git commit -m 'Run make test in CI'",
+                        "tail -50 rspec.log", "command -v pytest",
+                        "uv tool install ruff", "yarn add -D vitest", "CI=1 sudo pip3 install tox"):
+            self.assertFalse(gates.is_check(command), command)
+
+    def test_installing_a_test_tool_after_an_edit_still_asks(self):
+        self.edit()
+        out = hooks.stop({"session_id": "s1", "transcript_path": self.transcript("pip install pytest")})
+        self.assertIn("model-router:verifier", out["reason"])
 
     def test_hard_request_on_a_weak_session_needs_a_strong_agent(self):
         self.session_on("claude-haiku-5-5")
