@@ -95,8 +95,8 @@ export const register: Register = (on, options) => {
   const turnEffort = new Map<string, ModelEffort>()
   // agent.spawn carries no effort: an effort the caller put on the Agent call is read here.
   const callerEffort = new Map<string, ModelEffort>()
-  // A subagent's first request can go out before its spawn hook has the agent's id. null: spawns of
-  // this prompt got different efforts (or none), so the prompt can't tell whose request it is.
+  // A subagent's first request can go out before its spawn hook has the agent's id. The newest spawn of
+  // a prompt sets it, null when that spawn got no effort, so a later spawn never inherits an older one's.
   const promptEffort = new Map<string, ModelEffort | null>()
   // Each request's usage by turn: Haiku 5.5 bills a long prompt per request, not per turn.
   const turnRequests = new Map<string, TurnUsage[]>()
@@ -133,9 +133,7 @@ export const register: Register = (on, options) => {
         ...(effort ? { effort } : {}),
       },
     })
-    const given = pick?.effort ?? null
-    if (!promptEffort.has(e.prompt)) remember(promptEffort, e.prompt, given)
-    else if (promptEffort.get(e.prompt) !== given) promptEffort.set(e.prompt, null)
+    remember(promptEffort, e.prompt, pick?.effort ?? null)
     const started = await next(pick?.model ? { ...e, model: pick.model } : e)
     if (pick?.effort && started.agentId) remember(agentEffort, started.agentId, pick.effort)
     return started

@@ -228,6 +228,20 @@ test("an agent never steps at another spawn's effort for the same brief", async 
   }
 })
 
+test("a redo's first request gets the redo's effort, not the run it replaces", async () => {
+  const replies: Record<string, Reply> = { 'mod-spawn': PICK }
+  const mod = load(replies)
+  await mod.spawn(spawnEvent())
+  replies['mod-spawn'] = { stdout: JSON.stringify({ model: 'sonnet', effort: 'high', reason: 'redo, one level up' }) }
+  let sent: any
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu2' }), async (e: any) => {
+    await mod.start({ turnId: 't2', agentId: 'a2', text: e.prompt })
+    sent = await mod.step(stepEvent({ turnId: 't2', agentId: 'a2', effort: 'medium' }))
+    return { model: e.model, agentId: 'a2' }
+  })
+  assert.equal(sent.effort, 'high')
+})
+
 test('an effort on the Agent call reaches mod-spawn', async () => {
   const mod = load()
   const call = { tool: 'Agent', tool_use_id: 'tu1', effort: 'high', prompt: 'p' }
