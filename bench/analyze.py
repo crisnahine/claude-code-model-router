@@ -467,7 +467,9 @@ def _notes(results: Results) -> list[str]:
         again = sum(any(o["task"] == r["task"] and o["config"] == r["config"] and o["started_at"] > r["started_at"]
                         for o in rows) for r in aside)
         parts = [f"{reasons.count('network')} lost the network"] * ("network" in reasons) + \
-                [f"{reasons.count('limit')} hit a rate or usage limit"] * ("limit" in reasons)
+                [f"{reasons.count('limit')} hit a rate or usage limit"] * ("limit" in reasons) + \
+                [f"{reasons.count('api_error')} got an API error before any spend (a bad key, no credit or a model "
+                 "the account can't use)"] * ("api_error" in reasons)
         lines.append(f"- {len(aside)} run(s) are set aside, outside the results, because the API never got to the "
                      f"task: {', '.join(parts)}. {again} of them were run again later on the same task and "
                      "configuration, and none counts for or against a configuration. Their raw lines, with the reason, "

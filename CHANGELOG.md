@@ -105,6 +105,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 - The runner checks a file's size before reading it into a row's `final_answer`, and lists a file too big for the per-file cap as omitted without reading it, so a huge file a run leaves can't exhaust memory and lose the row.
 - Release readiness and the traceability matrix gave figures the benchmark page doesn't show (1,300 to 4,500 more cache tokens per run, 4 of 10 design tasks sent to the architect). They now state those findings without the numbers.
 - `cross-currency` failed a right answer whose `pricing/symbols.py` derives a constant from `DECIMALS` at import, such as a set of zero-decimal codes, because the check swapped the tables in after the file had run. The check now gives the file's own `SYMBOLS` and `DECIMALS` assignments the other tables before anything imports it. The task stays at revision 2, which has no recorded rows.
+- A run that errored before spending anything, such as an invalid API key, a credit balance too low or a model the account can't use, is set aside in `results/limited/` with `limited_reason` `api_error`. The runner set aside only rate limits and lost networks, so such a run went into the results as an unsolved task at $0, lowering the pass rate and the cost per solved task. It isn't retried, and 3 in a row stop the runner with exit code 2.
 
 ### Internal
 
