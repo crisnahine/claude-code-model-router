@@ -270,9 +270,10 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
         result = {}
     answer = result.get("result") or ""
     (scratch / "answer.txt").write_text(answer, encoding="utf-8")
-    passed = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
+    # Read before grading: the check also runs the code the run left, which could rewrite these files.
     ledger = ledger_rows(env) if config.get("plugin") else None
     types = agent_types(work, env) if config.get("plugin") else {}
+    passed = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
     kept = None
     if options.get("keep"):
         # The work the run left, its answer, the router's own data and ledger, and the session's transcripts.

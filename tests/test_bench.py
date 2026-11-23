@@ -919,6 +919,24 @@ class AgentCosts(unittest.TestCase):
             {"agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"}])
 
 
+    def test_the_ledger_is_read_before_the_work_dir_code_runs(self):
+        def rewrite(check, work, answer, timeout=120):
+            data = run.plugin_data_dir({"CLAUDE_CODE_PLUGIN_CACHE_DIR": str(work.parent / "plugins")})
+            (data / "ledger.jsonl").write_text('{"event": "usage", "cost_usd": 9}\n', encoding="utf-8")
+            return True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            claude = stub(tmp, COST_STUB)
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}), \
+                    unittest.mock.patch.object(run, "grade", rewrite):
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+        self.assertEqual(row["agent_costs"], {"model-router:implementer": 0.07, "model-router:verifier": 0.01,
+                                              "main": 0.03})
+
+
 class Limits(unittest.TestCase):
     """A rate or usage limit pauses the bench and retries the run; it is never recorded as a failed task."""
 
