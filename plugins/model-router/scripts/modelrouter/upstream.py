@@ -324,14 +324,16 @@ def refresh(settings: Settings, force: bool = False) -> dict:
     return store.update_dict(path(), apply)
 
 
-def ack() -> str | None:
+def ack() -> tuple[str, str] | None:
+    """The version marked as reviewed and the write's status (`store.try_update`), or None with nothing cached."""
     if not load().get("cache"):
         return None
 
     def apply(data: dict) -> None:
         data["reviewed"] = {**snapshot(data.get("cache") or {}), "reviewed_at": int(store.now())}
 
-    return store.update_dict(path(), apply)["reviewed"]["claude_code_version"]
+    data, status = store.try_update(path(), apply)
+    return data["reviewed"]["claude_code_version"], status
 
 
 def pending(data: dict | None = None) -> dict | None:

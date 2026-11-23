@@ -52,6 +52,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 
 ### Fixed
 
+- `ack` no longer says it marked the releases as reviewed when it didn't write. `store.update_dict` dropped the write's status, so an `upstream.json` from a newer release, one whose lock stayed held, or one that couldn't be read still printed "Marked Claude Code X ... as reviewed", and the next session announced the same releases again. `ack` now says the review mark was left as is, and why, and exits 1.
 - A raise of the request's level that a busy lock dropped is no longer reported as made. `request.raise_to` returned true when it had worked out a raise, even if the write was skipped because another process held `prompts.json`; it now returns false then, and `store.mutate_entry` returns the write's status.
 - A state file with a time that isn't a number no longer breaks the hook. `routes.json`, `done.json` and the other keyed files sorted their records by `at` (or `_at`), so a record with `"at": "x"` next to a normal one raised `TypeError` when a call looked up its route or a write trimmed the file. Such a time now sorts as the oldest.
 - A typed `/plugin:skill` no longer walks `~/.claude/plugins` on every prompt. For a plugin missing from `installed_plugins.json`, the lookup walked up to 20,000 entries, and a plugin loaded with `--plugin-dir` is never in that file, so each such line paid the whole walk and found nothing. `UserPromptSubmit` now reads the install record alone (`agents.installed_roots`); finding an agent by plugin name keeps its bounded walk.
