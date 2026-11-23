@@ -364,6 +364,7 @@ def _jsonl(paths) -> list[dict]:
 class Results:
     files: list[Path]
     rows: list[dict]
+    stale: list[dict]
     aside: list[tuple[str, dict]]
     archive: list[tuple[str, list[dict], int]]
     configs: list[dict]
@@ -397,9 +398,15 @@ def forced_ranks(configs: list[dict], registry_config: dict) -> dict[str, tuple[
 
 
 def load(paths: list[Path]) -> Results:
-    """Everything the page is built from, read once. The order and repeats of `paths` don't matter."""
+    """Everything the page is built from, read once. The order and repeats of `paths` don't matter. A row on an
+    earlier revision of its task isn't comparable with later runs of it, so it sits in `stale`, not `rows`."""
     files = sorted({p.resolve() for p in paths})
-    rows = [dict(row, _batch=_batch(path)) for path in files for row in _jsonl([path])]
+    tasks = run.load_tasks()
+    revisions = {t["id"]: t.get("revision", 1) for t in tasks}
+    every = [dict(row, _batch=_batch(path)) for path in files for row in _jsonl([path])]
+    old = [r.get("task_revision", 1) < revisions.get(r["task"], 1) for r in every]
+    rows = [r for r, gone in zip(every, old) if not gone]
+    stale = [r for r, gone in zip(every, old) if gone]
     folders = sorted({f.parent for f in files})
     aside = [(sub, row) for folder in folders for sub in ("infra", "limited") for row in _jsonl((folder / sub).glob("*.jsonl"))]
     archive = []
@@ -412,7 +419,7 @@ def load(paths: list[Path]) -> Results:
                 archive.append((folder.relative_to(results).as_posix(), kept, lines))
     configs = run.load_configs()
     prices = json.loads((run.PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["prices"]
-    return Results(files, rows, aside, archive, configs, run.load_tasks(), prices, router_ids(configs),
+    return Results(files, rows, stale, aside, archive, configs, tasks, prices, router_ids(configs),
                    frozenset(c["id"] for c in configs if c.get("model")),
                    forced_ranks(configs, mrconfig.base_config()))
 
@@ -452,11 +459,12 @@ def _notes(results: Results) -> list[str]:
         lines.append("- Router spend by agent type, from the router's ledger (`agent_costs`), over the runs that "
                      "record it: " + "; ".join(share(c) for c in sorted(spend)) + ".")
     for task in results.tasks:
-        old = sum(r["task"] == task["id"] and r.get("task_revision", 1) < task.get("revision", 1) for r in rows)
+        old = [r for r in results.stale if r["task"] == task["id"]]
         if old:
             changes = "; ".join(f"revision {n}: {why}" for n, why in sorted(task.get("revisions", {}).items()))
-            lines.append(f"- `{task['id']}` is at revision {task['revision']}; {old} of its runs here ran on an "
-                         f"earlier revision ({changes}), so they are not comparable with later runs of it.")
+            lines.append(f"- `{task['id']}` is at revision {task['revision']}; {len(old)} of its runs "
+                         f"(${sum(r['total_cost_usd'] for r in old):.2f}) ran on an earlier revision ({changes}), so "
+                         "they are left out of every table.")
     named = [t["id"] for t in results.tasks if profile.signals(t["id"].lower())]
     early = sum(r["config"] in results.routers and r["task"] in named and "task_revision" not in r for r in rows)
     if named and early:
@@ -563,7 +571,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "class is saturated when the weakest forced baseline (every subagent on the weakest model) can't be told "
         "from the strongest by the same test; then the tasks can't show a quality difference and no quality claim "
         "is made. Without forced baselines on two models the class has no quality claim either. A class is PARTIAL "
-        "when its configurations didn't run the same tasks the same number of times.",
+        "when its configurations didn't run the same tasks the same number of times, and runs on an earlier "
+        "revision of a task are left out of every table.",
         f"- PASS means the router's cost per solved task is below the best baseline's with the whole 95% interval "
         f"of the difference below zero, and its pass rate is not behind beyond noise. FAIL means it is behind on "
         f"either. PARTIAL means a tie, a difference inside the noise, or fewer than {MIN_RUNS} runs per "

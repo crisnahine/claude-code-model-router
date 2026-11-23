@@ -1129,23 +1129,26 @@ class TaskIdentity(unittest.TestCase):
         tasks = {t["id"]: t for t in run.load_tasks()}
         self.assertEqual(tasks["design-cache-invalidation"]["revision"], 2)
 
-    def test_the_page_names_each_tasks_revision_and_the_folder_name_bias(self):
+    def test_rows_on_an_earlier_task_revision_are_left_out_of_the_tables(self):
         template = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-design-2026-11-22.jsonl")
                               .read_text(encoding="utf-8").splitlines()[0])
         old = {k: v for k, v in template.items() if k != "task_revision"}
         rows = [dict(old, task="design-cache-invalidation", config="plugin"),
                 dict(old, task="design-cache-invalidation", config="defaults"),
-                dict(old, task="design-rate-limiter", config="plugin", task_revision=1)]
+                dict(old, task="design-rate-limiter", config="plugin", total_cost_usd=0.5)]
         with tempfile.TemporaryDirectory() as tmp:
             results = Path(tmp) / "results"
             results.mkdir()
             (results / "a-design.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            loaded = analyze.load([results / "a-design.jsonl"])
             out = Path(tmp) / "page.md"
             analyze.main([str(results / "a-design.jsonl"), "--out", str(out)])
             page = out.read_text(encoding="utf-8")
-        self.assertIn("`design-cache-invalidation` is at revision 2; 2 of its runs here ran on an earlier revision", page)
+        self.assertEqual(sorted(r["task"] for r in loaded.stale), ["design-cache-invalidation"] * 2)
+        self.assertEqual([r["task"] for r in loaded.rows], ["design-rate-limiter"])
+        self.assertIn("`design-cache-invalidation` is at revision 2; 2 of its runs ($", page)
+        self.assertIn("are left out of every table", page)
         self.assertIn("- Bias: 1 router-arm runs", page)  # the one router row with no task_revision
-        self.assertIn("`design-cache-invalidation`", page.split("- Bias: ")[1].split("\n")[0])
 
 
 class Isolation(unittest.TestCase):
