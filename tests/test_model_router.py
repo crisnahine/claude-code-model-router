@@ -2890,6 +2890,15 @@ class Mod(Sandbox):
             self.done("general-purpose", brief, "claude-haiku-5-5")
         self.assertEqual(health.load().why_routed_around("opus"), "ran as claude-haiku-5-5 instead")
 
+    def test_a_fallback_rewrite_that_ran_on_the_untouched_model_is_a_substitution(self):
+        # On the fallback the rewrite is applied before the call starts, so a run on the parent's model didn't take it.
+        self.session_on("claude-sonnet-5-5")
+        for number in range(2):
+            brief = f"{HARD} {number}"
+            self.assertEqual(self.pre("general-purpose", brief)["updatedInput"]["model"], "opus")
+            self.done("general-purpose", brief, "claude-sonnet-5-5", model="opus", effort="high")
+        self.assertEqual(health.load().why_routed_around("opus"), "ran as claude-sonnet-5-5 instead")
+
     def test_a_result_reads_no_agent_files(self):
         self.agent("rev", "opus")
         self.spawn("rev", LOOKUP)

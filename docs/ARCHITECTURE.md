@@ -52,7 +52,7 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 
 | Module | Job |
 | :- | :- |
-| `health` | What the router has seen of each model: a model error, a substitution (a run on neither the pick nor the model the call would have had untouched, which a dropped mod answer leaves) or a refused rewrite in; healthy, last ran as and why it is routed around out |
+| `health` | What the router has seen of each model: a model error, a substitution (a run on neither the pick nor, on the mod path, the model the call would have had untouched, which a dropped mod answer leaves; on the fallback the rewrite is applied before the call starts, so a run on that model is a substitution) or a refused rewrite in; healthy, last ran as and why it is routed around out |
 | `config` | Builds the `Registry` once per hook call or command from `config/models.json` and the user's and the project's override files (`config.load`), and holds the ordered `Level` type. A bad key in an override file is dropped and listed, and a project's file is held to raising |
 | `registry` | The `Registry` value every step reads: models (each marked as shipped or the user's, or added by the project), levels with their `needs` and effort, aliases, prices, the main-loop effort table, agent rules, and the keys held back or dropped. Its methods say which models exist and are usable right now (`available`), and give the `select` and `clamp` rules, `family`, `price` and `cost` |
 | `profile` | Reads a brief once into a `Reading` (`read`) and turns it into a level and the reasons for it, as a call or as a request (`level`) |

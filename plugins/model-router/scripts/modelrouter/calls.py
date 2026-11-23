@@ -192,7 +192,7 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
         pass
     try:
         health.ran(asked, outcome.ran_as, outcome.ran_family, outcome.forced, swapped=swapped,
-                   untouched=route.was if route else None)
+                   untouched=route.was if route and route.path == "mod" else None)
     except OSError:
         pass
     ledger.result(session_id, outcome.agent, asked, outcome.ran_as, outcome.status, outcome.tokens,
