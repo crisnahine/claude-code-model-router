@@ -34,8 +34,8 @@ def models_used(response: object) -> list[str]:
     used = response.get("modelsUsed") if isinstance(response, dict) else None
     if not isinstance(used, list):
         return []
-    ids = [m for m in used if isinstance(m, str) and _MODEL_ID.fullmatch(m)]
-    return ids[:MAX_SWAPPED] if len(set(ids)) >= 2 else []
+    ids = [m for m in used if isinstance(m, str) and _MODEL_ID.fullmatch(m)][:MAX_SWAPPED]
+    return ids if len(set(ids)) >= 2 else []
 
 
 def settled(session_id: str | None, key: str, rewrite: dict | None, finished: bool = False,

@@ -1894,6 +1894,7 @@ class Calls(Sandbox):
         self.assertEqual(calls.models_used({"modelsUsed": ["a", 3, "b"]}), ["a", "b"])
         many = [f"m{i}" for i in range(7)]
         self.assertEqual(calls.models_used({"modelsUsed": many}), many[:5])
+        self.assertEqual(calls.models_used({"modelsUsed": ["a", "a", "a", "a", "a", "b"]}), [])
 
     def test_only_runs_at_their_level_are_redone(self):
         for source in ("caller", None):
@@ -2594,6 +2595,19 @@ class Feedback(Sandbox):
         self.assertEqual((again["level"], again["escalated_from"]), ("lookup", None))
         self.pre("general-purpose", LOOKUP)
         self.assertEqual(learn.stats()["lookup"]["votes"], 0)
+
+    def test_a_swapped_run_the_caller_chose_leaves_the_count_alone(self):
+        self.pre("general-purpose", LOOKUP, model="sonnet")
+        self.assertEqual(learn.stats()["lookup"]["calls"], 0)
+        self.pre("general-purpose", "list the files under other")
+        self.done("general-purpose", LOOKUP, "claude-sonnet-5-5", model="sonnet", models_used=SWAP["swapped"]["modelsUsed"])
+        self.assertEqual(learn.stats()["lookup"]["calls"], 1)
+
+    def test_a_swapped_run_with_no_count_to_take_back_leaves_zero(self):
+        self.pre("general-purpose", LOOKUP)
+        learn.reset()
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", models_used=SWAP["swapped"]["modelsUsed"])
+        self.assertEqual(learn.stats().get("lookup", {}).get("calls", 0), 0)
 
     def test_a_plain_run_counts_for_its_level_and_finishes(self):
         key = calls.identify({"subagent_type": "general-purpose", "prompt": LOOKUP})[1]
