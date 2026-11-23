@@ -54,6 +54,7 @@ claude plugin validate --strict plugins/model-router
 python3 tools/traceability.py
 sh tests/mod/typecheck.sh
 python3 tools/docs_assets.py --check
+python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check
 ```
 
 `sh tests/mod/typecheck.sh` type-checks the mod and its test with `tsc` against Claude Code's published mod API types, pinned to a commit, with the tsconfig in `tests/mod`, outside the plugin folder; CI runs it too. To check against the types your installed Claude Code writes, see [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md). A change to routing reruns `claude plugin eval plugins/model-router --trust-plugin`; it runs live models, so record what it cost.

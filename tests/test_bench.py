@@ -1,6 +1,8 @@
 """Tests for the cost and quality benchmark under bench/. Run: python3 -m unittest discover -s tests"""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -24,7 +26,8 @@ def rows(config, cls, costs, passes):
 
 class Analysis(unittest.TestCase):
     def summary(self, data):
-        return {s["class"]: s for s in analyze.summarize(data, router="plugin", draws=500, seed=1)}
+        routers = analyze.router_ids(run.load_configs())
+        return {s["class"]: s for s in analyze.summarize(data, routers=routers, router="plugin", draws=500, seed=1)}
 
     def test_pass_rate_and_cost_per_solved_task(self):
         cell = self.summary(rows("plugin", "lookup", [1, 1, 1, 1], [True, True, False, True]))["lookup"]["configs"]["plugin"]
@@ -67,13 +70,15 @@ class Analysis(unittest.TestCase):
 
     def test_the_same_data_and_seed_give_the_same_intervals(self):
         data = rows("plugin", "lookup", [0.1, 0.3, 0.2, 0.4, 0.1], [True, False, True, True, True])
-        first = analyze.summarize(data, router="plugin", draws=300, seed=7)
-        self.assertEqual(first, analyze.summarize(data, router="plugin", draws=300, seed=7))
+        routers = frozenset({"plugin"})
+        first = analyze.summarize(data, routers=routers, router="plugin", draws=300, seed=7)
+        self.assertEqual(first, analyze.summarize(data, routers=routers, router="plugin", draws=300, seed=7))
 
     def test_the_table_has_a_row_per_class_and_a_column_per_configuration(self):
         data = (rows("plugin", "lookup", [0.1], [True]) + rows("defaults", "lookup", [0.2], [True])
                 + rows("plugin", "bugfix", [0.3], [False]) + rows("defaults", "bugfix", [0.4], [True]))
-        text = analyze.render(analyze.summarize(data, router="plugin", draws=100, seed=0), {"total_cost_usd": 1.0})
+        summary = analyze.summarize(data, routers=frozenset({"plugin"}), router="plugin", draws=100, seed=0)
+        text = analyze.render(summary, {"total_cost_usd": 1.0})
         header = next(line for line in text.splitlines() if line.startswith("| Task class"))
         self.assertIn("| plugin |", header)
         self.assertIn("| defaults |", header)
@@ -90,6 +95,81 @@ class Analysis(unittest.TestCase):
         self.assertEqual(verdict["best_baseline"], "defaults")
         self.assertEqual(verdict["rank"], 2)
         self.assertIn("plugin-cheap", verdict["configs"])  # still shown on the page
+
+    def test_the_bootstrap_draws_with_random_only(self):
+        # randrange has no cross-version guarantee; random() does.
+        with unittest.mock.patch.object(analyze.random.Random, "randrange", side_effect=AssertionError):
+            analyze.summarize(rows("plugin", "lookup", [0.1, 0.2], [True, False]), routers=frozenset({"plugin"}))
+
+    def test_every_baseline_gets_its_difference_interval(self):
+        n = analyze.MIN_RUNS
+        data = rows("plugin", "lookup", [0.1] * n, [True] * n) + rows("defaults", "lookup", [0.3] * n, [True] * n)
+        row = self.summary(data)["lookup"]
+        low, high = row["differences"]["defaults"]
+        self.assertAlmostEqual(low, -0.2)
+        self.assertAlmostEqual(high, -0.2)
+        self.assertNotIn("plugin", row["differences"])
+
+    def test_a_class_with_no_router_or_baseline_has_no_differences(self):
+        self.assertEqual(self.summary(rows("defaults", "lookup", [0.3], [True]))["lookup"]["differences"], {})
+
+    def page_args(self, tmp, name="page.md"):
+        res = Path(tmp) / "results"
+        res.mkdir(exist_ok=True)
+        data = rows("plugin", "lookup", [0.1, 0.2], [True, False]) + rows("defaults", "lookup", [0.3, 0.4], [True, True])
+        records = [dict(r, main_model="sonnet", started_at="2026-11-22T10:00:00+00:00", claude_version="2.1.330",
+                        models={}) for r in data]
+        path = res / "a-lookup-2026-11-22.jsonl"
+        path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+        return path, Path(tmp) / name
+
+    def check(self, *args):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = analyze.main([*map(str, args), "--check"])
+        return code, err.getvalue()
+
+    def test_check_fails_on_a_stale_page_and_passes_on_a_fresh_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, out = self.page_args(tmp)
+            self.assertEqual(analyze.main([str(path), "--out", str(out)]), 0)
+            self.assertEqual(self.check(path, "--out", out), (0, ""))
+            fresh = out.read_text(encoding="utf-8")
+            out.write_text(fresh + "x", encoding="utf-8")
+            code, err = self.check(path, "--out", out)
+            self.assertEqual(code, 1)
+            self.assertIn("page.md: out of date, run python3 bench/analyze.py", err)
+            self.assertEqual(out.read_text(encoding="utf-8"), fresh + "x")
+            out.unlink()
+            self.assertEqual(self.check(path, "--out", out)[0], 1)
+            self.assertFalse(out.exists())
+
+    def test_check_reads_the_page_as_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, out = self.page_args(tmp)
+            analyze.main([str(path), "--out", str(out)])
+            out.write_bytes(out.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+            self.assertEqual(self.check(path, "--out", out), (0, ""))
+
+    def test_argv_order_and_repeats_do_not_change_the_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a, out = self.page_args(tmp)
+            b = a.with_name("b-lookup-2026-11-22.jsonl")
+            b.write_text(a.read_text(encoding="utf-8").replace("0.3", "0.35").replace("0.1", "0.15"), encoding="utf-8")
+            pages = []
+            for argv in ([b, a], [a, b], [a, b, a]):
+                analyze.main([*map(str, argv), "--out", str(out)])
+                pages.append(out.read_text(encoding="utf-8"))
+            self.assertEqual(pages[0], pages[1])
+            self.assertEqual(pages[1], pages[2])
+
+    def test_main_reads_configurations_and_tasks_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, out = self.page_args(tmp)
+            with unittest.mock.patch.object(run, "load_configs", wraps=run.load_configs) as configs, \
+                    unittest.mock.patch.object(run, "load_tasks", wraps=run.load_tasks) as tasks:
+                analyze.main([str(path), "--out", str(out)])
+        self.assertEqual((configs.call_count, tasks.call_count), (1, 1))
 
     def test_each_session_model_gets_its_own_table_and_router(self):
         real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
@@ -850,45 +930,27 @@ class TaskIdentity(unittest.TestCase):
         self.assertIn("- Bias: 1 router-arm runs", page)  # the one router row with no task_revision
         self.assertIn("`design-cache-invalidation`", page.split("- Bias: ")[1].split("\n")[0])
 
-    def test_the_committed_page_states_revision_and_bias_only_when_the_rows_call_for_it(self):
-        raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
-        data = [json.loads(line) for path in raw for line in path.read_text(encoding="utf-8").splitlines() if line]
-        page = (ROOT / "docs" / "BENCHMARKS.md").read_text(encoding="utf-8")
-        old = sum(r["task"] == "design-cache-invalidation" and r.get("task_revision", 1) < 2 for r in data)
-        line = f"`design-cache-invalidation` is at revision 2; {old} of its runs here ran on an earlier revision"
-        (self.assertIn if old else self.assertNotIn)(line if old else "is at revision 2;", page)
-        early = sum("task_revision" not in r and r["config"].startswith("plugin") for r in data)
-        (self.assertIn if early else self.assertNotIn)("- Bias: ", page)
-
 
 class Pilot(unittest.TestCase):
-    def test_committed_results_match_the_published_table(self):
+    def test_the_committed_page_is_what_analyze_writes(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
         self.assertTrue(raw, "no raw results committed")
-        data = [json.loads(line) for path in raw for line in path.read_text(encoding="utf-8").splitlines() if line]
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = analyze.main([*map(str, raw), "--out", str(ROOT / "docs" / "BENCHMARKS.md"), "--check"])
+        self.assertEqual(code, 0, err.getvalue())
+
+    def test_the_page_keeps_its_cost_and_isolation_notes(self):
         page = (ROOT / "docs" / "BENCHMARKS.md").read_text(encoding="utf-8")
-        for path in raw:
-            self.assertIn(f"bench/results/{path.name}", page)
-        self.assertIn(f"${sum(r['total_cost_usd'] for r in data):.2f}", page)
-        self.assertIn(f"{len(data)} runs", page)
         self.assertIn("plus anything that subagents still running", page)
         self.assertIn("margin, not a bound", page)
-        stale = sum("plugin_state" not in r for r in data)
-        if stale:
-            self.assertIn(f"{stale} run(s) here predate", page)
         self.assertIn("`Bash(tail *)`", page)
         self.assertNotIn("`--no-session-persistence`, `--permission-mode", page)
         self.assertNotIn("puts it back afterwards", page)
-        borrowed = sum(r.get("plugin_state") is not None and "plugin_data_own" not in r for r in data)
-        if borrowed:
-            self.assertIn(f"{borrowed} router run(s) here borrowed the shared folder", page)
-        aside = sum(1 for sub in ("infra", "limited") for path in (ROOT / "bench" / "results" / sub).glob("*.jsonl")
-                    for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
-        if aside:
-            self.assertIn(f"{aside} run(s) are set aside", page)
-        unsaved = sum("sessions_saved" not in r for r in data)
-        if unsaved:
-            self.assertIn(f"{unsaved} run(s) here ran with `--no-session-persistence`", page)
+
+    def test_recorded_lookup_answers_still_grade_the_same(self):
+        raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
+        data = [json.loads(line) for path in raw for line in path.read_text(encoding="utf-8").splitlines() if line]
         for row in data:  # a lookup is graded from its answer alone, so today's check must agree with the record
             if row["class"] == "lookup" and len(row["answer"]) < 2000:  # the line keeps 2,000 characters
                 with tempfile.TemporaryDirectory() as tmp:

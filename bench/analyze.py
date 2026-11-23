@@ -2,6 +2,7 @@
 configuration, with 95% bootstrap intervals, and the router's standing against the best baseline.
 
   python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
+  python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ import math
 import random
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 BENCH = Path(__file__).resolve().parent
@@ -38,7 +40,7 @@ def _cell(runs: list[dict], rng: random.Random, draws: int) -> dict:
     n, solved, total = len(runs), sum(passed), sum(costs)
     cps, rate = [], []
     for _ in range(draws):
-        picks = [rng.randrange(n) for _ in range(n)]
+        picks = [int(rng.random() * n) for _ in range(n)]
         hits = sum(passed[i] for i in picks)
         cps.append(sum(costs[i] for i in picks) / hits if hits else math.inf)
         rate.append(hits / n)
@@ -56,16 +58,17 @@ def _difference(ours: list[float], theirs: list[float]) -> tuple[float, float]:
     return _interval([0.0 if math.isinf(a) and math.isinf(b) else a - b for a, b in zip(ours, theirs)])
 
 
-def _verdict(cells: dict, router: str) -> dict:
+def _verdict(cells: dict, router: str, routers: frozenset[str]) -> dict:
     # A router variant (any configuration that loads the plugin) is a rival build, never a baseline.
-    variants = {c["id"] for c in run.load_configs() if c.get("plugin")}
-    base = {name: cell for name, cell in cells.items() if name != router and name not in variants}
+    base = {name: cell for name, cell in cells.items() if name != router and name not in routers}
     if router not in cells or not base:
-        return {"status": "PARTIAL", "rank": None, "best_baseline": None, "reason": "no router or baseline runs"}
+        return {"status": "PARTIAL", "rank": None, "best_baseline": None, "differences": {},
+                "reason": "no router or baseline runs"}
     ours = cells[router]
     best = min(base, key=lambda name: (_key(base[name]), name))
     theirs = base[best]
-    verdict = {"rank": 1 + sum(_key(cell) < _key(ours) for cell in base.values()), "best_baseline": best}
+    verdict = {"rank": 1 + sum(_key(cell) < _key(ours) for cell in base.values()), "best_baseline": best,
+               "differences": {name: _difference(ours["_cps"], cell["_cps"]) for name, cell in base.items()}}
     if ours["runs"] < MIN_RUNS or theirs["runs"] < MIN_RUNS:
         return {**verdict, "status": "PARTIAL",
                 "reason": f"too few runs ({router} {ours['runs']}, {best} {theirs['runs']}; {MIN_RUNS} needed)"}
@@ -82,14 +85,15 @@ def _verdict(cells: dict, router: str) -> dict:
     return {**verdict, "status": "PARTIAL", "reason": f"not significant against {best}"}
 
 
-def summarize(rows: list[dict], router: str = "plugin", draws: int = 2000, seed: int = 0) -> list[dict]:
+def summarize(rows: list[dict], *, routers: frozenset[str], router: str = "plugin", draws: int = 2000,
+              seed: int = 0) -> list[dict]:
     rng = random.Random(seed)
     order = {name: i for i, name in enumerate(run.CLASSES)}
     out = []
     for cls in sorted({r["class"] for r in rows}, key=lambda c: (order.get(c, len(order)), c)):
         configs = sorted({r["config"] for r in rows if r["class"] == cls}, key=lambda c: (c != router, c))
         cells = {c: _cell([r for r in rows if r["class"] == cls and r["config"] == c], rng, draws) for c in configs}
-        verdict = _verdict(cells, router)
+        verdict = _verdict(cells, router, routers)
         for cell in cells.values():
             del cell["_cps"], cell["_rate"]
         out.append({"class": cls, "configs": cells, **verdict})
@@ -124,24 +128,23 @@ def render(summary: list[dict], meta: dict) -> str:
     return "\n".join([head, "", "## Results", "", *_table(summary), "", meta.get("body", "")]).rstrip() + "\n"
 
 
-def sessions(rows: list[dict], router: str | None = None) -> list[tuple[str, str, list[dict], list[dict]]]:
+def sessions(results: Results, router: str | None = None) -> list[tuple[str, str, list[dict], list[dict]]]:
     """One summary per session model, since a configuration costs differently on each. Its router is `router`,
     or else the first configuration in configs.json that loads the plugin and ran on that session model. A
     configuration that sets its own session model (opusplan) runs the same in any batch, so it joins every table."""
-    own = {c["id"] for c in run.load_configs() if c.get("model")}
     groups: dict[str, list[dict]] = {}
-    for r in rows:
-        if r["config"] not in own:
+    for r in results.rows:
+        if r["config"] not in results.own_model:
             groups.setdefault(r.get("main_model") or "unknown", []).append(r)
-    for r in rows:
-        if r["config"] in own:
+    for r in results.rows:
+        if r["config"] in results.own_model:
             for group in groups.values() or [groups.setdefault(r.get("main_model") or "unknown", [])]:
                 group.append(r)
     out = []
     for model, group in sorted(groups.items()):
         ran = {r["config"] for r in group}
-        chosen = router or next((c["id"] for c in run.load_configs() if c.get("plugin") and c["id"] in ran), "plugin")
-        out.append((model, chosen, summarize(group, router=chosen), group))
+        chosen = router or next((c["id"] for c in results.configs if c.get("plugin") and c["id"] in ran), "plugin")
+        out.append((model, chosen, summarize(group, routers=results.routers, router=chosen), group))
     return out
 
 
@@ -184,29 +187,28 @@ def _metric_text(cell: list[dict], routed: bool) -> str:
     return ", ".join(parts)
 
 
-def _metrics(summary: list[dict], rows: list[dict]) -> list[str]:
+def _metrics(summary: list[dict], rows: list[dict], routers: frozenset[str]) -> list[str]:
     configs = []
     for row in summary:
         configs += [c for c in row["configs"] if c not in configs]
-    plugin = {c["id"] for c in run.load_configs() if c.get("plugin")}
     lines = ["### Run metrics", "", "| Task class | " + " | ".join(configs) + " |",
              "| :- | " + " | ".join(":-" for _ in configs) + " |"]
     for row in summary:
         cells = []
         for c in configs:
             cell = [r for r in rows if r["class"] == row["class"] and r["config"] == c]
-            cells.append(_metric_text(cell, c in plugin) if cell else "not run")
+            cells.append(_metric_text(cell, c in routers) if cell else "not run")
         lines.append(f"| {row['class']} | " + " | ".join(cells) + " |")
     return lines
 
 
-def render_sessions(parts: list[tuple[str, str, list[dict], list[dict]]], meta: dict) -> str:
+def render_sessions(parts: list[tuple[str, str, list[dict], list[dict]]], meta: dict, routers: frozenset[str]) -> str:
     body = []
     for model, router, summary, rows in parts:
         own = sorted({r["config"] for r in rows if r.get("main_model") != model})
         but = f", except {', '.join(f'`{c}`' for c in own)}, which sets its own" if own else ""
         body += [f"## Results: session model `{model}`", "", f"Every run here had `{model}` as its session model{but}; "
-                 f"router: `{router}`.", "", *_table(summary), "", *_metrics(summary, rows), ""]
+                 f"router: `{router}`.", "", *_table(summary), "", *_metrics(summary, rows, routers), ""]
     return "\n".join([meta.get("header", "# Benchmarks"), "", *body, meta.get("body", "")]).rstrip() + "\n"
 
 
@@ -240,11 +242,50 @@ def _batch(path: Path) -> str:
     return next((name[:-len(cls) - 1] for cls in run.CLASSES if name.endswith(f"-{cls}")), name)
 
 
-def _notes(rows: list[dict], files: list[Path]) -> list[str]:
+def _jsonl(paths) -> list[dict]:
+    return [json.loads(line) for p in sorted(paths) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+@dataclass(frozen=True)
+class Results:
+    files: list[Path]
+    rows: list[dict]
+    aside: list[tuple[str, dict]]
+    archive: list[tuple[str, list[dict], int]]
+    configs: list[dict]
+    tasks: list[dict]
+    prices: dict
+    routers: frozenset[str]
+    own_model: frozenset[str]
+
+
+def router_ids(configs: list[dict]) -> frozenset[str]:
+    return frozenset(c["id"] for c in configs if c.get("plugin"))
+
+
+def load(paths: list[Path]) -> Results:
+    """Everything the page is built from, read once. The order and repeats of `paths` don't matter."""
+    files = sorted({p.resolve(): p for p in paths}.values())
+    rows = [dict(row, _batch=_batch(path)) for path in files for row in _jsonl([path])]
+    folders = sorted({f.parent for f in files})
+    aside = [(sub, row) for folder in folders for sub in ("infra", "limited") for row in _jsonl((folder / sub).glob("*.jsonl"))]
+    archive = []
+    for results in folders:
+        top = results / "archive"
+        for folder in sorted({top, *(p for p in top.glob("*") if p.is_dir())}) if top.is_dir() else []:
+            kept = _jsonl(folder.glob("*.jsonl"))
+            if kept:
+                lines = len(_jsonl([*folder.glob("infra/*.jsonl"), *folder.glob("limited/*.jsonl")]))
+                archive.append((folder.relative_to(results).as_posix(), kept, lines))
+    configs = run.load_configs()
+    prices = json.loads((run.PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["prices"]
+    return Results(files, rows, aside, archive, configs, run.load_tasks(), prices, router_ids(configs),
+                   frozenset(c["id"] for c in configs if c.get("model")))
+
+
+def _notes(results: Results) -> list[str]:
     """Page lines on runs set aside, router spend by agent type, and the batches each configuration's rows pool."""
-    found = [(sub, json.loads(line)) for folder in sorted({f.parent for f in files}) for sub in ("infra", "limited")
-             for path in sorted((folder / sub).glob("*.jsonl")) for line in path.read_text(encoding="utf-8").splitlines()
-             if line.strip()]
+    rows, found = results.rows, results.aside
     aside = [row for _, row in found]
     where = " and ".join(f"`bench/results/{sub}/`" for sub in sorted({sub for sub, _ in found}))
     lines = []
@@ -276,15 +317,14 @@ def _notes(rows: list[dict], files: list[Path]) -> list[str]:
                 f"{'main loop' if who == 'main' else f'`{who}`'} ${usd:.4f} ({usd / total:.0%})" for who, usd in order)
         lines.append("- Router spend by agent type, from the router's ledger (`agent_costs`), over the runs that "
                      "record it: " + "; ".join(share(c) for c in sorted(spend)) + ".")
-    for task in run.load_tasks():
+    for task in results.tasks:
         old = sum(r["task"] == task["id"] and r.get("task_revision", 1) < task.get("revision", 1) for r in rows)
         if old:
             changes = "; ".join(f"revision {n}: {why}" for n, why in sorted(task.get("revisions", {}).items()))
             lines.append(f"- `{task['id']}` is at revision {task['revision']}; {old} of its runs here ran on an "
                          f"earlier revision ({changes}), so they are not comparable with later runs of it.")
-    named = [t["id"] for t in run.load_tasks() if profile.signals(t["id"].lower())]
-    routed = {c["id"] for c in run.load_configs() if c.get("plugin")}
-    early = sum(r["config"] in routed and r["task"] in named and "task_revision" not in r for r in rows)
+    named = [t["id"] for t in results.tasks if profile.signals(t["id"].lower())]
+    early = sum(r["config"] in results.routers and r["task"] in named and "task_revision" not in r for r in rows)
     if named and early:
         lines.append(f"- Bias: {early} router-arm runs of the tasks named here were recorded while each run's "
                      "folder name held its task id, so a brief that quoted its working directory could give the "
@@ -299,8 +339,7 @@ def _notes(rows: list[dict], files: list[Path]) -> list[str]:
                      "in `duration_ms` (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md), and on many "
                      "rows here it falls well short of the gap to the next run's start (measured in "
                      "`docs/TEST_RESULTS.md`).")
-    plugin = {c["id"] for c in run.load_configs() if c.get("plugin")}
-    unrouted = sum(1 for r in rows if r["config"] in plugin and not isinstance(r.get("routed"), list))
+    unrouted = sum(1 for r in rows if r["config"] in results.routers and not isinstance(r.get("routed"), list))
     if unrouted:
         lines.append(f"- {unrouted} router run(s) here carry no `routed`, the router's spawn decisions: they were "
                      "recorded before the runner kept them. Their accuracy by level and escalation count as n/a, "
@@ -316,49 +355,38 @@ def _notes(rows: list[dict], files: list[Path]) -> list[str]:
     return lines
 
 
-def _jsonl(paths) -> list[dict]:
-    return [json.loads(line) for p in sorted(paths) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
-def _archived(files: list[Path], rows: list[dict]) -> list[str]:
+def _archived(results: Results) -> list[str]:
     """Each folder of rows kept under results/archive/, which no table reads, and why its rows are left out."""
-    commits = {r.get("bench_commit") for r in rows}
-    revisions = {t["id"]: t.get("revision", 1) for t in run.load_tasks()}
+    commits = {r.get("bench_commit") for r in results.rows}
+    revisions = {t["id"]: t.get("revision", 1) for t in results.tasks}
     lines = []
-    for results in sorted({f.parent for f in files}):
-        archive = results / "archive"
-        folders = sorted({archive, *(p for p in archive.glob("*") if p.is_dir())}) if archive.is_dir() else []
-        for folder in folders:
-            kept = _jsonl(folder.glob("*.jsonl"))
-            if not kept:
-                continue
-            aside = len(_jsonl([*folder.glob("infra/*.jsonl"), *folder.glob("limited/*.jsonl")]))
-            other = [r for r in kept if r.get("bench_commit") not in commits]
-            stale = sorted({r["task"] for r in kept if r.get("task_revision", 1) < revisions.get(r.get("task"), 1)})
-            reasons = []
-            if other:
-                reasons.append(f"{len(other)} ran on {len({r.get('bench_commit') for r in other})} other commits "
-                               "(older builds of the router and the bench)")
-            if stale:
-                n = sum(r.get("task_revision", 1) < revisions.get(r.get("task"), 1) for r in kept)
-                reasons.append(f"{n} on an earlier revision of " + ", ".join(f"`{t}`" for t in stale))
-            unnamed = sum("task_revision" not in r for r in kept)
-            if unnamed:
-                reasons.append(f"{unnamed} were recorded while the run's folder name held its task id")
-            listed = (", ".join(reasons[:-1]) + ", and " + reasons[-1]) if len(reasons) > 1 else "".join(reasons)
-            lines.append(f"- `bench/results/{folder.relative_to(results).as_posix()}/` holds {len(kept)} rows left out "
-                         "of every table" + (f", plus {aside} set-aside line{'s' * (aside != 1)} under its `infra/` and "
-                                             "`limited/`" if aside else "") + (f": {listed}." if listed else "."))
+    for folder, kept, aside in results.archive:
+        other = [r for r in kept if r.get("bench_commit") not in commits]
+        stale = sorted({r["task"] for r in kept if r.get("task_revision", 1) < revisions.get(r.get("task"), 1)})
+        reasons = []
+        if other:
+            reasons.append(f"{len(other)} ran on {len({r.get('bench_commit') for r in other})} other commits "
+                           "(older builds of the router and the bench)")
+        if stale:
+            n = sum(r.get("task_revision", 1) < revisions.get(r.get("task"), 1) for r in kept)
+            reasons.append(f"{n} on an earlier revision of " + ", ".join(f"`{t}`" for t in stale))
+        unnamed = sum("task_revision" not in r for r in kept)
+        if unnamed:
+            reasons.append(f"{unnamed} were recorded while the run's folder name held its task id")
+        listed = (", ".join(reasons[:-1]) + ", and " + reasons[-1]) if len(reasons) > 1 else "".join(reasons)
+        lines.append(f"- `bench/results/{folder}/` holds {len(kept)} rows left out "
+                     "of every table" + (f", plus {aside} set-aside line{'s' * (aside != 1)} under its `infra/` and "
+                                         "`limited/`" if aside else "") + (f": {listed}." if listed else "."))
     return lines + [""] if lines else []
 
 
-def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
+def _page(results: Results, summary: list[dict]) -> dict:
+    rows, files, tasks = results.rows, results.files, results.tasks
     total = sum(r["total_cost_usd"] for r in rows)
     versions = sorted({r["claude_version"] for r in rows})
     main = sorted({r["main_model"] for r in rows})
     dates = sorted(r["started_at"][:10] for r in rows)
-    configs = {c["id"]: c["description"] for c in run.load_configs()}
-    tasks = run.load_tasks()
+    configs = {c["id"]: c["description"] for c in results.configs}
     used = sorted({r["config"] for r in rows})
     models: dict[str, list[float]] = {}
     agents: dict[str, dict[str, int]] = {}
@@ -371,8 +399,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
     stale = sum(1 for r in rows if "plugin_state" not in r)
     unsaved = sum(1 for r in rows if "sessions_saved" not in r)
     borrowed = sum(1 for r in rows if r.get("plugin_state") is not None and "plugin_data_own" not in r)
-    prices = json.loads((run.PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["prices"]
-    plan = estimate(rows, tasks, run.load_configs(), prices)
+    plan = estimate(rows, tasks, results.configs, results.prices)
     budget = max((r.get("budget_usd") or 0.5 for r in rows), default=0.5)
     header = "\n".join([
         "<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->\n<p align=\"center\"><img src=\"assets/banner-benchmarks.svg\" width=\"880\" alt=\"Benchmarks: What does a solved task cost, with and without it?\"></p>\n\n<p align=\"center\"><a href=\"../README.md\">Model Router</a> &nbsp;&middot;&nbsp; <a href=\"README.md\">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href=\"SECURITY.md\">Security</a> &nbsp;&middot;&nbsp; Next: <a href=\"TEST_RESULTS.md\">Test results</a></p>\n<!-- End of page head. -->", "", "# Benchmarks", "",
@@ -414,7 +441,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         "- Agents started, by configuration: "
         + "; ".join(f"`{c}` " + ", ".join(f"{name} x{n}" for name, n in sorted(agents.get(c, {}).items()))
                     for c in used) + ".",
-        *_notes(rows, files),
+        *_notes(results),
         "- Shape: a single agent. The session hands each task to one subagent with the Agent tool and relays its "
         "answer, so the subagent is what each configuration changes.",
         "- Each run starts in a fresh copy of the task's files, outside any repository, with "
@@ -462,7 +489,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         "and passes on a reference answer (`tests/test_bench.py`).", "",
         "## Raw data and commands", "",
         *[f"- [`bench/results/{f.name}`](../bench/results/{f.name})" for f in files], "",
-        *_archived(files, rows),
+        *_archived(results),
         "```bash",
         "python3 bench/run.py --tasks <ids> --configs <ids> --runs <n> --budget 0.5 --max-total <usd> "
         "--out bench/results/<name>.jsonl",
@@ -483,7 +510,7 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
         f"${plan['runs'] * budget:,.2f} before overshoot, which has no fixed limit; only `--max-total` stops "
         "spend. The full suite needs the maintainer's go-ahead before it runs.", "",
         "Defined in `bench/configs.json` but not run here: "
-        + (", ".join(f"`{c['id']}`" for c in run.load_configs() if c["id"] not in used) or "none") + ".", "",
+        + (", ".join(f"`{c['id']}`" for c in results.configs if c["id"] not in used) or "none") + ".", "",
         "Not covered yet: the fan-out, workflow, team and redo shapes; a cold and a warm prompt cache measured "
         "apart; router overhead per spawn and per turn; and each `priority` setting. `opusplan` in a headless `dontAsk` run never enters plan mode, so it runs Sonnet "
         "throughout (https://code.claude.com/docs/en/model-config.md#opusplan-model-setting, "
@@ -494,19 +521,30 @@ def _page(rows: list[dict], files: list[Path], summary: list[dict]) -> dict:
     return {"header": header, "body": body}
 
 
+def build_page(results: Results, router: str | None = None) -> str:
+    parts = sessions(results, router)
+    summary = [row for _, _, part, _ in parts for row in part]
+    return render_sessions(parts, _page(results, summary), results.routers)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("results", nargs="+", type=Path)
     parser.add_argument("--router", help="the router configuration (default: per session model, the first "
                                              "configuration in configs.json that loads the plugin)")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--check", action="store_true", help="fail when --out differs from the page the results give")
     args = parser.parse_args(argv)
-    rows = [dict(json.loads(line), _batch=_batch(path)) for path in args.results
-            for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    parts = sessions(rows, router=args.router)
-    summary = [row for _, _, part, _ in parts for row in part]
-    args.out.write_text(render_sessions(parts, _page(rows, sorted(args.results), summary)), encoding="utf-8")
-    return 0
+    page = build_page(load(args.results), args.router)
+    if not args.check:
+        args.out.write_text(page, encoding="utf-8")
+        return 0
+    # As text, so a checkout that turned the page's line endings to CRLF still matches.
+    if args.out.is_file() and args.out.read_text(encoding="utf-8") == page:
+        return 0
+    print(f"{args.out}: out of date, run python3 bench/analyze.py bench/results/*.jsonl --out {args.out}",
+          file=sys.stderr)
+    return 1
 
 
 if __name__ == "__main__":
