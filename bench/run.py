@@ -125,6 +125,16 @@ def rate_limited(row: dict) -> bool:
     return refusal(row) is not None
 
 
+def grade(check: Path, work: Path, answer: Path, timeout: int = 120) -> bool:
+    """Whether the task's check passes. -I keeps the check's folder and the work dir off sys.path and ignores
+    PYTHON* variables, so code a run left behind can't shadow what the check imports."""
+    try:
+        return subprocess.run([sys.executable, "-I", str(check), str(work), str(answer)], capture_output=True,
+                              timeout=timeout).returncode == 0
+    except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
+        return False
+
+
 def can_start(spent: float, budget: float, max_total: float) -> bool:
     # A run can pass --max-budget-usd by one response plus what running subagents spend before they stop, so
     # this leaves room for twice its cap. That is a margin, not a bound.
@@ -251,11 +261,7 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
         result = {}
     answer = result.get("result") or ""
     (scratch / "answer.txt").write_text(answer, encoding="utf-8")
-    try:
-        passed = subprocess.run([sys.executable, str(task["dir"] / "check.py"), str(work), str(scratch / "answer.txt")],
-                                capture_output=True, text=True, timeout=120).returncode == 0
-    except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
-        passed = False
+    passed = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
     ledger = ledger_rows(env) if config.get("plugin") else None
     types = agent_types(work, env) if config.get("plugin") else {}
     kept = None

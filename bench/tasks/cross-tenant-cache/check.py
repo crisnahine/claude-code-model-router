@@ -1,11 +1,16 @@
 """Pass when prices, invalidation, deletion, bulk refresh, the sweep and the cache report are per tenant, for
 any ids."""
-import importlib
+import importlib.util
 import sys
 from pathlib import Path
 
+_spec = importlib.util.spec_from_file_location("passcheck", Path(__file__).resolve().parent.parent / "passcheck.py")
+passcheck = importlib.util.module_from_spec(_spec)
+sys.modules["passcheck"] = passcheck
+_spec.loader.exec_module(passcheck)
+
 WORK = Path(sys.argv[1])
-sys.path.insert(0, str(WORK))  # after the stdlib imports, so the work dir can't replace them
+passcheck.use_work(WORK)
 
 try:
     db = importlib.import_module("catalog.db")

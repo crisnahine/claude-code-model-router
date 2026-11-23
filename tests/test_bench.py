@@ -15,7 +15,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bench"))
+sys.path.insert(0, str(ROOT / "bench" / "tasks"))
 import analyze  # noqa: E402
+import passcheck  # noqa: E402
 import run  # noqa: E402
 
 
@@ -473,9 +475,7 @@ class Tasks(unittest.TestCase):
     def check(self, task, workdir, answer):
         result = Path(workdir) / ".." / "result.txt"
         result.write_text(answer, encoding="utf-8")
-        res = subprocess.run([sys.executable, str(task["dir"] / "check.py"), str(workdir), str(result)],
-                             capture_output=True, text=True, timeout=60)
-        return res.returncode == 0
+        return run.grade(task["dir"] / "check.py", Path(workdir), result, timeout=60)
 
     def test_every_task_has_a_known_class_and_a_check_that_tells_right_from_wrong(self):
         tasks = run.load_tasks()
@@ -1024,6 +1024,82 @@ class TaskIdentity(unittest.TestCase):
         self.assertIn("`design-cache-invalidation`", page.split("- Bias: ")[1].split("\n")[0])
 
 
+class Isolation(unittest.TestCase):
+    """Code a run leaves behind can't shadow the check's modules or fake a pass."""
+
+    PLANT = 'import sys\nsys.stderr.write("Ran 1 test\\n\\nOK\\n")\nimport os\nos._exit(0)\n'
+    FAILS = "import unittest\n\n\nclass T(unittest.TestCase):\n    def test_x(self):\n        self.fail('no')\n"
+    PASSES = "import unittest\n\n\nclass T(unittest.TestCase):\n    def test_x(self):\n        pass\n"
+
+    def test_tests_pass_ignores_a_planted_unittest_and_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "shipped", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            for text, want in ((self.FAILS, False), (self.PASSES, True)):
+                (shipped / "test_x.py").write_text(text, encoding="utf-8")
+                (work / "test_x.py").write_text(text, encoding="utf-8")
+                for name in ("unittest.py", "json.py"):
+                    (work / name).write_text(self.PLANT, encoding="utf-8")
+                self.assertEqual(passcheck.tests_pass(work, shipped, "test_x.py"), want)
+
+    def test_tests_pass_needs_the_shipped_test_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "shipped", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            (shipped / "test_x.py").write_text(self.FAILS, encoding="utf-8")
+            (work / "test_x.py").write_text(self.PASSES, encoding="utf-8")
+            self.assertFalse(passcheck.tests_pass(work, shipped, "test_x.py"))
+
+    def test_planted_stdlib_names_cannot_fake_a_pass(self):
+        for task in run.load_tasks():
+            with self.subTest(task=task["id"]), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp) / "work"
+                shutil.copytree(task["dir"] / "repo", work)
+                for name in ("json.py", "unittest.py"):
+                    (work / name).write_text(self.PLANT, encoding="utf-8")
+                answer = Path(tmp) / "answer.txt"
+                answer.write_text(task.get("wrong_answer", ""), encoding="utf-8")
+                self.assertFalse(run.grade(task["dir"] / "check.py", work, answer))
+                if (task["dir"] / "solution").is_dir():  # the same planted files don't cost an honest run its pass
+                    shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
+                    answer.write_text(task.get("reference_answer", ""), encoding="utf-8")
+                    self.assertTrue(run.grade(task["dir"] / "check.py", work, answer))
+
+    def test_a_check_runs_isolated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            check = Path(tmp) / "check.py"
+            check.write_text("import sys\nsys.exit(0 if sys.flags.isolated else 1)\n", encoding="utf-8")
+            self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt"))
+
+    def test_a_check_that_hangs_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            check = Path(tmp) / "check.py"
+            check.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+            self.assertFalse(run.grade(check, Path(tmp), Path(tmp) / "answer.txt", timeout=1))
+
+    def test_no_work_module_name_resolves_without_the_work_dir(self):
+        names = set()
+        for task in run.load_tasks():
+            for folder in ("repo", "solution"):
+                if (task["dir"] / folder).is_dir():
+                    names |= {p.stem if p.is_file() else p.name for p in (task["dir"] / folder).iterdir()
+                              if p.suffix == ".py" or p.is_dir()}
+        names.discard("__pycache__")
+        res = subprocess.run([sys.executable, "-I", "-c", "import importlib.util, sys; "
+                              "print([n for n in sys.argv[1:] if importlib.util.find_spec(n)])", *sorted(names)],
+                             capture_output=True, text=True)
+        self.assertEqual(res.stdout.strip(), "[]")
+
+    def test_checks_load_the_helper_by_path_and_append_the_work_dir(self):
+        for check in (run.BENCH / "tasks").glob("*/check.py"):
+            text = check.read_text(encoding="utf-8")
+            self.assertNotIn("sys.path.insert", text, check)
+            if "passcheck" in text:
+                self.assertIn('sys.modules["passcheck"] = passcheck', text, check)
+
+
 class Pilot(unittest.TestCase):
     def test_the_committed_page_is_what_analyze_writes(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
@@ -1050,8 +1126,7 @@ class Pilot(unittest.TestCase):
                     answer = Path(tmp) / "answer.txt"
                     answer.write_text(row["answer"], encoding="utf-8")
                     check = ROOT / "bench" / "tasks" / row["task"] / "check.py"
-                    res = subprocess.run([sys.executable, str(check), tmp, str(answer)], capture_output=True)
-                    self.assertEqual(res.returncode == 0, row["passed"], row["config"])
+                    self.assertEqual(run.grade(check, Path(tmp), answer), row["passed"], row["config"])
 
 
 class HardTier(unittest.TestCase):
