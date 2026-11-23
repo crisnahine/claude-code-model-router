@@ -5199,6 +5199,18 @@ class SecurityClaims(Sandbox):
         self.assertIn("saga", config.available())
         self.assertNotIn("saga", config.available(cap="sonnet"))
 
+    def test_a_project_model_is_never_the_routers_pick(self):
+        shipped = cfg.load()
+        self.override({"models": {"gpt-mini": {"strength": 9, "cost": 0, "speed": 9}, "saga": {"strength": 2.5}}})
+        config = cfg.load()
+        for priority in cfg.PRIORITIES:
+            for level in Level:
+                with self.subTest(priority=priority, level=level):
+                    self.assertEqual(ladder.pick(config, level, priority, config.available(), {}),
+                                     ladder.pick(shipped, level, priority, shipped.available(), {}))
+        self.session_on("claude-opus-5-5")
+        self.assertEqual(self.decide("general-purpose", HARD, model="gpt-mini")["model"], "gpt-mini")
+
     def test_it_writes_only_under_its_data_directory(self):
         outside = [self.home, self.project]
         before = {p: p.stat().st_mtime_ns for root in outside for p in root.rglob("*")}

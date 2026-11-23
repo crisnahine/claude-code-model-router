@@ -141,10 +141,12 @@ class Registry:
 
     def select(self, needs: float, priority: str, usable: list[str]) -> str | None:
         """balanced: the cheapest model strong enough. quality: one step stronger than needed.
-        fast: one step below, and the quickest of what qualifies."""
+        fast: one step below, and the quickest of what qualifies. A model a repository added is
+        never picked: its rank, cost and speed are only that repository's claim."""
+        usable = [n for n in usable if self.models[n].trusted]
         if not usable:
             return None
-        steps = sorted({self.strength(n) for n in self.models})
+        steps = sorted({self.strength(n) for n, m in self.models.items() if m.trusted})
         floor, top = steps[0], self.strength(usable[-1])
 
         def step(value: float, by: int) -> float:
