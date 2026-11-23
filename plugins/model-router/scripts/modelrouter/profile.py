@@ -66,8 +66,14 @@ _CHANGE = rf"\b{_CHANGE_VERB}"
 # often a noun ends it only with an object after it, so "the config and build scripts" doesn't,
 # and no verb ends it as the first half of a compound noun such as "debug logs" or "audit trails".
 _JUDGMENT_VERBS = r"review|audit|design|plan|evaluate|assess|propose"
-_HUNT_OTHER = (r"diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|prove|"
-               r"verify the logic|figure out")
+# Only nouns that form a compound with these verbs; scripts, builds, records and the like are their objects.
+_COMPOUND = r"\s+(?:logs?|output|trails?|notes?|mode|flags?|messages?|statements?|info|guides?|reports?)\b"
+# "Find why it fails" or "find the race" hunts a defect; "find the regression tests" or "the bug template" looks one up.
+_FIND_DEFECT = (r"find(?:s|ing)?\s+(?:out\s+)?why|find(?:s|ing)?\s+(?:the|a|an|this|that)\s+(?:[\w-]+\s+)?"
+                r"(?:bugs?|race(?:\s+conditions?)?|races|leaks?|deadlocks?|regressions?|crash(?:es)?|culprits?|"
+                rf"causes?)\b(?!-|{_COMPOUND}|\s+(?:tests?|suites?|templates?|trackers?|tickets?|labels?|fix\w*)\b)")
+_HUNT_OTHER = (rf"diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|prove|"
+               rf"verify the logic|figure out|{_FIND_DEFECT}")
 _HUNT_VERBS = rf"debug|{_HUNT_OTHER}"
 _REASONING_WORDS = (rf"{_JUDGMENT_VERBS}|{_HUNT_VERBS}|find out (?:why|how|whether|what caus\w*)|root.?caus\w*|"
                     r"compare|recommend")
@@ -78,8 +84,6 @@ _TASK_VERB = (r"(?:implement|fix|refactor|rename|migrate|optimi[sz]e|rewrite|con
               rf"{_HUNT_VERBS}|encrypt|harden|bump)\b(?!-)")
 _NOUN_VERB = (r"(?:build|update|change|design|plan|review|add|write|create|delete|remove|replace|make(?! sure)|"
               r"root.?caus\w*|port|limit|secure|escape)\b(?!-)")
-# Only nouns that form a compound with these verbs; scripts, builds, records and the like are their objects.
-_COMPOUND = r"\s+(?:logs?|output|trails?|notes?|mode|flags?|messages?|statements?|info|guides?|reports?)\b"
 _LIMIT_WORD = rf"(?:{_CHANGE_VERB}|(?:edit|modify|move|touch|{_REASONING_WORDS})\b(?!-))"
 # Only where a whole token starts: a \b inside "a-b-c" would rescan the rest of the run at every hyphen.
 _JOIN = (rf"(?<![\w'-])(?!{_LIMIT_WORD})[\w'-]+\s+(?:and|then)\s+(?:(?:also|then|instead|please|just)\s+){{0,2}}"
@@ -218,7 +222,8 @@ def _fixes_a_defect(asked: str, request: bool = False) -> bool:
     asked = re.sub(_RULED_OUT, "", asked)
     if not request:
         return bool(re.search(_DEFECT, asked))
-    return bool(re.search(_FIX, asked) or re.search(_HUNT, asked) and re.search(_DEFECT_NOUN, asked))
+    return bool(re.search(_FIX, asked) or re.search(rf"\b(?:{_FIND_DEFECT})", asked)
+                or re.search(_HUNT, asked) and re.search(_DEFECT_NOUN, asked))
 
 
 @dataclass(frozen=True)

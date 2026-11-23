@@ -1480,6 +1480,23 @@ class Profile(unittest.TestCase):
             self.assertEqual(result["level"], "standard", description)
             self.assertNotIn("fixes or hunts a defect", result["signals"], description)
 
+    def test_finding_why_or_finding_a_defect_hunts_one(self):
+        for brief in ("Find why the checkout total is wrong",
+                      "Find the race condition between the api and worker services that drops jobs",
+                      "Find why the build is slow.", "Find the bug in parse_date.", "Find the leak in the worker.",
+                      "Find the regression.", "Find out why the nightly export fails."):
+            self.assertEqual(self.level(brief), "complex", brief)
+            self.assertEqual(profile.profile_prompt(brief)["level"], "complex", brief)
+        for brief in ("Find where the auth middleware is defined", "Find all callers of parse_date",
+                      "Find the file that defines the User model", "Find the files that import auth",
+                      "Find the regression tests for the parser.", "Find the bug report template.",
+                      "Do not find the bug, just list the failing tests."):
+            self.assertEqual(self.level(brief), "lookup", brief)
+        for brief in ("Rename the helper. Avoid finding the bug in the tests.",
+                      "Rename the helper. Do not find why the tests fail."):
+            self.assertEqual(self.level(brief), "standard", brief)
+            self.assertNotEqual(profile.profile_prompt(brief)["level"], "complex", brief)
+
     def test_a_fix_the_brief_rules_out_does_not_floor_it(self):
         for brief in ("Rename the helper. Avoid fixing the unrelated tests.",
                       "Rename the helper. You must not fix the tests.",
@@ -4130,6 +4147,19 @@ class Reports(Sandbox):
             self.assertIn(f"Level: **{d['level']}**", text)
             self.assertIn(f"Model: **{d['model'] or 'left as it is'}**, effort: {d['effort'] or 'unchanged'}.", text)
             self.assertIn(f"Why: {d['reason']}.", text)
+
+    def test_explain_reads_a_find_that_hunts_a_defect_as_complex_and_a_find_that_looks_up_as_lookup(self):
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        for brief, level, model, request in (
+                ("Find why the checkout total is wrong", "complex", "opus", "complex"),
+                ("Find the race condition between the api and worker services that drops jobs",
+                 "complex", "opus", "complex"),
+                ("Find where the auth middleware is defined", "lookup", "haiku", "standard"),
+                ("Find all callers of parse_date", "lookup", "haiku", "lookup"),
+                ("Find the file that defines the User model", "lookup", "haiku", "lookup")):
+            d = spawn.decide({"session_id": "s1", "tool_input": {"prompt": brief}}, snap).decision
+            self.assertEqual((d["level"], d["model"]), (level, model), brief)
+            self.assertIn(f"As your own request it reads **{request}**", report.explain(snap, brief), brief)
 
     def test_explain_reports_the_rules_the_old_profile_and_ladder_copy_missed(self):
         self.override({"agents": {"quiet": {"route": False}}}, user=True)
