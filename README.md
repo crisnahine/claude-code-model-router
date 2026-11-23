@@ -105,7 +105,7 @@ On an Opus 5.5 session, the default model for every account type but Microsoft F
 
 On a Sonnet session the router is behind. It is cheapest only in <!-- bench:sonnet.pass_classes -->lookup<!-- /bench --> (<!-- bench:sonnet.less.defaults.min -->24<!-- /bench -->% less than the defaults, PASS), and in the other <!-- bench:sonnet.status.FAIL -->7<!-- /bench --> classes it costs <!-- bench:sonnet.behind.min -->7<!-- /bench --> to <!-- bench:sonnet.behind.max -->63<!-- /bench -->% more per solved task than the best baseline at the same pass rate (FAIL). On these tasks the cheapest models already solve nearly every run, so the router's Sonnet and Opus picks for harder subtasks cost more without a pass-rate gain to show. [Release readiness](docs/RELEASE_READINESS.md) says why, and the [roadmap](docs/ROADMAP.md) says what comes next: a harder task tier.
 
-The router ran the routing code at commit <!-- bench:opus.commit_code -->`780ee86`<!-- /bench -->, <!-- bench:per_cell -->10<!-- /bench --> runs per class and configuration, beside every baseline on the same Claude Code version and tasks. [BENCHMARKS.md](docs/BENCHMARKS.md) has every table, the raw data and the commands to rerun it.
+The router ran the routing code at commit <!-- bench:opus.commit_code -->`780ee86`<!-- /bench -->, <!-- bench:per_cell -->10<!-- /bench --> runs per class and configuration, beside every baseline on the same Claude Code version and tasks. That run had `verify_gate` off and ran complex on Sonnet; the verify gate is now on by default and complex now runs on Opus, so these figures don't describe the current defaults. [BENCHMARKS.md](docs/BENCHMARKS.md) has every table, the raw data and the commands to rerun it.
 
 ## Commands
 
