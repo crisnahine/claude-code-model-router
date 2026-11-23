@@ -107,12 +107,10 @@ def escalation(reg: Registry, hook_input: dict) -> str | None:
         return None
     need = entry.need
     # On a session's first prompt the model isn't known yet; by now the transcript has it.
-    current = (reg.family(session.model(session_id, hook_input.get("transcript_path")))
-               or entry.session_tier)
-    if not current or not need or reg.strength(current) >= reg.strength(need):
+    model = session.model(session_id, hook_input.get("transcript_path"))
+    if not entry.below(reg, model) or reg.strength(entry.top_spawn) >= reg.strength(need):
         return None
-    if reg.strength(entry.top_spawn) >= reg.strength(need):
-        return None
+    current = reg.family(model) or entry.session_tier
     try:
         request.mark_escalation(session_id, current)
     except OSError:

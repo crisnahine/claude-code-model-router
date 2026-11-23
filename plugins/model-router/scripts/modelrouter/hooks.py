@@ -11,22 +11,6 @@ from . import allowlist, calls, fallback, gates, health, intake, learn, ledger, 
 from . import config as cfg
 from .registry import Registry
 
-_NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
-
-
-def named_model(reg: Registry, prompt: str) -> str | None:
-    """A model the user may be asking for: "use opus", "run this on haiku". These are
-    ordinary words too, so this only prompts Claude to decide; it forces nothing."""
-    names = "|".join(re.escape(n) for n in reg.models)
-    if not names:
-        return None
-    text = (prompt or "").lower()
-    pattern = r"\b(?:use|using|with|on|via|to)\s+(?:the\s+)?(?:claude\s+)?(%s)\b(?!\s*(?:agent|subagent)s?\b)" % names
-    for match in re.finditer(pattern, text):
-        if not _NEGATION.search(text[max(0, match.start() - 40):match.start()]):
-            return match.group(1)
-    return None
-
 
 def _context(event: str, text: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
@@ -110,14 +94,11 @@ def user_prompt(hook_input: dict) -> dict | None:
             pass
     if not seen.person:
         return None
-    level = seen.level
-    pick = snap.pick(level)
-    need = pick.model
-    current = reg.family(session.model(session_id, hook_input.get("transcript_path")))
-    below = bool(current and need and reg.strength(current) < reg.strength(need))
-    wanted = named_model(reg, prompt)
-    request.start(session_id, prompt_id=hook_input.get("prompt_id"), level=level, need=need, below=below,
-                  session_tier=current, named=wanted)
+    model = session.model(session_id, hook_input.get("transcript_path"))
+    started = request.start(session_id, seen, reg, model, snap.usable, snap.raises, priority=options.priority,
+                            prompt_id=hook_input.get("prompt_id"), named=request.named_model(reg, prompt))
+    level, need, current, wanted = started.level, started.need, started.session_tier, started.named
+    below = started.below(reg, model)
     why = f" (wording suggests: {', '.join(seen.signals)})" if seen.signals else ""
     notes = []
     if mode == "advise":
@@ -345,10 +326,16 @@ def mod_turn(hook_input: dict) -> dict | None:
     allowlist.remember(session_id, hook_input.get("settings"))
     snap = settings.Snapshot(hook_input)
     reg, options = snap.registry, snap.options
+    seen = intake.from_turn(hook_input.get("text"), hook_input.get("command"), hook_input.get("origin"))
+    if options.mode != "off" and seen.person and seen.command:
+        # The level is the request's, which the floor and the Stop check read, whatever the effort switches say.
+        try:
+            request.raise_to(session_id, seen, reg, snap.usable, snap.raises, priority=options.priority)
+        except OSError:
+            pass
     if (options.mode != "auto" or not options.main_effort or options.effort_level
             or hook_input.get("first_party") is False):
         return None
-    seen = intake.from_turn(hook_input.get("text"), hook_input.get("command"), hook_input.get("origin"))
     if not seen.person:
         return None
     # The mod's live model, when it is an ID; a record can miss a fallback to another model.

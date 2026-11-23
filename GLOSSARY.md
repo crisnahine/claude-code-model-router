@@ -64,7 +64,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Intake**: the step that decides whether a prompt or a turn is the person's request and at what level (`intake.py`). A teammate's report, another session's message and a background notification are not. A typed skill is read from its arguments and its body, which the settings hook reads from the skill's file: under `.claude` for a project or user skill, in the plugin's install folder for a plugin's (this plugin's own, or one named in Claude Code's install record). A plugin's skill whose file isn't found is read from its arguments alone.
 
-**Request**: one prompt from the user and the turns it starts. Redos count only within one request. Its record is kept by `request.py`.
+**Request**: one prompt from the user and the turns it starts. Redos count only within one request. Its record is kept by `request.py`. Its level is set by the settings hook's `UserPromptSubmit` reading, which starts it, and the mod's `turn.start` reading of a typed command's rendered body, which can only raise it: never lower it, start one or raise from a turn that isn't the person's, and only when the turn is a typed command, since plain turn text may carry other hooks' context. The level drives the strong-agent floor, the hand-off note and the Stop check, whatever the `main_effort` option says. `Request.below` says whether the session's model is weaker than the request needs.
 
 **Ledger** (`ledger.py`): the append-only log of every spawn, result, turn effort and turn's spend, with the reason for each decision. A result row names the models of a swapped run in `models_used`.
 

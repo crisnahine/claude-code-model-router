@@ -1904,7 +1904,7 @@ class Router(Sandbox):
         self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("frontier", "fable", "hardest"))
         check = "Check this proposed fix for the duplicate charge problem and improve it: add a lock."
         self.assertEqual(self.decide("model-router:architect", check, model="sonnet")["model"], "sonnet")
-        request.start("s1", prompt_id=None, level="frontier", need=None, below=False, session_tier=None, named=None)
+        request.begin("s1", prompt_id=None, level="frontier", need=None, session_tier=None, named=None)
         self.assertEqual(self.decide("model-router:deep-solver", check)["level"], "frontier")
         self.options(max_tier="sonnet")
         self.assertEqual(self.decide("model-router:architect", check)["model"], "sonnet")
@@ -2371,7 +2371,7 @@ class Calls(Sandbox):
         self.assertIsNotNone(calls.finished_run("s1", key))
         with self.clock_at(self.clock + calls.REDO_WINDOW + 1):
             self.assertIsNone(calls.finished_run("s1", key))
-        request.start("s1", prompt_id="p1", level="lookup", need="haiku", below=False, session_tier=None, named=None)
+        request.begin("s1", prompt_id="p1", level="lookup", need="haiku", session_tier=None, named=None)
         self.assertIsNone(calls.finished_run("s1", key))
 
 
@@ -2432,7 +2432,7 @@ class Request(Sandbox):
         self.config = cfg.load()
 
     def start(self, **fields):
-        request.start("s1", **{"prompt_id": "p1", "level": "hardest", "need": "opus", "below": False,
+        request.begin("s1", **{"prompt_id": "p1", "level": "hardest", "need": "opus",
                                "session_tier": "sonnet", "named": None, **fields})
 
     def note(self, key, model, source, level="lookup"):
@@ -3156,7 +3156,7 @@ class Feedback(Sandbox):
             learn.decided(cfg.load(), source="caller", level="complex", pick="opus", runs_on="fable")
         hooks.user_prompt({"session_id": "s1", "prompt": HARD})  # opus would do, but complex is raised
         entry = request.load("s1")
-        self.assertEqual((entry.level, entry.need, entry.below), ("complex", "fable", True))
+        self.assertEqual((entry.level, entry.need, entry.below(cfg.load(), "claude-sonnet-5-5")), ("complex", "fable", True))
         self.assertIn("fable-level reasoning", hooks.stop({"session_id": "s1"})["reason"])
         text = hooks.user_prompt({"session_id": "s1", "prompt": HARD})["hookSpecificOutput"]["additionalContext"]
         self.assertIn("about fable-level reasoning, and this conversation runs on sonnet", text)
@@ -3311,7 +3311,7 @@ class Hooks(Sandbox):
         # By name only: the router routes the hand-off's brief, and its redo can climb.
         self.assertIn("model-router:architect can give the plan", text)
         self.assertNotIn('model: "', text)
-        self.assertTrue(request.load("s1").below)
+        self.assertTrue(request.load("s1").below(cfg.load(), "claude-haiku-5-5"))
 
     def test_machine_written_turns_dont_reset_the_request(self):
         self.session_on("claude-haiku-5-5")
@@ -3334,10 +3334,10 @@ class Hooks(Sandbox):
         self.assertIn("If it asks for that model", text)
         self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")  # nothing is forced
         config = cfg.load()
-        self.assertEqual(hooks.named_model(config, "Use Opus for the review"), "opus")
-        self.assertEqual(hooks.named_model(config, "run this on claude fable please"), "fable")
+        self.assertEqual(request.named_model(config, "Use Opus for the review"), "opus")
+        self.assertEqual(request.named_model(config, "run this on claude fable please"), "fable")
         for prompt in ("don't use opus for this", "the haiku about autumn", "work with the opus agent"):
-            self.assertIsNone(hooks.named_model(config, prompt), prompt)
+            self.assertIsNone(request.named_model(config, prompt), prompt)
 
     def test_advise_mode_gives_the_estimate(self):
         self.options(routing_mode="advise")
@@ -3991,7 +3991,7 @@ class Reports(Sandbox):
         self.assertIn("pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE", self.out("explain", *LOOKUP.split()))
         for name in ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_CODE_SUBAGENT_MODEL"):
             del os.environ[name]
-        request.start("s1", prompt_id="p1", level="hardest", need="opus", below=False, session_tier=None, named=None)
+        request.begin("s1", prompt_id="p1", level="hardest", need="opus", session_tier=None, named=None)
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
         text = report.explain(snap, LOOKUP, "model-router:architect")
         self.assertIn("Level: **hardest**", text)  # the request's floor reaches a strong role agent
@@ -4061,7 +4061,7 @@ class StateFiles(Sandbox):
 
     def test_state_files_carry_a_schema_version_that_reads_never_see(self):
         store.update_state(lambda state: state.update(max_tier="opus"))
-        request.start("s1", prompt_id=None, level="lookup", need=None, below=False, session_tier=None, named=None)
+        request.begin("s1", prompt_id=None, level="lookup", need=None, session_tier=None, named=None)
         self.assertEqual(json.loads((self.data / "state.json").read_text())["schema"], store.SCHEMA)
         self.assertEqual(json.loads((self.data / "prompts.json").read_text())["schema"], store.SCHEMA)
         self.assertEqual(store.load_state(), {"max_tier": "opus"})
@@ -4258,6 +4258,40 @@ class SlashSkills(Sandbox):
                              ("/other:go 482", "lookup")):
             with self.subTest(typed=typed):
                 self.assertEqual(intake.from_prompt(typed, self.project).level, level)
+
+    def test_the_mod_raises_the_request_where_the_settings_hook_saw_less(self):
+        self.options(main_effort="false")
+        self.session_on("claude-haiku-5-5")
+        # Not an installed plugin, so UserPromptSubmit sees only the arguments.
+        self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": "/acme:hard 1234"}))
+        self.assertEqual(request.load("s1").level, "lookup")
+        appended = self.HARD_BODY + "\n\n\nARGUMENTS: 1234"  # no placeholder took them
+        self.assertIsNone(self.turn("acme:hard", "1234", appended))  # main_effort is off: no effort
+        entry = request.load("s1")
+        self.assertEqual((entry.level, entry.need), ("hardest", "opus"))
+        self.assertEqual(self.decide("model-router:architect", LOOKUP)["level"], "hardest")  # the floor
+        self.assertIn("model-router:architect", hooks.stop({"session_id": "s1"})["reason"])
+
+    def test_a_turn_only_raises_and_only_for_a_typed_command_of_the_person(self):
+        self.session_on("claude-haiku-5-5")
+        self.turn("acme:hard", "1234", self.HARD_BODY)
+        self.assertIsNone(request.load("s1").level)  # a turn never starts a request
+        hooks.user_prompt({"session_id": "s1", "prompt": "/acme:hard 1234"})
+        for text, command in ((HARD, None), (f'Another Claude session sent a message:\n<teammate-message id="a">\n{HARD}\n</teammate-message>', None),
+                               (self.LINE.format("hard", ""), {"name": "hard", "args": "", "body": self.HARD_BODY})):
+            for origin in ("composer", "peer"):
+                if command and origin == "composer":
+                    continue
+                hooks.mod_turn({"session_id": "s1", "text": text, "command": command, "origin": origin})
+                self.assertEqual(request.load("s1").level, "lookup", (text[:30], origin))
+        self.options(routing_mode="off")
+        self.turn("hard", "", self.HARD_BODY)
+        self.assertEqual(request.load("s1").level, "lookup")
+        self.options(routing_mode="auto")
+        self.turn("hard", "", self.HARD_BODY)
+        self.assertEqual(request.load("s1").level, "hardest")
+        self.turn("where", "", self.LOOKUP_BODY)
+        self.assertEqual(request.load("s1").level, "hardest")  # never lowered
 
     def test_an_argument_that_only_names_the_target_leaves_the_task_to_the_body(self):
         self.session_on("claude-opus-5-5")
