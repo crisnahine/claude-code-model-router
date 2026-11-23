@@ -127,14 +127,20 @@ def rate_limited(row: dict) -> bool:
     return refusal(row) is not None
 
 
-SECRET_NAMES = ("TOKEN", "KEY", "SECRET", "PASSWORD")
+SECRET_NAMES = ("TOKEN", "KEY", "SECRET", "PASSWORD", "AUTH", "CREDENTIAL")
+
+
+def is_secret(name: str) -> bool:
+    """Whether an environment variable's name marks a credential. PAT counts only as a whole word, so PATH stays."""
+    upper = name.upper()
+    return (any(w in upper for w in SECRET_NAMES) or "PAT" in re.split(r"[^A-Z0-9]+", upper)
+            or upper.startswith(("ANTHROPIC_", "CLAUDE_CODE_OAUTH")))
 
 
 def grading_env(env: dict) -> dict:
     """The environment a check runs in: the harness's own, minus credentials, since the check's process also runs
     the code a run left in the work dir."""
-    return {k: v for k, v in env.items()
-            if not (any(w in k.upper() for w in SECRET_NAMES) or k.upper().startswith(("ANTHROPIC_", "CLAUDE_CODE_OAUTH")))}
+    return {k: v for k, v in env.items() if not is_secret(k)}
 
 
 def grade(check: Path, work: Path, answer: Path, timeout: int = 120) -> bool:

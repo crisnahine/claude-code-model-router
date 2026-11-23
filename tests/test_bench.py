@@ -1127,20 +1127,23 @@ class Isolation(unittest.TestCase):
 
     def test_a_check_sees_no_credentials(self):
         secret = {"CLAUDE_CODE_OAUTH_TOKEN": "t", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "3", "ANTHROPIC_API_KEY": "k",
-                  "ANTHROPIC_BASE_URL": "u", "GITHUB_TOKEN": "g", "AWS_SECRET_ACCESS_KEY": "s", "DB_PASSWORD": "p"}
+                  "ANTHROPIC_BASE_URL": "u", "GITHUB_TOKEN": "g", "AWS_SECRET_ACCESS_KEY": "s", "DB_PASSWORD": "p",
+                  "GH_PAT": "a", "PAT": "b", "NPM_AUTH": "c", "HTTP_AUTHORIZATION": "d", "GCP_CREDENTIALS": "e"}
+        kept = {"MRBENCH_KEPT": "yes", "PATHEXT": ".COM", "MRBENCH_PATCHES": "1"}
         with tempfile.TemporaryDirectory() as tmp:
             check = Path(tmp) / "check.py"
             check.write_text("import os, sys\n"
                              f"sys.exit(0 if not set({sorted(secret)!r}) & set(os.environ) "
-                             "and os.environ.get('MRBENCH_KEPT') == 'yes' and 'PATH' in os.environ else 1)\n",
+                             f"and set({sorted(kept)!r}) <= set(os.environ) and 'PATH' in os.environ else 1)\n",
                              encoding="utf-8")
-            with unittest.mock.patch.dict("os.environ", {**secret, "MRBENCH_KEPT": "yes"}):
+            with unittest.mock.patch.dict("os.environ", {**secret, **kept}):
                 self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt"))
                 self.assertEqual(sorted(set(secret) & set(run.grading_env(dict(os.environ)))), [])
 
     def test_credential_names_are_matched_in_any_case(self):
         # A plain dict: environment names are upper-cased on Windows, so os.environ can't hold these there.
-        self.assertEqual(run.grading_env({"api_key": "1", "keep": "2"}), {"keep": "2"})
+        env = {"api_key": "1", "Github_Pat": "2", "my_auth": "3", "Db_Credential": "4", "keep": "5", "Path": "6"}
+        self.assertEqual(run.grading_env(env), {"keep": "5", "Path": "6"})
 
     def test_a_check_that_hangs_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
