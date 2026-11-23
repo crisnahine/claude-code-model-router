@@ -394,7 +394,7 @@ def with_head(path: str, current: str) -> str:
 
 BADGES = [
     ("version", "version", None),
-    ("claude-code", "claude code", "2.1.292 or later"),
+    ("claude-code", "claude code", "2.1.326 or later"),
     ("python", "python", "3.9 or later"),
     ("dependencies", "dependencies", "none"),
     ("license", "license", "Apache-2.0"),

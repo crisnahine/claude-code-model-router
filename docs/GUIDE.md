@@ -126,7 +126,7 @@ The main conversation's effort is left alone wherever an effort change re-reads 
 
 ### Versions
 
-Needs Claude Code 2.1.292 for per-call effort. Mods need 2.1.287 and were tested live on 2.1.330: subagents, workflow agents, agent-team teammates (in-process, in an interactive session), plan mode, effort per request, effort only under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, the spend log, a hard skill typed as a slash command, and a background agent's `SubagentHandback` in auto mode. The slash-skill raise reads the mod's `skill.prompt` event, which the Claude Code changelog first names in 2.1.299; on an older build that raise may not happen.
+Needs Claude Code 2.1.326 or later: the mod reads its hook environment with `$.process.hookEnv()`, which 2.1.326 added (https://code.claude.com/docs/en/plugins/mods/reference.md). Claude Code checks the plugin's `engines` range from 2.1.323 on (https://code.claude.com/docs/en/plugins/manifest-reference.md). Needs Claude Code 2.1.292 for per-call effort. Mods need 2.1.287 and were tested live on 2.1.330: subagents, workflow agents, agent-team teammates (in-process, in an interactive session), plan mode, effort per request, effort only under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, the spend log, a hard skill typed as a slash command, and a background agent's `SubagentHandback` in auto mode. The slash-skill raise reads the mod's `skill.prompt` event, which the Claude Code changelog first names in 2.1.299; on an older build that raise may not happen.
 
 ### Operating systems
 

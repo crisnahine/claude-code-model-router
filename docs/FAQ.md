@@ -10,7 +10,7 @@ Short answers about Model Router, the Claude Code plugin with the id `model-rout
 
 ## What is Model Router?
 
-Model Router is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts, and moves a call one level up when its work comes back for a redo. It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages. The agent the caller chose, its prompt and its tools stay as they were. It is Apache-2.0 licensed and needs Claude Code 2.1.292 or later and Python 3.9 or later ([README](../README.md#install-the-claude-code-plugin)).
+Model Router is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts, and moves a call one level up when its work comes back for a redo. It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages. The agent the caller chose, its prompt and its tools stay as they were. It is Apache-2.0 licensed and needs Claude Code 2.1.326 or later and Python 3.9 or later ([README](../README.md#install-the-claude-code-plugin)).
 
 ## How does Model Router pick a model for a subagent?
 
