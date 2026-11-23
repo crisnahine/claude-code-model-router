@@ -1159,7 +1159,8 @@ class Isolation(unittest.TestCase):
         self.assertEqual(res.stdout.strip(), "[]")
 
     def test_checks_load_the_helper_by_path_and_append_the_work_dir(self):
-        for check in (run.BENCH / "tasks").glob("*/check.py"):
+        tasks = run.BENCH / "tasks"
+        for check in [*tasks.glob("*/check.py"), *tasks.glob("*/probe.py")]:
             text = check.read_text(encoding="utf-8")
             self.assertNotIn("sys.path.insert", text, check)
             if "passcheck" in text:
