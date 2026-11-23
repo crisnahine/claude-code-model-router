@@ -382,12 +382,13 @@ class Analysis(unittest.TestCase):
                 self.assertFalse(facts[name])
 
     @staticmethod
-    def first(n, config, cls=None, model=analyze.OPUS, **changes):
-        """An edit that applies `changes` to the first `n` rows of one configuration (and class) in a session."""
+    def first(n, who, cls=None, model=analyze.OPUS, **changes):
+        """An edit that applies `changes` to the first `n` rows of configuration `who` (and class) in a session,
+        or in every session for `model=None`, as for opusplan, which joins each one."""
         done = []
 
         def edit(row):
-            if (len(done) < n and row["config"] == config and row["main_model"] == model
+            if (len(done) < n and row["config"] == who and model in (None, row["main_model"])
                     and cls in (None, row["class"])):
                 done.append(row)
                 row.update({k: v(row) if callable(v) else v for k, v in changes.items()})
@@ -406,6 +407,31 @@ class Analysis(unittest.TestCase):
             with self.subTest(cls):
                 facts = self.session(self.changed(self.first(99, "opus", cls, total_cost_usd=cheap)))["facts"]
                 self.assertFalse(facts["level_as_defaults"])
+
+    def test_each_other_fact_turns_false_on_a_row_edit(self):
+        times = lambda by: lambda row: row["total_cost_usd"] * by  # noqa: E731
+        both = lambda *edits: lambda row: [edit(row) for edit in edits]  # noqa: E731
+        cases = (
+            ("best_named", None, self.first(99, "opus", "implementation", total_cost_usd=times(0.1))),
+            ("example", None, self.first(99, "opusplan", "bugfix", None, total_cost_usd=times(3))),
+            ("partial_for_runs", None, self.first(1, "defaults", "implementation", config="gone")),  # cells differ
+            ("fail_on_cost", None, self.first(5, "plugin-next", "implementation", passed=False)),
+            ("not_behind", None, self.first(8, "plugin-next", "implementation", passed=False)),
+            # opusplan solves 4 of 10 implementation runs and stays cheapest, so the router is ahead of it
+            ("no_gain", None, both(self.first(6, "opusplan", "implementation", None, passed=False),
+                                   self.first(99, "opusplan", "implementation", None, total_cost_usd=times(0.1)))),
+            ("no_pass", None, self.first(999, "plugin-next", total_cost_usd=times(0.01))),
+            ("solved_as_many", analyze.SONNET,
+             self.first(2, "plugin-next", "implementation", analyze.SONNET, passed=False)),
+            ("one_miss", analyze.SONNET, self.first(1, "sonnet-medium", "design", analyze.SONNET, passed=False)),
+        )
+        for name, model, edit in cases:
+            with self.subTest(name):
+                self.assertFalse(self.session(self.changed(edit), model)["facts"][name])
+
+    def test_the_facts_about_fail_classes_are_false_with_none(self):
+        facts = self.session(self.changed(self.first(999, "plugin-next", total_cost_usd=lambda row: 0.0001)))["facts"]
+        self.assertEqual((facts["no_pass"], facts["fail_on_cost"], facts["best_named"]), (False, False, False))
 
     def test_nearly_all_reads_each_configuration_the_docs_name(self):
         lose = self.first(4, "haiku-high", passed=False)  # 66 of 70, under NEARLY, while opusplan stays best

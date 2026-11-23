@@ -750,9 +750,9 @@ FACT_TEXT = {
                          "but the ones where it is level with the defaults, and is level with each of them there",
     "cheaper_everywhere": "the named cheap baselines cost less than the router in every class",
     "not_cheapest": "the router is not the cheapest configuration over all runs",
-    "best_named": "the best baseline in every FAIL class is one the docs name",
+    "best_named": "a class is FAIL, and the best baseline in each FAIL class is one the docs name",
     "partial_for_runs": "every PARTIAL class is PARTIAL for lack of runs",
-    "fail_on_cost": "every FAIL class fails on cost per solved task, not on pass rate",
+    "fail_on_cost": "a class is FAIL, and each FAIL class fails on cost per solved task, not on pass rate",
     "not_behind": "the router's pass rate is not behind its best baseline's beyond noise in any class",
     "no_gain": "the router's pass rate is not ahead of its best baseline's beyond noise in any class",
     "no_pass": "no class is PASS",
@@ -844,7 +844,7 @@ def facts(session: dict, routers: frozenset[str], forced: dict) -> dict[str, boo
 
     out = {
         "partial_for_runs": all(c["why"] == "few_runs" for c in classes if c["status"] == "PARTIAL"),
-        "fail_on_cost": all(c["why"] == "cost_above" for c in fails),
+        "fail_on_cost": bool(fails) and all(c["why"] == "cost_above" for c in fails),
         "not_behind": all(against(c) is not None and not against(c)["behind"] for c in classes if c["best_baseline"]),
         "no_gain": all(not ahead(c) for c in classes if c["best_baseline"]),
         "no_pass": not any(c["status"] == "PASS" for c in classes),
@@ -863,7 +863,7 @@ def facts(session: dict, routers: frozenset[str], forced: dict) -> dict[str, boo
             n in c["configs"] and router in c["configs"] and _below(cps(c, n), cps(c, router))
             for c in classes for n in named["cheaper"])
         out["not_cheapest"] = _below(_per_solved(pooled.get(best)), _per_solved(pooled.get(router)))
-        out["best_named"] = all(c["best_baseline"] in named["best_in"] for c in fails)
+        out["best_named"] = bool(fails) and all(c["best_baseline"] in named["best_in"] for c in fails)
         name, other = named["example"]
         ex = row(name)
         out["example"] = ex is not None and _below(cps(ex, router), cps(ex, defaults)) \
