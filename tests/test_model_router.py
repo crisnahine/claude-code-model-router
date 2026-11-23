@@ -752,6 +752,15 @@ class Allowlist(Sandbox):
                                                                      "opusplan", "default"]})), 4)
         self.assertEqual(len(self.permitted(user={"deniedModels": ["opus"]}, project={"deniedModels": ["haiku"]})), 4)
 
+    def test_a_family_deny_also_blocks_a_project_model_that_resolves_to_that_family(self):
+        self.override({"models": {"best": {"strength": 3}}})
+        config = cfg.load_config()
+        self.assertEqual(registry.family(config, "best"), "opus")
+        denied = allowlist.from_layers({"policy": {"deniedModels": ["opus"]}}).permitted(config)
+        self.assertEqual(denied, {"haiku", "sonnet", "fable"})
+        kept = allowlist.from_layers({"policy": {"deniedModels": ["claude-opus-5-5"]}}).permitted(config)
+        self.assertEqual(kept, {"haiku", "sonnet", "fable", "opus", "best"})
+
     def test_entries_that_are_not_strings_match_nothing(self):
         self.assertEqual(self.permitted(policy={"availableModels": ["sonnet", {"id": "claude-opus-5-5"}],
                                                 "deniedModels": [{"id": "sonnet"}]}), {"sonnet"})
