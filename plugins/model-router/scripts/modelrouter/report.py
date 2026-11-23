@@ -11,6 +11,12 @@ USAGE_SCHEMA = "model-router.usage/1"
 MODELS_SCHEMA = "model-router.models/1"
 
 
+def _strongest(reg: registry.Registry, usable: list[str]) -> str | None:
+    """The strongest usable model by a rank someone vouches for: a repository's own only when nothing else is usable."""
+    ranked = [n for n in usable if reg.models[n].trusted] or usable
+    return ranked[-1] if ranked else None
+
+
 def _effort(snap: settings.Snapshot, pick: ladder.Pick) -> str | None:
     """The pick's effort as it runs, held to any maxEffortLevel cap, and saying so."""
     effort, held = router.capped(pick.effort, snap.allowed.effort_cap(snap.registry, pick.model))
@@ -21,7 +27,7 @@ def policy(snap: settings.Snapshot) -> str:
     reg, options, usable = snap.registry, snap.options, snap.usable
     limit = options.cap
     lines = [f"Routing: **{options.mode}**. Priority: **{options.priority}**. "
-             f"Cap: **{limit or 'none'}**. Strongest model in use: **{usable[-1] if usable else 'none'}**.", "",
+             f"Cap: **{limit or 'none'}**. Strongest model in use: **{_strongest(reg, usable) or 'none'}**.", "",
              "| Subtask level | Model | Effort |", "| :- | :- | :- |"]
     for level in cfg.LEVELS:
         pick = snap.pick(level)
@@ -71,7 +77,7 @@ def models_data(snap: settings.Snapshot) -> dict:
     data = {
         "schema": MODELS_SCHEMA,
         "cap": limit or None,
-        "strongest_in_use": usable[-1] if usable else None,
+        "strongest_in_use": _strongest(reg, usable),
         "priority": options.priority,
         "models": rows,
         "levels": levels,

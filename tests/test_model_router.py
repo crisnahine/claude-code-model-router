@@ -2193,6 +2193,22 @@ class Router(Sandbox):
         self.override({"agents": {"worker": {"model": "sonnet"}}})  # a project can't take it back or lower it
         self.assertEqual(self.decide("worker", HARD)["model"], "haiku")
 
+    def test_a_project_rule_cannot_put_an_agent_on_a_model_the_project_added(self):
+        self.agent("worker")
+        self.override({"models": {"gpt-mini": {"strength": 9, "cost": 0}},
+                       "agents": {"worker": {"model": "gpt-mini"}, "general-purpose": {"model": "gpt-mini"}}})
+        for agent in ("worker", "general-purpose"):
+            for brief in (LOOKUP, HARD):
+                with self.subTest(agent=agent, brief=brief):
+                    d = self.decide(agent, brief)
+                    self.assertNotEqual(d["model"], "gpt-mini")
+                    self.assertIn(f"a project rule names gpt-mini for {agent}, a model only that file vouches for",
+                                  d["held"])
+        self.assertEqual(self.decide("worker", HARD, model="gpt-mini")["model"], "gpt-mini")  # a call may name it
+        self.override({"agents": {"worker": {"model": "gpt-mini"}}}, user=True)  # and so may the user's own rule
+        mine = self.decide("worker", HARD)
+        self.assertEqual((mine["source"], mine["model"], mine["held"]), ("rule", "gpt-mini", None))
+
     def test_a_project_rule_level_is_a_floor(self):
         self.agent("worker")
         self.override({"agents": {"worker": {"level": "complex"}}})
@@ -3988,6 +4004,14 @@ class Gates(Sandbox):
         self.pre("general-purpose", HARD)  # routed to opus
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
 
+    def test_an_agent_on_a_model_the_project_added_never_satisfies_escalation(self):
+        self.override({"models": {"gpt-mini": {"strength": 9, "cost": 0}}})
+        self.session_on("claude-haiku-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": HARD})
+        self.pre("general-purpose", HARD, model="gpt-mini")
+        self.assertIn("model-router:", (hooks.stop({"session_id": "s1"}) or {}).get("reason", "no check asked"))
+        self.assertIsNone(calls.strongest(cfg.load(), "s1"))
+
     def test_agents_started_together_cant_hide_the_strong_one(self):
         self.session_on("claude-haiku-5-5")
         hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
@@ -5061,6 +5085,11 @@ class MachineReadable(Sandbox):
         self.assertEqual(self.json_out("usage")["models"],
                          [{"model": "claude-haiku-5-5", "runs": 1, "tokens": 1200, "run_tokens": 5000}])
         self.assertIn("| claude-haiku-5-5 | 1 | 1,200 | 5,000 |", self.out("usage"))
+
+    def test_a_model_the_project_added_is_never_shown_as_the_strongest_in_use(self):
+        self.override({"models": {"gpt-mini": {"strength": 9, "cost": 0}}})
+        self.assertEqual(self.json_out("models")["strongest_in_use"], "fable")
+        self.assertIn("Strongest model in use: **fable**", self.out("policy"))
 
     def test_models_json(self):
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
