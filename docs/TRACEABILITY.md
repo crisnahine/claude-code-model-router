@@ -177,7 +177,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | :- | :- | :- | :- | :- | :- | :- |
 | S11.1 | Source and architecture: `docs/ARCHITECTURE.md`, `GLOSSARY.md` | Both exist | `docs/ARCHITECTURE.md`, `GLOSSARY.md` | Inspection | Present | PASS |
 | S11.2 | Capabilities and commands in `README.md` | "Commands", "Configuration" | `README.md` | Unit | `Shipped.test_skills_have_descriptions_and_use_the_launcher` | PASS |
-| S11.3 | Primary-source research in `docs/research/` | `model-control.md` | `docs/research/` | Inspection | Present, dated 2026-11-22 | PASS |
+| S11.3 | Primary-source research in `docs/research/` | `model-control.md`, `quality-first-routing.md` | `docs/research/` | Inspection | Present, dated 2026-11-22 | PASS |
 | S11.4 | Supported versions, surfaces, platforms, providers | README "Compatibility", GUIDE "Compatibility", ARCHITECTURE "Verified live" | `README.md`, `docs/GUIDE.md`, `docs/ARCHITECTURE.md` | Inspection | Present | PASS |
 | S11.5 | Install and usage instructions | README "Install" | `README.md` | Inspection | Present | PASS |
 | S11.6 | Automated test results | `docs/TEST_RESULTS.md` | `docs/TEST_RESULTS.md` | Inspection | Present | PASS |
@@ -234,7 +234,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S13.3 | The launcher is `sh` and harmless without Python | See S5.3, S12.23 | `scripts/model-router.sh` | Unit | `Launcher` class: a too-old or broken interpreter falls through, and with none new enough hooks pass and commands explain; `NoPython` class: with only `sh` on `PATH`, every hook exits 0 and commands explain | PASS |
 | S13.4 | Tests on the oldest and newest Python CI covers, on Linux, macOS and Windows; pin an image rather than drop a version | CI matrix | `.github/workflows/ci.yml` | CI | CI main | PASS |
 | S13.5 | Network only to the hosts the README names, only from the daily check | See S6.10 | `scripts/modelrouter/upstream.py` | Grep | Hosts match README "Privacy and security" | PASS |
-| S13.6 | No external project, library, benchmark or tool cited without a primary source | Research doc cites docs; one table lists the rest | `docs/README.md`, `docs/research/model-control.md` | Inspection | docs/README "Outside tools and sources": SWE-Bench Pro, the percentile bootstrap, the npm packages, TypeScript, Node.js, the GitHub CLI and tmux, each with a primary source checked 2026-11-22; SWE-Bench Pro is also a source key in the research doc | PASS |
+| S13.6 | No external project, library, benchmark or tool cited without a primary source | Research doc cites docs; one table lists the rest | `docs/README.md`, `docs/research/model-control.md`, `docs/research/quality-first-routing.md` | Inspection | docs/README "Outside tools and sources": SWE-Bench Pro, the percentile bootstrap, the npm packages, TypeScript, Node.js, the GitHub CLI and tmux, each with a primary source checked 2026-11-22; SWE-Bench Pro is also a source key in the research doc | PASS |
 
 ## Section 14: cost and quality leadership
 
