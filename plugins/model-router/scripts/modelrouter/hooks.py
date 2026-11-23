@@ -213,10 +213,10 @@ def agent_failed(hook_input: dict) -> dict | None:
     asked = _asked_for(config, tool_input, routed)
     if not asked:
         return None
-    named = tool_input.get("model")
-    newest = None
-    if mod_active(hook_input.get("session_id")) and (not named or str(named).lower() == asked):
-        newest = registry.newest_id(config, asked, snap.options.provider, snap.allowed, snap.health)
+    # The ID the mod sent, not today's newest_id: after the first of several parallel failures the
+    # ID is routed around, and recomputing it would strike the alias for the rest.
+    sent = request.load(session_id).sent_to(key)
+    newest = sent if sent and sent.lower() != asked and registry.family(config, sent) == asked else None
     if newest:
         # The mod sent the family's newest ID, and this provider refused it: the alias runs
         # from now on, and the ID is tried again after the outage.
@@ -296,9 +296,9 @@ def mod_spawn(hook_input: dict) -> dict | None:
     # The spawn procedure reads agent_id as "the call comes from inside a subagent".
     snap = settings.Snapshot(hook_input)
     spawned = spawn.decide({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, snap)
-    spawn.record(spawned, "mod")
     decision = spawned.decision
     newest = _newest(snap, decision)
+    spawn.record(spawned, "mod", newest)
     if decision["action"] != "rewrite" and not newest:
         return None
     return {"model": newest or decision["model"], "effort": decision["effort"], "reason": decision["reason"]}

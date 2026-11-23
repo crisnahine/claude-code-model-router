@@ -59,26 +59,28 @@ def decide(hook_input: dict, snap: settings.Snapshot) -> Spawn:
     return Spawn(hook_input, snap, call[1], found, router.decide(found, snap.config, snap.options))
 
 
-def record(spawned: Spawn, via: str) -> None:
-    """Write the spawn's ledger row and, unless it is denied, its call and votes. `via` is "mod" or "fallback"."""
+def record(spawned: Spawn, via: str, newest: str | None = None) -> None:
+    """Write the spawn's ledger row and, unless it is denied, its call and votes. `via` is "mod" or "fallback";
+    `newest` is the full ID the mod sends in place of the decided alias."""
     hook_input, decision = spawned.hook_input, spawned.decision
     session_id = hook_input.get("session_id")
     ledger.spawn(session_id, via, decision, spawned.facts.tool_input.get("description"),
                  kind=(hook_input.get("kind") or "subagent") if via == "mod" else None)
     if decision["action"] != "deny":
         try:
-            _record(spawned.snap.config, session_id, spawned.key, decision, spawned.facts.raises)
+            sent = newest or (decision["model"] if decision["action"] == "rewrite" else None)
+            _record(spawned.snap.config, session_id, spawned.key, decision, spawned.facts.raises, sent)
         except OSError:
             pass
 
 
-def _record(config: dict, session_id: str | None, key: str, decision: dict, raises: dict) -> None:
+def _record(config: dict, session_id: str | None, key: str, decision: dict, raises: dict, sent: str | None) -> None:
     level, source = decision["level"], decision["source"]
     runs_on = decision["model"] or decision["was"]
     if decision["repeat_of"]:
         source = None  # passed through untouched: neither the pick nor the level applied
     earlier = request.note_spawn(config, session_id, key, runs_on, level=level, effort=decision["effort"],
-                                 source=source)
+                                 source=source, sent=sent)
     user_named = source == "caller" and decision["was"] == request.load(session_id).named
     learn.decided(config, source=source, level=level, pick=decision["pick"], runs_on=runs_on, raised=raises,
                   earlier=earlier, escalated_from=decision["escalated_from"], user_named=user_named)

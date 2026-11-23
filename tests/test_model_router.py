@@ -2707,6 +2707,17 @@ class NewestOnProviders(Sandbox):
         self.assertEqual(self.model(LOOKUP), "haiku")
         self.assertTrue(health.load().healthy("haiku"))
 
+    def test_parallel_failures_of_a_sent_id_never_strike_the_alias(self):
+        os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
+        copies = [self.spawn(LOOKUP) for _ in range(3)]
+        self.assertEqual({out["model"] for out, _ in copies}, {"claude-haiku-5-5"})
+        self.assertEqual(request.load("s1").sent_to(calls.identify(copies[0][1]["tool_input"])[1]), "claude-haiku-5-5")
+        for _, hook_input in copies:
+            hooks.agent_failed({**hook_input, "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})
+        self.assertEqual([r["model"] for r in self.ledger() if r["event"] == "model_error"], ["claude-haiku-5-5"] * 3)
+        self.assertEqual([health.load().healthy("haiku"), health.load().healthy("claude-haiku-5-5")], [True, False])
+        self.assertEqual(self.model(LOOKUP), "haiku")
+
     def test_the_agent_call_fallback_sends_only_aliases(self):
         os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
         hook_input = {"session_id": "s9", "cwd": str(self.project),

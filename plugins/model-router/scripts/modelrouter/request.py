@@ -38,6 +38,12 @@ class Request:
         model = route.get("model") if isinstance(route, dict) else None
         return model if isinstance(model, str) else None
 
+    def sent_to(self, key: str) -> str | None:
+        """The model name or ID the path put on the call, which can be a full ID where the alias lags."""
+        route = self.routed.get(key)
+        sent = route.get("sent") if isinstance(route, dict) else None
+        return sent if isinstance(sent, str) else None
+
     def routed_by(self, key: str) -> str | None:
         route = self.routed.get(key)
         source = route.get("source") if isinstance(route, dict) else None
@@ -79,7 +85,7 @@ def deliver(session_id: str | None) -> None:
 
 
 def note_spawn(config: dict, session_id: str | None, key: str, model: str | None, *, level: str | None = None,
-               effort: str | None = None, source: str | None = None) -> str | None:
+               effort: str | None = None, source: str | None = None, sent: str | None = None) -> str | None:
     """Record a spawned call and return the model the router gave it earlier in this request."""
     stood = source in LEVEL_SOURCES and bool(level)
     earlier: list = []
@@ -95,7 +101,7 @@ def note_spawn(config: dict, session_id: str | None, key: str, model: str | None
             entry["calls"] = runs
         # The model each call runs on, for its result: the result shows the call as issued.
         routes = entry.get("routed") if isinstance(entry.get("routed"), dict) else {}
-        store.keep(routes, key, {"model": model, "source": source})
+        store.keep(routes, key, {"model": model, "source": source, **({"sent": sent} if sent else {})})
         entry["routed"] = routes
         if registry.stronger(config, model, entry.get("top_spawn")):
             entry["top_spawn"] = model
