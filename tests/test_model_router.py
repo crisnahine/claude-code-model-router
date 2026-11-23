@@ -3007,7 +3007,7 @@ class Hooks(Sandbox):
         self.session_on("claude-haiku-5-5")
         text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
         # By name only: the router routes the hand-off's brief, and its redo can climb.
-        self.assertIn("model-router:architect can take", text)
+        self.assertIn("model-router:architect can give the plan", text)
         self.assertNotIn('model: "', text)
         self.assertTrue(request.load("s1").below)
 
@@ -3156,11 +3156,19 @@ class GatesDefault(Sandbox):
         self.assertIn("model-router:deep-solver", note)
         self.assertNotIn("writes nothing", note)  # the deep-solver has every tool and can do the work
 
+    def test_the_hand_off_is_for_what_a_few_reads_cant_settle(self):
+        # A task the code settles in a few reads is done directly; delegating it only adds a round trip.
+        self.session_on("claude-haiku-5-5")
+        note = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
+        self.assertIn("can't be settled from the code in a few reads, model-router:architect can give the plan", note)
+        self.assertIn("Otherwise this conversation works directly", note)
+        self.assertNotRegex(note, r"(?i)cheap|cost")
+
     def test_the_prompt_note_promises_a_check_only_when_the_stronger_agent_check_is_on(self):
         self.session_on("claude-haiku-5-5")
         note = lambda: self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))  # noqa: E731
         self.assertIn("model-router:architect", note())
-        self.assertIn("A stop before then is held once", note())
+        self.assertIn("is held once", note())
         self.options(strong_agent_gate="false")
         self.assertNotIn("held once", note())
 

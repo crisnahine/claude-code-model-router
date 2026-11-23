@@ -79,7 +79,7 @@ The plugin's text is in the main loop's context. Measured 2026-11-23 on Claude C
 | Session-start note (`hooks.session_start`) | Once per session | 147 tokens | 128 |
 | The seven role agents' names, descriptions and tools in the agent list | Once per session | 493 | 493 |
 | The `route` skill's listing (the other four skills set `disable-model-invocation`, so theirs aren't in context, https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill) | Once per session | 84 | 61 |
-| The hard-request note | Per prompt, only when the request needs more than the session's model | about 88 | about 100 |
+| The hard-request note | Per prompt, only when the request needs more than the session's model | about 88 | about 106 |
 | The stronger-agent check at `Stop` | Once per request, only when that check fires | about 97 | about 107 |
 
 The first three are measured; the last two are rendered text at about 4 characters a token. On the fallback path, where the mod doesn't load, each routed spawn also gets a one-line note.

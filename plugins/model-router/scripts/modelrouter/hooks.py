@@ -122,15 +122,12 @@ def user_prompt(hook_input: dict) -> dict | None:
                          "from its wording alone.")
     elif below:
         agent = gates.strong_agent(config, need, level)
-        asked = " A stop before then is held once." if options.strong_agent_gate else ""
-        hand = (f"{agent} can take the plan or decision (design, root cause, the risky choice) instead of this "
-                f"conversation settling it. It writes nothing, so the change stays here.{asked}"
-                if gates.writes_nothing(agent)
-                else f"{agent} can take the hard thinking (design, root cause, the risky decision) instead of "
-                f"this conversation settling it.{asked}")
+        asked = " A stop before a stronger agent has looked is held once." if options.strong_agent_gate else ""
+        writes = "; it writes nothing, so the change stays here" if gates.writes_nothing(agent) else ""
         notes.append(
             f"This request looks {level}{why}: about {need}-level reasoning, and this conversation runs on "
-            f"{current}. {hand} The estimate reads only the wording; a simpler task in the code can be said so."
+            f"{current}. If the design, root cause or risky choice can't be settled from the code in a few reads, "
+            f"{agent} can give the plan or decision{writes}. Otherwise this conversation works directly.{asked}"
         )
     if wanted and mode == "auto":
         notes.append(f"The request mentions the {wanted} model. If it asks for that model, an Agent call with "
