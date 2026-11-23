@@ -15,6 +15,7 @@ from typing import Literal
 
 from . import health, learn, ledger, request, store
 from .config import LEVEL_SOURCES, Level
+from .registry import Registry
 
 # Without a request id to compare, a call seen again within this long counts as a redo.
 REDO_WINDOW = 30 * 60
@@ -170,6 +171,20 @@ def route_of(session_id: str | None, key: str, spawn_id: str | None = None) -> R
         found = _latest(entry, key)
         record = found[0] if found else None
     return _route(record)
+
+
+def strongest(reg: Registry, session_id: str | None) -> str | None:
+    """The strongest model any spawn of the current request ran on, for the Stop check. The routes
+    already hold every spawn's model and request, so it needs no record of its own."""
+    current = request.load(session_id)
+    ran = [r.model for r in map(_route, store.load_entry("routes", session_id).values())
+           if r and r.model and _in(current, r)]
+    return max(ran, key=reg.strength, default=None)
+
+
+def _in(current: request.Request, route: Route) -> bool:
+    """The route was written during this request: the same request id, else after it started."""
+    return route.prompt_id == current.prompt_id if current.prompt_id else route.at >= current.started
 
 
 def returned(session_id: str | None, outcome: Outcome) -> Returned:

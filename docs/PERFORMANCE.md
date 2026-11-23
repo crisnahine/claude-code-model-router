@@ -88,6 +88,25 @@ A once-per-session source is written to the prompt cache on the session's first 
 
 The note keeps what Claude must act on: don't name a model or effort, say what makes a subtask hard, and re-issue a call that fell short. It no longer names the strongest model in use, which changed nothing Claude does; `/model-router:route` says it. The `route` skill lost its `when_to_use` line, which repeated its description. The role-agent descriptions were trimmed, and the five that can't write files now say so, so Claude doesn't hand one of them a task whose result is a file; those two changes cancel out in tokens. The architect's, reviewer's and deep-solver's descriptions keep a line on when not to use them, since Claude delegates from descriptions (https://code.claude.com/docs/en/sub-agents.md) and those are the costliest agents. The two conditional notes grew by a sentence for the same reason: the architect is asked for the plan, decision or check, and Claude writes the result itself.
 
+## State locks a spawn takes
+
+Every read-modify-write of a state file takes that file's lock ([State](ARCHITECTURE.md#state)), and under the bounded retry each lock is one more wait for agents started in one message and one more chance for a skipped write. `bench/overhead.py` counts them in the same 1,000-call simulation (`locks` in `--json`), measured on 2026-11-24 on the machine above:
+
+| Path | Locks per spawn before | After | Files after |
+| :- | -: | -: | :- |
+| Mod (`mod-spawn`) | 3.1 | 3.0 | `ledger.jsonl`, `routes.json`, `learned.json` |
+| Fallback (`PreToolUse`) | 4.1 | 4.0 | the same, and `pending.json` for the rewrite waiting for its result |
+
+The simulation sends one prompt per 20 calls, so only one spawn in ten was the request's strongest so far. A real request starts with its first spawn, and that one used to take a lock on `prompts.json` for the strongest spawn. Counted on single spawns in a test:
+
+| Spawn | Mod before | Mod after | Fallback before | Fallback after |
+| :- | -: | -: | -: | -: |
+| The first of a request, or stronger than its siblings | 4 | 3 | 5 | 4 |
+| A redo the router chose (its count and its vote) | 5 | 3 | 6 | 4 |
+| Weaker than or as strong as a sibling already routed | 3 | 3 | 4 | 4 |
+
+Two changes made the difference. The request's strongest spawn is no longer written: it is read from the routes, which hold every spawn's model and request. A spawn's count and its vote against the level it escalated from are one write to `learned.json`. What is left is one lock per file a spawn has to write: the ledger is a log, `learned.json` is shared by all sessions, and `pending.json` exists only on the fallback. Folding the rewrite waiting for its result into the route would take the fallback to three, and is left until the counts in `locks.json` show it matters.
+
 ## State size
 
 1,000 routed calls were simulated with the real hook functions, at 20 calls per session:
@@ -99,14 +118,14 @@ The note keeps what Claude must act on: don't name a model or effort, say what m
 | File | Bytes after 1,000 calls | Bounded | What bounds it |
 | :- | -: | :- | :- |
 | `ledger.jsonl` | 798,174 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
-| `routes.json` | 206,956 | yes | The 200 most recently written sessions (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
-| `done.json` | 114,457 | yes | Same |
-| `prompts.json` | 5,383 | yes | The 200 most recently written sessions |
-| `edits.json` | 3,129 | yes | Same |
-| `sessions.json` | 2,913 | yes | Same |
-| `mod.json` | 1,747 | yes | Same |
-| `launched.json` | 1,608 | yes | Same |
-| `pending.json` | 815 | yes | Same |
+| `routes.json` | 206,970 | yes | The 200 most recently written sessions (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
+| `done.json` | 114,486 | yes | Same |
+| `prompts.json` | 5,140 | yes | The 200 most recently written sessions |
+| `edits.json` | 3,120 | yes | Same |
+| `sessions.json` | 2,911 | yes | Same |
+| `mod.json` | 1,738 | yes | Same |
+| `launched.json` | 1,619 | yes | Same |
+| `pending.json` | 816 | yes | Same |
 | `state.json` | 713 | yes | One record of options |
 | `learned.json` | 144 | yes | One entry per level |
 
