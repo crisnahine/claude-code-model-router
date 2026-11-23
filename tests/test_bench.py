@@ -381,6 +381,32 @@ class Analysis(unittest.TestCase):
                 facts = self.session(self.changed(edit))["facts"]
                 self.assertFalse(facts[name])
 
+    @staticmethod
+    def first(n, config, cls=None, model=analyze.OPUS, **changes):
+        """An edit that applies `changes` to the first `n` rows of one configuration (and class) in a session."""
+        done = []
+
+        def edit(row):
+            if (len(done) < n and row["config"] == config and row["main_model"] == model
+                    and cls in (None, row["class"])):
+                done.append(row)
+                row.update({k: v(row) if callable(v) else v for k, v in changes.items()})
+        return edit
+
+    def test_a_class_with_too_few_runs_is_never_read_as_a_win_or_a_loss(self):
+        cheap = lambda row: row["total_cost_usd"] * 0.1  # noqa: E731
+        for config in ("fable-high", "opus"):  # cheaper than the router in lookup only, which has 5 runs a cell
+            with self.subTest(config):
+                facts = self.session(self.changed(self.first(99, config, "lookup", total_cost_usd=cheap)))["facts"]
+                self.assertTrue(facts["strongest_beaten"] and facts["level_as_defaults"])
+
+    def test_level_as_defaults_needs_the_printed_classes_and_level_there(self):
+        cheap = lambda row: row["total_cost_usd"] * 0.5  # noqa: E731
+        for cls in ("implementation", "design"):  # Opus beats the router where it was beaten, and where it was level
+            with self.subTest(cls):
+                facts = self.session(self.changed(self.first(99, "opus", cls, total_cost_usd=cheap)))["facts"]
+                self.assertFalse(facts["level_as_defaults"])
+
     def test_a_session_the_docs_say_nothing_about_has_no_facts(self):
         results = self.changed(lambda row: row.update(main_model="elsewhere"))
         data = analyze.figures(results)
