@@ -24,6 +24,8 @@ from pathlib import Path
 BENCH = Path(__file__).resolve().parent
 ROOT = BENCH.parent
 PLUGIN = ROOT / "plugins" / "model-router"
+sys.path.insert(0, str(PLUGIN / "scripts"))
+from modelrouter.ledger import read as read_ledger  # noqa: E402
 CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research")
 
 # Every run starts from the same environment: nothing a parent Claude Code session, its plugins or the shell's
@@ -169,18 +171,8 @@ def session_dir(work: Path, env: dict) -> Path:
 
 def ledger_rows(env: dict) -> list[dict] | None:
     """The router's ledger rows for a run, in order; None when it kept no ledger. Lines that aren't objects are skipped."""
-    ledger = plugin_data_dir(env) / "ledger.jsonl"
-    if not ledger.is_file():
-        return None
-    rows = []
-    for line in ledger.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
+    path = plugin_data_dir(env) / "ledger.jsonl"
+    return read_ledger(path=path) if path.is_file() else None
 
 
 def agent_types(work: Path, env: dict) -> dict[str, str]:

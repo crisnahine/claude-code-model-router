@@ -409,6 +409,10 @@ class Recorder(unittest.TestCase):
                               encoding="utf-8")
             self.assertEqual(run.ledger_rows(env), [{"event": "spawn"}, {"event": "usage"}])
 
+    def test_a_run_with_no_ledger_gives_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(run.ledger_rows({"CLAUDE_CODE_PLUGIN_CACHE_DIR": tmp}))
+
     def test_ledger_rows_give_spend_by_agent_and_spawns(self):
         self.assertEqual(run.spend_by_agent(LEDGER, AGENT_TYPES),
                          {"model-router:implementer": 0.07, "model-router:verifier": 0.01, "main": 0.03})
