@@ -10,6 +10,8 @@ over the network. Standard library only.
 from __future__ import annotations
 
 import argparse
+import collections
+import contextlib
 import itertools
 import json
 import math
@@ -170,9 +172,21 @@ def python_floor(runs: int) -> dict:
     return summary(samples[1:], command="launcher with no router code (floor)", phase="warm")
 
 
+def lock_rows(spawn_locks: dict) -> list[dict]:
+    """Locks a spawn took, averaged over the simulated spawns of each path, and per state file."""
+    rows = []
+    for mod, spawns in spawn_locks.items():
+        files = collections.Counter(name for locks in spawns for name in locks)
+        rows.append({"path": "mod" if mod else "fallback", "spawns": len(spawns),
+                     "per_spawn": round(sum(files.values()) / len(spawns), 2) if spawns else 0,
+                     "files": {name: round(count / len(spawns), 2) for name, count in sorted(files.items())}})
+    return rows
+
+
 def in_process(base: Path, calls: int, runs: int):
     """Imports the runtime against a throwaway data dir, times one routing decision, and
-    simulates routed calls with the real hook functions to see how state grows."""
+    simulates routed calls with the real hook functions to see how state grows and how many
+    state locks a spawn takes."""
     box = Sandbox(base / "inproc")
     for key in [k for k in os.environ if k.startswith(("CLAUDE_", "ANTHROPIC_"))]:
         del os.environ[key]
@@ -182,6 +196,16 @@ def in_process(base: Path, calls: int, runs: int):
     from modelrouter import hooks, router, settings, spawn, store
 
     project = str(box.root / "project")
+    taken: list[str] = []
+    spawn_locks: dict[bool, list[list[str]]] = {False: [], True: []}
+    real_locked = store.locked
+
+    @contextlib.contextmanager
+    def counting(path: Path):
+        taken.append(path.name)
+        with real_locked(path):
+            yield
+
     decide = []
     for i in range(max(runs, 100)):
         hook_input = {"session_id": "bench", "cwd": project,
@@ -194,11 +218,13 @@ def in_process(base: Path, calls: int, runs: int):
     def routed_call(session: str, i: int, mod: bool) -> None:
         tool_input = {"subagent_type": "general-purpose", "prompt": f"{BRIEFS[i % 3]} (call {i})"}
         call = {"session_id": session, "cwd": project, "tool_input": tool_input}
+        before = len(taken)
         if mod:
             model = (hooks.mod_spawn({**call, "parent_model": SESSION_MODEL, "kind": "subagent"}) or {}).get("model")
         else:
             out = hooks.pre_agent(call)
             model = ((out or {}).get("hookSpecificOutput") or {}).get("updatedInput", {}).get("model")
+        spawn_locks[mod].append(taken[before:])
         ran_as = MODEL_IDS.get(model or "", SESSION_MODEL)  # the model it was routed to, never a substitute
         if i % 4 == 3:  # a background agent: launched now, finished when it stops
             hooks.post_agent({**call, "tool_response": {"resolvedModel": ran_as, "status": "async_launched",
@@ -236,8 +262,13 @@ def in_process(base: Path, calls: int, runs: int):
                 for name, size in sizes().items():
                     watch[name] = max(watch.get(name, 0), size)
 
-    simulate(calls, per_session=20)
+    store.locked = counting
+    try:
+        simulate(calls, per_session=20)
+    finally:
+        store.locked = real_locked
     grown = sizes()
+    locks = lock_rows(spawn_locks)
 
     # Bound check: lower every cap, run past them twice, and compare each round's peak size,
     # so a file trimmed by halving isn't judged by where its saw-tooth happens to stand.
@@ -269,7 +300,7 @@ def in_process(base: Path, calls: int, runs: int):
               "bounded": verdict.get(name, "not exercised")}
              for name in sorted(set(grown) | set(verdict) | set(STATE_FILES))]
     label = "config.load + spawn.facts + router.decide (in process)"
-    return summary(decide, digits=2, command=label, phase="warm"), state
+    return summary(decide, digits=2, command=label, phase="warm"), state, locks
 
 
 NODE_BENCH = r"""
@@ -354,10 +385,10 @@ def main() -> int:
         floor = python_floor(args.runs)
         hook_rows = hook_latency(base, HOOK_INPUTS, args.runs)
         mod_rows = hook_latency(base, MOD_INPUTS, args.runs)
-        decide_row, state = in_process(base, args.calls, args.runs)
+        decide_row, state, locks = in_process(base, args.calls, args.runs)
         mod_rows += [decide_row, *mod_handlers(base, args.runs)]
     report = {"machine": host, "runs": args.runs, "calls": args.calls, "floor": floor,
-              "hooks": hook_rows, "mod": mod_rows, "state": state}
+              "hooks": hook_rows, "mod": mod_rows, "state": state, "locks": locks}
     if args.json:
         print(json.dumps(report, indent=2))
         return 0
@@ -366,6 +397,9 @@ def main() -> int:
     print(table([floor, *hook_rows], ("command", "phase", "p50_ms", "p95_ms", "max_ms")))
     print("\nMod path (ms)\n")
     print(table(mod_rows, ("command", "phase", "p50_ms", "p95_ms", "max_ms")))
+    print(f"\nState locks a spawn takes, averaged over {args.calls} routed calls\n")
+    print(table([{**row, "files": ", ".join(f"{k} {v}" for k, v in row["files"].items())} for row in locks],
+                ("path", "spawns", "per_spawn", "files")))
     print(f"\nState after {args.calls} routed calls\n")
     print(table(state, ("file", "bytes_after", "bytes_per_1000_calls", "bounded")))
     return 0

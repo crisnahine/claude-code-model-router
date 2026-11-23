@@ -1,8 +1,8 @@
-"""The current request's record: its level and floor, the model the user named, the strongest
-spawn, whether the escalation was asked and whether code changed. The only module that reads or
+"""The current request's record: its level and floor, the model the user named, when it started,
+whether the escalation was asked and whether code changed. The only module that reads or
 writes the `prompts` entry for a session. Where each call was routed is `calls.py`'s.
 
-A new request replaces the whole record, so its strongest spawn starts empty.
+A new request replaces the whole record.
 Order matters: `deliver` marks a message from someone else and never starts a request, and a
 delivered message is never passed to `start`, so the user's request, and its level, stay.
 
@@ -46,7 +46,7 @@ class Request:
     floor_off: bool = False
     escalation_asked: bool = False
     edited: bool = False
-    top_spawn: str | None = None
+    started: float = 0.0
 
     @property
     def floor(self) -> Level | None:
@@ -60,7 +60,7 @@ class Request:
         return bool(current and self.need and reg.strength(current) < reg.strength(self.need))
 
 
-_TEXT = ("prompt_id", "level", "need", "session_tier", "named", "top_spawn")
+_TEXT = ("prompt_id", "level", "need", "session_tier", "named")
 _FLAGS = ("floor_off", "escalation_asked", "edited")
 
 
@@ -69,13 +69,17 @@ def load(session_id: str | None) -> Request:
     fields: dict = {k: entry[k] for k in _TEXT if isinstance(entry.get(k), str)}
     fields["level"] = Level.parse(fields.get("level"))
     fields.update({k: entry[k] for k in _FLAGS if isinstance(entry.get(k), bool)})
+    started = entry.get("started")
+    if isinstance(started, (int, float)) and not isinstance(started, bool):
+        fields["started"] = float(started)
     return Request(**fields)
 
 
 def begin(session_id: str | None, *, prompt_id: str | None, level: str | None, need: str | None,
           session_tier: str | None, named: str | None) -> None:
     store.save_entry("prompts", session_id, {
-        "prompt_id": prompt_id, "level": level, "need": need, "session_tier": session_tier, "named": named})
+        "prompt_id": prompt_id, "level": level, "need": need, "session_tier": session_tier, "named": named,
+        "started": store.now()})
 
 
 def _need(reg: Registry, level: Level, priority: str, usable: list[str], raises: Mapping[str, int]) -> str | None:
@@ -123,18 +127,6 @@ def note_edit(session_id: str | None) -> None:
 def deliver(session_id: str | None) -> None:
     """A message from someone else arrived: work for it isn't the user's request, so no floor."""
     store.update_entry("prompts", session_id, floor_off=True)
-
-
-def note_spawn(reg: Registry, session_id: str | None, model: str | None) -> None:
-    """The strongest model a call this request ran on, for the Stop check."""
-    if not reg.stronger(model, load(session_id).top_spawn):
-        return
-
-    def update(entry: dict) -> None:
-        if reg.stronger(model, entry.get("top_spawn")):
-            entry["top_spawn"] = model
-
-    store.mutate_entry("prompts", session_id, update)
 
 
 def mark_escalation(session_id: str | None, session_tier: str) -> None:

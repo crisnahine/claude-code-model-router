@@ -85,8 +85,11 @@ def _record(spawned: Spawn, via: str, newest: str | None) -> None:
                         level=Level.parse(decision["level"]), effort=decision["effort"], source=source, path=via,
                         counted=learn.counted(decision, kind), prompt_id=current.prompt_id, rewrote=rewrote)
     spawn_id = hook_input.get("tool_use_id")
-    earlier = calls.routed(session_id, spawned.key, route, spawn_id if isinstance(spawn_id, str) and spawn_id else None)
-    request.note_spawn(reg, session_id, runs_on)
+    earlier = None
+    try:  # a route that can't be written mustn't cost the spawn's votes
+        earlier = calls.routed(session_id, spawned.key, route, spawn_id if isinstance(spawn_id, str) and spawn_id else None)
+    except OSError:
+        pass
     user_named = source == "caller" and decision["was"] == current.named
     learn.spawned(reg, decision, kind, earlier, user_named, spawned.facts.raises)
     if gates.is_checker(decision["agent"]):

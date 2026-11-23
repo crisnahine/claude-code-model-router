@@ -2510,7 +2510,7 @@ class Fallback(Sandbox):
     def test_a_spawn_decides_without_writing_and_records_the_guarded_decision(self):
         hook_input = self.call("general-purpose", LOOKUP)
         spawned = spawn.decide(hook_input, settings.Snapshot(hook_input))
-        self.assertEqual((self.ledger(), request.load("s1").top_spawn), ([], None))
+        self.assertEqual((self.ledger(), calls.strongest(cfg.load(), "s1")), ([], None))
         spawned.decision.update(action="keep", model=None, reason="held")
         spawn.record(spawned, "fallback")
         self.assertEqual([(r["action"], r["reason"]) for r in self.ledger()], [("keep", "held")])
@@ -2550,15 +2550,30 @@ class Request(Sandbox):
         request.begin("s1", **{"prompt_id": "p1", "level": "hardest", "need": "opus",
                                "session_tier": "sonnet", "named": None, **fields})
 
-    def test_a_new_request_clears_its_strongest_spawn(self):
+    def route(self, model: str, prompt_id: str | None = "p1") -> None:
+        calls.routed("s1", model, calls.Route(model=model, sent=None, level=Level.lookup, effort="low",
+                                              source="router", path="mod", prompt_id=prompt_id))
+
+    def test_the_strongest_spawn_is_read_from_the_routes_and_a_new_request_clears_it(self):
         self.start()
-        request.note_spawn(self.config, "s1", "haiku")
-        request.note_spawn(self.config, "s1", "fable")
-        request.note_spawn(self.config, "s1", "opus")
-        self.assertEqual(request.load("s1").top_spawn, "fable")
+        for model in ("haiku", "fable", "opus"):
+            self.route(model)
+        self.assertEqual(calls.strongest(self.config, "s1"), "fable")
         self.start(prompt_id="p2", level="lookup")
-        now = request.load("s1")
-        self.assertEqual((now.prompt_id, now.level, now.top_spawn), ("p2", "lookup", None))
+        self.assertIsNone(calls.strongest(self.config, "s1"))
+        self.route("sonnet", "p2")
+        self.assertEqual(calls.strongest(self.config, "s1"), "sonnet")
+
+    def test_a_request_with_no_id_counts_the_spawns_written_since_it_started(self):
+        self.start(prompt_id=None)
+        self.route("opus", None)
+        self.assertEqual(calls.strongest(self.config, "s1"), "opus")
+        self.advance(1)
+        self.start(prompt_id=None, level="lookup")
+        self.assertIsNone(calls.strongest(self.config, "s1"))
+        self.advance(1)
+        self.route("haiku", None)
+        self.assertEqual(calls.strongest(self.config, "s1"), "haiku")
 
     def test_the_floor_is_the_requests_level_until_a_delivered_message(self):
         self.start()
@@ -3748,7 +3763,7 @@ class Gates(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
         self.pre("general-purpose", HARDEST)
         self.pre("general-purpose", LOOKUP)
-        self.assertEqual(request.load("s1").top_spawn, "opus")
+        self.assertEqual(calls.strongest(cfg.load(), "s1"), "opus")
 
     def test_no_escalation_for_easy_tasks_or_strong_sessions(self):
         self.session_on("claude-haiku-5-5")
@@ -4884,6 +4899,10 @@ class OverheadBench(unittest.TestCase):
             self.assertIn(name, files)
             self.assertIn("bytes_per_1000_calls", files[name])
             self.assertIs(files[name]["bounded"], True, name)
+        locks = {row["path"]: row for row in report["locks"]}
+        self.assertEqual({path: row["spawns"] > 0 for path, row in locks.items()}, {"fallback": True, "mod": True})
+        self.assertLessEqual(locks["mod"]["per_spawn"], 3.0)  # the ledger, the route and the votes
+        self.assertLessEqual(locks["fallback"]["per_spawn"], 4.0)  # and the rewrite waiting for its result
         for key in ("python", "platform", "claude_code"):
             self.assertIn(key, report["machine"])
 
@@ -5140,6 +5159,17 @@ class SpawnPaths(Sandbox):
             hooks.mod_spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                              "kind": "subagent", "tool_input": {"subagent_type": "general-purpose", "prompt": brief}})
 
+    def test_a_spawn_takes_one_lock_per_state_file_it_writes(self):
+        # A spawn that is the request's strongest so far still writes its route and that fact in one go.
+        for path, want in (("fallback", ["ledger.jsonl", "routes.json", "learned.json", "pending.json"]),
+                           ("mod", ["ledger.jsonl", "routes.json", "learned.json"])):
+            with self.subTest(path=path):
+                session = f"first-{path}"
+                hooks.user_prompt({"session_id": session, "prompt": HARD})
+                self.spawn_on(path, session, "general-purpose", LOOKUP)
+                taken = self.locks_taken(lambda: self.spawn_again(path, session, HARD))
+                self.assertEqual(taken, want)
+
     def test_a_redo_takes_one_lock_on_the_learned_file_for_its_count_and_its_vote(self):
         for path in ("fallback", "mod"):
             with self.subTest(path=path):
@@ -5153,6 +5183,14 @@ class SpawnPaths(Sandbox):
                 after = learn.stats()
                 self.assertEqual(after["standard"]["calls"], before.get("standard", {}).get("calls", 0) + 1)  # its count
                 self.assertEqual(after["lookup"]["votes"], before["lookup"].get("votes", 0) + 1)  # its vote
+
+    def test_a_route_that_cant_be_written_doesnt_cost_the_spawn_its_count(self):
+        for path in ("fallback", "mod"):
+            with self.subTest(path=path):
+                before = learn.stats().get("lookup", {}).get("calls", 0)
+                with mock.patch.object(calls, "routed", side_effect=OSError("disk full")):
+                    self.spawn_on(path, f"s-{path}", "general-purpose", LOOKUP)
+                self.assertEqual(learn.stats()["lookup"]["calls"], before + 1)
 
     def test_a_result_leaves_the_same_records_on_both_paths(self):
         for number, path in enumerate(("fallback", "mod")):

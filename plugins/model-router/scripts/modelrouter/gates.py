@@ -6,7 +6,7 @@ import os
 import re
 from pathlib import Path
 
-from . import profile, request, session, store
+from . import calls, profile, request, session, store
 from . import config as cfg
 from .config import Level
 from .registry import Registry
@@ -108,7 +108,7 @@ def escalation(reg: Registry, hook_input: dict) -> str | None:
     need = entry.need
     # On a session's first prompt the model isn't known yet; by now the transcript has it.
     model = session.model(session_id, hook_input.get("transcript_path"))
-    if not entry.below(reg, model) or reg.strength(entry.top_spawn) >= reg.strength(need):
+    if not entry.below(reg, model) or reg.strength(calls.strongest(reg, session_id)) >= reg.strength(need):
         return None
     current = reg.family(model) or entry.session_tier
     try:
