@@ -20,11 +20,12 @@ BENCH = Path(__file__).resolve().parent
 sys.path.insert(0, str(BENCH))
 import run  # noqa: E402
 sys.path.insert(0, str(run.PLUGIN / "scripts"))
+sys.path.insert(0, str(BENCH.parent / "tools"))
+from docs_pages import HEAD_END, HEAD_START  # noqa: E402
 from modelrouter import config as mrconfig, profile, registry  # noqa: E402
 from overhead import percentile  # noqa: E402
 
 RESULTS = BENCH / "results"
-HEAD_END = "<!-- End of page head. -->\n\n"  # the same text as docs_assets.HEAD_END
 MIN_RUNS = 10  # fewer runs per configuration than this and no row is called a win or a loss
 ALPHA = 0.05  # the 95% intervals, and the one-sided level of the exact comparisons
 SPLIT_STRONG, SPLIT_WEAK = "opus", "sonnet"  # the pair a task must split to count as telling models apart
@@ -698,7 +699,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
 def build_page(results: Results, router: str | None = None, current: str | None = None) -> str:
     parts = sessions(results, router)
     summary = [row for _, _, part, _ in parts for row in part]
-    kept = bool(current and current.startswith("<!-- Page head") and HEAD_END in current)
+    kept = bool(current and current.startswith(HEAD_START) and HEAD_END in current)
     head = current.split(HEAD_END, 1)[0] + HEAD_END if kept else ""
     return head + render_sessions(parts, _page(results, summary), results.routers)
 

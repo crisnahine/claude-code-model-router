@@ -1,4 +1,4 @@
-<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
 <p align="center"><img src="docs/assets/banner-contributing.svg" width="880" alt="Contributing: How does a change get merged?"></p>
 
 <p align="center"><a href="README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="docs/README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="CHANGELOG.md">Changelog</a> &nbsp;&middot;&nbsp; Next: <a href="RELEASING.md">Releasing</a></p>
@@ -36,6 +36,7 @@ docs/GUIDE.md                  commands, options, precedence, limits and compati
 docs/assets/                   logo, banners, badges and diagrams, and BRAND.md
 tools/traceability.py          counts the requirement statuses in docs/TRACEABILITY.md
 tools/docs_assets.py           writes the docs' SVGs, page heads, benchmark figures, the site's asset copies and CITATION.cff
+tools/docs_pages.py            the index of docs pages and the head each one carries (docs_assets and bench/analyze use it)
 docs/BENCHMARKS.md             cost and quality results against Claude Code without the plugin
 bench/                         the benchmark: pinned tasks and their pass checks, configurations, runner and analysis (not shipped)
 site/                          the project site, sitemap, robots.txt and llms.txt; a workflow deploys it to GitHub Pages from main once Pages is on

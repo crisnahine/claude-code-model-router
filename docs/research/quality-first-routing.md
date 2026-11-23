@@ -1,4 +1,4 @@
-<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
 <p align="center"><img src="../assets/banner-research-quality.svg" width="880" alt="Quality research: What can the router save without losing quality?"></p>
 
 <p align="center"><a href="../../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="../README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="model-control.md">Research</a> &nbsp;&middot;&nbsp; Next: <a href="../PERFORMANCE.md">Performance</a></p>

@@ -1,4 +1,4 @@
-<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
 <p align="center"><img src="assets/banner-docs.svg" width="880" alt="Documentation: Every page, and the question each one answers"></p>
 
 <p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; Previous: <a href="GUIDE.md">Guide</a> &nbsp;&middot;&nbsp; Next: <a href="ARCHITECTURE.md">Architecture</a></p>
@@ -8,7 +8,7 @@
 
 Every page about Model Router, the Claude Code plugin that routes each agent to the cheapest Claude model and effort that should do the job. New here? Start with the [README](../README.md) and the [questions](FAQ.md).
 
-<!-- Cards, written by tools/docs_assets.py from its PAGES table. -->
+<!-- Cards, written by tools/docs_assets.py from PAGES in tools/docs_pages.py. -->
 <table>
 <tr><th colspan="2" align="left">Start here<br><sub>What it is, and the questions people ask first.</sub></th></tr>
 <tr>

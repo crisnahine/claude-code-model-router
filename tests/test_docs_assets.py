@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "bench"))
 import analyze  # noqa: E402
 import docs_assets  # noqa: E402
+import docs_pages  # noqa: E402
 
 
 def check() -> tuple:
@@ -36,15 +37,18 @@ def bench_summary(solved=3, cps=0.12344, runs=4):
 
 
 class DocsAssets(unittest.TestCase):
-    def test_the_head_marker_matches_analyze(self):
-        self.assertEqual(analyze.HEAD_END, docs_assets.HEAD_END)
-
-    def test_the_benchmarks_head_comes_from_pages(self):
-        pages = [p if p[0] != "docs/BENCHMARKS.md" else (*p[:3], "A new question?", *p[4:]) for p in docs_assets.PAGES]
-        with mock.patch.object(docs_assets, "PAGES", pages):
-            page = docs_assets.build()["docs/BENCHMARKS.md"]
+    def test_a_page_head_comes_from_the_page_index_and_replaces_the_old_one(self):
+        pages = [p if p[0] != "docs/BENCHMARKS.md" else (*p[:3], "A new question?", *p[4:]) for p in docs_pages.PAGES]
+        old = docs_pages.with_head("docs/BENCHMARKS.md", "# Benchmarks\n")
+        page = docs_pages.with_head("docs/BENCHMARKS.md", old, pages)
         self.assertIn('alt="Benchmarks: A new question?"', page)
-        self.assertIn("\n# Benchmarks\n", page)
+        self.assertEqual(page.count("<!-- Page head"), 1)
+        self.assertTrue(page.endswith("<!-- End of page head. -->\n\n# Benchmarks\n"))
+
+    def test_analyze_keeps_a_head_that_ends_where_the_index_says(self):
+        head = docs_pages.page_head("docs/BENCHMARKS.md")
+        self.assertTrue(head.startswith(docs_pages.HEAD_START) and head.endswith(docs_pages.HEAD_END))
+        self.assertIs(analyze.HEAD_END, docs_pages.HEAD_END)
 
     def test_the_chart_draws_from_the_summary_not_the_page(self):
         with mock.patch.object(docs_assets, "bench_summary", return_value=bench_summary()):
@@ -71,7 +75,7 @@ class DocsAssets(unittest.TestCase):
         self.assertEqual(code, 0, "python3 tools/docs_assets.py --check:\n" + err)
 
     def test_every_page_under_docs_research_is_in_PAGES(self):
-        listed = {row[0] for row in docs_assets.PAGES}
+        listed = {row[0] for row in docs_pages.PAGES}
         found = {p.relative_to(ROOT).as_posix() for p in (ROOT / "docs" / "research").glob("*.md")}
         self.assertEqual(found - listed, set())
 
