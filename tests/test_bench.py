@@ -167,7 +167,7 @@ class Analysis(unittest.TestCase):
         six = against(6)  # p = 0.043 alone, 0.087 once adjusted for the second baseline
         self.assertLess(six["p_behind"], analyze.ALPHA)
         self.assertFalse(six["behind"])
-        self.assertTrue(against(5)["behind"])  # p = 0.011, 0.022 adjusted
+        self.assertTrue(against(5)["behind"])  # p = 0.016, 0.033 adjusted
         few = rows("plugin", "lookup", [0.3] * 5, [False] * 5) + rows("opus", "lookup", [0.4] * 5, [True] * 5)
         self.assertFalse(self.quality(few, self.FORCED)["quality"]["against"]["opus"]["behind"])  # p = 0.004, 5 runs
 
