@@ -34,7 +34,7 @@ def now() -> float:
 
 
 def stamp(value: Any) -> float:
-    """A stored time to sort by: the number itself, or 0 when it is junk, nan or infinite."""
+    """A stored time or count: the number itself, or 0 when it is junk, nan, infinite or too big for a float."""
     try:
         ok = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
     except OverflowError:

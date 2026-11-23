@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import threading
 import time
@@ -286,7 +285,7 @@ def snapshot(cache: dict) -> dict:
 def _failures(failed: object) -> int:
     """Failed fetches in a row, or 0 for no record or one that doesn't make sense."""
     if not isinstance(failed, dict) or not all(
-            cfg._number(failed.get(key)) and math.isfinite(failed[key]) for key in ("at", "count")):
+            cfg._number(failed.get(key)) for key in ("at", "count")):
         return 0
     return max(0, int(failed["count"]))
 
