@@ -756,6 +756,13 @@ class SuiteCoverage(unittest.TestCase):
             self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)  # that one would move the main loop too
             self.assertNotIn("--plugin-dir", cmd)
             self.assertEqual(configs[name]["price_model"], model)
+        for name in ("haiku", "sonnet", "opus"):
+            cmd, env = run.command("x", configs[name], options, {})
+            self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]),
+                             (name, "1"), name)
+            self.assertNotIn("CLAUDE_CODE_SUBAGENT_EFFORT", env)
+            self.assertNotIn("--plugin-dir", cmd)
+            self.assertEqual(configs[name]["price_model"], name)
         cmd, env = run.command("x", configs["fable"], options, {})
         self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "fable")
         for config in configs.values():

@@ -3,7 +3,7 @@
 Measures what Model Router costs per solved task, and how often tasks get solved, against Claude Code without it. Results go to [docs/BENCHMARKS.md](../docs/BENCHMARKS.md). Standard-library Python only. Nothing here ships with the plugin.
 
 - `tasks/<id>/`: one task each. `task.json` gives its class, brief and `revision` (raise it, with a line in `revisions`, whenever a change to the task could change a run's outcome; every row records it and the page says how many rows ran on an earlier one), `repo/` is the fixed set of files a run starts from, and `check.py <workdir> <answer-file>` exits 0 only when the task was solved. Checks share `tasks/passcheck.py` (the JSON answer readers, the FINDING.json rule, the work dir's tests) and load it by file path. `run.py` runs every check with `python -I`, so neither the check's folder nor the work dir is on `sys.path`. `solution/` (for tasks that change files, or write the DESIGN.json, RESEARCH.json or FINDING.json their brief asks for) or `reference_answer` (for an answer given in the reply: lookups) is a known-good result; `tests/test_bench.py` checks that each pass check fails on `repo/` as shipped and passes on that result.
-- `configs.json`: the configurations. `plugin` loads the router with `--plugin-dir`. `defaults` runs Claude Code with no plugin. `haiku`, `sonnet`, `opus` and `fable` force every subagent onto one model with `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`. `sonnet-medium`, `haiku-high`, `sonnet-high`, `opus-high` and `fable-high` also set `CLAUDE_CODE_SUBAGENT_EFFORT`. `opusplan` sets the session model (`model`), and `advisor` adds `--advisor opus` (`args`). `price_model` names the model the full-suite estimate prices each configuration's runs at. A router variant is any other configuration with `"plugin": true`. Its `router_config` becomes the run's own `.claude/model-router.json`, its `plugin_options` go in through `--settings` as `pluginConfigs` (project settings can't set plugin options), and `plugin_ref` loads the plugin exported from that commit instead of the checkout's. `analyze.py` gives a variant its own column but never makes it a baseline.
+- `configs.json`: the configurations. `plugin` loads the router with `--plugin-dir`. `defaults` runs Claude Code with no plugin. `haiku`, `sonnet`, `opus` and `fable` force every subagent onto one model with `CLAUDE_CODE_SUBAGENT_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`. Forcing needs Claude Code v2.1.257 or later. While `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is on, "Claude Code ignores the `model` field in subagent definitions, and Claude can't pass a model when it starts a subagent", but a fork, and a skill that runs in a subagent with `model: inherit`, still run on the parent conversation's model (https://code.claude.com/docs/en/sub-agents#run-every-subagent-on-one-model). The bench's prompt starts a subagent with the Agent tool, and the 1,280 recorded runs started only general-purpose, Explore, `claude` and the router's own agents ([docs/BENCHMARKS.md](../docs/BENCHMARKS.md), "Agents started"), so forcing covers them. Read a pilot row whose `subagents.by_type` shows any other type with that in mind. `sonnet-medium`, `haiku-high`, `sonnet-high`, `opus-high` and `fable-high` also set `CLAUDE_CODE_SUBAGENT_EFFORT`. `opusplan` sets the session model (`model`), and `advisor` adds `--advisor opus` (`args`). `price_model` names the model the full-suite estimate prices each configuration's runs at. A router variant is any other configuration with `"plugin": true`. Its `router_config` becomes the run's own `.claude/model-router.json`, its `plugin_options` go in through `--settings` as `pluginConfigs` (project settings can't set plugin options), and `plugin_ref` loads the plugin exported from that commit instead of the checkout's. `analyze.py` gives a variant its own column but never makes it a baseline.
 - `run.py`: runs each task under each configuration with `claude -p --output-format json`, checks the result, and appends one JSON line per run to `results/`.
 - `analyze.py`: computes pass rate and cost per solved task with 95% bootstrap intervals and writes `docs/BENCHMARKS.md` below the page head, which `tools/docs_assets.py` writes, and gives docs_assets the same numbers for the chart.
 
@@ -27,6 +27,38 @@ Each run gets a fresh copy of the task's files in a temporary directory, never t
 Sessions are saved, as Claude Code saves them by default, because the router's Stop check reads the transcripts to see whether a test ran. After each run the runner deletes that run's folder under `~/.claude/projects/`, the one named after its scratch copy, and nothing else.
 
 Each raw line records `bench_commit`, the HEAD it ran on, and `bench_dirty`, whether `bench/` or the plugin had changes HEAD doesn't hold. When the `m6-*` files were recorded, the check also counted the bench's own output under `bench/results/`, so once the first results file of a session was written, every later line said `bench_dirty: true`. That is why the 320 main rows of the `m6-*` files carry it while the 16 probe rows before them don't. The code that ran for all of them is `499d046`; the check now leaves `bench/results/` out.
+
+## The quality-tier pilot
+
+The six quality-tier tasks (one per class) run under `defaults`, `plugin` and the three forced baselines, 3 times each:
+
+```bash
+python3 bench/run.py --tasks impl-merge-customers bugfix-statement-queries security-admin-route \
+    rootcause-wallet-race cross-amount-cents design-checkout-retries \
+    --configs defaults plugin haiku sonnet opus --runs 3 --budget 1.5 --max-total 45 \
+    --model claude-opus-5-5 --out bench/results/pilot/quality-pilot-<date>.jsonl
+python3 bench/analyze.py bench/results/pilot/*.jsonl --out "$TMPDIR/quality-pilot.md"
+```
+
+The same pilot can run as three processes at once, each with its own two tasks, its own `--out` and a $15 share of the $45 cap:
+
+```bash
+pilot() {  # <part> <$ share> <task> <task>
+    python3 bench/run.py --tasks "$3" "$4" --configs defaults plugin haiku sonnet opus --runs 3 --budget 1.5 \
+        --max-total "$2" --model claude-opus-5-5 --out "bench/results/pilot/quality-pilot-<date>-$1.jsonl"
+}
+pilot a 15 impl-merge-customers bugfix-statement-queries &
+pilot b 15 security-admin-route rootcause-wallet-race &
+pilot c 15 cross-amount-cents design-checkout-retries &
+wait
+python3 bench/analyze.py bench/results/pilot/*.jsonl --out "$TMPDIR/quality-pilot.md"
+```
+
+Each process checks only its own spend, so the shares must add up to $45 or less, and the task sets must not overlap or a cell gets more than 3 runs. Three sessions at once are more likely to hit a rate limit; each runner pauses and retries on its own, as above.
+
+Run it only on the branch where QB and Q0 to Q5 are merged, since `plugin` is the checkout's router. 6 tasks x 5 configurations is 30 cells, and 3 runs of each is 90 runs. Rows go to `results/pilot/`, so the page's tables, built from `results/*.jsonl`, don't pool these 3-run rows with the 10-run ones. `analyze.py` picks `plugin` as the router there because it is the only plugin configuration in those rows. A task splits the models when `opus` solved at least 2 of 3 and `sonnet` at most 1 of 3. That is a reading rule for 3 runs, not a significance test. The 10-run measurement needs the maintainer's go after the pilot.
+
+What it should cost, as a guide. On the Opus session the recorded mean per run is $0.152 for `defaults`, $0.154 for `opus`, $0.122 for `plugin` and $0.075 for `haiku` (`results/`, 80 runs each). `sonnet` has no Opus-session rows and is put at $0.11: the $0.075 relay plus a Sonnet subagent at half of Opus's price per token (https://platform.claude.com/docs/en/about-claude/models/overview). `plugin` is put at `opus`'s $0.154, since these briefs should route to Opus. These tasks are assumed to cost 3 times the old ones per run, which is an unmeasured guess. That gives 18 runs per configuration x ($0.152 + $0.154 + $0.154 + $0.075 + $0.11) x 3, about $35. `--budget 1.5` is about 4 times the dearest recorded Opus-session run of these five configurations ($0.367, `plugin`), so the cap should end no run. `run.py` starts a run only while spend plus twice the budget stays under the cap, so the single process stops before its last runs when the real multiplier is above about 3.7, and each $15 process when it is above about 3.2 (if its two tasks cost like the rest), since each keeps its own $3 margin. The rows already written are kept.
 
 ## Adding a task
 
