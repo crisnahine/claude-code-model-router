@@ -4,6 +4,7 @@ in; whether a model is healthy, what it last ran as and why it is routed around 
 The record lives in state.json under "health", keyed by model name."""
 from __future__ import annotations
 
+import math
 import re
 import time
 from typing import Any, Callable
@@ -19,7 +20,8 @@ REFUSED = "a call rewritten to this model came back without having run"
 
 
 def _num(value: Any) -> float:
-    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
+    ok = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    return value if ok else 0
 
 
 def _outage_days(info: dict) -> int:

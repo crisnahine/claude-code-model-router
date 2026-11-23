@@ -1444,8 +1444,9 @@ class RepeatGuard(Sandbox):
         self.assertEqual((again["level"], again["model"], again["escalated_from"]), ("standard", "sonnet", "lookup"))
 
     def test_claude_reissuing_the_rewritten_call_is_fine(self):
-        self.pre("general-purpose", LOOKUP)
-        self.assertIsNone(self.pre("general-purpose", LOOKUP, model="haiku", effort="low"))
+        for prompt in ("list the files under a", "list the files under b"):
+            self.pre("general-purpose", prompt)
+            self.assertIsNone(self.pre("general-purpose", prompt, model="haiku", effort="low"))
         self.assertEqual(self.ledger()[-1]["source"], "caller")
         self.assertTrue(health.load().healthy("haiku"))
         self.assertEqual(learn.stats()["lookup"]["votes"], 0)
@@ -1856,9 +1857,11 @@ class Health(Sandbox):
 
     def test_a_junk_record_reads_as_healthy(self):
         store.update_state(lambda s: s.update(health={"opus": {"unavailable_until": "soon", "outages": -3},
-                                                      "sonnet": "x", "haiku": {"last_model": 5}}))
+                                                      "sonnet": "x", "haiku": {"last_model": 5},
+                                                      "fable": {"unavailable_until": float("nan"), "outages": float("inf")},
+                                                      "saga": {"unavailable_until": float("inf"), "outages": float("nan")}}))
         seen = health.load()
-        self.assertEqual([seen.healthy(n) for n in ("opus", "sonnet", "haiku")], [True, True, True])
+        self.assertEqual([seen.healthy(n) for n in ("opus", "sonnet", "haiku", "fable", "saga")], [True] * 5)
         self.assertEqual(seen.seen_running(), [])
 
     def test_the_record_keeps_its_shape(self):
