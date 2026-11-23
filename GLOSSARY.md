@@ -56,7 +56,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Fork**: an agent that starts from its parent's conversation. It runs on its parent's model and reads its parent's cache, so the router leaves it alone. A skill with `context: fork` is not a fork, despite the name ([skills](https://code.claude.com/docs/en/skills.md#run-skills-in-a-subagent)). It starts a new subagent of its `agent` type without an `agent.spawn` event, so it isn't routed either, and its model comes from the skill's `model` field, else from its agent type and the session.
 
-**Redo**: the same call issued again in the same request after its result came back. A redo runs one level higher and counts as a vote that its first level was too low. A run that swapped models never finishes a call, so issuing it again is no redo.
+**Redo**: the same call issued again in the same request after its result came back. A redo runs one level higher and counts as a vote that its first level was too low. When `maxEffortLevel` holds it at the model and effort of the run it repeats, it takes the next stronger usable model instead. A run that swapped models never finishes a call, so issuing it again is no redo.
 
 **Model swap**: a run whose model changed mid-run, reported as `modelsUsed` on the `Agent` result ([hooks](https://code.claude.com/docs/en/hooks.md)). A content-classifier fallback causes it: Sonnet 5.5 to Sonnet 5, Opus 5.5 and Fable to Opus 4.8 or Opus 5 ([model config](https://code.claude.com/docs/en/model-config.md), "Automatic model fallback"). Sonnet 5 scored 10.3% against 70.6% on Terminal-Bench 4.0 ([announcement](https://www.anthropic.com/news/claude-sonnet-5-5)). A swapped run is no health evidence, no redo and no count for its level.
 

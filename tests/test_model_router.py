@@ -2103,6 +2103,33 @@ class Router(Sandbox):
         self.pre("general-purpose", LOOKUP)
         self.assertNotIn("held", self.ledger()[-1])
 
+    def test_a_redo_the_effort_cap_holds_at_the_same_model_and_effort_goes_one_model_up(self):
+        (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "high"}))
+        first = self.decide("general-purpose", HARD)
+        self.assertEqual((first["model"], first["effort"]), ("opus", "high"))
+        self.pre("general-purpose", HARD)
+        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="high")
+        again = self.decide("general-purpose", HARD)
+        self.assertEqual((again["level"], again["model"], again["effort"]), ("hardest", "fable", "high"))
+        self.assertIn("maxEffortLevel holds opus at high, the same as the run that came back before, so it goes to fable",
+                      again["reason"])
+        self.pre("general-purpose", HARD)
+        self.assertIn("so it goes to fable", self.ledger()[-1]["reason"])
+
+    def test_the_redo_stays_when_no_stronger_model_is_usable_and_a_pin_keeps_its_model(self):
+        (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "high"}))
+        self.options(max_tier="opus")
+        self.pre("general-purpose", HARD)
+        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="high")
+        again = self.decide("general-purpose", HARD)
+        self.assertEqual((again["model"], again["effort"]), ("opus", "high"))
+        self.assertNotIn("so it goes to", again["reason"])
+        del os.environ["CLAUDE_PLUGIN_OPTION_MAX_TIER"]
+        self.agent("pinned", "opus")
+        self.pre("pinned", HARD)
+        self.done("pinned", HARD, "claude-opus-5-5", model="opus", effort="high")
+        self.assertEqual(self.decide("pinned", HARD)["model"], "opus")
+
     def test_rules_in_override_files(self):
         self.override({"agents": {"Explore": {"route": False}}}, user=True)
         self.override({"agents": {"general-purpose": {"model": "sonnet"}, "Plan": {"level": "frontier"}}})

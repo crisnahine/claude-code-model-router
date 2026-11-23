@@ -158,6 +158,12 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if redo:
         effort = _above_earlier(reg, effort, final, done)
     effort, held = capped(effort, facts.effort_caps.get(final))
+    stronger = next((n for n in usable if reg.stronger(n, final)), None)
+    if redo and source == "router" and held and stronger and (final, effort) == (done.get("model"), done.get("effort")):
+        # maxEffortLevel stops the redo at the run it repeats: quality comes first, so it takes the next model up.
+        why += f"; maxEffortLevel holds {final} at {effort}, the same as the run that came back before, so it goes to {stronger}"
+        final = stronger
+        effort, held = capped(ladder.effort_on(reg, level, settings.priority, final), facts.effort_caps.get(final))
     out.update(model=final, source=source, reason=why + held + (f"; {out['held']}" if out["held"] else ""))
     if final == out["was"] and not effort:
         return out  # it would run on this model anyway
