@@ -96,6 +96,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 - The check behind "a pass rate no lower beyond noise" tests the router against each class's best baseline with the unadjusted p, since it is one comparison backing a favourable claim. The Holm adjustment across the baselines stays for `BEHIND`.
 - The runner checks a file's size before reading it into a row's `final_answer`, and lists a file too big for the per-file cap as omitted without reading it, so a huge file a run leaves can't exhaust memory and lose the row.
 - Release readiness and the traceability matrix gave figures the benchmark page doesn't show (1,300 to 4,500 more cache tokens per run, 4 of 10 design tasks sent to the architect). They now state those findings without the numbers.
+- `cross-currency` failed a right answer whose `pricing/symbols.py` derives a constant from `DECIMALS` at import, such as a set of zero-decimal codes, because the check swapped the tables in after the file had run. The check now gives the file's own `SYMBOLS` and `DECIMALS` assignments the other tables before anything imports it. The task stays at revision 2, which has no recorded rows.
 
 ### Internal
 
