@@ -385,6 +385,24 @@ class Recorder(unittest.TestCase):
         self.assertEqual(self.row(base)["cost_known"], False)
         self.assertEqual(self.row(base)["total_cost_usd"], 0.5)
 
+    def test_a_refused_run_that_reports_zero_cost_cost_nothing(self):
+        base = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        limited = self.row(dict(base, subtype="error_during_execution", is_error=True, api_error_status=429,
+                                total_cost_usd=0))
+        self.assertEqual((limited["total_cost_usd"], limited["cost_known"]), (0, True))
+        offline = self.row(dict(base, subtype="error_during_execution", is_error=True, total_cost_usd=0,
+                                result="API Error: Can't reach the API server"), exit_code=1)
+        self.assertEqual((offline["total_cost_usd"], offline["cost_known"]), (0, True))
+
+    def test_ledger_rows_keep_only_json_objects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"CLAUDE_CODE_PLUGIN_CACHE_DIR": tmp}
+            ledger = run.plugin_data_dir(env) / "ledger.jsonl"
+            ledger.parent.mkdir(parents=True)
+            ledger.write_text('{"event": "spawn"}\n5\nnull\n[]\n"x"\nnot json\n\n{"event": "usage"}\n',
+                              encoding="utf-8")
+            self.assertEqual(run.ledger_rows(env), [{"event": "spawn"}, {"event": "usage"}])
+
     def test_ledger_rows_give_spend_by_agent_and_spawns(self):
         self.assertEqual(run.spend_by_agent(LEDGER, AGENT_TYPES),
                          {"model-router:implementer": 0.07, "model-router:verifier": 0.01, "main": 0.03})

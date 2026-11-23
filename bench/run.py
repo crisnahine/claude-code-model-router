@@ -148,16 +148,18 @@ def session_dir(work: Path, env: dict) -> Path:
 
 
 def ledger_rows(env: dict) -> list[dict] | None:
-    """The router's ledger rows for a run, in order; None when it kept no ledger. Bad lines are skipped."""
+    """The router's ledger rows for a run, in order; None when it kept no ledger. Lines that aren't objects are skipped."""
     ledger = plugin_data_dir(env) / "ledger.jsonl"
     if not ledger.is_file():
         return None
     rows = []
     for line in ledger.read_text(encoding="utf-8").splitlines():
         try:
-            rows.append(json.loads(line))
+            row = json.loads(line)
         except ValueError:
             continue
+        if isinstance(row, dict):
+            rows.append(row)
     return rows
 
 
@@ -278,9 +280,14 @@ def record(task: dict, config: dict, options: dict, prices: dict, result: dict, 
               for name, usage in (result.get("modelUsage") or {}).items()}
     agents = result.get("subagent_stats") or {}
     cost = result.get("total_cost_usd")
-    # A cost of 0 on error_during_execution "may be zeroed" (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md).
-    known = isinstance(cost, (int, float)) and not (result.get("subtype") == "error_during_execution" and cost == 0)
     ledger, code = facts["ledger"], facts["exit_code"]
+    stderr = facts["stderr"][-300:] if code else ""
+    refused = refusal({"is_error": result.get("is_error"), "exit_code": code, "stderr": stderr,
+                       "api_error_status": result.get("api_error_status"), "answer": result.get("result")})
+    # A cost of 0 on error_during_execution "may be zeroed" (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md),
+    # except when the API refused the run: it never started, so nothing was spent.
+    known = isinstance(cost, (int, float)) and not (
+        result.get("subtype") == "error_during_execution" and cost == 0 and not refused)
     return {
         "schema": 1, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
         "config": config["id"],
@@ -304,7 +311,7 @@ def record(task: dict, config: dict, options: dict, prices: dict, result: dict, 
         "permission_denials": [d.get("tool_name") for d in result.get("permission_denials") or []],
         "passed": facts["passed"], "answer": (result.get("result") or "")[:2000],
         **({"kept": facts["kept"]} if facts["kept"] else {}),
-        "stderr": facts["stderr"][-300:] if code else "",
+        "stderr": stderr,
     }
 
 
