@@ -1,4 +1,4 @@
-<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
 <p align="center"><img src="assets/banner-test-results.svg" width="880" alt="Test results: What ran last, and what passed?"></p>
 
 <p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="BENCHMARKS.md">Benchmarks</a> &nbsp;&middot;&nbsp; Next: <a href="TRACEABILITY.md">Traceability</a></p>
@@ -34,8 +34,8 @@ Run 2026-11-23 on macOS (Darwin 27.2.0), on `deepen-modules` after the merge of 
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` (`python3` is the system `/usr/bin/python3` here) | 553 tests OK |
-| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 553 tests OK |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` (`python3` is the system `/usr/bin/python3` here) | 604 tests OK |
+| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 604 tests OK |
 | Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 24 of 24 pass |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
@@ -45,7 +45,7 @@ Run 2026-11-23 on macOS (Darwin 27.2.0), on `deepen-modules` after the merge of 
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 | Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78; run 2026-11-23 on `9b27510` |
 
-The 553 local tests are 414 in `tests/test_model_router.py`, 115 in `tests/test_bench.py`, 4 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 17 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 250 briefs over-routed (0.8%), budget 2%; 4 known under-routes" on each of the interpreters run. CI's run on `8ec8eec` had 180.
+The 604 local tests are 447 in `tests/test_model_router.py`, 123 in `tests/test_bench.py`, 8 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 23 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 258 briefs over-routed (0.8%), budget 2%; 4 known under-routes" on each of the interpreters run. CI's run on `8ec8eec` had 180.
 
 Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
 

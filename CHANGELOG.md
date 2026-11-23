@@ -1,4 +1,4 @@
-<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
 <p align="center"><img src="docs/assets/banner-changelog.svg" width="880" alt="Changelog: What changed in each release?"></p>
 
 <p align="center"><a href="README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="docs/README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="docs/ROADMAP.md">Roadmap</a> &nbsp;&middot;&nbsp; Next: <a href="CONTRIBUTING.md">Contributing</a></p>
@@ -67,6 +67,20 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 
 - A project's `.claude/model-router.json` can no longer hold an agent below the router's pick: its rule's `model` applies only when it isn't weaker than the pick, its `level` is a floor, and its `route: false` is ignored. With the earlier limit on lowering a level, a cloned repository can only make its subagents cost more, never run weaker than the shipped ladder. A file that relied on either keeps loading and the part that lowered is dropped; the override shape's `schema` stays 1.
 
+### Benchmark
+
+- Pass-rate intervals are exact (Clopper-Pearson) 95% intervals. Cost intervals stay bootstrap, and each cell draws from a generator seeded by its session model, class and configuration, so adding a configuration or a class no longer moves another cell's interval.
+- Each class gets a quality verdict beside its cost verdict: the router's pass rate against every baseline, the strongest included, with an exact one-sided test. A class is saturated when the weakest forced baseline can't be told from the strongest, and then the page makes no quality claim for or against the router. 5 of the 16 class rows are saturated. A class with forced baselines on fewer than two models gets no verdict.
+- The quality verdict no longer reads a result that isn't significant as parity. `LEVEL` is now `NOT SHOWN BEHIND`, and the page says that 10 runs per cell can't show a tie (a router at 7 of 10 against a baseline at 10 of 10 isn't significant). `BEHIND` is Holm-adjusted across the baselines and only tests a baseline with 10 runs. The line notes when the router's rows and a baseline's come from different batches, and the PASS definition says its pass-rate check is against the cheapest baseline only.
+- A class is PARTIAL when its configurations ran different tasks or different numbers of runs, as well as when it has too few runs. The docs' figures count a PARTIAL class as neither a win nor a loss, so on an Opus session the router is below Claude Code's defaults in 5 of 8 classes, not 7.
+- Rows on an earlier revision of their task are left out of every table and counted in a page note. `cross-currency` and `lookup-retry-limit` each went to revision 2 when their checks changed, which drops 160 rows ($19.97) from the tables: 1,120 runs and $134.97 where there were 1,280 and $154.94.
+- A pass check has three outcomes: solved, not solved and broken (exit 2, the check itself failed). `run.grade` gives the verdict, a reason and a hash of the check's code, and a broken run is set aside in a note and counts neither way. Checks no longer swallow their own errors in `except BaseException`.
+- Every row records `grade` and `final_answer` (the reply, the text files the run added or changed, and the files it removed), since the runner deletes the work dir after grading and a fixed check can be tried again on the recorded runs. Rows carry `schema` 2, and a missing key marks an older harness only on a row below it.
+- Each task can keep `wrong/<name>/` and `right/<name>/` answers beside its check. One test asserts that the check fails on the shipped `repo/`, passes every right answer and fails every wrong one. The seven tasks that had no wrong answers now have 3 to 6.
+- Three checks fixed: `lookup-todo-count` read only the first number in an answer, `lookup-retry-limit` took "not" anywhere in a sentence as ruling `read_timeout` out, and `cross-currency` passed a `format_price` with its own copy of the symbol table.
+- The runner and the full-suite estimate take list prices from the plugin's registry, so a dated or `[1m]` model ID gets its price.
+- README and the FAQ said the router costs more "at the same pass rate" on a Sonnet session. Its design row is 9 of 10 against 10 of 10. They now say "at a pass rate no lower beyond noise", and the FAQ says that 5 of 8 Opus classes are saturated.
+
 ### Internal
 
 - `config.load` builds one `Registry` (models with a trust flag, ordered `Level`s, aliases, prices, the main-loop effort table, agent rules, and what it dropped or held back) from the three files, and every step reads it instead of a raw dict. `Level` is a `str` that orders by difficulty, so `max` and `<` work on levels and no step counts positions in `config.LEVELS`. The snapshot no longer reads the override files a second time to decide which models are the user's. State files, the ledger's rows and the `--json` outputs keep their shape; `tests/fixtures/json-outputs` holds the bytes of `models --json` and `usage --json` on a recorded setup.
@@ -75,7 +89,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 - `spawn` decides and records in two steps, and `fallback` adjusts the decision between them. Row shapes and the files' shapes don't change.
 - The effort cache rule's model families live in `config/models.json` under `main.effort_keeps_cache`, not in `hooks.py`.
 - The bench builds each row in a pure `record()` and orders runs with `schedule()`, so both are tested without a stub `claude`; the stub runs as `python stub.py` on every OS. `ledger_rows` reads through the plugin's `ledger.read`.
-- `bench/analyze.py` loads the rows once, draws the benchmark chart from its summary, fills the headline figures in the docs as `<!-- bench: -->` spans, and takes `--check` to fail when `docs/BENCHMARKS.md` no longer matches the results.
+- `bench/analyze.py` loads the rows once and gives the docs their figures by role (`figures`: router, defaults, best and strongest) with the yes/no facts their prose relies on. `tools/docs_assets.py` formats them into the `<!-- bench: -->` spans and draws the chart. `--check` fails when `docs/BENCHMARKS.md` no longer matches the results, or when one of those facts is false. `docs_assets.build` takes a snapshot of its inputs and returns the files to write, `tools/docs_pages.py` holds the page index and heads for it and for analyze, and the tests build inputs instead of patching globals.
 - The pass checks share `bench/tasks/passcheck.py` and run with `python -I`. Six new hard tasks (a statement-queries bugfix, a cents cross-module change, a retry design, a customer-merge migration, a wallet race and an admin-route security review) run task code in a probe child where it needs one. The forced Haiku, Sonnet and Opus baselines are pinned by a test, and `bench/README.md` has the quality-tier pilot command.
 
 ## 0.1.0 - 2026-11-23

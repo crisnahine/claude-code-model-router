@@ -1,4 +1,4 @@
-<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
 <p align="center"><img src="docs/assets/banner-glossary.svg" width="880" alt="Glossary: What do call, level, pick and redo mean?"></p>
 
 <p align="center"><a href="README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="docs/README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="docs/ARCHITECTURE.md">Architecture</a> &nbsp;&middot;&nbsp; Next: <a href="docs/research/model-control.md">Research</a></p>
@@ -78,10 +78,22 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Upstream**: the public feeds the plugin compares against what was last reviewed: Claude Code releases, the docs index, model aliases and model status.
 
-**Baseline**: a way of running Claude Code without the router that the benchmark compares it against, such as Claude Code's defaults or every subagent forced onto one model.
+**Baseline**: a way of running Claude Code without the router that the benchmark compares it against, such as Claude Code's defaults or every subagent forced onto one model. The docs' figures name each by the part it plays, not by its id: the router is `router`, and the baselines are `defaults` (no plugin, no forced model), `best` (the lowest cost per solved task over all runs) and `strongest` (the strongest forced one), besides each baseline's own id.
 
-**Pass check**: a benchmark task's script that decides, from the files and the answer a run left, whether the task was solved.
+**Pass check**: a benchmark task's script that decides, from the files and the answer a run left, whether the task was solved. It has three outcomes: solved (exit 0), not solved (exit 1) and broken (exit 2, the check itself failed). `run.grade` gives the verdict with a reason, the last line the check printed, and a hash of the check's code, and each row keeps all three under `grade`, so a row says which version of the check judged it.
 
-**Cost per solved task**: a configuration's total spend on a set of runs divided by the runs whose pass check passed. It is the benchmark's measure of cost.
+**Cost per solved task**: a configuration's total spend on a set of runs divided by the runs whose pass check passed. It is the benchmark's measure of cost. A failed run counts against it. A broken run and a run on an earlier task revision are left out of the spend and the count.
 
-**Pilot**: a benchmark run with too few runs per task to tell a difference from noise. Every row it produces is PARTIAL, and it supports no claim beyond its raw data.
+**Pilot**: a benchmark run with too few runs per cell (under 10) to tell a difference from noise, or whose cells cover different tasks or counts. Every row it produces is PARTIAL, and it supports no claim beyond its raw data. The quality-tier pilot, 3 runs per cell, is kept under `bench/results/pilot/` and the page's tables leave it out.
+
+**Saturated**: a task class where the weakest forced baseline (every subagent on the lowest model) can't be told from the strongest by an exact one-sided test at 5%. Its tasks can't tell models apart, so the benchmark makes no quality claim for or against the router there, and a PASS or FAIL on that class is a cost result only.
+
+**Quality verdict**: what a class's pass rates say about the router's quality, apart from its cost verdict. The router's rate is tested against every baseline that has 10 runs, with an exact one-sided test at 5% adjusted across the baselines (Holm): `BEHIND` when a baseline solved more beyond noise, `NOT SHOWN BEHIND` when none did. The second is not parity, since 10 runs per cell can't show a tie. The verdict is withheld ("no claim") for a saturated class, one with too few runs or cells that differ, and one whose forced baselines cover fewer than two models.
+
+**Known answers**: the right and wrong answers kept beside a task's pass check, as `wrong/<name>/` and `right/<name>/` overlays on `repo/` and `solution/`, or a `wrong_answer` for a reply. One test asserts that the check fails on `repo/` as shipped, passes every right answer and fails every wrong one, each as a verdict of the check and never as a broken one.
+
+**Task revision**: the number in a task's `task.json`, raised with a line under `revisions` saying why when a change to the task could change a run's outcome. Every row records the revision it ran on. Rows on an earlier one are left out of every table, and the page counts them in a note.
+
+**Broken run**: a benchmark run whose pass check exited 2, so it was neither solved nor failed. It stays in its results file with the check's error in `grade`, is left out of every table, and the page counts it in a note.
+
+**Prose fact**: a yes/no claim the docs' prose makes about the benchmark rows, such as every run solved or a baseline cheaper in every class. `bench/analyze.py` computes each from the rows (`PROSE`, `FACT_TEXT`), and `--check` fails when one is false.
