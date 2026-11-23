@@ -2473,6 +2473,14 @@ class RepeatGuard(Sandbox):
         self.assertEqual((again["action"], again["level"], again["model"], again["effort"], again["escalated_from"]),
                          ("rewrite", "frontier", "fable", "xhigh", None))
 
+    def test_a_redo_keeps_the_effort_the_call_names(self):
+        self.pre("general-purpose", HARD)
+        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="high")
+        for named in ("max", "low"):
+            with self.subTest(effort=named):
+                again = self.decide("general-purpose", HARD, effort=named)
+                self.assertEqual((again["escalated_from"], again["model"], again["effort"]), ("complex", "opus", None))
+
 
 class Calls(Sandbox):
     def route(self, tool_input: dict, model: str = "haiku", spawn_id: str | None = None, **fields) -> calls.Route | None:

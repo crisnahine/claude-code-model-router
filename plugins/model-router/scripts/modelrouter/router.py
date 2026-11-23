@@ -160,11 +160,12 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if final != target:
         why += f"; {target} is over the cap or unavailable here"
     effort = None
+    decided = _effort_decided(tool_input, definition, settings, facts.teammate)
     # Effort is set whenever nobody chose it, a pinned agent included: the pin is about
     # the model, and on current models effort is the cheaper lever for quality.
-    if source in LEVEL_SOURCES and not _effort_decided(tool_input, definition, settings, facts.teammate):
+    if source in LEVEL_SOURCES and not decided:
         effort = pick_effort if source == "router" else level_effort
-    if redo:
+    if redo and not decided:
         effort = _above_earlier(reg, effort, final, done)
     effort, held = capped(effort, facts.effort_caps.get(final))
     stronger = next((n for n in usable if reg.models[n].trusted and reg.stronger(n, final)), None)
