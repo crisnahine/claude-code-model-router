@@ -113,15 +113,19 @@ _LOOKUP = (r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|
 # What an agent is for, read from its name. Names are short and deliberate; descriptions
 # mention too many things in passing to be read this way. Each pattern must match a whole part of
 # the name, so "researcher", "relocation-migrator" and "information-extractor" aren't search agents.
-_HEAVY_NAME = (r"architects?|review(?:s|ers?|ing)?|audit(?:s|ors?|ing)?|secur(?:e|ity)|debug(?:gers?|ging)?|"
-               r"design(?:ers?|ing)?|plann(?:ers?|ing)|solver")
+_HEAVY_NAME = (r"architect(?:s|ure|ural)?|review(?:s|ers?|ing)?|audit(?:s|ors?|ing)?|(?:cyber)?secur(?:e|ity)|"
+               r"debug(?:gers?|ging)?|design(?:ers?|ing)?|plann(?:ers?|ing)|solver")
 _LIGHT_NAME = (r"explor(?:e|ers?|ing)|search(?:ers?|ing)?|scouts?|find(?:ers?)?|lookups?|locat(?:e|ors?)|"
                r"fetch(?:ers?)?|summar(?:y|ies|i[sz]ers?)|format(?:ters?)?|lint(?:ers?)?|runners?|"
-               r"verif(?:y|iers?|ication)|docs?|grep")
+               r"verif(?:y|iers?|ication)|grep")
+# Light only before another part: "docs-lookup" reads the docs, "update-docs" writes them.
+_LIGHT_LEAD = r"docs?"
 
 
-def _named_for(name: str, pattern: str) -> bool:
-    return any(re.fullmatch(pattern, part) for part in re.split(r"[-_:]", name))
+def _named_for(name: str, pattern: str, lead: str | None = None) -> bool:
+    parts = re.split(r"[-_:]", name)
+    return (any(re.fullmatch(pattern, part) for part in parts)
+            or bool(lead) and any(re.fullmatch(lead, part) for part in parts[:-1]))
 
 
 @dataclass(frozen=True)
@@ -147,7 +151,7 @@ ROLES = {
     "heavy": Role("heavy", floor=Level.complex),
     "light": Role("light", cap=Level.standard),
 }
-_KIND_NAMES = {"heavy": _HEAVY_NAME, "light": _LIGHT_NAME}
+_KIND_NAMES = {"heavy": (_HEAVY_NAME, None), "light": (_LIGHT_NAME, _LIGHT_LEAD)}
 _CHECKERS = ("verifier", "reviewer")
 
 
@@ -157,7 +161,8 @@ def role(agent_type: object) -> Role:
     found = ROLES.get(name)
     if found is None:
         short = name.split(":")[-1].lower()
-        found = next((ROLES[kind] for kind, pattern in _KIND_NAMES.items() if _named_for(short, pattern)), Role())
+        found = next((ROLES[kind] for kind, (pattern, lead) in _KIND_NAMES.items()
+                      if _named_for(short, pattern, lead)), Role())
     return replace(found, checker=True) if name.endswith(_CHECKERS) else found
 
 
