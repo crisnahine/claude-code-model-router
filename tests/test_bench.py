@@ -413,6 +413,24 @@ class Recorder(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(run.ledger_rows({"CLAUDE_CODE_PLUGIN_CACHE_DIR": tmp}))
 
+    def test_a_ledger_that_cannot_be_read_gives_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {"CLAUDE_CODE_PLUGIN_CACHE_DIR": tmp}
+            ledger = run.plugin_data_dir(env) / "ledger.jsonl"
+            ledger.parent.mkdir(parents=True)
+            ledger.write_bytes(b'{"event": "spawn"}\n\xff\xfe\n')
+            self.assertIsNone(run.ledger_rows(env))
+            ledger.write_text('{"event": "spawn"}\n', encoding="utf-8")
+            real = Path.read_text
+
+            def deny(path, *args, **kwargs):
+                if path.name == "ledger.jsonl":
+                    raise PermissionError(13, "denied")
+                return real(path, *args, **kwargs)
+
+            with unittest.mock.patch.object(Path, "read_text", deny):
+                self.assertIsNone(run.ledger_rows(env))
+
     def test_ledger_rows_give_spend_by_agent_and_spawns(self):
         self.assertEqual(run.spend_by_agent(LEDGER, AGENT_TYPES),
                          {"model-router:implementer": 0.07, "model-router:verifier": 0.01, "main": 0.03})
@@ -901,6 +919,24 @@ class AgentCosts(unittest.TestCase):
             {"agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"}])
 
 
+    def test_the_ledger_is_read_before_the_work_dir_code_runs(self):
+        def rewrite(check, work, answer, timeout=120):
+            data = run.plugin_data_dir({"CLAUDE_CODE_PLUGIN_CACHE_DIR": str(work.parent / "plugins")})
+            (data / "ledger.jsonl").write_text('{"event": "usage", "cost_usd": 9}\n', encoding="utf-8")
+            return True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            claude = stub(tmp, COST_STUB)
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}), \
+                    unittest.mock.patch.object(run, "grade", rewrite):
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+        self.assertEqual(row["agent_costs"], {"model-router:implementer": 0.07, "model-router:verifier": 0.01,
+                                              "main": 0.03})
+
+
 class Limits(unittest.TestCase):
     """A rate or usage limit pauses the bench and retries the run; it is never recorded as a failed task."""
 
@@ -1092,16 +1128,22 @@ class Isolation(unittest.TestCase):
     def test_a_check_sees_no_credentials(self):
         secret = {"CLAUDE_CODE_OAUTH_TOKEN": "t", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "3", "ANTHROPIC_API_KEY": "k",
                   "ANTHROPIC_BASE_URL": "u", "GITHUB_TOKEN": "g", "AWS_SECRET_ACCESS_KEY": "s", "DB_PASSWORD": "p",
-                  "api_key": "lower"}
+                  "GH_PAT": "a", "PAT": "b", "NPM_AUTH": "c", "HTTP_AUTHORIZATION": "d", "GCP_CREDENTIALS": "e"}
+        kept = {"MRBENCH_KEPT": "yes", "PATHEXT": ".COM", "MRBENCH_PATCHES": "1"}
         with tempfile.TemporaryDirectory() as tmp:
             check = Path(tmp) / "check.py"
             check.write_text("import os, sys\n"
                              f"sys.exit(0 if not set({sorted(secret)!r}) & set(os.environ) "
-                             "and os.environ.get('MRBENCH_KEPT') == 'yes' and 'PATH' in os.environ else 1)\n",
+                             f"and set({sorted(kept)!r}) <= set(os.environ) and 'PATH' in os.environ else 1)\n",
                              encoding="utf-8")
-            with unittest.mock.patch.dict("os.environ", {**secret, "MRBENCH_KEPT": "yes"}):
+            with unittest.mock.patch.dict("os.environ", {**secret, **kept}):
                 self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt"))
                 self.assertEqual(sorted(set(secret) & set(run.grading_env(dict(os.environ)))), [])
+
+    def test_credential_names_are_matched_in_any_case(self):
+        # A plain dict: environment names are upper-cased on Windows, so os.environ can't hold these there.
+        env = {"api_key": "1", "Github_Pat": "2", "my_auth": "3", "Db_Credential": "4", "keep": "5", "Path": "6"}
+        self.assertEqual(run.grading_env(env), {"keep": "5", "Path": "6"})
 
     def test_a_check_that_hangs_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1123,7 +1165,8 @@ class Isolation(unittest.TestCase):
         self.assertEqual(res.stdout.strip(), "[]")
 
     def test_checks_load_the_helper_by_path_and_append_the_work_dir(self):
-        for check in (run.BENCH / "tasks").glob("*/check.py"):
+        tasks = run.BENCH / "tasks"
+        for check in [*tasks.glob("*/check.py"), *tasks.glob("*/probe.py")]:
             text = check.read_text(encoding="utf-8")
             self.assertNotIn("sys.path.insert", text, check)
             if "passcheck" in text:
@@ -1179,6 +1222,7 @@ class HardTier(unittest.TestCase):
             if solution.is_dir():
                 shutil.copytree(solution, work, dirs_exist_ok=True)
             for rel, text in files.items():
+                (work / rel).parent.mkdir(parents=True, exist_ok=True)
                 (work / rel).write_text(text if isinstance(text, str) else json.dumps(text), encoding="utf-8")
             return self.check(task, work, answer)
 
@@ -1525,6 +1569,7 @@ class QualityTier(unittest.TestCase):
             "export rows in dollars": self.solution_with(
                 "shop/export.py", "{amount_cents}", "{amount_cents / 100}"),
             "second converter": {"shop/totals.py": totals_hand},
+            "old key in a new top-level module": {"legacy.py": 'def dollars(event):\n    return event["amount"]\n'},
             "zero dollars skip the conversion": self.solution_with(
                 "shop/events.py", 'if "amount" not in event:', 'if not event.get("amount"):'),
             "upcast keeps the old key": self.solution_with(
@@ -1574,6 +1619,18 @@ class QualityTier(unittest.TestCase):
         files = self.solution_with("shop/totals.py", "from shop import events\n",
                                    "from shop import events\n\n# the old amount key is gone\nNOTE = \"amount_cents, not amount\"\n")
         self.assertTrue(self.run_with("cross-amount-cents", files))
+
+    def test_the_cents_check_lets_a_test_file_hold_the_old_key(self):
+        test = 'from shop import events\n\n\ndef test_upcast():\n    assert events.upcast([{"amount": 0.29}])\n'
+        for rel in ("test_events.py", "events_test.py", "tests/check_events.py"):
+            with self.subTest(rel):
+                files = {rel: test}
+                self.assertTrue(self.run_with("cross-amount-cents", files))
+
+    def test_the_cents_check_still_fails_a_new_non_test_module_with_the_old_key(self):
+        for rel in ("legacy.py", "attests.py", "shop/contest.py"):
+            with self.subTest(rel):
+                self.assertFalse(self.run_with("cross-amount-cents", {rel: 'def dollars(event):\n    return event["amount"]\n'}))
 
     def test_the_cents_repo_has_no_comment(self):
         for path in (run.BENCH / "tasks" / "cross-amount-cents" / "repo").rglob("*.py"):
@@ -1796,7 +1853,7 @@ class QualityTier(unittest.TestCase):
                     "def transfer(store, src, dst, cents):\n    while True:\n        seen = store.get(src)\n"
                     "        if (seen or 0) < cents:\n            raise InsufficientFunds(src)\n        if src == dst:\n            return\n"
                     "        if store.compare_and_put(src, seen, seen - cents):\n            break\n    _add(store, dst, cents)\n")
-        # name: (files, a phase the check must call wrong)
+        # name: (files, phase letters of which the check must call at least one wrong)
         mutants = {
             "shipped": ({rel: shipped}, "C"),
             "locks in argument order": ({rel: solution.replace(keys, "dict.fromkeys((src, dst))")}, "C"),
@@ -1819,7 +1876,7 @@ class QualityTier(unittest.TestCase):
             "credit unlocked": ({rel: solution.replace(credit, "def credit(store, wallet, cents):\n    store.put(wallet, balance(store, wallet) + cents)\n\n\n")}, "A"),
             "credit put and verify": ({rel: solution.replace(credit, (
                 "def credit(store, wallet, cents):\n    while True:\n        want = balance(store, wallet) + cents\n"
-                "        store.put(wallet, want)\n        if balance(store, wallet) == want:\n            return\n\n\n"))}, "A"),
+                "        store.put(wallet, want)\n        if balance(store, wallet) == want:\n            return\n\n\n"))}, "AFH"),
             "no funds check": ({rel: solution.replace("        if available < cents:\n            raise InsufficientFunds(src)\n", "")}, "D"),
             "compare and put that never takes an absent wallet": ({rel: livelock}, "A"),
         }
@@ -1828,7 +1885,7 @@ class QualityTier(unittest.TestCase):
                 self.assertNotEqual(files[rel], solution if name != "shipped" else "")
                 got, wrong = self.wallet_phases(files)
                 self.assertIsNotNone(got, "the probe must answer inside its own timeout")
-                self.assertIn(phase, wrong, wrong)
+                self.assertTrue(set(wrong) & set(phase), wrong)
                 if name.startswith("compare and put"):
                     self.assertIs(got["A"]["hung"], True)
                     self.assertEqual(wrong[0], "A")
@@ -1854,6 +1911,18 @@ class QualityTier(unittest.TestCase):
         ordered = {"ledger/order.py": "def ordered(*keys):\n    return sorted(set(keys))\n",
                    rel: "from . import order\n" + solution.replace("sorted({src, dst})", "order.ordered(src, dst)")}
         self.assertTrue(self.run_with(task, ordered))
+
+    def test_wallet_check_takes_a_same_wallet_transfer_that_returns_early(self):
+        task = "rootcause-wallet-race"
+        rel = "ledger/wallet.py"
+        solution = self.source(task, "solution/ledger/wallet.py")
+        early = solution.replace(
+            "    with contextlib.ExitStack() as locks:",
+            "    if src == dst:\n        return\n    with contextlib.ExitStack() as locks:")
+        self.assertNotEqual(early, solution)
+        got, wrong = self.wallet_phases({rel: early})
+        self.assertEqual(wrong, [])
+        self.assertEqual(got["E"]["raised"], [])
 
     def test_a_locked_wallet_solution_does_not_wait_out_the_barriers(self):
         with tempfile.TemporaryDirectory() as tmp:

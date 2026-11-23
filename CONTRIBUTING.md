@@ -16,7 +16,8 @@ Branch from `main` and work in a git worktree (`git worktree add ../<name> -b <n
 plugins/model-router/
   .claude-plugin/plugin.json   manifest and options
   config/models.json           the model registry, levels, prices and role agents
-  hooks/router.ts              the mod: session.start, agent.spawn, turn.start, turn.step, turn.complete
+  hooks/router.ts              the mod: tool.call, session.start, agent.spawn, prompt.submit, skill.prompt,
+                               turn.start, turn.step, turn.complete
   hooks/hooks.json             the mod, plus SessionStart, UserPromptSubmit, PreToolUse,
                                PostToolUse, PostToolUseFailure, PostModelSwitch,
                                SubagentStop, Stop

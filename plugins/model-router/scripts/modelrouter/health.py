@@ -20,7 +20,11 @@ REFUSED = "a call rewritten to this model came back without having run"
 
 
 def _num(value: Any) -> float:
-    ok = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    """A stored number, or 0 when it is not a finite float (junk, nan, inf, or an int too big for one)."""
+    try:
+        ok = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    except OverflowError:
+        return 0
     return value if ok else 0
 
 

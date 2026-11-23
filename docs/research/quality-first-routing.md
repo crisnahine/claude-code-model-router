@@ -169,14 +169,23 @@ From `[changelog]` 2.1.270 to 2.1.330 (September 14 to November 20, 2026), only 
 ### Recommendations, ranked
 
 1. **Turn the verify gate on by default.** `settings.py` (`verify_gate`), `gates.py` `unverified_edit`. Every cheap-first saving in the docs depends on a check that catches failures `[plat-optimizing]#re-run-failures-at-higher-effort`, `[best-practices]#give-claude-a-check-to-run`, and a separate check was worth up to 10 points (`[blog-verify]`). The gate already asks once and lets go.
+   Status: shipped. `verify_gate` is on by default.
 2. **Run bug fixes and changes to existing code at `high`.** In `profile.py`, send briefs with fix or hunt verbs (`_HUNT_VERBS`, "fix") to `complex` (Sonnet `high`), or split `standard` so only implement-to-spec stays at `medium`. Backed by `[model-config]#choose-an-effort-level`, `[best-practices]#change-the-model-and-effort`, `[plat-effort]` (Sonnet: `high` "for harder or longer ones") and the measured `medium` loss `[plat-optimizing]#tune-effort`. The smaller option is to set `levels.standard.effort` to `high` in `config/models.json` outright; it costs about 1.7 times as much per Sonnet task `[plat-optimizing]` and removes the risk of a wrong guess about "well-specified".
+   Status: shipped, through the complex floor. Fix and hunt briefs profile at complex at least, and complex runs on Opus at `medium`.
 3. **Run the verifier, scout and `lookup` at Haiku `medium`.** `agents/verifier.md`, `agents/scout.md`, `config/models.json` `levels.lookup.effort`. `medium` is Haiku's documented starting point "for most work, including agentic coding", and `low` skips checks in long agent prompts `[plat-effort]`. Haiku cost is close to nothing here: scout spent $0.0057 over 80 bench runs (`docs/BENCHMARKS.md` "Setup").
+   Status: shipped. The scout, the verifier and the lookup level run Haiku at `medium`.
 4. **Move `complex` to Opus.** `config/models.json` `levels.complex` to `needs: 3` with `effort: medium`, which keeps `hardest` (Opus `high`) above it. On SWE-bench Pro, Opus `medium` solved 92.8% against Sonnet `high`'s 87.6%, at twice the cost per solved task `[plat-optimizing]`; on judgment-heavy work Opus is "clearly stronger" `[news-sonnet]`, and migrations and performance work "warrant Opus 5.5" `[blog-which]`. A narrower version moves only briefs with the `risk` or `load` signal. This is the one recommendation with a clear cost; under the user's rule the docs support paying it.
+   Status: shipped. Complex runs on Opus at `medium`.
 5. **Check a routed subagent's own edits at SubagentStop.** `gates.py` `note_agent_checks` already reads the subagent's transcript; when a routed agent that edits code ran no check, return `decision: "block"` once with a reason to run the project's checks `[hooks]#stop-decision-control`. The fix is cheapest inside the subagent that made the change, on its own cache, before the main loop builds on it.
+   Status: not shipped.
 6. **Treat a mid-run model swap as its own result.** `hooks.py` `post_agent`: read `modelsUsed` `[hooks]#agent`, write it to the ledger, and keep a fallen-back run out of the level's success count in `learn.py`. For a `risk` brief that fell back, tell Claude the run finished on an older model.
+   Status: shipped. A swapped run is its own result, `models_used` is in the ledger, and a risk brief's swapped run gets a note.
 7. **Turn `main_effort` on where the cache survives.** `settings.py` `main_effort`, `hooks.py` `mod_turn` already checks `_effort_keeps_cache`. It only raises, and `config.main.effort` already maps `complex` to `high`.
+   Status: not shipped. `main_effort` stays off by default.
 8. **Say plainly that `priority: fast` trades quality.** `docs/GUIDE.md` and the `/model-router:*` output. Point to fast mode as the documented way to buy speed at the same quality `[plat-optimizing]`.
+   Status: not shipped.
 9. **Pick effort or model on a redo by the failure kind, when the router can tell.** `router.py` redo branch. A run that ran no checks or skipped files should redo at more effort on the same model; a run that tried and was wrong should redo on the next model `[blog-dials]`, `[blog-effort]`. Today the router can't read the failure kind, so this waits on rec 5 and 6 giving it facts.
+   Status: not shipped.
 
 ## Open questions
 

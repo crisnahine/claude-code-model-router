@@ -143,6 +143,24 @@ test('a settings read that hangs is left out after two seconds', async () => {
   }
 })
 
+test('a clock that throws or hands back no cancel leaves the settings out and runs next once', async () => {
+  const clocks = [
+    () => { throw new Error('no clock') },
+    () => ({}),
+  ]
+  for (const after of clocks) {
+    const mod = load({}, {}, { user: { availableModels: ['haiku'] } })
+    ;(mod.$.clock as { after: unknown }).after = after
+    let runs = 0
+    const next = (x: object) => { runs++; return x }
+    const begin = { source: 'startup' }
+    const result = await Promise.resolve(mod.hooks['session.start']!(mod.$, begin, next)).catch(() => mod.catches['session.start']!(mod.$, begin, next))
+    assert.equal(result, begin)
+    assert.equal(runs, 1)
+    assert.equal('settings' in mod.calls[0]!.stdin, false)
+  }
+})
+
 test('a main-loop turn carries the settings layers too', async () => {
   const mod = load({}, {}, { policy: { deniedModels: ['opus'] } })
   await mod.start({ turnId: 't1', text: 'list the files under src' })

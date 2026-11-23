@@ -37,6 +37,11 @@ class Request:
         model = route.get("model") if isinstance(route, dict) else None
         return model if isinstance(model, str) else None
 
+    def routed_by(self, key: str) -> str | None:
+        route = self.routed.get(key)
+        source = route.get("source") if isinstance(route, dict) else None
+        return source if isinstance(source, str) else None
+
     def run(self, key: str) -> dict | None:
         run = self.calls.get(key)
         return run if isinstance(run, dict) else None
@@ -84,7 +89,7 @@ def note_spawn(config: dict, session_id: str | None, key: str, model: str | None
             entry["calls"] = runs
         # The model each call runs on, for its result: the result shows the call as issued.
         routes = entry.get("routed") if isinstance(entry.get("routed"), dict) else {}
-        store.keep(routes, key, {"model": model})
+        store.keep(routes, key, {"model": model, "source": source})
         entry["routed"] = routes
         if registry.stronger(config, model, entry.get("top_spawn")):
             entry["top_spawn"] = model

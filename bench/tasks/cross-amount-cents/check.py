@@ -1,6 +1,6 @@
 """Pass when the six shop modules and reports/daily.py, run in a child on a generated mixed log of old and new events,
-give exactly the cents results the spec describes, leave the log as it was, and only shop/events.py still names the
-old amount key."""
+give exactly the cents results the spec describes, leave the log as it was, and no module but shop/events.py and the test files still
+name the old amount key."""
 import ast
 import importlib.util
 import random
@@ -77,17 +77,21 @@ def same(a, b):
     return a == b
 
 
+def is_test_file(path, work):
+    name = path.name
+    return name.startswith("test_") or name.endswith("_test.py") or "tests" in path.relative_to(work).parts[:-1]
+
+
 def names_old_key(work):
-    for folder in ("shop", "reports"):
-        for path in sorted((work / folder).rglob("*.py")):
-            if path == work / "shop" / "events.py":
-                continue
-            try:
-                tree = ast.parse(path.read_text(encoding="utf-8"))
-            except (OSError, SyntaxError, ValueError):
-                return True
-            if any(isinstance(n, ast.Constant) and n.value == "amount" for n in ast.walk(tree)):
-                return True
+    for path in sorted(work.rglob("*.py")):
+        if path == work / "shop" / "events.py" or is_test_file(path, work):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (OSError, SyntaxError, ValueError):
+            return True
+        if any(isinstance(n, ast.Constant) and n.value == "amount" for n in ast.walk(tree)):
+            return True
     return False
 
 

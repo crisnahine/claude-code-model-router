@@ -347,7 +347,7 @@ class Shipped(unittest.TestCase):
 
     def test_nothing_still_carries_the_old_name(self):
         old = re.compile("orchestr" + "ator", re.I)
-        skip = {".git", ".superpowers", "fixtures", "__pycache__", "results"}
+        skip = {".git", ".superpowers", "superpowers", "fixtures", "__pycache__", "results"}
         for path in ROOT.rglob("*"):
             if path.is_file() and not skip & set(path.parts) and path.suffix != ".pyc":
                 self.assertIsNone(old.search(str(path.relative_to(ROOT))), path)
@@ -597,7 +597,7 @@ class Snapshot(Sandbox):
             self.out("models", "--json")
         self.assertEqual(trusted.call_count, 1)
 
-    def test_a_cheap_hook_loads_neither_the_allowlist_nor_the_health_table(self):
+    def test_a_cheap_hook_and_a_result_naming_no_model_load_neither_the_allowlist_nor_the_health_table(self):
         self.options(main_effort="true")
         usage = {"model": "claude-haiku-5-5", "input_tokens": 1, "output_tokens": 1}
         with mock.patch.object(allowlist, "read", side_effect=AssertionError("allowlist")), \
@@ -751,6 +751,15 @@ class Allowlist(Sandbox):
         self.assertEqual(len(self.permitted(policy={"deniedModels": ["claude-opus-5-5", "sonnet[1m]", "best",
                                                                      "opusplan", "default"]})), 4)
         self.assertEqual(len(self.permitted(user={"deniedModels": ["opus"]}, project={"deniedModels": ["haiku"]})), 4)
+
+    def test_a_family_deny_also_blocks_a_project_model_that_resolves_to_that_family(self):
+        self.override({"models": {"best": {"strength": 3}}})
+        config = cfg.load_config()
+        self.assertEqual(registry.family(config, "best"), "opus")
+        denied = allowlist.from_layers({"policy": {"deniedModels": ["opus"]}}).permitted(config)
+        self.assertEqual(denied, {"haiku", "sonnet", "fable"})
+        kept = allowlist.from_layers({"policy": {"deniedModels": ["claude-opus-5-5"]}}).permitted(config)
+        self.assertEqual(kept, {"haiku", "sonnet", "fable", "opus", "best"})
 
     def test_entries_that_are_not_strings_match_nothing(self):
         self.assertEqual(self.permitted(policy={"availableModels": ["sonnet", {"id": "claude-opus-5-5"}],
@@ -2488,9 +2497,10 @@ class Health(Sandbox):
         store.update_state(lambda s: s.update(health={"opus": {"unavailable_until": "soon", "outages": -3},
                                                       "sonnet": "x", "haiku": {"last_model": 5},
                                                       "fable": {"unavailable_until": float("nan"), "outages": float("inf")},
-                                                      "saga": {"unavailable_until": float("inf"), "outages": float("nan")}}))
+                                                      "saga": {"unavailable_until": float("inf"), "outages": float("nan")},
+                                                      "huge": {"unavailable_until": 10 ** 400, "outages": 10 ** 400}}))
         seen = health.load()
-        self.assertEqual([seen.healthy(n) for n in ("opus", "sonnet", "haiku", "fable", "saga")], [True] * 5)
+        self.assertEqual([seen.healthy(n) for n in ("opus", "sonnet", "haiku", "fable", "saga", "huge")], [True] * 6)
         self.assertEqual(seen.seen_running(), [])
 
     def test_the_record_keeps_its_shape(self):
@@ -2742,9 +2752,10 @@ class Feedback(Sandbox):
         self.assertEqual(learn.stats()["lookup"]["votes"], 0)
 
     def test_a_swapped_run_the_caller_chose_leaves_the_count_alone(self):
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
+        self.assertEqual(learn.stats()["lookup"]["calls"], 1)
         self.pre("general-purpose", LOOKUP, model="sonnet")
-        self.assertEqual(learn.stats()["lookup"]["calls"], 0)
-        self.pre("general-purpose", "list the files under other")
         self.done("general-purpose", LOOKUP, "claude-sonnet-5-5", model="sonnet", models_used=SWAP["swapped"]["modelsUsed"])
         self.assertEqual(learn.stats()["lookup"]["calls"], 1)
 

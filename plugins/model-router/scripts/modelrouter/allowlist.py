@@ -105,7 +105,9 @@ class Allowlist:
                 found = {registry.family(config, e) for e in entries}
                 names = {n for n in names if n in found}
         if self.deny is not None:
-            names -= {_blocked_family(config, e) for e in self.deny}
+            blocked = {_blocked_family(config, e) for e in self.deny} - {None}
+            # A project's model that resolves to a blocked family, such as `best`, goes with it.
+            names = {n for n in names if registry.family(config, n) not in blocked}
         return names
 
     def permits_id(self, name: str, model_id: str) -> bool:
