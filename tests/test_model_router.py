@@ -301,7 +301,8 @@ class Shipped(unittest.TestCase):
         self.assertIn("starting the brief with today's date: !`date +%F`", refresh)
         self.assertIn("\n  - Bash(date +%F)\n", refresh)  # the `!` line runs under the skill's own allowed-tools
         body = (PLUGIN / "agents" / "docs-researcher.md").read_text(encoding="utf-8").split("---", 2)[2]
-        self.assertIn("Your brief starts with today's date", body)
+        self.assertIn("When your brief gives today's date, use it as today.", body)
+        self.assertIn("say in the first line of your answer that you don't know today's date", body)
 
     def test_the_architect_hands_back_a_file_it_was_asked_to_write(self):
         # Misrouted to it, a write-the-file task still ends with the content the caller can write.
