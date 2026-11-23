@@ -95,6 +95,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 - Every fact the docs' prose rests on has a test that turns it false with a row edit, and the two about FAIL classes (each fails on cost, and its best baseline is one the docs name) are false when no class is FAIL, where they were true with nothing to check.
 - The check behind "a pass rate no lower beyond noise" tests the router against each class's best baseline with the unadjusted p, since it is one comparison backing a favourable claim. The Holm adjustment across the baselines stays for `BEHIND`.
 - The runner checks a file's size before reading it into a row's `final_answer`, and lists a file too big for the per-file cap as omitted without reading it, so a huge file a run leaves can't exhaust memory and lose the row.
+- Release readiness and the traceability matrix gave figures the benchmark page doesn't show (1,300 to 4,500 more cache tokens per run, 4 of 10 design tasks sent to the architect). They now state those findings without the numbers.
 
 ### Internal
 
