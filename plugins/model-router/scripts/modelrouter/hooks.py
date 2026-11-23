@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import time
 
-from . import allowlist, calls, gates, health, intake, ladder, learn, ledger, registry, request, session, settings, spawn, store, upstream
+from . import allowlist, calls, fallback, gates, health, intake, ladder, learn, ledger, registry, request, session, settings, spawn, store, upstream
 from . import config as cfg
 
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
@@ -143,65 +143,10 @@ def mod_active(session_id: str | None) -> bool:
 
 
 def pre_agent(hook_input: dict) -> dict | None:
-    """The fallback path: the decision becomes the call's rewritten input and a note, or
-    the one deny that holds the user's cap."""
     if mod_active(hook_input.get("session_id")):
         return None  # the plugin's mod routes this call when it spawns
-    session_id = hook_input.get("session_id")
-    decision = spawn.run(hook_input, "fallback", guard=lambda *args: _refused_rewrite(session_id, *args))
-    if decision["action"] == "rewrite":
-        return {"hookSpecificOutput": {
-            "hookEventName": "PreToolUse", "updatedInput": _rewritten_input(cfg.tool_input(hook_input), decision),
-            "additionalContext": _note(decision)}}
-    if decision["action"] == "deny":
-        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                       "permissionDecisionReason": decision["reason"]}}
-    return None
-
-
-def _refused_rewrite(session_id: str | None, decision: dict, key: str, config: dict,
-                     options: settings.Settings) -> None:
-    """We rewrote this very call before and no result came back: the rewrite wasn't
-    accepted, or something else stopped the call. Rewriting it again could loop."""
-    if decision["action"] != "rewrite" or not decision["model"]:
-        return
-    earlier = calls.refused_rewrite(session_id, key)
-    if earlier is None:
-        return
-    cap, untouched = options.cap, decision["was"]
-    if cap and registry.strength(config, untouched) > registry.strength(config, cap):
-        decision.update(action="deny", reason=(
-            f"Model Router: subagents are capped at {cap} by the user, and this call would run on "
-            f"{untouched}. Re-issue it with model: \"{decision['model']}\"."))
-        return
-    decision.update(action="keep", model=None, repeat_of=earlier.get("model"), reason=(
-        "this call was rewritten once and came back without having run, so it is passed through unchanged"))
-    repeat_of = decision["repeat_of"]
-    try:
-        health.refused(repeat_of)
-    except OSError:
-        pass
-
-
-def _rewritten_input(tool_input: dict, decision: dict) -> dict:
-    """The whole call as it should run: Claude Code replaces the input, it doesn't merge."""
-    updated = dict(tool_input)
-    if decision.get("model"):
-        updated["model"] = decision["model"]
-    if decision.get("effort"):
-        updated["effort"] = decision["effort"]
-    return updated
-
-
-def _note(decision: dict) -> str:
-    """One line for Claude, delivered with the agent's result."""
-    if decision.get("model"):
-        effort = f" at {decision['effort']} effort" if decision.get("effort") else ""
-        what = f"model to {decision['model']}{effort}"
-    else:
-        what = f"effort to {decision['effort']}"
-    return (f"Model Router set this agent's {what} ({decision['reason']}). "
-            "If the result falls short, re-issue the same call: it runs one level higher.")
+    config = cfg.load_config(hook_input)
+    return fallback.route(hook_input, config, settings.resolve(config))
 
 
 def _asked_for(config: dict, tool_input: dict, routed: str | None) -> str | None:
@@ -220,9 +165,11 @@ def post_agent(hook_input: dict) -> dict | None:
     # is back when the agent stops (agent_stopped), not here.
     launched = response.get("status") == "async_launched"
     agent_id = response.get("agentId")
+    agent, key = calls.identify(tool_input)
+    session_id = hook_input.get("session_id")
     routed = None
     try:
-        routed = calls.settled(hook_input.get("session_id"), tool_input, finished=not launched,
+        routed = calls.settled(session_id, key, fallback.take(session_id, key), finished=not launched,
                                launched_as=agent_id if launched and isinstance(agent_id, str) else None)
     except OSError:
         pass
@@ -231,8 +178,7 @@ def post_agent(hook_input: dict) -> dict | None:
         health.ran(asked, ran_as, registry.family(config, ran_as), settings.resolve(config).force)
     except OSError:
         pass
-    ledger.result(hook_input.get("session_id"), calls.identify(tool_input)[0], asked, ran_as,
-                  response.get("status"), response.get("totalTokens"))
+    ledger.result(session_id, agent, asked, ran_as, response.get("status"), response.get("totalTokens"))
     return None
 
 
@@ -240,9 +186,11 @@ def agent_failed(hook_input: dict) -> dict | None:
     """An agent call failed. If the error says the model itself isn't usable, count it,
     and route around that model once it has happened twice."""
     tool_input = cfg.tool_input(hook_input)
+    session_id = hook_input.get("session_id")
+    key = calls.identify(tool_input)[1]
     routed = None
     try:
-        routed = calls.settled(hook_input.get("session_id"), tool_input)
+        routed = calls.settled(session_id, key, fallback.take(session_id, key))
     except OSError:
         pass
     error = str(hook_input.get("error") or "")
@@ -334,7 +282,10 @@ def _mark_mod(session_id: str | None) -> None:
 def mod_spawn(hook_input: dict) -> dict | None:
     _mark_mod(hook_input.get("session_id"))
     # The spawn procedure reads agent_id as "the call comes from inside a subagent".
-    decision = spawn.run({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, "mod")
+    config = cfg.load_config(hook_input)
+    spawned = spawn.decide({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, config, settings.resolve(config))
+    spawn.record(spawned, "mod")
+    decision = spawned.decision
     newest = _newest(hook_input, decision)
     if decision["action"] != "rewrite" and not newest:
         return None

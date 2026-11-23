@@ -1,14 +1,22 @@
-"""One procedure for every spawn, whichever path it came by: gather the facts, decide,
-write the ledger row, and record the call and the votes it carries."""
+"""One procedure for every spawn, whichever path it came by, in two steps: decide (the facts
+and the router's decision, writing nothing), then record (the ledger row, the call and the
+votes it carries). A path may adjust the decision between them."""
 from __future__ import annotations
 
-from typing import Callable
+from dataclasses import dataclass
 
-from . import agents, allowlist, calls, gates, learn, ledger, registry, request, router, session, settings, store
+from . import agents, allowlist, calls, gates, learn, ledger, registry, request, router, session, settings
 from . import config as cfg
 
-# Adjusts a decision before it is logged and recorded: (decision, call key, config, settings).
-Guard = Callable[[dict, str, dict, settings.Settings], None]
+
+@dataclass
+class Spawn:
+    hook_input: dict
+    config: dict
+    options: settings.Settings
+    key: str
+    facts: router.Facts
+    decision: router.Decision
 
 
 def facts(hook_input: dict, config: dict, options: settings.Settings,
@@ -42,36 +50,31 @@ def facts(hook_input: dict, config: dict, options: settings.Settings,
                         floor=floor)
 
 
-def run(hook_input: dict, via: str, guard: Guard | None = None) -> dict:
-    """Decide one spawn and record it. `via` is "mod" or "fallback"."""
-    config = cfg.load_config(hook_input)
-    options = settings.resolve(config)
+def decide(hook_input: dict, config: dict, options: settings.Settings) -> Spawn:
+    """Decide one spawn. Writes nothing."""
     call = calls.identify(cfg.tool_input(hook_input))
-    key = call[1]
     found = facts(hook_input, config, options, call)
-    decision = router.decide(found, config, options)
-    if guard:
-        guard(decision, key, config, options)
+    return Spawn(hook_input, config, options, call[1], found, router.decide(found, config, options))
+
+
+def record(spawned: Spawn, via: str) -> None:
+    """Write the spawn's ledger row and, unless it is denied, its call and votes. `via` is "mod" or "fallback"."""
+    hook_input, decision = spawned.hook_input, spawned.decision
     session_id = hook_input.get("session_id")
-    action = decision["action"]
-    ledger.spawn(session_id, via, decision, found.tool_input.get("description"),
+    ledger.spawn(session_id, via, decision, spawned.facts.tool_input.get("description"),
                  kind=(hook_input.get("kind") or "subagent") if via == "mod" else None)
-    if action != "deny":
+    if decision["action"] != "deny":
         try:
-            _record(config, session_id, key, decision, found.raises,
-                    awaiting=via == "fallback" and action == "rewrite")
+            _record(spawned.config, session_id, spawned.key, decision, spawned.facts.raises)
         except OSError:
             pass
-    return decision
 
 
-def _record(config: dict, session_id: str | None, key: str, decision: dict, raises: dict, awaiting: bool) -> None:
+def _record(config: dict, session_id: str | None, key: str, decision: dict, raises: dict) -> None:
     level, source = decision["level"], decision["source"]
     runs_on = decision["model"] or decision["was"]
     if decision["repeat_of"]:
         source = None  # passed through untouched: neither the pick nor the level applied
-    if awaiting:
-        calls.awaiting(session_id, key, runs_on, level, decision["effort"])
     earlier = request.note_spawn(config, session_id, key, runs_on, level=level, effort=decision["effort"],
                                  source=source)
     user_named = source == "caller" and decision["was"] == request.load(session_id).named

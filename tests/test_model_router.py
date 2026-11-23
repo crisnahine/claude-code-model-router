@@ -27,7 +27,7 @@ ERRORS = json.loads((FIXTURES / "model-errors.json").read_text())
 FRAMING = json.loads((FIXTURES / "prompt-framing.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, allowlist, calls, cli, gates, health, hooks, intake, learn, ledger, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
+from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, learn, ledger, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 
 LOOKUP = "list the files under src"
@@ -144,7 +144,7 @@ class Sandbox(unittest.TestCase):
     def next_message(self) -> None:
         """Claude's next message comes seconds after this one: waiting rewrites are older."""
         store.mutate_entry("pending", "s1", lambda pending: [
-            v.update(at=v["at"] - calls.REFUSED_AFTER - 1) for v in pending.values() if isinstance(v, dict)])
+            v.update(at=v["at"] - fallback.REFUSED_AFTER - 1) for v in pending.values() if isinstance(v, dict)])
 
     def override(self, value: dict, user: bool = False) -> None:
         folder = self.home if user else self.project / ".claude"
@@ -1788,11 +1788,9 @@ class Calls(Sandbox):
         super().setUp()
         self.config = cfg.load_config()
 
-    def route(self, tool_input: dict, model: str = "haiku", awaiting: bool = False, **facts) -> str | None:
+    def route(self, tool_input: dict, model: str = "haiku", **facts) -> str | None:
         facts = {"level": "lookup", "effort": "low", "source": "router", **facts}
         key = calls.identify(tool_input)[1]
-        if awaiting:
-            calls.awaiting("s1", key, model, facts["level"], facts["effort"])
         return request.note_spawn(self.config, "s1", key, model, **facts)
 
     def test_a_call_is_known_by_its_agent_and_prompt(self):
@@ -1802,44 +1800,73 @@ class Calls(Sandbox):
         self.assertNotEqual(key, calls.identify({"subagent_type": "Explore", "prompt": "x"})[1])
         self.assertEqual(calls.identify({"subagent_type": ["a"], "prompt": "x"})[0], "general-purpose")
 
-    def test_a_rewrite_waits_for_its_result_and_only_a_result_finishes_the_run(self):
-        call = {"prompt": LOOKUP}
-        key = calls.identify(call)[1]
-        self.route(call, awaiting=True)
-        self.assertIsNone(calls.refused_rewrite("s1", key))  # a copy issued alongside it
-        self.next_message()
-        self.assertEqual(calls.refused_rewrite("s1", key)["model"], "haiku")
-        calls.settled("s1", call)  # an error: the rewrite was accepted, but nothing finished
-        self.assertIsNone(calls.refused_rewrite("s1", key))
-        self.assertIsNone(calls.finished_run("s1", key))
-        calls.settled("s1", call, finished=True)
-        self.assertEqual(calls.finished_run("s1", key)["level"], "lookup")
-
     def test_only_runs_at_their_level_are_redone(self):
         for source in ("caller", None):
             call = {"prompt": f"list {source}"}
             self.route(call, source=source)
-            calls.settled("s1", call, finished=True)
+            calls.settled("s1", calls.identify(call)[1], None, finished=True)
             self.assertIsNone(calls.finished_run("s1", calls.identify(call)[1]), source)
 
     def test_a_finished_run_counts_in_its_own_request_or_window(self):
         call = {"prompt": LOOKUP}
         key = calls.identify(call)[1]
         self.route(call)
-        calls.settled("s1", call, finished=True)
+        calls.settled("s1", calls.identify(call)[1], None, finished=True)
         self.assertIsNotNone(calls.finished_run("s1", key))
         with mock.patch.object(calls.time, "time", return_value=time.time() + calls.REDO_WINDOW + 1):
             self.assertIsNone(calls.finished_run("s1", key))
         request.start("s1", prompt_id="p1", level="lookup", need="haiku", below=False, session_tier=None, named=None)
         self.assertIsNone(calls.finished_run("s1", key))
 
-    def test_records_keep_the_most_recent_calls(self):
-        for i in range(store.KEPT_RECORDS + 2):
-            self.route({"prompt": f"list {i}"}, awaiting=True)
+
+class Fallback(Sandbox):
+    def pending(self, key: str, at: float) -> None:
+        store.save_entry("pending", "s1", {key: {"model": "haiku", "at": at}})
+
+    def test_a_rewrite_waits_for_its_result_and_only_a_result_finishes_the_run(self):
+        key = calls.identify({"prompt": LOOKUP})[1]
+        fallback.remember("s1", key, self.decide("general-purpose", LOOKUP))
+        request.note_spawn(cfg.load_config(), "s1", key, "haiku", level="lookup", effort="low", source="router")
+        self.assertIsNone(fallback.refused("s1", key))  # a copy issued alongside it
         self.next_message()
-        self.assertIsNone(calls.refused_rewrite("s1", calls.identify({"prompt": "list 0"})[1]))
-        self.assertIsNone(calls.refused_rewrite("s1", calls.identify({"prompt": "list 1"})[1]))
-        self.assertIsNotNone(calls.refused_rewrite("s1", calls.identify({"prompt": "list 2"})[1]))
+        self.assertEqual(fallback.refused("s1", key)["model"], "haiku")
+        calls.settled("s1", key, fallback.take("s1", key))  # an error: accepted, nothing finished
+        self.assertEqual((fallback.refused("s1", key), calls.finished_run("s1", key)), (None, None))
+        calls.settled("s1", key, fallback.take("s1", key), finished=True)
+        self.assertEqual(calls.finished_run("s1", key)["level"], "lookup")
+
+    def test_a_spawn_decides_without_writing_and_records_the_guarded_decision(self):
+        hook_input = self.call("general-purpose", LOOKUP)
+        config = cfg.load_config()
+        spawned = spawn.decide(hook_input, config, settings.resolve(config))
+        self.assertEqual((self.ledger(), request.load("s1").top_spawn), ([], None))
+        spawned.decision.update(action="keep", model=None, reason="held")
+        spawn.record(spawned, "fallback")
+        self.assertEqual([(r["action"], r["reason"]) for r in self.ledger()], [("keep", "held")])
+
+    def test_waiting_rewrites_keep_the_most_recent(self):
+        for i in range(store.KEPT_RECORDS + 2):
+            fallback.remember("s1", calls.identify({"prompt": f"list {i}"})[1], self.decide("general-purpose", f"list {i}"))
+        self.next_message()
+        self.assertIsNone(fallback.refused("s1", calls.identify({"prompt": "list 0"})[1]))
+        self.assertIsNone(fallback.refused("s1", calls.identify({"prompt": "list 1"})[1]))
+        self.assertIsNotNone(fallback.refused("s1", calls.identify({"prompt": "list 2"})[1]))
+
+    def test_a_rewrite_stamped_in_the_future_counts_as_refused(self):
+        self.pending("k", time.time() + 3600)
+        self.assertEqual(fallback.refused("s1", "k")["model"], "haiku")  # passed on untouched, never looped
+        self.pending("k", time.time() - 1)
+        self.assertIsNone(fallback.refused("s1", "k"))  # a copy issued alongside it
+
+    def test_a_copy_after_a_small_step_back_is_still_a_copy(self):
+        # A fan-out's copies, with the clock stepped back a few seconds between their hooks (an NTP correction).
+        written = time.time()
+        self.pending("k", written)
+        for back in (0.5, 3, fallback.REFUSED_AFTER - 0.5):
+            with mock.patch.object(fallback.time, "time", return_value=written - back):
+                self.assertIsNone(fallback.refused("s1", "k"), back)
+        with mock.patch.object(fallback.time, "time", return_value=written + 1):
+            self.assertIsNone(fallback.refused("s1", "k"))
 
 
 class Request(Sandbox):
@@ -4084,22 +4111,6 @@ class ClockAndCleanup(Sandbox):
         self.assertIsNone(calls.finished_run("s1", "k"))
         store.save_entry("done", "s1", {"k": {"level": "lookup", "at": time.time() - 60}})
         self.assertEqual(calls.finished_run("s1", "k")["level"], "lookup")
-
-    def test_a_rewrite_stamped_in_the_future_counts_as_refused(self):
-        store.save_entry("pending", "s1", {"k": {"model": "haiku", "at": time.time() + 3600}})
-        self.assertEqual(calls.refused_rewrite("s1", "k")["model"], "haiku")  # passed on untouched, never looped
-        store.save_entry("pending", "s1", {"k": {"model": "haiku", "at": time.time() - 1}})
-        self.assertIsNone(calls.refused_rewrite("s1", "k"))  # a copy issued alongside it
-
-    def test_a_copy_after_a_small_step_back_is_still_a_copy(self):
-        # A fan-out's copies, with the clock stepped back a few seconds between their hooks (an NTP correction).
-        written = time.time()
-        store.save_entry("pending", "s1", {"k": {"model": "haiku", "at": written}})
-        for back in (0.5, 3, calls.REFUSED_AFTER - 0.5):
-            with mock.patch.object(calls.time, "time", return_value=written - back):
-                self.assertIsNone(calls.refused_rewrite("s1", "k"), back)
-        with mock.patch.object(calls.time, "time", return_value=written + 1):
-            self.assertIsNone(calls.refused_rewrite("s1", "k"))
 
     def test_only_the_newest_copies_of_an_unreadable_file_are_kept(self):
         learned = store.data_dir() / "learned.json"

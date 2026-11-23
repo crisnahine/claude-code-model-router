@@ -12,7 +12,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Spawn**: the moment a call starts an agent. The mod sees it as the engine's `agent.spawn` event, the fallback as a `PreToolUse` hook on the `Agent` tool.
 
-**Path**: how a call reaches the router. The **mod path** runs in `hooks/router.ts` on engine events. The **fallback path** rewrites the `Agent` tool call and stands down when the mod runs.
+**Path**: how a call reaches the router. The **mod path** runs in `hooks/router.ts` on engine events. The **fallback path** (`fallback.py`) rewrites the `Agent` tool call and stands down when the mod runs.
 
 **Level**: how much reasoning a call needs: lookup, standard, complex, hardest or frontier. It comes from the call's brief and the agent's name.
 

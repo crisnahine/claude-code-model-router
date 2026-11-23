@@ -14,8 +14,6 @@ from .config import LEVELS
 
 # Without a request id to compare, a call seen again within this long counts as a redo.
 REDO_WINDOW = 30 * 60
-# shortcut: a refused call re-issued within this many seconds is rewritten again; key on a message id if hooks get one
-REFUSED_AFTER = 5
 
 
 def identify(tool_input: dict) -> tuple[str, str]:
@@ -26,22 +24,12 @@ def identify(tool_input: dict) -> tuple[str, str]:
     return agent, hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
 
 
-def awaiting(session_id: str | None, key: str, model: str | None, level: str | None, effort: str | None) -> None:
-    """A fallback rewrite waits here for its result."""
-    store.mutate_entry("pending", session_id, lambda pending: store.keep(
-        pending, key, {"model": model, "level": level, "effort": effort}))
-
-
-def settled(session_id: str | None, tool_input: dict, finished: bool = False,
+def settled(session_id: str | None, key: str, rewrite: dict | None, finished: bool = False,
             launched_as: str | None = None) -> str | None:
-    """A result or an error came back, so the call's rewrite was accepted. A result also
-    marks the run finished, so the same call issued again is a redo. A background launch
-    has no result yet: it waits under its agent's id until that agent stops. Returns the
-    model the call was routed to in this request, when known."""
-    key = identify(tool_input)[1]
-    rewrite = store.load_entry("pending", session_id).get(key)
-    if rewrite is not None:
-        store.mutate_entry("pending", session_id, lambda pending: pending.pop(key, None))
+    """A result or an error came back, so the call's `rewrite` (taken from the fallback) was
+    accepted. A result also marks the run finished, so the same call issued again is a redo.
+    A background launch has no result yet: it waits under its agent's id until that agent
+    stops. Returns the model the call was routed to in this request, when known."""
     now = request.load(session_id)
     model = now.routed_to(key)
     ran = rewrite if isinstance(rewrite, dict) and rewrite.get("level") else now.run(key)
@@ -88,14 +76,3 @@ def _age(record: dict) -> float:
     """Seconds since the record was written. A clock moved back makes it negative, and each
     caller decides which side of its test that unknown age falls on."""
     return time.time() - (record.get("at") or 0)
-
-
-def refused_rewrite(session_id: str | None, key: str) -> dict | None:
-    """This call's fallback rewrite, when the call shows up again before its result: the
-    rewrite didn't run. A rewrite only seconds from now, either way, is a copy issued alongside
-    it: a clock stepped back a little mustn't pass a fan-out's copies through unrouted, and one
-    stamped far ahead still counts as refused, so a big jump back can't loop a rewrite."""
-    rewrite = store.load_entry("pending", session_id).get(key)
-    if not isinstance(rewrite, dict) or abs(_age(rewrite)) < REFUSED_AFTER:
-        return None
-    return rewrite

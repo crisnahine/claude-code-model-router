@@ -26,7 +26,7 @@ The aim is the lowest cost per finished task at a high quality bar. Every subtas
                                 └──────────────┬────────────────────┘
                                                ▼
                                   scripts/modelrouter (Python)
-                  spawn · router.decide · ladder · registry · profile · request · calls · learn · gates
+                  spawn · fallback · router.decide · ladder · registry · profile · request · calls · learn · gates
 ```
 
 **The mod** (`hooks/router.ts`, a hooks module loaded from `hooks/hooks.json` under `modules`) is the primary path. It hooks four engine events:
@@ -52,7 +52,8 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 | `registry` | Which models exist, which are usable right now, the `select` and `clamp` rules, and list prices |
 | `profile` | Turns a brief and an agent's name into a level and the reasons for it |
 | `ladder` | Turns a level, the priority and learned raises into the pick: a model and an effort |
-| `spawn` | The one procedure both paths call for a spawn: gathers the facts, asks `router.decide`, writes the ledger row, and records the call |
+| `spawn` | The one procedure both paths call, in two steps: decide (facts and `router.decide`), then record (the ledger row, the call, its votes) |
+| `fallback` | The `Agent` call path's own pieces: the rewrite to `updatedInput`, the rewrite waiting for its result, the refused-rewrite guard and the one deny |
 | `router` | Applies the order of authority and produces one decision per agent, from the facts it is given alone |
 | `intake` | Whether a prompt or a turn is the person's request, and at what level, for both paths; profile scores it |
 | `request` | The current request's record: its level and floor, the model the user named, the routed spawns and the strongest one, and the escalation ask |
@@ -93,7 +94,7 @@ A level's `needs` is a strength. `ladder.pick` adds any learned raise, and `regi
 
 ## The decision
 
-Both paths call one procedure, `spawn.run`. It gathers the facts about the call (the agent's definition, the model it would inherit, the usable models, and an earlier finished run of the same call), passes them to `router.decide`, writes one ledger row (`via` says which path), and records the call in `calls` and its votes in `learn`. Each path is a thin adapter around it: the fallback turns the decision into `updatedInput` and a note, the mod into `{model, effort, reason}`.
+Both paths call one procedure in two steps. `spawn.decide` gathers the facts about the call (the agent's definition, the model it would inherit, the usable models, and an earlier finished run of the same call) and passes them to `router.decide`; it writes nothing. `spawn.record` writes one ledger row (`via` says which path) and records the call in `request` and its votes in `learn`. The fallback adjusts the decision between the two steps, so the ledger row shows the guarded result. Each path is a thin adapter around them: the fallback turns the decision into `updatedInput` and a note, the mod into `{model, effort, reason}`.
 
 `router.decide` reads no state of its own: the parent's model, the agent's definition, the call's earlier run and the learned raises all arrive as facts. It returns one record: keep or rewrite, plus the model, the effort, the level and the reason. The reason is written to the ledger, so every choice can be explained afterwards.
 
@@ -129,7 +130,7 @@ When an agent's result comes back, the call is remembered with the level it ran 
 
 ### Rewrites that don't take
 
-On the fallback path, the `Agent` tool validates a rewritten call, and Claude Code reports no event when it rejects one. A hook that rewrote the retry the same way would loop. So every rewrite is remembered until its result or failure arrives. If the same call shows up again first, and more than a few seconds later, the earlier rewrite didn't run, and a call the router would give a model is passed through untouched. Copies of one call issued in one message arrive together, so they are each routed as usual. This guard belongs to the fallback adapter alone; `router.decide` doesn't know about it. When the target was a model that has never run in this setup, that counts as a strike against it, and two strikes route around it.
+On the fallback path, the `Agent` tool validates a rewritten call, and Claude Code reports no event when it rejects one. That includes auto mode denying a call because a hook changed its input after the mode reviewed it (https://code.claude.com/docs/en/hooks.md#pretooluse-decision-control). A hook that rewrote the retry the same way would loop. So every rewrite is remembered until its result or failure arrives. If the same call shows up again first, and more than a few seconds later, the earlier rewrite didn't run, and a call the router would give a model is passed through untouched. Copies of one call issued in one message arrive together, so they are each routed as usual. This guard belongs to the fallback adapter alone (`fallback.py`); `router.decide` doesn't know about it. When the target was a model that has never run in this setup, that counts as a strike against it, and two strikes route around it.
 
 One case can't be passed through. If the model the call would run on untouched is above the user's cap, letting it go would break the cap. That repeated call is denied, with the model to use in the reason. This is the only denial the plugin ever returns, and the mod path never needs it.
 
@@ -176,7 +177,7 @@ A changelog or docs index that comes back empty, such as an outage page, counts 
 
 ```text
 mod  session.start ─ mod-start      marks the session, so PreToolUse stands down, and keeps the settings layers the mod read
-mod  agent.spawn   ─ mod-spawn      spawn.run for a subagent, teammate or workflow stage
+mod  agent.spawn   ─ mod-spawn      spawn.decide and spawn.record for a subagent, teammate or workflow stage
 mod  turn.start    ─ mod-turn       the main loop's effort for this turn; keeps the settings layers too
 mod  turn.step                      applies the agent's or the turn's effort to each request; keeps its usage
 mod  turn.complete ─ mod-usage      prices the turn's requests into the ledger
@@ -185,7 +186,7 @@ SessionStart ─┬─ session-start   records options and the session model; ex
                                  waiting 1 h to a day after a failed fetch
 UserPromptSubmit ─ user-prompt   profiles the request; notes a model the user may be asking for
 PostModelSwitch ─ model-switch   records the session's new model
-PreToolUse (Agent|Task) ─ pre-agent      fallback: spawn.run, returns updatedInput
+PreToolUse (Agent|Task) ─ pre-agent      fallback: fallback.route, returns updatedInput
 PostToolUse (Agent|Task) ─ post-agent    the model that ran; a returned result finishes the call for redos
 SubagentStop ─ agent-stopped    a background agent's result, or its handback, is back; finishes its call for redos;
                                 counts the checks the agent ran
