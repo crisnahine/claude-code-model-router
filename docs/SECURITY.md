@@ -47,7 +47,7 @@ How long a fetch can take:
 
 Fetches run from the async `SessionStart` hook once a day after a successful fetch (`upstream.refresh`, `upstream.CACHE_TTL_SECONDS`). After a failed fetch, session starts wait an hour before trying again, doubling with each failure in a row up to a day, and a success resets the wait (`upstream.FAILED_RETRY_SECONDS`, `upstream._retry_wait`, `upstream.refresh`); each try is capped at 25 seconds. `/model-router:refresh` fetches whenever you run it. Claude Code doesn't enforce `timeout` on an async hook (https://code.claude.com/docs/en/hooks.md#run-hooks-in-the-background), so the 25-second budget is what ends a stuck refresh. Turning the `update_check` option off stops the fetch at session start (`hooks.refresh_cache`).
 
-The manifest lists the same three hosts under `network.hosts`. That field only declares them: it doesn't allow or block any host (https://code.claude.com/docs/en/plugins-reference.md).
+The manifest lists the same three hosts under `network.hosts`. That field only declares them: it doesn't allow or block any host (https://code.claude.com/docs/en/plugins/manifest-reference.md#fields).
 
 ## Credentials
 

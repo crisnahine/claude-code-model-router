@@ -272,7 +272,7 @@ A breaking change is one that makes an existing file, option or reader behave di
 
 An override written for a newer release is read, not refused: the settings this release understands apply, the rest are ignored, and `/model-router:models` names the file. Refusing it would be worse, because a newer file that sets `routing_mode: off` would turn routing back on. A state file from a newer release is handled the other way round, read but never written, because writing it would drop what this release can't see.
 
-Plugin options have no version key of their own, since `userConfig` has Claude Code's shape (https://code.claude.com/docs/en/plugins-reference.md). They follow the plugin's version: within a major version an option is never removed or renamed, and the values it accepts only grow.
+Plugin options have no version key of their own, since `userConfig` has Claude Code's shape (https://code.claude.com/docs/en/plugins/manifest-reference.md#user-configuration). They follow the plugin's version: within a major version an option is never removed or renamed, and the values it accepts only grow.
 
 ## What is out of reach, or left alone on purpose
 
