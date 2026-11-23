@@ -884,12 +884,16 @@ BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(config id, 
     "claude-opus-5-5": ("Opus 5.5 session", [
         ("plugin-next", "Model Router", "rt"),
         ("defaults", "Claude Code defaults", "faintbar"),
+        ("haiku", "All subagents on Haiku", "r2"),
+        ("haiku-high", "All subagents on Haiku, high", "r3"),
+        ("opusplan", "opusplan (runs Sonnet when headless)", "r4"),
     ]),
     "sonnet": ("Sonnet 5.5 session", [
         ("plugin-next", "Model Router", "rt"),
         ("defaults", "Claude Code defaults", "faintbar"),
         ("sonnet-medium", "All subagents on Sonnet, medium", "r2"),
         ("sonnet-high", "All subagents on Sonnet, high", "r3"),
+        ("opusplan", "opusplan (runs Sonnet when headless)", "r4"),
     ]),
 }
 CELL = re.compile(r"(\d+) of (\d+) solved .*?\$([\d.]+) per solved")

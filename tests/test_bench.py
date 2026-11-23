@@ -114,6 +114,28 @@ class Analysis(unittest.TestCase):
         self.assertIn("bugfix: FAIL", sonnet_part)
         self.assertNotIn("$0.9000", sonnet_part)
 
+    def test_a_configuration_with_its_own_session_model_joins_every_table(self):
+        # opusplan sets its own --model, so its runs are the same whichever session the batch used.
+        real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl")
+                          .read_text().splitlines()[0])
+        n = analyze.MIN_RUNS
+        rows = [dict(real, main_model=m, config=c, total_cost_usd=usd, passed=True)
+                for m, c, usd in (("claude-opus-5-5", "plugin-next", 0.5), ("claude-opus-5-5", "defaults", 0.9),
+                                  ("sonnet", "plugin-next", 0.3), ("sonnet", "defaults", 0.2),
+                                  ("opusplan", "opusplan", 0.1)) for _ in range(n)]
+        with tempfile.TemporaryDirectory() as tmp:
+            res = Path(tmp) / "results"
+            res.mkdir()
+            (res / "a-bugfix.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            out = Path(tmp) / "page.md"
+            analyze.main([str(res / "a-bugfix.jsonl"), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        self.assertNotIn("## Results: session model `opusplan`", page)
+        for model in ("claude-opus-5-5", "sonnet"):
+            part = page.split(f"## Results: session model `{model}`")[1].split("## ")[0]
+            self.assertIn("| opusplan |", part)
+            self.assertIn("bugfix: FAIL, cost per solved task above opusplan's", part)
+
     def test_the_page_reports_latency_cache_level_accuracy_and_escalation(self):
         real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
         usage = {"m": {"inputTokens": 10, "cacheReadInputTokens": 80, "cacheCreationInputTokens": 10}}

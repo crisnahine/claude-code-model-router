@@ -126,10 +126,17 @@ def render(summary: list[dict], meta: dict) -> str:
 
 def sessions(rows: list[dict], router: str | None = None) -> list[tuple[str, str, list[dict], list[dict]]]:
     """One summary per session model, since a configuration costs differently on each. Its router is `router`,
-    or else the first configuration in configs.json that loads the plugin and ran on that session model."""
+    or else the first configuration in configs.json that loads the plugin and ran on that session model. A
+    configuration that sets its own session model (opusplan) runs the same in any batch, so it joins every table."""
+    own = {c["id"] for c in run.load_configs() if c.get("model")}
     groups: dict[str, list[dict]] = {}
     for r in rows:
-        groups.setdefault(r.get("main_model") or "unknown", []).append(r)
+        if r["config"] not in own:
+            groups.setdefault(r.get("main_model") or "unknown", []).append(r)
+    for r in rows:
+        if r["config"] in own:
+            for group in groups.values() or [groups.setdefault(r.get("main_model") or "unknown", [])]:
+                group.append(r)
     out = []
     for model, group in sorted(groups.items()):
         ran = {r["config"] for r in group}
@@ -196,7 +203,9 @@ def _metrics(summary: list[dict], rows: list[dict]) -> list[str]:
 def render_sessions(parts: list[tuple[str, str, list[dict], list[dict]]], meta: dict) -> str:
     body = []
     for model, router, summary, rows in parts:
-        body += [f"## Results: session model `{model}`", "", f"Every run here had `{model}` as its session model; "
+        own = sorted({r["config"] for r in rows if r.get("main_model") != model})
+        but = f", except {', '.join(f'`{c}`' for c in own)}, which sets its own" if own else ""
+        body += [f"## Results: session model `{model}`", "", f"Every run here had `{model}` as its session model{but}; "
                  f"router: `{router}`.", "", *_table(summary), "", *_metrics(summary, rows), ""]
     return "\n".join([meta.get("header", "# Benchmarks"), "", *body, meta.get("body", "")]).rstrip() + "\n"
 

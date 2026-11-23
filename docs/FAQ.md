@@ -26,7 +26,7 @@ The plugin is free under the Apache-2.0 license, and it adds 683 tokens to each 
 
 ## Does Model Router reduce Claude Code cost?
 
-On an Opus 5.5 session, yes: the router cost less per solved task than Claude Code's defaults in 7 of 8 task classes, $0.119 against $0.152 over 80 runs each (21% less), with every run solved for both. The difference is outside the noise in those 7 (18 to 36% less), and design is level. On a Sonnet session, no: the router is cheapest only in lookup and costs 7 to 63% more per solved task than the best baseline in the other 7 classes, at the same pass rate. Both ran the routing code at commit `780ee86`, 10 runs per class and configuration ([BENCHMARKS.md](BENCHMARKS.md), [TRACEABILITY.md](TRACEABILITY.md) row S4.15).
+Against Claude Code's defaults on an Opus 5.5 session, yes: the router cost less per solved task in 7 of 8 task classes, $0.119 against $0.152 over 80 runs each (21% less), with every run solved for both, and was level in design. It isn't the cheapest way to run agents there: every subagent on Haiku at `high` effort ($0.075, 80 of 80 solved) and `opusplan` ($0.069, 79 of 80; it runs Sonnet throughout when headless) cost less in every class, so each class is FAIL against the best baseline. On a Sonnet session, no: the router is cheapest only in lookup and costs 7 to 63% more per solved task than the best baseline in the other 7 classes, at the same pass rate. The router ran the routing code at commit `780ee86`, 10 runs per class and configuration, beside every baseline ([BENCHMARKS.md](BENCHMARKS.md), [TRACEABILITY.md](TRACEABILITY.md) row S4.15).
 
 ## Does quality drop when subagents run on cheaper models?
 
