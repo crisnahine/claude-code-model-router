@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 
-from . import allowlist, health, registry, store
+from . import allowlist, health, ladder, learn, registry, store
 from . import config as cfg
 from .config import MODES, PRIORITIES, parse_mode
 
@@ -132,6 +132,14 @@ class Snapshot:
     @cached_property
     def allowed(self) -> allowlist.Allowlist:
         return allowlist.read(self.session_id, self.project, (self.hook_input or {}).get("settings"))
+
+    @cached_property
+    def raises(self) -> dict[str, int]:
+        return learn.raises()
+
+    def pick(self, level: str) -> ladder.Pick:
+        """The ladder's pick for `level` under this setup's priority, usable models and learned raises."""
+        return ladder.pick(self.config, level, self.options.priority, self.usable, self.raises)
 
     def settle(self) -> None:
         """Write what reads only noticed: an outage the health table found too long. Dry runs skip it."""

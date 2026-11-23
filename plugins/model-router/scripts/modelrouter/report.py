@@ -2,9 +2,8 @@
 fall back to what the last SessionStart recorded."""
 from __future__ import annotations
 
-from . import agents, ladder, learn, ledger, registry, settings, store, upstream
+from . import intake, learn, ledger, registry, settings, spawn, store, upstream
 from . import config as cfg
-from .profile import profile_call, profile_prompt
 
 # The --json shapes. A new key keeps the version; removing or renaming one bumps it.
 USAGE_SCHEMA = "model-router.usage/1"
@@ -17,10 +16,9 @@ def policy(snap: settings.Snapshot) -> str:
     lines = [f"Routing: **{options.mode}**. Priority: **{options.priority}**. "
              f"Cap: **{limit or 'none'}**. Strongest model in use: **{usable[-1] if usable else 'none'}**.", "",
              "| Subtask level | Model | Effort |", "| :- | :- | :- |"]
-    raises = learn.raises()
     for level in cfg.LEVELS:
-        pick = ladder.pick(config, level, options.priority, usable, raises)
-        note = " (raised by feedback)" if raises[level] else ""
+        pick = snap.pick(level)
+        note = " (raised by feedback)" if snap.raises[level] else ""
         lines.append(f"| {level} | {pick.model or 'left as it is'}{note} | {pick.effort or 'as the agent or session sets it'} |")
     lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
     for name in registry.by_strength(config):
@@ -105,22 +103,25 @@ def models(snap: settings.Snapshot) -> str:
 
 
 def explain(snap: settings.Snapshot, text: str, agent: str | None = None) -> str:
-    """What the router would make of this task, and why."""
-    config, options, usable = snap.config, snap.options, snap.usable
-    result = profile_call({"prompt": text}, agent) if agent else profile_prompt(text)
-    level = result["level"]
-    pick = ladder.pick(config, level, options.priority, usable, learn.raises())
-    why = ", ".join(result["signals"]) or "no risk, scope or ambiguity wording"
-    out = [f"Level: **{level}** ({why}).",
-           f"Model: **{pick.model or 'left as it is'}**, effort: {pick.effort or 'unchanged'}.",
+    """What the router would make of an agent call with this brief, and why: a dry run of spawn.decide, which
+    writes nothing. Without an agent, the text also reads as the user's own request."""
+    options, usable = snap.options, snap.usable
+    call = {"session_id": snap.session_id, "tool_input": {"prompt": text, "subagent_type": agent or "general-purpose"}}
+    decision = spawn.decide(call, snap).decision
+    level = decision["level"]
+    why = ", ".join(decision["signals"]) or "no risk, scope or ambiguity wording"
+    out = [f"Level: **{level}** ({why})." if level else "Level: none, the call is not routed by level.",
+           f"Model: **{decision['model'] or 'left as it is'}**, effort: {decision['effort'] or 'unchanged'}.",
+           f"Why: {decision['reason']}.",
            f"Priority {options.priority}; models in use: {', '.join(usable) or 'none: availableModels and deniedModels leave no registry model open'}."]
-    if agent:
-        definition = agents.find(agent, snap.project)
-        pinned = (definition or {}).get("model")
-        if definition is None:
-            out.append(f"The definition of `{agent}` wasn't found, so its calls are left alone.")
-        elif pinned and options.pins == "respect":
-            out.append(f"`{agent}` names its own model ({pinned}), which is kept within the cap.")
+    if not agent:
+        seen = intake.from_prompt(text, snap.project)
+        if seen.person:
+            need = snap.pick(seen.level).model
+            out.append(f"As your own request it reads **{seen.level}** ({', '.join(seen.signals) or 'no signals'}), "
+                       f"which needs about {need or 'no model change'}.")
+        else:
+            out.append("It is not read as your own request: it is a delivered or machine message.")
     return "\n".join(out)
 
 

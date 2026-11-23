@@ -674,6 +674,17 @@ class Snapshot(Sandbox):
                                   "error": "API Error: 404 not_found_error: model: haiku"})
         self.assertIn("looks unavailable", out["hookSpecificOutput"]["additionalContext"])
 
+    def test_the_snapshot_picks_with_its_priority_usable_models_and_raises_read_once(self):
+        store.save_json(learn._path(), {"lookup": {"bump": 1}})
+        self.options(priority="quality")
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        with mock.patch.object(learn, "raises", wraps=learn.raises) as raises:
+            picks = {level: snap.pick(level) for level in cfg.LEVELS}
+            self.assertIs(snap.raises, snap.raises)
+        self.assertEqual(raises.call_count, 1)
+        self.assertEqual(picks["lookup"], ladder.pick(snap.config, "lookup", "quality", snap.usable, {"lookup": 1}))
+        self.assertEqual(picks["complex"], ladder.pick(snap.config, "complex", "quality", snap.usable, {}))
+
     def test_a_field_is_read_on_first_use_and_then_kept(self):
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
         with mock.patch.object(allowlist, "read", wraps=allowlist.read) as read:
@@ -1586,24 +1597,24 @@ class Profile(unittest.TestCase):
 
 class RoutingEvals(Sandbox):
     """Each `claude plugin eval` case routes as its expected_outcome says, with no model call, so a
-    routing regression fails CI instead of waiting for a paid eval run."""
+    routing regression fails CI instead of waiting for a paid eval run. A case hands a subagent an exact
+    brief, and the router decides that call as it would in a session on the case's own model."""
 
     def test_each_eval_case_routes_as_expected(self):
         cases = sorted((PLUGIN / "evals").glob("*/prompt.md"))
         self.assertGreaterEqual(len(cases), 2)
-        snap = settings.Snapshot()
         for path in cases:
             name = path.parent.name
-            want = re.fullmatch(r"['\"]?level (\w+), model (\w+), effort (\w+)['\"]?",
-                                frontmatter(path).get("expected_outcome", ""))
+            fields = frontmatter(path)
+            want = re.fullmatch(r"['\"]?level (\w+), model (\w+), effort (\w+)['\"]?", fields.get("expected_outcome", ""))
             self.assertTrue(want, f"{name}: expected_outcome must read 'level L, model M, effort E'")
-            body = path.read_text(encoding="utf-8").split("\n---\n", 1)[1].strip()
-            # A case that hands a subagent an exact brief is about how that call routes.
-            quoted = re.search(r'this exact prompt: "([^"]+)"', body)
-            got = (report.explain(snap, quoted[1], "general-purpose") if quoted
-                   else report.explain(snap, body))
-            self.assertIn(f"Level: **{want[1]}**", got, name)
-            self.assertIn(f"Model: **{want[2]}**, effort: {want[3]}.", got, name)
+            quoted = re.search(r'this exact prompt: "([^"]+)"', path.read_text(encoding="utf-8").split("\n---\n", 1)[1])
+            self.assertTrue(quoted, f"{name}: the case must quote the brief it hands a subagent")
+            self.session_on(fields["model"], session_id=name)
+            hook_input = {"session_id": name, "cwd": str(self.project),
+                          "tool_input": {"subagent_type": "general-purpose", "prompt": quoted[1]}}
+            d = spawn.decide(hook_input, settings.Snapshot(hook_input)).decision
+            self.assertEqual((d["level"], d["model"], d["effort"]), want.groups(), name)
 
 
 class Router(Sandbox):
@@ -3751,6 +3762,56 @@ class Reports(Sandbox):
         self.agent("pinned", "opus")
         self.assertIn("names its own model", self.out("explain", "--agent", "pinned", "list", "files"))
         self.assertIn("wasn't found", self.out("explain", "--agent", "mystery:agent", "list", "files"))
+
+    def test_explain_says_what_the_spawn_decision_says(self):
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        for agent, brief in (("general-purpose", HARD), ("general-purpose", LOOKUP), ("model-router:scout", HARDEST)):
+            d = spawn.decide({"session_id": "s1", "tool_input": {"prompt": brief, "subagent_type": agent}}, snap).decision
+            text = report.explain(snap, brief, agent)
+            self.assertIn(f"Level: **{d['level']}**", text)
+            self.assertIn(f"Model: **{d['model'] or 'left as it is'}**, effort: {d['effort'] or 'unchanged'}.", text)
+            self.assertIn(f"Why: {d['reason']}.", text)
+
+    def test_explain_reports_the_rules_the_old_profile_and_ladder_copy_missed(self):
+        self.override({"agents": {"quiet": {"route": False}}})
+        self.assertIn("leaves this agent alone", self.out("explain", "--agent", "quiet", *LOOKUP.split()))
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        self.assertIn("pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE", self.out("explain", *LOOKUP.split()))
+        for name in ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_CODE_SUBAGENT_MODEL"):
+            del os.environ[name]
+        request.start("s1", prompt_id="p1", level="hardest", need="opus", below=False, session_tier=None, named=None)
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        text = report.explain(snap, LOOKUP, "model-router:architect")
+        self.assertIn("Level: **hardest**", text)  # the request's floor reaches a strong role agent
+        key = calls.identify({"prompt": LOOKUP})[1]
+        request.note_spawn(snap.config, "s1", key, "haiku", level="lookup", effort="medium", source="router")
+        calls.settled("s1", key, None, finished=True)
+        self.assertIn("one level above the lookup run", report.explain(snap, LOOKUP))
+
+    def test_explain_writes_nothing(self):
+        # Every lazy read has something to write: a record too long for the clock, layers the session never stored.
+        with self.clock_at(self.clock + 19 * 86400):
+            health.failed("fable", "model not found")
+            health.failed("fable", "model not found")
+        sent = {"policy": {"availableModels": ["haiku", "sonnet", "fable"]}}
+        hook_input = {"session_id": "s1", "cwd": str(self.project), "settings": sent}
+        self.session_on("claude-sonnet-5-5")
+
+        def files() -> dict:
+            return {str(p): p.read_bytes() for root in (self.data, self.home, self.project)
+                    for p in root.rglob("*") if p.is_file()}
+
+        before = files()
+        text = report.explain(settings.Snapshot(hook_input), HARD)
+        report.explain(settings.Snapshot(hook_input), LOOKUP, "model-router:architect")
+        report.policy(settings.Snapshot(hook_input))
+        self.assertEqual(files(), before)
+        self.assertIn("models in use: haiku, sonnet.", text)  # fable is routed around, and the record stays as it was
+        state = store.state_path().read_bytes()
+        hooks.mod_spawn({**hook_input, "kind": "subagent", "tool_input": {"subagent_type": "general-purpose",
+                                                                          "prompt": LOOKUP}})
+        self.assertNotEqual(files(), before)  # a real spawn does write
+        self.assertNotEqual(store.state_path().read_bytes(), state)  # and settles the outage the reads found
 
     def test_usage_report(self):
         self.assertIn("No activity", self.out("usage"))

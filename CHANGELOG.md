@@ -12,6 +12,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 
 ### Changed
 
+- `/model-router:route` and the `explain` command ask the same procedure a real spawn does, so they also report an agent's rule, `route: false`, the force setting, a redo and the request's floor, and they write nothing. Without `--agent` the text also reads as your own request, on its own line.
 - A brief is read by one scorer, `profile.read`, for a call and for a request, and an agent's name stands for a role in one table (`profile.ROLES`), which the profile, the spawn's request floor and the Stop check all read. No level moves: 258 call briefs, 82 requests and 63 agent names keep their level and reasons.
 - Complex runs on Opus at `high`, where it ran on Sonnet at `high`. Migrations, schema changes, performance work and security review get the stronger model. Hardest runs Opus at `xhigh`, so a redo of a complex call is a fresh subagent on Opus at more effort. The headline benchmark figures predate this ladder.
 - A brief that fixes or hunts a defect profiles at complex at least, not standard, and so does the person's request: a fix request raises the main turn's effort and counts toward the strong-agent check. Only "fix" and "debug" count as verbs ("the fix", "fixture" and "debug logging" don't); the other hunt verbs, such as "investigate" and "diagnose", match anywhere. A fix the brief rules out doesn't count.

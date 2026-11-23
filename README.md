@@ -55,7 +55,7 @@ There is nothing you have to set: the eight options in `/config` under the plugi
 ## Quick start
 
 1. Start a new session. The plugin's commands start with `/model-router:`.
-2. Check what a task would get: `/model-router:route list the files under src`. It names the level, model and effort, and why. This is how the router reads three briefs (output of its `explain` command, which the skill runs):
+2. Check what a task would get: `/model-router:route list the files under src`. It names the level, model and effort, and why. This is how the router reads three briefs (the first two lines of each result of its `explain` command, which the skill runs):
 
    ```text
    > List the files under src and say which ones import requests

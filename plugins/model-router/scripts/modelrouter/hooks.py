@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 
-from . import allowlist, calls, fallback, gates, health, intake, ladder, learn, ledger, profile, registry, request, session, settings, spawn, store, upstream
+from . import allowlist, calls, fallback, gates, health, intake, learn, ledger, profile, registry, request, session, settings, spawn, store, upstream
 from . import config as cfg
 
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
@@ -106,7 +106,7 @@ def user_prompt(hook_input: dict) -> dict | None:
     if not seen.person:
         return None
     level = seen.level
-    pick = ladder.pick(config, level, options.priority, snap.usable, learn.raises())
+    pick = snap.pick(level)
     need = pick.model
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
     below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
