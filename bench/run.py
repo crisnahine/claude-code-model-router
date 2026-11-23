@@ -472,6 +472,9 @@ def main(argv: list[str] | None = None) -> int:
 
     tasks = [t for t in load_tasks() if not args.tasks or t["id"] in args.tasks]
     configs = [c for c in load_configs() if not args.configs or c["id"] in args.configs]
+    for flag, asked, found in (("--tasks", args.tasks, tasks), ("--configs", args.configs, configs)):
+        if asked and not found:
+            parser.error(f"{flag} matches no id: {', '.join(asked)}")
     version = subprocess.run([*args.claude, "--version"], capture_output=True, text=True).stdout.strip()
     registry_config = mrconfig.shipped()
     options = {"claude": args.claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,

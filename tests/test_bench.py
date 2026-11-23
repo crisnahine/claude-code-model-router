@@ -753,6 +753,15 @@ class Runner(unittest.TestCase):
         for rule in ("Bash(python3 *)", "Bash(tail *)", "Bash(head *)", "Bash(echo *)"):
             self.assertIn(rule, cmd)
 
+    def test_a_task_or_configuration_list_that_matches_nothing_is_an_error_naming_it(self):
+        for flag, ids in (("--tasks", ["no-such-task"]), ("--configs", ["defualts", "plugn"])):
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as tmp:
+                with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit) as caught:
+                    run.main([flag, *ids, "--max-total", "3", "--claude", *stub(tmp, LIMIT_STUB),
+                              "--out", str(Path(tmp) / "out.jsonl")])
+                self.assertEqual(caught.exception.code, 2)
+                self.assertIn(", ".join(ids), err.getvalue())
+
     def test_the_runner_stops_before_a_run_could_pass_the_total_cap(self):
         self.assertTrue(run.can_start(spent=2.0, budget=0.5, max_total=3.0))
         self.assertFalse(run.can_start(spent=2.3, budget=0.5, max_total=3.0))
