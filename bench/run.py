@@ -27,6 +27,7 @@ PLUGIN = ROOT / "plugins" / "model-router"
 sys.path.insert(0, str(PLUGIN / "scripts"))
 from modelrouter import config as mrconfig, registry  # noqa: E402
 from modelrouter.ledger import read as read_ledger  # noqa: E402
+ROW_SCHEMA = 2  # a row's schema says which harness wrote it; analyze reads a missing key as old only below this
 CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research")
 
 # Every run starts from the same environment: nothing a parent Claude Code session, its plugins or the shell's
@@ -312,7 +313,7 @@ def record(task: dict, config: dict, options: dict, registry_config: dict, resul
     known = isinstance(cost, (int, float)) and not (
         result.get("subtype") == "error_during_execution" and cost == 0 and not refused)
     return {
-        "schema": 1, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
+        "schema": ROW_SCHEMA, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
         "config": config["id"],
         "started_at": facts["started_at"], "claude_version": options["claude_version"],
         "main_model": config.get("model", options["model"]),

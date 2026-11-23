@@ -426,6 +426,11 @@ def load(paths: list[Path]) -> Results:
                    frozenset(c["id"] for c in configs if c.get("model")), forced_ranks(configs, registry_config))
 
 
+def _lacks(row: dict, key: str) -> bool:
+    """A missing key means an older harness only on a row written before ROW_SCHEMA, whose schema says so."""
+    return row.get("schema", 1) < run.ROW_SCHEMA and key not in row
+
+
 def _notes(results: Results) -> list[str]:
     """Page lines on runs set aside, router spend by agent type, and the batches each configuration's rows pool."""
     rows, found = results.rows, results.aside
@@ -468,14 +473,14 @@ def _notes(results: Results) -> list[str]:
                          f"(${sum(r['total_cost_usd'] for r in old):.2f}) ran on an earlier revision ({changes}), so "
                          "they are left out of every table.")
     named = [t["id"] for t in results.tasks if profile.signals(t["id"].lower())]
-    early = sum(r["config"] in results.routers and r["task"] in named and "task_revision" not in r for r in rows)
+    early = sum(r["config"] in results.routers and r["task"] in named and _lacks(r, "task_revision") for r in rows)
     if named and early:
         lines.append(f"- Bias: {early} router-arm runs of the tasks named here were recorded while each run's "
                      "folder name held its task id, so a brief that quoted its working directory could give the "
                      "router signal words from the folder name for " + ", ".join(f"`{t}`" for t in named) +
                      ". That could only have raised the router's level and cost on those tasks, so on cost those rows understate the router; a "
                      "pass the higher level bought may not repeat.")
-    unclocked = sum(1 for r in rows if not isinstance(r.get("wall_ms"), (int, float)))
+    unclocked = sum(1 for r in rows if _lacks(r, "wall_ms"))
     if unclocked:
         lines.append(f"- {unclocked} run(s) here carry no `wall_ms`, the runner's own clock around the `claude` "
                      "process, so their latency is n/a. Their `duration_ms` is Claude Code's figure, and it isn't "
@@ -483,7 +488,7 @@ def _notes(results: Results) -> list[str]:
                      "in `duration_ms` (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md), and on many "
                      "rows here it falls well short of the gap to the next run's start (measured in "
                      "`docs/TEST_RESULTS.md`).")
-    unrouted = sum(1 for r in rows if r["config"] in results.routers and not isinstance(r.get("routed"), list))
+    unrouted = sum(1 for r in rows if r["config"] in results.routers and _lacks(r, "routed"))
     if unrouted:
         lines.append(f"- {unrouted} router run(s) here carry no `routed`, the router's spawn decisions: they were "
                      "recorded before the runner kept them. Their accuracy by level and escalation count as n/a, "
@@ -514,7 +519,7 @@ def _archived(results: Results) -> list[str]:
         if stale:
             n = sum(r.get("task_revision", 1) < revisions.get(r.get("task"), 1) for r in kept)
             reasons.append(f"{n} on an earlier revision of " + ", ".join(f"`{t}`" for t in stale))
-        unnamed = sum("task_revision" not in r for r in kept)
+        unnamed = sum(_lacks(r, "task_revision") for r in kept)
         if unnamed:
             reasons.append(f"{unnamed} were recorded while the run's folder name held its task id")
         listed = (", ".join(reasons[:-1]) + ", and " + reasons[-1]) if len(reasons) > 1 else "".join(reasons)
@@ -540,9 +545,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         for name, count in ((r.get("subagents") or {}).get("by_type") or {}).items():
             agents.setdefault(r["config"], {}).setdefault(name, 0)
             agents[r["config"]][name] += count
-    stale = sum(1 for r in rows if "plugin_state" not in r)
-    unsaved = sum(1 for r in rows if "sessions_saved" not in r)
-    borrowed = sum(1 for r in rows if r.get("plugin_state") is not None and "plugin_data_own" not in r)
+    predate = sum(1 for r in rows if _lacks(r, "plugin_state"))
+    unsaved = sum(1 for r in rows if _lacks(r, "sessions_saved"))
+    borrowed = sum(1 for r in rows if r.get("plugin_state") is not None and _lacks(r, "plugin_data_own"))
     plan = estimate(rows, tasks, results.configs, results.registry)
     budget = max((r.get("budget_usd") or 0.5 for r in rows), default=0.5)
     saturated = sum(bool(row["quality"]["saturated"]) for row in summary)
@@ -620,11 +625,11 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "`state.json` and `learned.json` the run started from in `plugin_state`."
         + (f" {borrowed} router run(s) here borrowed the shared folder instead: the runner copied it before the "
            "run and put it back after, which also wiped what other sessions wrote there meanwhile." if borrowed else "")
-        + (f" {stale} run(s) here predate this: their lines have no `plugin_state`, and their router runs "
+        + (f" {predate} run(s) here predate this: their lines have no `plugin_state`, and their router runs "
            "started from whatever earlier runs and other sessions had left there. They also predate the `tail`, "
            "`head` and `echo` rules and the stricter `lookup-retry-limit` check, and their `bench_commit` is the "
            "commit the harness ran on top of before it was committed. Newer lines carry `bench_dirty`, true when "
-           "`bench/` or the plugin had uncommitted changes." if stale else ""),
+           "`bench/` or the plugin had uncommitted changes." if predate else ""),
         "- Sessions are saved, as Claude Code saves them by default, so the router's Stop check can read the "
         "transcripts and see a test run, the subagents' included. After each run the runner deletes that run's "
         "folder under `~/.claude/projects/` (the one named after its scratch copy) and nothing else, and each "

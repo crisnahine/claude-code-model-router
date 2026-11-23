@@ -1153,6 +1153,22 @@ class TaskIdentity(unittest.TestCase):
         self.assertIn("are left out of every table", page)
         self.assertIn("- Bias: 1 router-arm runs", page)  # the one router row with no task_revision
 
+    def test_a_missing_key_is_an_older_harness_only_below_the_row_schema(self):
+        template = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-design-2026-11-22.jsonl")
+                              .read_text(encoding="utf-8").splitlines()[0])
+        base = dict(template, config="defaults", task="design-rate-limiter", task_revision=1, wall_ms=1000)
+        older = {k: v for k, v in base.items() if k != "wall_ms"}
+        current = dict(older, schema=run.ROW_SCHEMA)  # a current row never lacks it, so the page doesn't read it as old
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp) / "results"
+            results.mkdir()
+            (results / "a.jsonl").write_text("".join(json.dumps(r) + "\n" for r in (older, current)))
+            out = Path(tmp) / "page.md"
+            analyze.main([str(results / "a.jsonl"), "--out", str(out)])
+            self.assertIn("1 run(s) here carry no `wall_ms`", out.read_text(encoding="utf-8"))
+        self.assertEqual(run.record({"id": "t", "class": "lookup"}, {"id": "x"}, Recorder.options, {}, {},
+                                    Recorder.facts)["schema"], run.ROW_SCHEMA)
+
 
 class Isolation(unittest.TestCase):
     """Code a run leaves behind can't shadow the check's modules or fake a pass."""
