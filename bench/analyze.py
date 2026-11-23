@@ -575,8 +575,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "Claim \"cheapest\" only for a PASS row, and link its raw data.",
         *(["", f"{saturated} of {len(summary)} class rows below are saturated: the weakest forced baseline solved "
               "as many runs as the strongest, within noise, so these tasks can't tell models apart. No claim about "
-              "quality, for or against the router, rests on a saturated row, and its PASS or FAIL is a cost result "
-              "only. See each table's Quality list."] if saturated else []),
+              "quality, for or against the router, rests on a saturated row. Its PASS or FAIL says nothing about quality, "
+              "except that a FAIL for a pass rate behind the cheapest baseline stands. See each table's Quality list."] if saturated else []),
     ])
     body = "\n".join([
         "## How to read it", "",
@@ -593,9 +593,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "is made. Without forced baselines on two models the class has no quality claim either. A class is PARTIAL "
         "when its configurations didn't run the same tasks the same number of times, and runs on an earlier "
         "revision of a task are left out of every table.",
-        f"- PASS means the router's cost per solved task is below the best baseline's with the whole 95% interval "
-        f"of the difference below zero, and its pass rate is not behind beyond noise. FAIL means it is behind on "
-        f"either. PARTIAL means a tie, a difference inside the noise, or fewer than {MIN_RUNS} runs per "
+        f"- PASS means the router's cost per solved task is below the cheapest baseline's with the whole 95% interval "
+        f"of the difference below zero, and its pass rate is not behind the cheapest baseline's beyond noise (a "
+        f"bootstrap interval of the difference in pass rates, against that one baseline only). FAIL means it is "
+        f"behind on either. PARTIAL means a tie, a difference inside the noise, or fewer than {MIN_RUNS} runs per "
         "configuration. The best baseline is the one with the lowest cost per solved task.",
         "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest. A router "
         "variant (another configuration that loads the plugin) has its own column but is never a baseline.",
