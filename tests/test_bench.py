@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bench"))
 sys.path.insert(0, str(ROOT / "bench" / "tasks"))
 import analyze  # noqa: E402
+import overhead  # noqa: E402
 import passcheck  # noqa: E402
 import run  # noqa: E402
 
@@ -755,6 +756,43 @@ class Runner(unittest.TestCase):
     def test_the_runner_stops_before_a_run_could_pass_the_total_cap(self):
         self.assertTrue(run.can_start(spent=2.0, budget=0.5, max_total=3.0))
         self.assertFalse(run.can_start(spent=2.3, budget=0.5, max_total=3.0))
+
+    def test_a_run_that_times_out_is_a_failed_row_charged_the_whole_budget(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            claude = stub(tmp, HANGING_STUB)
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 1,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "defaults"), options, {})
+        self.assertEqual((row["exit_code"], row["passed"], row["cost_known"], row["total_cost_usd"], row["answer"]),
+                         (None, False, False, 0.5, ""))
+        self.assertGreaterEqual(row["wall_ms"], 1000)
+
+
+HANGING_STUB = '''#!/usr/bin/env python3
+import sys, time
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+print('{"result": "half an ans', flush=True)
+time.sleep(30)
+'''
+
+
+class Overhead(unittest.TestCase):
+    def test_percentile_is_the_nearest_rank(self):
+        ten = [10.0, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+        for samples, share, want in ((ten, 0.5, 5), (ten, 0.95, 10), (ten, 0.1, 1), (ten, 0.11, 2),
+                                     (list(range(1, 21)), 0.95, 19), ([7.0], 0.5, 7), ([7.0], 0.95, 7),
+                                     ([3.0, 1, 2], 0.5, 2), ([1.0, 2], 0.5, 1)):
+            with self.subTest(samples=samples, share=share):
+                self.assertEqual(overhead.percentile(samples, share), want)
+        self.assertEqual(ten[0], 10.0)  # sorts a copy
+
+    def test_summary_rounds_each_figure_and_keeps_the_labels(self):
+        self.assertEqual(overhead.summary([1.26, 1.24, 3.04], command="pre-agent", warm=True),
+                         {"command": "pre-agent", "warm": True, "runs": 3, "p50_ms": 1.3, "p95_ms": 3.0, "max_ms": 3.0})
+        self.assertEqual(overhead.summary([10.4, 20.6, 30.2, 40.4], digits=0),
+                         {"runs": 4, "p50_ms": 21, "p95_ms": 40, "max_ms": 40})
 
 
 FILES_STUB = '''#!/usr/bin/env python3
