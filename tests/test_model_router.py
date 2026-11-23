@@ -2486,6 +2486,20 @@ class RepeatGuard(Sandbox):
                 again = self.decide("general-purpose", HARD, effort=named)
                 self.assertEqual((again["escalated_from"], again["model"], again["effort"]), ("complex", "opus", None))
 
+    def test_a_redo_that_would_repeat_the_run_at_the_environments_effort_goes_one_model_up(self):
+        for sid, name in (("e1", "CLAUDE_CODE_SUBAGENT_EFFORT"), ("e2", "CLAUDE_CODE_EFFORT_LEVEL")):
+            with self.subTest(env=name):
+                self.options(**{name: "high"})
+                self.session_on("claude-sonnet-5-5", sid)
+                first = self.decide("general-purpose", HARD, session_id=sid)
+                self.assertEqual((first["level"], first["model"], first["effort"]), ("complex", "opus", None))
+                self.pre("general-purpose", HARD, session_id=sid)
+                self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", session_id=sid)
+                again = self.decide("general-purpose", HARD, session_id=sid)  # hardest is opus too: the same run
+                self.assertEqual((again["escalated_from"], again["model"], again["effort"]), ("complex", "fable", None))
+                self.assertIn("so it goes to fable", again["reason"])
+                os.environ.pop(name)
+
 
 class Calls(Sandbox):
     def route(self, tool_input: dict, model: str = "haiku", spawn_id: str | None = None, **fields) -> calls.Route | None:

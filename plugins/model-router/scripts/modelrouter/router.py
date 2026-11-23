@@ -169,11 +169,15 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         effort = _above_earlier(reg, effort, final, done)
     effort, held = capped(effort, facts.effort_caps.get(final))
     stronger = next((n for n in usable if reg.models[n].trusted and reg.stronger(n, final)), None)
-    if redo and source == "router" and held and stronger and (final, effort) == (done.get("model"), done.get("effort")):
-        # maxEffortLevel stops the redo at the run it repeats: quality comes first, so it takes the next model up.
-        why += f"; maxEffortLevel holds {final} at {effort}, the same as the run that came back before, so it goes to {stronger}"
+    runs = runs_at(effort, tool_input, definition, settings, facts.teammate)
+    if (redo and source == "router" and stronger and runs is not None
+            and (final, runs) == (done.get("model"), done.get("effort"))):
+        # The redo would repeat the run it replaces: quality comes first, so it takes the next model up.
+        cause = f"maxEffortLevel holds {final} at {runs}" if held else f"{final} would run at {runs} again"
+        why += f"; {cause}, the same as the run that came back before, so it goes to {stronger}"
         final = stronger
-        effort, held = capped(ladder.effort_on(reg, level, settings.priority, final), facts.effort_caps.get(final))
+        if not decided:
+            effort, held = capped(ladder.effort_on(reg, level, settings.priority, final), facts.effort_caps.get(final))
     out.update(model=final, source=source, reason=why + held + (f"; {out['held']}" if out["held"] else ""))
     if final == out["was"] and not effort:
         return out  # it would run on this model anyway
@@ -198,6 +202,19 @@ def _above_earlier(reg: Registry, effort: str | None, model: str | None, done: d
         return effort
     floor = EFFORTS[min(EFFORTS.index(earlier) + 1, len(EFFORTS) - 1)]
     return effort if effort in EFFORTS and EFFORTS.index(effort) >= EFFORTS.index(floor) else floor
+
+
+def runs_at(effort: str | None, tool_input: dict, definition: dict | None, settings: Settings,
+            teammate: bool) -> str | None:
+    """The effort a call runs at as far as the router can tell, in Claude Code's order
+    (https://code.claude.com/docs/en/sub-agents.md#choose-an-effort-level): CLAUDE_CODE_EFFORT_LEVEL, the call's,
+    the agent's, the router's own `effort`, then CLAUDE_CODE_SUBAGENT_EFFORT. None when nothing it sees sets one."""
+    env = str(settings.effort_level or "").lower()
+    if env:
+        return env if env in EFFORTS else None  # auto or unset sends no effort
+    chosen = (tool_input.get("effort"), (definition or {}).get("effort"), effort,
+              None if teammate else settings.subagent_effort)
+    return next((e for e in (str(c).lower() for c in chosen if c) if e in EFFORTS), None)
 
 
 def _effort_decided(tool_input: dict, definition: dict | None, settings: Settings, teammate: bool) -> bool:
