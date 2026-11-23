@@ -433,7 +433,8 @@ class Recorder(unittest.TestCase):
     task = {"id": "t", "class": "lookup"}
     config = {"id": "plugin", "plugin": True}
     options = {"model": "sonnet", "budget": 0.5, "claude_version": "2.1.330", "commit": "abc", "dirty": False}
-    facts = {"started_at": "2026-11-23T00:00:00+00:00", "wall_ms": 7000, "exit_code": 0, "stderr": "", "passed": True,
+    facts = {"started_at": "2026-11-23T00:00:00+00:00", "wall_ms": 7000, "exit_code": 0, "stderr": "",
+             "grade": {"verdict": "pass", "reason": "solved", "check_hash": "0123456789abcdef"},
              "plugin_state": None, "ledger": None, "agent_types": {}, "session_dir_removed": True, "kept": None}
 
     def row(self, result, **facts):
@@ -452,6 +453,10 @@ class Recorder(unittest.TestCase):
             "costUSD": 0.0037657349999999997, "costBasis": "list"}})
         self.assertEqual((row["total_cost_usd"], row["cost_known"], row["answer"]),
                          (0.0037657349999999997, True, "DONE"))
+        self.assertEqual((row["passed"], row["grade"]), (True, self.facts["grade"]))
+        broken = self.row(json.loads(FIXTURE.read_text(encoding="utf-8")),
+                          grade={"verdict": "broken", "reason": "NameError: x", "check_hash": "f" * 16})
+        self.assertEqual((broken["passed"], broken["grade"]["verdict"]), (False, "broken"))
 
     def test_a_zeroed_cost_on_an_error_counts_the_whole_budget(self):
         base = json.loads(FIXTURE.read_text(encoding="utf-8"))
@@ -573,7 +578,7 @@ class Tasks(unittest.TestCase):
     def check(self, task, workdir, answer):
         result = Path(workdir) / ".." / "result.txt"
         result.write_text(answer, encoding="utf-8")
-        return run.grade(task["dir"] / "check.py", Path(workdir), result, timeout=60)
+        return run.grade(task["dir"] / "check.py", Path(workdir), result, timeout=60).passed
 
     def test_every_task_has_a_known_class_and_a_check_that_tells_right_from_wrong(self):
         tasks = run.load_tasks()
@@ -998,7 +1003,7 @@ class AgentCosts(unittest.TestCase):
         def rewrite(check, work, answer, timeout=120):
             data = run.plugin_data_dir({"CLAUDE_CODE_PLUGIN_CACHE_DIR": str(work.parent / "plugins")})
             (data / "ledger.jsonl").write_text('{"event": "usage", "cost_usd": 9}\n', encoding="utf-8")
-            return True
+            return run.Grade("pass", "", "0" * 16)
 
         with tempfile.TemporaryDirectory() as tmp:
             claude = stub(tmp, COST_STUB)
@@ -1207,17 +1212,17 @@ class Isolation(unittest.TestCase):
                     (work / name).write_text(self.PLANT, encoding="utf-8")
                 answer = Path(tmp) / "answer.txt"
                 answer.write_text(task.get("wrong_answer", ""), encoding="utf-8")
-                self.assertFalse(run.grade(task["dir"] / "check.py", work, answer))
+                self.assertFalse(run.grade(task["dir"] / "check.py", work, answer).passed)
                 if (task["dir"] / "solution").is_dir():  # the same planted files don't cost an honest run its pass
                     shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
                     answer.write_text(task.get("reference_answer", ""), encoding="utf-8")
-                    self.assertTrue(run.grade(task["dir"] / "check.py", work, answer))
+                    self.assertTrue(run.grade(task["dir"] / "check.py", work, answer).passed)
 
     def test_a_check_runs_isolated(self):
         with tempfile.TemporaryDirectory() as tmp:
             check = Path(tmp) / "check.py"
             check.write_text("import sys\nsys.exit(0 if sys.flags.isolated else 1)\n", encoding="utf-8")
-            self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt"))
+            self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt").passed)
 
     def test_a_check_sees_no_credentials(self):
         secret = {"CLAUDE_CODE_OAUTH_TOKEN": "t", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "3", "ANTHROPIC_API_KEY": "k",
@@ -1231,7 +1236,7 @@ class Isolation(unittest.TestCase):
                              f"and set({sorted(kept)!r}) <= set(os.environ) and 'PATH' in os.environ else 1)\n",
                              encoding="utf-8")
             with unittest.mock.patch.dict("os.environ", {**secret, **kept}):
-                self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt"))
+                self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt").passed)
                 self.assertEqual(sorted(set(secret) & set(run.grading_env(dict(os.environ)))), [])
 
     def test_credential_names_are_matched_in_any_case(self):
@@ -1243,7 +1248,7 @@ class Isolation(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             check = Path(tmp) / "check.py"
             check.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
-            self.assertFalse(run.grade(check, Path(tmp), Path(tmp) / "answer.txt", timeout=1))
+            self.assertFalse(run.grade(check, Path(tmp), Path(tmp) / "answer.txt", timeout=1).passed)
 
     def test_no_work_module_name_resolves_without_the_work_dir(self):
         names = set()
@@ -1265,6 +1270,81 @@ class Isolation(unittest.TestCase):
             self.assertNotIn("sys.path.insert", text, check)
             if "passcheck" in text:
                 self.assertIn('sys.modules["passcheck"] = passcheck', text, check)
+
+
+class Grading(unittest.TestCase):
+    """A check's exit code is its verdict: 0 solved, 1 not solved, 2 the check itself broke."""
+
+    def grade(self, body, timeout=60):
+        with tempfile.TemporaryDirectory() as tmp:
+            check = Path(tmp) / "check.py"
+            check.write_text(body, encoding="utf-8")
+            return run.grade(check, Path(tmp), Path(tmp) / "answer.txt", timeout=timeout)
+
+    def test_exit_0_passes_exit_1_fails_and_the_last_line_printed_is_the_reason(self):
+        ok = self.grade("print('noise')\nprint('both rows match')\nraise SystemExit(0)\n")
+        self.assertEqual((ok.verdict, ok.passed, ok.reason), ("pass", True, "both rows match"))
+        no = self.grade("print('the count is 5, not 4')\nraise SystemExit(1)\n")
+        self.assertEqual((no.verdict, no.passed, no.reason), ("fail", False, "the count is 5, not 4"))
+        self.assertEqual(self.grade("import os\nos._exit(3)\n").verdict, "fail")
+
+    def test_an_error_in_the_check_is_broken_not_failed(self):
+        for body in ("undefined_name\n", "import no_such_module\n", "raise SystemExit('x' + 1)\n",
+                     "def f(:\n"):
+            with self.subTest(body=body):
+                graded = self.grade(body)
+                self.assertEqual((graded.verdict, graded.passed), ("broken", False))
+        self.assertIn("NameError", self.grade("undefined_name\n").reason)
+
+    def test_work_dir_code_that_raises_or_exits_fails_instead_of_breaking_the_check(self):
+        for fault in ("raise ValueError('bad')", "raise SystemExit(0)", "import sys; sys.exit(0)", "1 / 0"):
+            with self.subTest(fault=fault):
+                graded = self.grade("import importlib.util, sys\nfrom pathlib import Path\n"
+                                    f"_s = importlib.util.spec_from_file_location('passcheck', {str(run.BENCH / 'tasks' / 'passcheck.py')!r})\n"
+                                    "passcheck = importlib.util.module_from_spec(_s)\n_s.loader.exec_module(passcheck)\n"
+                                    f"with passcheck.agent_code():\n    {fault}\n"
+                                    "passcheck.finish(True)\n")
+                self.assertEqual(graded.verdict, "fail")
+                self.assertIn("the work dir's code raised", graded.reason)
+
+    def test_a_check_that_hangs_fails_with_a_reason(self):
+        graded = self.grade("import time\ntime.sleep(30)\n", timeout=1)
+        self.assertEqual(graded.verdict, "fail")
+        self.assertIn("timed out", graded.reason)
+
+    def test_the_hash_names_the_check_the_helper_and_any_script_beside_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tasks = Path(tmp) / "tasks"
+            (tasks / "t").mkdir(parents=True)
+            (tasks / "passcheck.py").write_text("A = 1\n", encoding="utf-8")
+            (tasks / "t" / "check.py").write_text("print(1)\n", encoding="utf-8")
+            first = run.check_hash(tasks / "t" / "check.py")
+            self.assertEqual(first, run.check_hash(tasks / "t" / "check.py"))
+            self.assertEqual(len(first), 16)
+            for path, text in (("t/check.py", "print(2)\n"), ("passcheck.py", "A = 2\n"), ("t/probe.py", "x\n")):
+                (tasks / path).write_text(text, encoding="utf-8")
+                changed = run.check_hash(tasks / "t" / "check.py")
+                self.assertNotEqual(changed, first, path)
+                first = changed
+
+    def test_analyze_sets_aside_a_run_whose_check_broke(self):
+        template = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-design-2026-11-22.jsonl")
+                              .read_text(encoding="utf-8").splitlines()[0])
+        good = dict(template, config="defaults", task="design-rate-limiter", task_revision=1, schema=run.ROW_SCHEMA,
+                    passed=True, grade={"verdict": "pass", "reason": "solved", "check_hash": "a" * 16})
+        bad = dict(good, passed=False, total_cost_usd=0.25,
+                   grade={"verdict": "broken", "reason": "NameError: x", "check_hash": "b" * 16})
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp) / "results"
+            results.mkdir()
+            (results / "a.jsonl").write_text("".join(json.dumps(r) + "\n" for r in (good, bad)))
+            loaded = analyze.load([results / "a.jsonl"])
+            out = Path(tmp) / "page.md"
+            analyze.main([str(results / "a.jsonl"), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        self.assertEqual((len(loaded.rows), len(loaded.broken)), (1, 1))
+        self.assertIn("1 run(s) ($0.25) are set aside, though they stay in the results files: the pass check of "
+                      "`design-rate-limiter` broke on them", page)
 
 
 class Pilot(unittest.TestCase):
@@ -1293,7 +1373,7 @@ class Pilot(unittest.TestCase):
                     answer = Path(tmp) / "answer.txt"
                     answer.write_text(row["answer"], encoding="utf-8")
                     check = ROOT / "bench" / "tasks" / row["task"] / "check.py"
-                    self.assertEqual(run.grade(check, Path(tmp), answer), row["passed"], row["config"])
+                    self.assertEqual(run.grade(check, Path(tmp), answer).passed, row["passed"], row["config"])
 
 
 class HardTier(unittest.TestCase):
@@ -2024,7 +2104,7 @@ class QualityTier(unittest.TestCase):
             shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
             (Path(tmp) / "result.txt").write_text("", encoding="utf-8")
             start = time.monotonic()
-            verdict = run.grade(task["dir"] / "check.py", work, Path(tmp) / "result.txt")
+            verdict = run.grade(task["dir"] / "check.py", work, Path(tmp) / "result.txt").passed
             took = time.monotonic() - start
         self.assertTrue(verdict)
         self.assertLess(took, 15)  # five 5 s barriers would take 25 s
@@ -2035,7 +2115,7 @@ class QualityTier(unittest.TestCase):
             task, work = self.shipped(task_id, tmp)
             (Path(tmp) / "result.txt").write_text("", encoding="utf-8")
             start = time.monotonic()
-            verdict = run.grade(task["dir"] / "check.py", work, Path(tmp) / "result.txt")
+            verdict = run.grade(task["dir"] / "check.py", work, Path(tmp) / "result.txt").passed
             took = time.monotonic() - start
         self.assertFalse(verdict)
         self.assertLess(took, 40)

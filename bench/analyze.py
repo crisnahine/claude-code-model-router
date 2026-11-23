@@ -368,6 +368,7 @@ class Results:
     files: list[Path]
     rows: list[dict]
     stale: list[dict]
+    broken: list[dict]
     aside: list[tuple[str, dict]]
     archive: list[tuple[str, list[dict], int]]
     configs: list[dict]
@@ -402,14 +403,18 @@ def forced_ranks(configs: list[dict], registry_config: dict) -> dict[str, tuple[
 
 def load(paths: list[Path]) -> Results:
     """Everything the page is built from, read once. The order and repeats of `paths` don't matter. A row on an
-    earlier revision of its task isn't comparable with later runs of it, so it sits in `stale`, not `rows`."""
+    earlier revision of its task isn't comparable with later runs of it, so it sits in `stale`, not `rows`, and a
+    row whose pass check broke sits in `broken`."""
     files = sorted({p.resolve() for p in paths})
     tasks = run.load_tasks()
     revisions = {t["id"]: t.get("revision", 1) for t in tasks}
     every = [dict(row, _batch=_batch(path)) for path in files for row in _jsonl([path])]
     old = [r.get("task_revision", 1) < revisions.get(r["task"], 1) for r in every]
-    rows = [r for r, gone in zip(every, old) if not gone]
     stale = [r for r, gone in zip(every, old) if gone]
+    # A run whose pass check broke has no verdict: it was neither solved nor failed.
+    bad_check = [(r.get("grade") or {}).get("verdict") == "broken" for r in every]
+    broken = [r for r, gone, bad in zip(every, old, bad_check) if bad and not gone]
+    rows = [r for r, gone, bad in zip(every, old, bad_check) if not (gone or bad)]
     folders = sorted({f.parent for f in files})
     aside = [(sub, row) for folder in folders for sub in ("infra", "limited") for row in _jsonl((folder / sub).glob("*.jsonl"))]
     archive = []
@@ -422,7 +427,7 @@ def load(paths: list[Path]) -> Results:
                 archive.append((folder.relative_to(results).as_posix(), kept, lines))
     configs = run.load_configs()
     registry_config = mrconfig.base_config()
-    return Results(files, rows, stale, aside, archive, configs, tasks, registry_config, router_ids(configs),
+    return Results(files, rows, stale, broken, aside, archive, configs, tasks, registry_config, router_ids(configs),
                    frozenset(c["id"] for c in configs if c.get("model")), forced_ranks(configs, registry_config))
 
 
@@ -465,6 +470,12 @@ def _notes(results: Results) -> list[str]:
                 f"{'main loop' if who == 'main' else f'`{who}`'} ${usd:.4f} ({usd / total:.0%})" for who, usd in order)
         lines.append("- Router spend by agent type, from the router's ledger (`agent_costs`), over the runs that "
                      "record it: " + "; ".join(share(c) for c in sorted(spend)) + ".")
+    if results.broken:
+        names = sorted({r["task"] for r in results.broken})
+        lines.append(f"- {len(results.broken)} run(s) (${sum(r['total_cost_usd'] for r in results.broken):.2f}) are "
+                     "set aside, though they stay in the results files: the pass check of "
+                     + ", ".join(f"`{n}`" for n in names) + " broke on them (exit code 2, a bug in the check), so "
+                     "none counts as solved or failed. Each raw line's `grade` has the check's error.")
     for task in results.tasks:
         old = [r for r in results.stale if r["task"] == task["id"]]
         if old:

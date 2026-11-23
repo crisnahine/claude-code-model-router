@@ -1,4 +1,5 @@
 """Pieces the pass checks share. A check loads this by file path and runs under `python -I`."""
+import contextlib
 import importlib.util
 import json
 import re
@@ -10,6 +11,34 @@ from pathlib import Path
 # unittest is imported before the work dir joins sys.path, so a unittest.py left there can't stand in for it.
 LAUNCHER = ("import sys, unittest; sys.path.append(sys.argv[1]); "
             "unittest.main(module=None, argv=['unittest', sys.argv[2]])")
+
+
+def finish(ok: bool, reason: str = "") -> None:
+    """End the check: exit 0 for a solved task, 1 for an unsolved one. The last line printed is the reason a row records.
+    A check exits 2 only by raising, which the launcher in run.py reads as the check itself being broken."""
+    print(reason or ("solved" if ok else "not solved"), flush=True)
+    sys.exit(0 if ok else 1)
+
+
+@contextlib.contextmanager
+def agent_code():
+    """Wrap the lines of a check that run the work dir's code. Whatever they raise, SystemExit included, the task failed;
+    anything raised outside is a bug in the check."""
+    try:
+        yield
+    except BaseException as exc:
+        finish(False, f"the work dir's code raised {type(exc).__name__}: {exc}"[:300])
+
+
+def differs(got, want) -> str:
+    """Where two results first differ, for a check's failure reason."""
+    if isinstance(got, (list, tuple)) and isinstance(want, (list, tuple)):
+        for n, (a, b) in enumerate(zip(got, want), 1):
+            if a != b:
+                return f"result {n} is {a!r}, expected {b!r}"[:300]
+        if len(got) != len(want):
+            return f"{len(got)} results, expected {len(want)}"
+    return f"got {got!r}, expected {want!r}"[:300]
 
 
 def use_work(work: Path) -> None:
