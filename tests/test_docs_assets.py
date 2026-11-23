@@ -157,6 +157,13 @@ class DocsAssets(unittest.TestCase):
         self.assertEqual((f["tasks"], f["tasks_total"], f["opus.partial_classes"]), ("14", "30", "lookup and cross-module"))
         self.assertFalse([k for k in f if "plugin-next" in k])
 
+    def test_the_figures_do_not_read_the_wording_of_a_reason(self):
+        data = copy.deepcopy(self.snap.bench)
+        for session in data["sessions"]:
+            for c in session["classes"]:
+                c["reason"] = "reworded"
+        self.assertEqual(docs_assets.bench_figures(data), docs_assets.bench_figures(self.snap.bench))
+
     def test_the_trace_text_lists_every_baseline_with_its_interval(self):
         data = bench_data(solved=9, cps=0.2, runs=10, cls="root-cause")
         trace = docs_assets.bench_figures(data)["opus.trace"]

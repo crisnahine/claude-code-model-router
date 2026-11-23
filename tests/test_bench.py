@@ -49,12 +49,12 @@ class Analysis(unittest.TestCase):
     def test_a_clear_win_passes_and_ranks_first(self):
         data = rows("plugin", "lookup", [0.10] * 12, [True] * 12) + rows("defaults", "lookup", [0.50] * 12, [True] * 12)
         row = self.summary(data)["lookup"]
-        self.assertEqual((row["status"], row["rank"], row["best_baseline"]), ("PASS", 1, "defaults"))
+        self.assertEqual((row["status"], row["why"], row["rank"], row["best_baseline"]), ("PASS", "cost_below", 1, "defaults"))
 
     def test_too_few_runs_is_never_a_win(self):
         data = rows("plugin", "lookup", [0.10], [True]) + rows("defaults", "lookup", [0.50], [True])
         row = self.summary(data)["lookup"]
-        self.assertEqual(row["status"], "PARTIAL")
+        self.assertEqual((row["status"], row["why"]), ("PARTIAL", "few_runs"))
         self.assertIn("too few runs", row["reason"])
 
     def test_cheaper_but_solving_less_is_not_a_win(self):

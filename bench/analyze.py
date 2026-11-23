@@ -96,7 +96,7 @@ def _verdict(cells: dict, router: str, routers: frozenset[str], gap: str | None 
     # A router variant (any configuration that loads the plugin) is a rival build, never a baseline.
     base = {name: cell for name, cell in cells.items() if name != router and name not in routers}
     if router not in cells or not base:
-        return {"status": "PARTIAL", "rank": None, "best_baseline": None, "differences": {},
+        return {"status": "PARTIAL", "why": "no_data", "rank": None, "best_baseline": None, "differences": {},
                 "reason": "no router or baseline runs"}
     ours = cells[router]
     best = min(base, key=lambda name: (_key(base[name]), name))
@@ -104,21 +104,21 @@ def _verdict(cells: dict, router: str, routers: frozenset[str], gap: str | None 
     verdict = {"rank": 1 + sum(_key(cell) < _key(ours) for cell in base.values()), "best_baseline": best,
                "differences": {name: _difference(ours["_cps"], cell["_cps"]) for name, cell in base.items()}}
     if gap:
-        return {**verdict, "status": "PARTIAL", "reason": gap}
+        return {**verdict, "status": "PARTIAL", "why": "gap", "reason": gap}
     if ours["runs"] < MIN_RUNS or theirs["runs"] < MIN_RUNS:
-        return {**verdict, "status": "PARTIAL",
+        return {**verdict, "status": "PARTIAL", "why": "few_runs",
                 "reason": f"too few runs ({router} {ours['runs']}, {best} {theirs['runs']}; {MIN_RUNS} needed)"}
     if _difference(ours["_rate"], theirs["_rate"])[1] < 0:
         short = theirs["pass_rate"] - ours["pass_rate"]
-        return {**verdict, "status": "FAIL", "reason": f"pass rate behind {best} by {short:.0%}"}
+        return {**verdict, "status": "FAIL", "why": "pass_rate", "reason": f"pass rate behind {best} by {short:.0%}"}
     low, high = _difference(ours["_cps"], theirs["_cps"])
     if high < 0:
-        return {**verdict, "status": "PASS", "reason": f"cost per solved task below {best}'s; "
+        return {**verdict, "status": "PASS", "why": "cost_below", "reason": f"cost per solved task below {best}'s; "
                                                        f"95% interval of the difference ${low:.4f} to ${high:.4f}"}
     if low > 0:
-        return {**verdict, "status": "FAIL", "reason": f"cost per solved task above {best}'s; "
+        return {**verdict, "status": "FAIL", "why": "cost_above", "reason": f"cost per solved task above {best}'s; "
                                                        f"95% interval of the difference ${low:.4f} to ${high:.4f}"}
-    return {**verdict, "status": "PARTIAL", "reason": f"not significant against {best}"}
+    return {**verdict, "status": "PARTIAL", "why": "not_significant", "reason": f"not significant against {best}"}
 
 
 def _coverage_gap(runs: list[dict], router: str, base: list[str]) -> str | None:
@@ -769,7 +769,7 @@ def _against(classes: list[dict], router: str, cfg: str) -> dict:
     differ, is no win and no loss, so its interval is never read."""
     cps = lambda c, name: c["configs"][name]["cost_per_solved"]  # noqa: E731
     diffs = [(c, c["differences"][cfg]) for c in classes
-             if cfg in c["differences"] and (c["status"] != "PARTIAL" or c["reason"].startswith("not significant"))]
+             if cfg in c["differences"] and (c["status"] != "PARTIAL" or c["why"] == "not_significant")]
     below = [c for c, (lo, hi) in diffs if hi < 0]
     less = [1 - cps(c, router) / cps(c, cfg) for c in below if cps(c, cfg) and cps(c, router) is not None]
     return {"below": [c["class"] for c in below], "level": [c["class"] for c, (lo, hi) in diffs if lo <= 0 <= hi],
@@ -803,8 +803,8 @@ def facts(session: dict, routers: frozenset[str], forced: dict) -> dict[str, boo
     fails = [c for c in classes if c["status"] == "FAIL"]
     against = lambda c: c["quality"]["against"].get(c["best_baseline"])  # noqa: E731
     out = {
-        "partial_for_runs": all(c["reason"].startswith("too few runs") for c in classes if c["status"] == "PARTIAL"),
-        "fail_on_cost": all(c["reason"].startswith("cost per solved task above") for c in fails),
+        "partial_for_runs": all(c["why"] == "few_runs" for c in classes if c["status"] == "PARTIAL"),
+        "fail_on_cost": all(c["why"] == "cost_above" for c in fails),
         "not_behind": all(against(c) is not None and not against(c)["behind"] for c in classes if c["best_baseline"]),
         "no_gain": all(against(c) is not None and not against(c)["ahead"] for c in classes if c["best_baseline"]),
         "no_pass": not any(c["status"] == "PASS" for c in classes),
