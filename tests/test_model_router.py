@@ -5210,6 +5210,37 @@ class SecurityClaims(Sandbox):
         self.assertIn("saga", config.available())
         self.assertNotIn("saga", config.available(cap="sonnet"))
 
+    def test_a_project_model_is_never_the_routers_pick(self):
+        shipped = cfg.load()
+        self.override({"models": {"gpt-mini": {"strength": 9, "cost": 0, "speed": 9}, "saga": {"strength": 2.5}}})
+        config = cfg.load()
+        for priority in cfg.PRIORITIES:
+            for level in Level:
+                with self.subTest(priority=priority, level=level):
+                    self.assertEqual(ladder.pick(config, level, priority, config.available(), {}),
+                                     ladder.pick(shipped, level, priority, shipped.available(), {}))
+        self.session_on("claude-opus-5-5")
+        self.assertEqual(self.decide("general-purpose", HARD, model="gpt-mini")["model"], "gpt-mini")
+
+    def test_a_named_model_that_cant_run_never_falls_to_a_project_model(self):
+        self.override({"models": {"saga": {"strength": 2.5}, "tiny": {"strength": 1.5}}})
+        self.session_on("claude-opus-5-5")
+        for name in ("opus", "haiku", "opus", "haiku"):
+            health.failed(name, "model not found")
+        self.assertEqual(self.decide("general-purpose", HARD, model="opus")["model"], "sonnet")
+        self.assertEqual(self.decide("general-purpose", LOOKUP, model="haiku")["model"], "sonnet")
+
+    def test_a_redo_the_effort_cap_holds_never_moves_to_a_project_model(self):
+        self.override({"models": {"saga": {"strength": 3.5}, "titan": {"strength": 5}}})
+        self.session_on("claude-opus-5-5")
+        (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "high"}))
+        frontier = "research a novel fix for the auth migration across every service, root cause unknown"
+        for prompt, ran, redo in ((HARD, "opus", "fable"), (frontier, "fable", "fable")):
+            with self.subTest(ran=ran):
+                self.pre("general-purpose", prompt)
+                self.done("general-purpose", prompt, f"claude-{ran}-5-{2 if ran == 'fable' else 5}", model=ran, effort="high")
+                self.assertEqual(self.decide("general-purpose", prompt)["model"], redo)
+
     def test_it_writes_only_under_its_data_directory(self):
         outside = [self.home, self.project]
         before = {p: p.stat().st_mtime_ns for root in outside for p in root.rglob("*")}
