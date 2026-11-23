@@ -12,44 +12,44 @@ _spec.loader.exec_module(passcheck)
 WORK = Path(sys.argv[1])
 passcheck.use_work(WORK)
 
-try:
+got = []
+with passcheck.agent_code():
     db = importlib.import_module("catalog.db")
     get_price = importlib.import_module("catalog.prices").get_price
     events = importlib.import_module("admin.events")
     refresh_all = importlib.import_module("admin.bulk").refresh_all
     sweep = importlib.import_module("jobs.sweep").sweep
     cached = importlib.import_module("reports.cached").cached_products
-
     db.set_price("a", "p1", 100)
     db.set_price("b", "p1", 200)
-    ok = get_price("a", "p1") == 100 and get_price("b", "p1") == 200
+    got += [get_price("a", "p1"), get_price("b", "p1")]
     db.set_price("a", "p1", 150)
     events.on_price_changed("a", "p1")
-    ok = ok and get_price("b", "p1") == 200 and cached("b") == ["p1"] and cached("a") == []
-    ok = ok and get_price("a", "p1") == 150 and cached("a") == ["p1"]
+    got += [get_price("b", "p1"), cached("b"), cached("a")]
+    got += [get_price("a", "p1"), cached("a")]
     db.set_price("x:y", "p", 1)
     db.set_price("x", "y:p", 2)
-    ok = ok and get_price("x:y", "p") == 1 and get_price("x", "y:p") == 2
-    ok = ok and cached("x") == ["y:p"] and cached("x:y") == ["p"]
+    got += [get_price("x:y", "p"), get_price("x", "y:p")]
+    got += [cached("x"), cached("x:y")]
     db.set_price("b", "p2", 300)
     db.set_price("b", "p1", 250)
     refresh_all("b", ["p1", "p2"])
-    ok = ok and cached("b") == ["p1", "p2"] and get_price("b", "p1") == 250 and get_price("a", "p1") == 150
+    got += [cached("b"), get_price("b", "p1"), get_price("a", "p1")]
     events.on_price_changed("x", "y:p")
-    ok = ok and cached("x") == [] and cached("x:y") == ["p"]
+    got += [cached("x"), cached("x:y")]
     db.set_price("a", "p2", 50)
     get_price("a", "p2")
     sweep("a", ["p1"])
-    ok = ok and cached("a") == ["p1"] and cached("b") == ["p1", "p2"]
+    got += [cached("a"), cached("b")]
     events.on_product_deleted("b", "p1")
-    ok = ok and cached("b") == ["p2"] and cached("a") == ["p1"] and get_price("a", "p1") == 150
+    got += [cached("b"), cached("a"), get_price("a", "p1")]
     db.set_price("a", "p1", 175)
-    ok = ok and get_price("a", "p1") == 150  # still cached: deleting b's product mustn't evict a's price
+    got.append(get_price("a", "p1"))  # still cached: deleting b's product mustn't evict a's price
     try:
         db.lookup("b", "p1")
-        ok = False
+        got.append("b's p1 is still in the catalog")
     except KeyError:
-        pass
-except BaseException:  # a SystemExit from work-dir code is a failure
-    ok = False
-sys.exit(0 if ok else 1)
+        got.append("deleted")
+WANT = [100, 200, 200, ["p1"], [], 150, ["p1"], 1, 2, ["y:p"], ["p"], ["p1", "p2"], 250, 150, [], ["p"], ["p1"],
+        ["p1", "p2"], ["p2"], ["p1"], 150, 150, "deleted"]
+passcheck.finish(got == WANT, passcheck.differs(got, WANT))

@@ -1307,6 +1307,14 @@ class Grading(unittest.TestCase):
                 self.assertEqual(graded.verdict, "fail")
                 self.assertIn("the work dir's code raised", graded.reason)
 
+    def test_no_check_swallows_an_error_of_its_own(self):
+        import ast
+        for path in sorted((run.BENCH / "tasks").glob("*/check.py")):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.ExceptHandler):
+                    caught = {n.id for n in ast.walk(node.type) if isinstance(n, ast.Name)} if node.type else {"bare"}
+                    self.assertFalse(caught & {"bare", "Exception", "BaseException"}, f"{path.parent.name}:{node.lineno}")
+
     def test_a_check_that_hangs_fails_with_a_reason(self):
         graded = self.grade("import time\ntime.sleep(30)\n", timeout=1)
         self.assertEqual(graded.verdict, "fail")
