@@ -213,7 +213,9 @@ def agent_failed(hook_input: dict) -> dict | None:
             f"'{asked}' alias, as Claude Code resolves it for this provider."))
     fails = health.failed(asked, error)
     ledger.model_error(hook_input.get("session_id"), tool_input.get("subagent_type"), asked)
-    usable = [n for n in snap.usable if n != asked]
+    # snap.health may predate the strike just written, so the list reads the table again.
+    usable = [n for n in registry.available(config, snap.options.cap, allowed=snap.allowed, table=health.load(),
+                                            trusted=snap.trusted if snap.options.cap else None) if n != asked]
     if not usable:
         return None
     return _context("PostToolUseFailure", (

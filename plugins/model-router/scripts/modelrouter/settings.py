@@ -140,7 +140,7 @@ class Snapshot:
     @cached_property
     def usable(self) -> list[str]:
         return registry.available(self.config, self.options.cap, allowed=self.allowed, table=self.health,
-                                  trusted=self.trusted)
+                                  trusted=self.trusted if self.options.cap else None)
 
 
 def record(settings: Settings) -> None:

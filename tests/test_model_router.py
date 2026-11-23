@@ -590,11 +590,37 @@ class Snapshot(Sandbox):
         self.assertEqual(trusted.call_count, 1)
 
     def test_a_cheap_hook_loads_neither_the_allowlist_nor_the_health_table(self):
+        self.options(main_effort="true")
+        usage = {"model": "claude-haiku-5-5", "input_tokens": 1, "output_tokens": 1}
         with mock.patch.object(allowlist, "read", side_effect=AssertionError("allowlist")), \
                 mock.patch.object(health, "load", side_effect=AssertionError("health")):
             hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": str(self.project / "a.py")}})
             hooks.stop({"session_id": "s1", "cwd": str(self.project)})
-            hooks.mod_turn({"session_id": "s1", "text": LOOKUP})
+            hooks.mod_turn({"session_id": "s1", "cwd": str(self.project), "text": LOOKUP})
+            hooks.mod_usage({"session_id": "s1", "cwd": str(self.project), "usage": usage})
+            hooks.post_agent({**self.call(None, LOOKUP), "tool_response": {"status": "completed"}})
+
+    def test_a_spawn_reads_the_allowlist_once(self):
+        with mock.patch.object(allowlist, "read", wraps=allowlist.read) as read:
+            hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                             "kind": "subagent", "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}})
+        self.assertEqual(read.call_count, 1)
+
+    def test_the_override_file_is_read_for_trust_only_under_a_cap(self):
+        with mock.patch.object(cfg, "trusted_models", wraps=cfg.trusted_models) as trusted:
+            settings.Snapshot({"session_id": "s1", "cwd": str(self.project)}).usable
+            self.assertEqual(trusted.call_count, 0)
+            self.options(max_tier="sonnet")
+            settings.Snapshot({"session_id": "s1", "cwd": str(self.project)}).usable
+        self.assertEqual(trusted.call_count, 1)
+
+    def test_a_failed_agent_call_filters_the_usable_list_on_the_table_it_just_wrote(self):
+        store.save_entry("mod", "s1", {"active": True})
+        self.route_around("sonnet", "opus", "fable")
+        health.failed("haiku", "404 model not found")
+        out = hooks.agent_failed({**self.call("general-purpose", LOOKUP, model="haiku"),
+                                  "error": "API Error: 404 not_found_error: model: haiku"})
+        self.assertIn("looks unavailable", out["hookSpecificOutput"]["additionalContext"])
 
     def test_a_field_is_read_on_first_use_and_then_kept(self):
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
