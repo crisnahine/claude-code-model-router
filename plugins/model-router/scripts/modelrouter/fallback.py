@@ -62,19 +62,22 @@ def _guard(session_id: str | None, key: str, decision: router.Decision, reg: Reg
            options: settings.Settings) -> None:
     """We rewrote this very call before and no result came back: the rewrite wasn't
     accepted, or something else stopped the call. Rewriting it again could loop."""
-    if decision["action"] != "rewrite" or not decision["model"]:
+    if decision["action"] != "rewrite":
         return
     earlier = refused(session_id, key)
     if earlier is None:
         return
-    cap, untouched = options.cap, decision["was"]
-    if cap and reg.strength(untouched) > reg.strength(cap):
+    cap, untouched, changed = options.cap, decision["was"], bool(decision["model"])
+    if changed and cap and reg.strength(untouched) > reg.strength(cap):
         decision.update(action="deny", reason=(
             f"Model Router: subagents are capped at {cap} by the user, and this call would run on "
             f"{untouched}. Re-issue it with model: \"{decision['model']}\"."))
         return
     decision.update(action="keep", model=None, repeat_of=earlier.get("model"), reason=(
         "this call was rewritten once and came back without having run, so it is passed through unchanged"))
+    if not changed:  # an effort-only rewrite: no model to blame, and no repeat_of when `was` is unknown
+        decision["source"] = None
+        return
     try:
         health.refused(decision["repeat_of"])
     except OSError:

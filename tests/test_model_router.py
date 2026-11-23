@@ -2400,6 +2400,17 @@ class RepeatGuard(Sandbox):
         self.assertEqual(self.decide("general-purpose", "list the files under c")["model"], "sonnet")
         self.assertIn(health.REFUSED, self.out("models"))
 
+    def test_a_refused_effort_only_rewrite_under_force_passes_through(self):
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", max_tier="sonnet")
+        for session_id in ("s1", "s2"):  # s2's own model is unknown
+            self.assertEqual(self.pre("general-purpose", LOOKUP, session_id=session_id)["updatedInput"]["effort"], "medium")
+            for _ in range(2):
+                self.next_message()
+                self.assertIsNone(self.pre("general-purpose", LOOKUP, session_id=session_id))
+            self.assertIn("passed through", self.ledger()[-1]["reason"])
+        self.assertTrue(health.load().healthy("opus"))  # the rewrite never changed the model
+        self.assertEqual(learn.stats()["lookup"]["calls"], 2)  # a pass-through isn't a routed call
+
     def test_a_model_known_to_work_is_not_blamed(self):
         health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
         for prompt in ("list the files under a", "list the files under b"):
