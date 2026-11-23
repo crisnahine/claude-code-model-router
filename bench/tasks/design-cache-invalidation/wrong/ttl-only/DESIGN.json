@@ -1,0 +1,1 @@
+{"strategy": "ttl_only", "ttl_seconds": 5, "max_staleness_seconds": 5, "reasons": ["x"]}

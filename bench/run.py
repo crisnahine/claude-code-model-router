@@ -20,12 +20,15 @@ import tarfile
 import tempfile
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 BENCH = Path(__file__).resolve().parent
 ROOT = BENCH.parent
 PLUGIN = ROOT / "plugins" / "model-router"
 sys.path.insert(0, str(PLUGIN / "scripts"))
+from modelrouter import config as mrconfig, registry  # noqa: E402
 from modelrouter.ledger import read as read_ledger  # noqa: E402
+ROW_SCHEMA = 2  # a row's schema says which harness wrote it; analyze reads a missing key as old only below this
 CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research")
 
 # Every run starts from the same environment: nothing a parent Claude Code session, its plugins or the shell's
@@ -143,14 +146,51 @@ def grading_env(env: dict) -> dict:
     return {k: v for k, v in env.items() if not is_secret(k)}
 
 
-def grade(check: Path, work: Path, answer: Path, timeout: int = 120) -> bool:
-    """Whether the task's check passes. -I keeps the check's folder and the work dir off sys.path and ignores
-    PYTHON* variables, so code a run left behind can't shadow what the check imports."""
+# A check exits 0 when the task was solved, 1 when it wasn't and 2 when the check itself broke. The launcher turns
+# anything the check raises into 2, so a bug in a check can't read as a wrong answer.
+_LAUNCH = ("import runpy, sys, traceback\nsys.argv = sys.argv[1:]\ntry:\n"
+           "    runpy.run_path(sys.argv[0], run_name='__main__')\nexcept SystemExit:\n    raise\n"
+           "except BaseException:\n    traceback.print_exc()\n    sys.exit(2)\n")
+
+
+class Grade(NamedTuple):
+    verdict: str  # "pass", "fail" or "broken"
+    reason: str  # the last line the check printed, or for a broken check the last line of its error
+    check_hash: str  # the check's code, so a row says which check graded it
+
+    @property
+    def passed(self) -> bool:
+        return self.verdict == "pass"
+
+
+def check_hash(check: Path) -> str:
+    """A hash of the code that decides a task: the check, any script beside it and the helper checks share."""
+    files = sorted(Path(check).parent.glob("*.py")) + [Path(check).parent.parent / "passcheck.py"]
+    digest = hashlib.sha256()
+    for path in dict.fromkeys(files):
+        digest.update(path.name.encode() + b"\0" + (path.read_bytes() if path.is_file() else b"") + b"\0")
+    return digest.hexdigest()[:16]
+
+
+def _last_line(data: bytes) -> str:
+    lines = [line.strip() for line in data.decode("utf-8", "replace").splitlines() if line.strip()]
+    return lines[-1][:300] if lines else ""
+
+
+def grade(check: Path, work: Path, answer: Path, timeout: int = 120) -> Grade:
+    """The task's check run on a work dir and an answer file. -I keeps the check's folder and the work dir off
+    sys.path and ignores PYTHON* variables, so code a run left behind can't shadow what the check imports."""
+    digest = check_hash(check)
     try:
-        return subprocess.run([sys.executable, "-I", str(check), str(work), str(answer)], capture_output=True,
-                              env=grading_env(dict(os.environ)), timeout=timeout).returncode == 0
+        res = subprocess.run([sys.executable, "-I", "-c", _LAUNCH, str(check), str(work), str(answer)],
+                             capture_output=True, env=grading_env(dict(os.environ)), timeout=timeout)
     except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
-        return False
+        return Grade("fail", f"the check timed out after {timeout} s", digest)
+    if res.returncode == 0:
+        return Grade("pass", _last_line(res.stdout), digest)
+    if res.returncode == 2:
+        return Grade("broken", _last_line(res.stderr) or _last_line(res.stdout), digest)
+    return Grade("fail", _last_line(res.stdout) or f"the check exited {res.returncode}", digest)
 
 
 def can_start(spent: float, budget: float, max_total: float) -> bool:
@@ -250,7 +290,38 @@ def _git_dirty() -> bool:
     return bool(res.stdout.strip())
 
 
-def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
+FINAL_FILE_CHARS = 20_000  # kept per file
+FINAL_ROW_CHARS = 80_000  # kept per row, the reply and every file together
+
+
+def final_answer(shipped: Path, work: Path, reply: str) -> dict:
+    """What the check graded, kept in the row because the work dir is deleted after the run: the full reply, each
+    text file the run added or changed against the task's repo/, the files it removed, and the names of files left out
+    (binary, caches, or over the caps)."""
+    room, files, omitted = FINAL_ROW_CHARS - len(reply), {}, []
+    for path in sorted(p for p in work.rglob("*") if p.is_file()):
+        rel = path.relative_to(work).as_posix()
+        if "__pycache__" in path.parts or rel.startswith((".claude/", ".pytest_cache/")) or path.suffix == ".pyc":
+            continue
+        before = shipped / rel
+        data = path.read_bytes()
+        if before.is_file() and before.read_bytes() == data:
+            continue
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            omitted.append(rel)
+            continue
+        if len(text) > FINAL_FILE_CHARS or len(text) > room:
+            omitted.append(rel)
+            continue
+        files[rel], room = text, room - len(text)
+    removed = sorted(p.relative_to(shipped).as_posix() for p in shipped.rglob("*")
+                     if p.is_file() and "__pycache__" not in p.parts and not (work / p.relative_to(shipped)).exists())
+    return {"reply": reply, "files": files, "removed": removed, "omitted": omitted}
+
+
+def run_one(task: dict, config: dict, options: dict, registry_config: dict) -> dict:
     # No task or configuration name: a brief that quotes its working directory would hand the router signal words.
     scratch = Path(tempfile.mkdtemp(prefix="mrbench-"))
     work = scratch / "work"
@@ -279,7 +350,8 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
     # Read before grading: the check also runs the code the run left, which could rewrite these files.
     ledger = ledger_rows(env) if config.get("plugin") else None
     types = agent_types(work, env) if config.get("plugin") else {}
-    passed = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
+    final = final_answer(task["dir"] / "repo", work, answer)
+    graded = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
     kept = None
     if options.get("keep"):
         # The work the run left, its answer, the router's own data and ledger, and the session's transcripts.
@@ -289,13 +361,14 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
             shutil.copytree(session_dir(work, env), kept / "session", symlinks=True)
     session_removed = _forget_session(session_dir(work, env))
     shutil.rmtree(scratch, ignore_errors=True)
-    return record(task, config, options, prices, result,
-                  {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr, "passed": passed,
+    return record(task, config, options, registry_config, result,
+                  {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr,
+                   "grade": graded._asdict(), "final_answer": final,
                    "plugin_state": plugin_state, "ledger": ledger, "agent_types": types,
                    "session_dir_removed": session_removed, "kept": kept and str(kept)})
 
 
-def record(task: dict, config: dict, options: dict, prices: dict, result: dict, facts: dict) -> dict:
+def record(task: dict, config: dict, options: dict, registry_config: dict, result: dict, facts: dict) -> dict:
     """The row for one run, from Claude Code's parsed result and what the runner saw around the process."""
     models = {name: {k: usage.get(k) for k in ("inputTokens", "outputTokens", "cacheReadInputTokens",
                                                 "cacheCreationInputTokens", "costUSD", "costBasis")}
@@ -311,7 +384,7 @@ def record(task: dict, config: dict, options: dict, prices: dict, result: dict, 
     known = isinstance(cost, (int, float)) and not (
         result.get("subtype") == "error_during_execution" and cost == 0 and not refused)
     return {
-        "schema": 1, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
+        "schema": ROW_SCHEMA, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
         "config": config["id"],
         "started_at": facts["started_at"], "claude_version": options["claude_version"],
         "main_model": config.get("model", options["model"]),
@@ -328,10 +401,11 @@ def record(task: dict, config: dict, options: dict, prices: dict, result: dict, 
         "cost_known": known,
         "duration_ms": result.get("duration_ms"), "duration_api_ms": result.get("duration_api_ms"),
         "wall_ms": facts["wall_ms"], "num_turns": result.get("num_turns"),
-        "models": models, "prices": {name: prices.get(name) for name in models},
+        "models": models, "prices": {name: registry.price(registry_config, name) for name in models},
         "subagents": {k: agents.get(k) for k in ("spawned", "completed", "failed", "by_type")},
         "permission_denials": [d.get("tool_name") for d in result.get("permission_denials") or []],
-        "passed": facts["passed"], "answer": (result.get("result") or "")[:2000],
+        "passed": facts["grade"]["verdict"] == "pass", "grade": facts["grade"],
+        "answer": (result.get("result") or "")[:2000], "final_answer": facts["final_answer"],
         **({"kept": facts["kept"]} if facts["kept"] else {}),
         "stderr": stderr,
     }
@@ -365,7 +439,7 @@ def main(argv: list[str] | None = None) -> int:
     tasks = [t for t in load_tasks() if not args.tasks or t["id"] in args.tasks]
     configs = [c for c in load_configs() if not args.configs or c["id"] in args.configs]
     version = subprocess.run([*args.claude, "--version"], capture_output=True, text=True).stdout.strip()
-    prices = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["prices"]
+    registry_config = mrconfig.base_config()
     options = {"claude": args.claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,
                "plugin_dir": str(PLUGIN), "claude_version": version, "commit": _git_head(), "dirty": _git_dirty(),
                "keep": str(args.keep) if args.keep else None}
@@ -377,7 +451,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         begin = time.time()
         for attempt in range(LIMIT_RETRIES + 1):
-            row = run_one(task, config, options, prices)
+            row = run_one(task, config, options, registry_config)
             row["run"] = run_index
             spent += row["total_cost_usd"]
             if not rate_limited(row):
@@ -398,6 +472,9 @@ def main(argv: list[str] | None = None) -> int:
             fh.write(json.dumps(row, sort_keys=True) + "\n")
         print(f"{task['id']} {config['id']} run {run_index}: passed={row['passed']} "
               f"${row['total_cost_usd']:.4f} {time.time() - begin:.0f}s, total ${spent:.4f}")
+        if row["grade"]["verdict"] == "broken":
+            print(f"{task['id']}: its pass check broke ({row['grade']['reason']}); analyze sets this run aside",
+                  file=sys.stderr)
     return 0
 
 

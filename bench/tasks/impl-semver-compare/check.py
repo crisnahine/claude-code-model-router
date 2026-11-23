@@ -26,16 +26,24 @@ RANGES = {"^1.2.3": "1.3.0", "^0.2.3": "0.2.9", "^0.0.3": "0.0.3", "^1.2.3-beta.
 BAD_RANGES = ["", "||", ">=1.2.3 ||", "^1.2", "~1.2.3", ">= 1.2.3", ">=1.2.3 <01.0.0", "1.2", "=>1.2.3"]
 
 
-try:
+with passcheck.agent_code():
     module = passcheck.load(Path(sys.argv[1]), "semver")
     compare, best = module.compare, module.max_satisfying
-    ok = all(compare(ORDER[i], ORDER[j]) == (i > j) - (i < j)
-             for i, j in itertools.product(range(len(ORDER)), repeat=2))
-    ok = ok and all(compare(a, b) == 0 == compare(b, a) for a, b in EQUAL)
-    ok = ok and all(passcheck.raises(compare, bad, "1.0.0") and passcheck.raises(compare, "1.0.0", bad) for bad in INVALID)
-    ok = ok and all(best(V, r) == want for r, want in RANGES.items())
-    ok = ok and best(["1.3.0+b", "1.3.0+a"], "^1.0.0") == "1.3.0+b" and best([], "^1.0.0") is None
-    ok = ok and all(passcheck.raises(best, V, r) for r in BAD_RANGES)
-except BaseException:  # a SystemExit from work-dir code is a failure
-    ok = False
-sys.exit(0 if ok else 1)
+    order = [compare(ORDER[i], ORDER[j]) for i, j in itertools.product(range(len(ORDER)), repeat=2)]
+    equal = [(compare(a, b), compare(b, a)) for a, b in EQUAL]
+    invalid = [(passcheck.raises(compare, bad, "1.0.0"), passcheck.raises(compare, "1.0.0", bad)) for bad in INVALID]
+    ranges = [best(V, r) for r in RANGES]
+    build = [best(["1.3.0+b", "1.3.0+a"], "^1.0.0"), best([], "^1.0.0")]
+    bad_ranges = [passcheck.raises(best, V, r) for r in BAD_RANGES]
+checks = (
+    ("ordering", order, [(i > j) - (i < j) for i, j in itertools.product(range(len(ORDER)), repeat=2)]),
+    ("equal versions", equal, [(0, 0)] * len(EQUAL)),
+    ("invalid versions", invalid, [(True, True)] * len(INVALID)),
+    ("ranges", ranges, list(RANGES.values())),
+    ("build metadata and empty input", build, ["1.3.0+b", None]),
+    ("invalid ranges", bad_ranges, [True] * len(BAD_RANGES)),
+)
+for name, got, want in checks:
+    if got != want:
+        passcheck.finish(False, f"{name}: {passcheck.differs(got, want)}")
+passcheck.finish(True)

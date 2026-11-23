@@ -1,0 +1,3 @@
+The function is `read_retry_limit`, defined in `app/settings.py` (line 7).
+
+It reads the `MAX_RETRIES` environment variable. If that isn't set, it falls back to `DEFAULT_RETRIES`, which is 3. It is the only retry-limit reader in the repo. The only other environment read is `read_timeout` in the same file, which reads `REQUEST_TIMEOUT`.

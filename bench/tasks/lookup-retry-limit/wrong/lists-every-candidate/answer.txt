@@ -1,0 +1,1 @@
+app/settings.py: read_retry_limit, read_timeout; app/backoff.py: retries_left, retry_delay

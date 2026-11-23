@@ -1,0 +1,1 @@
+{"retry_at": "payments_client", "attempts": 2, "per_try_timeout_ms": 1400, "backoff_ms": 100, "idempotency_key": "per_checkout", "gateway_retries": "off", "reasons": ["x"]}

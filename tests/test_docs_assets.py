@@ -84,16 +84,17 @@ class DocsAssets(unittest.TestCase):
     def test_the_figures_from_the_committed_results(self):
         f = docs_assets.bench_figures(docs_assets.bench_summary())
         self.assertEqual((f["runs"], f["usd"], f["dates"], f["opus.commit"]),
-                         ("1,280", "$154.94", "2026-11-22 to 2026-11-23", "780ee86"))
+                         ("1,120", "$134.97", "2026-11-22 to 2026-11-23", "780ee86"))
         self.assertEqual(f["opus.commit_code"], "`780ee86`")
         self.assertEqual((f["opus.pooled.plugin-next"], f["opus.pooled.defaults"], f["opus.pooled_less.defaults"]),
-                         ("$0.119", "$0.152", "21"))
+                         ("$0.121", "$0.151", "20"))
         self.assertEqual((f["opus.below.defaults"], f["opus.less.defaults.min"], f["opus.less.defaults.max"],
-                          f["opus.level.defaults"]), ("7", "18", "36", "design"))
-        self.assertEqual((f["opus.behind.min"], f["opus.behind.max"], f["opus.status.FAIL"]), ("27", "144", "8"))
-        self.assertEqual((f["sonnet.pass_classes"], f["sonnet.behind.min"], f["sonnet.behind.max"],
+                          f["opus.level.defaults"]), ("5", "18", "32", "design"))
+        self.assertEqual((f["opus.behind.min"], f["opus.behind.max"], f["opus.status.FAIL"]), ("60", "144", "6"))
+        self.assertEqual((f["sonnet.status.PASS"], f["sonnet.behind.min"], f["sonnet.behind.max"],
                           f["sonnet.solved.plugin-next"], f["sonnet.solved.defaults"]),
-                         ("lookup", "7", "63", "79 of 80", "78 of 80"))
+                         ("0", "7", "63", "69 of 70", "68 of 70"))
+        self.assertNotIn("sonnet.pass_classes", f)
 
     def test_the_trace_text_lists_every_baseline_with_its_interval(self):
         data = bench_summary()
@@ -129,14 +130,14 @@ class DocsAssets(unittest.TestCase):
     def patched_build(self):
         real = docs_assets.bench_figures(docs_assets.bench_summary())
         with mock.patch.object(docs_assets, "bench_figures", return_value={**real, "opus.pooled.plugin-next": "$9.999",
-                                                                          "opus.cell.lookup.plugin-next": "$9.9999"}):
+                                                                          "opus.cell.bugfix.plugin-next": "$9.9999"}):
             return docs_assets.build()
 
     def test_the_figure_alt_text_follows_the_figures(self):
         files = self.patched_build()
         for path in ("README.md", "site/index.html"):
             alt = re.search(r'benchmark\.svg"[^>]*? alt="([^"]*)"', files[path]).group(1)
-            self.assertIn("lookup $9.9999 against", alt, path)
+            self.assertIn("bugfix $9.9999 against", alt, path)
 
     def test_no_figure_span_sits_inside_backticks(self):
         for path in ("README.md", "docs/FAQ.md", "site/index.html", "docs/TRACEABILITY.md"):

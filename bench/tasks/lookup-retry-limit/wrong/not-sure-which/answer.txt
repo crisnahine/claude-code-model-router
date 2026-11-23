@@ -1,0 +1,1 @@
+app/settings.py: read_retry_limit or read_timeout. I'm not sure which one it is.

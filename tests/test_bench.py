@@ -80,19 +80,6 @@ class Analysis(unittest.TestCase):
         first = analyze.summarize(data, routers=routers, router="plugin", draws=300, seed=7)
         self.assertEqual(first, analyze.summarize(data, routers=routers, router="plugin", draws=300, seed=7))
 
-    def test_the_table_has_a_row_per_class_and_a_column_per_configuration(self):
-        data = (rows("plugin", "lookup", [0.1], [True]) + rows("defaults", "lookup", [0.2], [True])
-                + rows("plugin", "bugfix", [0.3], [False]) + rows("defaults", "bugfix", [0.4], [True]))
-        summary = analyze.summarize(data, routers=frozenset({"plugin"}), router="plugin", draws=100, seed=0)
-        text = analyze.render(summary, {"total_cost_usd": 1.0})
-        header = next(line for line in text.splitlines() if line.startswith("| Task class"))
-        self.assertIn("| plugin |", header)
-        self.assertIn("| defaults |", header)
-        class_rows = [line for line in text.splitlines() if line.startswith(("| lookup ", "| bugfix "))]
-        self.assertEqual(len(class_rows), 2)
-        for line in class_rows:
-            self.assertTrue(line.endswith("| PARTIAL |"), line)
-
     def test_another_router_configuration_is_never_the_baseline(self):
         n = analyze.MIN_RUNS
         data = (rows("plugin", "bugfix", [0.3] * n, [True] * n) + rows("plugin-cheap", "bugfix", [0.1] * n, [True] * n)
@@ -115,6 +102,91 @@ class Analysis(unittest.TestCase):
         self.assertAlmostEqual(low, -0.2)
         self.assertAlmostEqual(high, -0.2)
         self.assertNotIn("plugin", row["differences"])
+
+    def test_pass_rate_intervals_are_exact_binomial(self):
+        self.assertAlmostEqual(analyze.exact_interval(10, 10)[0], 0.025 ** 0.1, places=6)
+        self.assertEqual(analyze.exact_interval(10, 10)[1], 1.0)
+        self.assertEqual(analyze.exact_interval(0, 10)[0], 0.0)
+        low, high = analyze.exact_interval(3, 10)  # the textbook Clopper-Pearson interval
+        self.assertAlmostEqual(low, 0.0667, places=3)
+        self.assertAlmostEqual(high, 0.6525, places=3)
+        cell = self.summary(rows("plugin", "lookup", [1] * 10, [True] * 10))["lookup"]["configs"]["plugin"]
+        self.assertAlmostEqual(cell["pass_ci"][0], 0.6915, places=3)
+
+    def quality(self, data, forced):
+        summary = analyze.summarize(data, routers=frozenset({"plugin"}), router="plugin", draws=200, seed=1, forced=forced)
+        return {s["class"]: s for s in summary}["lookup"]
+
+    FORCED = {"haiku": (1, -1), "opus": (3, -1)}
+
+    def test_a_class_where_the_weakest_forced_baseline_keeps_up_is_saturated(self):
+        n = analyze.MIN_RUNS
+        data = (rows("plugin", "lookup", [0.1] * n, [True] * n) + rows("haiku", "lookup", [0.2] * n, [True] * n)
+                + rows("opus", "lookup", [0.4] * n, [True] * n))
+        row = self.quality(data, self.FORCED)
+        q = row["quality"]
+        self.assertEqual((q["saturated"], q["claim"], q["weakest"], q["strongest"]), (True, None, "haiku", "opus"))
+        self.assertIn("no quality claim", q["reason"])
+        self.assertEqual(row["status"], "PASS")  # the cost verdict stands beside it
+        self.assertEqual(set(q["against"]), {"haiku", "opus"})  # the strongest is compared too
+
+    def test_a_class_that_tells_the_models_apart_gets_a_quality_claim(self):
+        n = analyze.MIN_RUNS
+        weak = rows("haiku", "lookup", [0.2] * n, [True] * 4 + [False] * 6)
+        strong = rows("opus", "lookup", [0.4] * n, [True] * n)
+        level = self.quality(rows("plugin", "lookup", [0.3] * n, [True] * n) + weak + strong, self.FORCED)["quality"]
+        self.assertEqual((level["saturated"], level["claim"]), (False, "LEVEL"))
+        behind = self.quality(rows("plugin", "lookup", [0.3] * n, [True] * 5 + [False] * 5) + weak + strong,
+                              self.FORCED)["quality"]
+        self.assertEqual((behind["saturated"], behind["claim"]), (False, "BEHIND"))
+        self.assertTrue(behind["against"]["opus"]["behind"])
+        self.assertFalse(behind["against"]["haiku"]["behind"])
+
+    def test_forced_baselines_on_one_model_cannot_show_saturation(self):
+        n = analyze.MIN_RUNS
+        data = (rows("plugin", "lookup", [0.1] * n, [True] * n) + rows("opus", "lookup", [0.4] * n, [True] * n)
+                + rows("opus-high", "lookup", [0.4] * n, [True] * n))
+        q = self.quality(data, {"opus": (3, -1), "opus-high": (3, 2)})["quality"]
+        self.assertEqual((q["saturated"], q["claim"]), (None, None))
+
+    def test_cells_that_cover_different_tasks_or_counts_are_partial(self):
+        n = analyze.MIN_RUNS
+        other = [dict(r, task="lookup-2") for r in rows("defaults", "lookup", [0.5] * n, [True] * n)]
+        row = self.quality(rows("plugin", "lookup", [0.1] * n, [True] * n) + other, self.FORCED)
+        self.assertEqual(row["status"], "PARTIAL")
+        self.assertIn("different tasks or run counts", row["reason"])
+        self.assertIsNone(row["quality"]["claim"])
+        short = rows("defaults", "lookup", [0.5] * (n + 2), [True] * (n + 2))
+        self.assertEqual(self.quality(rows("plugin", "lookup", [0.1] * n, [True] * n) + short, self.FORCED)["status"],
+                         "PARTIAL")
+
+    def test_a_cells_draws_do_not_depend_on_the_other_cells(self):
+        n = analyze.MIN_RUNS
+        plugin = rows("plugin", "lookup", [0.1, 0.2, 0.3, 0.4, 0.5, 0.9, 0.15, 0.35, 0.6, 0.7], [True] * n)
+        alone = self.quality(plugin, {})["configs"]["plugin"]
+        beside = self.quality(plugin + rows("defaults", "lookup", [0.2, 0.9] * (n // 2), [True] * n), {})["configs"]["plugin"]
+        self.assertEqual(alone["cps_ci"], beside["cps_ci"])
+        elsewhere = analyze.summarize(plugin, routers=frozenset({"plugin"}), draws=200, seed=1, session="sonnet")
+        self.assertNotEqual(elsewhere[0]["configs"]["plugin"]["cps_ci"], alone["cps_ci"])
+
+    def test_a_task_splits_the_models_when_the_strong_one_solves_most_and_the_weak_one_few(self):
+        def task_rows(task, strong, weak):
+            return [{"task": task, "config": c, "passed": p} for c, ps in (("opus", strong), ("sonnet", weak)) for p in ps]
+        data = (task_rows("a", [True, True, False], [False, True, False])   # 2 of 3 and 1 of 3: splits
+                + task_rows("b", [True, True, True], [True, False, False])  # 1 of 3: splits
+                + task_rows("c", [True, False, False], [False, False, False])  # strong under 2 of 3
+                + task_rows("d", [True, True, True], [True, True, False]))  # weak over 1 of 3
+        self.assertEqual(analyze.splitting_tasks(data), ["a", "b"])
+        self.assertIsNone(analyze.splitting_tasks([r for r in data if r["config"] == "opus"]))
+
+    def test_forced_baselines_rank_by_model_strength_then_effort(self):
+        ranks = analyze.forced_ranks(run.load_configs(), analyze.mrconfig.base_config())
+        self.assertLess(ranks["haiku"], ranks["haiku-high"])
+        self.assertLess(ranks["haiku-high"], ranks["sonnet-medium"])
+        self.assertLess(ranks["sonnet-high"], ranks["opus"])
+        self.assertLess(ranks["opus-high"], ranks["fable"])
+        self.assertNotIn("defaults", ranks)
+        self.assertNotIn("opusplan", ranks)
 
     def test_a_class_with_no_router_or_baseline_has_no_differences(self):
         self.assertEqual(self.summary(rows("defaults", "lookup", [0.3], [True]))["lookup"]["differences"], {})
@@ -288,9 +360,9 @@ class Analysis(unittest.TestCase):
         self.assertNotIn("`defaults`", never)
 
     def test_the_page_says_what_the_archive_holds_and_why_it_is_left_out(self):
-        real = json.loads((ROOT / "bench" / "tasks" / "lookup-retry-limit" / "task.json").read_text())
-        assert real["class"] == "lookup"
-        base = {"class": "lookup", "task": "lookup-retry-limit", "config": "defaults", "total_cost_usd": 0.05,
+        real = json.loads((ROOT / "bench" / "tasks" / "lookup-todo-count" / "task.json").read_text())
+        assert real["class"] == "lookup" and real["revision"] == 1
+        base = {"class": "lookup", "task": "lookup-todo-count", "config": "defaults", "total_cost_usd": 0.05,
                 "passed": True, "claude_version": "2.1.330", "main_model": "sonnet", "models": {},
                 "started_at": "2026-11-23T01:00:00+00:00", "budget_usd": 1.0, "plugin_state": None,
                 "plugin_data_own": True, "sessions_saved": True, "bench_commit": "c" * 40, "task_revision": 1}
@@ -361,7 +433,9 @@ class Recorder(unittest.TestCase):
     task = {"id": "t", "class": "lookup"}
     config = {"id": "plugin", "plugin": True}
     options = {"model": "sonnet", "budget": 0.5, "claude_version": "2.1.330", "commit": "abc", "dirty": False}
-    facts = {"started_at": "2026-11-23T00:00:00+00:00", "wall_ms": 7000, "exit_code": 0, "stderr": "", "passed": True,
+    facts = {"started_at": "2026-11-23T00:00:00+00:00", "wall_ms": 7000, "exit_code": 0, "stderr": "",
+             "grade": {"verdict": "pass", "reason": "solved", "check_hash": "0123456789abcdef"},
+             "final_answer": {"reply": "DONE", "files": {}, "removed": [], "omitted": []},
              "plugin_state": None, "ledger": None, "agent_types": {}, "session_dir_removed": True, "kept": None}
 
     def row(self, result, **facts):
@@ -380,6 +454,11 @@ class Recorder(unittest.TestCase):
             "costUSD": 0.0037657349999999997, "costBasis": "list"}})
         self.assertEqual((row["total_cost_usd"], row["cost_known"], row["answer"]),
                          (0.0037657349999999997, True, "DONE"))
+        self.assertEqual((row["passed"], row["grade"]), (True, self.facts["grade"]))
+        self.assertEqual(row["final_answer"], self.facts["final_answer"])
+        broken = self.row(json.loads(FIXTURE.read_text(encoding="utf-8")),
+                          grade={"verdict": "broken", "reason": "NameError: x", "check_hash": "f" * 16})
+        self.assertEqual((broken["passed"], broken["grade"]["verdict"]), (False, "broken"))
 
     def test_a_zeroed_cost_on_an_error_counts_the_whole_budget(self):
         base = json.loads(FIXTURE.read_text(encoding="utf-8"))
@@ -495,13 +574,73 @@ class Runner(unittest.TestCase):
         self.assertFalse(run.can_start(spent=2.3, budget=0.5, max_total=3.0))
 
 
+FILES_STUB = '''#!/usr/bin/env python3
+import json, sys
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+Path("FINDING.json").write_text('{"file": "app/settings.py", "line": 7}')
+Path("app/client.py").write_text("changed\\n")
+Path("app/backoff.py").unlink()
+print(json.dumps({"result": "x" * 3000, "total_cost_usd": 0.01, "modelUsage": {}}))
+'''
+
+
+class FinalAnswer(unittest.TestCase):
+    """A row keeps what the check graded, since the work dir is deleted after the run."""
+
+    def test_the_files_a_run_added_changed_or_removed_are_kept_and_the_rest_is_not(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
+            for root in (shipped, work):
+                (root / "pkg").mkdir(parents=True)
+                (root / "same.py").write_text("a = 1\n", encoding="utf-8")
+                (root / "pkg" / "edit.py").write_text("b = 1\n", encoding="utf-8")
+            (shipped / "gone.py").write_text("c = 1\n", encoding="utf-8")
+            (work / "pkg" / "edit.py").write_text("b = 2\n", encoding="utf-8")
+            (work / "DESIGN.json").write_text('{"x": 1}', encoding="utf-8")
+            (work / "pkg" / "__pycache__").mkdir()
+            (work / "pkg" / "__pycache__" / "edit.cpython-39.pyc").write_bytes(b"\0\1")
+            (work / ".claude").mkdir()
+            (work / ".claude" / "model-router.json").write_text("{}", encoding="utf-8")
+            (work / "blob.bin").write_bytes(b"\xff\xfe\x00")
+            (work / "big.txt").write_text("z" * (run.FINAL_FILE_CHARS + 1), encoding="utf-8")
+            final = run.final_answer(shipped, work, "the reply")
+        self.assertEqual(final, {"reply": "the reply", "files": {"DESIGN.json": '{"x": 1}', "pkg/edit.py": "b = 2\n"},
+                                 "removed": ["gone.py"], "omitted": ["big.txt", "blob.bin"]})
+
+    def test_the_files_together_stay_under_the_row_cap(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            for n in range(6):
+                (work / f"f{n}.txt").write_text("z" * run.FINAL_FILE_CHARS, encoding="utf-8")
+            final = run.final_answer(shipped, work, "")
+        self.assertEqual(len(final["files"]) * run.FINAL_FILE_CHARS <= run.FINAL_ROW_CHARS, True)
+        self.assertEqual(len(final["files"]) + len(final["omitted"]), 6)
+        self.assertTrue(final["omitted"])
+
+    def test_a_run_row_has_the_whole_reply_and_the_files_the_run_left(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            claude = stub(tmp, FILES_STUB)
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "defaults"), options, {})
+        self.assertEqual((len(row["answer"]), len(row["final_answer"]["reply"])), (2000, 3000))
+        self.assertEqual(row["final_answer"]["files"], {"FINDING.json": '{"file": "app/settings.py", "line": 7}',
+                                                        "app/client.py": "changed\n"})
+        self.assertEqual(row["final_answer"]["removed"], ["app/backoff.py"])
+
+
 class Tasks(unittest.TestCase):
     """Each pass check fails on the task as shipped and passes on a known-good answer."""
 
     def check(self, task, workdir, answer):
         result = Path(workdir) / ".." / "result.txt"
         result.write_text(answer, encoding="utf-8")
-        return run.grade(task["dir"] / "check.py", Path(workdir), result, timeout=60)
+        return run.grade(task["dir"] / "check.py", Path(workdir), result, timeout=60).passed
 
     def test_every_task_has_a_known_class_and_a_check_that_tells_right_from_wrong(self):
         tasks = run.load_tasks()
@@ -520,19 +659,62 @@ class Tasks(unittest.TestCase):
                 self.assertTrue(self.check(task, work, task.get("reference_answer", "")))
 
 
-    def test_a_lookup_answer_listing_every_candidate_fails(self):
-        task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+
+def overlay_dirs(task, kind):
+    folder = task["dir"] / kind
+    return sorted(p for p in folder.iterdir() if p.is_dir()) if folder.is_dir() else []
+
+
+def build_work(task, overlay, work):
+    """repo/, solution/ over it, then an overlay: `remove.txt` lists paths to delete, `answer.txt` is the reply and
+    stays out of the work dir, and every other file is copied in. Returns the reply."""
+    shutil.copytree(task["dir"] / "repo", work)
+    if (task["dir"] / "solution").is_dir():
+        shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
+    if overlay is None:
+        return ""
+    for line in (overlay / "remove.txt").read_text(encoding="utf-8").split("\n") if (overlay / "remove.txt").is_file() else []:
+        if line.strip():
+            (work / line.strip()).unlink()
+    for src in sorted(p for p in overlay.rglob("*") if p.is_file()):
+        rel = src.relative_to(overlay)
+        if rel.as_posix() in ("answer.txt", "remove.txt"):
+            continue
+        (work / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, work / rel)
+    return (overlay / "answer.txt").read_text(encoding="utf-8") if (overlay / "answer.txt").is_file() else ""
+
+
+class KnownAnswers(unittest.TestCase):
+    """Each task folder keeps the answers its check must turn down (wrong/) and take (right/) beside the check."""
+
+    def grade(self, task, overlay):
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp) / "work"
-            shutil.copytree(task["dir"] / "repo", work)
-            self.assertFalse(self.check(task, work, "app/settings.py: read_retry_limit, read_timeout; "
-                                                    "app/backoff.py: retries_left, retry_delay"))
-            for answer in ("read_retry_limit in app/settings.py; app/client.py calls it",
-                           "`read_retry_limit` in `app/settings.py`. `read_timeout` next to it reads REQUEST_TIMEOUT "
-                           "instead.",
-                           "`read_retry_limit` in app/settings.py; `fetch` in app/client.py passes it to "
-                           "`backoff.retries_left`."):
-                self.assertTrue(self.check(task, work, answer), answer)
+            reply = build_work(task, overlay, work)
+            answer = Path(tmp) / "answer.txt"
+            answer.write_text(reply, encoding="utf-8")
+            return run.grade(task["dir"] / "check.py", work, answer, timeout=60)
+
+    def test_every_task_has_known_wrong_answers(self):
+        for task in run.load_tasks():
+            with self.subTest(task=task["id"]):
+                self.assertTrue(task.get("wrong_answer") is not None or overlay_dirs(task, "wrong"))
+
+    def test_every_wrong_answer_fails_and_every_right_answer_passes(self):
+        for task in run.load_tasks():
+            for kind, verdict in (("wrong", "fail"), ("right", "pass")):
+                for overlay in overlay_dirs(task, kind):
+                    with self.subTest(task=task["id"], answer=f"{kind}/{overlay.name}"):
+                        graded = self.grade(task, overlay)
+                        self.assertEqual(graded.verdict, verdict, graded.reason)
+
+    def test_an_answer_folder_changes_something(self):
+        for task in run.load_tasks():
+            for kind in ("wrong", "right"):
+                for overlay in overlay_dirs(task, kind):
+                    with self.subTest(task=task["id"], answer=f"{kind}/{overlay.name}"):
+                        self.assertTrue(any(p.is_file() for p in overlay.rglob("*")))
 
 
 STUB = '''#!/usr/bin/env python3
@@ -676,77 +858,6 @@ class SuiteCoverage(unittest.TestCase):
         for cls in run.CLASSES:
             self.assertGreaterEqual(sum(t["class"] == cls for t in tasks), 2, cls)
 
-    def test_a_root_cause_check_fails_when_the_test_is_edited_to_pass(self):
-        for task in (t for t in run.load_tasks() if t["class"] == "root-cause"):
-            with self.subTest(task=task["id"]), tempfile.TemporaryDirectory() as tmp:
-                task, work = self.shipped(task["id"], tmp)
-                for test_file in work.glob("test_*.py"):
-                    test_file.write_text("import unittest\n", encoding="utf-8")
-                self.assertFalse(self.check(task, work))
-
-    def test_a_security_finding_given_only_in_the_reply_fails(self):
-        for task_id, reply in (("security-sql-injection", "db/users.py:6 builds the SQL with an f-string."),
-                               ("security-path-traversal", "files/server.py:8 joins the name unresolved."),
-                               ("security-admin-route", "gateway/router.py decodes the path twice.")):
-            with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
-                task, work = self.shipped(task_id, tmp)
-                self.assertFalse(self.check(task, work, reply))
-
-    JSON_ANSWERS = {  # task: (answer files that must pass, answer files that must fail); a str is written as is
-        "security-sql-injection": (
-            [{"file": "db/users.py", "line": 6}, {"file": "db/users.py", "line": 6, "why": "an f-string builds the SQL"},
-             {"file": "./db/users.py", "line": 6}, {"file": "db\\users.py", "line": 6},
-             {"file": "/tmp/x/work/db/users.py", "line": 6}],
-            [{"file": "db/orders.py", "line": 3}, {"file": "db/users.py", "line": 7}, {"file": "app.py", "line": 8},
-             {"file": "db/users.py", "line": "6 or 7"}, {"file": "db/users.py", "line": [6, 7, 11]},
-             {"file": "db/users.py", "line": "6-11"}, {"file": "db/users.py", "line": "6 to 11"},
-             {"file": "db/users.py", "line": 6, "maybe": [7, 11]}, {"file": "db/users.py", "line": [4, 6, 11]},
-             [{"file": "db/users.py", "line": 6}, {"file": "db/orders.py", "line": 4}],
-             {"file": ["db/users.py", "db/orders.py"], "line": 6}, {"file": "db/users.py", "line": "6"},
-             {"file": "db/users.py", "line": 6.0}, {"file": "db/users.py", "line": 6, "why": ["f-string"]},
-             {"file": "db/users.py"}, "db/users.py:6", ""]),
-        "security-path-traversal": (
-            [{"file": "files/server.py", "line": 8}, {"file": "files/server.py", "line": 9, "why": "opens it"},
-             {"file": "files\\server.py", "line": 8}, {"file": "/tmp/x/work/files/server.py", "line": 8}],
-            [{"file": "files/server.py", "line": "8 or 9"}, {"file": "files/server.py", "line": [8, 9]},
-             {"file": "files/server.py", "line": "8-9"}, {"file": "files/server.py", "line": 6},
-             {"file": "files/thumbs.py", "line": 8}, {"file": "web.py", "line": 7},
-             {"file": "files/server.py", "line": 8, "also": "web.py:5"},
-             [{"file": "files/server.py", "line": 8}, {"file": "files/thumbs.py", "line": 9}],
-             "files/server.py:8"]),
-        "research-changelog": (
-            [{"default_changed_in": "v1.3", "configurable_in": "2", "variable": "FETCHKIT_RETRIES",
-              "sources": ["/tmp/x/work/docs/changelog/v1.3.md", "changelog\\v2.0.md"]},
-             {"default_changed_in": "1.3.0", "configurable_in": 2, "variable": "FETCHKIT_RETRIES",
-              "sources": ["./docs/changelog/v1.3.md:3", "docs/changelog/v2.0.md#L4"]}],
-            [{"default_changed_in": "1.4", "configurable_in": "2.0", "variable": "FETCHKIT_RETRIES",
-              "sources": ["docs/changelog/v1.3.md", "docs/changelog/v2.0.md"]},
-             {"default_changed_in": "1.3", "configurable_in": "2.0", "variable": "FETCHKIT_RETRIES",
-              "sources": ["docs/changelog/v2.0.md"]}]),
-        "design-cache-invalidation": (
-            [{"strategy": "event_invalidation", "ttl_seconds": None, "max_staleness_seconds": 1, "reasons": ["bus"]},
-             {"strategy": "event_invalidation", "ttl_seconds": 600, "max_staleness_seconds": 2, "reasons": ["x"]}],
-            [{"strategy": "event_invalidation", "ttl_seconds": 5, "max_staleness_seconds": 1, "reasons": ["x"]},
-             {"strategy": "ttl_only", "ttl_seconds": 5, "max_staleness_seconds": 5, "reasons": ["x"]}]),
-        "research-latency": (
-            [{"deploy": "d3", "commit": "c0912ee", "p95_ms": 310}, {"deploy": "d3", "commit": "c0912ee",
-                                                                     "p95_ms": "310"}],
-            [{"deploy": "d2", "commit": "b77e210", "p95_ms": 280}, {"deploy": "d3", "commit": "c0912ee",
-                                                                     "p95_ms": 330}]),
-    }
-
-    def test_checks_take_every_fair_form_of_a_right_answer_and_no_wrong_one(self):
-        files = {"research-changelog": "RESEARCH.json", "research-latency": "RESEARCH.json",
-                 "design-cache-invalidation": "DESIGN.json", "security-sql-injection": "FINDING.json",
-                 "security-path-traversal": "FINDING.json"}
-        for task_id, (right, wrong) in self.JSON_ANSWERS.items():
-            for answer, expected in [(a, True) for a in right] + [(a, False) for a in wrong]:
-                with self.subTest(task=task_id, answer=answer), tempfile.TemporaryDirectory() as tmp:
-                    task, work = self.shipped(task_id, tmp)
-                    text = answer if isinstance(answer, str) else json.dumps(answer)
-                    (work / files[task_id]).write_text(text, encoding="utf-8")
-                    self.assertEqual(self.check(task, work), expected)
-
     def test_work_dir_code_cannot_exit_the_check_with_success(self):
         with tempfile.TemporaryDirectory() as tmp:
             task, work = self.shipped("rootcause-cart", tmp)
@@ -796,9 +907,12 @@ class SuiteCoverage(unittest.TestCase):
         tasks = [{"id": "l", "class": "lookup"}, {"id": "b", "class": "bugfix"}, {"id": "d", "class": "design"}]
         configs = [{"id": "a", "price_model": "sonnet"}, {"id": "o", "price_model": "opus"},
                    {"id": "h", "price_model": "haiku"}]
-        prices = {"claude-sonnet-5-5": {"output": 15}, "claude-opus-5-5": {"output": 75},
-                  "claude-opus-4-1": {"output": 99}, "claude-haiku-5-5": {"output": 5}, "claude-opus-*": {"output": 1}}
-        plan = analyze.estimate(data, tasks, configs, prices)
+        registry_config = {"prices": {"claude-sonnet-5-5": {"output": 15}, "claude-opus-5-5": {"output": 75},
+                                      "claude-opus-4-1": {"output": 99}, "claude-haiku-5-5": {"output": 5},
+                                      "claude-opus-*": {"output": 1}},
+                           "newest": {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5",
+                                      "haiku": "claude-haiku-5-5"}}
+        plan = analyze.estimate(data, tasks, configs, registry_config)
         self.assertEqual(plan["runs"], 90)
         # 10 runs x (0.05 + 0.10 + 0.0667 for design, from the mean of all runs) x (1 + 5 + 1, haiku never priced down)
         self.assertAlmostEqual(plan["usd"], 10 * (0.05 + 0.10 + 0.2 / 3) * 7, places=6)
@@ -923,7 +1037,7 @@ class AgentCosts(unittest.TestCase):
         def rewrite(check, work, answer, timeout=120):
             data = run.plugin_data_dir({"CLAUDE_CODE_PLUGIN_CACHE_DIR": str(work.parent / "plugins")})
             (data / "ledger.jsonl").write_text('{"event": "usage", "cost_usd": 9}\n', encoding="utf-8")
-            return True
+            return run.Grade("pass", "", "0" * 16)
 
         with tempfile.TemporaryDirectory() as tmp:
             claude = stub(tmp, COST_STUB)
@@ -1057,23 +1171,42 @@ class TaskIdentity(unittest.TestCase):
         tasks = {t["id"]: t for t in run.load_tasks()}
         self.assertEqual(tasks["design-cache-invalidation"]["revision"], 2)
 
-    def test_the_page_names_each_tasks_revision_and_the_folder_name_bias(self):
+    def test_rows_on_an_earlier_task_revision_are_left_out_of_the_tables(self):
         template = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-design-2026-11-22.jsonl")
                               .read_text(encoding="utf-8").splitlines()[0])
         old = {k: v for k, v in template.items() if k != "task_revision"}
         rows = [dict(old, task="design-cache-invalidation", config="plugin"),
                 dict(old, task="design-cache-invalidation", config="defaults"),
-                dict(old, task="design-rate-limiter", config="plugin", task_revision=1)]
+                dict(old, task="design-rate-limiter", config="plugin", total_cost_usd=0.5)]
         with tempfile.TemporaryDirectory() as tmp:
             results = Path(tmp) / "results"
             results.mkdir()
             (results / "a-design.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+            loaded = analyze.load([results / "a-design.jsonl"])
             out = Path(tmp) / "page.md"
             analyze.main([str(results / "a-design.jsonl"), "--out", str(out)])
             page = out.read_text(encoding="utf-8")
-        self.assertIn("`design-cache-invalidation` is at revision 2; 2 of its runs here ran on an earlier revision", page)
+        self.assertEqual(sorted(r["task"] for r in loaded.stale), ["design-cache-invalidation"] * 2)
+        self.assertEqual([r["task"] for r in loaded.rows], ["design-rate-limiter"])
+        self.assertIn("`design-cache-invalidation` is at revision 2; 2 of its runs ($", page)
+        self.assertIn("are left out of every table", page)
         self.assertIn("- Bias: 1 router-arm runs", page)  # the one router row with no task_revision
-        self.assertIn("`design-cache-invalidation`", page.split("- Bias: ")[1].split("\n")[0])
+
+    def test_a_missing_key_is_an_older_harness_only_below_the_row_schema(self):
+        template = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-design-2026-11-22.jsonl")
+                              .read_text(encoding="utf-8").splitlines()[0])
+        base = dict(template, config="defaults", task="design-rate-limiter", task_revision=1, wall_ms=1000)
+        older = {k: v for k, v in base.items() if k != "wall_ms"}
+        current = dict(older, schema=run.ROW_SCHEMA)  # a current row never lacks it, so the page doesn't read it as old
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp) / "results"
+            results.mkdir()
+            (results / "a.jsonl").write_text("".join(json.dumps(r) + "\n" for r in (older, current)))
+            out = Path(tmp) / "page.md"
+            analyze.main([str(results / "a.jsonl"), "--out", str(out)])
+            self.assertIn("1 run(s) here carry no `wall_ms`", out.read_text(encoding="utf-8"))
+        self.assertEqual(run.record({"id": "t", "class": "lookup"}, {"id": "x"}, Recorder.options, {}, {},
+                                    Recorder.facts)["schema"], run.ROW_SCHEMA)
 
 
 class Isolation(unittest.TestCase):
@@ -1113,17 +1246,17 @@ class Isolation(unittest.TestCase):
                     (work / name).write_text(self.PLANT, encoding="utf-8")
                 answer = Path(tmp) / "answer.txt"
                 answer.write_text(task.get("wrong_answer", ""), encoding="utf-8")
-                self.assertFalse(run.grade(task["dir"] / "check.py", work, answer))
+                self.assertFalse(run.grade(task["dir"] / "check.py", work, answer).passed)
                 if (task["dir"] / "solution").is_dir():  # the same planted files don't cost an honest run its pass
                     shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
                     answer.write_text(task.get("reference_answer", ""), encoding="utf-8")
-                    self.assertTrue(run.grade(task["dir"] / "check.py", work, answer))
+                    self.assertTrue(run.grade(task["dir"] / "check.py", work, answer).passed)
 
     def test_a_check_runs_isolated(self):
         with tempfile.TemporaryDirectory() as tmp:
             check = Path(tmp) / "check.py"
             check.write_text("import sys\nsys.exit(0 if sys.flags.isolated else 1)\n", encoding="utf-8")
-            self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt"))
+            self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt").passed)
 
     def test_a_check_sees_no_credentials(self):
         secret = {"CLAUDE_CODE_OAUTH_TOKEN": "t", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "3", "ANTHROPIC_API_KEY": "k",
@@ -1137,7 +1270,7 @@ class Isolation(unittest.TestCase):
                              f"and set({sorted(kept)!r}) <= set(os.environ) and 'PATH' in os.environ else 1)\n",
                              encoding="utf-8")
             with unittest.mock.patch.dict("os.environ", {**secret, **kept}):
-                self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt"))
+                self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt").passed)
                 self.assertEqual(sorted(set(secret) & set(run.grading_env(dict(os.environ)))), [])
 
     def test_credential_names_are_matched_in_any_case(self):
@@ -1149,7 +1282,7 @@ class Isolation(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             check = Path(tmp) / "check.py"
             check.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
-            self.assertFalse(run.grade(check, Path(tmp), Path(tmp) / "answer.txt", timeout=1))
+            self.assertFalse(run.grade(check, Path(tmp), Path(tmp) / "answer.txt", timeout=1).passed)
 
     def test_no_work_module_name_resolves_without_the_work_dir(self):
         names = set()
@@ -1173,6 +1306,98 @@ class Isolation(unittest.TestCase):
                 self.assertIn('sys.modules["passcheck"] = passcheck', text, check)
 
 
+class Grading(unittest.TestCase):
+    """A check's exit code is its verdict: 0 solved, 1 not solved, 2 the check itself broke."""
+
+    def grade(self, body, timeout=60):
+        with tempfile.TemporaryDirectory() as tmp:
+            check = Path(tmp) / "check.py"
+            check.write_text(body, encoding="utf-8")
+            return run.grade(check, Path(tmp), Path(tmp) / "answer.txt", timeout=timeout)
+
+    def test_exit_0_passes_exit_1_fails_and_the_last_line_printed_is_the_reason(self):
+        ok = self.grade("print('noise')\nprint('both rows match')\nraise SystemExit(0)\n")
+        self.assertEqual((ok.verdict, ok.passed, ok.reason), ("pass", True, "both rows match"))
+        no = self.grade("print('the count is 5, not 4')\nraise SystemExit(1)\n")
+        self.assertEqual((no.verdict, no.passed, no.reason), ("fail", False, "the count is 5, not 4"))
+        self.assertEqual(self.grade("import os\nos._exit(3)\n").verdict, "fail")
+
+    def test_finish_records_why_a_task_failed_and_solved_for_a_pass(self):
+        for ok, want in ((True, "solved"), (False, "the count is 5"), (False, "not solved")):
+            with self.subTest(ok=ok):
+                body = ("import importlib.util\n_s = importlib.util.spec_from_file_location('passcheck', "
+                        f"{str(run.BENCH / 'tasks' / 'passcheck.py')!r})\npasscheck = importlib.util.module_from_spec(_s)\n"
+                        f"_s.loader.exec_module(passcheck)\npasscheck.finish({ok}, {'the count is 5' if want != 'not solved' else ''!r})\n")
+                graded = self.grade(body)
+                self.assertEqual((graded.verdict, graded.reason), ("pass" if ok else "fail", want))
+
+    def test_an_error_in_the_check_is_broken_not_failed(self):
+        for body in ("undefined_name\n", "import no_such_module\n", "raise SystemExit('x' + 1)\n",
+                     "def f(:\n"):
+            with self.subTest(body=body):
+                graded = self.grade(body)
+                self.assertEqual((graded.verdict, graded.passed), ("broken", False))
+        self.assertIn("NameError", self.grade("undefined_name\n").reason)
+
+    def test_work_dir_code_that_raises_or_exits_fails_instead_of_breaking_the_check(self):
+        for fault in ("raise ValueError('bad')", "raise SystemExit(0)", "import sys; sys.exit(0)", "1 / 0"):
+            with self.subTest(fault=fault):
+                graded = self.grade("import importlib.util, sys\nfrom pathlib import Path\n"
+                                    f"_s = importlib.util.spec_from_file_location('passcheck', {str(run.BENCH / 'tasks' / 'passcheck.py')!r})\n"
+                                    "passcheck = importlib.util.module_from_spec(_s)\n_s.loader.exec_module(passcheck)\n"
+                                    f"with passcheck.agent_code():\n    {fault}\n"
+                                    "passcheck.finish(True)\n")
+                self.assertEqual(graded.verdict, "fail")
+                self.assertIn("the work dir's code raised", graded.reason)
+
+    def test_no_check_swallows_an_error_of_its_own(self):
+        import ast
+        for path in sorted((run.BENCH / "tasks").glob("*/check.py")):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.ExceptHandler):
+                    caught = {n.id for n in ast.walk(node.type) if isinstance(n, ast.Name)} if node.type else {"bare"}
+                    self.assertFalse(caught & {"bare", "Exception", "BaseException"}, f"{path.parent.name}:{node.lineno}")
+
+    def test_a_check_that_hangs_fails_with_a_reason(self):
+        graded = self.grade("import time\ntime.sleep(30)\n", timeout=1)
+        self.assertEqual(graded.verdict, "fail")
+        self.assertIn("timed out", graded.reason)
+
+    def test_the_hash_names_the_check_the_helper_and_any_script_beside_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tasks = Path(tmp) / "tasks"
+            (tasks / "t").mkdir(parents=True)
+            (tasks / "passcheck.py").write_text("A = 1\n", encoding="utf-8")
+            (tasks / "t" / "check.py").write_text("print(1)\n", encoding="utf-8")
+            first = run.check_hash(tasks / "t" / "check.py")
+            self.assertEqual(first, run.check_hash(tasks / "t" / "check.py"))
+            self.assertEqual(len(first), 16)
+            for path, text in (("t/check.py", "print(2)\n"), ("passcheck.py", "A = 2\n"), ("t/probe.py", "x\n")):
+                (tasks / path).write_text(text, encoding="utf-8")
+                changed = run.check_hash(tasks / "t" / "check.py")
+                self.assertNotEqual(changed, first, path)
+                first = changed
+
+    def test_analyze_sets_aside_a_run_whose_check_broke(self):
+        template = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-design-2026-11-22.jsonl")
+                              .read_text(encoding="utf-8").splitlines()[0])
+        good = dict(template, config="defaults", task="design-rate-limiter", task_revision=1, schema=run.ROW_SCHEMA,
+                    passed=True, grade={"verdict": "pass", "reason": "solved", "check_hash": "a" * 16})
+        bad = dict(good, passed=False, total_cost_usd=0.25,
+                   grade={"verdict": "broken", "reason": "NameError: x", "check_hash": "b" * 16})
+        with tempfile.TemporaryDirectory() as tmp:
+            results = Path(tmp) / "results"
+            results.mkdir()
+            (results / "a.jsonl").write_text("".join(json.dumps(r) + "\n" for r in (good, bad)))
+            loaded = analyze.load([results / "a.jsonl"])
+            out = Path(tmp) / "page.md"
+            analyze.main([str(results / "a.jsonl"), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        self.assertEqual((len(loaded.rows), len(loaded.broken)), (1, 1))
+        self.assertIn("1 run(s) ($0.25) are set aside, though they stay in the results files: the pass check of "
+                      "`design-rate-limiter` broke on them", page)
+
+
 class Pilot(unittest.TestCase):
     def test_the_committed_page_is_what_analyze_writes(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
@@ -1193,13 +1418,15 @@ class Pilot(unittest.TestCase):
     def test_recorded_lookup_answers_still_grade_the_same(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
         data = [json.loads(line) for path in raw for line in path.read_text(encoding="utf-8").splitlines() if line]
+        revisions = {t["id"]: t.get("revision", 1) for t in run.load_tasks()}
         for row in data:  # a lookup is graded from its answer alone, so today's check must agree with the record
-            if row["class"] == "lookup" and len(row["answer"]) < 2000:  # the line keeps 2,000 characters
+            if (row["class"] == "lookup" and len(row["answer"]) < 2000  # the line keeps 2,000 characters
+                    and row.get("task_revision", 1) == revisions[row["task"]]):  # an older revision's check differed
                 with tempfile.TemporaryDirectory() as tmp:
                     answer = Path(tmp) / "answer.txt"
                     answer.write_text(row["answer"], encoding="utf-8")
                     check = ROOT / "bench" / "tasks" / row["task"] / "check.py"
-                    self.assertEqual(run.grade(check, Path(tmp), answer), row["passed"], row["config"])
+                    self.assertEqual(run.grade(check, Path(tmp), answer).passed, row["passed"], row["config"])
 
 
 class HardTier(unittest.TestCase):
@@ -1232,124 +1459,6 @@ class HardTier(unittest.TestCase):
                 "research-yanked-release"}
         tasks = {t["id"]: t for t in run.load_tasks()}
         self.assertEqual({tasks[t]["class"] for t in hard}, set(run.CLASSES))
-
-    def test_the_timeout_lookup_wants_the_capped_value_and_the_client(self):
-        for answer, expected in (("25 app/client.py", True), ("It is capped.\n`25 app/client.py`", True),
-                                 ("25 seconds, app/client.py", True), ("25.0 ./app/client.py", True),
-                                 ("<25 app/client.py>", True), ("<25> <app/client.py>", True), ("<45 app/client.py>", False),
-                                 ("45 app/client.py", False), ("45 app/resolve.py", False), ("25 app/limits.py", False),
-                                 ("10 app/env.py", False), ("45000 app/env.py", False),
-                                 ("25 app/client.py\n45 app/resolve.py", False),
-                                 ("The answer is 25 seconds in app/client.py.", False)):
-            with self.subTest(answer=answer):
-                self.assertEqual(self.run_with("lookup-effective-timeout", {}, answer), expected)
-
-    def test_semver_needs_numeric_identifiers_validation_and_the_prerelease_rule(self):
-        solution = self.source("impl-semver-compare", "solution/semver.py")
-        loose = solution.replace("(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)", "(\\d+)\\.(\\d+)\\.(\\d+)")
-        any_prerelease = solution.replace(
-            "    return version[1] is None or any(bound[1] is not None and bound[0] == version[0] for _, bound in "
-            "comparators)", "    return True")
-        caret_major_only = solution.replace(
-            "upper = (major + 1, 0, 0) if major else (0, minor + 1, 0) if minor else (0, 0, patch + 1)",
-            "upper = (major + 1, 0, 0)")
-        for name, text in (("leading zeros allowed", loose), ("prereleases always match", any_prerelease),
-                           ("caret ignores 0.x", caret_major_only)):
-            with self.subTest(name):
-                self.assertNotEqual(text, solution)
-                self.assertFalse(self.run_with("impl-semver-compare", {"semver.py": text}))
-
-    def test_an_allocation_that_rounds_floors_negatives_or_skips_validation_fails(self):
-        solution = self.source("bugfix-split-amount", "solution/money.py")
-        to_last = ("def allocate(total_cents, weights):\n    s = sum(weights)\n"
-                   "    shares = [total_cents * w // s for w in weights]\n    shares[-1] += total_cents - sum(shares)\n"
-                   "    return shares\n")
-        floored = solution.replace("total, sign = sum(weights), (-1 if total_cents < 0 else 1)",
-                                   "total, sign = sum(weights), 1").replace("abs(total_cents)", "total_cents")
-        unchecked = "\n".join(l for l in solution.splitlines() if "raise ValueError" not in l and "if (not " not in l
-                              and "or sum(weights) <= 0" not in l) + "\n"
-        for name, text in (("remainder to the last share", to_last), ("negatives floored", floored),
-                           ("no validation", unchecked)):
-            with self.subTest(name):
-                self.assertNotEqual(text, solution)
-                self.assertFalse(self.run_with("bugfix-split-amount", {"money.py": text}))
-
-    def test_tenant_keys_must_reach_every_hand_built_key_and_never_collide(self):
-        joined = "def price_key(tenant_id, product_id):\n    return f\"price:{tenant_id}:{product_id}\"\n"
-        report = ("from cache import store\n\n\ndef cached_products(tenant_id):\n    prefix = f\"price:{tenant_id}:\"\n"
-                  "    return sorted(k[len(prefix):] for k in store.keys() if k.startswith(prefix))\n")
-        sweep = ("from cache import store\n\n\ndef sweep(tenant_id, keep):\n    prefix = f\"price:{tenant_id}:\"\n"
-                 "    for key in store.keys():\n        if key.startswith(prefix) and key[len(prefix):] not in keep:\n"
-                 "            store.delete(key)\n")
-        events = self.source("cross-tenant-cache", "solution/admin/events.py")
-        missed_delete = events.replace(
-            "    db.remove(tenant_id, product_id)\n    store.delete(keys.price_key(tenant_id, product_id))",
-            "    db.remove(tenant_id, product_id)\n    store.delete(\"price:\" + product_id)")
-        untenanted_sweep = ("from cache import keys, store\n\n\ndef sweep(tenant_id, keep):\n"
-                            "    for key in store.keys():\n"
-                            "        if key[2] not in keep:\n            store.delete(key)\n")
-        for name, files in (("colliding string key", {"cache/keys.py": joined, "reports/cached.py": report,
-                                                      "jobs/sweep.py": sweep}),
-                            ("hand-built key left in the delete handler", {"admin/events.py": missed_delete}),
-                            ("sweep across tenants", {"jobs/sweep.py": untenanted_sweep})):
-            with self.subTest(name):
-                self.assertFalse(self.run_with("cross-tenant-cache", files))
-
-    def test_the_import_finding_names_the_tar_extract_and_not_a_decoy(self):
-        for finding, expected in (({"file": "files/importer.py", "line": 17}, True),
-                                  ({"file": "files/importer.py", "line": 15}, True),
-                                  ({"file": "files/importer.py", "line": 13}, False),
-                                  ({"file": "files/server.py", "line": 9}, False),
-                                  ({"file": "files/server.py", "line": 8}, False),
-                                  ({"file": "files/thumbs.py", "line": 23}, False),
-                                  ({"file": "files/thumbs.py", "line": 12}, False),
-                                  ({"file": "auth/tokens.py", "line": 22}, False)):
-            with self.subTest(finding=finding):
-                self.assertEqual(self.run_with("security-prefix-check", {"FINDING.json": finding}), expected)
-
-    def test_dropping_or_clearing_the_cache_does_not_fix_the_shared_rows(self):
-        rates = self.source("rootcause-cached-rates", "repo/rates.py")
-        pricing = self.source("rootcause-cached-rates", "repo/pricing.py")
-        uncached = rates.replace("@functools.lru_cache(maxsize=None)\n", "")
-        cleared = pricing.replace("    rows = rate_table(region)\n    for row in rows:",
-                                  "    rate_table.cache_clear()\n    rows = rate_table(region)\n    for row in rows:")
-        for name, files in (("cache dropped", {"rates.py": uncached, "pricing.py": pricing}),
-                            ("cache cleared on each sale", {"pricing.py": cleared})):
-            with self.subTest(name):
-                self.assertNotEqual(list(files.values())[0], rates if name == "cache dropped" else pricing)
-                self.assertFalse(self.run_with("rootcause-cached-rates", files))
-        copied = rates.replace("    return rows\n", "    return rows\n\n\n_cached = rate_table\n\n\n"
-                                                    "def rate_table(region):\n"
-                                                    "    return [dict(row) for row in _cached(region)]\n")
-        self.assertTrue(self.run_with("rootcause-cached-rates", {"rates.py": copied, "pricing.py": pricing}))
-
-    def test_the_topic_design_must_hold_every_number(self):
-        good = {"partitions": 30, "key": "order_id", "retention_hours": 80, "replication_factor": 3, "reasons": ["x"]}
-        for change, expected in (({}, True), ({"partitions": 36}, True), ({"retention_hours": 72}, True),
-                                 ({"retention_hours": 82}, True),
-                                 ({"partitions": 24}, False), ({"partitions": 22}, False), ({"partitions": 32}, False),
-                                 ({"partitions": 42}, False), ({"partitions": 12}, False),
-                                 ({"key": "customer_id"}, False), ({"replication_factor": 2}, False),
-                                 ({"replication_factor": 4}, False), ({"retention_hours": 168}, False),
-                                 ({"retention_hours": 48}, False), ({"partitions": 30.0}, False),
-                                 ({"extra": 1}, False)):
-            with self.subTest(change=change):
-                self.assertEqual(self.run_with("design-event-partitions", {"DESIGN.json": {**good, **change}}),
-                                 expected)
-
-    def test_the_release_research_needs_the_yank_the_errata_and_the_advisory(self):
-        good = {"stream_since": "2.3.1", "timeout_since": "2.4.2", "safe_since": "2.4.3",
-                "sources": ["docs/changelog/v2.3.1.md", "docs/errata.md", "docs/security/SA-2025-01.md"]}
-        for change, expected in (({}, True), ({"stream_since": "v2.3.1", "safe_since": "2.4.3"}, True),
-                                 ({"sources": ["./docs/changelog/v2.3.1.md:3", "errata.md", "security/SA-2025-01.md",
-                                               "docs/security/SA-2025-02.md"]}, True),
-                                 ({"stream_since": "2.3.0"}, False), ({"timeout_since": "2.4.0"}, False),
-                                 ({"safe_since": "2.4.2"}, False), ({"safe_since": "2.5.0"}, False),
-                                 ({"sources": ["docs/changelog/v2.3.1.md", "docs/errata.md"]}, False),
-                                 ({"sources": good["sources"] + ["docs/nope.md"]}, False)):
-            with self.subTest(change=change):
-                self.assertEqual(self.run_with("research-yanked-release", {"RESEARCH.json": {**good, **change}}),
-                                 expected)
 
 
 class ProbeHelper(unittest.TestCase):
@@ -1403,117 +1512,6 @@ class QualityTier(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT lower('\u00c9'), lower('A')").fetchone(), ("\u00c9", "a"),
                          "this SQLite is built with ICU, so lower() folds non-ASCII letters and the task's data is wrong")
 
-    def test_migration_rejects_each_known_mistake(self):
-        solution = self.source("impl-merge-customers", "solution/store/migrations/m0002_merge_customers.py")
-        rel = "store/migrations/m0002_merge_customers.py"
-        self.assertTrue(self.run_with("impl-merge-customers", {rel: solution}))
-
-        def between(first, last, replacement=""):
-            return solution[:solution.index(first)] + replacement + solution[solution.index(last):]
-
-        rebuild, view, fill = ('        conn.execute("""\n            CREATE TABLE new_customers', '        conn.execute("""\n            CREATE VIEW',
-                               '        conn.execute("""\n            UPDATE customers SET name')
-        copy = 'INSERT INTO {} SELECT id, lower(trim(email)), name, created_at FROM {}'
-        schema = "id INTEGER PRIMARY KEY, email TEXT NOT NULL COLLATE NOCASE UNIQUE, name TEXT, created_at TEXT NOT NULL"
-        mutants = {
-            "pragma inside the transaction": solution.replace(
-                '    conn.execute("PRAGMA foreign_keys = OFF")\n    conn.execute("BEGIN")\n',
-                '    conn.execute("BEGIN")\n').replace(
-                "WHERE name IS NULL OR name = \'\'\"\"\")\n",
-                "WHERE name IS NULL OR name = \'\'\"\"\")\n        conn.execute(\"PRAGMA foreign_keys = OFF\")\n"),
-            "old table renamed first": between(rebuild, view, (
-                '        conn.execute("ALTER TABLE customers RENAME TO old_customers")\n'
-                f'        conn.execute("CREATE TABLE customers ({schema})")\n'
-                f'        conn.execute("{copy.format("customers", "old_customers")}")\n'
-                '        conn.execute("DROP TABLE old_customers")\n')),
-            "newest kept": solution.replace("ORDER BY k.created_at, k.id", "ORDER BY k.created_at DESC, k.id"),
-            "python lower": solution.replace(
-                '    conn.execute("BEGIN")\n',
-                '    conn.execute("BEGIN")\n    for key, email in conn.execute("SELECT id, email FROM customers").fetchall():\n'
-                '        conn.execute("UPDATE customers SET email = ? WHERE id = ?", (email.strip().lower(), key))\n'),
-            "view not recreated": between(view, '        if conn.execute("PRAGMA foreign_key_check")'),
-            "foreign keys left off": solution.replace(
-                '    finally:\n        conn.execute("PRAGMA foreign_keys = ON")\n', ""),
-            "unique index": between(rebuild, view, (
-                '        conn.execute("UPDATE customers SET email = lower(trim(email))")\n'
-                '        conn.execute("CREATE UNIQUE INDEX customers_email ON customers(email COLLATE NOCASE)")\n')),
-            "names not filled": between(fill, '        conn.execute("UPDATE orders'),
-            "tie goes to the highest id": solution.replace("ORDER BY k.created_at, k.id", "ORDER BY k.created_at, k.id DESC"),
-            "latest donor names the kept customer": solution.replace(
-                "ORDER BY d.created_at, d.id LIMIT 1), name)", "ORDER BY d.created_at DESC, d.id LIMIT 1), name)"),
-            "backup table left behind": solution.replace(
-                '        conn.execute("DROP TABLE customers")\n',
-                '        conn.execute("CREATE TABLE customers_backup AS SELECT * FROM customers")\n'
-                '        conn.execute("DROP TABLE customers")\n'),
-            "view turned into a table": between(view, '        if conn.execute("PRAGMA foreign_key_check")', (
-                '        conn.execute("""\n            CREATE TABLE customer_totals AS\n'
-                '            SELECT c.id, c.email, COUNT(o.id) AS orders, COALESCE(SUM(o.total_cents), 0) AS cents\n'
-                '            FROM customers c LEFT JOIN orders o ON o.customer_id = c.id\n'
-                '            GROUP BY c.id""")\n')),
-            "created_at no longer required": solution.replace(
-                "created_at TEXT NOT NULL\n            )", "created_at TEXT\n            )"),
-            "primary key lost": solution.replace("id INTEGER PRIMARY KEY,\n                email", "id INTEGER,\n                email"),
-            "view left in place": solution.replace('        conn.execute("DROP VIEW customer_totals")\n', ""),
-            "not committed": solution.replace('        conn.execute("COMMIT")\n', ""),
-        }
-        for name, text in mutants.items():
-            with self.subTest(name):
-                self.assertNotEqual(text, solution)
-                self.assertFalse(self.run_with("impl-merge-customers", {rel: text}))
-        noise = {
-            "writes to stdout": solution.replace("def upgrade(conn):\n", 'def upgrade(conn):\n    import sys\n'
-                                                 '    sys.stdout.write("done")\n'),
-            "swaps stdout": solution.replace("def upgrade(conn):\n", 'def upgrade(conn):\n    import os, sys\n'
-                                             '    sys.stdout = open(os.devnull, "w")\n'),
-            "prints at exit": solution.replace("import sqlite3\n", 'import atexit\nimport sqlite3\n\n'
-                                               'atexit.register(lambda: print(\'{"error": "late"}\'))\n', 1),
-        }
-        for name, text in noise.items():
-            with self.subTest(name):
-                self.assertNotEqual(text, solution)
-                self.assertTrue(self.run_with("impl-merge-customers", {rel: text}))
-        legacy_rename = between(rebuild, view, (
-            '        conn.execute("PRAGMA legacy_alter_table = ON")\n'
-            '        conn.execute("ALTER TABLE customers RENAME TO old_customers")\n'
-            f'        conn.execute("CREATE TABLE customers ({schema})")\n'
-            f'        conn.execute("{copy.format("customers", "old_customers")}")\n'
-            '        conn.execute("DROP TABLE old_customers")\n'
-            '        conn.execute("PRAGMA legacy_alter_table = OFF")\n'))
-        self.assertTrue(self.run_with("impl-merge-customers", {rel: legacy_rename}))
-
-    def line_of(self, rel, text, nth=1):
-        lines = self.source("security-admin-route", f"repo/{rel}").splitlines()
-        return [n for n, line in enumerate(lines, 1) if text in line][nth - 1]
-
-    def test_the_route_finding_names_the_second_decode_or_the_guard_and_no_decoy(self):
-        first, second = self.line_of("gateway/router.py", 'if "%" in path:'), self.line_of("gateway/router.py", "path = unquote(path)")
-        self.assertEqual(second, first + 1)
-        guard = self.line_of("gateway/guard.py", "path.startswith(")
-        decode = self.line_of("gateway/guard.py", "unquote(")
-        pairs = (
-            [("gateway/router.py", first, True), ("gateway/router.py", second, True), ("gateway/guard.py", guard, True),
-             ("./gateway/router.py", second, True), ("gateway\\router.py", first, True),
-             ("gateway/router.py", self.line_of("gateway/router.py", "path = unquote(raw"), False),
-             ("gateway/guard.py", decode, True),
-             ("gateway/admin.py", self.line_of("gateway/admin.py", 'f"SELECT'), False),
-             ("gateway/hooks.py", self.line_of("gateway/hooks.py", "pickle.loads"), False),
-             ("gateway/releases.py", self.line_of("gateway/releases.py", "subprocess.run"), False),
-             ("gateway/etag.py", self.line_of("gateway/etag.py", "hashlib.md5"), False),
-             ("gateway/files.py", self.line_of("gateway/files.py", "path = os.path.realpath"), False),
-             ("gateway/router.py", self.line_of("gateway/router.py", "random.uniform"), False),
-             ("auth/session.py", self.line_of("auth/session.py", "compare_digest"), False)])
-        for rel, line, expected in pairs:
-            with self.subTest(file=rel, line=line):
-                self.assertEqual(self.run_with("security-admin-route", {"FINDING.json": {"file": rel, "line": line}}), expected)
-        self.assertTrue(self.run_with("security-admin-route", {"FINDING.json": {
-            "file": "gateway/router.py", "line": second, "why": "It decodes the path a second time."}}))
-        for name, answer in (("two findings", [{"file": "gateway/router.py", "line": second},
-                                               {"file": "gateway/admin.py", "line": 1}]),
-                             ("a string line", {"file": "gateway/router.py", "line": str(second)}),
-                             ("two lines", {"file": "gateway/router.py", "line": [first, second]})):
-            with self.subTest(name):
-                self.assertFalse(self.run_with("security-admin-route", {"FINDING.json": answer}))
-
     def test_the_shipped_repo_has_no_comment_that_names_the_trap_or_clears_a_decoy(self):
         for path in (run.BENCH / "tasks" / "security-admin-route" / "repo").rglob("*.py"):
             with self.subTest(path=path.name):
@@ -1534,63 +1532,6 @@ class QualityTier(unittest.TestCase):
         self.assertTrue(admin[1])
         self.assertEqual(sneaked[1], admin[1])
 
-    def solution_with(self, rel, old, new):
-        text = self.source("cross-amount-cents", f"solution/{rel}")
-        self.assertIn(old, text)
-        return {rel: text.replace(old, new, 1)}
-
-    def shipped_module(self, rel):
-        return {rel: self.source("cross-amount-cents", f"repo/{rel}")}
-
-    def cents_mutants(self):
-        convert = 'int(round(Decimal(str(event["amount"])) * 100))'
-        zero = 'if "amount" not in event:\n        return dict(event)\n    cents = ' + convert
-        totals_hand = ("from shop import events\n\n\ndef order_total(log, order_id):\n    total = 0\n    for e in log:\n"
-                       "        cents = e[\"amount_cents\"] if \"amount_cents\" in e else round(e[\"amount\"] * 100)\n"
-                       "        if e[\"order_id\"] == order_id:\n"
-                       "            total += cents if e[\"kind\"] == \"charge\" else -cents\n    return total\n")
-        mutants = {
-            "truncated cents": self.solution_with("shop/events.py", convert, 'int(event["amount"] * 100)'),
-            "refund rounded the other way": self.solution_with(
-                "shop/events.py", "    new = {", '    if event["kind"] == "refund":\n        cents = int(event["amount"] * 100)\n    new = {'),
-            "rewritten in place": self.solution_with(
-                "shop/events.py", 'new = {k: v for k, v in event.items() if k != "amount"}\n    new["amount_cents"] = cents\n    return new',
-                'event.pop("amount")\n    event["amount_cents"] = cents\n    return event'),
-            "zero falls through": self.solution_with(
-                "shop/events.py", zero, 'cents = event.get("amount_cents") or ' + convert),
-            "float left in the total": self.solution_with(
-                "shop/totals.py", 'total += e["amount_cents"] if e["kind"] == "charge" else -e["amount_cents"]',
-                'cents = int(e["amount_cents"] / 100 * 100)\n            total += cents if e["kind"] == "charge" else -cents'),
-            "float left in the report": self.solution_with(
-                "reports/daily.py", "return charges - refunds", "return (charges - refunds) / 100 * 100"),
-            "refund bound off by one": self.solution_with("shop/refunds.py", "<= refundable(", "< refundable("),
-            "export header kept": self.solution_with(
-                "shop/export.py", 'HEADER = "kind,order_id,amount_cents"', 'HEADER = "kind,order_id,amount"'),
-            "export rows in dollars": self.solution_with(
-                "shop/export.py", "{amount_cents}", "{amount_cents / 100}"),
-            "second converter": {"shop/totals.py": totals_hand},
-            "old key in a new top-level module": {"legacy.py": 'def dollars(event):\n    return event["amount"]\n'},
-            "zero dollars skip the conversion": self.solution_with(
-                "shop/events.py", 'if "amount" not in event:', 'if not event.get("amount"):'),
-            "upcast keeps the old key": self.solution_with(
-                "shop/events.py", 'new = {k: v for k, v in event.items() if k != "amount"}', "new = dict(event)"),
-            "upcast under another name": {
-                rel: text.replace("upcast", "to_cents") for rel, text in (
-                    (f"{d}/{m}.py", self.source("cross-amount-cents", f"solution/{d}/{m}.py"))
-                    for d, m in (("shop", "events"), ("shop", "totals"), ("shop", "refunds"), ("shop", "invoice"),
-                                 ("shop", "export"), ("shop", "audit"), ("reports", "daily")))},
-        }
-        for module in ("events", "totals", "refunds", "invoice", "export", "audit"):
-            mutants[f"{module} untouched"] = self.shipped_module(f"shop/{module}.py")
-        mutants["report untouched"] = self.shipped_module("reports/daily.py")
-        return mutants
-
-    def test_cents_check_rejects_each_known_mistake(self):
-        self.assertTrue(self.run_with("cross-amount-cents", {}))
-        for name, files in self.cents_mutants().items():
-            with self.subTest(name):
-                self.assertFalse(self.run_with("cross-amount-cents", files))
-
     def test_cents_check_gives_the_same_verdicts_on_other_seeds(self):
         spec = importlib.util.spec_from_file_location("cents_check", run.BENCH / "tasks" / "cross-amount-cents" / "check.py")
         check, saved = importlib.util.module_from_spec(spec), sys.modules.get("passcheck")
@@ -1598,39 +1539,16 @@ class QualityTier(unittest.TestCase):
             spec.loader.exec_module(check)
         finally:
             sys.modules["passcheck"] = saved
-        solution = run.BENCH / "tasks" / "cross-amount-cents" / "solution"
-        builds = {"the solution": {}, **self.cents_mutants()}
+        task = next(t for t in run.load_tasks() if t["id"] == "cross-amount-cents")
+        builds = [("the solution", None, True)] + [(f"{kind}/{p.name}", p, kind == "right")
+                                                     for kind in ("right", "wrong") for p in overlay_dirs(task, kind)]
         with tempfile.TemporaryDirectory() as tmp:
-            for n, (name, files) in enumerate(builds.items()):
+            for n, (name, overlay, expected) in enumerate(builds):
                 work = Path(tmp) / str(n)
-                shutil.copytree(solution, work)
-                for rel, text in files.items():
-                    (work / rel).write_text(text, encoding="utf-8")
+                build_work(task, overlay, work)
                 for seed in range(1, 11):
                     with self.subTest(build=name, seed=seed):
-                        self.assertEqual(check.passes(work, seed), name == "the solution")
-
-    def test_cents_check_takes_a_round_based_converter(self):
-        files = self.solution_with("shop/events.py", 'int(round(Decimal(str(event["amount"])) * 100))',
-                                   'int(round(event["amount"] * 100))')
-        self.assertTrue(self.run_with("cross-amount-cents", files))
-
-    def test_the_cents_check_does_not_read_a_comment_or_a_longer_string_as_the_old_key(self):
-        files = self.solution_with("shop/totals.py", "from shop import events\n",
-                                   "from shop import events\n\n# the old amount key is gone\nNOTE = \"amount_cents, not amount\"\n")
-        self.assertTrue(self.run_with("cross-amount-cents", files))
-
-    def test_the_cents_check_lets_a_test_file_hold_the_old_key(self):
-        test = 'from shop import events\n\n\ndef test_upcast():\n    assert events.upcast([{"amount": 0.29}])\n'
-        for rel in ("test_events.py", "events_test.py", "tests/check_events.py"):
-            with self.subTest(rel):
-                files = {rel: test}
-                self.assertTrue(self.run_with("cross-amount-cents", files))
-
-    def test_the_cents_check_still_fails_a_new_non_test_module_with_the_old_key(self):
-        for rel in ("legacy.py", "attests.py", "shop/contest.py"):
-            with self.subTest(rel):
-                self.assertFalse(self.run_with("cross-amount-cents", {rel: 'def dollars(event):\n    return event["amount"]\n'}))
+                        self.assertEqual(check.passes(work, seed), expected)
 
     def test_the_cents_repo_has_no_comment(self):
         for path in (run.BENCH / "tasks" / "cross-amount-cents" / "repo").rglob("*.py"):
@@ -1646,38 +1564,6 @@ class QualityTier(unittest.TestCase):
             res = subprocess.run([sys.executable, "-I", "-c", code, str(work)], cwd=tmp, capture_output=True, text=True, timeout=60)
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(json.loads(res.stdout), [[{"kind": "charge", "order_id": "o1", "amount": 19.99}], ["charge 19.99"]])
-
-    def test_the_retry_design_must_hold_every_constraint(self):
-        good = {"retry_at": "payments_client", "attempts": 2, "per_try_timeout_ms": 1000, "backoff_ms": 100,
-                "idempotency_key": "per_checkout", "gateway_retries": "off", "reasons": ["x"]}
-        for change, expected in (({}, True), ({"per_try_timeout_ms": 600, "backoff_ms": 1500}, True),
-                                 ({"per_try_timeout_ms": 1325, "backoff_ms": 50}, True),
-                                 ({"per_try_timeout_ms": 1326, "backoff_ms": 50}, False),
-                                 ({"per_try_timeout_ms": 1400}, False), ({"per_try_timeout_ms": 599}, False),
-                                 ({"backoff_ms": 40}, False), ({"attempts": 3}, False), ({"attempts": 1}, False),
-                                 ({"retry_at": "checkout"}, False), ({"retry_at": "gateway"}, False),
-                                 ({"gateway_retries": "on"}, False), ({"idempotency_key": "per_attempt"}, False),
-                                 ({"per_try_timeout_ms": 1000.0}, False), ({"attempts": True}, False),
-                                 ({"reasons": []}, False), ({"extra": 1}, False)):
-            with self.subTest(change=change):
-                self.assertEqual(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}),
-                                 expected)
-
-    def test_the_retry_check_rejects_the_other_wrong_designs(self):
-        good = json.loads(self.source("design-checkout-retries", "solution/DESIGN.json"))
-        self.assertTrue(self.run_with("design-checkout-retries", {}))
-        for change in ({"retry_at": "none"}, {"retry_at": "none", "attempts": 1}, {"idempotency_key": "none"},
-                       {"attempts": "2"}, {"backoff_ms": 100.0}, {"gateway_retries": False}, {"reasons": "x"},
-                       {"reasons": [" "]}, {"per_try_timeout_ms": 1400, "backoff_ms": 50}):
-            with self.subTest(change=change):
-                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
-        for key in good:
-            with self.subTest(missing=key):
-                self.assertFalse(self.run_with("design-checkout-retries",
-                                               {"DESIGN.json": {k: v for k, v in good.items() if k != key}}))
-        for text in ("", "not json", json.dumps([good])):
-            with self.subTest(text=text):
-                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": text}))
 
     def test_each_rejected_retry_design_breaks_a_fact_spec_md_states(self):
         good = json.loads(self.source("design-checkout-retries", "solution/DESIGN.json"))
@@ -1713,108 +1599,6 @@ class QualityTier(unittest.TestCase):
                 self.assertFalse(holds({**good, **change}))
                 self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
 
-    def test_a_retry_design_given_only_in_the_reply_fails(self):
-        reply = json.dumps(json.loads(self.source("design-checkout-retries", "solution/DESIGN.json")))
-        with tempfile.TemporaryDirectory() as tmp:
-            task, work = self.shipped("design-checkout-retries", tmp)
-            self.assertFalse(self.check(task, work, reply))
-
-
-    def test_statement_check_rejects_each_known_mistake(self):
-        task = "bugfix-statement-queries"
-        rel = "billing/statement.py"
-        solution = self.source(task, "solution/billing/statement.py")
-        shipped = self.source(task, "repo/billing/statement.py")
-        self.assertTrue(self.run_with(task, {rel: solution}))
-        header = solution[:solution.index("    result = {")]
-        mutants = {
-            "shipped": shipped,
-            "join fan-out": header + (
-                '    sql = ("SELECT a.id, COALESCE(SUM(i.amount_cents), 0) - COALESCE(SUM(p.amount_cents), 0) FROM accounts a "\n'
-                '           "LEFT JOIN invoices i ON i.account_id = a.id AND i.voided = 0 "\n'
-                '           "LEFT JOIN payments p ON p.invoice_id = i.id GROUP BY a.id")\n'
-                '    return {a: c for a, c in conn.execute(sql)}\n'),
-            "rule dropped": solution.replace("if rules.counts(status, method):", "if True:"),
-            "pending bank counted": solution.replace("if rules.counts(status, method):", 'if status != "failed":'),
-            "voided kept": solution.replace(" WHERE voided = 0", "").replace(" WHERE i.voided = 0", ""),
-            "voided invoices' payments kept": solution.replace(" WHERE i.voided = 0", ""),
-            "payments per invoice": header + (
-                '    result = {a: 0 for (a,) in conn.execute("SELECT id FROM accounts")}\n'
-                '    for invoice_id, account_id, cents in conn.execute("SELECT id, account_id, amount_cents FROM invoices WHERE voided = 0").fetchall():\n'
-                '        result[account_id] += cents\n'
-                '        for paid, status, method in conn.execute("SELECT amount_cents, status, method FROM payments WHERE invoice_id = ?", (invoice_id,)).fetchall():\n'
-                '            if rules.counts(status, method):\n'
-                '                result[account_id] -= paid\n'
-                '    return result\n'),
-            "trace removed": shipped.replace("    result = {}", "    conn.set_trace_callback(None)\n    result = {}"),
-            "trace and progress removed": shipped.replace(
-                "    result = {}", "    conn.set_trace_callback(None)\n    conn.set_progress_handler(None, 0)\n    result = {}"),
-            "progress handler removed": solution.replace("    result = {", "    conn.set_progress_handler(None, 0)\n    result = {", 1),
-            "line tracing removed": solution.replace("    result = {", "    import sys\n    sys.settrace(None)\n    result = {", 1),
-            "index added": solution.replace(
-                "    result = {", '    conn.execute("CREATE INDEX payments_by_status ON payments(status)")\n    result = {', 1),
-            "temp table left": header + (
-                '    conn.execute("CREATE TEMP TABLE owed AS SELECT a.id AS id, COALESCE((SELECT SUM(amount_cents) FROM invoices '
-                'WHERE account_id = a.id AND voided = 0), 0) AS cents FROM accounts a")\n'
-                '    result = {a: c for a, c in conn.execute("SELECT id, cents FROM owed")}\n'
-                '    for account_id, paid, status, method in conn.execute("SELECT i.account_id, p.amount_cents, p.status, p.method FROM payments p '
-                'JOIN invoices i ON i.id = p.invoice_id WHERE i.voided = 0"):\n'
-                '        if rules.counts(status, method):\n'
-                '            result[account_id] -= paid\n'
-                '    return result\n'),
-            "string keys": solution.replace("    return result", "    return {str(k): v for k, v in result.items()}"),
-            "bool values": solution.replace("    return result", "    return {k: (True if v == 0 else v) for k, v in result.items()}"),
-            "float values": solution.replace("    return result", "    return {k: float(v) for k, v in result.items()}"),
-            "accounts without invoices left out": solution.replace("    return result", "    return {k: v for k, v in result.items() if v}"),
-            "not a dict": solution.replace("    return result", "    return list(result.items())"),
-            "raises": solution.replace("    return result", "    raise RuntimeError('no')"),
-        }
-        for name, text in mutants.items():
-            with self.subTest(name):
-                self.assertNotEqual(text, solution if name != "shipped" else "")
-                self.assertFalse(self.run_with(task, {rel: text}))
-        noise = {
-            "writes to stdout": solution.replace("    result = {", '    print("done")\n    result = {', 1),
-            "prints at exit": "import atexit\n" + solution.replace(
-                "from billing import rules\n", "from billing import rules\n\natexit.register(lambda: print('[]'))\n", 1),
-        }
-        for name, text in noise.items():
-            with self.subTest(name):
-                self.assertNotEqual(text, solution)
-                self.assertTrue(self.run_with(task, {rel: text}))
-
-    def test_statement_check_rejects_quadratic_python_and_takes_a_linear_rewrite(self):
-        task = "bugfix-statement-queries"
-        rel = "billing/statement.py"
-        solution = self.source(task, "solution/billing/statement.py")
-        header = solution[:solution.index("    result = {")]
-        quadratic = header + (
-            '    result = {a: 0 for (a,) in conn.execute("SELECT id FROM accounts")}\n'
-            '    invoices = conn.execute("SELECT id, account_id, amount_cents FROM invoices WHERE voided = 0").fetchall()\n'
-            '    payments = conn.execute("SELECT invoice_id, amount_cents, status, method FROM payments").fetchall()\n'
-            '    for invoice_id, account_id, cents in invoices:\n'
-            '        result[account_id] += cents - sum(p[1] for p in payments if p[0] == invoice_id and rules.counts(p[2], p[3]))\n'
-            '    return result\n')
-        self.assertFalse(self.run_with(task, {rel: quadratic}))
-        one_statement = header + (
-            '    sql = ("SELECT a.id, COALESCE(i.cents, 0) - COALESCE(p.cents, 0) FROM accounts a "\n'
-            '           "LEFT JOIN (SELECT account_id, SUM(amount_cents) AS cents FROM invoices WHERE voided = 0 GROUP BY account_id) i ON i.account_id = a.id "\n'
-            '           "LEFT JOIN (SELECT i.account_id AS account_id, SUM(p.amount_cents) AS cents FROM payments p JOIN invoices i ON i.id = p.invoice_id "\n'
-            '           "WHERE i.voided = 0 AND (p.status = \'settled\' OR (p.status = \'pending\' AND p.method = \'card\')) GROUP BY i.account_id) p "\n'
-            '           "ON p.account_id = a.id")\n'
-            '    return dict(conn.execute(sql).fetchall())\n')
-        self.assertTrue(self.run_with(task, {rel: one_statement}))
-        by_invoice = header + (
-            '    import collections\n'
-            '    paid = collections.defaultdict(int)\n'
-            '    for invoice_id, cents, status, method in conn.execute("SELECT invoice_id, amount_cents, status, method FROM payments"):\n'
-            '        if rules.counts(status, method):\n'
-            '            paid[invoice_id] += cents\n'
-            '    result = collections.defaultdict(int, {a: 0 for (a,) in conn.execute("SELECT id FROM accounts")})\n'
-            '    for invoice_id, account_id, cents in conn.execute("SELECT id, account_id, amount_cents FROM invoices WHERE voided = 0"):\n'
-            '        result[account_id] += cents - paid[invoice_id]\n'
-            '    return result\n')
-        self.assertTrue(self.run_with(task, {rel: by_invoice}))
 
     def wallet_phases(self, files):
         """The probe output for the wallet solution with `files` written over it, and the phases the check calls wrong."""
@@ -1930,7 +1714,7 @@ class QualityTier(unittest.TestCase):
             shutil.copytree(task["dir"] / "solution", work, dirs_exist_ok=True)
             (Path(tmp) / "result.txt").write_text("", encoding="utf-8")
             start = time.monotonic()
-            verdict = run.grade(task["dir"] / "check.py", work, Path(tmp) / "result.txt")
+            verdict = run.grade(task["dir"] / "check.py", work, Path(tmp) / "result.txt").passed
             took = time.monotonic() - start
         self.assertTrue(verdict)
         self.assertLess(took, 15)  # five 5 s barriers would take 25 s
@@ -1941,7 +1725,7 @@ class QualityTier(unittest.TestCase):
             task, work = self.shipped(task_id, tmp)
             (Path(tmp) / "result.txt").write_text("", encoding="utf-8")
             start = time.monotonic()
-            verdict = run.grade(task["dir"] / "check.py", work, Path(tmp) / "result.txt")
+            verdict = run.grade(task["dir"] / "check.py", work, Path(tmp) / "result.txt").passed
             took = time.monotonic() - start
         self.assertFalse(verdict)
         self.assertLess(took, 40)

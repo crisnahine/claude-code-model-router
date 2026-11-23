@@ -1,6 +1,9 @@
 {
   "class": "lookup",
-  "revision": 1,
+  "revision": 2,
+  "revisions": {
+    "2": "the check rules read_timeout out where it is named, and no longer fails an answer that says what read_timeout reads"
+  },
   "brief": "In this repository, which function reads the retry limit from the environment, and in which file is it defined? Answer with the file path and the function name.",
   "reference_answer": "app/settings.py, read_retry_limit",
   "wrong_answer": "app/client.py, fetch"
