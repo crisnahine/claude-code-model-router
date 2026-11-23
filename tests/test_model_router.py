@@ -4244,6 +4244,21 @@ class SlashSkills(Sandbox):
                 got = intake.from_prompt(typed, self.project)
                 self.assertEqual((got.person, got.level), (True, level))
 
+    def test_a_typed_plugin_skill_is_read_from_its_plugin_root(self):
+        self.session_on("claude-haiku-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": "/model-router:ship 1234", "cwd": str(self.project)})
+        self.assertEqual(request.load("s1").level, "complex")  # ship's own body, which its arguments only name
+        other = self.home / "plugins" / "cache" / "acme"
+        (other / "skills" / "go").mkdir(parents=True)
+        (other / "skills" / "go" / "SKILL.md").write_text(self.HARD_BODY.split("\n\n")[1] + " $ARGUMENTS\n")
+        (other / "skills" / "dir" / "SKILL.md").mkdir(parents=True)  # not a regular file
+        (self.home / "plugins" / "installed_plugins.json").write_text(
+            json.dumps({"plugins": {"acme@market": [{"installPath": str(other)}]}}))
+        for typed, level in (("/acme:go 482", "complex"), ("/acme:dir 482", "lookup"), ("/acme:gone 482", "lookup"),
+                             ("/other:go 482", "lookup")):
+            with self.subTest(typed=typed):
+                self.assertEqual(intake.from_prompt(typed, self.project).level, level)
+
     def test_an_argument_that_only_names_the_target_leaves_the_task_to_the_body(self):
         self.session_on("claude-opus-5-5")
         raw = ("---\nname: security-review\nargument-hint: <pr-number>\n---\nReview pull request #$ARGUMENTS for "

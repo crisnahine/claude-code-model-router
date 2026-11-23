@@ -12,6 +12,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 
 ### Changed
 
+- A plugin's skill typed as `/plugin:skill args` is profiled by its own body as well, which the settings hook reads from the plugin's install folder, so `/model-router:ship 1234` gets its note and floor from `UserPromptSubmit`.
 - `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` is named in the session-start note and in `/model-router:models` (`workflow_model` in `--json`) as a pin on every workflow agent. Routing doesn't change for it, since the docs don't say whether it or a mod's model wins.
 - Every effort the router sets, for an agent or a main-loop turn, is held to `maxEffortLevel` from your settings, managed ones included, with a `modelSettings` entry replacing its source's cap for that model. The ledger reason and `/model-router:route` say when the cap held it. Claude Code applies the cap itself, so this changes what is reported, and what a redo asks for, to what runs.
 - `/model-router:route` and the `explain` command ask the same procedure a real spawn does, so they also report an agent's rule, `route: false`, the force setting, a redo and the request's floor, and they write nothing. Without `--agent` the text also reads as your own request, on its own line.
