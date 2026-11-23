@@ -160,6 +160,15 @@ class Analysis(unittest.TestCase):
         self.assertEqual(self.quality(rows("plugin", "lookup", [0.1] * n, [True] * n) + short, self.FORCED)["status"],
                          "PARTIAL")
 
+    def test_a_cells_draws_do_not_depend_on_the_other_cells(self):
+        n = analyze.MIN_RUNS
+        plugin = rows("plugin", "lookup", [0.1, 0.2, 0.3, 0.4, 0.5, 0.9, 0.15, 0.35, 0.6, 0.7], [True] * n)
+        alone = self.quality(plugin, {})["configs"]["plugin"]
+        beside = self.quality(plugin + rows("defaults", "lookup", [0.2, 0.9] * (n // 2), [True] * n), {})["configs"]["plugin"]
+        self.assertEqual(alone["cps_ci"], beside["cps_ci"])
+        elsewhere = analyze.summarize(plugin, routers=frozenset({"plugin"}), draws=200, seed=1, session="sonnet")
+        self.assertNotEqual(elsewhere[0]["configs"]["plugin"]["cps_ci"], alone["cps_ci"])
+
     def test_a_task_splits_the_models_when_the_strong_one_solves_most_and_the_weak_one_few(self):
         def task_rows(task, strong, weak):
             return [{"task": task, "config": c, "passed": p} for c, ps in (("opus", strong), ("sonnet", weak)) for p in ps]

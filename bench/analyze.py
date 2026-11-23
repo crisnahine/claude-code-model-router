@@ -187,14 +187,15 @@ def _quality(cells: dict, runs: list[dict], router: str, routers: frozenset[str]
 
 
 def summarize(rows: list[dict], *, routers: frozenset[str], router: str = "plugin", draws: int = 2000,
-              seed: int = 0, forced: dict | None = None) -> list[dict]:
-    rng = random.Random(seed)
+              seed: int = 0, session: str = "", forced: dict | None = None) -> list[dict]:
     order = {name: i for i, name in enumerate(run.CLASSES)}
     out = []
     for cls in sorted({r["class"] for r in rows}, key=lambda c: (order.get(c, len(order)), c)):
         runs = [r for r in rows if r["class"] == cls]
         configs = sorted({r["config"] for r in runs}, key=lambda c: (c != router, c))
-        cells = {c: _cell([r for r in runs if r["config"] == c], rng, draws) for c in configs}
+        # One generator per cell, so a cell's draws never depend on which other cells are in the page.
+        cells = {c: _cell([r for r in runs if r["config"] == c], random.Random(f"{seed}/{session}/{cls}/{c}"), draws)
+                 for c in configs}
         base = [c for c in configs if c != router and c not in routers]
         gap = _coverage_gap(runs, router, base) if router in cells else None
         verdict = _verdict(cells, router, routers, gap)
@@ -244,7 +245,7 @@ def sessions(results: Results, router: str | None = None) -> list[tuple[str, str
     for model, group in sorted(groups.items()):
         ran = {r["config"] for r in group}
         chosen = router or next((c["id"] for c in results.configs if c.get("plugin") and c["id"] in ran), "plugin")
-        out.append((model, chosen, summarize(group, routers=results.routers, router=chosen,
+        out.append((model, chosen, summarize(group, routers=results.routers, router=chosen, session=model,
                                              forced=results.forced), group))
     return out
 
@@ -555,7 +556,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "- Cost per solved task is a configuration's total spend on a task class divided by the tasks it solved, "
         "so failed runs count against it.",
         "- Pass-rate intervals are exact 95% binomial (Clopper-Pearson) intervals. Cost intervals are 95% "
-        "percentile bootstrap intervals over runs (2,000 resamples, seed 0).",
+        "percentile bootstrap intervals over runs (2,000 resamples), and each cell resamples from a generator "
+        "seeded by its session model, class and configuration, so a cell's interval doesn't change when another "
+        "configuration is added.",
         "- Quality: the router's pass rate is tested against every baseline with an exact one-sided test (5%). A "
         "class is saturated when the weakest forced baseline (every subagent on the weakest model) can't be told "
         "from the strongest by the same test; then the tasks can't show a quality difference and no quality claim "
