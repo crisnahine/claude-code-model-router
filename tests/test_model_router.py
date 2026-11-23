@@ -5118,6 +5118,42 @@ class SpawnPaths(Sandbox):
             self.assertEqual((again["escalated_from"], again["level"]), ("lookup", "standard") if redo else (None, "lookup"),
                              (path, model))
 
+    def locks_taken(self, act) -> list[str]:
+        """The state files `act` took a lock on, in order."""
+        taken, real = [], store.locked
+
+        @contextlib.contextmanager
+        def counting(path):
+            taken.append(path.name)
+            with real(path):
+                yield
+
+        with mock.patch.object(store, "locked", counting):
+            act()
+        return taken
+
+    def spawn_again(self, path: str, session: str, brief: str) -> None:
+        """One more spawn in a session `spawn_on` already set up."""
+        if path == "fallback":
+            hooks.pre_agent(self.call("general-purpose", brief, session_id=session))
+        else:
+            hooks.mod_spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                             "kind": "subagent", "tool_input": {"subagent_type": "general-purpose", "prompt": brief}})
+
+    def test_a_redo_takes_one_lock_on_the_learned_file_for_its_count_and_its_vote(self):
+        for path in ("fallback", "mod"):
+            with self.subTest(path=path):
+                session = f"redo-{path}"
+                self.spawn_on(path, session, "general-purpose", LOOKUP)
+                self.done("general-purpose", LOOKUP, "claude-haiku-5-5", session_id=session)
+                self.advance(fallback.REFUSED_AFTER + 1)
+                before = learn.stats()
+                taken = self.locks_taken(lambda: self.spawn_again(path, session, LOOKUP))
+                self.assertEqual(taken.count("learned.json"), 1)
+                after = learn.stats()
+                self.assertEqual(after["standard"]["calls"], before.get("standard", {}).get("calls", 0) + 1)  # its count
+                self.assertEqual(after["lookup"]["votes"], before["lookup"].get("votes", 0) + 1)  # its vote
+
     def test_a_result_leaves_the_same_records_on_both_paths(self):
         for number, path in enumerate(("fallback", "mod")):
             self.spawn_on(path, f"s{number}", "general-purpose", LOOKUP)

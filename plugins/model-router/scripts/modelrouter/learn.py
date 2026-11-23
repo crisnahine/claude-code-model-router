@@ -40,28 +40,36 @@ def _raise(info: object) -> int:
         return 0
 
 
-def _update(level: str, calls: int = 0, up: int = 0, down: int = 0) -> None:
-    found = Level.parse(level)
-    if found is None:
-        return
-    level = found.value  # a plain str key: the state file sorts its keys
+def _tally(data: dict, level: str, calls: int = 0, up: int = 0, down: int = 0) -> None:
+    info = data.get(level) if isinstance(data.get(level), dict) else {}
+    for field, amount in (("calls", calls), ("votes", up), ("relax", down)):
+        info[field] = max(0, int(info.get(field) or 0) + amount)
+    raised = int(info.get("bump") or 0)
+    enough = max(VOTES_NEEDED, SHARE_NEEDED * info["calls"])
+    if raised < MAX_BUMP and info["votes"] >= enough:
+        info.update(bump=raised + 1, calls=0, votes=0, relax=0)
+    elif raised > 0 and info["relax"] >= enough:
+        info.update(bump=raised - 1, calls=0, votes=0, relax=0)
+    data[level] = info
+
+
+def _update(changes: list[tuple[object, dict[str, int]]]) -> None:
+    """Apply every (level, {"calls" | "up" | "down": amount}) in one locked write."""
+    found = []
+    for level, amounts in changes:
+        parsed = Level.parse(level)
+        if parsed is not None:
+            found.append((parsed.value, amounts))  # a plain str key: the state file sorts its keys
 
     def change(data: dict) -> None:
-        info = data.get(level) if isinstance(data.get(level), dict) else {}
-        for field, amount in (("calls", calls), ("votes", up), ("relax", down)):
-            info[field] = max(0, int(info.get(field) or 0) + amount)
-        raised = int(info.get("bump") or 0)
-        enough = max(VOTES_NEEDED, SHARE_NEEDED * info["calls"])
-        if raised < MAX_BUMP and info["votes"] >= enough:
-            info.update(bump=raised + 1, calls=0, votes=0, relax=0)
-        elif raised > 0 and info["relax"] >= enough:
-            info.update(bump=raised - 1, calls=0, votes=0, relax=0)
-        data[level] = info
+        for level, amounts in found:
+            _tally(data, level, **amounts)
 
-    try:
-        store.update_dict(_path(), change)
-    except OSError:
-        pass
+    if found:
+        try:
+            store.update_dict(_path(), change)
+        except OSError:
+            pass
 
 
 SUBAGENT = "subagent"
@@ -90,27 +98,26 @@ def spawned(reg: Registry, decision: Mapping, kind: str, earlier: Route | None, 
         return None
     source = _source(decision)
     counts = counted(decision, kind)
-    if counts:
-        _update(counts, calls=1)
+    changes: list[tuple[object, dict[str, int]]] = [(counts, {"calls": 1})] if counts else []
     if source == "router" and decision["escalated_from"]:
-        _update(decision["escalated_from"], up=1)
-    if source != "caller" or user_named:
-        return counts
-    pick, runs_on = decision["pick"], decision["model"] or decision["was"]
-    # The same call routed weaker earlier in this request counts double: it was redone.
-    if earlier and earlier.source == "router" and reg.stronger(runs_on, earlier.model):
-        _update(level, up=2)
-    elif reg.stronger(runs_on, pick):
-        _update(level, up=1)
-    elif reg.stronger(pick, runs_on) and (raises() if raised is None else raised).get(level, 0) > 0:
-        _update(level, down=1)
+        changes.append((decision["escalated_from"], {"up": 1}))
+    if source == "caller" and not user_named:
+        pick, runs_on = decision["pick"], decision["model"] or decision["was"]
+        # The same call routed weaker earlier in this request counts double: it was redone.
+        if earlier and earlier.source == "router" and reg.stronger(runs_on, earlier.model):
+            changes.append((level, {"up": 2}))
+        elif reg.stronger(runs_on, pick):
+            changes.append((level, {"up": 1}))
+        elif reg.stronger(pick, runs_on) and (raises() if raised is None else raised).get(level, 0) > 0:
+            changes.append((level, {"down": 1}))
+    _update(changes)
     return counts
 
 
 def swapped(route: Route | None) -> None:
     """A run that swapped models mid-run is no result for its level: take back the count it made."""
     if route and route.counted:
-        _update(route.counted, calls=-1)
+        _update([(route.counted, {"calls": -1})])
 
 
 def reset() -> str:
