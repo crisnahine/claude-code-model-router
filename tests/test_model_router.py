@@ -160,6 +160,11 @@ class Sandbox(unittest.TestCase):
 class Shipped(unittest.TestCase):
     """What ships must be consistent with itself."""
 
+    def test_the_boolean_option_defaults_in_plugin_json_match_settings(self):
+        fields = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["userConfig"]
+        for name in ("main_effort", "update_check", "verify_gate", "strong_agent_gate"):
+            self.assertEqual(fields[name]["default"], getattr(settings.Settings(), name), name)
+
     def test_the_claude_code_floor_is_the_version_the_mod_api_needs(self):
         # $.process.hookEnv() needs v2.1.326: https://code.claude.com/docs/en/plugins/mods/reference.md
         manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
@@ -1054,13 +1059,13 @@ class Options(Sandbox):
         os.environ.update(ANTHROPIC_API_KEY="sk-test", ANTHROPIC_BASE_URL="https://gateway.example")
         s = settings.resolve(cfg.load_config())
         self.assertEqual((s.subagent_model, s.force, s.cloud, s.cap, s.main_effort, s.verify_gate),
-                         ("opus", True, "vertex", None, False, False))
+                         ("opus", True, "vertex", None, False, True))
         self.assertEqual((s.api_key, s.base_url), ("sk-test", True))
         self.assertNotIn("sk-test", repr(s))
 
     def test_skill_commands_read_options_recorded_at_session_start(self):
         values = {"max_tier": "haiku", "priority": "quality", "agent_pins": "override", "routing_mode": "advise",
-                  "main_effort": "false", "update_check": "off", "verify_gate": "1",
+                  "main_effort": "false", "update_check": "off", "verify_gate": "false",
                   "strong_agent_gate": "false"}
         self.options(**values)
         hooks.session_start({"session_id": "s1"})
@@ -1070,7 +1075,7 @@ class Options(Sandbox):
         self.assertEqual(settings.resolve(config), settings.Settings())
         self.assertEqual(settings.resolve(config, recorded=True), settings.Settings(
             mode="advise", routing_mode="advise", priority="quality", cap="haiku", pins="override",
-            main_effort=False, update_check=False, verify_gate=True, strong_agent_gate=False))
+            main_effort=False, update_check=False, verify_gate=False, strong_agent_gate=False))
         self.assertIn("Cap: **haiku**", self.out("policy"))
 
     def test_policy_shows_the_routing_mode_the_user_set(self):
@@ -2560,7 +2565,7 @@ class Feedback(Sandbox):
         self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "haiku")
 
     def test_the_prompt_note_and_the_stop_gate_follow_a_raised_level(self):
-        self.options(verify_gate="true")  # off by default
+        self.options(verify_gate="true")
         self.session_on("claude-sonnet-5-5")
         for _ in range(learn.VOTES_NEEDED):
             learn.decided(cfg.load_config(), source="caller", level="complex", pick="sonnet", runs_on="opus")
@@ -2761,8 +2766,7 @@ class Hooks(Sandbox):
 
 
 class GatesDefault(Sandbox):
-    """verify_gate (the test-run check) is off by default; strong_agent_gate (the stronger-agent
-    check) is on."""
+    """verify_gate (the test-run check) and strong_agent_gate (the stronger-agent check) are on."""
 
     def hard_on_weak_session(self) -> None:
         self.session_on("claude-haiku-5-5")
@@ -2774,7 +2778,7 @@ class GatesDefault(Sandbox):
 
     def test_the_defaults(self):
         s = settings.resolve()
-        self.assertEqual((s.verify_gate, s.strong_agent_gate), (False, True))
+        self.assertEqual((s.verify_gate, s.strong_agent_gate), (True, True))
 
     def test_the_stronger_agent_check_runs_by_default_and_can_be_turned_off(self):
         self.hard_on_weak_session()
@@ -2783,11 +2787,18 @@ class GatesDefault(Sandbox):
         self.hard_on_weak_session()
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
 
-    def test_the_test_run_check_waits_for_verify_gate(self):
+    def test_the_test_run_check_runs_by_default_and_can_be_turned_off(self):
         self.edited()
-        self.assertIsNone(hooks.stop({"session_id": "s1"}))
-        self.options(verify_gate="true")
         self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
+        self.options(verify_gate="false")
+        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+
+    def test_every_falsy_form_turns_the_test_run_check_off(self):
+        for form in ("false", "False", "0", "no", "off"):
+            with self.subTest(form=form):
+                self.options(verify_gate=form)
+                self.edited()
+                self.assertIsNone(hooks.stop({"session_id": "s1"}))
 
     def test_turning_one_check_off_leaves_the_other(self):
         self.options(verify_gate="true", strong_agent_gate="false")
@@ -2825,7 +2836,7 @@ class GatesDefault(Sandbox):
 class Gates(Sandbox):
     def setUp(self):
         super().setUp()
-        self.options(verify_gate="true")  # off by default
+        self.options(verify_gate="true")
 
     def transcript(self, command: str, stamp: str = "2099-01-01T00:00:00Z") -> str:
         path = Path(self.tmp.name) / "t.jsonl"
@@ -2940,7 +2951,7 @@ class SubagentChecks(Sandbox):
 
     def setUp(self):
         super().setUp()
-        self.options(verify_gate="true")  # off by default
+        self.options(verify_gate="true")
 
     def transcript(self, name: str, command: str) -> str:
         path = Path(self.tmp.name) / name

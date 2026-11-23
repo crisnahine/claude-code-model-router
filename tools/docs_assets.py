@@ -841,11 +841,11 @@ def diagram_stop_checks() -> str:
           "and no agent of the needed strength started."],
          ["Blocks the stop once and asks for a stronger", "agent's check: the architect, or the deep-solver",
           "for a frontier request, started no lower than", "the request's level."], 1.0),
-        (478, "verify_gate", "off by default", "faint", "mut",
+        (478, "verify_gate", "on by default", "r1", "tag",
          ["code in the project changed, and no test, lint,", "type-check or build ran after the last edit,",
           "and no verifier or reviewer started."],
-         ["Asks once for a test run (the verifier)", "before the turn ends. Turn it on in /config", "under the plugin."],
-         0.62),
+         ["Asks once for a test run (the verifier)", "before the turn ends. It is the failure signal", "the router reruns on. Turn it off in /config."],
+         1.0),
     ]
     for x, name, state, cls, tcls, when, then, op in lanes:
         out.append(f'<g opacity="{op}">')
@@ -873,7 +873,7 @@ def diagram_stop_checks() -> str:
     label = ("When Claude is about to end a turn, the Stop hook runs two checks. strong_agent_gate, on by default, "
              "blocks the stop once when a complex or harder request was answered by a weaker session model with no "
              "agent of the needed strength started, and asks for a stronger agent's check, started no lower than "
-             "the request's level. verify_gate, off by default, asks once for a test run when code changed and "
+             "the request's level. verify_gate, on by default, asks once for a test run when code changed and "
              "nothing checked it.")
     return svg(w, h, title, label, "".join(out), css)
 

@@ -91,8 +91,8 @@
     "verify_gate": {
       "type": "boolean",
       "title": "Test run before finishing",
-      "description": "Off by default, since it adds turns and often an agent. When on, Claude is asked once, before it finishes a turn, to run the verifier when code in the project changed and no test, lint or build ran afterwards. Turn it on if you want a check before every finish.",
-      "default": false
+      "description": "On by default. Claude is asked once, before it finishes a turn, to run the verifier when code in the project changed and no test, lint or build ran afterwards. This check is the failure signal that lets the router start cheap and re-run what fails. Turn it off to skip the ask.",
+      "default": true
     },
     "strong_agent_gate": {
       "type": "boolean",

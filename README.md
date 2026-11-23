@@ -131,7 +131,7 @@ Options, in `/config` under the plugin:
 | `agent_pins` | `respect` | `respect` keeps the model an agent names for itself. `override` routes those agents by task too |
 | `main_effort` | off | When on, raises the main conversation's effort for one turn on a complex or harder request, and never lowers it. Leave it off in a HIPAA organization, or if Claude Desktop reaches Claude through a Claude apps gateway. It turns itself off where an effort change would re-read the context uncached ([where](docs/GUIDE.md#configuration)) |
 | `update_check` | on | The daily check of the changelog, docs index, model list and deprecations |
-| `verify_gate` | off | Asks for a test run before a turn ends when code changed and nothing checked it |
+| `verify_gate` | on | Asks for a test run before a turn ends when code changed and nothing checked it. `false` turns it off |
 | `strong_agent_gate` | on | Asks for a stronger agent's check before a turn ends when a weak session model answered a hard request alone |
 
 Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours and applies everywhere. `.claude/model-router.json` belongs to a project. Both have the same shape:

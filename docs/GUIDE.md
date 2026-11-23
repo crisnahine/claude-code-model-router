@@ -38,7 +38,7 @@ Options, in `/config` under the plugin:
 | `agent_pins` | `respect` | `respect` keeps the model an agent names for itself. `override` routes those agents by task too |
 | `main_effort` | off | When on, raises the main conversation's effort for a complex or harder request, for that turn. Off where an effort change would re-read the context uncached: Bedrock (including its Mantle endpoint), Vertex, Foundry, `ANTHROPIC_BASE_URL`, a Claude apps gateway or another third-party provider, `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`, prompt caching turned off (`DISABLE_PROMPT_CACHING` or a per-model variant), and models other than Fable 5.1+, Opus 5.5, Sonnet 5.5 and Haiku 5.5 (the list is `main.effort_keeps_cache` in `config/models.json`). Leave it off in a HIPAA organization, which the router doesn't detect, or if Claude Desktop reaches Claude through a Claude apps gateway, which it can't tell from a subscription there |
 | `update_check` | on | The daily check of the changelog, docs index, model list and deprecations |
-| `verify_gate` | off | Asks for a test run before a turn ends when code changed and nothing checked it. It adds turns and often an agent, so it's off unless you want a check before every finish |
+| `verify_gate` | on | Asks for a test run before a turn ends when code changed and nothing checked it. It is the failure signal the router needs to start cheap and rerun what fails ([cost and intelligence](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence)), at the price of a turn and sometimes an agent. `false` turns it off |
 | `strong_agent_gate` | on | Asks for a stronger agent's check before a turn ends when a weak session model answered a hard request alone. It rarely fires on a strong session model |
 
 Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours and applies everywhere. `.claude/model-router.json` belongs to a project. Both have the same shape:
@@ -77,13 +77,13 @@ Under steps 1 and 5 your environment has decided, so the model is left as it is:
 
 ## The checks before a turn ends
 
-![The checks before a turn ends. strong_agent_gate, on by default, blocks the stop once when a complex or harder request was answered by a weaker session model with no agent of the needed strength started, and asks for a stronger agent's check. verify_gate, off by default, asks once for a test run when code changed and nothing checked it.](assets/stop-checks.svg)
+![The checks before a turn ends. strong_agent_gate, on by default, blocks the stop once when a complex or harder request was answered by a weaker session model with no agent of the needed strength started, and asks for a stronger agent's check. verify_gate, on by default, asks once for a test run when code changed and nothing checked it.](assets/stop-checks.svg)
 
 Before Claude ends a turn, the `Stop` hook runs two checks. Each asks once, then lets the turn end.
 
 With `strong_agent_gate` on, its default, a complex or harder request that a weaker session model answered alone, with no agent of the needed strength started, gets one blocked stop and a request for a stronger agent's check: the architect, or the deep-solver for a frontier request. That agent starts no lower than the request's level, so a short hand-off brief can't route it lower, and a redo of it still climbs.
 
-With `verify_gate` on (off by default), Claude is asked once for a test run when code in the project changed and no test, lint, type-check or build ran after the last edit, and no verifier or reviewer was started. A test run inside a subagent counts.
+With `verify_gate` on (the default; `false` turns it off), Claude is asked once for a test run when code in the project changed and no test, lint, type-check or build ran after the last edit, and no verifier or reviewer was started. A test run inside a subagent counts.
 
 ## What it can't do
 
