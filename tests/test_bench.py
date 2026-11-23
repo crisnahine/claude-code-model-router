@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -663,7 +664,8 @@ class SuiteCoverage(unittest.TestCase):
 
     def test_a_security_finding_given_only_in_the_reply_fails(self):
         for task_id, reply in (("security-sql-injection", "db/users.py:6 builds the SQL with an f-string."),
-                               ("security-path-traversal", "files/server.py:8 joins the name unresolved.")):
+                               ("security-path-traversal", "files/server.py:8 joins the name unresolved."),
+                               ("security-admin-route", "gateway/router.py decodes the path twice.")):
             with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
                 task, work = self.shipped(task_id, tmp)
                 self.assertFalse(self.check(task, work, reply))
@@ -1319,7 +1321,8 @@ class QualityTier(unittest.TestCase):
 
     def test_the_quality_tier_has_one_task_in_each_of_six_classes(self):
         want = {"impl-merge-customers": "implementation", "bugfix-statement-queries": "bugfix",
-                "rootcause-wallet-race": "root-cause"}
+                "security-admin-route": "security-review", "rootcause-wallet-race": "root-cause",
+                "cross-amount-cents": "cross-module", "design-checkout-retries": "design"}
         tasks = {t["id"]: t for t in run.load_tasks()}
         self.assertEqual({i: tasks[i]["class"] for i in want}, want)
         self.assertTrue(all(tasks[i]["revision"] == 1 for i in want))
@@ -1422,6 +1425,231 @@ class QualityTier(unittest.TestCase):
             '        conn.execute("DROP TABLE old_customers")\n'
             '        conn.execute("PRAGMA legacy_alter_table = OFF")\n'))
         self.assertTrue(self.run_with("impl-merge-customers", {rel: legacy_rename}))
+
+    def line_of(self, rel, text, nth=1):
+        lines = self.source("security-admin-route", f"repo/{rel}").splitlines()
+        return [n for n, line in enumerate(lines, 1) if text in line][nth - 1]
+
+    def test_the_route_finding_names_the_second_decode_or_the_guard_and_no_decoy(self):
+        first, second = self.line_of("gateway/router.py", 'if "%" in path:'), self.line_of("gateway/router.py", "path = unquote(path)")
+        self.assertEqual(second, first + 1)
+        guard = self.line_of("gateway/guard.py", "path.startswith(")
+        decode = self.line_of("gateway/guard.py", "unquote(")
+        pairs = (
+            [("gateway/router.py", first, True), ("gateway/router.py", second, True), ("gateway/guard.py", guard, True),
+             ("./gateway/router.py", second, True), ("gateway\\router.py", first, True),
+             ("gateway/router.py", self.line_of("gateway/router.py", "path = unquote(raw"), False),
+             ("gateway/guard.py", decode, True),
+             ("gateway/admin.py", self.line_of("gateway/admin.py", 'f"SELECT'), False),
+             ("gateway/hooks.py", self.line_of("gateway/hooks.py", "pickle.loads"), False),
+             ("gateway/releases.py", self.line_of("gateway/releases.py", "subprocess.run"), False),
+             ("gateway/etag.py", self.line_of("gateway/etag.py", "hashlib.md5"), False),
+             ("gateway/files.py", self.line_of("gateway/files.py", "path = os.path.realpath"), False),
+             ("gateway/router.py", self.line_of("gateway/router.py", "random.uniform"), False),
+             ("auth/session.py", self.line_of("auth/session.py", "compare_digest"), False)])
+        for rel, line, expected in pairs:
+            with self.subTest(file=rel, line=line):
+                self.assertEqual(self.run_with("security-admin-route", {"FINDING.json": {"file": rel, "line": line}}), expected)
+        self.assertTrue(self.run_with("security-admin-route", {"FINDING.json": {
+            "file": "gateway/router.py", "line": second, "why": "It decodes the path a second time."}}))
+        for name, answer in (("two findings", [{"file": "gateway/router.py", "line": second},
+                                               {"file": "gateway/admin.py", "line": 1}]),
+                             ("a string line", {"file": "gateway/router.py", "line": str(second)}),
+                             ("two lines", {"file": "gateway/router.py", "line": [first, second]})):
+            with self.subTest(name):
+                self.assertFalse(self.run_with("security-admin-route", {"FINDING.json": answer}))
+
+    def test_the_shipped_repo_has_no_comment_that_names_the_trap_or_clears_a_decoy(self):
+        for path in (run.BENCH / "tasks" / "security-admin-route" / "repo").rglob("*.py"):
+            with self.subTest(path=path.name):
+                self.assertFalse([l for l in path.read_text(encoding="utf-8").splitlines() if l.lstrip().startswith("#")])
+
+    def test_the_shipped_route_serves_the_admin_handler_to_a_user_on_a_double_encoded_path(self):
+        code = ("import json, sys\nsys.path.append(sys.argv[1])\nfrom app import handle\nfrom auth import session\n"
+                "print(json.dumps([list(handle({'cookie': session.issue(who), 'path': path})) for who, path in "
+                "json.loads(sys.argv[2])]))")
+        cases = [["bob", "/%2561dmin/users"], ["bob", "/admin/users"], ["bob", "/%61dmin/users"], ["alice", "/admin/users"]]
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("security-admin-route", tmp)
+            res = subprocess.run([sys.executable, "-I", "-c", code, str(work), json.dumps(cases)], cwd=tmp,
+                                 capture_output=True, text=True, timeout=60)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        sneaked, plain, once, admin = json.loads(res.stdout)
+        self.assertEqual((plain[0], once[0], admin[0], sneaked[0]), (403, 403, 200, 200))
+        self.assertTrue(admin[1])
+        self.assertEqual(sneaked[1], admin[1])
+
+    def solution_with(self, rel, old, new):
+        text = self.source("cross-amount-cents", f"solution/{rel}")
+        self.assertIn(old, text)
+        return {rel: text.replace(old, new, 1)}
+
+    def shipped_module(self, rel):
+        return {rel: self.source("cross-amount-cents", f"repo/{rel}")}
+
+    def cents_mutants(self):
+        convert = 'int(round(Decimal(str(event["amount"])) * 100))'
+        zero = 'if "amount" not in event:\n        return dict(event)\n    cents = ' + convert
+        totals_hand = ("from shop import events\n\n\ndef order_total(log, order_id):\n    total = 0\n    for e in log:\n"
+                       "        cents = e[\"amount_cents\"] if \"amount_cents\" in e else round(e[\"amount\"] * 100)\n"
+                       "        if e[\"order_id\"] == order_id:\n"
+                       "            total += cents if e[\"kind\"] == \"charge\" else -cents\n    return total\n")
+        mutants = {
+            "truncated cents": self.solution_with("shop/events.py", convert, 'int(event["amount"] * 100)'),
+            "refund rounded the other way": self.solution_with(
+                "shop/events.py", "    new = {", '    if event["kind"] == "refund":\n        cents = int(event["amount"] * 100)\n    new = {'),
+            "rewritten in place": self.solution_with(
+                "shop/events.py", 'new = {k: v for k, v in event.items() if k != "amount"}\n    new["amount_cents"] = cents\n    return new',
+                'event.pop("amount")\n    event["amount_cents"] = cents\n    return event'),
+            "zero falls through": self.solution_with(
+                "shop/events.py", zero, 'cents = event.get("amount_cents") or ' + convert),
+            "float left in the total": self.solution_with(
+                "shop/totals.py", 'total += e["amount_cents"] if e["kind"] == "charge" else -e["amount_cents"]',
+                'cents = int(e["amount_cents"] / 100 * 100)\n            total += cents if e["kind"] == "charge" else -cents'),
+            "float left in the report": self.solution_with(
+                "reports/daily.py", "return charges - refunds", "return (charges - refunds) / 100 * 100"),
+            "refund bound off by one": self.solution_with("shop/refunds.py", "<= refundable(", "< refundable("),
+            "export header kept": self.solution_with(
+                "shop/export.py", 'HEADER = "kind,order_id,amount_cents"', 'HEADER = "kind,order_id,amount"'),
+            "export rows in dollars": self.solution_with(
+                "shop/export.py", "{amount_cents}", "{amount_cents / 100}"),
+            "second converter": {"shop/totals.py": totals_hand},
+            "zero dollars skip the conversion": self.solution_with(
+                "shop/events.py", 'if "amount" not in event:', 'if not event.get("amount"):'),
+            "upcast keeps the old key": self.solution_with(
+                "shop/events.py", 'new = {k: v for k, v in event.items() if k != "amount"}', "new = dict(event)"),
+            "upcast under another name": {
+                rel: text.replace("upcast", "to_cents") for rel, text in (
+                    (f"{d}/{m}.py", self.source("cross-amount-cents", f"solution/{d}/{m}.py"))
+                    for d, m in (("shop", "events"), ("shop", "totals"), ("shop", "refunds"), ("shop", "invoice"),
+                                 ("shop", "export"), ("shop", "audit"), ("reports", "daily")))},
+        }
+        for module in ("events", "totals", "refunds", "invoice", "export", "audit"):
+            mutants[f"{module} untouched"] = self.shipped_module(f"shop/{module}.py")
+        mutants["report untouched"] = self.shipped_module("reports/daily.py")
+        return mutants
+
+    def test_cents_check_rejects_each_known_mistake(self):
+        self.assertTrue(self.run_with("cross-amount-cents", {}))
+        for name, files in self.cents_mutants().items():
+            with self.subTest(name):
+                self.assertFalse(self.run_with("cross-amount-cents", files))
+
+    def test_cents_check_gives_the_same_verdicts_on_other_seeds(self):
+        spec = importlib.util.spec_from_file_location("cents_check", run.BENCH / "tasks" / "cross-amount-cents" / "check.py")
+        check, saved = importlib.util.module_from_spec(spec), sys.modules.get("passcheck")
+        try:
+            spec.loader.exec_module(check)
+        finally:
+            sys.modules["passcheck"] = saved
+        solution = run.BENCH / "tasks" / "cross-amount-cents" / "solution"
+        builds = {"the solution": {}, **self.cents_mutants()}
+        with tempfile.TemporaryDirectory() as tmp:
+            for n, (name, files) in enumerate(builds.items()):
+                work = Path(tmp) / str(n)
+                shutil.copytree(solution, work)
+                for rel, text in files.items():
+                    (work / rel).write_text(text, encoding="utf-8")
+                for seed in range(1, 11):
+                    with self.subTest(build=name, seed=seed):
+                        self.assertEqual(check.passes(work, seed), name == "the solution")
+
+    def test_cents_check_takes_a_round_based_converter(self):
+        files = self.solution_with("shop/events.py", 'int(round(Decimal(str(event["amount"])) * 100))',
+                                   'int(round(event["amount"] * 100))')
+        self.assertTrue(self.run_with("cross-amount-cents", files))
+
+    def test_the_cents_check_does_not_read_a_comment_or_a_longer_string_as_the_old_key(self):
+        files = self.solution_with("shop/totals.py", "from shop import events\n",
+                                   "from shop import events\n\n# the old amount key is gone\nNOTE = \"amount_cents, not amount\"\n")
+        self.assertTrue(self.run_with("cross-amount-cents", files))
+
+    def test_the_cents_repo_has_no_comment(self):
+        for path in (run.BENCH / "tasks" / "cross-amount-cents" / "repo").rglob("*.py"):
+            with self.subTest(path=path.name):
+                self.assertFalse([l for l in path.read_text(encoding="utf-8").splitlines() if l.lstrip().startswith("#")])
+
+    def test_the_shipped_cents_repo_still_works_in_dollars(self):
+        code = ("import json, sys\nsys.path.append(sys.argv[1])\nfrom shop import events, invoice\n"
+                "log = []\nevents.record(log, 'charge', 'o1', 19.99)\n"
+                "print(json.dumps([log, invoice.lines(log, 'o1')]))")
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("cross-amount-cents", tmp)
+            res = subprocess.run([sys.executable, "-I", "-c", code, str(work)], cwd=tmp, capture_output=True, text=True, timeout=60)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        self.assertEqual(json.loads(res.stdout), [[{"kind": "charge", "order_id": "o1", "amount": 19.99}], ["charge 19.99"]])
+
+    def test_the_retry_design_must_hold_every_constraint(self):
+        good = {"retry_at": "payments_client", "attempts": 2, "per_try_timeout_ms": 1000, "backoff_ms": 100,
+                "idempotency_key": "per_checkout", "gateway_retries": "off", "reasons": ["x"]}
+        for change, expected in (({}, True), ({"per_try_timeout_ms": 600, "backoff_ms": 1500}, True),
+                                 ({"per_try_timeout_ms": 1325, "backoff_ms": 50}, True),
+                                 ({"per_try_timeout_ms": 1326, "backoff_ms": 50}, False),
+                                 ({"per_try_timeout_ms": 1400}, False), ({"per_try_timeout_ms": 599}, False),
+                                 ({"backoff_ms": 40}, False), ({"attempts": 3}, False), ({"attempts": 1}, False),
+                                 ({"retry_at": "checkout"}, False), ({"retry_at": "gateway"}, False),
+                                 ({"gateway_retries": "on"}, False), ({"idempotency_key": "per_attempt"}, False),
+                                 ({"per_try_timeout_ms": 1000.0}, False), ({"attempts": True}, False),
+                                 ({"reasons": []}, False), ({"extra": 1}, False)):
+            with self.subTest(change=change):
+                self.assertEqual(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}),
+                                 expected)
+
+    def test_the_retry_check_rejects_the_other_wrong_designs(self):
+        good = json.loads(self.source("design-checkout-retries", "solution/DESIGN.json"))
+        self.assertTrue(self.run_with("design-checkout-retries", {}))
+        for change in ({"retry_at": "none"}, {"retry_at": "none", "attempts": 1}, {"idempotency_key": "none"},
+                       {"attempts": "2"}, {"backoff_ms": 100.0}, {"gateway_retries": False}, {"reasons": "x"},
+                       {"reasons": [" "]}, {"per_try_timeout_ms": 1400, "backoff_ms": 50}):
+            with self.subTest(change=change):
+                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
+        for key in good:
+            with self.subTest(missing=key):
+                self.assertFalse(self.run_with("design-checkout-retries",
+                                               {"DESIGN.json": {k: v for k, v in good.items() if k != key}}))
+        for text in ("", "not json", json.dumps([good])):
+            with self.subTest(text=text):
+                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": text}))
+
+    def test_each_rejected_retry_design_breaks_a_fact_spec_md_states(self):
+        good = json.loads(self.source("design-checkout-retries", "solution/DESIGN.json"))
+        spec = " ".join(self.source("design-checkout-retries", "repo/SPEC.md").split())
+        for change, facts in (({"retry_at": "checkout"}, ("running the whole handler again", "reserves the stock twice")),
+                              ({"retry_at": "gateway"}, ("calling the checkout service again", "reserves the stock twice")),
+                              ({"gateway_retries": "on"}, ("on by default with 3 attempts", "twice the normal request rate")),
+                              ({"attempts": 3}, ("twice the normal request rate",)),
+                              ({"attempts": 1}, ("survive one failed or slow provider call",)),
+                              ({"idempotency_key": "per_attempt"}, ("may still have charged", "idempotent only when"))):
+            with self.subTest(change=change):
+                for fact in facts:
+                    self.assertIn(fact, spec)
+                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
+
+        def ms(pattern):
+            return int(re.search(pattern, spec).group(1).replace(",", ""))
+
+        self.assertIn("At most 1 in 100 charges may need a second try", spec)
+        self.assertIn("even when every try times out", spec)
+        p99, gap = ms(r"p99 ([\d,]+) ms"), ms(r"at least ([\d,]+) ms between attempts")
+        before, after, deadline = ms(r"up to ([\d,]+) ms before"), ms(r"([\d,]+) ms after"), ms(r"after ([\d,]+) ms\.")
+        self.assertEqual((p99, gap, before, after, deadline), (600, 50, 200, 100, 3000))
+
+        def holds(d):
+            return (d["per_try_timeout_ms"] >= p99 and d["backoff_ms"] >= gap and before + d["attempts"]
+                    * d["per_try_timeout_ms"] + (d["attempts"] - 1) * d["backoff_ms"] + after <= deadline)
+
+        self.assertTrue(holds(good))
+        for change in ({"per_try_timeout_ms": 550}, {"backoff_ms": 40}, {"per_try_timeout_ms": 1400, "backoff_ms": 50},
+                       {"per_try_timeout_ms": 1326, "backoff_ms": 50}):
+            with self.subTest(change=change):
+                self.assertFalse(holds({**good, **change}))
+                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
+
+    def test_a_retry_design_given_only_in_the_reply_fails(self):
+        reply = json.dumps(json.loads(self.source("design-checkout-retries", "solution/DESIGN.json")))
+        with tempfile.TemporaryDirectory() as tmp:
+            task, work = self.shipped("design-checkout-retries", tmp)
+            self.assertFalse(self.check(task, work, reply))
 
 
     def test_statement_check_rejects_each_known_mistake(self):

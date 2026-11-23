@@ -1,0 +1,5 @@
+{
+  "class": "design",
+  "revision": 1,
+  "brief": "Read SPEC.md and design the retries for the checkout's call to the payment provider. Write DESIGN.json in the repository root with exactly these keys: \"retry_at\" (one of \"gateway\", \"checkout\", \"payments_client\", \"none\"), \"attempts\" (an integer, the total number of tries), \"per_try_timeout_ms\" (an integer), \"backoff_ms\" (an integer), \"idempotency_key\" (one of \"none\", \"per_attempt\", \"per_checkout\"), \"gateway_retries\" (\"on\" or \"off\") and \"reasons\" (a list of short strings)."
+}
