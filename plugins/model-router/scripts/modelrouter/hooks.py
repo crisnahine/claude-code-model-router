@@ -6,7 +6,6 @@ denies only to hold the user's own cap when a lowering rewrite didn't take."""
 from __future__ import annotations
 
 import re
-import time
 
 from . import allowlist, calls, fallback, gates, health, intake, ladder, learn, ledger, profile, registry, request, router, session, settings, spawn, store, upstream
 from . import config as cfg
@@ -292,7 +291,7 @@ def _mark_mod(session_id: str | None) -> None:
     """The mod's session.start fires once per process, never after /clear, so every
     turn and spawn says the mod is running."""
     if session_id and not mod_active(session_id):
-        store.save_entry("mod", session_id, {"active": True, "at": time.time()})
+        store.save_entry("mod", session_id, {"active": True, "at": store.now()})
 
 
 def mod_spawn(hook_input: dict) -> dict | None:

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import math
 import re
-import time
 from typing import Any, Callable
 
 from . import store
@@ -42,7 +41,7 @@ class Health:
 
     def healthy(self, name: str) -> bool:
         info = self._info(name)
-        now, until = time.time(), _num(info.get("unavailable_until"))
+        now, until = store.now(), _num(info.get("unavailable_until"))
         latest = now + _outage_days(info) * 86400
         if until > latest:
             # A clock moved back would stretch the outage: it lasts at most its own days from now.
@@ -112,7 +111,7 @@ def _route_around(info: dict) -> None:
     if _num(info.get("unavailable_until")) > time.time():
         return  # parallel failures of one outage must not stack into the next, longer one
     info["outages"] = int(_num(info.get("outages"))) + 1
-    info["unavailable_until"] = time.time() + _outage_days(info) * 86400
+    info["unavailable_until"] = store.now() + _outage_days(info) * 86400
 
 
 def _strike(info: dict, strikes: int, error: str) -> None:

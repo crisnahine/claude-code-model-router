@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import time
 
 from . import request, store
 from .config import LEVELS
@@ -89,4 +88,4 @@ def finished_run(session_id: str | None, key: str) -> dict | None:
 def _age(record: dict) -> float:
     """Seconds since the record was written. A clock moved back makes it negative, and each
     caller decides which side of its test that unknown age falls on."""
-    return time.time() - (record.get("at") or 0)
+    return store.now() - (record.get("at") or 0)

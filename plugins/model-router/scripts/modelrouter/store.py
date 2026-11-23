@@ -22,6 +22,21 @@ SCHEMA = 1
 MIGRATIONS: dict[int, Callable[[dict], dict]] = {0: lambda data: data}
 
 
+_clock: Callable[[], float] | None = None
+
+
+def now() -> float:
+    """The wall-clock time stamped into state and compared with it. Lock waits and stale-lock
+    checks read the real clocks, so a frozen clock never stalls a lock."""
+    return (_clock or time.time)()
+
+
+def set_clock(clock: Callable[[], float] | None) -> None:
+    """Replace the state clock, or restore the real one with None. For tests."""
+    global _clock
+    _clock = clock
+
+
 def claude_home() -> Path:
     return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
 
@@ -78,6 +93,7 @@ def locked(path: Path) -> Iterator[None]:
             break
         except FileExistsError:
             try:
+                # The lock file's mtime is the filesystem's real time, not the state clock.
                 if time.time() - lock.stat().st_mtime > LOCK_STALE_SECONDS:
                     lock.unlink()  # left behind by a process that died
                     continue
@@ -238,7 +254,7 @@ def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any]) -> N
         entry = data.get(key)
         entry = entry if isinstance(entry, dict) else {}
         change(entry)
-        entry["_at"] = time.time()
+        entry["_at"] = now()
         data[key] = entry
         if len(data) > KEEP_ENTRIES:
             def written(k: str) -> float:
@@ -263,7 +279,7 @@ def update_entry(name: str, key: str | None, **changes: Any) -> None:
 def keep(records: dict, key: str, record: dict, kept: int | None = None) -> None:
     """Store a record stamped with the time, and drop the oldest past `kept` (KEPT_RECORDS)."""
     kept = KEPT_RECORDS if kept is None else kept
-    records[key] = {**record, "at": time.time()}
+    records[key] = {**record, "at": now()}
     keys = [k for k, v in records.items() if isinstance(v, dict)]
     for old in sorted(keys, key=lambda k: records[k].get("at") or 0)[:-kept]:
         del records[old]
