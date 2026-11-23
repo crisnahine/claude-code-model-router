@@ -790,6 +790,21 @@ class FinalAnswer(unittest.TestCase):
         self.assertEqual(final, {"reply": "the reply", "files": {"DESIGN.json": '{"x": 1}', "pkg/edit.py": "b = 2\n"},
                                  "removed": ["gone.py"], "omitted": ["big.txt", "blob.bin"]})
 
+    def test_a_file_too_big_for_the_cap_is_omitted_unread(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
+            shipped.mkdir()
+            work.mkdir()
+            big = "z" * (4 * run.FINAL_FILE_CHARS + 1)
+            for folder in (shipped, work):
+                (folder / "same.txt").write_text(big, encoding="utf-8")
+            (work / "huge.txt").write_text(big, encoding="utf-8")
+            (work / "small.txt").write_text("ok\n", encoding="utf-8")
+            with unittest.mock.patch.object(Path, "read_bytes", autospec=True, side_effect=Path.read_bytes) as read:
+                final = run.final_answer(shipped, work, "")
+        self.assertEqual((final["files"], final["omitted"]), ({"small.txt": "ok\n"}, ["huge.txt"]))
+        self.assertEqual({p.name for (p,), _ in read.call_args_list}, {"small.txt"})
+
     def test_the_files_together_stay_under_the_row_cap(self):
         with tempfile.TemporaryDirectory() as tmp:
             shipped, work = Path(tmp) / "repo", Path(tmp) / "work"
