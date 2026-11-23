@@ -2743,9 +2743,10 @@ class Feedback(Sandbox):
         self.assertEqual(learn.stats()["lookup"]["votes"], 0)
 
     def test_a_swapped_run_the_caller_chose_leaves_the_count_alone(self):
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
+        self.assertEqual(learn.stats()["lookup"]["calls"], 1)
         self.pre("general-purpose", LOOKUP, model="sonnet")
-        self.assertEqual(learn.stats()["lookup"]["calls"], 0)
-        self.pre("general-purpose", "list the files under other")
         self.done("general-purpose", LOOKUP, "claude-sonnet-5-5", model="sonnet", models_used=SWAP["swapped"]["modelsUsed"])
         self.assertEqual(learn.stats()["lookup"]["calls"], 1)
 

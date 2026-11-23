@@ -182,8 +182,10 @@ def post_agent(hook_input: dict) -> dict | None:
     if not swapped:
         return None
     try:
-        record = request.load(session_id).calls.get(key)
-        if isinstance(record, dict) and record.get("source") == "router":
+        now = request.load(session_id)
+        record = now.run(key)
+        # The key ignores the model, so a caller's own run of K can follow an earlier router run of K.
+        if record and record.get("source") == "router" and now.routed_by(key) == "router":
             learn.uncount(record.get("level"))
     except OSError:
         pass
