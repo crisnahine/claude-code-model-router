@@ -1073,6 +1073,20 @@ class Isolation(unittest.TestCase):
             check.write_text("import sys\nsys.exit(0 if sys.flags.isolated else 1)\n", encoding="utf-8")
             self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt"))
 
+    def test_a_check_sees_no_credentials(self):
+        secret = {"CLAUDE_CODE_OAUTH_TOKEN": "t", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "3", "ANTHROPIC_API_KEY": "k",
+                  "ANTHROPIC_BASE_URL": "u", "GITHUB_TOKEN": "g", "AWS_SECRET_ACCESS_KEY": "s", "DB_PASSWORD": "p",
+                  "api_key": "lower"}
+        with tempfile.TemporaryDirectory() as tmp:
+            check = Path(tmp) / "check.py"
+            check.write_text("import os, sys\n"
+                             f"sys.exit(0 if not set({sorted(secret)!r}) & set(os.environ) "
+                             "and os.environ.get('MRBENCH_KEPT') == 'yes' and 'PATH' in os.environ else 1)\n",
+                             encoding="utf-8")
+            with unittest.mock.patch.dict("os.environ", {**secret, "MRBENCH_KEPT": "yes"}):
+                self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt"))
+                self.assertEqual(sorted(set(secret) & set(run.grading_env(dict(os.environ)))), [])
+
     def test_a_check_that_hangs_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             check = Path(tmp) / "check.py"

@@ -125,12 +125,22 @@ def rate_limited(row: dict) -> bool:
     return refusal(row) is not None
 
 
+SECRET_NAMES = ("TOKEN", "KEY", "SECRET", "PASSWORD")
+
+
+def grading_env(env: dict) -> dict:
+    """The environment a check runs in: the harness's own, minus credentials, since the check's process also runs
+    the code a run left in the work dir."""
+    return {k: v for k, v in env.items()
+            if not (any(w in k.upper() for w in SECRET_NAMES) or k.upper().startswith(("ANTHROPIC_", "CLAUDE_CODE_OAUTH")))}
+
+
 def grade(check: Path, work: Path, answer: Path, timeout: int = 120) -> bool:
     """Whether the task's check passes. -I keeps the check's folder and the work dir off sys.path and ignores
     PYTHON* variables, so code a run left behind can't shadow what the check imports."""
     try:
         return subprocess.run([sys.executable, "-I", str(check), str(work), str(answer)], capture_output=True,
-                              timeout=timeout).returncode == 0
+                              env=grading_env(dict(os.environ)), timeout=timeout).returncode == 0
     except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
         return False
 
