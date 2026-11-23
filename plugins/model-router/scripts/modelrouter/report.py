@@ -81,6 +81,7 @@ def models_data(snap: settings.Snapshot) -> dict:
         "newer_files": [str(p) for p in store.newer_files()],
         "newer_config": [str(p) for p in reg.newer],
         "workflow_model": options.workflow_model,
+        "locks": lock_rows(),
     }
     # New keys appear only when they have something to say, so a clean setup's output keeps its bytes.
     if reg.problems:
@@ -133,7 +134,33 @@ def models(snap: settings.Snapshot) -> str:
     if data["newer_config"]:
         lines += ["", "Written for a newer Model Router, so only the settings this release understands apply: "
                   + ", ".join(data["newer_config"]) + ". Update the plugin to use the rest."]
+    lines += lock_table(data["locks"])
     return "\n".join(lines)
+
+
+LOCK_EVENTS = ("waits", "other_session", "skipped", "broken")
+
+
+def lock_rows() -> list[dict]:
+    """Each state file's lock counts, for `models`: waits for the lock, how many of those were
+    on another session's lock, writes skipped because it stayed held, stale locks broken."""
+    rows = []
+    for name, counts in sorted(store.lock_counts().items()):
+        if isinstance(counts, dict):
+            rows.append({"file": name, **{e: counts.get(e) if isinstance(counts.get(e), int) else 0
+                                          for e in LOCK_EVENTS},
+                         "last_at": counts.get("at") if isinstance(counts.get("at"), (int, float)) else None})
+    return rows
+
+
+def lock_table(rows: list[dict]) -> list[str]:
+    if not rows:
+        return []
+    return ["", "| State file | Lock waits | On another session's lock | Writes skipped | Stale locks broken |",
+            "| :- | -: | -: | -: | -: |",
+            *(f"| {r['file']} | {r['waits']} | {r['other_session']} | {r['skipped']} | {r['broken']} |" for r in rows),
+            "", "A skipped write lost one update to that file, since the lock stayed held past "
+            f"{store.LOCK_WAIT_SECONDS:g} seconds."]
 
 
 def explain(snap: settings.Snapshot, text: str, agent: str | None = None) -> str:

@@ -35,6 +35,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 - Complex needs Opus, so on a Sonnet or Haiku session a complex request gets the session note and one blocked Stop asking for `model-router:architect`. `strong_agent_gate` controls it and is on by default. `priority: quality` and a learned raise take complex to Fable.
 - Result rows in `ledger.jsonl` carry `models_used` when the run swapped models. Claude gets a one-line note when a risk brief's run swapped models.
 - A new state file, `allowlist.json`, holds each session's settings layers.
+- `/model-router:models` shows, per state file, the hooks that waited for its lock, how many waited on another session's lock, the writes skipped because the lock stayed held and the stale locks broken (`locks` in `--json`). A new state file, `locks.json`, holds the counts.
 - `verify_gate` is on by default. Claude is asked once to run the verifier when code changed and nothing checked it. Set `verify_gate: false` to turn it off.
 - When `availableModels` and `deniedModels` leave no registry model, the call is left as it is, and the ledger row says why. The router no longer picks a model the lists block.
 - When a cap, the allowlist or model health leaves a level's pick weaker than the level needs, the pick gets one more effort step, at most `xhigh`.
@@ -62,6 +63,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 - A brief that opens with "Debug logging for ...", or rules a fix out ("avoid fixing", "must not fix"), no longer profiles as a fix. A long run of newlines in a brief no longer makes the profiler's regex scans quadratic.
 - A bench check can no longer be fooled by a `unittest.py` the agent leaves in the work directory: every check runs isolated, and the root-cause checks run the work directory's tests in a child that imports `unittest` first.
 - A bench run that errored during execution with a zero cost counts as an unknown cost and books the whole budget. A run the API refused for a rate limit or a lost network keeps its zero, since nothing started.
+- A state write no longer goes ahead without its lock. When the lock stayed held past two seconds the hook wrote anyway, and could drop another hook's update to the same file, such as a redo record, a health strike or a vote. A busy lock is now tried again with backoff for up to one second, then that write is skipped and counted. `models --reset` says when another process held the file.
 
 ### Security
 

@@ -137,7 +137,7 @@ Installed and run live on macOS. The unit tests also run on Linux and Windows in
 
 ### Failure handling
 
-Every hook and every mod hook fails open. A bug in this plugin can cost routing but can't block a tool call, a spawn or a session. State files are written atomically, and under a lock when it can be had within two seconds, so agents started together don't overwrite each other's records. A write that would wait longer goes ahead without the lock, so a hook never hangs, and can then lose one update.
+Every hook and every mod hook fails open. A bug in this plugin can cost routing but can't block a tool call, a spawn or a session. State files are written atomically and under a lock, so agents started together don't overwrite each other's records. A hook waits at most a second for a busy lock. Past that it skips the write, which loses that one update, and counts it; `/model-router:models` shows the counts per file.
 
 ## Update and uninstall
 
