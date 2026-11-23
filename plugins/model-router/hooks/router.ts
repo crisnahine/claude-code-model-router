@@ -50,21 +50,25 @@ async function hasFirstPartyCredential($: EngineInterface): Promise<boolean | un
 }
 
 // Only these keys cross to the runtime. A source whose read fails or is still pending after
-// two seconds is left out, and the runtime fills it from the files.
+// two seconds is left out, and the runtime fills it from the files. Never throws, like ask.
 async function modelSettings($: EngineInterface): Promise<Record<string, Record<string, unknown>> | undefined> {
-  const layers: Record<string, Record<string, unknown>> = {}
-  const reads = SOURCES.map(async source => {
-    try {
-      const read = (await $.settings.read({ source })) as Record<string, unknown>
-      layers[source] = Object.fromEntries(KEYS.filter(key => key in read).map(key => [key, read[key]]))
-    } catch {
-      // left out
-    }
-  })
-  let timer: { cancel: () => void } | undefined
-  await Promise.race([Promise.all(reads), new Promise<void>(resolve => { timer = $.clock.after(SETTINGS_MS, resolve) })])
-  timer?.cancel()
-  return Object.keys(layers).length ? { ...layers } : undefined
+  try {
+    const layers: Record<string, Record<string, unknown>> = {}
+    const reads = SOURCES.map(async source => {
+      try {
+        const read = (await $.settings.read({ source })) as Record<string, unknown>
+        layers[source] = Object.fromEntries(KEYS.filter(key => key in read).map(key => [key, read[key]]))
+      } catch {
+        // left out
+      }
+    })
+    let timer: { cancel: () => void } | undefined
+    await Promise.race([Promise.all(reads), new Promise<void>(resolve => { timer = $.clock.after(SETTINGS_MS, resolve) })])
+    timer?.cancel()
+    return Object.keys(layers).length ? { ...layers } : undefined
+  } catch {
+    return undefined
+  }
 }
 
 function effortRank(effort: ModelEffort | undefined): number {
