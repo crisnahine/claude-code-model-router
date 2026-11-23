@@ -1,0 +1,1 @@
+`read_retry_limit` in app/settings.py. It doesn't matter whether you call read_timeout.

@@ -1038,14 +1038,14 @@ CLASS_WORDS = {"security-review": "security review", "root-cause": "root cause"}
 BENCH_ALT = (
     "Cost per solved task by task class, from docs/BENCHMARKS.md, {per_cell} runs per class and configuration. "
     "On an Opus 5.5 session the router cost less than Claude Code's defaults in {opus.below.defaults} classes, "
-    "for example lookup {opus.cell.lookup.plugin-next} against {opus.cell.lookup.defaults}, but more than the "
-    "cheapest baseline in all {opus.status.FAIL} (FAIL): opusplan, which runs Sonnet throughout when headless, in "
-    "{opus.best_count.opusplan} classes, and every subagent on Haiku in {opus.best.haiku} and "
-    "{opus.best.haiku-high}, for example lookup {opus.cell.lookup.plugin-next} against "
-    "{opus.cell.lookup.opusplan} for opusplan. On a Sonnet session the router is cheapest only in "
-    "{sonnet.pass_classes} ({sonnet.cell.lookup.plugin-next} against {sonnet.cell.lookup.defaults}, PASS) and "
-    "costs more than the best baseline in the other {sonnet.status.FAIL} (FAIL), from {sonnet.behind.min}% more in "
-    "{sonnet.behind.min_class} to {sonnet.behind.max}% more in {sonnet.behind.max_class}.")
+    "for example bugfix {opus.cell.bugfix.plugin-next} against {opus.cell.bugfix.defaults}, but more than the "
+    "cheapest baseline in {opus.status.FAIL} of {opus.classes} (FAIL): opusplan, which runs Sonnet throughout when "
+    "headless, in {opus.best_count.opusplan} classes, and every subagent on Haiku in {opus.best.haiku} and "
+    "{opus.best.haiku-high}, for example bugfix {opus.cell.bugfix.plugin-next} against "
+    "{opus.cell.bugfix.opusplan} for opusplan. On a Sonnet session the router is cheapest in {sonnet.status.PASS} of "
+    "{sonnet.classes} classes (PASS) and costs more than the best baseline in {sonnet.status.FAIL} (FAIL), from "
+    "{sonnet.behind.min}% more in {sonnet.behind.min_class} to {sonnet.behind.max}% more in {sonnet.behind.max_class}. "
+    "A class with too few runs is PARTIAL.")
 
 
 def class_word(k: str) -> str:
@@ -1100,7 +1100,7 @@ def session_figures(name: str, session: dict) -> dict:
         less = [1 - cps(c, router) / cps(c, cfg) for c in below if cps(c, cfg) and cps(c, router) is not None]
         if less:
             f[f"less.{cfg}.min"], f[f"less.{cfg}.max"] = pct(min(less)), pct(max(less))
-        best = [class_word(c["class"]) for c in classes if c["best_baseline"] == cfg]
+        best = [class_word(c["class"]) for c in classes if c["best_baseline"] == cfg and c["status"] == "FAIL"]
         if best:
             f[f"best.{cfg}"], f[f"best_count.{cfg}"] = words(best), str(len(best))
     behind = [(cps(c, router) / cps(c, c["best_baseline"]) - 1, class_word(c["class"]))

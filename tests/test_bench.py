@@ -360,9 +360,9 @@ class Analysis(unittest.TestCase):
         self.assertNotIn("`defaults`", never)
 
     def test_the_page_says_what_the_archive_holds_and_why_it_is_left_out(self):
-        real = json.loads((ROOT / "bench" / "tasks" / "lookup-retry-limit" / "task.json").read_text())
-        assert real["class"] == "lookup"
-        base = {"class": "lookup", "task": "lookup-retry-limit", "config": "defaults", "total_cost_usd": 0.05,
+        real = json.loads((ROOT / "bench" / "tasks" / "lookup-todo-count" / "task.json").read_text())
+        assert real["class"] == "lookup" and real["revision"] == 1
+        base = {"class": "lookup", "task": "lookup-todo-count", "config": "defaults", "total_cost_usd": 0.05,
                 "passed": True, "claude_version": "2.1.330", "main_model": "sonnet", "models": {},
                 "started_at": "2026-11-23T01:00:00+00:00", "budget_usd": 1.0, "plugin_state": None,
                 "plugin_data_own": True, "sessions_saved": True, "bench_commit": "c" * 40, "task_revision": 1}
@@ -1409,8 +1409,10 @@ class Pilot(unittest.TestCase):
     def test_recorded_lookup_answers_still_grade_the_same(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
         data = [json.loads(line) for path in raw for line in path.read_text(encoding="utf-8").splitlines() if line]
+        revisions = {t["id"]: t.get("revision", 1) for t in run.load_tasks()}
         for row in data:  # a lookup is graded from its answer alone, so today's check must agree with the record
-            if row["class"] == "lookup" and len(row["answer"]) < 2000:  # the line keeps 2,000 characters
+            if (row["class"] == "lookup" and len(row["answer"]) < 2000  # the line keeps 2,000 characters
+                    and row.get("task_revision", 1) == revisions[row["task"]]):  # an older revision's check differed
                 with tempfile.TemporaryDirectory() as tmp:
                     answer = Path(tmp) / "answer.txt"
                     answer.write_text(row["answer"], encoding="utf-8")
