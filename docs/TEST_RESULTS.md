@@ -34,9 +34,9 @@ Run 2026-11-23 on macOS (Darwin 27.2.0), on `27b94e6` and the commits after it, 
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 446 tests OK |
-| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 446 tests OK |
-| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 446 tests OK |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 447 tests OK |
+| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 447 tests OK |
+| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 447 tests OK |
 | Unit tests, Python 3.15.2 | `python3.15 -m unittest discover -s tests` | 350 tests OK, last run on `ed6007d`; not run since |
 | Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 18 of 18 pass |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
@@ -47,7 +47,7 @@ Run 2026-11-23 on macOS (Darwin 27.2.0), on `27b94e6` and the commits after it, 
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 | Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78; run 2026-11-23 on `9b27510` |
 
-The 446 local tests are 323 in `tests/test_model_router.py`, 101 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 16 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 246 briefs over-routed (0.8%), budget 2%; 5 known under-routes" on Python 3.9.6 and 3.13.13, the two run for this count. CI's run on `8ec8eec` had 180.
+The 447 local tests are 323 in `tests/test_model_router.py`, 102 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 16 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 246 briefs over-routed (0.8%), budget 2%; 5 known under-routes" on Python 3.9.6 and 3.13.13, the two run for this count. CI's run on `8ec8eec` had 180.
 
 Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
 

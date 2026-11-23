@@ -1608,6 +1608,24 @@ class QualityTier(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": text}))
 
+    def test_each_rejected_retry_design_breaks_a_fact_spec_md_states(self):
+        good = json.loads(self.source("design-checkout-retries", "solution/DESIGN.json"))
+        spec = " ".join(self.source("design-checkout-retries", "repo/SPEC.md").split())
+        for change, facts in (({"per_try_timeout_ms": 550}, ("p99 600 ms", "at most 1 in 100 charges to a second try")),
+                              ({"retry_at": "checkout"}, ("running the whole handler again", "reserves the stock twice")),
+                              ({"retry_at": "gateway"}, ("calling the checkout service again", "reserves the stock twice")),
+                              ({"gateway_retries": "on"}, ("on by default with 3 attempts", "twice the normal request rate")),
+                              ({"attempts": 3}, ("twice the normal request rate",)),
+                              ({"attempts": 1}, ("survive one failed or slow provider call",)),
+                              ({"idempotency_key": "per_attempt"}, ("may still have charged", "idempotent only when")),
+                              ({"backoff_ms": 40}, ("at least 50 ms between attempts",)),
+                              ({"per_try_timeout_ms": 1400, "backoff_ms": 50}, ("p99.9 1,400 ms", "gives up after 3,000 ms",
+                                                                                "up to 200 ms before", "100 ms after"))):
+            with self.subTest(change=change):
+                for fact in facts:
+                    self.assertIn(fact, spec)
+                self.assertFalse(self.run_with("design-checkout-retries", {"DESIGN.json": {**good, **change}}))
+
     def test_a_retry_design_given_only_in_the_reply_fails(self):
         reply = json.dumps(json.loads(self.source("design-checkout-retries", "solution/DESIGN.json")))
         with tempfile.TemporaryDirectory() as tmp:
