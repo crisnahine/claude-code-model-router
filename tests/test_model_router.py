@@ -81,6 +81,7 @@ class Sandbox(unittest.TestCase):
 
     def tearDown(self):
         store.set_clock(None)
+        store.owner = None
         self.managed_root.stop()
         self.patch.stop()
         self.tmp.cleanup()
@@ -310,7 +311,8 @@ class Shipped(unittest.TestCase):
         self.assertIn("starting the brief with today's date: !`date +%F`", refresh)
         self.assertIn("\n  - Bash(date +%F)\n", refresh)  # the `!` line runs under the skill's own allowed-tools
         body = (PLUGIN / "agents" / "docs-researcher.md").read_text(encoding="utf-8").split("---", 2)[2]
-        self.assertIn("Your brief starts with today's date", body)
+        self.assertIn("When your brief gives today's date, use it as today.", body)
+        self.assertIn("say in the first line of your answer that you don't know today's date", body)
 
     def test_the_architect_hands_back_a_file_it_was_asked_to_write(self):
         # Misrouted to it, a write-the-file task still ends with the content the caller can write.
@@ -575,21 +577,72 @@ class Store(Sandbox):
         self.assertEqual(store.load_entry("sample", "s1")["n"], 120)
         self.assertEqual(list(self.data.glob("*.lock")) + list(self.data.glob("*.tmp")), [])
 
-    def test_a_stale_lock_is_cleared_and_a_held_one_never_hangs(self):
-        path = self.data / "state.json"
+    def test_two_processes_waiting_on_one_keyed_file_both_keep_their_update(self):
+        code = ("import sys; sys.path.insert(0, sys.argv[1])\n"
+                "from modelrouter import store\n"
+                "store.owner = sys.argv[2]\n"
+                "store.LOCK_WAIT_SECONDS = 60\n"  # the second worker may start much later on a slow machine
+                "print('ready', flush=True)\n"
+                "store.mutate_entry('sample', 's1', lambda entry: entry.update({sys.argv[2]: 1}))\n")
+        store.owner = "holder"
+        with store.locked(store.data_dir() / "sample.json"):
+            workers = [subprocess.Popen([sys.executable, "-c", code, str(SCRIPTS), name], stdout=subprocess.PIPE,
+                                        text=True, env={**os.environ}) for name in ("a", "b")]
+            for worker in workers:
+                self.assertEqual(worker.stdout.readline().strip(), "ready")
+            time.sleep(0.1)  # both are now waiting on the lock this test holds
+        for worker in workers:
+            worker.communicate(timeout=60)
+            self.assertEqual(worker.returncode, 0)
+        entry = store.load_entry("sample", "s1")
+        self.assertEqual((entry.get("a"), entry.get("b")), (1, 1))
+        counts = store.lock_counts()["sample.json"]
+        self.assertEqual((counts["waits"], counts["other_session"], counts.get("skipped")), (2, 2, None))
+
+    def test_a_lock_held_past_the_bound_skips_the_write(self):
+        self.data.mkdir(exist_ok=True)
+        store.save_entry("sample", "s1", {"n": 1})
+        path = self.data / "sample.json"
+        before = path.read_bytes()
+        lock = self.data / "sample.json.lock"
+        lock.write_text("other")  # held by someone else, and fresh
+        (self.data / "ledger.jsonl.lock").write_text("")
+        started = time.monotonic()
+        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
+            self.assertEqual(store.try_update(path, lambda data: data.update(b=2)), ({"s1": mock.ANY, "b": 2}, "busy"))
+            store.mutate_entry("sample", "s1", lambda entry: entry.update(n=2))
+            self.assertEqual(store.remove_state_file(path), "busy")
+            store.append_ledger({"event": "spawn"})
+            store.owner = "mine"
+            store.update_entry("sample", "s1", n=3)
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertFalse(store.ledger_path().exists())
+        self.assertTrue(lock.exists())  # not ours to remove
+        self.assertEqual(store.lock_counts()["sample.json"]["skipped"], 4)
+        self.assertEqual(store.lock_counts()["sample.json"]["other_session"], 1)
+        self.assertEqual(store.lock_counts()["ledger.jsonl"]["skipped"], 1)
+
+    def test_a_stale_lock_is_broken(self):
         self.data.mkdir(exist_ok=True)
         lock = self.data / "state.json.lock"
         lock.write_text("")
         os.utime(lock, (time.time() - 60, time.time() - 60))
-        store.update_dict(path, lambda data: data.update(a=1))
+        store.update_dict(self.data / "state.json", lambda data: data.update(a=1))
         self.assertFalse(lock.exists())
-        lock.write_text("")  # held by someone else, and fresh
-        started = time.monotonic()
-        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
-            store.update_dict(path, lambda data: data.update(b=2))
-        self.assertLess(time.monotonic() - started, 2)
-        self.assertEqual(store.load_state_file(path), {"a": 1, "b": 2})
-        self.assertTrue(lock.exists())  # not ours to remove
+        self.assertEqual(store.load_state_file(self.data / "state.json"), {"a": 1})
+        self.assertEqual(store.lock_counts(), {"state.json": {"broken": 1, "at": self.clock}})
+
+    def test_a_reset_while_another_process_holds_the_lock_says_so(self):
+        self.data.mkdir(exist_ok=True)
+        (self.data / "state.json.lock").write_text("")
+        (self.data / "learned.json.lock").write_text("")
+        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02):
+            out = io.StringIO()
+            with redirect_stdout(out):
+                cli.main(["models", "--reset"])
+        self.assertIn("another Model Router process held state.json", out.getvalue())
+        self.assertIn("another Model Router process held learned.json", out.getvalue())
 
     def test_state_files_are_written_compact(self):
         store.save_entry("sample", "s1", {"a": {"model": "haiku"}})
@@ -1028,6 +1081,10 @@ class Allowlist(Sandbox):
         self.assertTrue(permits(["sonnet", "claude-opus-4-6"], "sonnet", "claude-sonnet-5-5"))
         self.assertFalse(permits(["opus", "claude-opus-4-6"], "opus", "claude-opus-5-5"))
         self.assertFalse(permits(["sonnet", "anthropic.claude-sonnet-5-5-v1:0"], "sonnet", "claude-sonnet-5-5"))
+        # An alias that only contains a family's name names no version.
+        for alias in ("opusplan", "default", "best"):
+            self.assertTrue(permits(["opus", alias], "opus", "claude-opus-5-5"), alias)
+        self.assertFalse(permits(["opus", "us.anthropic.claude-opus"], "opus", "claude-opus-5-5"))
         # The family keeps a permitted version, which its alias moves to, so it stays routable.
         self.assertEqual(self.permitted(policy={"availableModels": pinned}), {"sonnet"})
         managed = allowlist.from_layers({}, floor={"availableModels": pinned})
@@ -1474,8 +1531,10 @@ class Profile(unittest.TestCase):
         self.assertIn("fixes or hunts a defect", fixed["signals"])
         self.assertEqual(profile.profile_prompt("Figure out why it times out and fix it.")["level"], "complex")
         for brief in ("Rename the helper. Avoid fixing the unrelated tests.", "Do not fix the tests. Rename the helper.",
-                      "Find the commit that landed the fix for the CSV export.", "Add debug logging to the retry loop."):
+                      "Find the commit that landed the fix for the CSV export.", "Add debug logging to the retry loop.",
+                      "Analyze the sales numbers in q3.csv.", "Reproduce the export from last week's report."):
             self.assertNotEqual(profile.profile_prompt(brief)["level"], "complex", brief)
+        self.assertEqual(profile.profile_prompt("Reproduce the crash on upload.")["level"], "complex")
 
     def test_reading_about_something_sensitive_or_broad_is_still_a_lookup(self):
         self.assertEqual(self.level("read the auth module and list its functions"), "lookup")
@@ -4687,6 +4746,17 @@ class Launcher(Sandbox):
                                      input="{}", capture_output=True, text=True, env=fake["env"])
                 self.assertEqual(res.returncode, 1, res.stderr)
 
+    def test_a_command_whose_text_names_a_hook_keeps_its_exit_code(self):
+        fake = self.fake_pythons("real", "real")
+        launcher = (SCRIPTS / "model-router.sh").as_posix()
+        for args in (["explain", "--no-such-flag", "stop"], ["--data-dir", "stop", "explain", "--no-such-flag"]):
+            with self.subTest(args=args):
+                res = subprocess.run(["sh", launcher, *args], capture_output=True, text=True, env=fake["env"])
+                self.assertEqual(res.returncode, 2, res.stderr)
+        res = subprocess.run(["sh", launcher, "--data-dir", "unused", "stop", "--no-such-flag"], input="{}",
+                             capture_output=True, text=True, env=fake["env"])
+        self.assertEqual(res.returncode, 1, res.stderr)
+
     def test_hooks_dont_load_the_network_or_xml_modules(self):
         probe = ("import sys; sys.path.insert(0, sys.argv[1]); import modelrouter.cli; "
                  "print(sorted(m for m in ('urllib.request', 'http.client', 'xml.etree.ElementTree') if m in sys.modules))")
@@ -4865,6 +4935,16 @@ class MachineReadable(Sandbox):
         self.assertEqual(data["set_aside"], [str(p) for p in store.set_aside()])
         self.assertRegex(data["set_aside"][0], r"learned\.json\.corrupt-")
         self.assertEqual(data["newer_files"], [str(newer)])
+
+    def test_models_shows_lock_counts_per_state_file(self):
+        self.assertNotIn("locks", self.json_out("models"))
+        self.assertNotIn("Lock waits", self.out("models"))
+        (store.data_dir() / "sample.json.lock").write_text("")
+        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02):
+            store.update_entry("sample", "s1", n=1)
+        self.assertEqual(self.json_out("models")["locks"], [
+            {"file": "sample.json", "waits": 0, "other_session": 0, "skipped": 1, "broken": 0, "last_at": self.clock}])
+        self.assertIn("| sample.json | 0 | 0 | 1 | 0 |", self.out("models"))
 
 
 class JsonOutputs(Sandbox):

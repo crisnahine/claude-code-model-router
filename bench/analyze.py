@@ -1,6 +1,7 @@
 """Turn bench results into docs/BENCHMARKS.md: pass rate (exact 95% binomial interval) and cost per solved task
 (95% bootstrap interval) for each task class and configuration, the router's cost standing against the best
-baseline, and a quality verdict that is withheld when the task set can't tell models apart.
+baseline, and a quality verdict that is withheld when the task set can't tell models apart. `figures` gives the
+docs the same numbers by role (router, defaults, best, strongest), with the yes/no facts their prose relies on.
 
   python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
   python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check
@@ -20,12 +21,13 @@ BENCH = Path(__file__).resolve().parent
 sys.path.insert(0, str(BENCH))
 import run  # noqa: E402
 sys.path.insert(0, str(run.PLUGIN / "scripts"))
+sys.path.insert(0, str(BENCH.parent / "tools"))
+from docs_pages import HEAD_END, HEAD_START  # noqa: E402
 from modelrouter import config as mrconfig, profile  # noqa: E402
 from modelrouter.registry import Registry  # noqa: E402
 from overhead import percentile  # noqa: E402
 
 RESULTS = BENCH / "results"
-HEAD_END = "<!-- End of page head. -->\n\n"  # the same text as docs_assets.HEAD_END
 MIN_RUNS = 10  # fewer runs per configuration than this and no row is called a win or a loss
 ALPHA = 0.05  # the 95% intervals, and the one-sided level of the exact comparisons
 SPLIT_STRONG, SPLIT_WEAK = "opus", "sonnet"  # the pair a task must split to count as telling models apart
@@ -95,7 +97,7 @@ def _verdict(cells: dict, router: str, routers: frozenset[str], gap: str | None 
     # A router variant (any configuration that loads the plugin) is a rival build, never a baseline.
     base = {name: cell for name, cell in cells.items() if name != router and name not in routers}
     if router not in cells or not base:
-        return {"status": "PARTIAL", "rank": None, "best_baseline": None, "differences": {},
+        return {"status": "PARTIAL", "why": "no_data", "rank": None, "best_baseline": None, "differences": {},
                 "reason": "no router or baseline runs"}
     ours = cells[router]
     best = min(base, key=lambda name: (_key(base[name]), name))
@@ -103,21 +105,21 @@ def _verdict(cells: dict, router: str, routers: frozenset[str], gap: str | None 
     verdict = {"rank": 1 + sum(_key(cell) < _key(ours) for cell in base.values()), "best_baseline": best,
                "differences": {name: _difference(ours["_cps"], cell["_cps"]) for name, cell in base.items()}}
     if gap:
-        return {**verdict, "status": "PARTIAL", "reason": gap}
+        return {**verdict, "status": "PARTIAL", "why": "gap", "reason": gap}
     if ours["runs"] < MIN_RUNS or theirs["runs"] < MIN_RUNS:
-        return {**verdict, "status": "PARTIAL",
+        return {**verdict, "status": "PARTIAL", "why": "few_runs",
                 "reason": f"too few runs ({router} {ours['runs']}, {best} {theirs['runs']}; {MIN_RUNS} needed)"}
     if _difference(ours["_rate"], theirs["_rate"])[1] < 0:
         short = theirs["pass_rate"] - ours["pass_rate"]
-        return {**verdict, "status": "FAIL", "reason": f"pass rate behind {best} by {short:.0%}"}
+        return {**verdict, "status": "FAIL", "why": "pass_rate", "reason": f"pass rate behind {best} by {short:.0%}"}
     low, high = _difference(ours["_cps"], theirs["_cps"])
     if high < 0:
-        return {**verdict, "status": "PASS", "reason": f"cost per solved task below {best}'s; "
+        return {**verdict, "status": "PASS", "why": "cost_below", "reason": f"cost per solved task below {best}'s; "
                                                        f"95% interval of the difference ${low:.4f} to ${high:.4f}"}
     if low > 0:
-        return {**verdict, "status": "FAIL", "reason": f"cost per solved task above {best}'s; "
+        return {**verdict, "status": "FAIL", "why": "cost_above", "reason": f"cost per solved task above {best}'s; "
                                                        f"95% interval of the difference ${low:.4f} to ${high:.4f}"}
-    return {**verdict, "status": "PARTIAL", "reason": f"not significant against {best}"}
+    return {**verdict, "status": "PARTIAL", "why": "not_significant", "reason": f"not significant against {best}"}
 
 
 def _coverage_gap(runs: list[dict], router: str, base: list[str]) -> str | None:
@@ -150,15 +152,27 @@ def splitting_tasks(runs: list[dict], strong: str = SPLIT_STRONG, weak: str = SP
     return out
 
 
+def _holm(ps: dict[str, float]) -> dict[str, float]:
+    """Holm's step-down adjustment of one-sided p values, so a family of tests holds ALPHA as a whole."""
+    out, running = {}, 0.0
+    for i, (name, p) in enumerate(sorted(ps.items(), key=lambda kv: (kv[1], kv[0]))):
+        running = max(running, min(1.0, (len(ps) - i) * p))
+        out[name] = running
+    return out
+
+
 def _quality(cells: dict, runs: list[dict], router: str, routers: frozenset[str], forced: dict, gap: str | None) -> dict:
     """What the pass rates say about quality. The router's rate is set against every baseline with an exact
-    one-sided test. When the weakest forced baseline can't be told from the strongest, the tasks can't tell models
-    apart, so the class is `saturated` and no claim is made either way."""
+    one-sided test, Holm-adjusted across the baselines, and only against a baseline with MIN_RUNS runs. When the
+    weakest forced baseline can't be told from the strongest, the tasks can't tell models apart, so the class is
+    `saturated` and no claim is made either way. A result that isn't significant is not parity."""
     base = {name: cell for name, cell in cells.items() if name != router and name not in routers}
     ours = cells.get(router)
-    against = {name: {"pass_rate": cell["pass_rate"], "pass_ci": cell["pass_ci"],
-                      "behind": _lower_p(ours["solved"], ours["runs"], cell["solved"], cell["runs"]) < ALPHA,
-                      "ahead": _lower_p(cell["solved"], cell["runs"], ours["solved"], ours["runs"]) < ALPHA}
+    tested = {name: _lower_p(ours["solved"], ours["runs"], cell["solved"], cell["runs"])
+              for name, cell in base.items() if ours and min(ours["runs"], cell["runs"]) >= MIN_RUNS}
+    holm = _holm(tested)
+    against = {name: {"pass_rate": cell["pass_rate"], "pass_ci": cell["pass_ci"], "p_behind": tested.get(name),
+                      "behind": holm.get(name, 1.0) < ALPHA}
                for name, cell in sorted(base.items())} if ours else {}
     ladder = sorted((n for n in base if n in forced), key=lambda n: (forced[n], n))
     weak, strong = (ladder[0], ladder[-1]) if ladder else (None, None)
@@ -179,12 +193,17 @@ def _quality(cells: dict, runs: list[dict], router: str, routers: frozenset[str]
     if p >= ALPHA:
         return {**out, "saturated": True, "reason": f"{seen}, a gap that could be chance, so these tasks can't "
                                                     "tell models apart; no quality claim"}
+    batches = {c: {r.get("_batch") for r in runs if r["config"] == c} for c in (router, *base)}
+    mixed = " The router and some baselines ran in different batches." if any(
+        batches[c] != batches[router] for c in base) else ""
     behind = [n for n, a in against.items() if a["behind"]]
     if behind:
         return {**out, "saturated": False, "claim": "BEHIND",
-                "reason": f"{seen}; the router solved fewer than {', '.join(behind)} beyond noise"}
-    return {**out, "saturated": False, "claim": "LEVEL",
-            "reason": f"{seen}; no baseline solved more than the router beyond noise"}
+                "reason": f"{seen}; the router solved fewer than {', '.join(behind)} beyond noise (Holm-adjusted "
+                          f"across the baselines).{mixed}".rstrip(".")}
+    return {**out, "saturated": False, "claim": "NOT SHOWN BEHIND",
+            "reason": f"{seen}; no baseline solved more than the router beyond noise, which isn't parity: "
+                      f"{MIN_RUNS} runs per cell can't show it.{mixed}".rstrip(".")}
 
 
 def summarize(rows: list[dict], *, routers: frozenset[str], router: str = "plugin", draws: int = 2000,
@@ -574,8 +593,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "Claim \"cheapest\" only for a PASS row, and link its raw data.",
         *(["", f"{saturated} of {len(summary)} class rows below are saturated: the weakest forced baseline solved "
               "as many runs as the strongest, within noise, so these tasks can't tell models apart. No claim about "
-              "quality, for or against the router, rests on a saturated row, and its PASS or FAIL is a cost result "
-              "only. See each table's Quality list."] if saturated else []),
+              "quality, for or against the router, rests on a saturated row. Its PASS or FAIL says nothing about quality, "
+              "except that a FAIL for a pass rate behind the cheapest baseline stands. See each table's Quality list."] if saturated else []),
     ])
     body = "\n".join([
         "## How to read it", "",
@@ -586,15 +605,21 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "percentile bootstrap intervals over runs (2,000 resamples), and each cell resamples from a generator "
         "seeded by its session model, class and configuration, so a cell's interval doesn't change when another "
         "configuration is added.",
-        "- Quality: the router's pass rate is tested against every baseline with an exact one-sided test (5%). A "
+        f"- Quality: the router's pass rate is tested against every baseline that has {MIN_RUNS} runs, with an exact "
+        "one-sided test (5%) adjusted across the baselines (Holm). BEHIND means a baseline solved more beyond "
+        "noise. NOT SHOWN BEHIND means none did, which is not parity: a test that finds no gap in "
+        f"{MIN_RUNS} runs per cell can't rule out a large one (a router at 7 of 10 against 10 of 10 isn't "
+        "significant), so the page claims no parity. The router's rows and a baseline's may come from different "
+        "batches, which the Quality line notes. A "
         "class is saturated when the weakest forced baseline (every subagent on the weakest model) can't be told "
         "from the strongest by the same test; then the tasks can't show a quality difference and no quality claim "
         "is made. Without forced baselines on two models the class has no quality claim either. A class is PARTIAL "
         "when its configurations didn't run the same tasks the same number of times, and runs on an earlier "
         "revision of a task are left out of every table.",
-        f"- PASS means the router's cost per solved task is below the best baseline's with the whole 95% interval "
-        f"of the difference below zero, and its pass rate is not behind beyond noise. FAIL means it is behind on "
-        f"either. PARTIAL means a tie, a difference inside the noise, or fewer than {MIN_RUNS} runs per "
+        f"- PASS means the router's cost per solved task is below the cheapest baseline's with the whole 95% interval "
+        f"of the difference below zero, and its pass rate is not behind the cheapest baseline's beyond noise (a "
+        f"bootstrap interval of the difference in pass rates, against that one baseline only). FAIL means it is "
+        f"behind on either. PARTIAL means a tie, a difference inside the noise, or fewer than {MIN_RUNS} runs per "
         "configuration. The best baseline is the one with the lowest cost per solved task.",
         "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest. A router "
         "variant (another configuration that loads the plugin) has its own column but is never a baseline.",
@@ -699,28 +724,188 @@ def _page(results: Results, summary: list[dict]) -> dict:
 def build_page(results: Results, router: str | None = None, current: str | None = None) -> str:
     parts = sessions(results, router)
     summary = [row for _, _, part, _ in parts for row in part]
-    kept = bool(current and current.startswith("<!-- Page head") and HEAD_END in current)
+    kept = bool(current and current.startswith(HEAD_START) and HEAD_END in current)
     head = current.split(HEAD_END, 1)[0] + HEAD_END if kept else ""
     return head + render_sessions(parts, _page(results, summary), results.routers)
 
 
-def summary_data(results: Results, router: str | None = None) -> dict:
-    """The page's figures as data, for the docs chart."""
+OPUS, SONNET = "claude-opus-5-5", "sonnet"  # the session models the docs' prose is about
+NEARLY = 0.95  # "solves nearly every run": at least this share of runs
+# The configurations the docs' prose names for each session, and what it says about them.
+PROSE = {
+    OPUS: {"ran": {"defaults", "haiku", "haiku-high", "opus", "opus-high", "fable", "fable-high", "opusplan", "advisor"},
+           "cheaper": ("haiku-high", "opusplan"), "best_in": {"opusplan", "haiku", "haiku-high"},
+           "level_as_defaults": ("opus", "opus-high", "advisor"), "example": ("bugfix", "opusplan")},
+    SONNET: {"ran": {"defaults", "sonnet-medium", "sonnet-high", "opusplan"}, "miss": ("design", "sonnet-medium")},
+}
+FACT_TEXT = {
+    "solved_all": "the router and the defaults solved every run",
+    "solved_as_many": "the router solved as many runs as the defaults",
+    "one_miss": "the router missed one run, in a class where its best baseline solved them all",
+    "strongest_beaten": "the router beat every subagent on the strongest model outside the noise in every class",
+    "level_as_defaults": "the router beat the Opus and advisor baselines in every class but the ones where it is level with the defaults",
+    "cheaper_everywhere": "the named cheap baselines cost less than the router in every class",
+    "not_cheapest": "the router is not the cheapest configuration over all runs",
+    "best_named": "the best baseline in every FAIL class is one the docs name",
+    "partial_for_runs": "every PARTIAL class is PARTIAL for lack of runs",
+    "fail_on_cost": "every FAIL class fails on cost per solved task, not on pass rate",
+    "not_behind": "the router's pass rate is not behind its best baseline's beyond noise in any class",
+    "no_gain": "the router's pass rate is not ahead of its best baseline's beyond noise in any class",
+    "no_pass": "no class is PASS",
+    "example": "the docs' example class: the router is cheaper than the defaults and dearer than the named baseline",
+    "nearly_all": f"the best baseline over all runs solved at least {NEARLY:.0%} of them",
+    "ran": "the configurations that ran are the ones the docs list",
+}
+
+
+def _pooled(rows: list[dict]) -> dict:
+    out: dict[str, dict] = {}
+    for r in rows:
+        cell = out.setdefault(r["config"], {"runs": 0, "solved": 0, "cost_usd": 0.0})
+        cell["runs"] += 1
+        cell["solved"] += bool(r["passed"])
+        cell["cost_usd"] += float(r["total_cost_usd"])
+    return out
+
+
+def _per_solved(cell: dict | None) -> float | None:
+    return cell["cost_usd"] / cell["solved"] if cell and cell["solved"] else None
+
+
+def _below(low: float | None, high: float | None) -> bool:
+    return low is not None and high is not None and low < high
+
+
+def roles(results: Results, router: str, pooled: dict) -> dict:
+    """The configurations that play each part in a session: the router, Claude Code's defaults (no plugin, no
+    forced model), the baseline with the lowest cost per solved task over all runs, and the strongest forced one."""
+    base = [c for c in pooled if c != router and c not in results.routers]
+    best = min((c for c in base if pooled[c]["solved"]), key=lambda c: (_per_solved(pooled[c]), c), default=None)
+    plain = [c["id"] for c in results.configs if c["id"] in pooled
+             and not (c.get("plugin") or c.get("env") or c.get("model") or c.get("args"))]
+    return {"router": router if router in pooled else None, "defaults": plain[0] if plain else None, "best": best,
+            "strongest": max((c for c in base if c in results.forced), key=lambda c: (results.forced[c], c), default=None)}
+
+
+def _against(classes: list[dict], router: str, cfg: str) -> dict:
+    """How the router stands against one baseline, class by class. A class with too few runs, or whose cells
+    differ, is no win and no loss, so its interval is never read."""
+    cps = lambda c, name: c["configs"][name]["cost_per_solved"]  # noqa: E731
+    diffs = [(c, c["differences"][cfg]) for c in classes
+             if cfg in c["differences"] and (c["status"] != "PARTIAL" or c["why"] == "not_significant")]
+    below = [c for c, (lo, hi) in diffs if hi < 0]
+    less = [1 - cps(c, router) / cps(c, cfg) for c in below if cps(c, cfg) and cps(c, router) is not None]
+    return {"below": [c["class"] for c in below], "level": [c["class"] for c, (lo, hi) in diffs if lo <= 0 <= hi],
+            "less": (min(less), max(less)) if less else None,
+            "best_in": [c["class"] for c in classes if c["best_baseline"] == cfg and c["status"] == "FAIL"]}
+
+
+def _behind(classes: list[dict], router: str) -> dict | None:
+    """The router's cost per solved task over the best baseline's, as a fraction, in the FAIL classes."""
+    cps = lambda c, name: c["configs"][name]["cost_per_solved"]  # noqa: E731
+    over = [(cps(c, router) / cps(c, c["best_baseline"]) - 1, c["class"]) for c in classes
+            if c["status"] == "FAIL" and c["best_baseline"] and cps(c, router) is not None and cps(c, c["best_baseline"])]
+    return {"min": min(over, key=lambda o: o[0]), "max": max(over, key=lambda o: o[0])} if over else None
+
+
+def facts(session: dict, routers: frozenset[str], forced: dict) -> dict[str, bool]:
+    """The yes/no claims the docs' prose makes about a session, each true or false by its rows. Empty for a
+    session the prose says nothing about."""
+    named = PROSE.get(session["model"])
+    if named is None:
+        return {}
+    classes, pooled, role = session["classes"], session["pooled"], session["roles"]
+    router, defaults, best = role["router"], role["defaults"], role["best"]
+    row = lambda name: next((c for c in classes if c["class"] == name), None)  # noqa: E731
+    cps = lambda c, name: c["configs"][name]["cost_per_solved"] if name in c["configs"] else None  # noqa: E731
+    beaten = lambda name: bool(classes) and all(name in c["differences"] and c["differences"][name][1] < 0  # noqa: E731
+                                                for c in classes)
+    unbeaten = lambda name: {c["class"] for c in classes if not (name in c["differences"]  # noqa: E731
+                                                                  and c["differences"][name][1] < 0)}
+    solved = lambda name: name in pooled and pooled[name]["solved"] == pooled[name]["runs"]  # noqa: E731
+    fails = [c for c in classes if c["status"] == "FAIL"]
+    against = lambda c: c["quality"]["against"].get(c["best_baseline"])  # noqa: E731
+
+    def ahead(c):  # the router's rate above its best baseline's beyond noise, with the same run gate as BEHIND
+        ours, theirs = c["configs"].get(router), c["configs"].get(c["best_baseline"])
+        return bool(ours and theirs and min(ours["runs"], theirs["runs"]) >= MIN_RUNS
+                    and _lower_p(theirs["solved"], theirs["runs"], ours["solved"], ours["runs"]) < ALPHA)
+
+    out = {
+        "partial_for_runs": all(c["why"] == "few_runs" for c in classes if c["status"] == "PARTIAL"),
+        "fail_on_cost": all(c["why"] == "cost_above" for c in fails),
+        "not_behind": all(against(c) is not None and not against(c)["behind"] for c in classes if c["best_baseline"]),
+        "no_gain": all(not ahead(c) for c in classes if c["best_baseline"]),
+        "no_pass": not any(c["status"] == "PASS" for c in classes),
+        "nearly_all": best is not None and pooled[best]["solved"] >= NEARLY * pooled[best]["runs"],
+        "ran": {c for c in pooled if c != router and c not in routers} == named["ran"],
+    }
+    if "cheaper" in named:
+        out["solved_all"] = solved(router) and solved(defaults)
+        top = [c for c in pooled if c in forced and role["strongest"] and forced[c][0] == forced[role["strongest"]][0]]
+        out["strongest_beaten"] = bool(top) and all(beaten(c) for c in top)
+        out["level_as_defaults"] = defaults is not None and all(unbeaten(c) == unbeaten(defaults)
+                                                                for c in named["level_as_defaults"])
+        out["cheaper_everywhere"] = bool(classes) and all(
+            n in c["configs"] and router in c["configs"] and _below(cps(c, n), cps(c, router))
+            for c in classes for n in named["cheaper"])
+        out["not_cheapest"] = _below(_per_solved(pooled.get(best)), _per_solved(pooled.get(router)))
+        out["best_named"] = all(c["best_baseline"] in named["best_in"] for c in fails)
+        name, other = named["example"]
+        ex = row(name)
+        out["example"] = ex is not None and _below(cps(ex, router), cps(ex, defaults)) \
+            and _below(cps(ex, other), cps(ex, router))
+    if "miss" in named:
+        name, other = named["miss"]
+        ex = row(name)
+        mine, theirs = pooled.get(router), pooled.get(defaults)
+        out["solved_as_many"] = bool(mine and theirs) and mine["solved"] >= theirs["solved"]
+        cell = lambda name: (ex or {}).get("configs", {}).get(name)  # noqa: E731
+        out["one_miss"] = bool(mine and cell(router) and cell(other)) and mine["runs"] - mine["solved"] == 1 \
+            and cell(router)["solved"] < cell(router)["runs"] and ex["best_baseline"] == other \
+            and cell(other)["solved"] == cell(other)["runs"]
+    return out
+
+
+def broken_facts(data: dict) -> list[str]:
+    """One line for each fact in `data` (from `figures`) that is false."""
+    return [f"{s['model']}: {FACT_TEXT[name]} is false now" for s in data["sessions"]
+            for name, ok in s["facts"].items() if not ok]
+
+
+def figures(results: Results, router: str | None = None) -> dict:
+    """The page's figures as data, for the docs: per session model, each table's classes, the figures over all
+    runs, the roles (router, defaults, best, strongest), how the router stands against each baseline, and the
+    facts the docs' prose relies on."""
     rows = results.rows
     dates = sorted(r["started_at"][:10] for r in rows)
     out = []
     for model, chosen, classes, group in sessions(results, router):
-        pooled: dict[str, dict] = {}
-        for r in group:
-            cell = pooled.setdefault(r["config"], {"runs": 0, "solved": 0, "cost_usd": 0.0})
-            cell["runs"] += 1
-            cell["solved"] += bool(r["passed"])
-            cell["cost_usd"] += float(r["total_cost_usd"])
+        pooled = _pooled(group)
+        role = roles(results, chosen, pooled)
         ref = next((c.get("plugin_ref") for c in results.configs if c["id"] == chosen), None)
-        out.append({"model": model, "router": chosen, "plugin_ref": ref, "classes": classes, "pooled": pooled})
+        baselines = sorted({cfg for c in classes for cfg in c["differences"]})
+        pool_router = _per_solved(pooled[chosen]) if chosen in pooled else None
+        session = {"model": model, "router": chosen, "plugin_ref": ref, "classes": classes, "pooled": pooled,
+                   "roles": role, "against": {cfg: _against(classes, chosen, cfg) for cfg in baselines},
+                   "behind": _behind(classes, chosen),
+                   "pooled_less": {cfg: 1 - pool_router / _per_solved(pooled[cfg]) for cfg in baselines
+                                   if pool_router is not None and cfg in pooled and pooled[cfg]["solved"]},
+                   "saturated": sum(bool(c["quality"]["saturated"]) for c in classes)}
+        out.append({**session, "facts": facts(session, results.routers, results.forced)})
     return {"runs": len(rows), "usd": sum(float(r["total_cost_usd"]) for r in rows),
             "dates": [dates[0], dates[-1]] if dates else [], "claude_versions": sorted({r["claude_version"] for r in rows}),
+            "per_cell": sorted({cell["runs"] for s in out for c in s["classes"] for cell in c["configs"].values()}),
+            "tasks": len({r["task"] for r in rows}), "tasks_total": len(results.tasks),
             "sessions": out}
+
+
+def check(results: Results, out: Path, current: str | None, router: str | None = None) -> list[str]:
+    """Why `out`, whose text is `current`, doesn't match the results: a stale page, or a fact the docs state
+    that the rows no longer bear out."""
+    stale = [f"{out}: out of date, run python3 bench/analyze.py bench/results/*.jsonl --out {out}"] \
+        if current != build_page(results, router, current) else []
+    return stale + broken_facts(figures(results, router))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -729,22 +914,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--router", help="the router configuration (default: per session model, the first "
                                              "configuration in configs.json that loads the plugin)")
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--check", action="store_true", help="fail when --out differs from the page the results give")
+    parser.add_argument("--check", action="store_true", help="fail when --out differs from the page the results give, or a fact the docs state about the rows is false")
     args = parser.parse_args(argv)
     try:
         # As text, so a checkout that turned the page's line endings to CRLF still matches.
         current = args.out.read_text(encoding="utf-8") if args.out.is_file() else None
     except (OSError, UnicodeDecodeError):
         current = None
-    page = build_page(load(args.results), args.router, current)
+    results = load(args.results)
     if not args.check:
-        args.out.write_text(page, encoding="utf-8")
+        args.out.write_text(build_page(results, args.router, current), encoding="utf-8")
         return 0
-    if current == page:
-        return 0
-    print(f"{args.out}: out of date, run python3 bench/analyze.py bench/results/*.jsonl --out {args.out}",
-          file=sys.stderr)
-    return 1
+    problems = check(results, args.out, current, args.router)
+    for problem in problems:
+        print(problem, file=sys.stderr)
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":

@@ -99,23 +99,33 @@ _RULED_OUT = rf"\b(?:avoid|must not|not to|out of scope)\b:?{_CLAUSE}"
 # Work whose point is a defect. "fix" and "debug" count only as verbs ("the fix", "fixture", "debug logging" don't),
 # and "fix" before "#" is a closing keyword. The other hunt verbs are matched as they are.
 _VERB_START = r"(?:^|\n)[ \t]*|[.;:!?,]\s+|\b(?:and|then|to|please|must|should|or|so)\s+"
-_DEFECT = (rf"(?:{_VERB_START})(?:fix(?:es|ing)?\b(?!\s*#)|debug\b(?!{_COMPOUND}|\s+logging\b))|"
-           rf"\bfix(?:es|ing)?(?={_OBJECT})|\b(?:{_HUNT_OTHER})\b")
+_FIX = (rf"(?:{_VERB_START})(?:fix(?:es|ing)?\b(?!\s*#)|debug\b(?!{_COMPOUND}|\s+logging\b))|"
+        rf"\bfix(?:es|ing)?(?={_OBJECT})")
+_HUNT = rf"\b(?:{_HUNT_OTHER})\b"
+_DEFECT = rf"{_FIX}|{_HUNT}"
+# A person's request says "analyze the sales numbers" about data as often as about code, so there a hunt verb
+# counts only beside a word for a defect.
+_DEFECT_NOUN = (r"\b(?:bugs?|failures?|failing|errors?|flaky|crash(?:es|ed|ing)?|regressions?|broken|races?|"
+                r"leak(?:s|ing)?)\b")
 _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"
 _LOOKUP = (r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|describe|summari[sz]e|"
            r"is there|does)\b")
 # What an agent is for, read from its name. Names are short and deliberate; descriptions
 # mention too many things in passing to be read this way. Each pattern must match a whole part of
 # the name, so "researcher", "relocation-migrator" and "information-extractor" aren't search agents.
-_HEAVY_NAME = (r"architects?|review(?:s|ers?|ing)?|audit(?:s|ors?|ing)?|secur(?:e|ity)|debug(?:gers?|ging)?|"
-               r"design(?:ers?|ing)?|plann(?:ers?|ing)|solver")
+_HEAVY_NAME = (r"architect(?:s|ure|ural)?|review(?:s|ers?|ing)?|audit(?:s|ors?|ing)?|(?:cyber)?secur(?:e|ity)|"
+               r"debug(?:gers?|ging)?|design(?:ers?|ing)?|plann(?:ers?|ing)|solver")
 _LIGHT_NAME = (r"explor(?:e|ers?|ing)|search(?:ers?|ing)?|scouts?|find(?:ers?)?|lookups?|locat(?:e|ors?)|"
                r"fetch(?:ers?)?|summar(?:y|ies|i[sz]ers?)|format(?:ters?)?|lint(?:ers?)?|runners?|"
-               r"verif(?:y|iers?|ication)|docs?|grep")
+               r"verif(?:y|iers?|ication)|grep")
+# Light only before another part: "docs-lookup" reads the docs, "update-docs" writes them.
+_LIGHT_LEAD = r"docs?"
 
 
-def _named_for(name: str, pattern: str) -> bool:
-    return any(re.fullmatch(pattern, part) for part in re.split(r"[-_:]", name))
+def _named_for(name: str, pattern: str, lead: str | None = None) -> bool:
+    parts = re.split(r"[-_:]", name)
+    return (any(re.fullmatch(pattern, part) for part in parts)
+            or bool(lead) and any(re.fullmatch(lead, part) for part in parts[:-1]))
 
 
 @dataclass(frozen=True)
@@ -141,7 +151,7 @@ ROLES = {
     "heavy": Role("heavy", floor=Level.complex),
     "light": Role("light", cap=Level.standard),
 }
-_KIND_NAMES = {"heavy": _HEAVY_NAME, "light": _LIGHT_NAME}
+_KIND_NAMES = {"heavy": (_HEAVY_NAME, None), "light": (_LIGHT_NAME, _LIGHT_LEAD)}
 _CHECKERS = ("verifier", "reviewer")
 
 
@@ -151,7 +161,8 @@ def role(agent_type: object) -> Role:
     found = ROLES.get(name)
     if found is None:
         short = name.split(":")[-1].lower()
-        found = next((ROLES[kind] for kind, pattern in _KIND_NAMES.items() if _named_for(short, pattern)), Role())
+        found = next((ROLES[kind] for kind, (pattern, lead) in _KIND_NAMES.items()
+                      if _named_for(short, pattern, lead)), Role())
     return replace(found, checker=True) if name.endswith(_CHECKERS) else found
 
 
@@ -203,8 +214,11 @@ def signals(text: str) -> list[str]:
     return [name for name in found if name != "load" or re.search(_CHOICE, text)]
 
 
-def _fixes_a_defect(asked: str) -> bool:
-    return bool(re.search(_DEFECT, re.sub(_RULED_OUT, "", asked)))
+def _fixes_a_defect(asked: str, request: bool = False) -> bool:
+    asked = re.sub(_RULED_OUT, "", asked)
+    if not request:
+        return bool(re.search(_DEFECT, asked))
+    return bool(re.search(_FIX, asked) or re.search(_HUNT, asked) and re.search(_DEFECT_NOUN, asked))
 
 
 @dataclass(frozen=True)
@@ -213,7 +227,7 @@ class Reading:
     whether it asks for a change or for reasoning, whether it fixes or hunts a defect, frontier and
     thoroughness wording, whether it is phrased as a lookup, whether it is English, and how long it is.
     `judgment` (asks to review, design or plan) and `systems` (names several systems in a list) are the
-    call's own extra reasons for complex."""
+    call's own extra reasons for complex, and `request_defect` is the request's narrower defect rule."""
     signals: tuple[str, ...]
     acts: frozenset[str]  # "change" and "reason"
     defect: bool
@@ -224,6 +238,7 @@ class Reading:
     length: int
     judgment: bool = False
     systems: bool = False
+    request_defect: bool = False
 
 
 def read(text: str, limits: bool = True) -> Reading:
@@ -244,7 +259,8 @@ def read(text: str, limits: bool = True) -> Reading:
     return Reading(signals=tuple(hits), acts=frozenset(acts), defect=_fixes_a_defect(asked),
                    frontier=bool(re.search(_FRONTIER, seen)), thorough=bool(re.search(_THOROUGH, text)),
                    lookup_form=bool(re.search(_LOOKUP, text)), english=not _not_english(text), length=len(text),
-                   judgment=bool(re.search(_JUDGMENT, seen)), systems=bool(re.search(rf"\b{_SYSTEMS}\b", seen)))
+                   judgment=bool(re.search(_JUDGMENT, seen)), systems=bool(re.search(rf"\b{_SYSTEMS}\b", seen)),
+                   request_defect=_fixes_a_defect(asked, request=True))
 
 
 def level(reading: Reading, kind: str, role: Role | None = None) -> dict:
@@ -270,7 +286,7 @@ def _request_level(r: Reading) -> dict:
         result = Level.lookup
     else:
         result = Level.standard
-    if result < Level.complex and r.defect:
+    if result < Level.complex and r.request_defect:
         result, hits = Level.complex, hits + ["fixes or hunts a defect"]
     return {"level": result, "signals": hits}
 
@@ -306,7 +322,8 @@ def _call_level(r: Reading, held: Role) -> dict:
 
 def profile_prompt(prompt: str) -> dict:
     """The user's request as a whole. Used to tell whether the conversation's own model
-    is strong enough for it. Fixing or hunting a defect is at least complex, as in profile_call."""
+    is strong enough for it. Fixing or hunting a defect is at least complex, as in profile_call, except that a
+    hunt verb such as "analyze" counts only beside a defect word such as "bug" or "failing"."""
     reading = read(prompt, limits=False)
     return {**level(reading, "request"), "changes": "change" in reading.acts}
 

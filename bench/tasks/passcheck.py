@@ -100,10 +100,16 @@ def finding(work: Path, target: str, lines: set) -> bool:
 
 
 def tests_pass(work: Path, shipped: Path, test: str) -> bool:
-    if (Path(work) / test).read_bytes() != (Path(shipped) / test).read_bytes():
-        return False  # the test is the spec; changing it doesn't count
-    res = subprocess.run([sys.executable, "-I", "-c", LAUNCHER, str(work), test[:-3]], cwd=work,
-                         capture_output=True, text=True, timeout=60)
+    """Whether the work dir's copy of the shipped test is unchanged and passes. A test the run removed, made
+    unreadable or left hanging, or output that isn't UTF-8, is False; a shipped test that can't be read raises."""
+    spec = (Path(shipped) / test).read_bytes()
+    try:
+        if (Path(work) / test).read_bytes() != spec:
+            return False  # the test is the spec; changing it doesn't count
+        res = subprocess.run([sys.executable, "-I", "-c", LAUNCHER, str(work), test[:-3]], cwd=work,
+                             capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
+        return False
     return res.returncode == 0 and re.search(r"Ran [1-9]\d* tests?", res.stderr) is not None and "OK" in res.stderr
 
 
