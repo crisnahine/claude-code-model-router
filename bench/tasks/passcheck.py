@@ -79,7 +79,8 @@ def tests_pass(work: Path, shipped: Path, test: str) -> bool:
 
 def probe(work: Path, script: Path, payload, timeout: int = 45):
     """Run script in an isolated child on the work dir, with payload as JSON on stdin; return the JSON its last stdout
-    line holds, or None on a timeout, a non-zero exit, no output or a last line that isn't JSON."""
+    line holds (trailing blank lines don't count), or None on a timeout, output that isn't valid UTF-8, a non-zero exit,
+    no output or a last line that isn't JSON."""
     try:
         res = subprocess.run([sys.executable, "-I", str(script), str(work)], cwd=work, input=json.dumps(payload),
                              capture_output=True, text=True, timeout=timeout)

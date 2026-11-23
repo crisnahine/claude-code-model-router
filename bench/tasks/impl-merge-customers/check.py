@@ -27,7 +27,7 @@ def scramble(rng, text):
 
 def generate(seed):
     rng = random.Random(seed)
-    ids = rng.sample(range(1, 400), 90)
+    ids = rng.sample(range(1, 400), 100)
     customers = []
     for n in range(22):
         base = f"user{n}.{rng.choice('abcdef')}@{rng.choice(['shop', 'mail', 'corp'])}.test"
@@ -38,6 +38,9 @@ def generate(seed):
     customers.append([ids.pop(), "émile@shop.test", None, rng.choice(STAMPS)])
     customers.append([ids.pop(), "zoë@shop.test", None, STAMPS[0]])
     customers.append([ids.pop(), "ZOë@SHOP.test", "Zoe", STAMPS[0]])
+    customers.append([ids.pop(), "donor@shop.test", None, STAMPS[1]])
+    customers.append([ids.pop(), " Donor@shop.test", "Early", STAMPS[3]])
+    customers.append([ids.pop(), "DONOR@SHOP.TEST", "Late", STAMPS[5]])
     customers.append([ids.pop(), "\ttab@shop.test", "Tab", rng.choice(STAMPS)])
     customers.append([ids.pop(), "tab@shop.test", "Tab too", rng.choice(STAMPS)])
     rng.shuffle(customers)
@@ -88,13 +91,22 @@ def expected(rows):
             "addresses": [[i, owner[c], line] for i, c, line in rows["addresses"]], "view": view,
             "email_index": ["u", "NOCASE"], "email_notnull": 1,
             "fks": {"orders": [["customers", "CASCADE"]], "addresses": [["customers", "CASCADE"]]},
-            "duplicate_rejected": True}
+            "duplicate_rejected": True, "objects": [["table", t] for t in ("addresses", "customers", "orders")]
+            + [["view", "customer_totals"]],
+            "columns": {"customers": [[0, "id", "INTEGER", 0, None, 1], [1, "email", "TEXT", 1, None, 0],
+                                      [2, "name", "TEXT", 0, None, 0], [3, "created_at", "TEXT", 1, None, 0]],
+                        "orders": [[0, "id", "INTEGER", 0, None, 1], [1, "customer_id", "INTEGER", 1, None, 0],
+                                   [2, "total_cents", "INTEGER", 1, None, 0]],
+                        "addresses": [[0, "id", "INTEGER", 0, None, 1], [1, "customer_id", "INTEGER", 1, None, 0],
+                                      [2, "line", "TEXT", 1, None, 0]]},
+            "orders_index": ["customer_id"],
+            "indexes": ["orders_by_customer", "sqlite_autoindex_customers_1"]}
 
 
 def passes(work, schema, seed):
     rows = generate(seed)
     got = passcheck.probe(work, HERE / "probe.py", {"schema": schema, "rows": rows})
-    if not isinstance(got, dict) or "orders_by_customer" not in (got.pop("indexes", None) or []):
+    if not isinstance(got, dict):
         return False
     return json.dumps(got, sort_keys=True) == json.dumps(expected(rows), sort_keys=True)
 

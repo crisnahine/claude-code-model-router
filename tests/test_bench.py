@@ -1335,6 +1335,12 @@ class QualityTier(unittest.TestCase):
         db = self.source("impl-merge-customers", "repo/store/db.py")
         for text in (probe, db):
             self.assertIn("LEGACY_TRANSACTION_CONTROL", text)
+            self.assertIn("legacy_alter_table", text)
+
+    def test_sqlite_lower_folds_ascii_only(self):
+        conn = sqlite3.connect(":memory:")
+        self.assertEqual(conn.execute("SELECT lower('\u00c9'), lower('A')").fetchone(), ("\u00c9", "a"),
+                         "this SQLite is built with ICU, so lower() folds non-ASCII letters and the task's data is wrong")
 
     def test_migration_rejects_each_known_mistake(self):
         solution = self.source("impl-merge-customers", "solution/store/migrations/m0002_merge_customers.py")
@@ -1371,6 +1377,21 @@ class QualityTier(unittest.TestCase):
                 '        conn.execute("UPDATE customers SET email = lower(trim(email))")\n'
                 '        conn.execute("CREATE UNIQUE INDEX customers_email ON customers(email COLLATE NOCASE)")\n')),
             "names not filled": between(fill, '        conn.execute("UPDATE orders'),
+            "tie goes to the highest id": solution.replace("ORDER BY k.created_at, k.id", "ORDER BY k.created_at, k.id DESC"),
+            "latest donor names the kept customer": solution.replace(
+                "ORDER BY d.created_at, d.id LIMIT 1), name)", "ORDER BY d.created_at DESC, d.id LIMIT 1), name)"),
+            "backup table left behind": solution.replace(
+                '        conn.execute("DROP TABLE customers")\n',
+                '        conn.execute("CREATE TABLE customers_backup AS SELECT * FROM customers")\n'
+                '        conn.execute("DROP TABLE customers")\n'),
+            "view turned into a table": between(view, '        if conn.execute("PRAGMA foreign_key_check")', (
+                '        conn.execute("""\n            CREATE TABLE customer_totals AS\n'
+                '            SELECT c.id, c.email, COUNT(o.id) AS orders, COALESCE(SUM(o.total_cents), 0) AS cents\n'
+                '            FROM customers c LEFT JOIN orders o ON o.customer_id = c.id\n'
+                '            GROUP BY c.id""")\n')),
+            "created_at no longer required": solution.replace(
+                "created_at TEXT NOT NULL\n            )", "created_at TEXT\n            )"),
+            "primary key lost": solution.replace("id INTEGER PRIMARY KEY,\n                email", "id INTEGER,\n                email"),
             "view left in place": solution.replace('        conn.execute("DROP VIEW customer_totals")\n', ""),
             "not committed": solution.replace('        conn.execute("COMMIT")\n', ""),
         }
@@ -1378,6 +1399,18 @@ class QualityTier(unittest.TestCase):
             with self.subTest(name):
                 self.assertNotEqual(text, solution)
                 self.assertFalse(self.run_with("impl-merge-customers", {rel: text}))
+        noise = {
+            "writes to stdout": solution.replace("def upgrade(conn):\n", 'def upgrade(conn):\n    import sys\n'
+                                                 '    sys.stdout.write("done")\n'),
+            "swaps stdout": solution.replace("def upgrade(conn):\n", 'def upgrade(conn):\n    import os, sys\n'
+                                             '    sys.stdout = open(os.devnull, "w")\n'),
+            "prints at exit": solution.replace("import sqlite3\n", 'import atexit\nimport sqlite3\n\n'
+                                               'atexit.register(lambda: print(\'{"error": "late"}\'))\n', 1),
+        }
+        for name, text in noise.items():
+            with self.subTest(name):
+                self.assertNotEqual(text, solution)
+                self.assertTrue(self.run_with("impl-merge-customers", {rel: text}))
         legacy_rename = between(rebuild, view, (
             '        conn.execute("PRAGMA legacy_alter_table = ON")\n'
             '        conn.execute("ALTER TABLE customers RENAME TO old_customers")\n'

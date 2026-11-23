@@ -1,6 +1,7 @@
 import importlib
 import importlib.util
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -14,7 +15,8 @@ passcheck.use_work(Path(sys.argv[1]))
 payload = json.load(sys.stdin)
 out = {"error": None, "in_transaction": None, "foreign_keys": None, "fk_check": None, "integrity": None,
        "user_version": None, "customers": None, "orders": None, "addresses": None, "view": None,
-       "email_index": None, "email_notnull": None, "fks": None, "indexes": None, "duplicate_rejected": None}
+       "email_index": None, "email_notnull": None, "fks": None, "indexes": None, "duplicate_rejected": None,
+       "objects": None, "columns": None, "orders_index": None}
 
 
 def rows(conn, sql):
@@ -31,9 +33,11 @@ def email_index(conn):
 
 
 def rejects_duplicate(conn):
-    row = conn.execute("SELECT email FROM customers ORDER BY id LIMIT 1").fetchone()
+    emails = [r[0] for r in conn.execute("SELECT email FROM customers ORDER BY id") if r[0].isascii() and r[0].upper() != r[0]]
+    if not emails:
+        return False
     try:
-        conn.execute("INSERT INTO customers (email, created_at) VALUES (?, '9999')", (row[0].upper(),))
+        conn.execute("INSERT INTO customers (email, created_at) VALUES (?, '9999')", (emails[0].upper(),))
     except sqlite3.IntegrityError:
         return True
     finally:
@@ -67,7 +71,12 @@ try:
     out["email_notnull"] = [r[3] for r in conn.execute("PRAGMA table_info(customers)") if r[1] == "email"][0]
     out["fks"] = {t: [[r[2], r[6]] for r in conn.execute(f"PRAGMA foreign_key_list({t})")] for t in ("orders", "addresses")}
     out["indexes"] = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name")]
+    out["objects"] = rows(conn, "SELECT type, name FROM sqlite_master WHERE type IN ('table', 'view') ORDER BY type, name")
+    out["columns"] = {t: rows(conn, f"PRAGMA table_info({t})") for t in ("customers", "orders", "addresses")}
+    out["orders_index"] = [r[2] for r in conn.execute("PRAGMA index_info(orders_by_customer)")]
     out["duplicate_rejected"] = rejects_duplicate(conn)
 except BaseException as e:  # whatever state was read so far still goes out
     out["error"] = out["error"] or f"{type(e).__name__}: {e}"
-print(json.dumps(out))
+# Written to the file descriptor and followed by _exit, so nothing the migration left behind can add a later line.
+os.write(1, ("\n" + json.dumps(out) + "\n").encode())
+os._exit(0)
