@@ -14,29 +14,29 @@ The latest results, with the commands that produce them. Replace this file's num
 
 | Job | Result | Tests | Took |
 | :- | :- | :- | -: |
-| `test (ubuntu-latest, 3.13)` | success | 361 OK, 1 skipped | 36 s |
-| `test (ubuntu-24.04, 3.9)` | success | 361 OK, 1 skipped | 44 s |
-| `test (macos-latest, 3.9)` | success | 361 OK, 1 skipped | 128 s |
-| `test (macos-latest, 3.13)` | success | 361 OK, 1 skipped | 70 s |
-| `test (windows-latest, 3.9)` | success | 361 OK, 19 skipped | 127 s |
-| `test (windows-latest, 3.13)` | success | 361 OK, 19 skipped | 76 s |
-| `mod (ubuntu-latest)` | success | 18 of 18 pass | 8 s |
-| `mod (macos-latest)` | success | 18 of 18 pass | 11 s |
-| `mod (windows-latest)` | success | 18 of 18 pass | 16 s |
-| `typecheck` | success | the mod type-checks with `tsc` | 7 s |
-| `validate` | success | marketplace and plugin both "Validation passed" | 23 s |
+| `test (ubuntu-latest, 3.13)` | success | 378 OK, 1 skipped | 44 s |
+| `test (ubuntu-24.04, 3.9)` | success | 378 OK, 1 skipped | 45 s |
+| `test (macos-latest, 3.9)` | success | 378 OK, 1 skipped | 127 s |
+| `test (macos-latest, 3.13)` | success | 378 OK, 1 skipped | 94 s |
+| `test (windows-latest, 3.9)` | success | 378 OK, 19 skipped | 105 s |
+| `test (windows-latest, 3.13)` | success | 378 OK, 19 skipped | 92 s |
+| `mod (ubuntu-latest)` | success | 18 of 18 pass | 5 s |
+| `mod (macos-latest)` | success | 18 of 18 pass | 9 s |
+| `mod (windows-latest)` | success | 18 of 18 pass | 15 s |
+| `typecheck` | success | the mod type-checks with `tsc` | 9 s |
+| `validate` | success | marketplace and plugin both "Validation passed" | 12 s |
 
-The test counts come from each job's log (`gh run view --job <id> --log`), and the times from each job's start and end. Windows skips more because the stub `claude` the bench tests use is a shebang script. Commits after `27b94e6` have not run in CI yet. CI runs on pushes to `main` and on pull requests, so a work branch is covered once it has an open PR.
+The test counts come from each job's log (`gh run view --job <id> --log`), and the times from each job's start and end. Windows skips more because the stub `claude` the bench tests use is a shebang script. Commits after `b836649` have not run in CI yet. CI runs on pushes to `main` and on pull requests, so a work branch is covered once it has an open PR.
 
 ## Local
 
-Run 2026-11-23 on macOS (Darwin 27.2.0), on `27b94e6` and the commits after it, up to `38b11c3`, with the `780ee86` benchmark merged, plus the change that updated this file.
+Run 2026-11-23 on macOS (Darwin 27.2.0), on `27b94e6` and the commits after it, up to `ac5d76e` with the baseline run merged, plus the change that updated this file.
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 377 tests OK |
-| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 377 tests OK |
-| Unit tests, Python 3.15.2 | `python3.15 -m unittest discover -s tests` | 377 tests OK |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 390 tests OK |
+| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 390 tests OK |
+| Unit tests, Python 3.15.2 | `python3.15 -m unittest discover -s tests` | 390 tests OK |
 | Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 18 of 18 pass |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
@@ -45,7 +45,7 @@ Run 2026-11-23 on macOS (Darwin 27.2.0), on `27b94e6` and the commits after it, 
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 | Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78; run 2026-11-23 on `9b27510` |
 
-The 377 local tests are 319 in `tests/test_model_router.py`, 48 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 4 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 246 briefs over-routed (0.8%), budget 2%; 5 known under-routes" on each of the three interpreters. CI's run on `8ec8eec` had 180.
+The 390 local tests are 322 in `tests/test_model_router.py`, 58 in `tests/test_bench.py`, 3 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 4 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 246 briefs over-routed (0.8%), budget 2%; 5 known under-routes" on each of the three interpreters. CI's run on `8ec8eec` had 180.
 
 Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
 
@@ -141,3 +141,5 @@ Wall time: the rows from builds before `27b94e6`, under `bench/results/archive/e
 The `27b94e6` run (2026-11-22, Claude Code 2.1.330, the bench and the router at `27b94e6`, `bench_dirty` false on every row): `--runs 5` per task, so 10 per class and configuration, at `--budget 1.0`. Stage 1 was an Opus 5.5 session (`--model claude-opus-5-5`), `plugin` and `defaults` on all 16 tasks: 160 runs, $21.88. Stage 2 was a Sonnet session (`--model sonnet`), `plugin`, `defaults`, `sonnet-medium` and `sonnet-high`: 320 runs, $22.66. The total is $44.54 at list price. Every cell reached 10, and no run lost the network or hit a limit. Each class ran as its own `run.py` with one results file per class. Each stage ran its classes in parallel workers that shared the stage's cap ($30 and $36): 2 workers on Opus and 4 on Sonnet, each class's `--max-total` being what was left of its worker's share. That way `run.py`'s reserve of twice the budget held once per worker, not once per class. The 810 earlier rows went to `bench/results/archive/` with `git mv`, so the tables compare the router at `27b94e6` only with baselines run beside it, on the same commit, task revisions and Claude Code version.
 
 The `780ee86` run (2026-11-22 UTC, Claude Code 2.1.330, `bench_dirty` false on every row): `plugin-next`, the plugin exported from `780ee86`, which differs from this release in its license, a state-file fix and the architect's description, on every task, `--runs 5`, so 10 per class. Sonnet session: 80 runs, $6.01, under an $8 cap. Opus 5.5 session: 80 runs, $9.55, under a $12 cap. The total is $15.56 at list price. Every cell reached 10, and no run lost the network or hit a limit. The baselines weren't rerun: they are the `27b94e6` run's rows, on the same Claude Code version, machine and task revisions. These runs used `--budget 0.6` where the baselines used 1.0, so that `run.py`'s reserve of twice the budget fit one worker per stage under its cap. No `27b94e6` run had cost more than $0.37, so the lower cap ended no run. Commands: `python3 bench/run.py --configs plugin-next --runs 5 --budget 0.6 --model sonnet` (then `--model claude-opus-5-5`), one class at a time, each class's `--max-total` being what was left of the stage cap.
+
+The baseline run (2026-11-23, Claude Code 2.1.330, `bench_dirty` false on every row): `haiku`, `haiku-high`, `opus`, `opus-high`, `fable`, `fable-high`, `opusplan` and the advisor on an Opus 5.5 session (`--model claude-opus-5-5`), every task, 10 runs per class, `--budget 1.0` as for the existing baselines. That's 640 runs, $94.83, plus $0.22 for one run each of the advisor and `opusplan` first to check this account can run them, so $95.06 under a $100 cap. Every cell reached 10, the dearest run cost $0.39, and no run errored, lost the network or hit a limit. It ran in rounds (`--first-run`): one round of every task under all eight first, to measure each configuration's cost, then four more rounds for seven of them in four workers, then `fable-high`'s four in one worker, so a cap stop could never leave a cell uneven. `opusplan` sets its own session model, so its rows join both session tables on the page; headless, it never enters plan mode and runs Sonnet throughout.
