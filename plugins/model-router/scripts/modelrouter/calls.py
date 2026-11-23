@@ -186,7 +186,8 @@ def strongest(reg: Registry, session_id: str | None) -> str | None:
     current = request.load(session_id)
     ran = [r.model for r in map(_route, store.load_entry("routes", session_id).values())
            if r and r.model and _in(current, r)]
-    return max(ran, key=reg.strength, default=None)
+    # A model a repository added is only as strong as that repository claims, so it never counts.
+    return max((n for n in ran if n not in reg.models or reg.models[n].trusted), key=reg.strength, default=None)
 
 
 def _in(current: request.Request, route: Route) -> bool:

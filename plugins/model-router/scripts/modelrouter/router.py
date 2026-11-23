@@ -137,12 +137,15 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
 
     rule_model = reg.family(rule.model)
     if not requested and not rule_model and reg.family(rule.suggested):
-        # A project's model applies only when it isn't weaker than what the call would run on without it.
+        # A project's model applies only when it isn't weaker than what the call would run on without it, and
+        # never when the project added it: that model's strength is only the project's own claim.
         suggested, runs_on = reg.family(rule.suggested), target or out["was"]
-        if runs_on and not reg.stronger(runs_on, suggested):
+        asked = f"a project rule names {suggested} for {agent}"
+        if not reg.models[suggested].trusted:
+            out["held"] = f"{asked}, a model only that file vouches for"
+        elif runs_on and not reg.stronger(runs_on, suggested):
             rule_model = suggested
         else:
-            asked = f"a project rule names {suggested} for {agent}"
             out["held"] = (f"{asked}, weaker than {basis} {runs_on}" if runs_on
                            else f"{asked}, and the model the call would run on isn't known")
     if rule_model and not requested:
