@@ -179,6 +179,16 @@ test('forks and resumed runs pass through with no CLI call', async () => {
   assert.equal(mod.calls.length, 0)
 })
 
+test('a spawn sends its Agent call id, and a workflow agent sends none', async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  await mod.spawn(spawnEvent())
+  await mod.spawn(spawnEvent({ workflow: { runId: 'w1' } }))
+  await mod.spawn(spawnEvent({ tool_use_id: '' }))
+  assert.equal(mod.calls[0]!.stdin.tool_use_id, 'tu1')
+  assert.equal('tool_use_id' in mod.calls[1]!.stdin, false)
+  assert.equal('tool_use_id' in mod.calls[2]!.stdin, false)
+})
+
 test('a routed agent steps at the pick effort', async () => {
   const mod = load({ 'mod-spawn': PICK })
   await mod.spawn(spawnEvent())

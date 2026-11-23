@@ -3078,6 +3078,20 @@ class ModPayloads(Sandbox):
                          ("spawn", "mod", "subagent", "general-purpose", "haiku"))
         self.assertTrue(hooks.mod_active("s1"))
 
+    def test_siblings_keep_their_sent_ids_when_the_same_call_is_issued_again(self):
+        os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
+        refused = "API Error: 404 not_found_error: model: claude-haiku-5-5"
+        base = {**self.payloads["mod-spawn"], "cwd": str(self.project), "parent_agent_id": None,
+                "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
+        copies = [{**base, "tool_use_id": f"tu{i}"} for i in (1, 2, 3)]
+        self.assertEqual([hooks.mod_spawn(c)["model"] for c in copies[:2]], ["claude-haiku-5-5"] * 2)
+        self.assertEqual([calls.route_of("s1", "none", f"tu{i}").sent for i in (1, 2)], ["claude-haiku-5-5"] * 2)
+        hooks.agent_failed({**copies[0], "error": refused})
+        self.assertEqual(hooks.mod_spawn(copies[2])["model"], "haiku")  # the ID is routed around now
+        hooks.agent_failed({**copies[1], "error": refused})
+        self.assertEqual([r["model"] for r in self.ledger() if r["event"] == "model_error"], ["claude-haiku-5-5"] * 2)
+        self.assertTrue(health.load().healthy("haiku"))
+
     def test_turn_picks_an_effort(self):
         session.record("s1", "claude-opus-5-5")
         self.assertEqual(hooks.mod_turn(self.payloads["mod-turn"]), {"level": "complex", "effort": "high"})

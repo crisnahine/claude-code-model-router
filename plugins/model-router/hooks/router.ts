@@ -113,6 +113,8 @@ export const register: Register = (on, options) => {
       parent_agent_id: e.parentAgentId,
       parent_model: e.parentModel,
       kind: e.workflow ? 'workflow' : e.isTeammate ? 'teammate' : 'subagent',
+      // A workflow's id is shared by all of its agents, so it can't tell one route from another.
+      ...(e.tool_use_id && !e.workflow ? { tool_use_id: e.tool_use_id } : {}),
       tool_input: {
         subagent_type: e.subagentType,
         prompt: e.prompt,
