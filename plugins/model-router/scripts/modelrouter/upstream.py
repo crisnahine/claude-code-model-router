@@ -239,7 +239,7 @@ def _same_model(model_id: str, seen: str) -> bool:
 def diff(reviewed: dict, live: dict, routed: list[str] | None = None, in_use: list[str] | None = None) -> dict:
     """`routed` is the registry's model names; by default the ones this plugin ships.
     `in_use` is the full model IDs routed calls have really run as here."""
-    routed = list(routed if routed is not None else (cfg.base_config().get("models") or {}))
+    routed = list(routed if routed is not None else cfg.shipped().models)
     reviewed_version = reviewed.get("claude_code_version") or "0"
     old_pages, new_pages = reviewed.get("pages") or {}, live.get("pages") or {}
     added = sorted(set(new_pages) - set(old_pages))

@@ -188,7 +188,7 @@ def in_process(base: Path, calls: int, runs: int):
                       "tool_input": {"subagent_type": "general-purpose", "prompt": f"{BRIEFS[i % 3]} ({i})"}}
         started = time.perf_counter()
         snap = settings.Snapshot(hook_input)
-        router.decide(spawn.facts(hook_input, snap), snap.config, snap.options)
+        router.decide(spawn.facts(hook_input, snap), snap.registry, snap.options)
         decide.append((time.perf_counter() - started) * 1000)
 
     def routed_call(session: str, i: int, mod: bool) -> None:
@@ -268,7 +268,7 @@ def in_process(base: Path, calls: int, runs: int):
               "bytes_per_1000_calls": round(grown.get(name, 0) * 1000 / calls),
               "bounded": verdict.get(name, "not exercised")}
              for name in sorted(set(grown) | set(verdict) | set(STATE_FILES))]
-    label = "load_config + spawn.facts + router.decide (in process)"
+    label = "config.load + spawn.facts + router.decide (in process)"
     return summary(decide, digits=2, command=label, phase="warm"), state
 
 

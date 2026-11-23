@@ -14,8 +14,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import registry, store
+from . import store
 from .config import EFFORTS
+from .registry import Registry
 
 SOURCES = ("policy", "user", "project", "local", "flag")
 KEYS = ("availableModels", "deniedModels", "availableModelsMatch", "modelOverrides", "maxEffortLevel", "modelSettings")
@@ -87,28 +88,28 @@ def _layers(raw: object) -> dict[str, dict]:
     return {source: _layer(raw[source], source == "policy") for source in SOURCES if source in raw}
 
 
-def _blocked_family(config: dict, entry: str) -> str | None:
+def _blocked_family(reg: Registry, entry: str) -> str | None:
     """The registry model a deny entry blocks whole: one that names the family with no version.
     A version, or a context variant such as sonnet[1m], blocks that model only: Claude Code
     moves the alias to the newest permitted version, so the alias stays usable."""
     e = entry.strip().lower()
     if e in ("best", "opusplan", "default") or "[" in e:
         return None
-    if e in registry.models(config):
+    if e in reg.models:
         return e
-    return None if any(c.isdigit() for c in e) else registry.family(config, e)
+    return None if any(c.isdigit() for c in e) else reg.family(e)
 
 
-def _effective(config: dict, entries: tuple[str, ...]) -> tuple[str, ...]:
+def _effective(reg: Registry, entries: tuple[str, ...]) -> tuple[str, ...]:
     """An allow list as Claude Code applies it: an entry naming a specific model in a family (a
     version prefix, a full ID or a custom ID that embeds the family) turns off the entry that
     names the family itself (https://code.claude.com/docs/en/model-config.md, Merge behavior)."""
-    plain = set(registry.models(config)) | set(config.get("aliases") or {})
+    plain = set(reg.models) | set(reg.aliases)
 
     def bare(entry: str) -> str:
         return entry.strip().lower().split("[")[0]
 
-    specific = {registry.family(config, e) for e in entries if bare(e) not in plain} - {None}
+    specific = {reg.family(e) for e in entries if bare(e) not in plain} - {None}
     return tuple(e for e in entries if bare(e) not in specific)
 
 
@@ -122,21 +123,21 @@ class Allowlist:
     floor_allow: tuple[str, ...] | None = None  # the managed files' list, which must permit too
     effort_caps: tuple[dict, ...] = ()  # each source's maxEffortLevel and modelSettings caps
 
-    def permitted(self, config: dict) -> set[str]:
+    def permitted(self, reg: Registry) -> set[str]:
         """Registry models the lists leave open. An allow entry matches its family, so
         claude-opus-4-6 permits opus. A deny entry blocks a family only when it names the family."""
-        names = set(registry.models(config))
+        names = set(reg.models)
         for entries in (self.allow, self.floor_allow):
             if entries is not None:
-                found = {registry.family(config, e) for e in _effective(config, entries)}
+                found = {reg.family(e) for e in _effective(reg, entries)}
                 names = {n for n in names if n in found}
         if self.deny is not None:
-            blocked = {_blocked_family(config, e) for e in self.deny} - {None}
+            blocked = {_blocked_family(reg, e) for e in self.deny} - {None}
             # A project's model that resolves to a blocked family, such as `best`, goes with it.
-            names = {n for n in names if registry.family(config, n) not in blocked}
+            names = {n for n in names if reg.family(n) not in blocked}
         return names
 
-    def permits_id(self, config: dict, name: str, model_id: str) -> bool:
+    def permits_id(self, reg: Registry, name: str, model_id: str) -> bool:
         """Whether the full ID of family `name` may run: not ruled out by the lists or by
         modelOverrides, which Claude Code applies to the ID itself."""
         def names(entries: tuple[str, ...], prefix: bool) -> bool:
@@ -144,13 +145,13 @@ class Allowlist:
                        for e in entries)
 
         for entries in (self.allow, self.floor_allow):
-            if entries is not None and not names(_effective(config, entries), not self.exact):
+            if entries is not None and not names(_effective(reg, entries), not self.exact):
                 return False
         if self.deny is not None and names(self.deny, True):
             return False
         return not self.overrides
 
-    def effort_cap(self, config: dict, name: str | None) -> str | None:
+    def effort_cap(self, reg: Registry, name: str | None) -> str | None:
         """The highest effort `name`'s family may run at, or None for no cap. The lowest cap of any
         source applies, and a source's modelSettings entry for the model replaces its top-level
         one; "max" sets none (https://code.claude.com/docs/en/settings-reference.md#maxeffortlevel)."""
@@ -159,7 +160,7 @@ class Allowlist:
             # shortcut: modelSettings is keyed by model ID, and several IDs of one family read as the
             # highest of their caps; Claude Code still applies the exact one to each request.
             own = [v["maxEffortLevel"] for k, v in (layer.get("modelSettings") or {}).items()
-                   if name and registry.family(config, k) == name]
+                   if name and reg.family(k) == name]
             cap = max(own, key=EFFORTS.index) if own else layer.get("maxEffortLevel")
             if cap in EFFORTS and cap != "max":
                 found.append(cap)

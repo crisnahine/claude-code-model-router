@@ -9,14 +9,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import registry, store
-from .config import LEVEL_SOURCES
+from . import store
+from .config import LEVEL_SOURCES, Level
+from .registry import Registry
 
 
 @dataclass(frozen=True)
 class Request:
     prompt_id: str | None = None
-    level: str | None = None
+    level: Level | None = None
     need: str | None = None
     below: bool = False
     session_tier: str | None = None
@@ -29,7 +30,7 @@ class Request:
     routed: dict = field(default_factory=dict)
 
     @property
-    def floor(self) -> str | None:
+    def floor(self) -> Level | None:
         """The level strong role agents start no lower than, until a delivered message ends it."""
         return None if self.floor_off else self.level
 
@@ -62,6 +63,7 @@ _MAPS = ("calls", "routed")
 def load(session_id: str | None) -> Request:
     entry = store.load_entry("prompts", session_id)
     fields: dict = {k: entry[k] for k in _TEXT if isinstance(entry.get(k), str)}
+    fields["level"] = Level.parse(fields.get("level"))
     fields.update({k: entry[k] for k in _FLAGS if isinstance(entry.get(k), bool)})
     fields.update({k: entry[k] for k in _MAPS if isinstance(entry.get(k), dict)})
     return Request(**fields)
@@ -84,7 +86,7 @@ def deliver(session_id: str | None) -> None:
     store.update_entry("prompts", session_id, floor_off=True)
 
 
-def note_spawn(config: dict, session_id: str | None, key: str, model: str | None, *, level: str | None = None,
+def note_spawn(reg: Registry, session_id: str | None, key: str, model: str | None, *, level: str | None = None,
                effort: str | None = None, source: str | None = None, sent: str | None = None) -> str | None:
     """Record a spawned call and return the model the router gave it earlier in this request."""
     stood = source in LEVEL_SOURCES and bool(level)
@@ -103,7 +105,7 @@ def note_spawn(config: dict, session_id: str | None, key: str, model: str | None
         routes = entry.get("routed") if isinstance(entry.get("routed"), dict) else {}
         store.keep(routes, key, {"model": model, "source": source, **({"sent": sent} if sent else {})})
         entry["routed"] = routes
-        if registry.stronger(config, model, entry.get("top_spawn")):
+        if reg.stronger(model, entry.get("top_spawn")):
             entry["top_spawn"] = model
 
     store.mutate_entry("prompts", session_id, update)

@@ -2,8 +2,9 @@
 fall back to what the last SessionStart recorded."""
 from __future__ import annotations
 
-from . import intake, ladder, learn, ledger, registry, router, settings, spawn, store, upstream
+from . import intake, ladder, learn, ledger, router, settings, spawn, store, upstream
 from . import config as cfg
+from . import registry
 
 # The --json shapes. A new key keeps the version; removing or renaming one bumps it.
 USAGE_SCHEMA = "model-router.usage/1"
@@ -12,12 +13,12 @@ MODELS_SCHEMA = "model-router.models/1"
 
 def _effort(snap: settings.Snapshot, pick: ladder.Pick) -> str | None:
     """The pick's effort as it runs, held to any maxEffortLevel cap, and saying so."""
-    effort, held = router.capped(pick.effort, snap.allowed.effort_cap(snap.config, pick.model))
+    effort, held = router.capped(pick.effort, snap.allowed.effort_cap(snap.registry, pick.model))
     return f"{effort} ({held.lstrip('; ')})" if held else effort
 
 
 def policy(snap: settings.Snapshot) -> str:
-    config, options, usable = snap.config, snap.options, snap.usable
+    reg, options, usable = snap.registry, snap.options, snap.usable
     limit = options.cap
     lines = [f"Routing: **{options.mode}**. Priority: **{options.priority}**. "
              f"Cap: **{limit or 'none'}**. Strongest model in use: **{usable[-1] if usable else 'none'}**.", "",
@@ -27,30 +28,30 @@ def policy(snap: settings.Snapshot) -> str:
         note = " (raised by feedback)" if snap.raises[level] else ""
         lines.append(f"| {level} | {pick.model or 'left as it is'}{note} | {_effort(snap, pick) or 'as the agent or session sets it'} |")
     lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
-    for name in registry.by_strength(config):
-        info = registry.models(config)[name]
+    for name in reg.by_strength():
+        info = reg.models[name]
         flag = "" if name in usable else " (not in use)"
-        lines.append(f"| {name}{flag} | {info.get('strength')} | {info.get('speed', '-')} | "
-                     f"{info.get('cost', '-')} | {info.get('use_for', '')} |")
+        lines.append(f"| {name}{flag} | {info.strength} | {'-' if info.speed is None else info.speed} | "
+                     f"{'-' if info.cost is None else info.cost} | {info.use_for} |")
     lines += ["", "Strength, speed and cost are relative ranks, not prices.", "",
               "A role agent with a model keeps it, also where the router doesn't route; the others are "
               "routed by their brief, like any other agent.", "",
               "| Role agent | Model | Role |", "| :- | :- | :- |"]
-    for name, agent in (config.get("crew") or {}).items():
+    for name, agent in reg.crew.items():
         lines.append(f"| {cfg.PLUGIN_NAME}:{name} | {agent.get('model') or 'routed by brief'} | {agent.get('role', '')} |")
     return "\n".join(lines)
 
 
 def models_data(snap: settings.Snapshot) -> dict:
     """Each registry model's state here, in the `model-router.models/1` shape."""
-    config, options, table, usable = snap.config, snap.options, snap.health, snap.usable
+    reg, options, table, usable = snap.registry, snap.options, snap.health, snap.usable
     limit = options.cap
-    allowed = snap.allowed.permitted(config)
+    allowed = snap.allowed.permitted(reg)
     rows = []
-    for name in registry.by_strength(config):
-        if limit and registry.strength(config, name) > registry.strength(config, limit):
+    for name in reg.by_strength():
+        if limit and reg.strength(name) > reg.strength(limit):
             status, detail = "above_cap", "above your cap"
-        elif limit and name not in snap.trusted:
+        elif limit and reg.models[name].project:
             status, detail = "project_model_under_cap", "added by this project, so not used while a cap is set"
         elif name not in allowed:
             status, detail = "not_permitted", "not permitted by the availableModels or deniedModels setting"
@@ -67,7 +68,7 @@ def models_data(snap: settings.Snapshot) -> dict:
               for level, info in ((lv, learned.get(lv)) for lv in cfg.LEVELS) if isinstance(info, dict)]
     aliases = (upstream.load().get("cache") or {}).get("aliases")
     aliases = aliases if isinstance(aliases, list) else []
-    return {
+    data = {
         "schema": MODELS_SCHEMA,
         "cap": limit or None,
         "strongest_in_use": usable[-1] if usable else None,
@@ -75,12 +76,24 @@ def models_data(snap: settings.Snapshot) -> dict:
         "models": rows,
         "levels": levels,
         "doc_aliases": aliases,
-        "not_in_registry": [f for f in upstream.model_families(aliases) if f not in registry.models(config)],
+        "not_in_registry": [f for f in upstream.model_families(aliases) if f not in reg.models],
         "set_aside": [str(p) for p in store.set_aside()],
         "newer_files": [str(p) for p in store.newer_files()],
-        "newer_config": [str(p) for p in cfg.newer_overrides()],
+        "newer_config": [str(p) for p in reg.newer],
         "workflow_model": options.workflow_model,
     }
+    # New keys appear only when they have something to say, so a clean setup's output keeps its bytes.
+    if reg.problems:
+        data["config_problems"] = list(reg.problems)
+    held_back = _held_back(reg)
+    if held_back:
+        data["held_back"] = held_back
+    return data
+
+
+def _held_back(reg: registry.Registry) -> list[dict]:
+    """What a project's override file asked for that the registry did not apply."""
+    return [{"kind": h.kind, "name": h.name, "reason": h.reason} for h in reg.held]
 
 
 def models(snap: settings.Snapshot) -> str:
@@ -93,6 +106,13 @@ def models(snap: settings.Snapshot) -> str:
         lines += ["", "| Subtask level | Routed calls | Votes it was too low | Raised |", "| :- | -: | -: | :- |"]
         lines += [f"| {lv['level']} | {lv['routed_calls']} | {lv['votes_too_low']} | "
                   f"{'yes' if lv['raised'] else 'no'} |" for lv in data["levels"]]
+    if data.get("config_problems"):
+        lines += ["", "Left out of the override files, so the registry runs without them: "
+                  + "; ".join(data["config_problems"]) + "."]
+    if data.get("held_back"):
+        lines += ["", "A project's model-router.json asked for these and Model Router did not apply them "
+                  "(a project's file can raise, never lower):"]
+        lines += [f"- {h['kind']} {h['name']}: {h['reason']}" for h in data["held_back"]]
     if data["workflow_model"]:
         lines += ["", f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins every workflow agent to {data['workflow_model']}. "
                   "Model Router still sets a workflow agent's model, and the docs don't say which of the two wins; "

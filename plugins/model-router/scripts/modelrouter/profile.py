@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, replace
 
-from .config import LEVELS, PLUGIN_NAME
+from .config import PLUGIN_NAME, Level
 
 # Two or more systems named in a list ("across the API, the web client and ...") are cross-module work.
 _SYSTEM = r"(?:services?|clients?|api|gateway|backend|frontend|workers?|apps?|layers?|modules?)"
@@ -124,8 +124,8 @@ class Role:
     its cap. `strong` agents start no lower than the request's level, a `checker` reports on finished work, and
     an agent that doesn't `write` has no Write or Edit tool."""
     kind: str | None = None
-    floor: str | None = None
-    cap: str | None = None
+    floor: Level | None = None
+    cap: Level | None = None
     strong: bool = False
     checker: bool = False
     writes: bool = True
@@ -135,11 +135,11 @@ ARCHITECT, REVIEWER, DEEP_SOLVER = "architect", "reviewer", "deep-solver"
 # Our own role agents by full name, then the two kinds any agent's name can show. Another plugin's solver is
 # only a heavy role; ours is for what the others couldn't do.
 ROLES = {
-    f"{PLUGIN_NAME}:{ARCHITECT}": Role("heavy", floor="complex", strong=True, writes=False),
-    f"{PLUGIN_NAME}:{REVIEWER}": Role("heavy", floor="complex", strong=True, writes=False),
-    f"{PLUGIN_NAME}:{DEEP_SOLVER}": Role("heavy", floor="hardest", strong=True),
-    "heavy": Role("heavy", floor="complex"),
-    "light": Role("light", cap="standard"),
+    f"{PLUGIN_NAME}:{ARCHITECT}": Role("heavy", floor=Level.complex, strong=True, writes=False),
+    f"{PLUGIN_NAME}:{REVIEWER}": Role("heavy", floor=Level.complex, strong=True, writes=False),
+    f"{PLUGIN_NAME}:{DEEP_SOLVER}": Role("heavy", floor=Level.hardest, strong=True),
+    "heavy": Role("heavy", floor=Level.complex),
+    "light": Role("light", cap=Level.standard),
 }
 _KIND_NAMES = {"heavy": _HEAVY_NAME, "light": _LIGHT_NAME}
 _CHECKERS = ("verifier", "reviewer")
@@ -261,17 +261,17 @@ def _request_level(r: Reading) -> dict:
     if r.length > 1500 and "scope" not in hits:
         hits.append("scope")  # a long brief is rarely a small task
     if len(hits) >= 3:
-        result = "frontier" if r.frontier else "hardest"
+        result = Level.frontier if r.frontier else Level.hardest
     elif len(hits) == 2:
-        result = "complex"
+        result = Level.complex
     elif "change" in r.acts or hits:
-        result = "standard"
+        result = Level.standard
     elif (r.lookup_form or r.length < 80) and r.english:
-        result = "lookup"
+        result = Level.lookup
     else:
-        result = "standard"
-    if LEVELS.index(result) < LEVELS.index("complex") and r.defect:
-        result, hits = "complex", hits + ["fixes or hunts a defect"]
+        result = Level.standard
+    if result < Level.complex and r.defect:
+        result, hits = Level.complex, hits + ["fixes or hunts a defect"]
     return {"level": result, "signals": hits}
 
 
@@ -280,26 +280,26 @@ def _call_level(r: Reading, held: Role) -> dict:
     why = list(hits)
     if r.acts:
         if len(hits) >= 3:
-            result = "frontier" if r.frontier else "hardest"
+            result = Level.frontier if r.frontier else Level.hardest
         elif len(hits) == 2 and r.frontier:
-            result = "hardest"  # research-grade wording on broad or open work
+            result = Level.hardest  # research-grade wording on broad or open work
         elif len(hits) == 2 or "risk" in hits or (hits and r.judgment) or r.systems:
-            result = "complex"
+            result = Level.complex
         else:
-            result = "standard"
-        if LEVELS.index(result) < LEVELS.index("complex") and r.defect:
-            result, why = "complex", why + ["fixes or hunts a defect"]
+            result = Level.standard
+        if result < Level.complex and r.defect:
+            result, why = Level.complex, why + ["fixes or hunts a defect"]
     elif len(hits) >= 2:
-        result = "standard"  # finds or explains something broad or sensitive, but only reads
+        result = Level.standard  # finds or explains something broad or sensitive, but only reads
     elif not r.english:
-        result, why = "standard", why + ["not in English"]
+        result, why = Level.standard, why + ["not in English"]
     else:
-        result = "lookup"
-    if result == "lookup" and (r.thorough or r.length > LONG_BRIEF):
-        result, why = "standard", why + ["thorough or long brief"]
-    if held.floor and LEVELS.index(result) < LEVELS.index(held.floor):
+        result = Level.lookup
+    if result == Level.lookup and (r.thorough or r.length > LONG_BRIEF):
+        result, why = Level.standard, why + ["thorough or long brief"]
+    if held.floor and result < held.floor:
         result, why = held.floor, why + ["agent's role"]
-    elif held.cap and LEVELS.index(result) > LEVELS.index(held.cap):
+    elif held.cap and result > held.cap:
         result, why = held.cap, why + ["search or check agent"]
     return {"level": result, "signals": why}
 

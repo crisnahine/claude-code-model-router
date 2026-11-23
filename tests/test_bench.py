@@ -180,7 +180,7 @@ class Analysis(unittest.TestCase):
         self.assertIsNone(analyze.splitting_tasks([r for r in data if r["config"] == "opus"]))
 
     def test_forced_baselines_rank_by_model_strength_then_effort(self):
-        ranks = analyze.forced_ranks(run.load_configs(), analyze.mrconfig.base_config())
+        ranks = analyze.forced_ranks(run.load_configs(), analyze.mrconfig.shipped())
         self.assertLess(ranks["haiku"], ranks["haiku-high"])
         self.assertLess(ranks["haiku-high"], ranks["sonnet-medium"])
         self.assertLess(ranks["sonnet-high"], ranks["opus"])
@@ -439,7 +439,7 @@ class Recorder(unittest.TestCase):
              "plugin_state": None, "ledger": None, "agent_types": {}, "session_dir_removed": True, "kept": None}
 
     def row(self, result, **facts):
-        return run.record(self.task, self.config, self.options, {}, result, {**self.facts, **facts})
+        return run.record(self.task, self.config, self.options, run.mrconfig.build({}), result, {**self.facts, **facts})
 
     def test_a_real_2_1_330_result_becomes_a_row(self):
         row = self.row(json.loads(FIXTURE.read_text(encoding="utf-8")))
@@ -907,11 +907,11 @@ class SuiteCoverage(unittest.TestCase):
         tasks = [{"id": "l", "class": "lookup"}, {"id": "b", "class": "bugfix"}, {"id": "d", "class": "design"}]
         configs = [{"id": "a", "price_model": "sonnet"}, {"id": "o", "price_model": "opus"},
                    {"id": "h", "price_model": "haiku"}]
-        registry_config = {"prices": {"claude-sonnet-5-5": {"output": 15}, "claude-opus-5-5": {"output": 75},
-                                      "claude-opus-4-1": {"output": 99}, "claude-haiku-5-5": {"output": 5},
-                                      "claude-opus-*": {"output": 1}},
-                           "newest": {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5",
-                                      "haiku": "claude-haiku-5-5"}}
+        registry_config = analyze.mrconfig.build({
+            "prices": {"claude-sonnet-5-5": {"output": 15}, "claude-opus-5-5": {"output": 75},
+                       "claude-opus-4-1": {"output": 99}, "claude-haiku-5-5": {"output": 5},
+                       "claude-opus-*": {"output": 1}},
+            "newest": {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5", "haiku": "claude-haiku-5-5"}})
         plan = analyze.estimate(data, tasks, configs, registry_config)
         self.assertEqual(plan["runs"], 90)
         # 10 runs x (0.05 + 0.10 + 0.0667 for design, from the mean of all runs) x (1 + 5 + 1, haiku never priced down)
@@ -1205,7 +1205,7 @@ class TaskIdentity(unittest.TestCase):
             out = Path(tmp) / "page.md"
             analyze.main([str(results / "a.jsonl"), "--out", str(out)])
             self.assertIn("1 run(s) here carry no `wall_ms`", out.read_text(encoding="utf-8"))
-        self.assertEqual(run.record({"id": "t", "class": "lookup"}, {"id": "x"}, Recorder.options, {}, {},
+        self.assertEqual(run.record({"id": "t", "class": "lookup"}, {"id": "x"}, Recorder.options, run.mrconfig.build({}), {},
                                     Recorder.facts)["schema"], run.ROW_SCHEMA)
 
 

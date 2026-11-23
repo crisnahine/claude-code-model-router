@@ -6,8 +6,10 @@ import os
 import re
 from pathlib import Path
 
-from . import profile, registry, request, session, store
+from . import profile, request, session, store
 from . import config as cfg
+from .config import Level
+from .registry import Registry
 from .settings import Settings
 
 _NON_CODE = (".md", ".mdx", ".txt", ".rst", ".adoc", ".csv", ".log")
@@ -73,12 +75,12 @@ def checks_ran_since(transcript_path: object, since: float) -> bool:
     return False
 
 
-def strong_agent(config: dict, need: str, level: str | None = None) -> str:
+def strong_agent(reg: Registry, need: str, level: Level | None = None) -> str:
     """The role agent to hand hard thinking to, by name only: the router routes its brief with the
     role's floor and a redo still climbs, which a model named on the call would stop. Only with no
     role agent does the needed model go on the call."""
-    name = profile.DEEP_SOLVER if level == "frontier" else profile.ARCHITECT
-    if name not in (config.get("crew") or {}):
+    name = profile.DEEP_SOLVER if level == Level.frontier else profile.ARCHITECT
+    if name not in reg.crew:
         return f'a subagent with model: "{need}"'
     return f"{cfg.PLUGIN_NAME}:{name}"
 
@@ -88,34 +90,34 @@ def writes_nothing(agent: str) -> bool:
     return not profile.role(agent).writes
 
 
-def finished_check(config: dict, hook_input: dict, need: str, level: str | None) -> str:
+def finished_check(reg: Registry, hook_input: dict, need: str, level: Level | None) -> str:
     """The agent to check a finished result. The reviewer stops without a diff file, so it is named only
     once code changed in this request, which is when a diff can be saved; otherwise the plan is still open."""
-    if request.load(hook_input.get("session_id")).edited and profile.REVIEWER in (config.get("crew") or {}):
+    if request.load(hook_input.get("session_id")).edited and profile.REVIEWER in reg.crew:
         return f"{cfg.PLUGIN_NAME}:{profile.REVIEWER}"
-    return strong_agent(config, need, level)
+    return strong_agent(reg, need, level)
 
 
-def escalation(config: dict, hook_input: dict) -> str | None:
+def escalation(reg: Registry, hook_input: dict) -> str | None:
     """A request estimated above the conversation's own model, answered without any
     agent of that strength: ask once for a stronger model to check the result."""
     session_id = hook_input.get("session_id")
     entry = request.load(session_id)
-    if entry.escalation_asked or entry.level not in cfg.LEVELS[cfg.LEVELS.index("complex"):]:
+    if entry.escalation_asked or not entry.level or entry.level < Level.complex:
         return None
     need = entry.need
     # On a session's first prompt the model isn't known yet; by now the transcript has it.
-    current = (registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
+    current = (reg.family(session.model(session_id, hook_input.get("transcript_path")))
                or entry.session_tier)
-    if not current or not need or registry.strength(config, current) >= registry.strength(config, need):
+    if not current or not need or reg.strength(current) >= reg.strength(need):
         return None
-    if registry.strength(config, entry.top_spawn) >= registry.strength(config, need):
+    if reg.strength(entry.top_spawn) >= reg.strength(need):
         return None
     try:
         request.mark_escalation(session_id, current)
     except OSError:
         return None
-    agent = finished_check(config, hook_input, need, entry.level)
+    agent = finished_check(reg, hook_input, need, entry.level)
     act = ("to check; it writes nothing, so what it finds is applied here" if writes_nothing(agent)
            else "to check and improve")
     given = ("The task and the path of the diff, saved to a file, go" if agent.endswith(f":{profile.REVIEWER}")
@@ -149,8 +151,8 @@ def unverified_edit(hook_input: dict) -> str | None:
     )
 
 
-def before_stop(hook_input: dict, config: dict, settings: Settings) -> str | None:
+def before_stop(hook_input: dict, reg: Registry, settings: Settings) -> str | None:
     if hook_input.get("stop_hook_active") or settings.mode != "auto":
         return None
-    return ((escalation(config, hook_input) if settings.strong_agent_gate else None)
+    return ((escalation(reg, hook_input) if settings.strong_agent_gate else None)
             or (unverified_edit(hook_input) if settings.verify_gate else None))

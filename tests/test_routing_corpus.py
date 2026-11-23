@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "plugins" / "model-router" / "scripts"))
 from modelrouter import profile  # noqa: E402
-from modelrouter.config import LEVELS  # noqa: E402
+from modelrouter.config import LEVELS, Level  # noqa: E402
 
 FIXTURES = ROOT / "tests" / "fixtures"
 CORPUS = json.loads((ROOT / "tests" / "fixtures" / "routing-corpus.json").read_text(encoding="utf-8"))["briefs"]
@@ -25,13 +25,13 @@ CORPUS = json.loads((ROOT / "tests" / "fixtures" / "routing-corpus.json").read_t
 OVER_ROUTE_BUDGET = 0.02
 
 
-def routed(brief: dict) -> int:
+def routed(brief: dict) -> Level:
     level = profile.profile_call({"description": brief["description"], "prompt": brief["prompt"]}, brief["agent"])
-    return LEVELS.index(level["level"])
+    return level["level"]
 
 
 def show(briefs: list[dict]) -> str:
-    return "\n".join(f"  {LEVELS[routed(b)]} for {b['lowest']}..{b['highest']}: {b['prompt']}" for b in briefs)
+    return "\n".join(f"  {routed(b)} for {b['lowest']}..{b['highest']}: {b['prompt']}" for b in briefs)
 
 
 class RoutingCorpus(unittest.TestCase):
@@ -42,7 +42,7 @@ class RoutingCorpus(unittest.TestCase):
         self.assertGreaterEqual(sum(not b["prompt"].isascii() or "é" in b["prompt"] for b in CORPUS), 5)
 
     def test_no_brief_routes_below_its_lowest_level(self):
-        under = [b for b in CORPUS if routed(b) < LEVELS.index(b["lowest"])]
+        under = [b for b in CORPUS if routed(b) < b["lowest"]]
         new = [b for b in under if not b.get("known_under")]
         fixed = [b for b in CORPUS if b.get("known_under") and b not in under]
         if new:
@@ -53,16 +53,16 @@ class RoutingCorpus(unittest.TestCase):
     def test_defect_briefs_route_at_complex_or_above(self):
         marked = [b for b in CORPUS if b.get("defect")]
         self.assertGreaterEqual(len(marked), 12)
-        low = [b for b in marked if routed(b) < LEVELS.index("complex")]
+        low = [b for b in marked if routed(b) < Level.complex]
         if low:
             self.fail("fix or hunt a defect but route below complex:\n" + show(low))
 
     def test_over_routes_stay_rare_and_one_level(self):
-        over = [b for b in CORPUS if routed(b) > LEVELS.index(b["highest"])]
+        over = [b for b in CORPUS if routed(b) > b["highest"]]
         print(f"\nrouting corpus: {len(over)} of {len(CORPUS)} briefs over-routed ({len(over) / len(CORPUS):.1%}), "
               f"budget {OVER_ROUTE_BUDGET:.0%}; "
               f"{sum(bool(b.get('known_under')) for b in CORPUS)} known under-routes")
-        far = [b for b in over if routed(b) > LEVELS.index(b["highest"]) + 1]
+        far = [b for b in over if routed(b) > (Level(b["highest"]).up() or Level.frontier)]
         if far:
             self.fail("routed two or more levels too high:\n" + show(far))
         if len(over) / len(CORPUS) > OVER_ROUTE_BUDGET:
@@ -104,7 +104,7 @@ class AgentNameCorpus(unittest.TestCase):
     def test_a_kind_explains_the_levels(self):
         for row in NAMES["agents"]:
             heavy, light = row["kind"] == "heavy", row["kind"] == "light"
-            self.assertEqual(LEVELS.index(row["on_lookup"]) >= LEVELS.index("complex"), heavy, row["agent"])
+            self.assertEqual(Level(row["on_lookup"]) >= Level.complex, heavy, row["agent"])
             self.assertEqual(row["on_hard"] == "standard", light, row["agent"])
 
 

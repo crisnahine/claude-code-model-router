@@ -20,7 +20,8 @@ BENCH = Path(__file__).resolve().parent
 sys.path.insert(0, str(BENCH))
 import run  # noqa: E402
 sys.path.insert(0, str(run.PLUGIN / "scripts"))
-from modelrouter import config as mrconfig, profile, registry  # noqa: E402
+from modelrouter import config as mrconfig, profile  # noqa: E402
+from modelrouter.registry import Registry  # noqa: E402
 from overhead import percentile  # noqa: E402
 
 RESULTS = BENCH / "results"
@@ -289,7 +290,7 @@ def _metric_text(cell: list[dict], routed: bool) -> str:
         levels[level][0] += ok
         levels[level][1] += 1
     if levels:
-        order = sorted(levels, key=lambda lv: mrconfig.LEVELS.index(lv) if lv in mrconfig.LEVELS else len(mrconfig.LEVELS))
+        order = sorted(levels, key=lambda lv: (mrconfig.Level.parse(lv) is None, mrconfig.Level.parse(lv) or mrconfig.Level.lookup))
         text = ", ".join(f"{lv} {levels[lv][0]}/{levels[lv][1]}" for lv in order)
         parts.append(f"accuracy by level: {text}" + (f" ({len(first)} of {len(cell)} runs)" if len(first) < len(cell) else ""))
     else:
@@ -326,16 +327,16 @@ def render_sessions(parts: list[tuple[str, str, list[dict], list[dict]]], meta: 
     return "\n".join([meta.get("header", "# Benchmarks"), "", *body, meta.get("body", "")]).rstrip() + "\n"
 
 
-def _newest_price(registry_config: dict, alias: str) -> dict:
+def _newest_price(registry_config: Registry, alias: str) -> dict:
     """The list price of a family's newest model: the registry's `newest` ID, else the highest priced version."""
-    prices = registry_config.get("prices") or {}
+    prices = registry_config.prices
     versions = [(tuple(int(n) for n in key.split("-")[2:] if n.isdigit()), key) for key in prices
                 if key.startswith(f"claude-{alias}-") and not key.endswith("*")]
-    named = (registry_config.get("newest") or {}).get(alias) or (max(versions)[1] if versions else "")
-    return registry.price(registry_config, named) or {}
+    named = registry_config.newest.get(alias) or (max(versions)[1] if versions else "")
+    return registry_config.price(named) or {}
 
 
-def estimate(rows: list[dict], tasks: list[dict], configs: list[dict], registry_config: dict) -> dict:
+def estimate(rows: list[dict], tasks: list[dict], configs: list[dict], registry_config: Registry) -> dict:
     """What MIN_RUNS of every task under every configuration would cost. A class's runs cost what its runs
     here cost on average (all runs' mean for a class with none), and a configuration whose subagents run a
     dearer model than sonnet costs that much more per token on the whole run. Cheaper models are never priced
@@ -373,7 +374,7 @@ class Results:
     archive: list[tuple[str, list[dict], int]]
     configs: list[dict]
     tasks: list[dict]
-    registry: dict
+    registry: Registry
     routers: frozenset[str]
     own_model: frozenset[str]
     forced: dict
@@ -387,16 +388,16 @@ def router_ids(configs: list[dict]) -> frozenset[str]:
     return frozenset(c["id"] for c in configs if c.get("plugin"))
 
 
-def forced_ranks(configs: list[dict], registry_config: dict) -> dict[str, tuple[float, int]]:
+def forced_ranks(configs: list[dict], registry_config: Registry) -> dict[str, tuple[float, int]]:
     """Each configuration that forces every subagent onto one model, ranked by that model's strength in the
     registry, then by the effort it sets (none ranks below low)."""
     out = {}
     for c in configs:
         env = c.get("env") or {}
         if env.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE") and env.get("CLAUDE_CODE_SUBAGENT_MODEL"):
-            model = registry.family(registry_config, env["CLAUDE_CODE_SUBAGENT_MODEL"])
+            model = registry_config.family(env["CLAUDE_CODE_SUBAGENT_MODEL"])
             effort = env.get("CLAUDE_CODE_SUBAGENT_EFFORT")
-            out[c["id"]] = (registry.strength(registry_config, model),
+            out[c["id"]] = (registry_config.strength(model),
                             mrconfig.EFFORTS.index(effort) if effort in mrconfig.EFFORTS else -1)
     return out
 
@@ -426,7 +427,7 @@ def load(paths: list[Path]) -> Results:
                 lines = len(_jsonl([*folder.glob("infra/*.jsonl"), *folder.glob("limited/*.jsonl")]))
                 archive.append((folder.relative_to(results).as_posix(), kept, lines))
     configs = run.load_configs()
-    registry_config = mrconfig.base_config()
+    registry_config = mrconfig.shipped()
     return Results(files, rows, stale, broken, aside, archive, configs, tasks, registry_config, router_ids(configs),
                    frozenset(c["id"] for c in configs if c.get("model")), forced_ranks(configs, registry_config))
 

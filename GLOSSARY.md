@@ -14,7 +14,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Path**: how a call reaches the router. The **mod path** runs in `hooks/router.ts` on engine events. The **fallback path** (`fallback.py`) rewrites the `Agent` tool call and stands down when the mod runs.
 
-**Level**: how much reasoning a call needs: lookup, standard, complex, hardest or frontier. It comes from the call's brief and the agent's name.
+**Level**: how much reasoning a call needs: lookup, standard, complex, hardest or frontier. It comes from the call's brief and the agent's name. In code it is `config.Level`, a `str` that is written to state files and JSON as its bare name but orders by difficulty (a plain `str` sorts alphabetically), so levels compare and `max` works on them. `Level.up()` is the next one.
 
 **Profile**: the step that turns a brief and an agent's name into a level, with the reasons for it (`profile.py`). `profile.read` gives the brief's Reading and `profile.level` scores it, as a call or as a request. A brief that fixes or hunts a defect is at least complex, and so is the person's request.
 
@@ -24,9 +24,9 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Signal**: one kind of difficulty a Reading looks for in a brief: risk (security, data and its consistency, migrations, public APIs), scope (several modules or services), load (performance, latency, throughput, staleness and capacity limits, counted only when the brief also asks for a design or a choice) or ambiguity (design, a decision between approaches, root cause, trade-offs). More signals mean a higher level.
 
-**Registry**: the shipped `config/models.json`, merged with the user's and a project's override files: which models exist and their relative strength, speed and cost, the level table, aliases and list prices (`config.py`, `registry.py`).
+**Registry**: the one value `config.load` builds per hook call or command from the shipped `config/models.json` and the user's and a project's override files, which every step reads (`registry.Registry`). It holds the models (each marked as the plugin's or the user's, or added by the project) with their relative strength, speed and cost, the levels with their `needs` and effort, aliases, list prices, the main-loop effort table, agent rules, and the keys it dropped or held back. Its methods say which models are usable and pick between them (`available`, `select`, `clamp`, `family`, `price`, `cost`). A level's `needs` is finite and never lower than the level below it.
 
-**Override file**: `~/.claude/model-router.json` or a project's `.claude/model-router.json`, merged over the registry. The user's file is trusted in full. A project's is limited: it can turn routing down but never on, it can raise a level's `needs` or `effort` but never lower it below the shipped or the user's value, and it can't change the rank of a shipped model or one the user defined. A `needs` that isn't a finite number is dropped from every file.
+**Override file**: `~/.claude/model-router.json` or a project's `.claude/model-router.json`, merged over the registry. The user's file is trusted in full. A project's is limited: it can turn routing down but never on, it can raise a level's `needs` or `effort` but never lower it below the shipped or the user's value, and it can't change the rank of a shipped model or one the user defined. A key of the wrong type, such as a `needs` that isn't a finite number, is dropped from every file. What is dropped, and what a project asked for and was held back, is listed by `/model-router:models`. An override file is only read, never set aside.
 
 **Ladder**: the rule that turns a level, the priority and learned feedback into a model and an effort. When the model it lands on is weaker than the level needs, because a cap, the allowlist or model health left nothing at or above it, the pick gets one more effort step, at most `xhigh`, which makes up part of the loss. A pin, a caller's model or a rule that the cap lowers keeps the level's own effort.
 
@@ -48,7 +48,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Model health** (`health.py`): what the router has seen of each model here. Two calls that fail with a model error, run as a different model or are rejected route the model around for a day, then three days, then a week, after which it is tried again. A call that runs as asked clears the record. Reading the table writes nothing; an outage a read finds too long for the clock is shortened in memory and written by the next spawn.
 
-**Snapshot** (`settings.Snapshot`): the config, options, usable models, health, allowlist and learned raises a hook call reads once and passes to every step, and the ladder's `pick(level)` bound to them, so no step re-reads a file another step already read. The last three load on first use. A read writes nothing, so a dry run leaves the state as it was; a spawn writes what reads only noticed (`Snapshot.settle`).
+**Snapshot** (`settings.Snapshot`): the registry, options, usable models, health, allowlist and learned raises a hook call reads once and passes to every step, and the ladder's `pick(level)` bound to them, so no step re-reads a file another step already read. The last three load on first use. A read writes nothing, so a dry run leaves the state as it was; a spawn writes what reads only noticed (`Snapshot.settle`).
 
 **Main-loop effort**: the effort of the conversation's own turn. The mod raises it for one turn when the request profiles as complex or harder, never lowers it, and leaves it alone wherever an effort change would re-read the context uncached. A `maxEffortLevel` cap holds it too.
 

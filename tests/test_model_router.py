@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import datetime
 import inspect
 import io
@@ -31,6 +32,8 @@ FRAMING = json.loads((FIXTURES / "prompt-framing.json").read_text())
 sys.path.insert(0, str(SCRIPTS))
 from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, ladder, learn, ledger, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
+from modelrouter.config import Level  # noqa: E402
+from modelrouter.registry import LevelSpec, Model, Rule  # noqa: E402
 
 LOOKUP = "list the files under src"
 BUILD = "implement the parser change"
@@ -123,7 +126,7 @@ class Sandbox(unittest.TestCase):
     def decide(self, agent: str | None, prompt: str, **extra) -> dict:
         hook_input = self.call(agent, prompt, **extra)
         snap = settings.Snapshot(hook_input)
-        return router.decide(spawn.facts(hook_input, snap), snap.config, snap.options)
+        return router.decide(spawn.facts(hook_input, snap), snap.registry, snap.options)
 
     def pre(self, agent: str | None, prompt: str, **extra) -> dict | None:
         out = hooks.pre_agent(self.call(agent, prompt, **extra))
@@ -630,16 +633,21 @@ class Snapshot(Sandbox):
                               {**spawned, "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})),
                           ("pre-agent", lambda: hooks.pre_agent(self.call("general-purpose", BUILD, session_id="s2"))),
                           ("user-prompt", lambda: hooks.user_prompt({"session_id": "s1", "prompt": HARD}))):
-            with mock.patch.object(cfg, "load_config", wraps=cfg.load_config) as load, \
+            with mock.patch.object(cfg, "load", wraps=cfg.load) as load, \
                     mock.patch.object(settings, "resolve", wraps=settings.resolve) as resolve:
                 run()
             self.assertEqual((load.call_count, resolve.call_count), (1, 1), name)
 
-    def test_the_models_report_reads_the_users_override_file_once_under_a_cap(self):
-        store.update_state(lambda state: state.update(max_tier="sonnet"))
-        with mock.patch.object(cfg, "trusted_models", wraps=cfg.trusted_models) as trusted:
-            self.out("models", "--json")
-        self.assertEqual(trusted.call_count, 1)
+    def test_an_override_file_is_read_once_per_call_under_a_cap_or_not(self):
+        self.override({"models": {"saga": {"strength": 1.5}}}, user=True)
+        self.override({"models": {"swift": {"strength": 1.6}}})
+        for cap in (None, "sonnet"):
+            if cap:
+                store.update_state(lambda state: state.update(max_tier=cap))
+            with mock.patch.object(store, "load_dict", wraps=store.load_dict) as read:
+                self.out("models", "--json")
+            files = [c.args[0].name for c in read.call_args_list if c.args[0].name == cfg.OVERRIDE_FILE]
+            self.assertEqual(files, [cfg.OVERRIDE_FILE] * 2, cap)
 
     def test_a_cheap_hook_and_a_result_naming_no_model_load_neither_the_allowlist_nor_the_health_table(self):
         self.options(main_effort="true")
@@ -658,14 +666,6 @@ class Snapshot(Sandbox):
                              "kind": "subagent", "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}})
         self.assertEqual(read.call_count, 1)
 
-    def test_the_override_file_is_read_for_trust_only_under_a_cap(self):
-        with mock.patch.object(cfg, "trusted_models", wraps=cfg.trusted_models) as trusted:
-            settings.Snapshot({"session_id": "s1", "cwd": str(self.project)}).usable
-            self.assertEqual(trusted.call_count, 0)
-            self.options(max_tier="sonnet")
-            settings.Snapshot({"session_id": "s1", "cwd": str(self.project)}).usable
-        self.assertEqual(trusted.call_count, 1)
-
     def test_a_failed_agent_call_filters_the_usable_list_on_the_table_it_just_wrote(self):
         hooks.mod_start({"session_id": "s1"})
         self.route_around("sonnet", "opus", "fable")
@@ -682,24 +682,24 @@ class Snapshot(Sandbox):
             picks = {level: snap.pick(level) for level in cfg.LEVELS}
             self.assertIs(snap.raises, snap.raises)
         self.assertEqual(raises.call_count, 1)
-        self.assertEqual(picks["lookup"], ladder.pick(snap.config, "lookup", "quality", snap.usable, {"lookup": 1}))
-        self.assertEqual(picks["complex"], ladder.pick(snap.config, "complex", "quality", snap.usable, {}))
+        self.assertEqual(picks["lookup"], ladder.pick(snap.registry, "lookup", "quality", snap.usable, {"lookup": 1}))
+        self.assertEqual(picks["complex"], ladder.pick(snap.registry, "complex", "quality", snap.usable, {}))
 
     def test_a_field_is_read_on_first_use_and_then_kept(self):
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
         with mock.patch.object(allowlist, "read", wraps=allowlist.read) as read:
             self.assertIs(snap.allowed, snap.allowed)
-            self.assertEqual(snap.usable, registry.available(snap.config, snap.options.cap, allowed=snap.allowed))
+            self.assertEqual(snap.usable, snap.registry.available(snap.options.cap, allowed=snap.allowed))
         self.assertEqual(read.call_count, 1)
 
 
 class Registry(Sandbox):
     def setUp(self):
         super().setUp()
-        self.config = cfg.load_config()
+        self.config = cfg.load()
 
     def test_family_maps_aliases_and_ids(self):
-        f = lambda m: registry.family(self.config, m)  # noqa: E731
+        f = lambda m: self.config.family(m)  # noqa: E731
         self.assertEqual(f("claude-opus-5-5"), "opus")
         self.assertEqual(f("sonnet[1m]"), "sonnet")
         self.assertEqual(f("best"), "opus")
@@ -708,8 +708,8 @@ class Registry(Sandbox):
             self.assertIsNone(f(unknown))
 
     def test_select_by_priority(self):
-        usable = registry.available(self.config)
-        pick = lambda needs, priority, names=usable: registry.select(self.config, needs, priority, names)  # noqa: E731
+        usable = self.config.available()
+        pick = lambda needs, priority, names=usable: self.config.select(needs, priority, names)  # noqa: E731
         self.assertEqual([pick(n, "balanced") for n in (1, 2, 3, 4)], ["haiku", "sonnet", "opus", "fable"])
         self.assertEqual([pick(n, "quality") for n in (1, 2, 3, 4)], ["sonnet", "opus", "fable", "fable"])
         self.assertEqual([pick(n, "fast") for n in (1, 2, 3, 4)], ["haiku", "haiku", "sonnet", "opus"])
@@ -717,87 +717,94 @@ class Registry(Sandbox):
         self.assertIsNone(pick(2, "balanced", []))
 
     def test_select_uses_cost_and_speed_not_just_rank(self):
-        config = dict(self.config)
-        config["models"] = {**self.config["models"], "swift": {"strength": 3, "speed": 5, "cost": 2.5}}
-        usable = registry.by_strength(config)
-        self.assertEqual(registry.select(config, 3, "balanced", usable), "swift")  # cheaper than opus
-        self.assertEqual(registry.select(config, 2, "fast", usable), "swift")  # the quickest that qualifies
+        config = dataclasses.replace(self.config, models={**self.config.models, "swift": Model("swift", 3, 5, 2.5)})
+        usable = config.by_strength()
+        self.assertEqual(config.select(3, "balanced", usable), "swift")  # cheaper than opus
+        self.assertEqual(config.select(2, "fast", usable), "swift")  # the quickest that qualifies
 
     def test_cap_limits_available_models(self):
-        self.assertEqual(registry.available(self.config, cap="sonnet"), ["haiku", "sonnet"])
-        self.assertEqual(registry.available(self.config, cap="sonnet")[-1], "sonnet")
-        self.assertEqual(registry.available(self.config)[-1], "fable")
+        self.assertEqual(self.config.available(cap="sonnet"), ["haiku", "sonnet"])
+        self.assertEqual(self.config.available(cap="sonnet")[-1], "sonnet")
+        self.assertEqual(self.config.available()[-1], "fable")
 
     def test_clamp_never_raises_above_what_was_asked(self):
-        self.assertEqual(registry.clamp(self.config, "fable", ["haiku", "sonnet"]), "sonnet")
-        self.assertEqual(registry.clamp(self.config, "opus", ["haiku", "opus"]), "opus")
+        self.assertEqual(self.config.clamp("fable", ["haiku", "sonnet"]), "sonnet")
+        self.assertEqual(self.config.clamp("opus", ["haiku", "opus"]), "opus")
         # Nothing at or below it is usable: the weakest usable is the least bad.
-        self.assertEqual(registry.clamp(self.config, "haiku", ["sonnet", "opus"]), "sonnet")
+        self.assertEqual(self.config.clamp("haiku", ["sonnet", "opus"]), "sonnet")
 
     def test_project_can_add_a_model_but_not_rerank_or_slip_under_the_cap(self):
         self.override({"models": {"saga": {"strength": 0.5, "cost": 9}, "fable": {"strength": 0}}})
-        config = cfg.load_config()
-        self.assertEqual(config["models"]["fable"]["strength"], 4)
-        self.assertIn("saga", registry.available(config))
-        self.assertEqual(registry.available(config, cap="sonnet"), ["haiku", "sonnet"])
+        config = cfg.load()
+        self.assertEqual(config.models["fable"].strength, 4)
+        self.assertEqual((config.models["saga"].project, config.models["fable"].trusted), (True, True))
+        self.assertIn("saga", config.available())
+        self.assertEqual(config.available(cap="sonnet"), ["haiku", "sonnet"])
 
     def test_the_users_own_file_is_trusted(self):
         self.override({"models": {"saga": {"strength": 1.5, "speed": 3, "cost": 1.5}, "opus": {"strength": 3.5}}},
                       user=True)
         self.override({"models": {"saga": {"strength": 9}}})  # a project can't re-rank the user's model
-        config = cfg.load_config()
-        self.assertEqual((config["models"]["saga"]["strength"], config["models"]["opus"]["strength"]), (1.5, 3.5))
-        self.assertEqual(registry.available(config, cap="sonnet"), ["haiku", "saga", "sonnet"])
+        config = cfg.load()
+        self.assertEqual((config.models["saga"].strength, config.models["opus"].strength), (1.5, 3.5))
+        self.assertTrue(config.models["saga"].trusted)
+        self.assertEqual(config.available(cap="sonnet"), ["haiku", "saga", "sonnet"])
 
     def test_only_the_users_own_file_can_add_prices(self):
         self.override({"prices": {"Claude-Saga-1": {"input": 2, "output": 10, "cache_read": "x"},
                                   "claude-opus-5-5": {"output": 30}, "bad": 5}}, user=True)
         self.override({"prices": {"claude-haiku-5-5": {"input": 999}, "claude-proj-1": {"input": 1}}})
-        config = cfg.load_config()
-        self.assertEqual(registry.price(config, "claude-saga-1"), {"input": 2, "output": 10})
-        self.assertEqual(registry.price(config, "claude-opus-5-5")["output"], 30)
-        self.assertEqual(registry.price(config, "claude-opus-5-5")["input"],  # merged key by key
+        config = cfg.load()
+        self.assertEqual(config.price("claude-saga-1"), {"input": 2, "output": 10})
+        self.assertEqual(config.price("claude-opus-5-5")["output"], 30)
+        self.assertEqual(config.price("claude-opus-5-5")["input"],  # merged key by key
                          cfg.base_config()["prices"]["claude-opus-5-5"]["input"])
-        self.assertNotIn("bad", config["prices"])
-        self.assertEqual(registry.price(config, "claude-haiku-5-5")["input"],
+        self.assertNotIn("bad", config.prices)
+        self.assertEqual(config.price("claude-haiku-5-5")["input"],
                          cfg.base_config()["prices"]["claude-haiku-5-5"]["input"])
-        self.assertIsNone(registry.price(config, "claude-proj-1"))
+        self.assertIsNone(config.price("claude-proj-1"))
 
     def test_malformed_override_files_are_ignored(self):
         self.override({"models": "nope", "levels": {"lookup": {"needs": "x", "effort": "ludicrous"},
                                                     "complex": {"effort": "max"}, "bogus": {"needs": 9}},
                        "agents": {"a": {"model": 5, "level": ["x"], "route": "no"}, "b": [1]},
                        "routing_mode": 5})
-        config = cfg.load_config()
-        self.assertEqual(config["levels"]["lookup"], {"needs": 1, "effort": "medium"})
-        self.assertEqual(config["levels"]["complex"]["effort"], "max")
-        self.assertNotIn("bogus", config["levels"])
-        self.assertEqual({k: v for k, v in config["agents"].items() if k in ("a", "b")}, {"a": {}})
+        config = cfg.load()
+        self.assertEqual(config.levels[Level.lookup], LevelSpec(1, "medium"))
+        self.assertEqual(config.levels[Level.complex].effort, "max")
+        self.assertNotIn("bogus", config.levels)
+        self.assertEqual({k: v for k, v in config.rules.items() if k in ("a", "b")}, {"a": Rule()})
         self.assertEqual(settings.resolve(config).mode, "auto")
+        self.assertEqual(sorted(p.split(": ", 1)[1].split(" ")[0] for p in config.problems),
+                         ["agents.a.level", "agents.a.model", "agents.a.route", "agents.b", "levels.bogus",
+                          "levels.lookup.effort", "levels.lookup.needs", "models", "routing_mode"])
         (self.project / ".claude" / "model-router.json").write_text("{not json")
-        self.assertEqual(len(cfg.load_config()["models"]), 4)
+        self.assertEqual(len(cfg.load().models), 4)
 
     def test_a_project_file_may_raise_a_level_but_never_lower_it(self):
         self.override({"levels": {"complex": {"needs": 2, "effort": "low"}, "hardest": {"needs": 4, "effort": "max"},
                                   "lookup": {"effort": None}, "standard": {"needs": 2, "effort": "medium"}}})
-        levels = cfg.load_config()["levels"]
-        base = cfg.base_config()["levels"]
-        self.assertEqual(levels["complex"], base["complex"])  # both lowerings dropped, without an error
-        self.assertEqual(levels["hardest"], {"needs": 4, "effort": "max"})
-        self.assertEqual(levels["lookup"], base["lookup"])
-        self.assertEqual(levels["standard"], base["standard"])
+        registry_ = cfg.load()
+        levels, base = registry_.levels, cfg.shipped().levels
+        self.assertEqual(levels[Level.complex], base[Level.complex])  # both lowerings dropped, without an error
+        self.assertEqual(levels[Level.hardest], LevelSpec(4, "max"))
+        self.assertEqual(levels[Level.lookup], base[Level.lookup])
+        self.assertEqual(levels[Level.standard], base[Level.standard])
+        self.assertEqual(registry_.problems, ())
+        self.assertEqual([(h.kind, h.name) for h in registry_.held],
+                         [("level", "complex"), ("level", "complex"), ("level", "lookup")])
         d = self.decide("general-purpose", HARD)
         self.assertEqual((d["model"], d["effort"]), ("opus", "high"))
 
     def test_the_floor_a_project_file_cannot_pass_is_the_users_own_value(self):
         self.override({"levels": {"complex": {"effort": "xhigh", "needs": 4}}}, user=True)
         self.override({"levels": {"complex": {"effort": "high", "needs": 3}, "hardest": {"effort": "high"}}})
-        levels = cfg.load_config()["levels"]
-        self.assertEqual(levels["complex"], {"needs": 4, "effort": "xhigh"})
-        self.assertEqual(levels["hardest"]["effort"], "xhigh")
+        levels = cfg.load().levels
+        self.assertEqual(levels[Level.complex], LevelSpec(4, "xhigh"))
+        self.assertEqual(levels[Level.hardest].effort, "xhigh")
         self.override({"levels": {"complex": {"effort": None}}}, user=True)
         self.override({"levels": {"complex": {"effort": "high"}}})
-        self.assertEqual(cfg.load_config()["levels"]["complex"]["effort"], "high")  # raises a level the user left open
+        self.assertEqual(cfg.load().levels[Level.complex].effort, "high")  # raises a level the user left open
 
     def test_non_finite_numbers_are_rejected_in_every_file(self):
         nan, inf = float("nan"), float("inf")
@@ -806,17 +813,50 @@ class Registry(Sandbox):
         for user in (True, False):
             with self.subTest(user=user):
                 self.override(spec, user=user)
-                config = cfg.load_config()
-                self.assertEqual(config["levels"], cfg.base_config()["levels"])
-                self.assertNotIn("saga", config["models"])
-                self.assertNotIn("claude-x-1", config["prices"])
+                config = cfg.load()
+                self.assertEqual(config.levels, cfg.shipped().levels)
+                self.assertNotIn("saga", config.models)
+                self.assertNotIn("claude-x-1", config.prices)
                 self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")
+                for where in ("levels.complex.needs", "levels.hardest.needs", "levels.standard.needs",
+                              "models.saga.strength", "models.saga.speed", "prices.claude-x-1.input"):
+                    self.assertTrue(any(f"{where} is not a finite number" in p for p in config.problems), where)
+                data = json.loads(self.out("models", "--json"))
+                self.assertEqual(data["config_problems"], list(config.problems))
+                self.assertIn("Left out of the override files", self.out("models"))
 
     def test_a_project_model_name_cannot_capture_a_trusted_models_ids(self):
         self.override({"models": {"claude": {"strength": 0.5}, "opus-5": {"strength": 9}, "saga": {"strength": 2}}})
-        config = cfg.load_config()
-        self.assertEqual(registry.family(config, "claude-opus-5-5"), "opus")
-        self.assertEqual([m for m in ("claude", "opus-5", "saga") if m in config["models"]], ["claude", "saga"])
+        config = cfg.load()
+        self.assertEqual(config.family("claude-opus-5-5"), "opus")
+        self.assertEqual([m for m in ("claude", "opus-5", "saga") if m in config.models], ["claude", "saga"])
+        self.assertEqual([h.name for h in config.held], ["opus-5"])
+
+    def test_needs_never_fall_as_the_level_rises(self):
+        shipped = [cfg.shipped().levels[level].needs for level in cfg.LEVELS]
+        self.assertEqual(shipped, [1, 2, 3, 3, 4])
+        self.override({"levels": {"lookup": {"needs": 3}}})  # a raise lifts every level above it
+        levels = cfg.load().levels
+        self.assertEqual([levels[level].needs for level in cfg.LEVELS], [3, 3, 3, 3, 4])
+        self.assertEqual(self.decide("general-purpose", BUILD)["model"], "opus")  # standard needs 3 now
+        self.override({"levels": {"hardest": {"needs": 1}}}, user=True)  # a level can't need less than the one below
+        self.override({"levels": {}})
+        self.assertEqual(cfg.load().levels[Level.hardest].needs, 3)
+
+    def test_an_alias_that_names_no_model_is_dropped_and_listed(self):
+        base = {**cfg.base_config(), "aliases": {"best": "opus", "top": "ghost"}}
+        reg = cfg.build(base)
+        self.assertEqual((reg.family("best"), reg.family("top")), ("opus", None))
+        self.assertEqual(reg.problems, ("aliases.top names no model, dropped",))
+
+    def test_what_a_project_file_asked_for_and_was_held_back_is_listed(self):
+        self.override({"levels": {"complex": {"needs": 2}}, "models": {"opus-x": {"strength": 9}}})
+        reg = cfg.load()
+        self.assertEqual([(h.kind, h.name) for h in reg.held], [("model", "opus-x"), ("level", "complex")])
+        data = json.loads(self.out("models", "--json"))
+        self.assertEqual([(h["kind"], h["name"]) for h in data["held_back"]], [("model", "opus-x"), ("level", "complex")])
+        self.assertIn("- level complex: needs 2 is below 3", self.out("models"))
+        self.assertNotIn("config_problems", data)
 
 
 class Allowlist(Sandbox):
@@ -824,7 +864,7 @@ class Allowlist(Sandbox):
 
     def setUp(self):
         super().setUp()
-        self.config = cfg.load_config()
+        self.config = cfg.load()
 
     def permitted(self, **layers):
         return allowlist.from_layers(layers).permitted(self.config)
@@ -844,8 +884,8 @@ class Allowlist(Sandbox):
 
     def test_a_family_deny_also_blocks_a_project_model_that_resolves_to_that_family(self):
         self.override({"models": {"best": {"strength": 3}}})
-        config = cfg.load_config()
-        self.assertEqual(registry.family(config, "best"), "opus")
+        config = cfg.load()
+        self.assertEqual(config.family("best"), "opus")
         denied = allowlist.from_layers({"policy": {"deniedModels": ["opus"]}}).permitted(config)
         self.assertEqual(denied, {"haiku", "sonnet", "fable"})
         kept = allowlist.from_layers({"policy": {"deniedModels": ["claude-opus-5-5"]}}).permitted(config)
@@ -858,7 +898,7 @@ class Allowlist(Sandbox):
     def test_junk_engine_layers_count_as_unset(self):
         sent = {"policy": {"deniedModels": [1, None]}, "user": "x", "project": {"availableModels": "opus"},
                 "bogus": {"a": 1}}
-        self.assertEqual(allowlist.read("s1", self.project, sent).permitted(self.config), set(registry.models(self.config)))
+        self.assertEqual(allowlist.read("s1", self.project, sent).permitted(self.config), set(self.config.models))
         self.assertIsNone(allowlist.remember("s1", "not an object"))
 
     def test_only_the_four_keys_are_stored(self):
@@ -1009,7 +1049,7 @@ class Allowlist(Sandbox):
         self.assertEqual([read.effort_cap(self.config, n) for n in ("haiku", "opus", "sonnet")], ["low", "low", "medium"])
 
     def test_a_managed_file_that_is_there_but_unreadable_permits_no_models(self):
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(registry.models(self.config)))  # absent
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(self.config.models))  # absent
         drop_ins = self.home / "managed-settings.d"
         drop_ins.mkdir()
         (drop_ins / "50-bad.json").write_text("{not json")
@@ -1020,7 +1060,7 @@ class Allowlist(Sandbox):
         self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
 
     def test_an_empty_or_blank_managed_file_and_a_folder_in_the_drop_ins_are_no_policy(self):
-        everything = set(registry.models(self.config))
+        everything = set(self.config.models)
         drop_ins = self.home / "managed-settings.d"
         drop_ins.mkdir()
         for text in ("", " \n\t "):
@@ -1036,8 +1076,8 @@ class Allowlist(Sandbox):
         for denied in (["opus"] + ["x"] * allowlist.MAX_ENTRIES, ["opus", "y" * (allowlist.MAX_CHARS + 1)]):
             self.assertEqual(self.permitted(policy={"deniedModels": denied}), set())
         self.assertEqual(self.permitted(policy={"deniedModels": ["x"] * allowlist.MAX_ENTRIES}),
-                         set(registry.models(self.config)))  # exactly at the cap is fine
-        self.assertEqual(self.permitted(user={"deniedModels": ["x"] * 300}), set(registry.models(self.config)))  # not policy: ignored
+                         set(self.config.models))  # exactly at the cap is fine
+        self.assertEqual(self.permitted(user={"deniedModels": ["x"] * 300}), set(self.config.models))  # not policy: ignored
         self.assertEqual(self.permitted(user={"availableModels": ["z" * 300, "haiku"] + ["q"] * 300}), {"haiku"})
         self.managed.write_text(json.dumps({"deniedModels": ["opus"] + ["x"] * allowlist.MAX_ENTRIES}))
         self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
@@ -1085,7 +1125,7 @@ class Allowlist(Sandbox):
         os.symlink("/dev/zero", self.home / "settings.json")
         (self.project / ".claude").mkdir()
         (self.project / ".claude" / "settings.json").write_text(json.dumps({"availableModels": ["haiku"], "pad": "x" * allowlist.MAX_BYTES}))
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(registry.models(self.config)))
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(self.config.models))
         real = self.project / "real.json"
         real.write_text(json.dumps({"availableModels": ["haiku"]}))
         (self.home / "settings.json").unlink()
@@ -1103,14 +1143,14 @@ class Allowlist(Sandbox):
         tree = Path(self.tmp.name) / "tree"
         tree.mkdir()
         (tree / ".git").write_text(f"gitdir: {other / 'stuff' / 'w'}\n")
-        self.assertEqual(allowlist.read(None, tree).permitted(self.config), set(registry.models(self.config)))
+        self.assertEqual(allowlist.read(None, tree).permitted(self.config), set(self.config.models))
         (other / "elsewhere" / ".git").mkdir(parents=True)
         (other / "elsewhere" / ".claude").mkdir()
         (other / "elsewhere" / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["opus"]}))
         (other / ".git" / "worktrees" / "w").mkdir(parents=True)
         (other / ".git" / "worktrees" / "w" / "commondir").write_text("../../../elsewhere/.git\n")  # not the checkout's own .git
         (tree / ".git").write_text(f"gitdir: {other / '.git' / 'worktrees' / 'w'}\n")
-        self.assertEqual(allowlist.read(None, tree).permitted(self.config), set(registry.models(self.config)))
+        self.assertEqual(allowlist.read(None, tree).permitted(self.config), set(self.config.models))
 
     def test_nothing_left_prints_no_none_in_the_reports(self):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["some-other-model"]}))
@@ -1140,12 +1180,12 @@ class Allowlist(Sandbox):
     def test_a_deeply_nested_settings_file_is_unreadable_not_a_crash(self):
         deep = "[" * 400000
         (self.home / "settings.json").write_text(deep)
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(registry.models(self.config)))
+        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(self.config.models))
         self.managed.write_text(deep)
         self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
 
     def test_a_malformed_policy_list_permits_nothing_while_a_soft_one_is_unset(self):
-        everything = set(registry.models(self.config))
+        everything = set(self.config.models)
         for key in ("deniedModels", "availableModels"):
             for junk in ("opus", None, 5, {"a": 1}):
                 self.assertEqual(self.permitted(policy={key: junk}), set(), (key, junk))
@@ -1171,7 +1211,7 @@ class Allowlist(Sandbox):
 
     def test_nothing_left_leaves_the_call_as_it_is(self):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["some-other-model"]}))
-        self.assertEqual(registry.available(self.config, allowed=allowlist.read(None, self.project)), [])
+        self.assertEqual(self.config.available(allowed=allowlist.read(None, self.project)), [])
         self.session_on("claude-opus-5-5")
         self.assertIsNone(self.pre("general-purpose", LOOKUP))
         row = self.ledger()[-1]
@@ -1181,10 +1221,10 @@ class Allowlist(Sandbox):
 
 class Options(Sandbox):
     def mode(self) -> str:
-        return settings.resolve(cfg.load_config()).mode
+        return settings.resolve(cfg.load()).mode
 
     def test_defaults(self):
-        self.assertEqual(settings.resolve(cfg.load_config()), settings.Settings())
+        self.assertEqual(settings.resolve(cfg.load()), settings.Settings())
 
     def test_the_mantle_switch_and_each_prompt_caching_switch_are_read(self):
         env = {"CLAUDE_CODE_USE_MANTLE": "1", "DISABLE_PROMPT_CACHING": "true", "DISABLE_PROMPT_CACHING_OPUS": "1",
@@ -1213,7 +1253,7 @@ class Options(Sandbox):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="yes",
                      CLAUDE_CODE_USE_VERTEX="1", max_tier="nonsense", main_effort="false")
         os.environ.update(ANTHROPIC_API_KEY="sk-test", ANTHROPIC_BASE_URL="https://gateway.example")
-        s = settings.resolve(cfg.load_config())
+        s = settings.resolve(cfg.load())
         self.assertEqual((s.subagent_model, s.force, s.cloud, s.cap, s.main_effort, s.verify_gate),
                          ("opus", True, "vertex", None, False, True))
         self.assertEqual((s.api_key, s.base_url), ("sk-test", True))
@@ -1227,7 +1267,7 @@ class Options(Sandbox):
         hooks.session_start({"session_id": "s1"})
         for name in values:
             del os.environ[f"CLAUDE_PLUGIN_OPTION_{name.upper()}"]
-        config = cfg.load_config()
+        config = cfg.load()
         self.assertEqual(settings.resolve(config), settings.Settings())
         self.assertEqual(settings.resolve(config, recorded=True), settings.Settings(
             mode="advise", routing_mode="advise", priority="quality", cap="haiku", pins="override",
@@ -1248,30 +1288,33 @@ class ConfigSchema(Sandbox):
     def test_the_shipped_config_has_the_current_schema_and_validates(self):
         base = cfg.base_config()
         self.assertEqual(base["schema"], cfg.CONFIG_SCHEMA)
-        cleaned = cfg._clean(base)
-        for name in base["models"]:
-            self.assertEqual(set(cleaned["models"][name]), {"strength", "speed", "cost"}, name)
+        shipped = cfg.shipped()
+        self.assertEqual((shipped.problems, shipped.held), ((), ()))
+        for name, spec in base["models"].items():
+            model = shipped.models[name]
+            self.assertEqual((model.strength, model.speed, model.cost), (spec["strength"], spec["speed"], spec["cost"]), name)
         for name, spec in base["levels"].items():
-            self.assertEqual(cleaned["levels"][name], spec, name)
-        self.assertEqual(cfg._prices(base["prices"]).keys(), base["prices"].keys())
+            self.assertEqual(shipped.levels[name], LevelSpec(spec["needs"], spec["effort"]), name)
+        self.assertEqual(shipped.prices.keys(), base["prices"].keys())
+        self.assertEqual(shipped.aliases, base["aliases"])
 
     def test_an_override_without_a_schema_still_loads(self):
         self.override({"levels": {"complex": {"effort": "xhigh"}}}, user=True)
         self.override({"agents": {"my-agent": {"level": "lookup"}}})
-        config = cfg.load_config()
-        self.assertEqual((config["levels"]["complex"]["effort"], config["agents"]["my-agent"]["level"]),
-                         ("xhigh", "lookup"))
-        self.assertEqual(cfg.newer_overrides(), [])
+        config = cfg.load()
+        self.assertEqual((config.levels[Level.complex].effort, config.rules["my-agent"].level),
+                         ("xhigh", Level.lookup))
+        self.assertEqual(config.newer, ())
 
     def test_an_override_from_a_newer_release_is_read_as_far_as_it_is_understood_and_named(self):
         self.override({"schema": cfg.CONFIG_SCHEMA + 1, "routing_mode": "off",
                        "levels": {"complex": {"effort": "xhigh"}}, "a_future_key": {"x": 1}}, user=True)
         self.override({"schema": cfg.CONFIG_SCHEMA + 1, "agents": {"my-agent": {"level": "lookup"}}})
-        config = cfg.load_config()
-        self.assertEqual((config["routing_mode"], config["levels"]["complex"]["effort"]), ("off", "xhigh"))
-        self.assertEqual(config["agents"]["my-agent"]["level"], "lookup")
+        config = cfg.load()
+        self.assertEqual((config.routing_mode, config.levels[Level.complex].effort), ("off", "xhigh"))
+        self.assertEqual(config.rules["my-agent"].level, Level.lookup)
         newer = [str(self.home / "model-router.json"), str(self.project / ".claude" / "model-router.json")]
-        self.assertEqual([str(p) for p in cfg.newer_overrides()], newer)
+        self.assertEqual([str(p) for p in config.newer], newer)
         self.assertEqual(json.loads(self.out("models", "--json"))["newer_config"], newer)
         self.assertIn("newer Model Router", self.out("models"))
 
@@ -1675,14 +1718,14 @@ class Router(Sandbox):
         self.assertEqual(self.decide("model-router:deep-solver", LOOKUP)["model"], "opus")  # routed, never Fable by pin
 
     def test_the_shipped_ladder_picks_at_balanced_priority(self):
-        config = cfg.base_config()
+        config = cfg.shipped()
         every = ["haiku", "sonnet", "opus", "fable"]
         picks = [tuple(ladder.pick(config, level, "balanced", every, {})) for level in cfg.LEVELS]
         self.assertEqual(picks, [("haiku", "medium"), ("sonnet", "medium"), ("opus", "high"),
                                  ("opus", "xhigh"), ("fable", "high")])
 
     def test_a_pick_weaker_than_the_levels_need_gets_one_more_effort_step(self):
-        config = cfg.base_config()
+        config = cfg.shipped()
         pick = lambda level, usable: tuple(ladder.pick(config, level, "balanced", usable, {}))  # noqa: E731
         self.assertEqual(pick("complex", ["haiku", "sonnet"]), ("sonnet", "xhigh"))
         self.assertEqual(pick("hardest", ["haiku", "sonnet"]), ("sonnet", "xhigh"))
@@ -1691,7 +1734,7 @@ class Router(Sandbox):
         self.assertEqual(ladder.pick(config, "complex", "balanced", [], {}), (None, "high"))
 
     def test_a_pick_at_or_above_the_levels_need_gets_no_extra_step(self):
-        config = cfg.base_config()
+        config = cfg.shipped()
         pick = lambda level, usable, priority="balanced": tuple(ladder.pick(config, level, priority, usable, {}))  # noqa: E731
         self.assertEqual(pick("lookup", ["sonnet"]), ("sonnet", "medium"))  # stronger than needed
         self.assertEqual(pick("standard", ["sonnet", "opus"]), ("sonnet", "medium"))
@@ -1700,10 +1743,10 @@ class Router(Sandbox):
         self.assertEqual(pick("complex", ["sonnet", "opus"], "fast"), ("sonnet", None))  # fast steps down on purpose
 
     def test_the_extra_effort_step_never_goes_past_xhigh(self):
-        config = cfg.base_config()
+        config = cfg.shipped()
         for effort, want in (("medium", "high"), ("high", "xhigh"), ("xhigh", "xhigh"), ("max", "max")):
-            levels = {**config["levels"], "complex": {"needs": 3, "effort": effort}}
-            pick = ladder.pick({**config, "levels": levels}, "complex", "balanced", ["sonnet"], {})
+            levels = {**config.levels, Level.complex: LevelSpec(3, effort)}
+            pick = ladder.pick(dataclasses.replace(config, levels=levels), "complex", "balanced", ["sonnet"], {})
             self.assertEqual(pick, ("sonnet", want), effort)
 
     def test_complex_without_opus_runs_on_sonnet_at_xhigh_and_a_redo_adds_effort(self):
@@ -1745,7 +1788,7 @@ class Router(Sandbox):
         self.assertEqual((d["level"], d["model"], d["effort"]), ("complex", "fable", "high"))
         os.environ.pop("CLAUDE_PLUGIN_OPTION_PRIORITY")
         for _ in range(learn.VOTES_NEEDED):
-            learn.decided(cfg.load_config(), source="caller", level="complex", pick="opus", runs_on="fable")
+            learn.decided(cfg.load(), source="caller", level="complex", pick="opus", runs_on="fable")
         d = self.decide("general-purpose", HARD)
         self.assertEqual((d["model"], d["effort"]), ("fable", "high"))
 
@@ -1785,12 +1828,12 @@ class Router(Sandbox):
         self.session_on("claude-sonnet-5-5")
         hook_input = {**self.call("general-purpose", BUILD), "agent_id": "agent-1", "agent_type": "helper"}
         snap = settings.Snapshot(hook_input)
-        d = router.decide(spawn.facts(hook_input, snap), snap.config, settings.Settings())
+        d = router.decide(spawn.facts(hook_input, snap), snap.registry, settings.Settings())
         self.assertEqual((d["action"], d["model"], d["was"]), ("rewrite", "sonnet", None))
 
     def test_decide_needs_only_its_facts(self):
-        config = cfg.load_config()
-        usable = registry.available(config)
+        config = cfg.load()
+        usable = config.available()
 
         def decide(**facts) -> dict:
             facts = {"agent": "helper", "tool_input": {"prompt": LOOKUP}, "usable": usable, **facts}
@@ -1895,10 +1938,10 @@ class Router(Sandbox):
         self.assertEqual((d["level"], d["model"]), ("complex", "opus"))
 
     def test_a_strong_agent_is_named_without_a_model_so_its_brief_routes_and_its_redo_climbs(self):
-        config = cfg.load_config()
+        config = cfg.load()
         self.assertEqual(gates.strong_agent(config, "sonnet", "complex"), "model-router:architect")
         self.assertEqual(gates.strong_agent(config, "fable", "frontier"), "model-router:deep-solver")
-        self.assertEqual(gates.strong_agent({**config, "crew": {}}, "opus", "complex"), 'a subagent with model: "opus"')
+        self.assertEqual(gates.strong_agent(dataclasses.replace(config, crew={}), "opus", "complex"), 'a subagent with model: "opus"')
         self.session_on("claude-haiku-5-5")
         brief = "Design the session store migration across the API and worker services."
         named = self.decide("model-router:architect", brief, model="sonnet", effort="high")  # the old hint
@@ -2027,7 +2070,7 @@ class Router(Sandbox):
         path.write_text("".join(json.dumps(r) + "\n" for r in rows))
         hook_input = {**self.call("general-purpose", BUILD), "transcript_path": str(path)}
         snap = settings.Snapshot(hook_input)
-        d = router.decide(spawn.facts(hook_input, snap), snap.config, settings.Settings())
+        d = router.decide(spawn.facts(hook_input, snap), snap.registry, settings.Settings())
         self.assertEqual((d["model"], d["was"]), ("sonnet", "sonnet"))  # not the recorded opus, not the subagent's haiku
 
     def test_hooks_never_break_on_garbage(self):
@@ -2210,7 +2253,7 @@ class RepeatGuard(Sandbox):
 class Calls(Sandbox):
     def setUp(self):
         super().setUp()
-        self.config = cfg.load_config()
+        self.config = cfg.load()
 
     def route(self, tool_input: dict, model: str = "haiku", **facts) -> str | None:
         facts = {"level": "lookup", "effort": "low", "source": "router", **facts}
@@ -2262,7 +2305,7 @@ class Fallback(Sandbox):
     def test_a_rewrite_waits_for_its_result_and_only_a_result_finishes_the_run(self):
         key = calls.identify({"prompt": LOOKUP})[1]
         fallback.remember("s1", key, self.decide("general-purpose", LOOKUP))
-        request.note_spawn(cfg.load_config(), "s1", key, "haiku", level="lookup", effort="low", source="router")
+        request.note_spawn(cfg.load(), "s1", key, "haiku", level="lookup", effort="low", source="router")
         self.assertIsNone(fallback.refused("s1", key))  # a copy issued alongside it
         self.next_message()
         self.assertEqual(fallback.refused("s1", key)["model"], "haiku")
@@ -2308,7 +2351,7 @@ class Fallback(Sandbox):
 class Request(Sandbox):
     def setUp(self):
         super().setUp()
-        self.config = cfg.load_config()
+        self.config = cfg.load()
 
     def start(self, **fields):
         request.start("s1", **{"prompt_id": "p1", "level": "hardest", "need": "opus", "below": False,
@@ -2558,7 +2601,7 @@ class Mod(Sandbox):
             "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}})
         row = self.ledger()[-1]
         self.assertEqual((row["event"], row["cost_usd"]), ("usage", 6.0))
-        self.assertIsNone(registry.cost(cfg.load_config(), "claude-unknown-9", {"input_tokens": 1}))
+        self.assertIsNone(cfg.load().cost("claude-unknown-9", {"input_tokens": 1}))
         # Opus 5.5 cache writes: $5/MTok for five minutes, $8/MTok for one hour.
         hooks.mod_usage({"session_id": "s1", "agent_id": "a1", "usage": {
             "model": "claude-opus-5-5", "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
@@ -2569,15 +2612,15 @@ class Mod(Sandbox):
             "model": "claude-opus-5-5", "input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
             "cache_creation_input_tokens": 1_000_000}})
         self.assertEqual(self.ledger()[-1]["cost_usd"], 5.0)  # no split reported
-        config = cfg.load_config()
-        self.assertEqual(registry.price(config, "claude-opus-4-7")["input"], 5)  # one entry covers Opus 4.x
-        self.assertEqual(registry.price(config, "claude-opus-4-1-20250805"),  # except 4.1, at its own list price
+        config = cfg.load()
+        self.assertEqual(config.price("claude-opus-4-7")["input"], 5)  # one entry covers Opus 4.x
+        self.assertEqual(config.price("claude-opus-4-1-20250805"),  # except 4.1, at its own list price
                          {"input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75, "cache_write_1h": 30})
         for opus_4 in ("claude-opus-4-0", "claude-opus-4-20250514"):  # Opus 4 lists at the same price as 4.1
-            self.assertEqual(registry.price(config, opus_4), registry.price(config, "claude-opus-4-1"), opus_4)
-        self.assertEqual(registry.price(config, "claude-haiku-4-5-20251001")["input"], 1)
-        self.assertEqual(registry.price(config, "claude-opus-5-5[1m]")["input"], 4)
-        self.assertIsNone(registry.price(config, "claude-opus-5-6"))  # a new version is never priced as its neighbour
+            self.assertEqual(config.price(opus_4), config.price("claude-opus-4-1"), opus_4)
+        self.assertEqual(config.price("claude-haiku-4-5-20251001")["input"], 1)
+        self.assertEqual(config.price("claude-opus-5-5[1m]")["input"], 4)
+        self.assertIsNone(config.price("claude-opus-5-6"))  # a new version is never priced as its neighbour
 
     def test_results_are_checked_against_the_model_the_mod_routed_to(self):
         self.options(agent_pins="override")
@@ -2786,12 +2829,11 @@ class NewestOnProviders(Sandbox):
         self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "sonnet"))  # the Anthropic API
 
     def test_the_shipped_ids_belong_to_their_families_and_are_priced(self):
-        config = cfg.base_config()
-        self.assertEqual({p: tuple(f) for p, f in config["older_aliases"].items() if not p.startswith("$")}, self.LAGS)
-        for family, model_id in config["newest"].items():
-            if not family.startswith("$"):
-                self.assertEqual((registry.family(config, model_id), model_id), (family, self.NEWEST[family]))
-                self.assertIsNotNone(registry.price(config, model_id))
+        config = cfg.shipped()
+        self.assertEqual({p: tuple(f) for p, f in config.older_aliases.items()}, self.LAGS)
+        for family, model_id in config.newest.items():
+            self.assertEqual((config.family(model_id), model_id), (family, self.NEWEST[family]))
+            self.assertIsNotNone(config.price(model_id))
 
     def test_a_pin_an_allowlist_a_denial_or_overrides_keep_the_alias(self):
         os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
@@ -2902,7 +2944,7 @@ class Ledger(Sandbox):
         ledger.model_error("s1", "deep", "fable")
         ledger.turn("s1", "complex", "high", command="hard")
         ledger.turn("s1", "complex", "high")
-        ledger.usage(cfg.load_config(), "s1", "a1", {"model": "claude-opus-5-5", "input_tokens": 1_000_000,
+        ledger.usage(cfg.load(), "s1", "a1", {"model": "claude-opus-5-5", "input_tokens": 1_000_000,
                      "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}, None)
         rows = ledger.read()
         self.assertEqual([list(r) for r in rows], [
@@ -2928,11 +2970,11 @@ class Ledger(Sandbox):
 
     def test_a_malformed_usage_writes_no_row(self):
         for usage in ({"input_tokens": 1}, "x", None, {"model": 5}):
-            ledger.usage(cfg.load_config(), "s1", None, usage, None)
+            ledger.usage(cfg.load(), "s1", None, usage, None)
         self.assertEqual(ledger.read(), [])
 
     def test_a_turn_is_unpriced_if_any_request_is_unpriced(self):
-        config = cfg.load_config()
+        config = cfg.load()
         usage = {"model": "claude-opus-5-5", "input_tokens": 1_000_000}
         requests = [usage, {"model": "claude-unknown-9", "input_tokens": 5}, "junk"]
         self.assertIsNone(ledger.turn_cost(config, usage, requests))
@@ -2951,7 +2993,7 @@ class LongPromptPricing(Sandbox):
 
     def cost(self, usage: dict, requests: list | None = None):
         payload = {"session_id": "s1", "agent_id": "a1", "usage": usage}
-        return ledger.turn_cost(cfg.load_config(), usage, requests)
+        return ledger.turn_cost(cfg.load(), usage, requests)
 
     def test_a_request_over_100k_pays_the_long_prompt_rate(self):
         short = self.haiku(input_tokens=10_000, cache_write=20_000, output_tokens=1_000)  # 30K prompt
@@ -3033,7 +3075,7 @@ class Feedback(Sandbox):
         self.options(verify_gate="true")
         self.session_on("claude-sonnet-5-5")
         for _ in range(learn.VOTES_NEEDED):
-            learn.decided(cfg.load_config(), source="caller", level="complex", pick="opus", runs_on="fable")
+            learn.decided(cfg.load(), source="caller", level="complex", pick="opus", runs_on="fable")
         hooks.user_prompt({"session_id": "s1", "prompt": HARD})  # opus would do, but complex is raised
         entry = request.load("s1")
         self.assertEqual((entry.level, entry.need, entry.below), ("complex", "fable", True))
@@ -3061,7 +3103,7 @@ class Feedback(Sandbox):
         self.assertEqual(learn.raises()["lookup"], 0)
 
     def test_each_kind_of_spawn_casts_its_own_votes(self):
-        config = cfg.load_config()
+        config = cfg.load()
 
         def votes(**facts) -> dict:
             learn.reset()
@@ -3089,7 +3131,7 @@ class Feedback(Sandbox):
                 "from modelrouter import config, learn, store\n"
                 "store.LOCK_WAIT_SECONDS = 60\n"
                 "facts = dict(source='router', level='lookup', pick='haiku', runs_on='haiku')\n"
-                "for _ in range(10): learn.decided(config.load_config(), **facts)\n")
+                "for _ in range(10): learn.decided(config.load(), **facts)\n")
         workers = [subprocess.Popen([sys.executable, "-c", code, str(SCRIPTS)], env={**os.environ})
                    for _ in range(5)]
         for worker in workers:
@@ -3213,7 +3255,7 @@ class Hooks(Sandbox):
         self.assertIn('model: "haiku"', text)
         self.assertIn("If it asks for that model", text)
         self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")  # nothing is forced
-        config = cfg.load_config()
+        config = cfg.load()
         self.assertEqual(hooks.named_model(config, "Use Opus for the review"), "opus")
         self.assertEqual(hooks.named_model(config, "run this on claude fable please"), "fable")
         for prompt in ("don't use opus for this", "the haiku about autumn", "work with the opus agent"):
@@ -3876,7 +3918,7 @@ class Reports(Sandbox):
         text = report.explain(snap, LOOKUP, "model-router:architect")
         self.assertIn("Level: **hardest**", text)  # the request's floor reaches a strong role agent
         key = calls.identify({"prompt": LOOKUP})[1]
-        request.note_spawn(snap.config, "s1", key, "haiku", level="lookup", effort="medium", source="router")
+        request.note_spawn(snap.registry, "s1", key, "haiku", level="lookup", effort="medium", source="router")
         calls.settled("s1", key, None, finished=True)
         self.assertIn("one level above the lookup run", report.explain(snap, LOOKUP))
 
@@ -4002,7 +4044,7 @@ class StateFiles(Sandbox):
 
     def test_a_broken_settings_file_is_never_moved(self):
         (self.home / "model-router.json").write_text("{oops")
-        cfg.load_config()
+        cfg.load()
         store.update_state(lambda state: state.update(max_tier="opus"))
         self.assertEqual((self.home / "model-router.json").read_text(), "{oops")
         self.assertEqual(list(self.home.glob("*.corrupt-*")), [])
@@ -4375,7 +4417,7 @@ class ReadmeDiagrams(unittest.TestCase):
             self.assertIn(row, text)
 
     def test_the_ladder_note_says_where_a_ruled_out_model_moves_the_pick(self):
-        config = cfg.base_config()
+        config = cfg.shipped()
         self.assertEqual(ladder.pick(config, "lookup", "balanced", ["sonnet", "opus", "fable"], {}).model, "sonnet")
         self.assertEqual(ladder.pick(config, "complex", "balanced", ["haiku", "sonnet"], {}).model, "sonnet")
         text = self.text("ladder.svg")
@@ -4487,6 +4529,44 @@ class MachineReadable(Sandbox):
         self.assertEqual(data["newer_files"], [str(newer)])
 
 
+class JsonOutputs(Sandbox):
+    """The bytes of `models --json` and `usage --json` on a recorded setup. A change to how the registry is
+    built or read may not move them (docs/ARCHITECTURE.md, Compatibility); a new key shows only when it has
+    something to say."""
+
+    DIR = FIXTURES / "json-outputs"
+
+    def recorded(self) -> None:
+        self.override({"levels": {"complex": {"effort": "xhigh"}}, "agents": {"ruled": {"model": "sonnet"}},
+                       "models": {"swift": {"strength": 2.5, "speed": 5, "cost": 2.5}},
+                       "prices": {"claude-swift-1": {"input": 1, "output": 5}}}, user=True)
+        self.override({"levels": {"standard": {"effort": "high"}}, "agents": {"slow": {"level": "complex"}},
+                       "models": {"saga": {"strength": 1.5, "speed": 2, "cost": 1.2}}})
+        health.ran("fable", "claude-opus-5-5", "opus", forced=False)
+        health.ran("fable", "claude-opus-5-5", "opus", forced=False)
+        health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
+        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "sonnet", "opus", "fable", "swift"]}))
+        store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga", "swift"]}})
+        store.save_json(learn._path(), {"complex": {"calls": 4, "votes": 1, "bump": 1}, "lookup": {"calls": 2}})
+        self.session_on("claude-opus-5-5")
+        for agent, brief, ran in (("general-purpose", LOOKUP, "claude-haiku-5-5"), ("ruled", BUILD, "claude-sonnet-5-5"),
+                                  ("slow", LOOKUP, "claude-opus-5-5"), ("general-purpose", HARD, "claude-opus-5-5")):
+            self.pre(agent, brief)
+            self.done(agent, brief, ran)
+        for agent_id, model in ((None, "claude-opus-5-5"), ("a1", "claude-haiku-5-5"), ("a1", "claude-new-9")):
+            hooks.mod_usage({"session_id": "s1", "agent_id": agent_id, "usage": {
+                "model": model, "input_tokens": 1200, "output_tokens": 400_000,
+                "cache_read_input_tokens": 3000, "cache_creation_input_tokens": 500}})
+
+    def test_the_models_and_usage_outputs_are_the_recorded_bytes(self):
+        self.recorded()
+        got = {"models": self.out("models", "--json"), "usage": self.out("usage", "--json")}
+        store.update_state(lambda state: state.update(max_tier="sonnet"))
+        got["models-capped"] = self.out("models", "--json")
+        for name, text in got.items():
+            self.assertEqual(text, (self.DIR / f"{name}.json").read_text(encoding="utf-8"), name)
+
+
 @unittest.skipUnless(shutil.which("sh"), "needs sh")
 class OverheadBench(unittest.TestCase):
     def test_the_overhead_bench_reports_every_hook_and_state_file(self):
@@ -4519,18 +4599,18 @@ class PriceTable(unittest.TestCase):
     UNLISTED = {"claude-mythos-preview"}
 
     def test_every_model_still_in_service_has_a_price(self):
-        config = cfg.load_config()
+        config = cfg.load()
         lifecycle = json.loads((ROOT / "compat" / "baseline.json").read_text(encoding="utf-8"))["lifecycle"]
         missing = [model for model, info in lifecycle.items()
                    if info.get("state") in ("Active", "Deprecated") and model not in self.UNLISTED
-                   and registry.price(config, model) is None]
+                   and config.price(model) is None]
         self.assertEqual(missing, [])
 
     def test_mythos_is_priced_like_its_fable_twin(self):
-        config = cfg.load_config()
+        config = cfg.load()
         for version, rates in (("5-2", (8, 40, 0.2, 10, 16)), ("5-1", (10, 50, 0.25, 12.5, 20)),
                                ("5", (10, 50, 1, 12.5, 20))):
-            price = registry.price(config, f"claude-mythos-{version}")
+            price = config.price(f"claude-mythos-{version}")
             self.assertEqual(tuple(price[k] for k in ("input", "output", "cache_read", "cache_write",
                                                       "cache_write_1h")), rates, version)
 
@@ -4546,27 +4626,27 @@ class SecurityClaims(Sandbox):
         cleaned = cfg._clean({"routing_mode": "advise", "models": {"saga": {"strength": 1}},
                               "levels": {"lookup": {"effort": "low"}}, "agents": {"x": {"level": "lookup"}},
                               "prices": {"claude-saga-1": {"input": 1}}, "newest": {"opus": "claude-x"},
-                              "older_aliases": {"bedrock": ["opus"]}, "crew": {"x": {}}, "main": {}})
+                              "older_aliases": {"bedrock": ["opus"]}, "crew": {"x": {}}, "main": {}}, cfg.PROJECT_FILE, [])
         self.assertEqual(set(cleaned), {"routing_mode", "models", "levels", "agents"})
         self.override({"prices": {"claude-opus-5-5": {"output": 0}}, "newest": {"opus": "claude-evil-1"}})
-        config = cfg.load_config()
-        self.assertEqual(config["newest"], cfg.base_config()["newest"])
-        self.assertEqual(config["prices"]["claude-opus-5-5"], cfg.base_config()["prices"]["claude-opus-5-5"])
+        config = cfg.load()
+        self.assertEqual(config.newest, {k: v for k, v in cfg.base_config()["newest"].items() if k[0] != "$"})
+        self.assertEqual(config.prices["claude-opus-5-5"], cfg.base_config()["prices"]["claude-opus-5-5"])
 
     def test_the_weakest_routing_mode_wins(self):
         for user, project, want in (("auto", "off", "off"), ("off", "auto", "off"), ("advise", "auto", "advise")):
             with self.subTest(user=user, project=project):
                 self.override({"routing_mode": user}, user=True)
                 self.override({"routing_mode": project})
-                self.assertEqual(settings.resolve(cfg.load_config()).mode, want)
+                self.assertEqual(settings.resolve(cfg.load()).mode, want)
 
     def test_a_project_model_cannot_take_a_trusted_name_or_count_under_a_cap(self):
         self.override({"models": {"opus-fast": {"strength": 9}, "pus": {"strength": 9}, "saga": {"strength": 0.1}}})
-        config = cfg.load_config()
-        self.assertNotIn("opus-fast", config["models"])
-        self.assertNotIn("pus", config["models"])
-        self.assertIn("saga", registry.available(config))
-        self.assertNotIn("saga", registry.available(config, cap="sonnet"))
+        config = cfg.load()
+        self.assertNotIn("opus-fast", config.models)
+        self.assertNotIn("pus", config.models)
+        self.assertIn("saga", config.available())
+        self.assertNotIn("saga", config.available(cap="sonnet"))
 
     def test_it_writes_only_under_its_data_directory(self):
         outside = [self.home, self.project]
@@ -4602,7 +4682,7 @@ class SecurityClaims(Sandbox):
 
     def test_the_api_key_stays_out_of_repr_and_state(self):
         os.environ["ANTHROPIC_API_KEY"] = "sk-secret-123"
-        options = settings.resolve(cfg.load_config())
+        options = settings.resolve(cfg.load())
         self.assertNotIn("sk-secret-123", repr(options))
         settings.record(options)
         hooks.session_start({"session_id": "s1", "source": "startup", "cwd": str(self.project)})
@@ -4637,7 +4717,7 @@ class ProfileProperties(unittest.TestCase):
             yield " ".join(words) + ".", rng.choice(self.AGENTS), rng
 
     def level(self, text, agent):
-        return cfg.LEVELS.index(profile.profile_call({"prompt": text}, agent)["level"])
+        return profile.profile_call({"prompt": text}, agent)["level"]
 
     def test_adding_a_signal_word_never_lowers_the_level(self):
         for brief, agent, rng in self.briefs():
@@ -4960,6 +5040,38 @@ class DesignDecisions(unittest.TestCase):
             result = profile.profile_call({"prompt": prompt}, "general-purpose")
             self.assertEqual(result["level"], level, prompt)
             self.assertIn("load", result["signals"], prompt)
+
+
+class Levels(unittest.TestCase):
+    def test_levels_order_by_difficulty_not_alphabetically(self):
+        names = ["lookup", "standard", "complex", "hardest", "frontier"]
+        self.assertEqual(sorted(names), ["complex", "frontier", "hardest", "lookup", "standard"])  # what a bare str does
+        self.assertEqual(sorted(reversed(cfg.LEVELS)), [Level(n) for n in names])
+        self.assertIs(max(Level.lookup, Level.hardest), Level.hardest)
+        self.assertIs(min(Level.frontier, Level.complex), Level.complex)
+        self.assertTrue(Level.lookup < "standard" < Level.complex <= Level.complex < Level.hardest < Level.frontier)
+        self.assertFalse(Level.hardest < Level.complex)
+        self.assertIs(Level.complex.up(), Level.hardest)
+        self.assertIsNone(Level.frontier.up())
+
+    def test_a_level_is_its_bare_name_wherever_it_is_written(self):
+        self.assertEqual(json.dumps({"level": Level.hardest}), '{"level": "hardest"}')
+        self.assertEqual((f"{Level.complex}", str(Level.complex), "%s" % Level.complex), ("complex",) * 3)
+        self.assertEqual(Level.complex, "complex")
+        self.assertEqual({Level.complex: 1}["complex"], 1)
+        self.assertEqual((Level.parse("nope"), Level.parse(5), Level.parse(None)), (None, None, None))
+        self.assertIs(Level.parse("complex"), Level.complex)
+        with self.assertRaises(TypeError):
+            Level.complex < 3
+
+    def test_only_config_knows_the_order_of_the_levels(self):
+        found = []
+        for folder, pattern in ((SCRIPTS / "modelrouter", "*.py"), (ROOT / "bench", "*.py"), (ROOT / "tools", "*.py"),
+                                (ROOT / "tests", "*.py")):
+            for path in folder.glob(pattern):
+                if path.name != "config.py" and "LEVELS" + ".index" in path.read_text(encoding="utf-8"):
+                    found.append(str(path.relative_to(ROOT)))
+        self.assertEqual(found, [])
 
 
 class Roles(unittest.TestCase):

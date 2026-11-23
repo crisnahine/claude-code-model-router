@@ -3,9 +3,10 @@ the rewrite waiting for its result, the refused-rewrite guard and the one deny."
 from __future__ import annotations
 
 
-from . import health, registry, settings, spawn, store
+from . import health, settings, spawn, store
 from . import config as cfg
 from . import router
+from .registry import Registry
 
 # shortcut: a refused call re-issued within this many seconds is rewritten again; key on a message id if hooks get one
 REFUSED_AFTER = 5
@@ -16,7 +17,7 @@ def route(hook_input: dict, snap: settings.Snapshot) -> dict | None:
     one deny that holds the user's cap."""
     spawned = spawn.decide(hook_input, snap)
     session_id, decision = hook_input.get("session_id"), spawned.decision
-    _guard(session_id, spawned.key, decision, snap.config, snap.options)
+    _guard(session_id, spawned.key, decision, snap.registry, snap.options)
     spawn.record(spawned, "fallback")
     if decision["action"] == "rewrite":
         # A rewrite auto mode denies after review gets no result, so it stays pending and
@@ -59,7 +60,7 @@ def refused(session_id: str | None, key: str) -> dict | None:
     return rewrite
 
 
-def _guard(session_id: str | None, key: str, decision: router.Decision, config: dict,
+def _guard(session_id: str | None, key: str, decision: router.Decision, reg: Registry,
            options: settings.Settings) -> None:
     """We rewrote this very call before and no result came back: the rewrite wasn't
     accepted, or something else stopped the call. Rewriting it again could loop."""
@@ -69,7 +70,7 @@ def _guard(session_id: str | None, key: str, decision: router.Decision, config: 
     if earlier is None:
         return
     cap, untouched = options.cap, decision["was"]
-    if cap and registry.strength(config, untouched) > registry.strength(config, cap):
+    if cap and reg.strength(untouched) > reg.strength(cap):
         decision.update(action="deny", reason=(
             f"Model Router: subagents are capped at {cap} by the user, and this call would run on "
             f"{untouched}. Re-issue it with model: \"{decision['model']}\"."))

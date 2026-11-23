@@ -26,7 +26,8 @@ BENCH = Path(__file__).resolve().parent
 ROOT = BENCH.parent
 PLUGIN = ROOT / "plugins" / "model-router"
 sys.path.insert(0, str(PLUGIN / "scripts"))
-from modelrouter import config as mrconfig, registry  # noqa: E402
+from modelrouter import config as mrconfig  # noqa: E402
+from modelrouter.registry import Registry  # noqa: E402
 from modelrouter.ledger import read as read_ledger  # noqa: E402
 ROW_SCHEMA = 2  # a row's schema says which harness wrote it; analyze reads a missing key as old only below this
 CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research")
@@ -321,7 +322,7 @@ def final_answer(shipped: Path, work: Path, reply: str) -> dict:
     return {"reply": reply, "files": files, "removed": removed, "omitted": omitted}
 
 
-def run_one(task: dict, config: dict, options: dict, registry_config: dict) -> dict:
+def run_one(task: dict, config: dict, options: dict, registry_config: Registry) -> dict:
     # No task or configuration name: a brief that quotes its working directory would hand the router signal words.
     scratch = Path(tempfile.mkdtemp(prefix="mrbench-"))
     work = scratch / "work"
@@ -368,7 +369,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: dict) -> d
                    "session_dir_removed": session_removed, "kept": kept and str(kept)})
 
 
-def record(task: dict, config: dict, options: dict, registry_config: dict, result: dict, facts: dict) -> dict:
+def record(task: dict, config: dict, options: dict, registry_config: Registry, result: dict, facts: dict) -> dict:
     """The row for one run, from Claude Code's parsed result and what the runner saw around the process."""
     models = {name: {k: usage.get(k) for k in ("inputTokens", "outputTokens", "cacheReadInputTokens",
                                                 "cacheCreationInputTokens", "costUSD", "costBasis")}
@@ -401,7 +402,7 @@ def record(task: dict, config: dict, options: dict, registry_config: dict, resul
         "cost_known": known,
         "duration_ms": result.get("duration_ms"), "duration_api_ms": result.get("duration_api_ms"),
         "wall_ms": facts["wall_ms"], "num_turns": result.get("num_turns"),
-        "models": models, "prices": {name: registry.price(registry_config, name) for name in models},
+        "models": models, "prices": {name: registry_config.price(name) for name in models},
         "subagents": {k: agents.get(k) for k in ("spawned", "completed", "failed", "by_type")},
         "permission_denials": [d.get("tool_name") for d in result.get("permission_denials") or []],
         "passed": facts["grade"]["verdict"] == "pass", "grade": facts["grade"],
@@ -439,7 +440,7 @@ def main(argv: list[str] | None = None) -> int:
     tasks = [t for t in load_tasks() if not args.tasks or t["id"] in args.tasks]
     configs = [c for c in load_configs() if not args.configs or c["id"] in args.configs]
     version = subprocess.run([*args.claude, "--version"], capture_output=True, text=True).stdout.strip()
-    registry_config = mrconfig.base_config()
+    registry_config = mrconfig.shipped()
     options = {"claude": args.claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,
                "plugin_dir": str(PLUGIN), "claude_version": version, "commit": _git_head(), "dirty": _git_dirty(),
                "keep": str(args.keep) if args.keep else None}

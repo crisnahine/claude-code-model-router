@@ -7,16 +7,17 @@ from __future__ import annotations
 
 import re
 
-from . import allowlist, calls, fallback, gates, health, intake, learn, ledger, profile, registry, request, router, session, settings, spawn, store, upstream
+from . import allowlist, calls, fallback, gates, health, intake, learn, ledger, profile, request, router, session, settings, spawn, store, upstream
 from . import config as cfg
+from .registry import Registry
 
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
 
 
-def named_model(config: dict, prompt: str) -> str | None:
+def named_model(reg: Registry, prompt: str) -> str | None:
     """A model the user may be asking for: "use opus", "run this on haiku". These are
     ordinary words too, so this only prompts Claude to decide; it forces nothing."""
-    names = "|".join(re.escape(n) for n in registry.models(config))
+    names = "|".join(re.escape(n) for n in reg.models)
     if not names:
         return None
     text = (prompt or "").lower()
@@ -92,7 +93,7 @@ def user_prompt(hook_input: dict) -> dict | None:
     """Size up the request against the conversation's own model. Says nothing when there
     is nothing Claude needs to do differently, so an ordinary prompt costs no tokens."""
     snap = settings.Snapshot(hook_input)
-    config, options = snap.config, snap.options
+    reg, options = snap.registry, snap.options
     mode = options.mode
     if mode == "off":
         return None
@@ -112,9 +113,9 @@ def user_prompt(hook_input: dict) -> dict | None:
     level = seen.level
     pick = snap.pick(level)
     need = pick.model
-    current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
-    below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
-    wanted = named_model(config, prompt)
+    current = reg.family(session.model(session_id, hook_input.get("transcript_path")))
+    below = bool(current and need and reg.strength(current) < reg.strength(need))
+    wanted = named_model(reg, prompt)
     request.start(session_id, prompt_id=hook_input.get("prompt_id"), level=level, need=need, below=below,
                   session_tier=current, named=wanted)
     why = f" (wording suggests: {', '.join(seen.signals)})" if seen.signals else ""
@@ -124,7 +125,7 @@ def user_prompt(hook_input: dict) -> dict | None:
             notes.append(f"Routing estimate for this request: {level}{why}, about {need}-level reasoning, "
                          "from its wording alone.")
     elif below:
-        agent = gates.strong_agent(config, need, level)
+        agent = gates.strong_agent(reg, need, level)
         asked = " A stop before a stronger agent has looked is held once." if options.strong_agent_gate else ""
         writes = "; it writes nothing, so the change stays here" if gates.writes_nothing(agent) else ""
         notes.append(
@@ -148,10 +149,10 @@ def pre_agent(hook_input: dict) -> dict | None:
     return fallback.route(hook_input, settings.Snapshot(hook_input))
 
 
-def _asked_for(config: dict, tool_input: dict, routed: str | None) -> str | None:
+def _asked_for(reg: Registry, tool_input: dict, routed: str | None) -> str | None:
     """The model a finished or failed call was meant to run on: the one it was routed to,
     or the one it named."""
-    return routed or registry.family(config, tool_input.get("model"))
+    return routed or reg.family(tool_input.get("model"))
 
 
 def post_agent(hook_input: dict) -> dict | None:
@@ -173,9 +174,9 @@ def post_agent(hook_input: dict) -> dict | None:
                                launched_as=agent_id if launched and isinstance(agent_id, str) else None)
     except OSError:
         pass
-    asked = _asked_for(snap.config, tool_input, routed)
+    asked = _asked_for(snap.registry, tool_input, routed)
     try:
-        health.ran(asked, ran_as, registry.family(snap.config, ran_as), snap.options.force, swapped=bool(swapped))
+        health.ran(asked, ran_as, snap.registry.family(ran_as), snap.options.force, swapped=bool(swapped))
     except OSError:
         pass
     ledger.result(session_id, agent, asked, ran_as, response.get("status"), response.get("totalTokens"),
@@ -212,14 +213,14 @@ def agent_failed(hook_input: dict) -> dict | None:
     if not health.is_model_error(error, hook_input.get("is_interrupt")):
         return None
     snap = settings.Snapshot(hook_input)
-    config = snap.config
-    asked = _asked_for(config, tool_input, routed)
+    reg = snap.registry
+    asked = _asked_for(reg, tool_input, routed)
     if not asked:
         return None
     # The ID the mod sent, not today's newest_id: after the first of several parallel failures the
     # ID is routed around, and recomputing it would strike the alias for the rest.
     sent = request.load(session_id).sent_to(key)
-    newest = sent if sent and sent.lower() != asked and registry.family(config, sent) == asked else None
+    newest = sent if sent and sent.lower() != asked and reg.family(sent) == asked else None
     if newest:
         # The mod sent the family's newest ID, and this provider refused it: the alias runs
         # from now on, and the ID is tried again after the outage.
@@ -231,13 +232,12 @@ def agent_failed(hook_input: dict) -> dict | None:
     fails = health.failed(asked, error)
     ledger.model_error(hook_input.get("session_id"), tool_input.get("subagent_type"), asked)
     # snap.health may predate the strike just written, so the list reads the table again.
-    usable = [n for n in registry.available(config, snap.options.cap, allowed=snap.allowed, table=health.load(),
-                                            trusted=snap.trusted if snap.options.cap else None) if n != asked]
+    usable = [n for n in reg.available(snap.options.cap, allowed=snap.allowed, table=health.load()) if n != asked]
     if not usable:
         return None
     return _context("PostToolUseFailure", (
         f"The '{asked}' model looks unavailable here. This agent call re-issued with model: "
-        f"\"{registry.clamp(config, asked, usable)}\" runs on the nearest usable one."
+        f"\"{reg.clamp(asked, usable)}\" runs on the nearest usable one."
         + (" Model Router will route around it for now." if fails >= 2 else "")))
 
 
@@ -265,7 +265,7 @@ def post_edit(hook_input: dict) -> dict | None:
 
 def stop(hook_input: dict) -> dict | None:
     snap = settings.Snapshot(hook_input)
-    reason = gates.before_stop(hook_input, snap.config, snap.options)
+    reason = gates.before_stop(hook_input, snap.registry, snap.options)
     return {"decision": "block", "reason": reason} if reason else None
 
 
@@ -314,10 +314,10 @@ def _newest(snap: settings.Snapshot, decision: dict) -> str | None:
     (https://code.claude.com/docs/en/sub-agents.md)."""
     if decision["action"] == "deny" or decision["version"]:
         return None
-    return registry.newest_id(snap.config, decision["model"], snap.options.provider, snap.allowed, snap.health)
+    return snap.registry.newest_id(decision["model"], snap.options.provider, snap.allowed, snap.health)
 
 
-def _effort_keeps_cache(config: dict, options: settings.Settings, model: object) -> bool:
+def _effort_keeps_cache(reg: Registry, options: settings.Settings, model: object) -> bool:
     """Only the models in `main.effort_keeps_cache`, on Anthropic's API without a gateway,
     Mantle, pre-release betas turned off or prompt caching turned off for them, keep the prompt
     cache when effort changes (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level).
@@ -330,7 +330,7 @@ def _effort_keeps_cache(config: dict, options: settings.Settings, model: object)
     family, version = found
     if family in options.cache_off:
         return False
-    rule = ((config.get("main") or {}).get("effort_keeps_cache") or {}).get(family)
+    rule = reg.keeps_cache.get(family)
     if not isinstance(rule, str) or not re.fullmatch(r"(?:>=)?\d+(?:\.\d+)*", rule):
         return False
     wanted = tuple(int(part) for part in rule.lstrip(">=").split("."))
@@ -344,7 +344,7 @@ def mod_turn(hook_input: dict) -> dict | None:
     _mark_mod(session_id)
     allowlist.remember(session_id, hook_input.get("settings"))
     snap = settings.Snapshot(hook_input)
-    config, options = snap.config, snap.options
+    reg, options = snap.registry, snap.options
     if (options.mode != "auto" or not options.main_effort or options.effort_level
             or hook_input.get("first_party") is False):
         return None
@@ -354,13 +354,13 @@ def mod_turn(hook_input: dict) -> dict | None:
     # The mod's live model, when it is an ID; a record can miss a fallback to another model.
     model = hook_input.get("model")
     model = model if upstream.version_of(model) else session.model(session_id)
-    if not _effort_keeps_cache(config, options, model):
+    if not _effort_keeps_cache(reg, options, model):
         return None
     level = seen.level
-    effort = ((config.get("main") or {}).get("effort") or {}).get(level)
+    effort = reg.main_effort.get(level)
     if effort not in cfg.EFFORTS:
         return None
-    effort, held = router.capped(effort, snap.allowed.effort_cap(config, registry.family(config, model)))
+    effort, held = router.capped(effort, snap.allowed.effort_cap(reg, reg.family(model)))
     ledger.turn(session_id, level, effort, seen.command, reason=held.lstrip("; ") or None)
     return {"level": level, "effort": effort}
 
@@ -369,7 +369,7 @@ def mod_usage(hook_input: dict) -> dict | None:
     """One ledger row per turn, its cost the sum of its requests, each priced on its own."""
     usage = hook_input.get("usage")
     if isinstance(usage, dict) and isinstance(usage.get("model"), str):
-        ledger.usage(settings.Snapshot(hook_input).config, hook_input.get("session_id"), hook_input.get("agent_id"),
+        ledger.usage(settings.Snapshot(hook_input).registry, hook_input.get("session_id"), hook_input.get("agent_id"),
                      usage, hook_input.get("requests"))
     return None
 

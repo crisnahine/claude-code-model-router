@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import store
-from . import config as cfg
+from .config import Level
 from .profile import asks_for_work, profile_prompt
 
 # Where the mod saw a turn's prompt come from (prompt.submit's origin.kind): whether it is the person's.
@@ -89,10 +89,10 @@ def profile_skill(args: object, body: object, rendered: bool) -> dict:
     if takes_args and asks_for_work(args):
         return profile_prompt(args)
     parts = [profile_prompt(text) for text in (args, body[:SKILL_BODY_CHARS])]
-    if takes_args and cfg.LEVELS.index(parts[1]["level"]) > cfg.LEVELS.index("complex"):
+    if takes_args and parts[1]["level"] > Level.complex:
         # A template that serves any target: its own wording, a pipeline's gates say, isn't one task's depth.
-        parts[1] = {**parts[1], "level": "complex"}
-    return max(parts, key=lambda p: cfg.LEVELS.index(p["level"]))
+        parts[1] = {**parts[1], "level": Level.complex}
+    return max(parts, key=lambda p: p["level"])
 
 
 def _typed_skill(prompt: str, project: Path) -> dict | None:
@@ -122,7 +122,7 @@ def _typed_skill(prompt: str, project: Path) -> dict | None:
 class Intake:
     delivered: bool
     person: bool
-    level: str | None
+    level: Level | None
     signals: tuple[str, ...]
     command: str | None = None
 

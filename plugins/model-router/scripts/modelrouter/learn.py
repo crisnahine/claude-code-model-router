@@ -6,8 +6,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import registry, store
-from .config import LEVEL_SOURCES, LEVELS
+from . import store
+from .registry import Registry
+from .config import LEVEL_SOURCES, LEVELS, Level
 
 VOTES_NEEDED = 6
 SHARE_NEEDED = 0.3
@@ -36,8 +37,10 @@ def _raise(info: object) -> int:
 
 
 def _update(level: str, calls: int = 0, up: int = 0, down: int = 0) -> None:
-    if level not in LEVELS:
+    found = Level.parse(level)
+    if found is None:
         return
+    level = found.value  # a plain str key: the state file sorts its keys
 
     def change(data: dict) -> None:
         info = data.get(level) if isinstance(data.get(level), dict) else {}
@@ -63,7 +66,7 @@ def uncount(level: str | None) -> None:
         _update(level, calls=-1)
 
 
-def decided(config: dict, *, source: str | None, level: str | None, pick: str | None, runs_on: str | None,
+def decided(reg: Registry, *, source: str | None, level: str | None, pick: str | None, runs_on: str | None,
             raised: dict | None = None, earlier: str | None = None, escalated_from: str | None = None,
             user_named: bool = False) -> None:
     """Count one spawn and cast the votes its facts carry. `source` is None for a call
@@ -78,11 +81,11 @@ def decided(config: dict, *, source: str | None, level: str | None, pick: str | 
     if source != "caller" or user_named:
         return
     # The same call routed weaker earlier in this request counts double: it was redone.
-    if earlier and registry.stronger(config, runs_on, earlier):
+    if earlier and reg.stronger(runs_on, earlier):
         _update(level, up=2)
-    elif registry.stronger(config, runs_on, pick):
+    elif reg.stronger(runs_on, pick):
         _update(level, up=1)
-    elif registry.stronger(config, pick, runs_on) and (raises() if raised is None else raised).get(level, 0) > 0:
+    elif reg.stronger(pick, runs_on) and (raises() if raised is None else raised).get(level, 0) > 0:
         _update(level, down=1)
 
 

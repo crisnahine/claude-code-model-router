@@ -10,7 +10,7 @@ import hashlib
 import re
 
 from . import request, store
-from .config import LEVELS
+from .config import Level
 
 # Without a request id to compare, a call seen again within this long counts as a redo.
 REDO_WINDOW = 30 * 60
@@ -46,7 +46,7 @@ def settled(session_id: str | None, key: str, rewrite: dict | None, finished: bo
     now = request.load(session_id)
     model = now.routed_to(key)
     ran = rewrite if isinstance(rewrite, dict) and rewrite.get("level") else now.run(key)
-    if not isinstance(ran, dict) or ran.get("level") not in LEVELS:
+    if not isinstance(ran, dict) or Level.parse(ran.get("level")) is None:
         return model
     run = {"level": ran["level"], "model": ran.get("model"), "effort": ran.get("effort"),
            "prompt_id": now.prompt_id}
@@ -69,7 +69,7 @@ def stopped(session_id: str | None, agent_id: object, answered: bool) -> None:
         run.update(waiting if isinstance(waiting, dict) else {})
 
     store.mutate_entry("launched", session_id, take)
-    if answered and run.get("level") in LEVELS and isinstance(run.get("key"), str):
+    if answered and Level.parse(run.get("level")) and isinstance(run.get("key"), str):
         finished = {k: run.get(k) for k in ("level", "model", "effort", "prompt_id")}
         store.mutate_entry("done", session_id, lambda done: store.keep(done, run["key"], finished))
 
@@ -78,7 +78,7 @@ def finished_run(session_id: str | None, key: str) -> dict | None:
     """The run of this call that finished earlier in the current request: the same request
     id, or within REDO_WINDOW when there is none."""
     run = store.load_entry("done", session_id).get(key)
-    if not isinstance(run, dict) or run.get("level") not in LEVELS:
+    if not isinstance(run, dict) or Level.parse(run.get("level")) is None:
         return None
     current = request.load(session_id).prompt_id
     same = run.get("prompt_id") == current if current else 0 <= _age(run) < REDO_WINDOW

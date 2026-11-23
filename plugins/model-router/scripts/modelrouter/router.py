@@ -7,9 +7,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal, Mapping, Optional, TypedDict
 
-from . import ladder, registry
-from . import config as cfg
+from . import ladder
+from .config import EFFORTS, LEVEL_SOURCES, Level
 from .profile import profile_call
+from .registry import Registry, Rule
 from .settings import Settings
 
 
@@ -43,12 +44,12 @@ class Facts:
     parent: str | None = None  # the model an agent without one inherits, when known
     earlier: dict | None = None  # calls.finished_run: this call's finished run in this request
     raises: dict = field(default_factory=dict)  # learn.raises: the learned raise of each level
-    floor: str | None = None  # the request's level, for a hand-off to a strong role agent
+    floor: Level | None = None  # the request's level, for a hand-off to a strong role agent
     teammate: bool = False  # an agent-team teammate, which CLAUDE_CODE_SUBAGENT_EFFORT doesn't reach
     effort_caps: Mapping[str, str] = field(default_factory=dict)  # maxEffortLevel per registry model, where set
 
 
-def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
+def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     tool_input, agent, definition, usable = facts.tool_input, facts.agent, facts.definition, facts.usable
     out: Decision = {"agent": agent, "action": "keep", "model": None, "effort": None, "level": None,
            "signals": [], "source": None, "pick": None, "was": None, "reason": "", "repeat_of": None,
@@ -57,10 +58,10 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
         out["reason"] = "a fork runs on its conversation's model"
         return out
 
-    requested = registry.family(config, tool_input.get("model"))
+    requested = reg.family(tool_input.get("model"))
     own_model = (definition or {}).get("model")
-    pinned = registry.family(config, own_model)
-    env_default = registry.family(config, settings.subagent_model)
+    pinned = reg.family(own_model)
+    env_default = reg.family(settings.subagent_model)
     # The built-in Explore and Plan have had their own default model in some versions,
     # so what they would run on isn't assumed.
     special = bool(definition) and definition["source"] == "builtin" and agent in ("Explore", "Plan")
@@ -69,21 +70,22 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
     elif definition is not None and not own_model and not special:
         out["was"] = env_default or facts.parent
 
-    rule = (config.get("agents") or {}).get(agent) or {}
+    rule = reg.rules.get(agent) or Rule()
     profile = profile_call(tool_input, agent)
-    level = rule.get("level") or profile["level"]
-    if facts.floor in cfg.LEVELS and cfg.LEVELS.index(facts.floor) > cfg.LEVELS.index(level):
+    level = rule.level or profile["level"]
+    if facts.floor and facts.floor > level:
         level = facts.floor
     done = facts.earlier
-    redo = bool(done and done.get("level") in cfg.LEVELS and not tool_input.get("model"))
+    done_level = Level.parse(done.get("level")) if done else None
+    redo = bool(done_level and not tool_input.get("model"))
     if redo:
         # The same call again after its result came back: the first answer wasn't good
         # enough. Re-running at the next level is cheaper than starting every call high.
-        above = cfg.LEVELS.index(done["level"]) + 1
-        if above < len(cfg.LEVELS) and cfg.LEVELS.index(level) < above:
-            level, out["escalated_from"] = cfg.LEVELS[above], done["level"]
-    pick, pick_effort = ladder.pick(config, level, settings.priority, usable, facts.raises)
-    level_effort = ladder.effort(config, level, settings.priority)
+        above = done_level.up()
+        if above and level < above:
+            level, out["escalated_from"] = above, done_level
+    pick, pick_effort = ladder.pick(reg, level, settings.priority, usable, facts.raises)
+    level_effort = ladder.effort(reg, level, settings.priority)
     out.update(level=level, signals=profile["signals"], pick=pick)
 
     if settings.mode != "auto":
@@ -92,7 +94,7 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
     if not usable:
         out["reason"] = "availableModels and deniedModels leave no registry model open here, so the call is left as it is"
         return out
-    if rule.get("route") is False:
+    if rule.route is False:
         out["reason"] = "a rule in model-router.json leaves this agent alone"
         return out
     if tool_input.get("model") and not requested:
@@ -110,7 +112,7 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
                        reason=f"{level} subtask; the model is pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE, so only effort is set{held}")
         return out
 
-    rule_model = registry.family(config, rule.get("model"))
+    rule_model = reg.family(rule.model)
     override = settings.pins == "override"
     if requested:
         target, source, why = requested, "caller", "the call names a model"
@@ -136,16 +138,16 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
 
     named = tool_input.get("model") if source == "caller" else own_model if source == "pin" else None
     out["version"] = named if isinstance(named, str) and named.lower() != target else None
-    final = registry.clamp(config, target, usable)
+    final = reg.clamp(target, usable)
     if final != target:
         why += f"; {target} is over the cap or unavailable here"
     effort = None
     # Effort is set whenever nobody chose it, a pinned agent included: the pin is about
     # the model, and on current models effort is the cheaper lever for quality.
-    if source in cfg.LEVEL_SOURCES and not _effort_decided(tool_input, definition, settings, facts.teammate):
+    if source in LEVEL_SOURCES and not _effort_decided(tool_input, definition, settings, facts.teammate):
         effort = pick_effort if source == "router" else level_effort
     if redo:
-        effort = _above_earlier(config, effort, final, done)
+        effort = _above_earlier(reg, effort, final, done)
     effort, held = capped(effort, facts.effort_caps.get(final))
     out.update(model=final, source=source, reason=why + held)
     if final == out["was"] and not effort:
@@ -156,21 +158,21 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
 
 def capped(effort: str | None, cap: str | None) -> tuple[str | None, str]:
     """An effort held to the maxEffortLevel cap, and the reason to add when it was."""
-    if effort in cfg.EFFORTS and cap in cfg.EFFORTS and cfg.EFFORTS.index(effort) > cfg.EFFORTS.index(cap):
+    if effort in EFFORTS and cap in EFFORTS and EFFORTS.index(effort) > EFFORTS.index(cap):
         return cap, f"; effort held to {cap} by maxEffortLevel"
     return effort, ""
 
 
-def _above_earlier(config: dict, effort: str | None, model: str | None, done: dict) -> str | None:
+def _above_earlier(reg: Registry, effort: str | None, model: str | None, done: dict) -> str | None:
     """A redo must ask for more than the run it replaces. When the cap or availability
     keeps it on the same model, that means more effort than last time."""
-    if registry.stronger(config, model, done.get("model")):
+    if reg.stronger(model, done.get("model")):
         return effort
     earlier = done.get("effort")
-    if earlier not in cfg.EFFORTS:
+    if earlier not in EFFORTS:
         return effort
-    floor = cfg.EFFORTS[min(cfg.EFFORTS.index(earlier) + 1, len(cfg.EFFORTS) - 1)]
-    return effort if effort in cfg.EFFORTS and cfg.EFFORTS.index(effort) >= cfg.EFFORTS.index(floor) else floor
+    floor = EFFORTS[min(EFFORTS.index(earlier) + 1, len(EFFORTS) - 1)]
+    return effort if effort in EFFORTS and EFFORTS.index(effort) >= EFFORTS.index(floor) else floor
 
 
 def _effort_decided(tool_input: dict, definition: dict | None, settings: Settings, teammate: bool) -> bool:
