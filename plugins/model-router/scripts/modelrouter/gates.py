@@ -6,7 +6,7 @@ import os
 import re
 from pathlib import Path
 
-from . import registry, request, session, store
+from . import profile, registry, request, session, store
 from . import config as cfg
 from .settings import Settings
 
@@ -16,13 +16,12 @@ CHECK_COMMAND = re.compile(
     r"ruff|eslint|flake8|pylint|clippy|golangci-lint|rubocop)\b|"
     r"\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|lint|typecheck|check|build)\b|"
     r"\b(?:cargo|go|dotnet|mvn|gradle|gradlew|make|just|swift|mix|deno)\s+\S*\s*(?:test|check|build|vet|lint|verify)\b")
-_CHECKERS = ("verifier", "reviewer")
 # A message's tool_use rows are stamped before its Edit's PostToolUse records the edit.
 _SAME_MESSAGE_SLACK = 5
 
 
 def is_checker(agent_type: object) -> bool:
-    return str(agent_type or "").endswith(_CHECKERS)
+    return profile.role(agent_type).checker
 
 
 def note_edit(hook_input: dict) -> None:
@@ -78,7 +77,7 @@ def strong_agent(config: dict, need: str, level: str | None = None) -> str:
     """The role agent to hand hard thinking to, by name only: the router routes its brief with the
     role's floor and a redo still climbs, which a model named on the call would stop. Only with no
     role agent does the needed model go on the call."""
-    name = "deep-solver" if level == "frontier" else "architect"
+    name = profile.DEEP_SOLVER if level == "frontier" else profile.ARCHITECT
     if name not in (config.get("crew") or {}):
         return f'a subagent with model: "{need}"'
     return f"{cfg.PLUGIN_NAME}:{name}"
@@ -86,14 +85,14 @@ def strong_agent(config: dict, need: str, level: str | None = None) -> str:
 
 def writes_nothing(agent: str) -> bool:
     """The architect and the reviewer have no Write or Edit tool, so a task whose deliverable is a file fails there."""
-    return agent in (f"{cfg.PLUGIN_NAME}:architect", f"{cfg.PLUGIN_NAME}:reviewer")
+    return not profile.role(agent).writes
 
 
 def finished_check(config: dict, hook_input: dict, need: str, level: str | None) -> str:
     """The agent to check a finished result. The reviewer stops without a diff file, so it is named only
     once code changed in this request, which is when a diff can be saved; otherwise the plan is still open."""
-    if request.load(hook_input.get("session_id")).edited and "reviewer" in (config.get("crew") or {}):
-        return f"{cfg.PLUGIN_NAME}:reviewer"
+    if request.load(hook_input.get("session_id")).edited and profile.REVIEWER in (config.get("crew") or {}):
+        return f"{cfg.PLUGIN_NAME}:{profile.REVIEWER}"
     return strong_agent(config, need, level)
 
 
@@ -119,7 +118,7 @@ def escalation(config: dict, hook_input: dict) -> str | None:
     agent = finished_check(config, hook_input, need, entry.level)
     act = ("to check; it writes nothing, so what it finds is applied here" if writes_nothing(agent)
            else "to check and improve")
-    given = ("The task and the path of the diff, saved to a file, go" if agent.endswith(":reviewer")
+    given = ("The task and the path of the diff, saved to a file, go" if agent.endswith(f":{profile.REVIEWER}")
              else "The task and the result go")
     return (
         f"This request was estimated as {entry.level}: about {need}-level reasoning, on a conversation running "

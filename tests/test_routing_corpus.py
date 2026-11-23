@@ -93,12 +93,19 @@ class RequestCorpus(unittest.TestCase):
 class AgentNameCorpus(unittest.TestCase):
     """What an agent's name does to a call: a heavy name lifts a plain brief, a light name caps a hard one."""
 
-    def test_every_name_keeps_its_levels(self):
+    def test_every_name_keeps_its_role_and_levels(self):
         self.assertGreaterEqual(len(NAMES["agents"]), 20)
         for row in NAMES["agents"]:
             low = profile.profile_call({"prompt": NAMES["lookup_brief"]}, row["agent"])["level"]
             high = profile.profile_call({"prompt": NAMES["hard_brief"]}, row["agent"])["level"]
             self.assertEqual((low, high), (row["on_lookup"], row["on_hard"]), row["agent"])
+            self.assertEqual(profile.role(row["agent"]).kind, row["kind"], row["agent"])
+
+    def test_a_kind_explains_the_levels(self):
+        for row in NAMES["agents"]:
+            heavy, light = row["kind"] == "heavy", row["kind"] == "light"
+            self.assertEqual(LEVELS.index(row["on_lookup"]) >= LEVELS.index("complex"), heavy, row["agent"])
+            self.assertEqual(row["on_hard"] == "standard", light, row["agent"])
 
 
 if __name__ == "__main__":

@@ -1325,6 +1325,26 @@ class Profile(unittest.TestCase):
         self.assertNotIn("ixes", models["sonnet"]["use_for"])
         self.assertTrue(models["opus"]["use_for"].startswith("Defect fixes, migrations and performance work"))
 
+    def test_one_reading_serves_a_call_and_a_request(self):
+        brief = "Fix the auth bug across every service. Do not change the public API."
+        reading = profile.read(brief)
+        self.assertEqual(reading.signals, ("risk", "scope"))
+        self.assertEqual(profile.level(reading, "call", profile.role("general-purpose")),
+                         profile.profile_call({"prompt": brief}, "general-purpose"))
+        wording = profile.read(brief, limits=False)
+        self.assertEqual({**profile.level(wording, "request"), "changes": "change" in wording.acts},
+                         profile.profile_prompt(brief))
+
+    def test_a_request_with_signals_and_no_verb_scores_but_a_call_that_asks_for_nothing_is_a_lookup(self):
+        self.assertEqual(profile.profile_prompt("the payments service")["level"], "standard")
+        self.assertEqual(self.level("the payments service"), "lookup")
+
+    def test_the_two_kinds_have_their_own_length_rules(self):
+        long = "notes " * 300
+        self.assertEqual(profile.profile_prompt(long)["signals"], ["scope"])
+        self.assertEqual(self.level(long), "lookup")
+        self.assertEqual(self.level("list the files. " + "x " * 2100), "standard")
+
     def test_a_search_or_check_agent_stays_at_standard_for_a_fix_brief(self):
         brief = {"prompt": "Fix the off-by-one in page_slice."}
         self.assertEqual(profile.profile_call(brief, "model-router:verifier")["level"], "standard")
@@ -4740,42 +4760,31 @@ class DesignDecisions(unittest.TestCase):
             self.assertIn("load", result["signals"], prompt)
 
 
-class AgentNames(unittest.TestCase):
-    """A name reads as a role only by whole parts: "researcher" holds "search", "relocation" holds "locat"."""
+class Roles(unittest.TestCase):
+    """An agent's name reads as a role by whole parts, from one table: "researcher" holds "search",
+    "relocation" holds "locat". The levels each name gets are in tests/fixtures/agent-name-corpus.json."""
 
-    BRIEF = "investigate why auth is flaky and redesign it across every service"
+    def test_the_table_carries_what_each_of_our_agents_is(self):
+        role = profile.role
+        self.assertEqual(role("model-router:architect"), profile.Role("heavy", floor="complex", strong=True, writes=False))
+        self.assertEqual(role("model-router:reviewer"),
+                         profile.Role("heavy", floor="complex", strong=True, checker=True, writes=False))
+        self.assertEqual(role("model-router:deep-solver"), profile.Role("heavy", floor="hardest", strong=True))
+        self.assertEqual(role("model-router:verifier"), profile.Role("light", cap="standard", checker=True))
+        self.assertEqual(role("model-router:implementer"), profile.Role())
 
-    def level(self, agent: str) -> str:
-        return profile.profile_call({"prompt": self.BRIEF}, agent)["level"]
+    def test_another_plugins_agent_is_only_a_kind_never_strong_or_read_only(self):
+        self.assertEqual(profile.role("acme:deep-solver"), profile.Role("heavy", floor="complex"))
+        self.assertEqual(profile.role("acme:code-reviewer"), profile.Role("heavy", floor="complex", checker=True))
+        self.assertEqual(profile.role("scout"), profile.Role("light", cap="standard"))
 
-    def test_a_name_that_only_contains_a_search_word_is_no_search_agent(self):
-        for agent in ("researcher", "relocation-migrator", "splinter-fixer", "information-extractor",
-                      "allocator-tuner", "helper", "acme:nonlinear_formatted"):
-            self.assertEqual(self.level(agent), "hardest", agent)
+    def test_a_name_that_only_contains_a_role_word_has_no_role(self):
+        for agent in ("researcher", "relocation-migrator", "dependency-resolver", "helper", "", None):
+            self.assertEqual(profile.role(agent), profile.Role(), agent)
 
-    def test_search_and_check_agents_stay_light(self):
-        for agent in ("scout", "explorer", "Explore", "docs-researcher", "model-router:docs-researcher", "verifier",
-                      "lint-runner", "code_search", "acme:summarizer", "grep"):
-            self.assertEqual(self.level(agent), "standard", agent)
-
-    def test_review_and_design_agents_stay_heavy(self):
-        for agent in ("architect", "security-reviewer", "deep-solver", "code_auditor", "debugger", "planner"):
-            self.assertEqual(profile.profile_call({"prompt": "List the files in ./puzzles."}, agent)["level"],
-                             "complex", agent)
-
-
-class SolverNames(unittest.TestCase):
-    """Only this plugin's own deep-solver is floored at hardest; another plugin's solver is a heavy role, a resolver none."""
-
-    def level(self, agent: str) -> str:
-        return profile.profile_call({"prompt": "List the files in ./puzzles."}, agent)["level"]
-
-    def test_only_the_deep_solver_starts_at_hardest(self):
-        self.assertEqual(self.level("model-router:deep-solver"), "hardest")
-        self.assertEqual(self.level("sudoku-solver"), "complex")
-        self.assertEqual(self.level("acme:equation-solver"), "complex")
-        self.assertEqual(self.level("dependency-resolver"), "lookup")
-        self.assertEqual(self.level("acme:deep-solver"), "complex")
+    def test_the_strong_roles_are_the_ones_that_get_the_requests_floor(self):
+        names = {agent.split(":")[1] for agent, held in profile.ROLES.items() if held.strong}
+        self.assertEqual(names, {profile.ARCHITECT, profile.REVIEWER, profile.DEEP_SOLVER})
 
 
 if __name__ == "__main__":
