@@ -26,7 +26,7 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ERRORS = json.loads((FIXTURES / "model-errors.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, allowlist, calls, cli, gates, health, hooks, learn, profile, registry, report, router, session, settings, spawn, store, upstream  # noqa: E402
+from modelrouter import agents, allowlist, calls, cli, gates, health, hooks, learn, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 
 LOOKUP = "list the files under src"
@@ -421,7 +421,17 @@ class DeliveredMessages(Sandbox):
         self.session_on("claude-haiku-5-5")
         hooks.user_prompt({"session_id": "s1", "prompt": LOOKUP})
         self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": self.delivered()}))
-        self.assertEqual(store.load_entry("prompts", "s1")["level"], "lookup")
+        self.assertEqual(request.load("s1").level, "lookup")
+
+    def test_a_delivered_message_ends_the_floor_and_never_starts_a_request(self):
+        self.session_on("claude-haiku-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": HARD, "prompt_id": "p1"})
+        before = request.load("s1")
+        hooks.user_prompt({"session_id": "s1", "prompt": self.delivered(), "prompt_id": "p2"})
+        after = request.load("s1")
+        self.assertEqual((after.floor, after.prompt_id, after.level), (None, "p1", before.level))
+        hooks.user_prompt({"session_id": "s1", "prompt": HARD, "prompt_id": "p3"})
+        self.assertEqual(request.load("s1").floor, before.level)
 
     def test_a_machine_origin_from_the_mod_raises_no_effort(self):
         session.record("s1", "claude-opus-5-5")
@@ -1407,7 +1417,7 @@ class Router(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": (
             "Our order service double-charges customers under concurrent retries across the payments API and "
             "the worker queue. Find the root cause and design a fix that keeps backward compatibility.")})
-        self.assertEqual(store.load_entry("prompts", "s1")["level"], "hardest")
+        self.assertEqual(request.load("s1").level, "hardest")
         plan = "Plan a fix for the double-charge bug described above."
         self.assertEqual(self.decide("model-router:scout", plan.replace("Plan a fix for", "List the files of"))["model"],
                          "haiku")  # the floor is only for the two strong role agents
@@ -1437,7 +1447,7 @@ class Router(Sandbox):
             hooks.user_prompt({"session_id": "s1", "prompt": message})
             d = self.decide("model-router:architect", rename)
             self.assertEqual((d["level"], d["model"]), ("complex", "sonnet"), message)
-            self.assertEqual(store.load_entry("prompts", "s1")["level"], "hardest")  # the Stop check still sees it
+            self.assertEqual(request.load("s1").level, "hardest")  # the Stop check still sees it
 
     def test_a_task_notification_keeps_the_requests_floor(self):
         self.session_on("claude-sonnet-5-5")
@@ -1744,9 +1754,12 @@ class Calls(Sandbox):
         super().setUp()
         self.config = cfg.load_config()
 
-    def route(self, tool_input: dict, model: str = "haiku", **facts) -> str | None:
+    def route(self, tool_input: dict, model: str = "haiku", awaiting: bool = False, **facts) -> str | None:
         facts = {"level": "lookup", "effort": "low", "source": "router", **facts}
-        return calls.routed(self.config, "s1", calls.identify(tool_input)[1], model, **facts)
+        key = calls.identify(tool_input)[1]
+        if awaiting:
+            calls.awaiting("s1", key, model, facts["level"], facts["effort"])
+        return request.note_spawn(self.config, "s1", key, model, **facts)
 
     def test_a_call_is_known_by_its_agent_and_prompt(self):
         agent, key = calls.identify({"prompt": "x"})
@@ -1783,26 +1796,62 @@ class Calls(Sandbox):
         self.assertIsNotNone(calls.finished_run("s1", key))
         with mock.patch.object(calls.time, "time", return_value=time.time() + calls.REDO_WINDOW + 1):
             self.assertIsNone(calls.finished_run("s1", key))
-        hooks.user_prompt({"session_id": "s1", "prompt": "check the repo", "prompt_id": "p1"})
+        request.start("s1", prompt_id="p1", level="lookup", need="haiku", below=False, session_tier=None, named=None)
         self.assertIsNone(calls.finished_run("s1", key))
 
-    def test_the_router_pick_before_and_the_strongest_spawn_are_per_request(self):
-        call = {"prompt": LOOKUP}
-        self.assertIsNone(self.route(call))
-        self.assertEqual(self.route(call, "opus", source="caller"), "haiku")
-        self.assertEqual(self.route({"prompt": "x"}, "fable", source="pin"), None)
-        self.assertEqual(calls.strongest("s1"), "fable")
-        hooks.user_prompt({"session_id": "s1", "prompt": "something else"})
-        self.assertIsNone(calls.strongest("s1"))
-        self.assertIsNone(self.route(call, "opus", source="caller"))
-
     def test_records_keep_the_most_recent_calls(self):
-        for i in range(calls.KEPT + 2):
+        for i in range(store.KEPT_RECORDS + 2):
             self.route({"prompt": f"list {i}"}, awaiting=True)
         self.next_message()
         self.assertIsNone(calls.refused_rewrite("s1", calls.identify({"prompt": "list 0"})[1]))
         self.assertIsNone(calls.refused_rewrite("s1", calls.identify({"prompt": "list 1"})[1]))
         self.assertIsNotNone(calls.refused_rewrite("s1", calls.identify({"prompt": "list 2"})[1]))
+
+
+class Request(Sandbox):
+    def setUp(self):
+        super().setUp()
+        self.config = cfg.load_config()
+
+    def start(self, **fields):
+        request.start("s1", **{"prompt_id": "p1", "level": "hardest", "need": "opus", "below": False,
+                               "session_tier": "sonnet", "named": None, **fields})
+
+    def note(self, key, model, source, level="lookup"):
+        return request.note_spawn(self.config, "s1", key, model, level=level, effort="low", source=source)
+
+    def test_a_new_request_clears_its_runs_and_strongest_spawn(self):
+        self.start()
+        self.assertIsNone(self.note("k", "haiku", "router"))
+        self.assertEqual(self.note("k", "opus", "caller"), "haiku")
+        self.note("j", "fable", "pin", level="complex")
+        now = request.load("s1")
+        self.assertEqual((now.top_spawn, now.routed_to("k"), now.run("j")["model"]), ("fable", "opus", "fable"))
+        self.start(prompt_id="p2", level="lookup")
+        now = request.load("s1")
+        self.assertEqual((now.prompt_id, now.level, now.top_spawn, now.routed_to("k"), now.run("j")),
+                         ("p2", "lookup", None, None, None))
+        self.assertIsNone(self.note("k", "opus", "caller"))
+
+    def test_the_floor_is_the_requests_level_until_a_delivered_message(self):
+        self.start()
+        self.assertEqual(request.load("s1").floor, "hardest")
+        request.deliver("s1")
+        self.assertEqual((request.load("s1").floor, request.load("s1").level), (None, "hardest"))
+        self.start()
+        self.assertEqual(request.load("s1").floor, "hardest")
+
+    def test_the_escalation_is_asked_once_per_request(self):
+        self.start()
+        request.mark_escalation("s1", "haiku")
+        self.assertEqual((request.load("s1").escalation_asked, request.load("s1").session_tier), (True, "haiku"))
+        self.start()
+        self.assertFalse(request.load("s1").escalation_asked)
+
+    def test_a_session_without_a_request_reads_empty(self):
+        self.assertEqual(request.load("nobody"), request.Request())
+        store.save_entry("prompts", "s1", {"level": 5, "below": "yes", "calls": []})
+        self.assertEqual(request.load("s1"), request.Request())
 
 
 class Mod(Sandbox):
@@ -2293,8 +2342,8 @@ class Feedback(Sandbox):
         for _ in range(learn.VOTES_NEEDED):
             learn.decided(cfg.load_config(), source="caller", level="complex", pick="sonnet", runs_on="opus")
         hooks.user_prompt({"session_id": "s1", "prompt": HARD})  # sonnet would do, but complex is raised
-        entry = store.load_entry("prompts", "s1")
-        self.assertEqual((entry["level"], entry["need"], entry["below"]), ("complex", "opus", True))
+        entry = request.load("s1")
+        self.assertEqual((entry.level, entry.need, entry.below), ("complex", "opus", True))
         self.assertIn("opus-level reasoning", hooks.stop({"session_id": "s1"})["reason"])
         text = hooks.user_prompt({"session_id": "s1", "prompt": HARD})["hookSpecificOutput"]["additionalContext"]
         self.assertIn("about opus-level reasoning, and this conversation runs on sonnet", text)
@@ -2421,13 +2470,13 @@ class Hooks(Sandbox):
         # By name only: the router routes the hand-off's brief, and its redo can climb.
         self.assertIn("model-router:architect rather than", text)
         self.assertNotIn('model: "', text)
-        self.assertTrue(store.load_entry("prompts", "s1")["below"])
+        self.assertTrue(request.load("s1").below)
 
     def test_machine_written_turns_dont_reset_the_request(self):
         self.session_on("claude-haiku-5-5")
         hooks.user_prompt({"session_id": "s1", "prompt": HARD})
         self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": "<task-notification>done</task-notification>"}))
-        self.assertEqual(store.load_entry("prompts", "s1")["level"], "complex")
+        self.assertEqual(request.load("s1").level, "complex")
 
     def test_a_prompt_that_opens_with_pasted_text_is_the_users_request(self):
         self.session_on("claude-haiku-5-5")
@@ -2435,7 +2484,7 @@ class Hooks(Sandbox):
         pasted = ('<pasted_content id="x">\nTraceback (most recent call last):\n  File "billing.py"\n'
                   '</pasted_content id="x">\n' + LOOKUP)
         hooks.user_prompt({"session_id": "s1", "prompt": pasted})
-        self.assertEqual(store.load_entry("prompts", "s1")["level"], "standard")  # the pasted traceback counts too
+        self.assertEqual(request.load("s1").level, "standard")  # the pasted traceback counts too
 
     def test_a_model_the_user_may_be_asking_for_is_left_to_claude(self):
         self.session_on("claude-opus-5-5")
@@ -2652,7 +2701,7 @@ class Gates(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
         self.pre("general-purpose", HARDEST)
         self.pre("general-purpose", LOOKUP)
-        self.assertEqual(calls.strongest("s1"), "opus")
+        self.assertEqual(request.load("s1").top_spawn, "opus")
 
     def test_no_escalation_for_easy_tasks_or_strong_sessions(self):
         self.session_on("claude-haiku-5-5")
@@ -3221,13 +3270,13 @@ class SlashSkills(Sandbox):
         skills.mkdir(parents=True)
         (skills / "SKILL.md").write_text(raw, encoding="utf-8")
         hooks.user_prompt({"session_id": "s1", "prompt": "/ship " + typo, "cwd": str(self.project)})
-        self.assertEqual(store.load_entry("prompts", "s1")["level"], "standard")
+        self.assertEqual(request.load("s1").level, "standard")
         named = self.project / ".claude" / "skills" / "named"
         named.mkdir()
         (named / "SKILL.md").write_text("---\nname: named\narguments: [task]\n---\nRedesign the auth schema across "
                                         "every service: $task\n", encoding="utf-8")
         hooks.user_prompt({"session_id": "s1", "prompt": "/named " + typo, "cwd": str(self.project)})
-        self.assertEqual(store.load_entry("prompts", "s1")["level"], "standard")
+        self.assertEqual(request.load("s1").level, "standard")
 
     def test_an_argument_that_only_names_the_target_leaves_the_task_to_the_body(self):
         self.session_on("claude-opus-5-5")
@@ -3248,7 +3297,7 @@ class SlashSkills(Sandbox):
         (skills / "SKILL.md").write_text(raw, encoding="utf-8")
         for typed in ("/security-review 482", "/security-review the login page"):
             hooks.user_prompt({"session_id": "s1", "prompt": typed, "cwd": str(self.project)})
-            self.assertEqual(store.load_entry("prompts", "s1")["level"], "complex", typed)
+            self.assertEqual(request.load("s1").level, "complex", typed)
         ship = (PLUGIN / "skills" / "ship" / "SKILL.md").read_text(encoding="utf-8").split("---\n", 2)[2]
         ship_body = lambda args: ship.replace("$ARGUMENTS", args)  # noqa: E731
         # A template body serves many targets, so its own wording decides at most complex: an issue number
@@ -3316,7 +3365,7 @@ class SlashSkills(Sandbox):
         commands.mkdir(parents=True)
         (commands / "where.md").write_text("List the files under src.")
         level = lambda prompt: (hooks.user_prompt({"session_id": "s1", "prompt": prompt, "cwd": str(self.project)}),  # noqa: E731
-                                store.load_entry("prompts", "s1")["level"])[1]
+                                request.load("s1").level)[1]
         self.assertEqual(level("/hard please check src too"), "hardest")
         self.assertEqual(level("/where"), "lookup")
         self.assertEqual(level("/elsewhere:unknown " + LOOKUP), "lookup")  # not found: the typed line is profiled
@@ -3764,10 +3813,14 @@ class EdgeCases(Sandbox):
         self.session_on("claude-sonnet-5-5")
         hooks.user_prompt({"session_id": "s1", "prompt": HARD, "cwd": str(self.project)})
         self.pre("general-purpose", LOOKUP)
-        state = {name: store.load_entry(name, "s1") for name in ("prompts", "pending", "sessions")}
+        def snapshot() -> dict:
+            return {"prompts": request.load("s1"), "pending": store.load_entry("pending", "s1"),
+                    "sessions": store.load_entry("sessions", "s1")}
+        state = snapshot()
         self.assertTrue(all(state.values()), state)
+        self.assertTrue(state["prompts"].routed)
         out = hooks.session_start({"session_id": "s1", "source": "compact", "cwd": str(self.project)})
-        self.assertEqual({name: store.load_entry(name, "s1") for name in state}, state)  # no model: kept as is
+        self.assertEqual(snapshot(), state)  # no model: kept as is
         self.assertIn("Model Router sets", json.dumps(out))  # compaction drops the old note, so it is sent again
         hooks.session_start({"session_id": "s1", "source": "compact", "model": "claude-opus-5-5",
                              "cwd": str(self.project)})

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from . import agents, allowlist, calls, gates, learn, registry, router, session, settings, store
+from . import agents, allowlist, calls, gates, learn, registry, request, router, session, settings, store
 from . import config as cfg
 
 # Adjusts a decision before it is logged and recorded: (decision, call key, config, settings).
@@ -35,8 +35,7 @@ def facts(hook_input: dict, config: dict, options: settings.Settings,
     # agents start no lower than the request's level; a redo still climbs from there.
     allowed = allowlist.read(hook_input.get("session_id"), project, hook_input.get("settings"))
     strong = agent in (f"{cfg.PLUGIN_NAME}:architect", f"{cfg.PLUGIN_NAME}:deep-solver")
-    request = store.load_entry("prompts", hook_input.get("session_id")) if strong else {}
-    floor = None if request.get("floor_off") else request.get("level")
+    floor = request.load(hook_input.get("session_id")).floor if strong else None
     return router.Facts(agent=agent, tool_input=tool_input, usable=registry.available(config, options.cap, allowed=allowed),
                         definition=definition, parent=parent,
                         earlier=calls.finished_run(hook_input.get("session_id"), key), raises=learn.raises(),
@@ -77,9 +76,11 @@ def _record(config: dict, session_id: str | None, key: str, decision: dict, rais
     runs_on = decision["model"] or decision["was"]
     if decision["repeat_of"]:
         source = None  # passed through untouched: neither the pick nor the level applied
-    earlier = calls.routed(config, session_id, key, runs_on, level=level, effort=decision["effort"],
-                           source=source, awaiting=awaiting)
-    user_named = source == "caller" and decision["was"] == calls.named(session_id)
+    if awaiting:
+        calls.awaiting(session_id, key, runs_on, level, decision["effort"])
+    earlier = request.note_spawn(config, session_id, key, runs_on, level=level, effort=decision["effort"],
+                                 source=source)
+    user_named = source == "caller" and decision["was"] == request.load(session_id).named
     learn.decided(config, source=source, level=level, pick=decision["pick"], runs_on=runs_on, raised=raises,
                   earlier=earlier, escalated_from=decision["escalated_from"], user_named=user_named)
     if gates.is_checker(decision["agent"]):

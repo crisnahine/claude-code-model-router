@@ -8,7 +8,7 @@ import re
 import time
 from pathlib import Path
 
-from . import calls, registry, session, store
+from . import registry, request, session, store
 from . import config as cfg
 from .settings import Settings
 
@@ -102,26 +102,26 @@ def escalation(config: dict, hook_input: dict) -> str | None:
     """A request estimated above the conversation's own model, answered without any
     agent of that strength: ask once for a stronger model to check the result."""
     session_id = hook_input.get("session_id")
-    entry = store.load_entry("prompts", session_id)
-    if entry.get("escalation_asked") or entry.get("level") not in cfg.LEVELS[cfg.LEVELS.index("complex"):]:
+    entry = request.load(session_id)
+    if entry.escalation_asked or entry.level not in cfg.LEVELS[cfg.LEVELS.index("complex"):]:
         return None
-    need = entry.get("need")
+    need = entry.need
     # On a session's first prompt the model isn't known yet; by now the transcript has it.
     current = (registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
-               or entry.get("session_tier"))
+               or entry.session_tier)
     if not current or not need or registry.strength(config, current) >= registry.strength(config, need):
         return None
-    if registry.strength(config, calls.strongest(session_id)) >= registry.strength(config, need):
+    if registry.strength(config, entry.top_spawn) >= registry.strength(config, need):
         return None
     try:
-        store.update_entry("prompts", session_id, escalation_asked=True, session_tier=current)
+        request.mark_escalation(session_id, current)
     except OSError:
         return None
-    agent = strong_agent(config, need, entry.get("level"))
+    agent = strong_agent(config, need, entry.level)
     act = ("to check; it writes nothing, so apply what it finds yourself" if writes_nothing(agent)
            else "to check and improve")
     return (
-        f"This request was estimated as {entry.get('level')}, which needs about {need}-level reasoning, and "
+        f"This request was estimated as {entry.level}, which needs about {need}-level reasoning, and "
         f"this conversation runs on {current}. No {need}-level agent has looked at it. Before finishing, give "
         f"the task and your result to {agent} {act}, then give the user the reconciled answer. If the task "
         "turned out to be simple and the estimate was wrong, say so in one line and finish."

@@ -246,7 +246,7 @@ def in_process(base: Path, calls: int, runs: int):
     # so a file trimmed by halving isn't judged by where its saw-tooth happens to stand.
     # Once with one call per session, so the per-session files hold far more sessions than
     # their cap, and once with one long session, for the per-session lists.
-    caps = {(store, "LEDGER_MAX_BYTES"): 16 * 1024, (store, "KEEP_ENTRIES"): 5, (call_log, "KEPT"): 10}
+    caps = {(store, "LEDGER_MAX_BYTES"): 16 * 1024, (store, "KEEP_ENTRIES"): 5, (store, "KEPT_RECORDS"): 10}
     saved = {key: getattr(*key) for key in caps}
     verdict: dict = {}
     for per_session, rounds in ((1, max(40, calls // 5)), (10 ** 9, max(50, calls // 5))):

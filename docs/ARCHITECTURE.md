@@ -26,7 +26,7 @@ The aim is the lowest cost per finished task at a high quality bar. Every subtas
                                 └──────────────┬────────────────────┘
                                                ▼
                                   scripts/modelrouter (Python)
-                  spawn · router.decide · ladder · registry · profile · calls · learn · gates
+                  spawn · router.decide · ladder · registry · profile · request · calls · learn · gates
 ```
 
 **The mod** (`hooks/router.ts`, a hooks module loaded from `hooks/hooks.json` under `modules`) is the primary path. It hooks four engine events:
@@ -54,7 +54,8 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 | `ladder` | Turns a level, the priority and learned raises into the pick: a model and an effort |
 | `spawn` | The one procedure both paths call for a spawn: gathers the facts, asks `router.decide`, writes the ledger row, and records the call |
 | `router` | Applies the order of authority and produces one decision per agent, from the facts it is given alone |
-| `calls` | What happened to each call: routed, rewritten and waiting, finished. Answers the redo, refused-rewrite and strongest-spawn questions |
+| `request` | The current request's record: its level and floor, the model the user named, the routed spawns and the strongest one, and the escalation ask |
+| `calls` | Per-call records both paths use: background runs waiting for their agent, finished runs for redos |
 | `learn` | Decides from each spawn's facts which votes it casts, counts votes that a level was routed too low, and raises it |
 | `agents` | Finds an agent's definition in the project, the user folder, this plugin or another installed plugin |
 | `session` | Tracks the model the conversation itself runs on |

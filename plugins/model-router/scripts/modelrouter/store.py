@@ -15,6 +15,7 @@ KEEP_ENTRIES = 200
 KEEP_SET_ASIDE = 3  # copies of an unreadable state file kept for a person to look at
 LOCK_WAIT_SECONDS = 2.0
 LOCK_STALE_SECONDS = 10.0
+KEPT_RECORDS = 100  # calls kept per record file
 # The version written into every state file. MIGRATIONS[n] turns a version-n file into
 # version n + 1. A file with no version is version 0, which already has today's shape.
 SCHEMA = 1
@@ -257,6 +258,15 @@ def save_entry(name: str, key: str | None, entry: dict) -> None:
 
 def update_entry(name: str, key: str | None, **changes: Any) -> None:
     mutate_entry(name, key, lambda entry: entry.update(changes))
+
+
+def keep(records: dict, key: str, record: dict, kept: int | None = None) -> None:
+    """Store a record stamped with the time, and drop the oldest past `kept` (KEPT_RECORDS)."""
+    kept = KEPT_RECORDS if kept is None else kept
+    records[key] = {**record, "at": time.time()}
+    keys = [k for k, v in records.items() if isinstance(v, dict)]
+    for old in sorted(keys, key=lambda k: records[k].get("at") or 0)[:-kept]:
+        del records[old]
 
 
 def ledger_path() -> Path:

@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import time
 
-from . import allowlist, calls, gates, health, ladder, learn, registry, session, settings, spawn, store, upstream
+from . import allowlist, calls, gates, health, ladder, learn, registry, request, session, settings, spawn, store, upstream
 from . import config as cfg
 from .profile import asks_for_work, profile_prompt
 
@@ -193,7 +193,7 @@ def user_prompt(hook_input: dict) -> dict | None:
         # Work for someone else's message isn't the user's request, so it doesn't get its floor.
         # A task notification continues the user's request and keeps it.
         try:
-            store.update_entry("prompts", session_id, floor_off=True)
+            request.deliver(session_id)
         except OSError:
             pass
     if mode == "off" or not is_user_prompt(prompt):
@@ -206,10 +206,8 @@ def user_prompt(hook_input: dict) -> dict | None:
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
     below = bool(current and need and registry.strength(config, current) < registry.strength(config, need))
     wanted = named_model(config, prompt)
-    store.save_entry("prompts", session_id, {
-        "prompt_id": hook_input.get("prompt_id"), "level": level, "need": need,
-        "below": below,
-        "session_tier": current, "named": wanted})
+    request.start(session_id, prompt_id=hook_input.get("prompt_id"), level=level, need=need, below=below,
+                  session_tier=current, named=wanted)
     why = f" (wording suggests: {', '.join(result['signals'])})" if result["signals"] else ""
     notes = []
     if mode == "advise":

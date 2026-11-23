@@ -52,7 +52,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Vote**: evidence that a level was routed too low: a redo, or Claude naming a stronger model than the pick. Enough votes raise the level one step, and a raise that keeps being overruled with a weaker model is undone the same way.
 
-**Request**: one prompt from the user and the turns it starts. Redos count only within one request.
+**Request**: one prompt from the user and the turns it starts. Redos count only within one request. Its record is kept by `request.py`.
 
 **Ledger**: the append-only log of every spawn, result, turn effort and turn's spend, with the reason for each decision.
 

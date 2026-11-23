@@ -100,7 +100,7 @@ The note keeps what Claude must act on: don't name a model or effort, say what m
 | :- | -: | :- | :- |
 | `ledger.jsonl` | 773,494 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
 | `prompts.json` | 178,447 | yes | The 200 most recently written sessions (`store.KEEP_ENTRIES`) |
-| `done.json` | 112,775 | yes | Same, and 100 calls per session (`calls.KEPT`) |
+| `done.json` | 112,775 | yes | Same, and 100 calls per session (`store.KEPT_RECORDS`) |
 | `edits.json` | 3,120 | yes | The 200 most recently written sessions |
 | `sessions.json` | 2,911 | yes | Same |
 | `mod.json` | 1,738 | yes | Same |
