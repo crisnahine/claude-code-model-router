@@ -108,7 +108,7 @@ def _clamp(name: str, latest: float) -> float:
 
 
 def _route_around(info: dict) -> None:
-    if _num(info.get("unavailable_until")) > time.time():
+    if _num(info.get("unavailable_until")) > store.now():
         return  # parallel failures of one outage must not stack into the next, longer one
     info["outages"] = int(_num(info.get("outages"))) + 1
     info["unavailable_until"] = store.now() + _outage_days(info) * 86400
