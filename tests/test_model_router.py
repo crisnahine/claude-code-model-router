@@ -1832,6 +1832,19 @@ class Router(Sandbox):
         self.options(CLAUDE_CODE_SUBAGENT_EFFORT="medium")
         self.assertEqual(self.decide("general-purpose", LOOKUP)["action"], "keep")
 
+    def test_the_subagent_effort_variable_does_not_reach_a_teammate(self):
+        self.options(CLAUDE_CODE_SUBAGENT_EFFORT="low")
+        self.assertEqual(self.decide("general-purpose", HARD)["action"], "keep")
+        # The fallback knows a teammate by its named Agent call, the mod by the spawn's kind.
+        out = self.pre("general-purpose", HARD, name="auditor")
+        self.assertEqual((out["updatedInput"]["effort"], out["updatedInput"]["name"]), ("high", "auditor"))
+        for kept in ({"isolation": "worktree"}, {"effort": "low"}):
+            self.assertEqual(self.decide("general-purpose", HARD, name="auditor", **kept)["action"], "keep", kept)
+        mod = lambda kind: hooks.mod_spawn({"session_id": kind, "cwd": str(self.project), "parent_model": "claude-opus-5-5",  # noqa: E731
+                                            "kind": kind, "tool_input": {"subagent_type": "general-purpose", "prompt": HARD}})
+        self.assertEqual(mod("teammate")["effort"], "high")
+        self.assertIsNone(mod("subagent"))
+
     def test_the_users_environment_settings_win(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         self.assertEqual(self.decide("general-purpose", LOOKUP)["action"], "keep")

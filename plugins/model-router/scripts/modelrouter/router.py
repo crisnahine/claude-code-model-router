@@ -44,6 +44,7 @@ class Facts:
     earlier: dict | None = None  # calls.finished_run: this call's finished run in this request
     raises: dict = field(default_factory=dict)  # learn.raises: the learned raise of each level
     floor: str | None = None  # the request's level, for a hand-off to a strong role agent
+    teammate: bool = False  # an agent-team teammate, which CLAUDE_CODE_SUBAGENT_EFFORT doesn't reach
 
 
 def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
@@ -101,7 +102,7 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
         # pinned strong model it is the only lever left on cost.
         out.update(was=env_default or facts.parent,
                    reason="CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent's model")
-        effort = None if _effort_decided(tool_input, definition, settings) else level_effort
+        effort = None if _effort_decided(tool_input, definition, settings, facts.teammate) else level_effort
         if effort and not tool_input.get("model"):
             out.update(action="rewrite", effort=effort, source="router",
                        reason=f"{level} subtask; the model is pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE, so only effort is set")
@@ -139,7 +140,7 @@ def decide(facts: Facts, config: dict, settings: Settings) -> Decision:
     effort = None
     # Effort is set whenever nobody chose it, a pinned agent included: the pin is about
     # the model, and on current models effort is the cheaper lever for quality.
-    if source in cfg.LEVEL_SOURCES and not _effort_decided(tool_input, definition, settings):
+    if source in cfg.LEVEL_SOURCES and not _effort_decided(tool_input, definition, settings, facts.teammate):
         effort = pick_effort if source == "router" else level_effort
     if redo:
         effort = _above_earlier(config, effort, final, done)
@@ -162,7 +163,7 @@ def _above_earlier(config: dict, effort: str | None, model: str | None, done: di
     return effort if effort in cfg.EFFORTS and cfg.EFFORTS.index(effort) >= cfg.EFFORTS.index(floor) else floor
 
 
-def _effort_decided(tool_input: dict, definition: dict | None, settings: Settings) -> bool:
+def _effort_decided(tool_input: dict, definition: dict | None, settings: Settings, teammate: bool) -> bool:
     """Someone already chose this call's effort: the caller, the agent, or the user's environment."""
     return bool("effort" in tool_input or (definition or {}).get("effort")
-                or settings.effort_level or settings.subagent_effort)
+                or settings.effort_level or (settings.subagent_effort and not teammate))

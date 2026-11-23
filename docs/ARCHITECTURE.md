@@ -116,7 +116,7 @@ The scout, verifier and docs-researcher pin Haiku at medium effort in their own 
 
 Then `registry.clamp` moves the result to the closest usable model at or below it, or to the weakest usable model when none is below it, so it raises only when everything usable is stronger than the pick.
 
-Effort is set when the router, a rule or the agent's own model decided the model and nobody chose an effort: not the call, not the agent's definition, not `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT`. A pin is about the model, and an agent that pins Opus with no effort would otherwise run at `medium`.
+Effort is set when the router, a rule or the agent's own model decided the model and nobody chose an effort: not the call, not the agent's definition, not `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT`. A pin is about the model, and an agent that pins Opus with no effort would otherwise run at `medium`. `CLAUDE_CODE_SUBAGENT_EFFORT` "doesn't apply to forks, forked skills, or teammates" (https://code.claude.com/docs/en/env-vars.md), so it doesn't count for a teammate: the router sets that effort. The mod names a teammate by the spawn's `kind`. On the fallback path the `Agent` call carries no such field; a call with a `name` from the main conversation, with no `isolation`, launches as a teammate when agent teams are on (https://code.claude.com/docs/en/sub-agents.md#subagent-names), and the router treats it as one (`spawn.facts`, `router.Facts.teammate`). The hook can't see whether agent teams are on, so a named call without them is treated as a teammate too.
 
 Some details of how the rules apply:
 
