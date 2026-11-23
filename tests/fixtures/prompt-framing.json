@@ -1,0 +1,14 @@
+{
+  "delivered": [
+    "Another Claude session sent a message:\n<teammate-message teammate_id=\"auditor\" color=\"blue\">\nfix the auth migration across every service\n</teammate-message>",
+    "Another Claude session sent a message:\n<cross-session-message teammate_id=\"auditor\" color=\"blue\">\nfix the auth migration across every service\n</cross-session-message>"
+  ],
+  "machine": [
+    "<task-notification>done</task-notification>"
+  ],
+  "person": [
+    "fix the auth migration across every service",
+    "Another Claude session sent a message: is that how they phrase it?",
+    "<pasted_content id=\"x\">\nTraceback (most recent call last):\n  File \"billing.py\"\n</pasted_content id=\"x\">\nlist the files under src"
+  ]
+}

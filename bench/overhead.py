@@ -179,7 +179,6 @@ def in_process(base: Path, calls: int, runs: int):
     os.environ.update(box.env())
     sys.pycache_prefix = str(box.root / "pycache")
     sys.path.insert(0, str(PLUGIN / "scripts"))
-    from modelrouter import calls as call_log
     from modelrouter import config as cfg
     from modelrouter import hooks, router, settings, spawn, store
 

@@ -24,9 +24,10 @@ SCRIPTS = PLUGIN / "scripts"
 SCRIPT = SCRIPTS / "model-router.py"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ERRORS = json.loads((FIXTURES / "model-errors.json").read_text())
+FRAMING = json.loads((FIXTURES / "prompt-framing.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, allowlist, calls, cli, gates, health, hooks, learn, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
+from modelrouter import agents, allowlist, calls, cli, gates, health, hooks, intake, learn, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 
 LOOKUP = "list the files under src"
@@ -398,7 +399,7 @@ class SkillGrants(unittest.TestCase):
                 self.assertFalse(self.allowed(rules, f"{self.PREFIX} ack"), name)
 
 
-class DeliveredMessages(Sandbox):
+class Intake(Sandbox):
     """A teammate's report or another session's message reaching the main loop isn't the user's request."""
 
     def setUp(self):
@@ -412,10 +413,10 @@ class DeliveredMessages(Sandbox):
     def test_a_delivered_message_raises_no_effort(self):
         session.record("s1", "claude-opus-5-5")
         for tag in ("teammate-message", "cross-session-message"):
-            self.assertFalse(hooks.is_user_prompt(self.delivered(tag)), tag)
+            self.assertFalse(intake.is_user_prompt(self.delivered(tag)), tag)
             self.assertIsNone(hooks.mod_turn({"session_id": "s1", "text": self.delivered(tag)}), tag)
         self.assertEqual(hooks.mod_turn({"session_id": "s1", "text": HARD}), {"level": "complex", "effort": "high"})
-        self.assertTrue(hooks.is_user_prompt("Another Claude session sent a message: is that how they phrase it?"))
+        self.assertTrue(intake.is_user_prompt("Another Claude session sent a message: is that how they phrase it?"))
 
     def test_a_delivered_message_leaves_the_users_request_alone(self):
         self.session_on("claude-haiku-5-5")
@@ -433,13 +434,35 @@ class DeliveredMessages(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": HARD, "prompt_id": "p3"})
         self.assertEqual(request.load("s1").floor, before.level)
 
-    def test_a_machine_origin_from_the_mod_raises_no_effort(self):
-        session.record("s1", "claude-opus-5-5")
-        turn = lambda origin: hooks.mod_turn({"session_id": "s1", "text": HARD, "origin": origin})  # noqa: E731
-        for origin in ("task-notification", "peer", "peer-send-message"):
-            self.assertIsNone(turn(origin), origin)
-        for origin in ("composer", "bridge", "sdk", "unclassified", "coordinator", "a-kind-from-a-later-build"):
-            self.assertEqual(turn(origin), {"level": "complex", "effort": "high"}, origin)
+    KINDS = {"composer": True, "bridge": True, "sdk": True, "task-notification": False, "scheduled-trigger": True,
+             "peer": False, "peer-send-message": False, "projects-relay": True, "channel": True, "coordinator": True,
+             "observer": False, "observer-activity": False, "auto-continuation": True, "unclassified": True,
+             "slack-ping": True, "plugin": True}  # PromptOrigin in the mod types pinned by tests/mod/typecheck.sh
+
+    def test_every_origin_kind_is_classified(self):
+        self.assertEqual(set(intake.ORIGINS), set(self.KINDS))
+        for kind, person in self.KINDS.items():
+            with self.subTest(kind=kind):
+                self.assertEqual(intake.from_turn(HARD, None, kind).person, person)
+        self.assertTrue(intake.from_turn(HARD, None, "a-kind-from-a-later-build").person)
+
+    def test_the_framing_of_a_delivered_message(self):
+        for text in FRAMING["delivered"]:
+            seen = intake.from_prompt(text, self.project)
+            self.assertEqual((seen.delivered, seen.person, seen.level), (True, False, None), text)
+            self.assertFalse(intake.from_turn(text, None, None).person, text)
+        for text in FRAMING["machine"]:
+            self.assertEqual((intake.from_prompt(text, self.project).delivered, intake.is_user_prompt(text)), (False, False))
+        for text in FRAMING["person"]:
+            self.assertTrue(intake.from_prompt(text, self.project).person, text)
+
+    def test_a_command_is_this_turns_only_when_its_line_opens_the_turn(self):
+        line = SlashSkills.LINE.format("hard", "")  # no arguments: the body is the task
+        command = {"name": "hard", "args": "", "body": SlashSkills.HARD_BODY}
+        seen = intake.from_turn(line, command, "composer")
+        self.assertEqual((seen.person, seen.command, seen.level), (True, "hard", "hardest"))
+        self.assertIsNone(intake.from_turn(FRAMING["delivered"][0], command, None).command)
+        self.assertIsNone(intake.from_turn(SlashSkills.LINE.format("other", ""), command, None).command)
 
 
 class Store(Sandbox):
@@ -3291,7 +3314,7 @@ class SlashSkills(Sandbox):
             with self.subTest(target=target):
                 self.assertEqual(self.turn("security-review", target, body.replace("$ARGUMENTS", target))["effort"],
                                  "high")
-                self.assertEqual(hooks._profile_skill(target, raw, rendered=False)["level"], "complex")
+                self.assertEqual(intake.profile_skill(target, raw, rendered=False)["level"], "complex")
         skills = self.project / ".claude" / "skills" / "security-review"
         skills.mkdir(parents=True)
         (skills / "SKILL.md").write_text(raw, encoding="utf-8")
@@ -3319,8 +3342,8 @@ class SlashSkills(Sandbox):
 
     def test_only_a_placeholder_that_receives_the_arguments_hands_them_the_task(self):
         hard = self.HARD_BODY.split("\n\n")[1]
-        rendered = lambda body, args: hooks._profile_skill(args, body, rendered=True)["level"]  # noqa: E731
-        raw = lambda body, args: hooks._profile_skill(args, body, rendered=False)["level"]  # noqa: E731
+        rendered = lambda body, args: intake.profile_skill(args, body, rendered=True)["level"]  # noqa: E731
+        raw = lambda body, args: intake.profile_skill(args, body, rendered=False)["level"]  # noqa: E731
         # An earlier ARGUMENTS: line in the body is not the engine's trailer, and any trailer means no placeholder.
         self.assertEqual(rendered(hard + "\nARGUMENTS: none\nKeep notes.\n\n\nARGUMENTS: src", "src"), "hardest")
         self.assertEqual(rendered(hard + "\n\n\nARGUMENTS: src  extra", "src extra"), "hardest")
@@ -3343,7 +3366,7 @@ class SlashSkills(Sandbox):
         self.assertIsNone(self.turn("commit", "", body))
         self.assertIsNone(self.turn("commit", "", "Review the staged diff in production style.\n" + body))
         # The cut only works while the opening is too short for profile_prompt's own length rule.
-        self.assertNotIn("scope", profile.profile_prompt("note " * (hooks._SKILL_BODY_CHARS // 5))["signals"])
+        self.assertNotIn("scope", profile.profile_prompt("note " * (intake.SKILL_BODY_CHARS // 5))["signals"])
 
     def test_a_teammate_message_still_does_not_raise(self):
         self.session_on("claude-opus-5-5")

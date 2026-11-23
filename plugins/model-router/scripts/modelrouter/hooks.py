@@ -8,105 +8,10 @@ from __future__ import annotations
 import re
 import time
 
-from . import allowlist, calls, gates, health, ladder, learn, registry, request, session, settings, spawn, store, upstream
+from . import allowlist, calls, gates, health, intake, ladder, learn, registry, request, session, settings, spawn, store, upstream
 from . import config as cfg
-from .profile import asks_for_work, profile_prompt
 
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
-
-
-# Where the mod saw a turn's prompt come from (prompt.submit's origin.kind) when it wasn't
-# the person. Left out: unclassified, which a same-user socket's typed prompt also gets, and
-# a coordinator's hand-off, which is a worker's real task. An unknown kind counts as the person's.
-MACHINE_ORIGINS = {"task-notification", "peer", "peer-send-message", "observer", "observer-activity"}
-_DELIVERED = "Another Claude session sent a message:"
-
-
-def is_delivered(prompt: str) -> bool:
-    """A teammate's report or another session's message, framed as Claude Code delivers it."""
-    first, _, rest = (prompt or "").lstrip().partition("\n")
-    return first.strip() == _DELIVERED and rest.lstrip().startswith(("<teammate-message", "<cross-session-message"))
-
-
-def is_user_prompt(prompt: str) -> bool:
-    """UserPromptSubmit also fires for background-task notifications, teammates' reports
-    and other sessions' messages. Those must not reset what is known about the user's
-    request. Pasted text is the user's, though it arrives wrapped in a <pasted_content> tag."""
-    prompt = (prompt or "").lstrip()
-    if is_delivered(prompt):
-        return False
-    return not prompt.startswith("<") or prompt.startswith("<pasted_content")
-
-
-# A skill's body is standing instructions, not the request: only its opening counts, so its length
-# never reads as scope and a !`cmd` output or checklist further down can't make every use hard.
-_SKILL_BODY_CHARS = 1500
-
-
-_FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*\r?\n", re.S)
-
-
-def _receives(body: str, frontmatter: str, count: int) -> bool:
-    """Whether a raw skill file has a placeholder that receives one of `count` arguments: an unescaped
-    $ARGUMENTS, $N or $ARGUMENTS[N] with N below count (0-based), or a declared name the body uses.
-    A $ followed by an amount ($500, $1.00) is prose."""
-    if re.search(r"(?<!\\)\$ARGUMENTS\b(?!\[)", body):
-        return True
-    for index in re.findall(r"(?<!\\)\$(?:ARGUMENTS\[(\d+)\]|(\d+)(?![\d.,]))", body):
-        if int(index[0] or index[1]) < count:
-            return True
-    block = re.search(r"(?ms)^arguments\s*:(.*?)(?=^\S|\Z)", frontmatter)
-    names = re.findall(r"[A-Za-z_]\w*", block.group(1)) if block else []
-    return any(re.search(rf"(?<!\\)\${re.escape(name)}\b", body) for name in names)
-
-
-def _profile_skill(args: object, body: object, rendered: bool) -> dict:
-    """A typed skill's profile. A skill whose content takes its arguments (a $ARGUMENTS, $1 or named
-    placeholder) and is given a task in them runs that task, so the arguments alone set the level: its own
-    instructions, a pipeline's say, are the same on every use. Arguments that only name a target leave the
-    task to the body, at most complex. A skill that takes no placeholder, or is typed with no arguments, is
-    its body: the higher of the arguments' level and the body's opening counts. `rendered` is the engine's expansion, where a skill that takes no
-    placeholder gets the arguments appended as "ARGUMENTS: ..."; otherwise body is the raw file."""
-    args = args.strip() if isinstance(args, str) else ""
-    body = (body if isinstance(body, str) else "").lstrip("\ufeff")
-    body = re.sub(r"\A\s*Base directory for this skill: [^\n]*\n", "", body)
-    front = _FRONTMATTER.match(body)
-    body = body[front.end():] if front else body
-    if rendered:
-        # The engine appends the trailer last, so only its last occurrence counts, and any trailer at all
-        # means no placeholder took them: an unexpected format errs toward the higher level.
-        head, trailer, _ = body.rpartition("\nARGUMENTS: ")
-        takes_args = bool(args) and not trailer
-        body = head if trailer else body
-    else:
-        takes_args = bool(args) and _receives(body, front.group(1) if front else "", len(args.split()))
-    if takes_args and asks_for_work(args):
-        return profile_prompt(args)
-    parts = [profile_prompt(text) for text in (args, body[:_SKILL_BODY_CHARS])]
-    if takes_args and cfg.LEVELS.index(parts[1]["level"]) > cfg.LEVELS.index("complex"):
-        # A template that serves any target: its own wording, a pipeline's gates say, isn't one task's depth.
-        parts[1] = {**parts[1], "level": "complex"}
-    return max(parts, key=lambda p: cfg.LEVELS.index(p["level"]))
-
-
-def _typed_skill(prompt: str, hook_input: dict) -> dict | None:
-    """The profile behind "/name args" when name is a project or user skill or command on disk.
-    UserPromptSubmit sees only the typed line; a plugin's skill isn't found this way."""
-    match = re.match(r"/([A-Za-z0-9_.-]+)(?:\s+(.*))?\Z", prompt.strip(), re.S)
-    if not match:
-        return None
-    name, args = match.group(1), match.group(2) or ""
-    project, home = cfg.project_dir(hook_input) / ".claude", store.claude_home()
-    for path in (project / "skills" / name / "SKILL.md", home / "skills" / name / "SKILL.md",
-                 project / "commands" / f"{name}.md", home / "commands" / f"{name}.md"):
-        try:
-            if not path.is_file():  # a FIFO or device would hang or never end
-                continue
-            with path.open("rb") as fh:
-                return _profile_skill(args, fh.read(64 * 1024).decode("utf-8", "replace"), rendered=False)
-        except OSError:
-            continue
-    return None
 
 
 def named_model(config: dict, prompt: str) -> str | None:
@@ -186,21 +91,23 @@ def user_prompt(hook_input: dict) -> dict | None:
     config = cfg.load_config(hook_input)
     options = settings.resolve(config)
     mode = options.mode
+    if mode == "off":
+        return None
     prompt = hook_input.get("prompt")
     prompt = prompt if isinstance(prompt, str) else ""
     session_id = hook_input.get("session_id")
-    if mode != "off" and is_delivered(prompt):
+    seen = intake.from_prompt(prompt, cfg.project_dir(hook_input))
+    if seen.delivered:
         # Work for someone else's message isn't the user's request, so it doesn't get its floor.
         # A task notification continues the user's request and keeps it.
         try:
             request.deliver(session_id)
         except OSError:
             pass
-    if mode == "off" or not is_user_prompt(prompt):
+    if not seen.person:
         return None
     usable = registry.available(config, options.cap, allowed=allowlist.read(session_id, cfg.project_dir(hook_input)))
-    result = _typed_skill(prompt, hook_input) or profile_prompt(prompt)
-    level = result["level"]
+    level = seen.level
     pick = ladder.pick(config, level, options.priority, usable, learn.raises())
     need = pick.model
     current = registry.family(config, session.model(session_id, hook_input.get("transcript_path")))
@@ -208,7 +115,7 @@ def user_prompt(hook_input: dict) -> dict | None:
     wanted = named_model(config, prompt)
     request.start(session_id, prompt_id=hook_input.get("prompt_id"), level=level, need=need, below=below,
                   session_tier=current, named=wanted)
-    why = f" (wording suggests: {', '.join(result['signals'])})" if result["signals"] else ""
+    why = f" (wording suggests: {', '.join(seen.signals)})" if seen.signals else ""
     notes = []
     if mode == "advise":
         if need:
@@ -463,28 +370,23 @@ def mod_turn(hook_input: dict) -> dict | None:
     allowlist.remember(session_id, hook_input.get("settings"))
     config = cfg.load_config(hook_input)
     options = settings.resolve(config)
-    text = hook_input.get("text")
-    text = text if isinstance(text, str) else ""
-    # Only a turn that opens with the command's own line is that command's turn.
-    command = hook_input.get("command")
-    command = command if (isinstance(command, dict) and text.lstrip().startswith("<command-")
-                          and f"<command-name>/{command.get('name')}</command-name>" in text) else None
-    asked = command is not None or is_user_prompt(text)
+    if (options.mode != "auto" or not options.main_effort or options.effort_level
+            or hook_input.get("first_party") is False):
+        return None
+    seen = intake.from_turn(hook_input.get("text"), hook_input.get("command"), hook_input.get("origin"))
+    if not seen.person:
+        return None
     # The mod's live model, when it is an ID; a record can miss a fallback to another model.
     model = hook_input.get("model")
     model = model if upstream.version_of(model) else session.model(session_id)
-    if (options.mode != "auto" or not options.main_effort or not asked
-            or options.effort_level or hook_input.get("first_party") is False
-            or str(hook_input.get("origin")) in MACHINE_ORIGINS
-            or not _effort_keeps_cache(options, model)):
+    if not _effort_keeps_cache(options, model):
         return None
-    level = (_profile_skill(command.get("args"), command.get("body"), rendered=True) if command
-             else profile_prompt(text))["level"]
+    level = seen.level
     effort = ((config.get("main") or {}).get("effort") or {}).get(level)
     if effort not in cfg.EFFORTS:
         return None
     store.append_ledger({"event": "turn", "session": hook_input.get("session_id"), "level": level,
-                         "effort": effort, **({"command": command.get("name")} if command else {})})
+                         "effort": effort, **({"command": seen.command} if seen.command else {})})
     return {"level": level, "effort": effort}
 
 
