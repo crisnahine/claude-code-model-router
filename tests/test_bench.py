@@ -441,11 +441,11 @@ class Analysis(unittest.TestCase):
 
     def test_the_page_says_what_the_archive_holds_and_why_it_is_left_out(self):
         real = json.loads((ROOT / "bench" / "tasks" / "lookup-todo-count" / "task.json").read_text())
-        assert real["class"] == "lookup" and real["revision"] == 1
+        revision = real["revision"]  # the rows without a task_revision count as revision 1
         base = {"class": "lookup", "task": "lookup-todo-count", "config": "defaults", "total_cost_usd": 0.05,
                 "passed": True, "claude_version": "2.1.330", "main_model": "sonnet", "models": {},
                 "started_at": "2026-11-23T01:00:00+00:00", "budget_usd": 1.0, "plugin_state": None,
-                "plugin_data_own": True, "sessions_saved": True, "bench_commit": "c" * 40, "task_revision": 1}
+                "plugin_data_own": True, "sessions_saved": True, "bench_commit": "c" * 40, "task_revision": revision}
         old = {k: v for k, v in base.items() if k != "task_revision"}
         kept = [dict(old, bench_commit="a" * 40, task="design-cache-invalidation", **{"class": "design"}),
                 dict(old, bench_commit="b" * 40), dict(base)]
@@ -459,9 +459,11 @@ class Analysis(unittest.TestCase):
             analyze.main([str(res / "new-lookup.jsonl"), "--out", str(out)])
             page = out.read_text(encoding="utf-8")
         raw = page.split("## Raw data and commands")[1]
+        earlier = ("1 on an earlier revision of `design-cache-invalidation`" if revision == 1 else
+                   "2 on an earlier revision of `design-cache-invalidation`, `lookup-todo-count`")
         self.assertIn("- `bench/results/archive/early-builds/` holds 3 rows left out of every table, plus 1 set-aside "
                       "line under its `infra/` and `limited/`: 2 ran on 2 other commits (older builds of the router "
-                      "and the bench), 1 on an earlier revision of `design-cache-invalidation`, and 2 were recorded "
+                      f"and the bench), {earlier}, and 2 were recorded "
                       "while the run's folder name held its task id.", raw)
         self.assertNotIn("$0.15", page.split("## Raw data and commands")[0])  # archived spend is in no table
 
