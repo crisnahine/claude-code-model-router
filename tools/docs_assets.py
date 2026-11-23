@@ -6,7 +6,7 @@ Run: python3 tools/docs_assets.py            write everything
 """
 from __future__ import annotations
 
-import functools
+import dataclasses
 import html
 import json
 import re
@@ -18,8 +18,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from docs_pages import PAGES, attr, rel, with_head  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-ASSETS = ROOT / "docs" / "assets"
-SITE = ROOT / "site"
 REPO = "https://github.com/crisnahine/claude-code-model-router"
 
 SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif'
@@ -263,27 +261,27 @@ GROUPS = {1: ("Start here", "What it is, and the questions people ask first."),
 CARDS_START, CARDS_END = "<!-- Cards, written by tools/docs_assets.py from PAGES in tools/docs_pages.py. -->", "<!-- End of cards. -->"
 
 
-def cards() -> str:
+def cards(pages: list = PAGES) -> str:
     out = [CARDS_START, "<table>"]
     for group, (name, blurb) in GROUPS.items():
-        pages = [p for p in EXTRA_CARDS + PAGES if p[5] == group and p[0] != "docs/README.md"]
+        shown = [p for p in EXTRA_CARDS + pages if p[5] == group and p[0] != "docs/README.md"]
         out.append(f'<tr><th colspan="2" align="left">{name}<br><sub>{blurb}</sub></th></tr>')
-        for k in range(0, len(pages), 2):
+        for k in range(0, len(shown), 2):
             out.append("<tr>")
-            for path, slug, title, question, _, _ in pages[k:k + 2]:
+            for path, slug, title, question, _, _ in shown[k:k + 2]:
                 out.append(f'<td width="50%" valign="top"><img src="assets/icon-{slug}.svg" width="20" height="20" '
                            f'alt=""> <a href="{rel("docs/README.md", path)}"><b>{title}</b></a><br>{question}</td>')
-            if len(pages[k:k + 2]) == 1:
+            if len(shown[k:k + 2]) == 1:
                 out.append('<td width="50%"></td>')
             out.append("</tr>")
     out += ["</table>", CARDS_END]
     return "\n".join(out)
 
 
-def with_cards(current: str) -> str:
+def with_cards(current: str, pages: list = PAGES) -> str:
     if CARDS_START in current:
         before, rest = current.split(CARDS_START, 1)
-        return before + cards() + rest.split(CARDS_END, 1)[1]
+        return before + cards(pages) + rest.split(CARDS_END, 1)[1]
     return current
 
 
@@ -322,11 +320,11 @@ def banner(slug, title, question, icon, group) -> str:
     return svg(w, h, f"{title}: Model Router documentation", label, body, css)
 
 
-def banner_assets() -> dict:
+def banner_assets(pages: list = PAGES) -> dict:
     out = {}
-    for _, slug, title, question, icon, group in PAGES:
+    for _, slug, title, question, icon, group in pages:
         out[f"banner-{slug}.svg"] = banner(slug, title, question, icon, group)
-    for _, slug, title, question, icon, group in PAGES + EXTRA_CARDS:
+    for _, slug, title, question, icon, group in [*pages, *EXTRA_CARDS]:
         out[f"icon-{slug}.svg"] = svg(24, 24, title, f"{title} icon", icon_body(icon))
     return out
 
@@ -374,8 +372,7 @@ LADDER = [  # level, model, effort, needs, subtask
 ]
 
 
-def check_ladder_against_registry():
-    config = json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8"))
+def check_ladder_against_registry(config: dict):
     by_strength = {m["strength"]: name for name, m in config["models"].items()}
     shipped = [(lv, by_strength[spec["needs"]], spec["effort"], spec["needs"]) for lv, spec in config["levels"].items()]
     mine = [(lv, model.lower(), effort, needs) for lv, model, effort, needs, _ in LADDER]
@@ -840,13 +837,6 @@ BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(role or con
         ("opusplan", "opusplan (runs Sonnet when headless)", "r4"),
     ]),
 }
-@functools.lru_cache(maxsize=1)
-def bench_summary() -> dict:
-    sys.path.insert(0, str(ROOT / "bench"))
-    import analyze
-    return analyze.figures(analyze.load(analyze.default_paths()))
-
-
 def bench_data(data: dict):
     by_model = {s["model"]: s for s in data["sessions"]}
     sessions = []
@@ -1155,23 +1145,20 @@ def between(current: str, marks: tuple, body: str) -> str:
     return before + body + rest.split(marks[1], 1)[1]
 
 
-def site_files(faq: str, figures: dict) -> dict:
-    index = SITE / "index.html"
-    if not index.exists():
+def site_files(faq: str, figures: dict, texts: dict, v: str, day: str) -> dict:
+    if "site/index.html" not in texts:
         return {}
-    page = index.read_text(encoding="utf-8")
+    page = texts["site/index.html"]
     url = SITE_URL.search(page).group(1)
     old = None
-    sitemap = SITE / "sitemap.xml"
-    if sitemap.exists():
-        m = re.search(r"<loc>(\S+?)</loc>", sitemap.read_text(encoding="utf-8"))
+    if "site/sitemap.xml" in texts:
+        m = re.search(r"<loc>(\S+?)</loc>", texts["site/sitemap.xml"])
         old = m.group(1) if m else None
     if old and old != url:
         head, sep, tail = page.partition("-->")
         page = head + sep + tail.replace(old, url)
     page = between(page, FAQ_HTML, site_faq_html(faq))
     page = between(page, FAQ_LD, site_faq_ld(faq))
-    v, day = version(), release_date(version())
     page = re.sub(r'"softwareVersion": "[^"]*"', f'"softwareVersion": "{v}"', page)
     page = badge_alt(page, v)
     page = bench_alt(with_figures("site/index.html", page, figures), figures)
@@ -1182,7 +1169,7 @@ def site_files(faq: str, figures: dict) -> dict:
         "site/index.html": page,
         "site/sitemap.xml": ('<?xml version="1.0" encoding="UTF-8"?>\n'
                              '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-                             f"  <url>\n    <loc>{url}</loc>\n    <lastmod>{release_date(version())}</lastmod>\n"
+                             f"  <url>\n    <loc>{url}</loc>\n    <lastmod>{day}</lastmod>\n"
                              "  </url>\n</urlset>\n"),
         "site/robots.txt": f"User-agent: *\nAllow: /\n\nSitemap: {url}sitemap.xml\n",
     }
@@ -1206,7 +1193,7 @@ def release_date(v: str) -> str:
     return m.group(1)
 
 
-def citation(v: str) -> str:
+def citation(v: str, day: str) -> str:
     return f"""cff-version: 1.2.0
 message: "If you use Model Router in your work, please cite it with these details."
 type: software
@@ -1220,7 +1207,7 @@ authors:
   - given-names: Cris
     family-names: Nahine
 version: "{v}"
-date-released: "{release_date(v)}"
+date-released: "{day}"
 license: Apache-2.0
 repository-code: "{REPO}"
 url: "{REPO}"
@@ -1239,16 +1226,40 @@ SITE_ASSETS = ["logo-mark.svg", "logo.svg", "routing-call.svg", "badge-version.s
                "social-preview.png"]
 
 
-def build() -> dict:
-    LAYOUT.clear()
-    check_ladder_against_registry()
-    bench = bench_summary()
-    figures = bench_figures(bench)
+@dataclasses.dataclass(frozen=True)
+class Snapshot:
+    """Everything `build` reads, taken once: the plugin's version and its release date, the shipped ladder, the
+    text of every page it rewrites, the page index and the benchmark figures from `analyze.figures`."""
+    version: str
+    released: str
+    ladder: dict
+    texts: dict
+    bench: dict
+    pages: list = dataclasses.field(default_factory=lambda: list(PAGES))
+
+
+def snapshot() -> Snapshot:
+    sys.path.insert(0, str(ROOT / "bench"))
+    import analyze
     v = version()
+    wanted = [*(p[0] for p in PAGES), "README.md", "site/index.html", "site/sitemap.xml"]
+    return Snapshot(
+        version=v, released=release_date(v),
+        ladder=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
+        texts={path: (ROOT / path).read_text(encoding="utf-8") for path in wanted if (ROOT / path).exists()},
+        bench=analyze.figures(analyze.load(analyze.default_paths())))
+
+
+def build(snap: Snapshot) -> dict:
+    """The files to write, by path, for a snapshot of the inputs. Reads no file."""
+    LAYOUT.clear()
+    check_ladder_against_registry(snap.ladder)
+    figures = bench_figures(snap.bench)
+    v = snap.version
     files = {}
     assets = {}
     assets.update(brand_assets())
-    assets.update(banner_assets())
+    assets.update(banner_assets(snap.pages))
     assets.update(badge_assets(v))
     assets["hero.svg"] = hero()
     assets["hero-phone.svg"] = hero(phone=True)
@@ -1257,26 +1268,25 @@ def build() -> dict:
     assets["two-paths.svg"] = diagram_two_paths()
     assets["precedence.svg"] = diagram_precedence()
     assets["stop-checks.svg"] = diagram_stop_checks()
-    assets["benchmark.svg"] = bench_chart(bench)
-    assets["benchmark-phone.svg"] = bench_chart(bench, phone=True)
+    assets["benchmark.svg"] = bench_chart(snap.bench)
+    assets["benchmark-phone.svg"] = bench_chart(snap.bench, phone=True)
     assets["social-preview.svg"] = social_preview()
     panel, css, ph = ladder_panel(1, 1, 518, prefix="c")
     assets["routing-call.svg"] = svg(520, round(ph) + 2, "One agent call, routed and redone", HERO_LABEL, panel, css)
     for name, body in assets.items():
         files[f"docs/assets/{name}"] = body
-    for path, *_ in PAGES:
-        p = ROOT / path
-        if p.exists():
-            files[path] = with_head(path, p.read_text(encoding="utf-8"))
+    for path, *_ in snap.pages:
+        if path in snap.texts:
+            files[path] = with_head(path, snap.texts[path], snap.pages)
             if path == "docs/README.md":
-                files[path] = with_cards(files[path])
-    readme = badge_alt((ROOT / "README.md").read_text(encoding="utf-8"), v)
+                files[path] = with_cards(files[path], snap.pages)
+    readme = badge_alt(snap.texts["README.md"], v)
     files["README.md"] = bench_alt(readme, figures)
     for path in ("README.md", "docs/FAQ.md", "docs/TRACEABILITY.md"):
         if path in files:
             files[path] = with_figures(path, files[path], figures)
-    files["CITATION.cff"] = citation(v)
-    files.update(site_files(files.get("docs/FAQ.md", ""), figures))
+    files["CITATION.cff"] = citation(v, snap.released)
+    files.update(site_files(files.get("docs/FAQ.md", ""), figures, snap.texts, v, snap.released))
     return files
 
 
@@ -1324,14 +1334,13 @@ def palette_problems() -> list:
     return found
 
 
-def main(argv: list) -> int:
-    check = "--check" in argv
-    files = build()
-    problems = palette_problems() + LAYOUT
+def sync(files: dict, check: bool, root: Path = ROOT) -> list:
+    """Write `files` under `root`, or with `check` report each one that differs, and the same for the site's copies."""
+    problems = []
     for path, body in files.items():
         if path.endswith(".svg"):
             problems += problems_in_svg(path, body)
-        target = ROOT / path
+        target = root / path
         current = target.read_text(encoding="utf-8") if target.exists() else None
         if current != body:
             if check:
@@ -1340,13 +1349,20 @@ def main(argv: list) -> int:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(body.encode("utf-8"))
     for name in SITE_ASSETS:
-        src, dst = ASSETS / name, SITE / "assets" / name
+        src, dst = root / "docs" / "assets" / name, root / "site" / "assets" / name
         if src.exists() and (not dst.exists() or dst.read_bytes() != src.read_bytes()):
             if check:
                 problems.append(f"site/assets/{name}: differs from docs/assets, run python3 tools/docs_assets.py")
             else:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 dst.write_bytes(src.read_bytes())
+    return problems
+
+
+def main(argv: list) -> int:
+    check = "--check" in argv
+    files = build(snapshot())
+    problems = palette_problems() + LAYOUT + sync(files, check)
     for p in problems:
         print(p, file=sys.stderr)
     return 1 if problems else 0
