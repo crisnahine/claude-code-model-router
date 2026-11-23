@@ -407,6 +407,12 @@ class Analysis(unittest.TestCase):
                 facts = self.session(self.changed(self.first(99, "opus", cls, total_cost_usd=cheap)))["facts"]
                 self.assertFalse(facts["level_as_defaults"])
 
+    def test_nearly_all_reads_each_configuration_the_docs_name(self):
+        lose = self.first(4, "haiku-high", passed=False)  # 66 of 70, under NEARLY, while opusplan stays best
+        session = self.session(self.changed(lose))
+        self.assertEqual(session["roles"]["best"], "opusplan")
+        self.assertFalse(session["facts"]["nearly_all"])
+
     def test_a_session_the_docs_say_nothing_about_has_no_facts(self):
         results = self.changed(lambda row: row.update(main_model="elsewhere"))
         data = analyze.figures(results)

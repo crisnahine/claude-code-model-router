@@ -735,8 +735,10 @@ NEARLY = 0.95  # "solves nearly every run": at least this share of runs
 PROSE = {
     OPUS: {"ran": {"defaults", "haiku", "haiku-high", "opus", "opus-high", "fable", "fable-high", "opusplan", "advisor"},
            "cheaper": ("haiku-high", "opusplan"), "best_in": {"opusplan", "haiku", "haiku-high"},
-           "level_as_defaults": ("opus", "opus-high", "advisor"), "example": ("bugfix", "opusplan")},
-    SONNET: {"ran": {"defaults", "sonnet-medium", "sonnet-high", "opusplan"}, "miss": ("design", "sonnet-medium")},
+           "level_as_defaults": ("opus", "opus-high", "advisor"), "example": ("bugfix", "opusplan"),
+           "nearly": ("opusplan", "haiku-high")},
+    SONNET: {"ran": {"defaults", "sonnet-medium", "sonnet-high", "opusplan"}, "miss": ("design", "sonnet-medium"),
+             "nearly": ("defaults", "opusplan", "sonnet-medium")},
 }
 FACT_TEXT = {
     "solved_all": "the router and the defaults solved every run",
@@ -755,7 +757,8 @@ FACT_TEXT = {
     "no_gain": "the router's pass rate is not ahead of its best baseline's beyond noise in any class",
     "no_pass": "no class is PASS",
     "example": "the docs' example class: the router is cheaper than the defaults and dearer than the named baseline",
-    "nearly_all": f"the best baseline over all runs solved at least {NEARLY:.0%} of them",
+    "nearly_all": f"the best baseline over all runs, and each one the docs say solves nearly every run, solved at "
+                  f"least {NEARLY:.0%} of them",
     "ran": "the configurations that ran are the ones the docs list",
 }
 
@@ -845,7 +848,8 @@ def facts(session: dict, routers: frozenset[str], forced: dict) -> dict[str, boo
         "not_behind": all(against(c) is not None and not against(c)["behind"] for c in classes if c["best_baseline"]),
         "no_gain": all(not ahead(c) for c in classes if c["best_baseline"]),
         "no_pass": not any(c["status"] == "PASS" for c in classes),
-        "nearly_all": best is not None and pooled[best]["solved"] >= NEARLY * pooled[best]["runs"],
+        "nearly_all": best is not None and all(name in pooled and pooled[name]["solved"] >= NEARLY * pooled[name]["runs"]
+                                               for name in {best, *named.get("nearly", ())}),
         "ran": {c for c in pooled if c != router and c not in routers} == named["ran"],
     }
     if "cheaper" in named:
