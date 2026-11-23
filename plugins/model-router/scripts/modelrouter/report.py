@@ -81,7 +81,6 @@ def models_data(snap: settings.Snapshot) -> dict:
         "newer_files": [str(p) for p in store.newer_files()],
         "newer_config": [str(p) for p in reg.newer],
         "workflow_model": options.workflow_model,
-        "locks": lock_rows(),
     }
     # New keys appear only when they have something to say, so a clean setup's output keeps its bytes.
     if reg.problems:
@@ -89,6 +88,9 @@ def models_data(snap: settings.Snapshot) -> dict:
     held_back = _held_back(reg)
     if held_back:
         data["held_back"] = held_back
+    locks = lock_rows()
+    if locks:
+        data["locks"] = locks
     return data
 
 
@@ -134,7 +136,7 @@ def models(snap: settings.Snapshot) -> str:
     if data["newer_config"]:
         lines += ["", "Written for a newer Model Router, so only the settings this release understands apply: "
                   + ", ".join(data["newer_config"]) + ". Update the plugin to use the rest."]
-    lines += lock_table(data["locks"])
+    lines += lock_table(data.get("locks", []))
     return "\n".join(lines)
 
 

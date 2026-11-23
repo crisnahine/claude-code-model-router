@@ -267,7 +267,7 @@ The top-level `schema` key is `<shape>/<version>`. A new key keeps the version, 
 | `newer_config` | Paths of `model-router.json` overrides written for a newer release, of which only the settings this release understands apply (see Compatibility) |
 | `config_problems`, `held_back` | Only when non-empty. Keys an override file had wrong and the registry dropped, as sentences; and what a project's file asked for that wasn't applied, as `kind`, `name` and `reason` (see Trust) |
 | `workflow_model` | The value of `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`, a pin on every workflow agent, or `null` when it isn't set |
-| `locks` | One entry per state file whose lock was ever busy, by name: `file`, `waits` (waits that got the lock), `other_session` (waits on another session's lock), `skipped` (writes skipped because the lock stayed held), `broken` (stale locks removed) and `last_at` (Unix time of the last one) |
+| `locks` | One entry per state file whose lock was ever busy, by name: `file`, `waits` (waits that got the lock), `other_session` (waits on another session's lock), `skipped` (writes skipped because the lock stayed held), `broken` (stale locks removed) and `last_at` (Unix time of the last one). The key is left out while no lock was ever busy |
 
 ## Compatibility
 
