@@ -8,7 +8,41 @@
 
 ## Unreleased
 
+Run `/model-router:models reset` once after upgrading. A level's learned raise now means a different model: a raise on complex used to move it from Sonnet to Opus, and now moves it from Opus to Fable. The reset clears the learned raises and the learned availability.
+
+### Changed
+
+- Complex runs on Opus at `medium`, where it ran on Sonnet at `high`. Migrations, schema changes, performance work and security review get the stronger model. Hardest is still Opus at `high`, so a redo of a complex call is a fresh subagent on Opus at a higher effort.
+- A brief that fixes or hunts a defect profiles at complex at least, not standard. "Fix", "debug" and the hunt verbs count only as verbs: "the fix", "fixture" and "debug logging" don't.
+- The scout, the verifier and lookup run Haiku at `medium`, not `low`.
+- `verify_gate` is on by default. Claude is asked once to run the verifier when code changed and nothing checked it. Set `verify_gate: false` to turn it off.
+- When `availableModels` and `deniedModels` leave no registry model, the call is left as it is, and the ledger row says why. The router no longer picks a model the lists block.
+- When a cap, the allowlist or model health leaves a level's pick weaker than the level needs, the pick gets one more effort step, at most `xhigh`.
+- A run that swapped models mid-run (Claude Code reports it as `modelsUsed` on the Agent result) is its own result. It no longer counts as the level's result, as a strike against the model it left, or as a redo when the call is issued again.
+- The allowlist reads the settings layers through the mod, so managed policy from server-managed, MDM and registry sources reaches it. The managed settings files stay as a floor: their deny entries always apply, and their allow list must permit a model too. Without the mod, or when a read fails, it reads the files. A policy list that isn't a list, or a deny list over 200 entries, leaves no model open.
+- Claude Code 2.1.326 or later is required, not 2.1.292. The mod calls `$.process.hookEnv()`, which older versions don't have; on them the mod routed nothing and only the fallback path worked.
 - In `/plugin` and `/config`, Routing mode, Priority, Strongest model allowed and Agents that name their own model are now pickers of their allowed values, so they show their default and a mistyped value can't be saved.
+
+### Fixed
+
+- A background agent that hands its report back through `SubagentHandback` counts as answered. Its call used to stay open, and a re-issue wasn't seen as a redo.
+- A stopped agent is counted as stopped even when its transcript can't be read.
+- On Bedrock's Mantle endpoint, and with prompt caching turned off, `main_effort` leaves the main loop's effort alone, since an effort change there drops the cache.
+- The Windows managed settings folder no longer comes from the `ProgramFiles` environment variable, which a trusted repository's `env` block can set. It is `C:\Program Files\ClaudeCode`.
+- A later settings read that fails no longer drops a session's server-managed or MDM policy. The last policy stands, and a malformed one fails closed.
+- A health record holding `NaN` or `Infinity` no longer raises or leaves a model routed around for good.
+- A brief that opens with "Debug logging for ...", or rules a fix out ("avoid fixing", "must not fix"), no longer profiles as a fix. A long run of newlines in a brief no longer makes the profiler's regex scans quadratic.
+- A bench check can no longer be fooled by a `unittest.py` the agent leaves in the work directory: every check runs isolated, and the root-cause checks run the work directory's tests in a child that imports `unittest` first.
+- A bench run that errored during execution with a zero cost counts as an unknown cost and books the whole budget. A run the API refused for a rate limit or a lost network keeps its zero, since nothing started.
+
+### Internal
+
+- New modules in `scripts/modelrouter/`: `health` owns the record of which models failed and the rules for what counts as evidence; `allowlist` owns what `availableModels` and `deniedModels` leave open; `request` owns the current request's record in `prompts.json`; `intake` decides whether a prompt is the person's request and at what level; `ledger` writes and reads every ledger row and owns the turn Spend rule; `fallback` owns the waiting rewrites, the refused-rewrite guard and the cap-hold deny. `settings.Snapshot` reads config, options, models, health and the allowlist once per hook call and passes them down.
+- `spawn` decides and records in two steps, and `fallback` adjusts the decision between them. Row shapes and the files' shapes don't change.
+- The effort cache rule's model families live in `config/models.json` under `main.effort_keeps_cache`, not in `hooks.py`.
+- The bench builds each row in a pure `record()` and orders runs with `schedule()`, so both are tested without a stub `claude`; the stub runs as `python stub.py` on every OS. `ledger_rows` reads through the plugin's `ledger.read`.
+- `bench/analyze.py` loads the rows once, draws the benchmark chart from its summary, fills the headline figures in the docs as `<!-- bench: -->` spans, and takes `--check` to fail when `docs/BENCHMARKS.md` no longer matches the results.
+- The pass checks share `bench/tasks/passcheck.py` and run with `python -I`. Six new hard tasks (a statement-queries bugfix, a cents cross-module change, a retry design, a customer-merge migration, a wallet race and an admin-route security review) run task code in a probe child where it needs one. The forced Haiku, Sonnet and Opus baselines are pinned by a test, and `bench/README.md` has the quality-tier pilot command.
 
 ## 0.1.0 - 2026-11-23
 
