@@ -696,6 +696,11 @@ class KnownAnswers(unittest.TestCase):
             answer.write_text(reply, encoding="utf-8")
             return run.grade(task["dir"] / "check.py", work, answer, timeout=60)
 
+    def test_every_task_has_known_wrong_answers(self):
+        for task in run.load_tasks():
+            with self.subTest(task=task["id"]):
+                self.assertTrue(task.get("wrong_answer") is not None or overlay_dirs(task, "wrong"))
+
     def test_every_wrong_answer_fails_and_every_right_answer_passes(self):
         for task in run.load_tasks():
             for kind, verdict in (("wrong", "fail"), ("right", "pass")):
