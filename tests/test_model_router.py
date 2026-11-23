@@ -2533,6 +2533,29 @@ class Calls(Sandbox):
         self.assertIsNone(self.route({"prompt": "other"}, source="caller"))
         self.assertIsNone(self.route({"prompt": "other"}))  # a caller's run is no run to be redone
 
+    def test_a_sessions_calls_are_dropped_a_day_after_it_last_wrote_them(self):
+        # Every spawn rewrites these files whole under a lock it waits 1 s for, so old sessions cost lost writes.
+        def run(session: str) -> None:
+            for key, agent_id in (("k1", None), ("k2", "a1")):
+                calls.routed(session, key, calls.Route(model="haiku", sent=None, level=cfg.Level.lookup, effort="low",
+                                                       source="router", path="mod"))
+                calls.returned(session, calls.Outcome("result", key=key, launched=bool(agent_id), agent_id=agent_id))
+
+        def sessions() -> dict:
+            return {name: sorted(store.load_state_file(store._keyed(name))) for name in ("routes", "launched", "done")}
+
+        run("old")
+        self.advance(calls.KEPT_FOR)
+        run("recent")
+        self.assertEqual(sessions(), dict.fromkeys(("routes", "launched", "done"), ["old", "recent"]))
+        self.advance(1)
+        run("new")
+        self.assertEqual(sessions(), dict.fromkeys(("routes", "launched", "done"), ["new", "recent"]))
+        store.save_entry("sessions", "kept", {"model": "opus"})
+        self.advance(calls.KEPT_FOR + 1)
+        store.save_entry("sessions", "next", {"model": "opus"})
+        self.assertEqual(sorted(store.load_state_file(store._keyed("sessions"))), ["kept", "next"])  # other files keep theirs
+
     def test_a_route_with_junk_in_it_reads_as_none(self):
         key = calls.identify({"prompt": LOOKUP})[1]
         store.save_entry("routes", "s1", {key: {"call": key, "model": 7, "level": "nope", "at": "later"}, "x": 3})
