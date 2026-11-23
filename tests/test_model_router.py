@@ -1010,10 +1010,20 @@ class Allowlist(Sandbox):
         self.assertEqual((layers["user"]["modelOverrides"], layers["project"]["modelOverrides"]), (True, False))
         self.assertNotIn('"a"', (self.data / "allowlist.json").read_text(encoding="utf-8"))
 
-    def test_a_failing_store_does_not_stop_the_read(self):
+    def test_a_failing_store_does_not_stop_remembering_the_layers_for_this_call(self):
+        sent = {"policy": {"availableModels": ["opus"]}}
         with mock.patch.object(store, "save_entry", side_effect=ValueError("bad")):
-            found = allowlist.read("s1", self.project, {"policy": {"availableModels": ["opus"]}})
+            layers = allowlist.remember("s1", sent)
+        self.assertEqual(layers["policy"]["availableModels"], ["opus"])
+
+    def test_reading_the_sent_layers_stores_nothing_until_the_mod_hook_remembers_them(self):
+        sent = {"policy": {"availableModels": ["opus"]}}
+        found = allowlist.read("s1", self.project, sent)
         self.assertEqual(found.permitted(self.config), {"opus"})
+        self.assertFalse((self.data / "allowlist.json").exists())
+        hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "settings": sent, "kind": "subagent",
+                         "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}})
+        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"opus"})
 
     @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
     def test_a_settings_file_that_is_not_a_small_regular_file_is_ignored(self):
@@ -2592,7 +2602,9 @@ class Health(Sandbox):
             health.failed("opus", "model not found")
             health.failed("opus", "model not found")
         with self.at(0):
-            self.assertFalse(health.load().healthy("opus"))
+            seen = health.load()
+            self.assertFalse(seen.healthy("opus"))
+            seen.settle()
         with self.at(health.OUTAGE_DAYS[0] + 0.01):
             self.assertTrue(health.load().healthy("opus"))
 
@@ -2605,17 +2617,20 @@ class Health(Sandbox):
         self.assertEqual([seen.healthy("fable"), seen.healthy("sonnet"), seen.healthy("none")], [False, True, True])
         self.assertEqual(store.state_path().read_bytes(), before)
 
-    def test_a_clamp_checks_the_record_again_under_the_lock(self):
+    def test_reading_a_too_long_outage_writes_nothing_and_settling_checks_the_record_again(self):
         with self.at(19):
             health.failed("opus", "model not found")
             health.failed("opus", "model not found")
-        seen = health.load()
-        # Another writer clears the record after this one read it.
-        health.ran("opus", "claude-opus-5-5", "opus", forced=False)
-        cleared = store.state_path().read_bytes()
+        long_outage = store.state_path().read_bytes()
         with self.at(0):
-            self.assertTrue(seen.healthy("opus"))  # the cleared record wins over the stale read
-        self.assertEqual(store.state_path().read_bytes(), cleared)
+            seen = health.load()
+            self.assertFalse(seen.healthy("opus"))
+            self.assertEqual(store.state_path().read_bytes(), long_outage)
+            # Another writer clears the record after this one read it.
+            health.ran("opus", "claude-opus-5-5", "opus", forced=False)
+            cleared = store.state_path().read_bytes()
+            seen.settle()
+        self.assertEqual(store.state_path().read_bytes(), cleared)  # the cleared record wins over the stale read
 
     def test_a_junk_record_reads_as_healthy(self):
         store.update_state(lambda s: s.update(health={"opus": {"unavailable_until": "soon", "outages": -3},

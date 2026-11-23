@@ -133,6 +133,14 @@ class Snapshot:
     def allowed(self) -> allowlist.Allowlist:
         return allowlist.read(self.session_id, self.project, (self.hook_input or {}).get("settings"))
 
+    def settle(self) -> None:
+        """Write what reads only noticed: an outage the health table found too long. Dry runs skip it."""
+        if "health" in vars(self):
+            try:
+                self.health.settle()
+            except OSError:
+                pass
+
     @cached_property
     def trusted(self) -> list[str]:
         return cfg.trusted_models(self.config)

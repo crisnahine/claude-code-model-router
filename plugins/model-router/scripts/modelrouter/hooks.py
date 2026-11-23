@@ -292,6 +292,7 @@ def _mark_mod(session_id: str | None) -> None:
 
 def mod_spawn(hook_input: dict) -> dict | None:
     _mark_mod(hook_input.get("session_id"))
+    allowlist.remember(hook_input.get("session_id"), hook_input.get("settings"))
     # The spawn procedure reads agent_id as "the call comes from inside a subagent".
     snap = settings.Snapshot(hook_input)
     spawned = spawn.decide({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, snap)

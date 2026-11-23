@@ -68,7 +68,7 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 | `session` | Tracks the model the conversation itself runs on |
 | `gates` | The two checks before a turn ends |
 | `upstream` | Compares releases, the docs index, model aliases and model status with what was last reviewed |
-| `settings` | The plugin's options and the environment facts routing depends on, resolved once per hook call or command, and the snapshot of config, options, usable models, health and allowlist each hook call builds once (the last three on first use) |
+| `settings` | The plugin's options and the environment facts routing depends on, resolved once per hook call or command, and the snapshot of config, options, usable models, health and allowlist each hook call builds once (the last three on first use). A read writes nothing, so a dry run leaves the state as it was; a spawn settles what reads noticed (`Snapshot.settle`) |
 | `allowlist` | Which registry models `availableModels` and `deniedModels` leave open, from the settings layers the mod reads from the engine, with the settings files for any source the mod didn't send; the managed files always apply as a floor |
 | `ledger` | One append per row kind, the turn Spend rule, and reading rows from the data folder or a given path |
 | `hooks`, `cli`, `report`, `store`, `config` | Handlers for settings hooks and mod calls, commands, tables, state files and the ledger file, and the registry and override files |
@@ -166,7 +166,7 @@ A second check at `Stop`, under the `verify_gate` option, which is on by default
 | The models you allow | The `max_tier` option | Stronger ones are never picked, and pins and explicit choices are lowered |
 | The models your organization allows | `availableModels` from the policy source alone, else the user, project, local and flag sources combined; `deniedModels` from the policy source only. The mod reads the sources from the engine; a source it couldn't read, or without the mod, comes from the settings files. The managed files also apply as a floor: their deny entries add to the engine's, their allow list must permit too, and one `exact` makes matching exact. An allow entry stands for its family; a deny entry counts when it names a family | Blocked ones are not picked. When they leave no registry model open, the call is left as it is and the ledger says why |
 | The model a name resolves to | `resolvedModel` in the `Agent` tool's result, and the model on each turn's usage | Shown in `/model-router:models` and `/model-router:usage` |
-| A model that isn't served here | A model error from the `Agent` tool, twice | Routed around for a day, then retried. Repeat trouble extends the wait to three days, then seven. A clock moved back can't stretch a wait past its own days from now |
+| A model that isn't served here | A model error from the `Agent` tool, twice | Routed around for a day, then retried. Repeat trouble extends the wait to three days, then seven. A clock moved back can't stretch a wait past its own days from now: a read shortens it in memory, and the next spawn writes it |
 | A model that is silently replaced | The model a call was routed to, or the one it named, against `resolvedModel`, twice. Not counted while `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is set | Same |
 | A model name the `Agent` tool rejects | A rewrite to it comes back without having run, twice | Same |
 | A level routed too low | A redo of a routed call, or Claude naming a stronger model than the pick | Redos run one level up at once. After 6 votes that amount to 30% of that level's calls, the level is raised for good |
@@ -216,7 +216,7 @@ In `${CLAUDE_PLUGIN_DATA}`:
 | :- | :- |
 | `state.json` | Every plugin option as SessionStart recorded it, for skill commands, which run without them; and model health |
 | `upstream.json` | The upstream cache and what was last reviewed |
-| `allowlist.json` | Per session: the four allowlist keys of each settings source, as the mod last read them. A source whose read failed is left out: the last set kept for it stands, else its file is read |
+| `allowlist.json` | Per session: the four allowlist keys of each settings source, as the mod's own hooks last stored them; reading them stores nothing. A source whose read failed is left out: the last set kept for it stands, else its file is read |
 | `learned.json` | Calls and votes per level, and which levels are raised |
 | `sessions.json`, `prompts.json`, `edits.json`, `pending.json`, `launched.json`, `done.json`, `mod.json` | Per session: its model, the current request's profile and routed calls, edit and check times, rewrites waiting for a result, background agents still running, finished calls for redo escalation, and whether the mod is running. The 200 most recently written sessions are kept |
 | `ledger.jsonl` | One line per agent start, result, turn effort and turn usage, with the decision, its reason and the list-price cost. A result row has `models_used` only when Claude Code reported a mid-run swap. Trimmed at 4 MB |

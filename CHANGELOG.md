@@ -37,6 +37,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 
 ### Fixed
 
+- Reading the allowlist or the health table no longer writes state. A read of the mod's settings layers left them for the mod's own hooks to store, and an outage the clock made too long is shortened in memory and written by the next spawn.
 - An agent name is read by whole parts, so `researcher`, `relocation-migrator`, `splinter-fixer`, `information-extractor` and `allocator-tuner` are no longer capped as search agents. `docs-researcher`, `lint-runner`, `scout`, `explorer` and `verifier` still are.
 - A typed `/plugin:skill args` is profiled by its arguments, not by the skill's own name.
 - A background agent that hands its report back through `SubagentHandback` counts as answered. Its call used to stay open, and a re-issue wasn't seen as a redo.

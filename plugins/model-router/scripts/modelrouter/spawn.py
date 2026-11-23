@@ -62,6 +62,7 @@ def record(spawned: Spawn, via: str) -> None:
     """Write the spawn's ledger row and, unless it is denied, its call and votes. `via` is "mod" or "fallback"."""
     hook_input, decision = spawned.hook_input, spawned.decision
     session_id = hook_input.get("session_id")
+    spawned.snap.settle()
     ledger.spawn(session_id, via, decision, spawned.facts.tool_input.get("description"),
                  kind=(hook_input.get("kind") or "subagent") if via == "mod" else None)
     if decision["action"] != "deny":
