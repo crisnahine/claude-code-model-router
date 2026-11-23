@@ -125,11 +125,6 @@ def _table(summary: list[dict]) -> list[str]:
     return [*lines, "", *[f"- {row['class']}: {row['status']}, {row['reason']}." for row in summary]]
 
 
-def render(summary: list[dict], meta: dict) -> str:
-    head = meta.get("header", "# Benchmarks")
-    return "\n".join([head, "", "## Results", "", *_table(summary), "", meta.get("body", "")]).rstrip() + "\n"
-
-
 def sessions(results: Results, router: str | None = None) -> list[tuple[str, str, list[dict], list[dict]]]:
     """One summary per session model, since a configuration costs differently on each. Its router is `router`,
     or else the first configuration in configs.json that loads the plugin and ran on that session model. A

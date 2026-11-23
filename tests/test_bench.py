@@ -80,19 +80,6 @@ class Analysis(unittest.TestCase):
         first = analyze.summarize(data, routers=routers, router="plugin", draws=300, seed=7)
         self.assertEqual(first, analyze.summarize(data, routers=routers, router="plugin", draws=300, seed=7))
 
-    def test_the_table_has_a_row_per_class_and_a_column_per_configuration(self):
-        data = (rows("plugin", "lookup", [0.1], [True]) + rows("defaults", "lookup", [0.2], [True])
-                + rows("plugin", "bugfix", [0.3], [False]) + rows("defaults", "bugfix", [0.4], [True]))
-        summary = analyze.summarize(data, routers=frozenset({"plugin"}), router="plugin", draws=100, seed=0)
-        text = analyze.render(summary, {"total_cost_usd": 1.0})
-        header = next(line for line in text.splitlines() if line.startswith("| Task class"))
-        self.assertIn("| plugin |", header)
-        self.assertIn("| defaults |", header)
-        class_rows = [line for line in text.splitlines() if line.startswith(("| lookup ", "| bugfix "))]
-        self.assertEqual(len(class_rows), 2)
-        for line in class_rows:
-            self.assertTrue(line.endswith("| PARTIAL |"), line)
-
     def test_another_router_configuration_is_never_the_baseline(self):
         n = analyze.MIN_RUNS
         data = (rows("plugin", "bugfix", [0.3] * n, [True] * n) + rows("plugin-cheap", "bugfix", [0.1] * n, [True] * n)
