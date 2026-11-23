@@ -231,9 +231,9 @@
   },
   {
    "agent": "docs",
-   "kind": "light",
+   "kind": null,
    "on_lookup": "lookup",
-   "on_hard": "standard"
+   "on_hard": "hardest"
   },
   {
    "agent": "grep",
@@ -384,6 +384,36 @@
    "kind": "heavy",
    "on_lookup": "complex",
    "on_hard": "hardest"
+  },
+  {
+   "agent": "architecture-advisor",
+   "kind": "heavy",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "api-architecture",
+   "kind": "heavy",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "cybersecurity-analyst",
+   "kind": "heavy",
+   "on_lookup": "complex",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "update-docs",
+   "kind": null,
+   "on_lookup": "lookup",
+   "on_hard": "hardest"
+  },
+  {
+   "agent": "docs-lookup",
+   "kind": "light",
+   "on_lookup": "lookup",
+   "on_hard": "standard"
   }
  ]
 }

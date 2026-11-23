@@ -291,7 +291,7 @@ def usage(days: int) -> str:
         ran = ", ".join(f"{m} x{n}" for m, n in sorted(a["ran_on"].items())) or "-"
         lines.append(f"| {a['agent']} | {a['calls']} | {a['routed']} | {levels} | {ran} |")
     if data["models"]:
-        lines += ["", "| Model | Agent runs | Final-request tokens | Tokens over the runs |", "| :- | -: | -: | -: |"]
+        lines += ["", "| Model | Agent runs | Final-request tokens | All subagent turns' tokens |", "| :- | -: | -: | -: |"]
         lines += [f"| {m['model']} | {m['runs']} | {m['tokens']:,} | "
                   f"{'-' if m['run_tokens'] is None else format(m['run_tokens'], ',')} |" for m in data["models"]]
     if data["model_errors"]:

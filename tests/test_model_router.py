@@ -302,7 +302,8 @@ class Shipped(unittest.TestCase):
         self.assertIn("starting the brief with today's date: !`date +%F`", refresh)
         self.assertIn("\n  - Bash(date +%F)\n", refresh)  # the `!` line runs under the skill's own allowed-tools
         body = (PLUGIN / "agents" / "docs-researcher.md").read_text(encoding="utf-8").split("---", 2)[2]
-        self.assertIn("Your brief starts with today's date", body)
+        self.assertIn("When your brief gives today's date, use it as today.", body)
+        self.assertIn("say in the first line of your answer that you don't know today's date", body)
 
     def test_the_architect_hands_back_a_file_it_was_asked_to_write(self):
         # Misrouted to it, a write-the-file task still ends with the content the caller can write.
@@ -1071,6 +1072,10 @@ class Allowlist(Sandbox):
         self.assertTrue(permits(["sonnet", "claude-opus-4-6"], "sonnet", "claude-sonnet-5-5"))
         self.assertFalse(permits(["opus", "claude-opus-4-6"], "opus", "claude-opus-5-5"))
         self.assertFalse(permits(["sonnet", "anthropic.claude-sonnet-5-5-v1:0"], "sonnet", "claude-sonnet-5-5"))
+        # An alias that only contains a family's name names no version.
+        for alias in ("opusplan", "default", "best"):
+            self.assertTrue(permits(["opus", alias], "opus", "claude-opus-5-5"), alias)
+        self.assertFalse(permits(["opus", "us.anthropic.claude-opus"], "opus", "claude-opus-5-5"))
         # The family keeps a permitted version, which its alias moves to, so it stays routable.
         self.assertEqual(self.permitted(policy={"availableModels": pinned}), {"sonnet"})
         managed = allowlist.from_layers({}, floor={"availableModels": pinned})
@@ -1517,8 +1522,10 @@ class Profile(unittest.TestCase):
         self.assertIn("fixes or hunts a defect", fixed["signals"])
         self.assertEqual(profile.profile_prompt("Figure out why it times out and fix it.")["level"], "complex")
         for brief in ("Rename the helper. Avoid fixing the unrelated tests.", "Do not fix the tests. Rename the helper.",
-                      "Find the commit that landed the fix for the CSV export.", "Add debug logging to the retry loop."):
+                      "Find the commit that landed the fix for the CSV export.", "Add debug logging to the retry loop.",
+                      "Analyze the sales numbers in q3.csv.", "Reproduce the export from last week's report."):
             self.assertNotEqual(profile.profile_prompt(brief)["level"], "complex", brief)
+        self.assertEqual(profile.profile_prompt("Reproduce the crash on upload.")["level"], "complex")
 
     def test_reading_about_something_sensitive_or_broad_is_still_a_lookup(self):
         self.assertEqual(self.level("read the auth module and list its functions"), "lookup")
@@ -4527,6 +4534,17 @@ class Launcher(Sandbox):
                 res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), hook, "--no-such-flag"],
                                      input="{}", capture_output=True, text=True, env=fake["env"])
                 self.assertEqual(res.returncode, 1, res.stderr)
+
+    def test_a_command_whose_text_names_a_hook_keeps_its_exit_code(self):
+        fake = self.fake_pythons("real", "real")
+        launcher = (SCRIPTS / "model-router.sh").as_posix()
+        for args in (["explain", "--no-such-flag", "stop"], ["--data-dir", "stop", "explain", "--no-such-flag"]):
+            with self.subTest(args=args):
+                res = subprocess.run(["sh", launcher, *args], capture_output=True, text=True, env=fake["env"])
+                self.assertEqual(res.returncode, 2, res.stderr)
+        res = subprocess.run(["sh", launcher, "--data-dir", "unused", "stop", "--no-such-flag"], input="{}",
+                             capture_output=True, text=True, env=fake["env"])
+        self.assertEqual(res.returncode, 1, res.stderr)
 
     def test_hooks_dont_load_the_network_or_xml_modules(self):
         probe = ("import sys; sys.path.insert(0, sys.argv[1]); import modelrouter.cli; "
