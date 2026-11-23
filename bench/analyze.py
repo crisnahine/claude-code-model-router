@@ -668,7 +668,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "on the whole run: "
         + ", ".join(f"`{cid}` x{factor:g}" for cid, factor in plan["factors"].items() if factor > 1)
         + ". That scales the price per token only: a dearer model may use more or fewer tokens, the class means "
-        "pool every configuration's runs, and the new classes are harder than the pilot's two, so treat the figure "
+        "pool every configuration's runs, so treat the figure "
         f"as a guide, not a bound. At the per-run cap the pilot used, {plan['runs']} runs x ${budget:g} come to "
         f"${plan['runs'] * budget:,.2f} before overshoot, which has no fixed limit; only `--max-total` stops "
         "spend. The full suite needs the maintainer's go-ahead before it runs.", "",
