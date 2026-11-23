@@ -50,6 +50,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 
 ### Internal
 
+- CI pins Claude Code: `validate` runs on 2.1.329 and 2.1.330. A new `eval` job, started by hand, runs `claude plugin eval plugins/model-router` with an `ANTHROPIC_API_KEY` secret, `--threshold 0.8`, `--max-cost-usd 2` and `--no-publish`.
 - New modules in `scripts/modelrouter/`: `health` owns the record of which models failed and the rules for what counts as evidence; `allowlist` owns what `availableModels` and `deniedModels` leave open; `request` owns the current request's record in `prompts.json`; `intake` decides whether a prompt is the person's request and at what level; `ledger` writes and reads every ledger row and owns the turn Spend rule; `fallback` owns the waiting rewrites, the refused-rewrite guard and the cap-hold deny. `settings.Snapshot` reads config, options, models, health and the allowlist once per hook call and passes them down.
 - `spawn` decides and records in two steps, and `fallback` adjusts the decision between them. Row shapes and the files' shapes don't change.
 - The effort cache rule's model families live in `config/models.json` under `main.effort_keeps_cache`, not in `hooks.py`.
