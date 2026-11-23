@@ -32,8 +32,8 @@ ROUTED_AROUND = "routed-around"  # ... and it is now routed around
 @dataclass(frozen=True)
 class Route:
     """Where one spawn went, written by `spawn.record` on either path. `sent` is the name or ID the
-    path put on the call, a full ID where the alias lags; `rewrote` says the decision changed the call;
-    `counted` is the level the spawn counted toward (`learn.counted`), so a run that swapped models
+    path put on the call, a full ID where the alias lags; `was` is the model the call would have run on
+    untouched (the parent's, or the agent's pin); `rewrote` says the decision changed the call; `counted` is the level the spawn counted toward (`learn.counted`), so a run that swapped models
     can take its own count back."""
     model: str | None
     sent: str | None
@@ -45,6 +45,7 @@ class Route:
     prompt_id: str | None = None
     at: float = 0.0
     rewrote: bool = False
+    was: str | None = None
 
     @property
     def leveled(self) -> bool:
@@ -125,14 +126,14 @@ def _route(record: object) -> Route | None:
                  source=_text(record.get("source")), path=_text(record.get("path")) or "",
                  counted=Level.parse(record.get("counted")), prompt_id=_text(record.get("prompt_id")),
                  at=float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else 0.0,
-                 rewrote=record.get("rewrote") is True)
+                 rewrote=record.get("rewrote") is True, was=_text(record.get("was")))
 
 
 def _record(route: Route, key: str) -> dict:
     record = {"model": route.model, "sent": route.sent, "level": route.level.value if route.level else None,
               "effort": route.effort, "source": route.source, "path": route.path,
               "counted": route.counted.value if route.counted else None, "prompt_id": route.prompt_id,
-              "rewrote": route.rewrote or None, "call": key}
+              "rewrote": route.rewrote or None, "was": route.was, "call": key}
     return {k: v for k, v in record.items() if v is not None}
 
 
@@ -190,7 +191,8 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
     except OSError:
         pass
     try:
-        health.ran(asked, outcome.ran_as, outcome.ran_family, outcome.forced, swapped=swapped)
+        health.ran(asked, outcome.ran_as, outcome.ran_family, outcome.forced, swapped=swapped,
+                   untouched=route.was if route else None)
     except OSError:
         pass
     ledger.result(session_id, outcome.agent, asked, outcome.ran_as, outcome.status, outcome.tokens,

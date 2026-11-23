@@ -142,10 +142,13 @@ def refused(name: str | None) -> None:
     _edit(name, change)
 
 
-def ran(name: str | None, ran_as: object, ran_family: str | None, forced: bool, swapped: bool = False) -> None:
+def ran(name: str | None, ran_as: object, ran_family: str | None, forced: bool, swapped: bool = False,
+        untouched: str | None = None) -> None:
     """We asked for `name`; Claude Code reports the model that really ran. Under the force
     setting every agent runs on the forced model, which isn't a substitution, and a run that
-    swapped models mid-run says nothing about either model."""
+    swapped models mid-run says nothing about either model. A run on the model the call would
+    have had untouched is a pick that never arrived (a mod answer that timed out or lost to a
+    later mod), not a substitution."""
     if forced or swapped or not name or not ran_family:
         return
     if ran_family == name:
@@ -153,6 +156,8 @@ def ran(name: str | None, ran_as: object, ran_family: str | None, forced: bool, 
         if (info.get("last_model") != ran_as or info.get("fail") or info.get("substituted")
                 or info.get("outages") or info.get("unavailable_until")):
             _edit(name, lambda i: i.update(last_model=ran_as, fail=0, substituted=0, outages=0, unavailable_until=0))
+        return
+    if ran_family == untouched:
         return
 
     def change(info: dict) -> None:

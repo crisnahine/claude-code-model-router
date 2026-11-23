@@ -2767,6 +2767,21 @@ class Mod(Sandbox):
         seen = health.load()
         self.assertEqual([seen.healthy("haiku"), seen.healthy("opus")], [False, True])
 
+    def test_a_pick_that_never_arrived_is_no_substitution(self):
+        # The mod's answer timed out, or a later mod replaced it: the call ran on what it would have had untouched.
+        parent = "claude-sonnet-5-5"
+        for number in range(3):
+            brief = f"{HARD} {number}"
+            self.assertEqual(self.spawn("general-purpose", brief, parent=parent)["model"], "opus")
+            self.done("general-purpose", brief, parent)
+        self.assertIsNone(store.load_state().get("health"))
+        self.assertEqual(calls.route_of("s1", calls.identify({"subagent_type": "general-purpose", "prompt": f"{HARD} 0"})[1]).was, "sonnet")
+        for number in range(2):  # a model that is neither the pick nor the parent is one
+            brief = f"{HARD} other {number}"
+            self.spawn("general-purpose", brief, parent=parent)
+            self.done("general-purpose", brief, "claude-haiku-5-5")
+        self.assertEqual(health.load().why_routed_around("opus"), "ran as claude-haiku-5-5 instead")
+
     def test_a_result_reads_no_agent_files(self):
         self.agent("rev", "opus")
         self.spawn("rev", LOOKUP)
@@ -2839,6 +2854,13 @@ class Health(Sandbox):
         self.assertTrue(health.load().healthy("fable"))
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         self.assertEqual(health.load().why_routed_around("fable"), "ran as claude-opus-5-5 instead")
+
+    def test_a_run_on_the_untouched_model_is_no_substitution(self):
+        for _ in range(2):
+            health.ran("fable", "claude-opus-5-5", "opus", forced=False, untouched="opus")
+        self.assertEqual(store.load_state().get("health"), None)
+        health.ran("fable", "claude-opus-5-5", "opus", forced=False, untouched="sonnet")
+        self.assertEqual(store.load_state()["health"]["fable"]["substituted"], 1)
 
     def test_a_forced_run_or_an_unknown_family_is_no_evidence(self):
         for _ in range(2):

@@ -83,7 +83,8 @@ def _record(spawned: Spawn, via: str, newest: str | None) -> None:
     rewrote = decision["action"] == "rewrite"
     route = calls.Route(model=runs_on, sent=newest or (decision["model"] if rewrote else None),
                         level=Level.parse(decision["level"]), effort=decision["effort"], source=source, path=via,
-                        counted=learn.counted(decision, kind), prompt_id=current.prompt_id, rewrote=rewrote)
+                        counted=learn.counted(decision, kind), prompt_id=current.prompt_id, rewrote=rewrote,
+                        was=decision["was"])
     spawn_id = hook_input.get("tool_use_id")
     earlier = calls.routed(session_id, spawned.key, route, spawn_id if isinstance(spawn_id, str) and spawn_id else None)
     request.note_spawn(reg, session_id, runs_on)
