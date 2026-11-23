@@ -31,6 +31,7 @@ def note_edit(hook_input: dict) -> None:
     path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
     if path and not path.lower().endswith(_NON_CODE) and _in_project(hook_input, path):
         store.update_entry("edits", hook_input.get("session_id"), edited_at=time.time())
+        request.note_edit(hook_input.get("session_id"))
 
 
 def _in_project(hook_input: dict, path: str) -> bool:
@@ -85,8 +86,16 @@ def strong_agent(config: dict, need: str, level: str | None = None) -> str:
 
 
 def writes_nothing(agent: str) -> bool:
-    """The architect has no Write or Edit tool, so a task whose deliverable is a file fails there."""
-    return agent == f"{cfg.PLUGIN_NAME}:architect"
+    """The architect and the reviewer have no Write or Edit tool, so a task whose deliverable is a file fails there."""
+    return agent in (f"{cfg.PLUGIN_NAME}:architect", f"{cfg.PLUGIN_NAME}:reviewer")
+
+
+def finished_check(config: dict, hook_input: dict, need: str, level: str | None) -> str:
+    """The agent to check a finished result. The reviewer stops without a diff file, so it is named only
+    once code changed in this request, which is when a diff can be saved; otherwise the plan is still open."""
+    if request.load(hook_input.get("session_id")).edited and "reviewer" in (config.get("crew") or {}):
+        return f"{cfg.PLUGIN_NAME}:reviewer"
+    return strong_agent(config, need, level)
 
 
 def escalation(config: dict, hook_input: dict) -> str | None:
@@ -108,12 +117,14 @@ def escalation(config: dict, hook_input: dict) -> str | None:
         request.mark_escalation(session_id, current)
     except OSError:
         return None
-    agent = strong_agent(config, need, entry.level)
+    agent = finished_check(config, hook_input, need, entry.level)
     act = ("to check; it writes nothing, so what it finds is applied here" if writes_nothing(agent)
            else "to check and improve")
+    given = ("The task and the path of the diff, saved to a file, go" if agent.endswith(":reviewer")
+             else "The task and the result go")
     return (
         f"This request was estimated as {entry.level}: about {need}-level reasoning, on a conversation running "
-        f"{current}, with no {need}-level agent having looked. The task and the result go to {agent} {act}, and "
+        f"{current}, with no {need}-level agent having looked. {given} to {agent} {act}, and "
         "the user gets the reconciled answer. If the task was simple and the estimate wrong, one line saying so "
         "finishes the turn."
     )
@@ -135,7 +146,7 @@ def unverified_edit(hook_input: dict) -> str | None:
     return (
         f"Code changed since the last check and nothing has checked it yet. {name}:verifier finds and runs the "
         f"project's tests, lint and type checks on the change, and a risky or cross-module change also gets "
-        f"{name}:reviewer. A project with no runnable checks, or a change that can't affect behavior, finishes "
+        f"{name}:reviewer, given the path of a saved diff. A project with no runnable checks, or a change that can't affect behavior, finishes "
         "with one line saying so."
     )
 

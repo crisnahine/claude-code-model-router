@@ -1,5 +1,5 @@
 """The current request's record: its level and floor, the model the user named, the model each
-call was routed to and the strongest spawn, and whether the escalation was asked. The only
+call was routed to and the strongest spawn, whether the escalation was asked and whether code changed. The only
 module that reads or writes the `prompts` entry for a session.
 
 A new request replaces the whole record, so its runs, routes and strongest spawn start empty.
@@ -23,6 +23,7 @@ class Request:
     named: str | None = None
     floor_off: bool = False
     escalation_asked: bool = False
+    edited: bool = False
     top_spawn: str | None = None
     calls: dict = field(default_factory=dict)
     routed: dict = field(default_factory=dict)
@@ -48,7 +49,7 @@ class Request:
 
 
 _TEXT = ("prompt_id", "level", "need", "session_tier", "named", "top_spawn")
-_FLAGS = ("below", "floor_off", "escalation_asked")
+_FLAGS = ("below", "floor_off", "escalation_asked", "edited")
 _MAPS = ("calls", "routed")
 
 
@@ -65,6 +66,11 @@ def start(session_id: str | None, *, prompt_id: str | None, level: str | None, n
     store.save_entry("prompts", session_id, {
         "prompt_id": prompt_id, "level": level, "need": need, "below": below,
         "session_tier": session_tier, "named": named})
+
+
+def note_edit(session_id: str | None) -> None:
+    """Code in the project changed during this request, so a diff of it can be saved."""
+    store.update_entry("prompts", session_id, edited=True)
 
 
 def deliver(session_id: str | None) -> None:

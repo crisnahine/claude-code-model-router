@@ -39,7 +39,7 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
                                                        hook_input.get("transcript_path")))
     # A hand-off brief often reads simpler than the request it serves, so the strong role
     # agents start no lower than the request's level; a redo still climbs from there.
-    strong = agent in (f"{cfg.PLUGIN_NAME}:architect", f"{cfg.PLUGIN_NAME}:deep-solver")
+    strong = agent in tuple(f"{cfg.PLUGIN_NAME}:{role}" for role in ("architect", "deep-solver", "reviewer"))
     floor = request.load(hook_input.get("session_id")).floor if strong else None
     # The mod says so. On the fallback, a named call from the main conversation without `isolation` launches
     # as a teammate when agent teams are on (sub-agents.md, Subagent names); that is the one hook-visible sign.

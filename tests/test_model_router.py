@@ -1726,8 +1726,10 @@ class Router(Sandbox):
         self.assertEqual(request.load("s1").level, "hardest")
         plan = "Plan a fix for the double-charge bug described above."
         self.assertEqual(self.decide("model-router:scout", plan.replace("Plan a fix for", "List the files of"))["model"],
-                         "haiku")  # the floor is only for the two strong role agents
+                         "haiku")  # the floor is only for the strong role agents
         d = self.decide("model-router:architect", plan)
+        self.assertEqual((d["level"], d["model"], d["effort"]), ("hardest", "opus", "xhigh"))
+        d = self.decide("model-router:reviewer", "Review the diff saved at the path above for the double-charge fix.")
         self.assertEqual((d["level"], d["model"], d["effort"]), ("hardest", "opus", "xhigh"))
         self.pre("model-router:architect", plan)
         self.done("model-router:architect", plan, "claude-opus-5-5", model="opus", effort="xhigh")
@@ -3155,6 +3157,27 @@ class GatesDefault(Sandbox):
         note = self.text(hooks.user_prompt({"session_id": "s1", "prompt": frontier}))
         self.assertIn("model-router:deep-solver", note)
         self.assertNotIn("writes nothing", note)  # the deep-solver has every tool and can do the work
+
+    def test_a_finished_change_goes_to_the_reviewer_with_a_diff_and_an_open_plan_to_the_architect(self):
+        # The reviewer stops without a diff file, so it is named only once code changed in this request.
+        self.session_on("claude-haiku-5-5")
+        hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": "src/app.py"}})
+        hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
+        plan = hooks.stop({"session_id": "s1"})["reason"]
+        self.assertIn("model-router:architect", plan)
+        self.assertNotIn("model-router:reviewer", plan)  # the edit came before this request
+        self.session_on("claude-haiku-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
+        hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": "src/app.py"}})
+        reason = hooks.stop({"session_id": "s1"})["reason"]
+        self.assertIn("model-router:reviewer", reason)
+        self.assertIn("the path of the diff, saved to a file", reason)
+        self.assertIn("writes nothing", reason)
+        self.assertNotIn("model-router:architect", reason)
+
+    def test_the_test_run_check_names_the_reviewer_with_a_saved_diff(self):
+        self.edited()
+        self.assertIn("model-router:reviewer, given the path of a saved diff", hooks.stop({"session_id": "s1"})["reason"])
 
     def test_the_hand_off_is_for_what_a_few_reads_cant_settle(self):
         # A task the code settles in a few reads is done directly; delegating it only adds a round trip.
