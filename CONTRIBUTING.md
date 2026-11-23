@@ -10,6 +10,38 @@
 
 Branch from `main` and work in a git worktree (`git worktree add ../<name> -b <name> main`), so the main checkout keeps its branch. Other work, and a maintainer's installed copy of the plugin, may read from that checkout. CI runs on pushes to `main` and on pull requests, so a branch is tested once it has an open PR.
 
+## Repository layout
+
+```text
+plugins/model-router/
+  .claude-plugin/plugin.json   manifest and options
+  config/models.json           the model registry, levels, prices and role agents
+  hooks/router.ts              the mod: agent.spawn, turn.start, turn.step, turn.complete
+  hooks/hooks.json             the mod, plus SessionStart, UserPromptSubmit, PreToolUse,
+                               PostToolUse, PostToolUseFailure, PostModelSwitch,
+                               SubagentStop, Stop
+  scripts/modelrouter/         the runtime: registry, profile, router, learn, gates, agents,
+                               session, upstream, report, hooks, cli, store (standard library only)
+  agents/                      the seven role agents
+  skills/                      ship, route, models, usage, refresh
+  evals/                       routing evals
+tests/                         unit tests, run on Linux, macOS and Windows
+compat/baseline.json           the Claude Code version, docs index, model list and model status last reviewed
+docs/research/                 the primary-source research the design rests on
+docs/README.md                 index of the project's documents: traceability, readiness, roadmap, test results
+docs/FAQ.md                    questions and answers
+docs/GUIDE.md                  commands, options, precedence, limits and compatibility in full
+docs/assets/                   logo, banners, badges and diagrams, and BRAND.md
+tools/traceability.py          counts the requirement statuses in docs/TRACEABILITY.md
+tools/docs_assets.py           writes the docs' SVGs, page heads, the site's asset copies and CITATION.cff
+docs/BENCHMARKS.md             cost and quality results against Claude Code without the plugin
+bench/                         the benchmark: pinned tasks, configurations, runner and analysis (not shipped)
+site/                          the project site, sitemap, robots.txt and llms.txt; a workflow deploys it to GitHub Pages from main once Pages is on
+CITATION.cff                   how to cite the project
+```
+
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the design and the reasons behind it. A daily GitHub workflow compares live Claude Code releases, docs, model aliases and model status with `compat/baseline.json` and opens an issue when something this plugin is built on changes.
+
 ## Gates
 
 Every change passes these before it is merged:

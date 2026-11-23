@@ -1,0 +1,5 @@
+{
+  "class": "design",
+  "revision": 1,
+  "brief": "Read SPEC.md and design the order-events topic it describes. Write DESIGN.json in the repository root with exactly these keys: \"partitions\" (an integer), \"key\" (one of \"order_id\", \"customer_id\", \"event_id\", \"none\"), \"retention_hours\" (a number), \"replication_factor\" (an integer) and \"reasons\" (a list of short strings)."
+}

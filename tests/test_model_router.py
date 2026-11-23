@@ -158,7 +158,8 @@ class Shipped(unittest.TestCase):
 
     def test_the_costly_role_agents_say_when_not_to_use_them(self):
         # Claude delegates from descriptions, so these limits keep the costliest agents for the work they're for.
-        for name, limit in (("architect", "Not for a file to deliver or a clear change."),
+        # With no note on the request, this is all Claude reads before handing it a task that writes a file.
+        for name, limit in (("architect", "Can't write files, so not for a task that must make one, or a clear change."),
                             ("reviewer", "A small, tested change doesn't need one."),
                             ("deep-solver", "Not for ordinary hard coding.")):
             self.assertIn(limit, frontmatter(PLUGIN / "agents" / f"{name}.md")["description"], name)
@@ -223,7 +224,7 @@ class Shipped(unittest.TestCase):
         for path in sorted((PLUGIN / "agents").glob("*.md")):
             front = frontmatter(path)
             if front.get("tools") and not re.search(r"\b(?:Edit|Write|NotebookEdit)\b", front["tools"]):
-                self.assertRegex(front["description"], r"(?i)writes nothing|doesn't fix code", path.name)
+                self.assertRegex(front["description"], r"(?i)writes nothing|can't write files|doesn't fix code", path.name)
 
     def test_the_architect_hands_back_a_file_it_was_asked_to_write(self):
         # Misrouted to it, a write-the-file task still ends with the content the caller can write.
@@ -1140,6 +1141,15 @@ class Router(Sandbox):
     def test_a_model_named_on_the_call_is_kept(self):
         d = self.decide("general-purpose", LOOKUP, model="opus")
         self.assertEqual((d["action"], d["model"], d["source"]), ("keep", "opus", "caller"))
+
+    def test_a_project_file_may_raise_a_level_but_not_past_the_cap(self):
+        self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "haiku")
+        self.override({"levels": {"lookup": {"needs": 3, "effort": "high"}}})
+        d = self.decide("general-purpose", LOOKUP)
+        self.assertEqual((d["model"], d["effort"]), ("opus", "high"))
+        self.options(max_tier="sonnet")
+        d = self.decide("general-purpose", LOOKUP)
+        self.assertEqual((d["model"], d["effort"]), ("sonnet", "high"))  # the cap bounds the model, not effort
 
     def test_a_model_named_on_the_call_is_lowered_to_the_cap(self):
         self.options(max_tier="sonnet")
@@ -3054,8 +3064,8 @@ class ReadmeDiagrams(unittest.TestCase):
         import xml.etree.ElementTree as ET
         return ET.parse(ROOT / "docs" / "assets" / name).getroot()
 
-    def test_each_diagram_is_valid_titled_svg_linked_from_the_readme(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    def test_each_diagram_is_valid_titled_svg_linked_from_the_architecture_page(self):
+        page = (ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
         for name in self.NAMES:
             root = self.parse(name)
             self.assertEqual(root.tag, f"{self.SVG}svg", name)
@@ -3063,10 +3073,15 @@ class ReadmeDiagrams(unittest.TestCase):
                 self.assertTrue(root.get(attr), f"{name} has no {attr}")
             title = root.find(f"{self.SVG}title")
             self.assertTrue(title is not None and (title.text or "").strip(), f"{name} has no title")
-            self.assertIn(f"](docs/assets/{name})", readme)
+            self.assertIn(f"](assets/{name})", page)
             source = (ROOT / "docs" / "assets" / name).read_text(encoding="utf-8")
             self.assertNotIn("var(", source, f"{name}: librsvg and some viewers render CSS variables black")
             self.assertIn("prefers-color-scheme: dark", source, name)
+
+    def test_the_guide_carries_the_precedence_and_stop_check_diagrams(self):
+        guide = (ROOT / "docs" / "GUIDE.md").read_text(encoding="utf-8")
+        for name in ("precedence.svg", "stop-checks.svg"):
+            self.assertIn(f"](assets/{name})", guide)
 
     def text(self, name: str) -> str:
         return " ".join((cell.text or "").strip() for cell in self.parse(name).iter(f"{self.SVG}text"))

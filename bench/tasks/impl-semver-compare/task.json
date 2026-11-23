@@ -1,0 +1,5 @@
+{
+  "class": "implementation",
+  "revision": 1,
+  "brief": "Implement compare and max_satisfying in semver.py exactly as their docstrings specify, using the standard library only."
+}

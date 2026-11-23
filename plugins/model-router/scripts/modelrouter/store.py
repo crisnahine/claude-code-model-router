@@ -16,7 +16,7 @@ KEEP_SET_ASIDE = 3  # copies of an unreadable state file kept for a person to lo
 LOCK_WAIT_SECONDS = 2.0
 LOCK_STALE_SECONDS = 10.0
 # The version written into every state file. MIGRATIONS[n] turns a version-n file into
-# version n + 1; 0.1.0 wrote no version, and its files already have today's shape.
+# version n + 1. A file with no version is version 0, which already has today's shape.
 SCHEMA = 1
 MIGRATIONS: dict[int, Callable[[dict], dict]] = {0: lambda data: data}
 

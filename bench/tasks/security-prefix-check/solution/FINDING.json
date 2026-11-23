@@ -1,0 +1,5 @@
+{
+  "file": "files/importer.py",
+  "line": 17,
+  "why": "extractall follows symlink and hard-link members whose targets the name check never looks at"
+}
