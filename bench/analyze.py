@@ -845,7 +845,9 @@ def facts(session: dict, routers: frozenset[str], forced: dict) -> dict[str, boo
     out = {
         "partial_for_runs": all(c["why"] == "few_runs" for c in classes if c["status"] == "PARTIAL"),
         "fail_on_cost": bool(fails) and all(c["why"] == "cost_above" for c in fails),
-        "not_behind": all(against(c) is not None and not against(c)["behind"] for c in classes if c["best_baseline"]),
+        # One comparison backing a favourable claim, so the unadjusted p; Holm is for BEHIND across the baselines.
+        "not_behind": all(against(c) is not None and (against(c)["p_behind"] is None or against(c)["p_behind"] >= ALPHA)
+                          for c in classes if c["best_baseline"]),
         "no_gain": all(not ahead(c) for c in classes if c["best_baseline"]),
         "no_pass": not any(c["status"] == "PASS" for c in classes),
         "nearly_all": best is not None and all(name in pooled and pooled[name]["solved"] >= NEARLY * pooled[name]["runs"]

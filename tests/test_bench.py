@@ -429,6 +429,13 @@ class Analysis(unittest.TestCase):
             with self.subTest(name):
                 self.assertFalse(self.session(self.changed(edit), model)["facts"][name])
 
+    def test_not_behind_reads_the_unadjusted_p(self):
+        session = self.session(self.changed(self.first(4, "plugin-next", "implementation", passed=False)))
+        row = next(c for c in session["classes"] if c["class"] == "implementation")
+        mine = row["quality"]["against"][row["best_baseline"]]  # 6 of 10 against 10 of 10: p = 0.043
+        self.assertEqual((mine["p_behind"] < analyze.ALPHA, mine["behind"]), (True, False))  # not BEHIND after Holm
+        self.assertFalse(session["facts"]["not_behind"])
+
     def test_the_facts_about_fail_classes_are_false_with_none(self):
         facts = self.session(self.changed(self.first(999, "plugin-next", total_cost_usd=lambda row: 0.0001)))["facts"]
         self.assertEqual((facts["no_pass"], facts["fail_on_cost"], facts["best_named"]), (False, False, False))
