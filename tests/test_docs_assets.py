@@ -80,6 +80,7 @@ class DocsAssets(unittest.TestCase):
         f = docs_assets.bench_figures(docs_assets.bench_summary())
         self.assertEqual((f["runs"], f["usd"], f["dates"], f["opus.commit"]),
                          ("1,280", "$154.94", "2026-11-22 to 2026-11-23", "780ee86"))
+        self.assertEqual(f["opus.commit_code"], "`780ee86`")
         self.assertEqual((f["opus.pooled.plugin-next"], f["opus.pooled.defaults"], f["opus.pooled_less.defaults"]),
                          ("$0.119", "$0.152", "21"))
         self.assertEqual((f["opus.below.defaults"], f["opus.less.defaults.min"], f["opus.less.defaults.max"],
@@ -131,6 +132,11 @@ class DocsAssets(unittest.TestCase):
         for path in ("README.md", "site/index.html"):
             alt = re.search(r'benchmark\.svg"[^>]*? alt="([^"]*)"', files[path]).group(1)
             self.assertIn("lookup $9.9999 against", alt, path)
+
+    def test_no_figure_span_sits_inside_backticks(self):
+        for path in ("README.md", "docs/FAQ.md", "site/index.html", "docs/TRACEABILITY.md"):
+            text = (ROOT / path).read_text(encoding="utf-8")
+            self.assertIsNone(re.search(r"`<!-- bench:|<!-- /bench -->`", text), path)
 
     def test_the_site_faq_shows_figures_without_marks(self):
         page = self.patched_build()["site/index.html"]

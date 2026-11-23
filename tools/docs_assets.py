@@ -1061,6 +1061,7 @@ def session_figures(name: str, session: dict) -> dict:
     classes = session["classes"]
     if session.get("plugin_ref"):
         f["commit"] = session["plugin_ref"]
+        f["commit_code"] = f"`{session['plugin_ref']}`"  # the span must sit outside the code span
     f["classes"] = str(len(classes))
     for status in ("PASS", "FAIL", "PARTIAL"):
         f[f"status.{status}"] = str(sum(c["status"] == status for c in classes))
