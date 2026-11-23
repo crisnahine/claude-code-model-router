@@ -267,6 +267,13 @@ class Shipped(unittest.TestCase):
             if front.get("tools") and not re.search(r"\b(?:Edit|Write|NotebookEdit)\b", front["tools"]):
                 self.assertRegex(front["description"], r"(?i)writes nothing|can't write files|doesn't fix code", path.name)
 
+    def test_the_verifier_reports_a_check_that_never_ran_as_not_run(self):
+        body = (PLUGIN / "agents" / "verifier.md").read_text(encoding="utf-8").split("---", 2)[2]
+        self.assertIn("`NOT RUN`", body)
+        self.assertIn("failed to start", body)
+        self.assertIn("only parsed or compiled", body)
+        self.assertIn("never as a pass", body)
+
     def test_the_architect_hands_back_a_file_it_was_asked_to_write(self):
         # Misrouted to it, a write-the-file task still ends with the content the caller can write.
         body = (PLUGIN / "agents" / "architect.md").read_text(encoding="utf-8").split("---", 2)[2]
