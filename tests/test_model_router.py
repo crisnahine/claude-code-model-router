@@ -206,7 +206,7 @@ class Shipped(unittest.TestCase):
             self.assertIn(limit, frontmatter(PLUGIN / "agents" / f"{name}.md")["description"], name)
 
     # Always-cheap agents keep a model, so they stay cheap when the router isn't routing; the rest are routed.
-    PINNED = {"scout": ("haiku", "low"), "verifier": ("haiku", "low"), "docs-researcher": ("haiku", "medium")}
+    PINNED = {"scout": ("haiku", "medium"), "verifier": ("haiku", "medium"), "docs-researcher": ("haiku", "medium")}
 
     def test_only_the_always_cheap_role_agents_carry_a_model(self):
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
@@ -714,7 +714,7 @@ class Registry(Sandbox):
                        "agents": {"a": {"model": 5, "level": ["x"], "route": "no"}, "b": [1]},
                        "routing_mode": 5})
         config = cfg.load_config()
-        self.assertEqual(config["levels"]["lookup"], {"needs": 1, "effort": "low"})
+        self.assertEqual(config["levels"]["lookup"], {"needs": 1, "effort": "medium"})
         self.assertEqual(config["levels"]["complex"]["effort"], "max")
         self.assertNotIn("bogus", config["levels"])
         self.assertEqual({k: v for k, v in config["agents"].items() if k in ("a", "b")}, {"a": {}})
@@ -1435,7 +1435,7 @@ class Router(Sandbox):
         self.session_on("claude-fable-5-2")
         for brief in (LOOKUP, HARDEST):
             d = self.decide("model-router:scout", brief)
-            self.assertEqual((d["model"] or "haiku", d["effort"] or "low"), ("haiku", "low"), brief)
+            self.assertEqual((d["model"] or "haiku", d["effort"] or "medium"), ("haiku", "medium"), brief)
         self.assertEqual(self.decide("model-router:architect", HARDEST)["model"], "opus")
         self.assertEqual(self.decide("model-router:deep-solver", LOOKUP)["model"], "opus")  # routed, never Fable by pin
 
@@ -1444,7 +1444,7 @@ class Router(Sandbox):
         for agent in ("helper", "general-purpose", None, "Explore"):
             d = self.decide(agent, LOOKUP)
             self.assertEqual((d["action"], d["model"], d["effort"], d["source"]),
-                             ("rewrite", "haiku", "low", "router"), agent)
+                             ("rewrite", "haiku", "medium", "router"), agent)
         d = self.decide("helper", BUILD)
         self.assertEqual((d["model"], d["effort"]), ("sonnet", "medium"))
         d = self.decide("helper", HARD)
@@ -1454,9 +1454,9 @@ class Router(Sandbox):
         out = self.pre("general-purpose", LOOKUP, description="d", run_in_background=True)
         self.assertEqual(out["updatedInput"], {"prompt": LOOKUP, "subagent_type": "general-purpose",
                                                "description": "d", "run_in_background": True,
-                                               "model": "haiku", "effort": "low"})
+                                               "model": "haiku", "effort": "medium"})
         self.assertNotIn("permissionDecision", out)
-        self.assertIn("haiku at low effort", out["additionalContext"])
+        self.assertIn("haiku at medium effort", out["additionalContext"])
         self.assertEqual(self.ledger()[-1]["via"], "fallback")
 
     def test_no_output_when_the_model_would_be_the_same(self):
@@ -1488,9 +1488,9 @@ class Router(Sandbox):
 
         self.assertEqual(decide()["action"], "keep")  # no definition found: left alone
         d = decide(definition={"source": "project", "model": None}, parent="opus")
-        self.assertEqual((d["action"], d["model"], d["effort"], d["was"]), ("rewrite", "haiku", "low", "opus"))
+        self.assertEqual((d["action"], d["model"], d["effort"], d["was"]), ("rewrite", "haiku", "medium", "opus"))
         d = decide(definition={"source": "project", "model": "opus"})
-        self.assertEqual((d["model"], d["source"], d["effort"]), ("opus", "pin", "low"))
+        self.assertEqual((d["model"], d["source"], d["effort"]), ("opus", "pin", "medium"))
         d = decide(definition={"source": "project", "model": None}, earlier={"level": "lookup", "model": "haiku"})
         self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("standard", "sonnet", "lookup"))
         d = decide(definition={"source": "project", "model": None}, raises={"lookup": 1})
@@ -1522,13 +1522,13 @@ class Router(Sandbox):
     def test_agents_that_name_a_model_keep_it_within_the_cap(self):
         self.agent("pinned", "opus")
         d = self.decide("pinned", LOOKUP)  # the pin holds the model; effort still follows the subtask
-        self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "opus", "pin", "low"))
+        self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "opus", "pin", "medium"))
         self.agent("deep", "fable", extra="effort: xhigh\n")
         d = self.decide("deep", LOOKUP)
         self.assertEqual((d["model"], d["effort"]), ("fable", None))  # its own effort: xhigh
         self.options(max_tier="sonnet")
         d = self.decide("pinned", LOOKUP)
-        self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", "low"))
+        self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", "medium"))
         self.assertEqual(self.decide("deep", HARD)["model"], "sonnet")
 
     def test_a_hand_off_to_the_strong_role_agents_runs_at_least_at_the_requests_level(self):
@@ -1609,7 +1609,7 @@ class Router(Sandbox):
 
     def test_the_role_agents_are_routed_by_their_brief(self):
         d = self.decide("model-router:implementer", LOOKUP)
-        self.assertEqual((d["action"], d["source"], d["model"], d["effort"]), ("rewrite", "router", "haiku", "low"))
+        self.assertEqual((d["action"], d["source"], d["model"], d["effort"]), ("rewrite", "router", "haiku", "medium"))
         for agent in ("scout", "verifier", "docs-researcher"):  # pinned to Haiku, their own effort kept
             d = self.decide(f"model-router:{agent}", HARDEST)
             self.assertEqual((d["action"], d["source"], d["model"]), ("keep", "pin", "haiku"), agent)
@@ -1642,12 +1642,12 @@ class Router(Sandbox):
     def test_a_forced_subagent_model_still_gets_its_effort(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="claude-opus-5-5[1m]", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         out = self.pre("general-purpose", LOOKUP)
-        self.assertEqual(out["updatedInput"], {"prompt": LOOKUP, "subagent_type": "general-purpose", "effort": "low"})
-        self.assertIn("effort to low", out["additionalContext"])
+        self.assertEqual(out["updatedInput"], {"prompt": LOOKUP, "subagent_type": "general-purpose", "effort": "medium"})
+        self.assertIn("effort to medium", out["additionalContext"])
         self.assertEqual(self.decide("general-purpose", HARD)["effort"], "high")
         self.options(priority="fast")
         self.assertIsNone(self.decide("general-purpose", HARD)["effort"])
-        self.assertEqual(self.decide("general-purpose", LOOKUP)["effort"], "low")
+        self.assertEqual(self.decide("general-purpose", LOOKUP)["effort"], None)
         self.options(CLAUDE_CODE_SUBAGENT_EFFORT="medium")
         self.assertEqual(self.decide("general-purpose", LOOKUP)["action"], "keep")
 
@@ -1674,7 +1674,7 @@ class Router(Sandbox):
         self.assertEqual(self.decide("general-purpose", BUILD)["model"], "haiku")
         d = self.decide("general-purpose", HARD)
         self.assertEqual((d["model"], d["effort"]), ("haiku", None))
-        self.assertEqual(self.decide("general-purpose", LOOKUP)["effort"], "low")
+        self.assertEqual(self.decide("general-purpose", LOOKUP)["effort"], None)
 
     def test_an_unavailable_model_is_routed_around(self):
         self.route_around("sonnet")
@@ -2019,7 +2019,7 @@ class Mod(Sandbox):
                                 "kind": "subagent", "tool_input": tool_input})
 
     def test_spawns_are_routed_from_the_parents_exact_model(self):
-        self.assertEqual(self.spawn("general-purpose", LOOKUP), {"model": "haiku", "effort": "low",
+        self.assertEqual(self.spawn("general-purpose", LOOKUP), {"model": "haiku", "effort": "medium",
                                                                  "reason": "lookup subtask"})
         self.assertEqual(self.spawn("general-purpose", HARD)["model"], "sonnet")
         self.assertIsNone(self.spawn("general-purpose", BUILD, model="sonnet", effort="high"))
@@ -2103,22 +2103,22 @@ class Mod(Sandbox):
 
     def test_a_pinned_agent_redone_gets_more_effort(self):
         self.agent("pinned", "opus")
-        self.assertEqual(self.spawn("pinned", LOOKUP)["effort"], "low")
+        self.assertEqual(self.spawn("pinned", LOOKUP)["effort"], "medium")
         self.done("pinned", LOOKUP, "claude-opus-5-5")
         pick = self.spawn("pinned", LOOKUP)
-        self.assertEqual((pick["model"], pick["effort"]), ("opus", "medium"))
+        self.assertEqual((pick["model"], pick["effort"]), ("opus", "high"))
 
     def test_workflow_stages_and_teammate_roles_without_a_file_are_routed(self):
         for kind, agent in (("workflow", "workflow-subagent"), ("teammate", "helper-two")):
             pick = hooks.mod_spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                                     "kind": kind, "tool_input": {"subagent_type": agent, "prompt": LOOKUP}})
-            self.assertEqual((pick["model"], pick["effort"]), ("haiku", "low"), kind)
+            self.assertEqual((pick["model"], pick["effort"]), ("haiku", "medium"), kind)
         self.assertIsNone(self.spawn("no-such-agent", LOOKUP))
 
     def test_forced_subagent_model_gets_effort_only(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         pick = self.spawn("general-purpose", LOOKUP)
-        self.assertEqual((pick["model"], pick["effort"]), (None, "low"))
+        self.assertEqual((pick["model"], pick["effort"]), (None, "medium"))
 
     def test_turn_effort_stays_off_without_a_first_party_credential(self):
         self.options(main_effort="true")  # off by default

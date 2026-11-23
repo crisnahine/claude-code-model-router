@@ -1,6 +1,6 @@
 ---
 description: From a Sonnet session, a file-listing subagent should run on Haiku. Without the router it inherits Sonnet.
-expected_outcome: "level lookup, model haiku, effort low"
+expected_outcome: "level lookup, model haiku, effort medium"
 tags: [routing, cost]
 model: sonnet
 max_turns: 4

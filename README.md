@@ -3,7 +3,7 @@
 <p align="center">
   <picture>
     <source media="(max-width: 600px)" srcset="docs/assets/hero-phone.svg">
-    <img src="docs/assets/hero.svg" width="100%" alt="Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level to complex, Sonnet at high effort, and is solved. The ladder runs lookup on Haiku at low, standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high and frontier on Fable at high.">
+    <img src="docs/assets/hero.svg" width="100%" alt="Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level to complex, Sonnet at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high and frontier on Fable at high.">
   </picture>
 </p>
 
@@ -60,7 +60,7 @@ There is nothing to configure. Claude model routing is on from the first session
    ```text
    > List the files under src and say which ones import requests
    Level: lookup (no risk, scope or ambiguity wording).
-   Model: haiku, effort: low.
+   Model: haiku, effort: medium.
 
    > Implement parse_date in utils.py to the spec in the docstring, with tests
    Level: standard (no risk, scope or ambiguity wording).
@@ -82,7 +82,7 @@ Each subtask is scored from its own brief: risk (security, data, migrations, pub
 
 | Level | Typical subtask | Model (balanced) | Effort |
 | :- | :- | :- | :- |
-| lookup | Find, list, summarize, run a command | Haiku | low |
+| lookup | Find, list, summarize, run a command | Haiku | medium |
 | standard | Implement to a clear spec, write tests | Sonnet | medium |
 | complex | Design, review, risky or cross-module change | Sonnet | high |
 | hardest | Ambiguous, multi-system and risky at once | Opus | high |

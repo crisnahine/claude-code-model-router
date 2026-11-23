@@ -47,7 +47,7 @@
   "levels": {
     "lookup": {
       "needs": 1,
-      "effort": "low"
+      "effort": "medium"
     },
     "standard": {
       "needs": 2,

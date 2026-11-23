@@ -2,7 +2,7 @@
 name: verifier
 description: Runs the project's tests, type checks, linters and builds after an unchecked change and reports what passed and failed. Doesn't fix code.
 model: haiku
-effort: low
+effort: medium
 tools: Read, Grep, Glob, Bash
 color: green
 ---

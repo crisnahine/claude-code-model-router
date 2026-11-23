@@ -2,7 +2,7 @@
 name: scout
 description: Finds files, symbols, call sites and config and explains existing code when that takes more than a few searches. Writes nothing.
 model: haiku
-effort: low
+effort: medium
 tools: Read, Grep, Glob
 omitClaudeMd: true
 color: cyan

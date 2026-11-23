@@ -37,7 +37,7 @@ The wordmark is drawn with strokes, so it needs no font. Write the product name 
 | `muted` | `#4A5871` | `#9BA9BD` | Secondary text, arrows |
 | `route` | `#A65200` | `#FFB23E` | The call: route, token, redo tag |
 | `routesoft` | `#FFF1DE` | `#33260F` | The row a call is on |
-| rung 1, lookup | `#0E8C6F` | `#38D3A8` | Haiku, low |
+| rung 1, lookup | `#0E8C6F` | `#38D3A8` | Haiku, medium |
 | rung 2, standard | `#0A78B8` | `#45B4F2` | Sonnet, medium |
 | rung 3, complex | `#3B57D6` | `#8196FF` | Sonnet, high |
 | rung 4, hardest | `#6D3FD1` | `#AA8BFF` | Opus, high |

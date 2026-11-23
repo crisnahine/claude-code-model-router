@@ -425,7 +425,7 @@ def badge_assets(version: str) -> dict:
 # ---------------------------------------------------------------- the ladder panel (hero, social preview)
 
 LADDER = [  # level, model, effort, needs, subtask
-    ("lookup", "Haiku", "low", 1, "Find, list, summarize, run a command"),
+    ("lookup", "Haiku", "medium", 1, "Find, list, summarize, run a command"),
     ("standard", "Sonnet", "medium", 2, "Implement to a clear spec, write tests"),
     ("complex", "Sonnet", "high", 2, "Design, review, risky or cross-module change"),
     ("hardest", "Opus", "high", 3, "Ambiguous, multi-system and risky at once"),
@@ -519,7 +519,7 @@ def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,),
 HERO_TITLE = "Model Router: every Claude Code agent on the cheapest model that should do the job"
 HERO_LABEL = ("Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and "
               "runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level "
-              "to complex, Sonnet at high effort, and is solved. The ladder runs lookup on Haiku at low, standard on "
+              "to complex, Sonnet at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on "
               "Sonnet at medium, complex on Sonnet at high, hardest on Opus at high and frontier on Fable at high.")
 
 
@@ -604,7 +604,7 @@ def diagram_ladder() -> str:
            + ".lredo{animation:lr 12s linear infinite}" + keyframes("lr", pulse + [(100, "opacity:0")])
            + ".lstatic{animation:hide 1s infinite}" + keyframes("hide", [(0, "opacity:0"), (100, "opacity:0")]))
     title = "The ladder: five levels to a model and an effort"
-    label = ("With balanced priority, lookup runs on Haiku at low effort, standard on Sonnet at medium, complex on "
+    label = ("With balanced priority, lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on "
              "Sonnet at high, hardest on Opus at high, and frontier on Fable at high. A call climbs one rung each "
              "time it comes back for a redo. Quality priority goes one step stronger, fast one step lighter. When "
              "the cap, the availableModels or deniedModels settings, or failures rule a model out, the pick moves "
