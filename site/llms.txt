@@ -14,6 +14,7 @@ Facts, each with its source:
 
 - [README](https://github.com/crisnahine/claude-code-model-router/blob/main/README.md): what it does, install, options, compatibility
 - [Questions](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/FAQ.md): short answers, each in its first sentence
+- [Guide](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/GUIDE.md): commands, every option, who decides the model, limits, providers, update and uninstall
 - [Architecture](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/ARCHITECTURE.md): the two paths, the ladder, the decision and its order of authority
 - [Glossary](https://github.com/crisnahine/claude-code-model-router/blob/main/GLOSSARY.md): the project's own words
 - [Benchmarks](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/BENCHMARKS.md): cost per solved task against Claude Code without the plugin, with raw data

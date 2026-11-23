@@ -169,7 +169,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S10.10 | CI green on the release PR and on the merge commit in `main` before tagging | Release checklist | `RELEASING.md` | CI | PR run 45004814197 and main run 45004998622 passed on `8ec8eec`; PR run 45055301092 passed on `bbb5827` and main run 45055601879 on `27b94e6`; main run 45077498725 passed on `b836649`. For 0.1.0 this runs at release time (RELEASING.md items 5 and 6) | PASS |
 | S10.11 | Reproducible cost and quality results | Benchmark harness and a full run | `bench/`, `docs/BENCHMARKS.md` | Benchmark | 640 runs on 2026-11-22 (Claude Code 2.1.330), $60.11 at list price, 10 per class and configuration, raw lines and commands committed: the routing code at `780ee86` beside the `27b94e6` benchmark. Opus 5.5 table: 7 PASS and 1 PARTIAL rows. Sonnet table: 1 PASS and 7 FAIL, under the Section 14 rule. The page names the archived earlier rows and why they're left out | PASS |
 | S10.12 | A security assessment | [SECURITY.md](SECURITY.md): who can influence routing, the network, credentials, state files, the mod, skills, workflows and open items | `docs/SECURITY.md` | Inspection | Each claim names the module and the function, class or constant it was checked against on 2026-11-22, not a line number | PASS |
-| S10.13 | Professional documentation and install steps, README at release polish with SVG diagrams | README with three SVG diagrams in "How it works" | `README.md`, `docs/assets/` | Unit, inspection | `ReadmeDiagrams` class (6 tests); the changelog's Python claim is corrected (S8.2) | PASS |
+| S10.13 | Professional documentation and install steps, README at release polish with SVG diagrams | A short README with the hero and benchmark chart; the two-paths, ladder and redo diagrams in ARCHITECTURE.md and the precedence and stop-check diagrams in GUIDE.md | `README.md`, `docs/GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/assets/` | Unit, inspection | `ReadmeDiagrams` class (7 tests); the changelog's Python claim is corrected (S8.2) | PASS |
 
 ## Section 11: final delivery
 
@@ -178,7 +178,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S11.1 | Source and architecture: `docs/ARCHITECTURE.md`, `GLOSSARY.md` | Both exist | `docs/ARCHITECTURE.md`, `GLOSSARY.md` | Inspection | Present | PASS |
 | S11.2 | Capabilities and commands in `README.md` | "Commands", "Configuration" | `README.md` | Unit | `Shipped.test_skills_have_descriptions_and_use_the_launcher` | PASS |
 | S11.3 | Primary-source research in `docs/research/` | `model-control.md` | `docs/research/` | Inspection | Present, dated 2026-11-22 | PASS |
-| S11.4 | Supported versions, surfaces, platforms, providers | README "Compatibility", ARCHITECTURE "Verified live" | `README.md`, `docs/ARCHITECTURE.md` | Inspection | Present | PASS |
+| S11.4 | Supported versions, surfaces, platforms, providers | README "Compatibility", GUIDE "Compatibility", ARCHITECTURE "Verified live" | `README.md`, `docs/GUIDE.md`, `docs/ARCHITECTURE.md` | Inspection | Present | PASS |
 | S11.5 | Install and usage instructions | README "Install" | `README.md` | Inspection | Present | PASS |
 | S11.6 | Automated test results | `docs/TEST_RESULTS.md` | `docs/TEST_RESULTS.md` | Inspection | Present | PASS |
 | S11.7 | Security assessment | [SECURITY.md](SECURITY.md) | `docs/SECURITY.md` | Inspection | Present; see S10.12 | PASS |
@@ -233,7 +233,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S13.2 | The mod is TypeScript loaded as is, with no routing logic of its own | See S5.2 | `hooks/router.ts` | Inspection | The `turn.step` effort-rank check | PARTIAL |
 | S13.3 | The launcher is `sh` and harmless without Python | See S5.3, S12.23 | `scripts/model-router.sh` | Unit | `Launcher` class: a too-old or broken interpreter falls through, and with none new enough hooks pass and commands explain; `NoPython` class: with only `sh` on `PATH`, every hook exits 0 and commands explain | PASS |
 | S13.4 | Tests on the oldest and newest Python CI covers, on Linux, macOS and Windows; pin an image rather than drop a version | CI matrix | `.github/workflows/ci.yml` | CI | CI main | PASS |
-| S13.5 | Network only to the hosts the README names, only from the daily check | See S6.10 | `scripts/modelrouter/upstream.py` | Grep | Hosts match README "Install" | PASS |
+| S13.5 | Network only to the hosts the README names, only from the daily check | See S6.10 | `scripts/modelrouter/upstream.py` | Grep | Hosts match README "Privacy and security" | PASS |
 | S13.6 | No external project, library, benchmark or tool cited without a primary source | Research doc cites docs; one table lists the rest | `docs/README.md`, `docs/research/model-control.md` | Inspection | docs/README "Outside tools and sources": SWE-Bench Pro, the percentile bootstrap, the npm packages, TypeScript, Node.js, the GitHub CLI and tmux, each with a primary source checked 2026-11-22; SWE-Bench Pro is also a source key in the research doc | PASS |
 
 ## Section 14: cost and quality leadership
