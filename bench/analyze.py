@@ -380,7 +380,14 @@ def _batch(path: Path) -> str:
 
 
 def _jsonl(paths) -> list[dict]:
-    return [json.loads(line) for p in sorted(paths) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows = []
+    for p in sorted(paths):
+        for number, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            try:
+                rows += [json.loads(line)] if line.strip() else []
+            except ValueError as exc:
+                raise SystemExit(f"{p}:{number}: not a JSON line ({exc})") from None
+    return rows
 
 
 @dataclass(frozen=True)
