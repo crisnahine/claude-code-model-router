@@ -1129,11 +1129,26 @@ class Sessions(unittest.TestCase):
             self.assertEqual(list((home / "projects").iterdir()), [])  # the shared folder is still cleaned up
 
 
-class Stopped(unittest.TestCase):
-    """Once claude returns the run is paid for: whatever stops the steps after it, its row is written and its
-    scratch and session folders are removed."""
+# Ctrl-C while claude runs: the session has started, then the bench gets SIGINT mid-call.
+INTERRUPT_STUB = '''#!/usr/bin/env python3
+import os, re, signal, sys, time
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+folder = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(Path.cwd().resolve()))
+(folder / "s1").mkdir(parents=True)
+(folder / "s1.jsonl").write_text("{}")
+os.kill(os.getppid(), signal.SIGINT)
+time.sleep(30)
+'''
 
-    def stop(self, error: type, *argv: str, **patches) -> tuple[list[dict], list[Path], list[Path]]:
+
+class Stopped(unittest.TestCase):
+    """Once claude starts the run costs money: whatever stops it or the steps after it, its row is written and
+    its scratch and session folders are removed."""
+
+    def stop(self, error: type, *argv: str, source: str = SESSION_STUB,
+             **patches) -> tuple[list[dict], list[Path], list[Path]]:
         with tempfile.TemporaryDirectory() as tmp:
             home, scratch, out = Path(tmp) / "config", Path(tmp) / "scratch", Path(tmp) / "out.jsonl"
             scratch.mkdir()
@@ -1144,10 +1159,18 @@ class Stopped(unittest.TestCase):
                     (unittest.mock.patch.multiple(run, **patches) if patches else contextlib.nullcontext()), \
                     self.assertRaises(error):
                 run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "1", "--max-total", "3",
-                          "--claude", *stub(tmp, SESSION_STUB), "--out", str(out), *argv])
+                          "--claude", *stub(tmp, source), "--out", str(out), *argv])
             rows = [json.loads(line) for line in out.read_text().splitlines()] if out.exists() else []
             sessions = list((home / "projects").iterdir()) if (home / "projects").exists() else []
             return rows, list(scratch.iterdir()), sessions
+
+    @unittest.skipIf(sys.platform == "win32", "needs a POSIX SIGINT sent to the bench")
+    def test_an_interrupt_during_the_claude_call_writes_a_broken_row_charged_the_budget_and_cleans_up(self):
+        rows, scratch, sessions = self.stop(KeyboardInterrupt, source=INTERRUPT_STUB)
+        self.assertEqual([(r["grade"]["verdict"], r["exit_code"], r["cost_known"], r["total_cost_usd"]) for r in rows],
+                         [("broken", None, False, 0.5)])
+        self.assertIn("KeyboardInterrupt", rows[0]["grade"]["reason"])
+        self.assertEqual((scratch, sessions), ([], []))
 
     def test_an_interrupt_while_grading_still_writes_the_row_and_cleans_up(self):
         rows, scratch, sessions = self.stop(KeyboardInterrupt, grade=unittest.mock.Mock(side_effect=KeyboardInterrupt))

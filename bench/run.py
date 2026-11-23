@@ -355,21 +355,23 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     plugin_state = state_hashes(plugin_data_dir(env)) if config.get("plugin") else None
     clock = time.monotonic()
-    try:
-        proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=options["timeout"])
-        stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
-    except subprocess.TimeoutExpired as exc:
-        stdout, stderr, code = _text(exc.stdout), "timed out", None
-    # The run's wall time: Claude Code's own duration_ms can fall short of it.
-    wall_ms = round((time.monotonic() - clock) * 1000)
-    try:
-        result = json.loads(stdout)
-    except ValueError:
-        result = {}
-    answer = result.get("result") or ""
+    stdout, stderr, code, wall_ms, result = "", "interrupted", None, None, {}
     ledger, types, final, graded, kept, stopped = None, {}, None, None, None, None
-    # The run is paid for now: whatever stops the steps below, its row is still built and its scratch removed.
+    # Once claude starts the run costs money: whatever stops it or the steps after it, its row is still built and its
+    # scratch removed. With no result yet the cost is unknown, so the row is charged the whole budget.
     try:
+        try:
+            proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=options["timeout"])
+            stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            stdout, stderr, code = _text(exc.stdout), "timed out", None
+        # The run's wall time: Claude Code's own duration_ms can fall short of it.
+        wall_ms = round((time.monotonic() - clock) * 1000)
+        try:
+            result = json.loads(stdout)
+        except ValueError:
+            result = {}
+        answer = result.get("result") or ""
         (scratch / "answer.txt").write_text(answer, encoding="utf-8")
         # Read before grading: the check also runs the code the run left, which could rewrite these files.
         ledger = ledger_rows(env) if config.get("plugin") else None
@@ -385,6 +387,8 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
             kept = target
     except BaseException as exc:
         stopped = exc
+    if wall_ms is None:
+        wall_ms = round((time.monotonic() - clock) * 1000)
     session_removed = _forget_session(session_dir(work, env))
     shutil.rmtree(scratch, ignore_errors=True)
     if graded is None:
