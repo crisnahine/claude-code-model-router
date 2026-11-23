@@ -4087,6 +4087,15 @@ class Launcher(Sandbox):
         self.assertEqual(res.returncode, 2)  # argparse's code, not the fallback's 0
         self.assertEqual(fake["log"].read_text().split(), ["python3", "python3"])  # the run, then the probe
 
+    def test_a_hook_command_never_exits_2(self):
+        # Exit 2 blocks PreToolUse, UserPromptSubmit and Stop; argparse exits 2 on a bad flag.
+        fake = self.fake_pythons("real", "real")
+        for hook in ("pre-agent", "user-prompt", "stop", "mod-spawn"):
+            with self.subTest(hook=hook):
+                res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), hook, "--no-such-flag"],
+                                     input="{}", capture_output=True, text=True, env=fake["env"])
+                self.assertEqual(res.returncode, 1, res.stderr)
+
     def test_hooks_dont_load_the_network_or_xml_modules(self):
         probe = ("import sys; sys.path.insert(0, sys.argv[1]); import modelrouter.cli; "
                  "print(sorted(m for m in ('urllib.request', 'http.client', 'xml.etree.ElementTree') if m in sys.modules))")

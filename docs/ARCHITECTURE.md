@@ -205,7 +205,7 @@ PostToolUse (Edit|Write|NotebookEdit) ─ post-edit   notes that code changed
 Stop ─ stop                      the two checks
 ```
 
-Every handler catches its own errors and exits 0, and every mod hook has a `.catch` that passes the event on unchanged. The launcher exits 0 when Python is missing. A bug in this plugin can cost routing, but it can't block a tool call, a spawn or a session.
+Every handler catches its own errors and exits 0, and every mod hook has a `.catch` that passes the event on unchanged. The launcher exits 0 when Python is missing, and turns any other failure of a hook command into exit 1, since exit 2 would block the tool call, the prompt or the stop (https://code.claude.com/docs/en/hooks.md#exit-code-2-behavior-per-event). A bug in this plugin can cost routing, but it can't block a tool call, a spawn or a session.
 
 ## State
 

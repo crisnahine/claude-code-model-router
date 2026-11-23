@@ -36,6 +36,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 
 ### Fixed
 
+- A hook command that fails exits 1, never 2. The launcher passed the router's exit code through, and argparse exits 2 on a bad argument, which blocks a tool call, a prompt or a stop.
 - An agent name is read by whole parts, so `researcher`, `relocation-migrator`, `splinter-fixer`, `information-extractor` and `allocator-tuner` are no longer capped as search agents. `docs-researcher`, `lint-runner`, `scout`, `explorer` and `verifier` still are.
 - A typed `/plugin:skill args` is profiled by its arguments, not by the skill's own name.
 - A background agent that hands its report back through `SubagentHandback` counts as answered. Its call used to stay open, and a re-issue wasn't seen as a redo.
