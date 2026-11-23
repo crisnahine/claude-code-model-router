@@ -97,7 +97,10 @@ def main(argv: list[str] | None = None) -> int:
                 hook_input = json.load(sys.stdin)
             except ValueError:
                 hook_input = {}
-            output = hooks.HANDLERS[args.cmd](_well_formed(hook_input))
+            hook_input = _well_formed(hook_input)
+            if isinstance(hook_input.get("session_id"), str):
+                store.owner = hook_input["session_id"]
+            output = hooks.HANDLERS[args.cmd](hook_input)
             if output:
                 print(json.dumps(output))
         except Exception as exc:  # noqa: BLE001 - a hook must never break the session

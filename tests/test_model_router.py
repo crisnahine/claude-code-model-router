@@ -77,6 +77,7 @@ class Sandbox(unittest.TestCase):
 
     def tearDown(self):
         store.set_clock(None)
+        store.owner = None
         self.managed_root.stop()
         self.patch.stop()
         self.tmp.cleanup()
@@ -563,6 +564,28 @@ class Store(Sandbox):
         self.assertEqual(store.load_entry("sample", "s1")["n"], 120)
         self.assertEqual(list(self.data.glob("*.lock")) + list(self.data.glob("*.tmp")), [])
 
+    def test_two_processes_waiting_on_one_keyed_file_both_keep_their_update(self):
+        code = ("import sys; sys.path.insert(0, sys.argv[1])\n"
+                "from modelrouter import store\n"
+                "store.owner = sys.argv[2]\n"
+                "store.LOCK_WAIT_SECONDS = 60\n"  # the second worker may start much later on a slow machine
+                "print('ready', flush=True)\n"
+                "store.mutate_entry('sample', 's1', lambda entry: entry.update({sys.argv[2]: 1}))\n")
+        store.owner = "holder"
+        with store.locked(store.data_dir() / "sample.json"):
+            workers = [subprocess.Popen([sys.executable, "-c", code, str(SCRIPTS), name], stdout=subprocess.PIPE,
+                                        text=True, env={**os.environ}) for name in ("a", "b")]
+            for worker in workers:
+                self.assertEqual(worker.stdout.readline().strip(), "ready")
+            time.sleep(0.1)  # both are now waiting on the lock this test holds
+        for worker in workers:
+            worker.communicate(timeout=60)
+            self.assertEqual(worker.returncode, 0)
+        entry = store.load_entry("sample", "s1")
+        self.assertEqual((entry.get("a"), entry.get("b")), (1, 1))
+        counts = store.lock_counts()["sample.json"]
+        self.assertEqual((counts["waits"], counts["other_session"], counts.get("skipped")), (2, 2, None))
+
     def test_a_lock_held_past_the_bound_skips_the_write(self):
         self.data.mkdir(exist_ok=True)
         store.save_entry("sample", "s1", {"n": 1})
@@ -577,10 +600,15 @@ class Store(Sandbox):
             store.mutate_entry("sample", "s1", lambda entry: entry.update(n=2))
             self.assertEqual(store.remove_state_file(path), "busy")
             store.append_ledger({"event": "spawn"})
+            store.owner = "mine"
+            store.update_entry("sample", "s1", n=3)
         self.assertLess(time.monotonic() - started, 2)
         self.assertEqual(path.read_bytes(), before)
         self.assertFalse(store.ledger_path().exists())
         self.assertTrue(lock.exists())  # not ours to remove
+        self.assertEqual(store.lock_counts()["sample.json"]["skipped"], 4)
+        self.assertEqual(store.lock_counts()["sample.json"]["other_session"], 1)
+        self.assertEqual(store.lock_counts()["ledger.jsonl"]["skipped"], 1)
 
     def test_a_stale_lock_is_broken(self):
         self.data.mkdir(exist_ok=True)
@@ -590,6 +618,7 @@ class Store(Sandbox):
         store.update_dict(self.data / "state.json", lambda data: data.update(a=1))
         self.assertFalse(lock.exists())
         self.assertEqual(store.load_state_file(self.data / "state.json"), {"a": 1})
+        self.assertEqual(store.lock_counts(), {"state.json": {"broken": 1, "at": self.clock}})
 
     def test_a_reset_while_another_process_holds_the_lock_says_so(self):
         self.data.mkdir(exist_ok=True)
@@ -4508,6 +4537,16 @@ class MachineReadable(Sandbox):
         self.assertEqual(data["set_aside"], [str(p) for p in store.set_aside()])
         self.assertRegex(data["set_aside"][0], r"learned\.json\.corrupt-")
         self.assertEqual(data["newer_files"], [str(newer)])
+
+    def test_models_shows_lock_counts_per_state_file(self):
+        self.assertEqual(self.json_out("models")["locks"], [])
+        self.assertNotIn("Lock waits", self.out("models"))
+        (store.data_dir() / "sample.json.lock").write_text("")
+        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02):
+            store.update_entry("sample", "s1", n=1)
+        self.assertEqual(self.json_out("models")["locks"], [
+            {"file": "sample.json", "waits": 0, "other_session": 0, "skipped": 1, "broken": 0, "last_at": self.clock}])
+        self.assertIn("| sample.json | 0 | 0 | 1 | 0 |", self.out("models"))
 
 
 @unittest.skipUnless(shutil.which("sh"), "needs sh")

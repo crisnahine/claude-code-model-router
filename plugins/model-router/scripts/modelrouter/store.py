@@ -79,8 +79,37 @@ def write_atomic(path: Path, text: str) -> None:
     raise OSError(f"could not replace {path.name}")
 
 
+# The session whose hook is running, written into the lock files it holds, so a wait can
+# tell another session's lock from its own.
+owner: str | None = None
+
+
 class Busy(OSError):
     """Another process held the lock past LOCK_WAIT_SECONDS, so the write was skipped."""
+
+
+def lock_counts() -> dict:
+    """Lock waits, waits on another session's lock, skipped writes and stale locks broken, per file."""
+    return _read_state(data_dir() / "locks.json")[0]
+
+
+def _count(path: Path, *events: str) -> None:
+    # Written without a lock, after the state lock is let go: two at once can lose a count,
+    # never a state update.
+    counts_path = path.with_name("locks.json")
+    try:
+        counts, status = _read_state(counts_path)
+        if status != "ok":
+            return
+        entry = counts.get(path.name)
+        entry = entry if isinstance(entry, dict) else {}
+        for event in events:
+            entry[event] = int(entry.get(event) or 0) + 1
+        entry["at"] = now()
+        counts[path.name] = entry
+        write_atomic(counts_path, json.dumps({**counts, "schema": SCHEMA}, separators=(",", ":"), sort_keys=True))
+    except (OSError, ValueError, TypeError):
+        pass
 
 
 @contextlib.contextmanager
@@ -94,6 +123,8 @@ def locked(path: Path) -> Iterator[None]:
     deadline = time.monotonic() + LOCK_WAIT_SECONDS
     delay = 0.001
     handle = None
+    events: list[str] = []
+    holder = ""
     while True:
         try:
             handle = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -103,6 +134,7 @@ def locked(path: Path) -> Iterator[None]:
                 # The lock file's mtime is the filesystem's real time, not the state clock.
                 if time.time() - lock.stat().st_mtime > LOCK_STALE_SECONDS:
                     lock.unlink()  # left behind by a process that died
+                    events.append("broken")
                     continue
             except OSError:
                 pass
@@ -111,10 +143,24 @@ def locked(path: Path) -> Iterator[None]:
             # there. Anywhere else the directory isn't writable and waiting won't help.
             if os.name != "nt":
                 raise
+        if "waits" not in events:
+            events.append("waits")
+        if owner and not holder:
+            try:
+                holder = lock.read_text(encoding="utf-8")  # empty until the holder writes its name
+            except OSError:
+                pass
+            if holder and holder != owner:
+                events.append("other_session")
         if time.monotonic() >= deadline:
+            events[events.index("waits")] = "skipped"
+            _count(path, *events)
             raise Busy(f"{lock.name} is held by another process")
         time.sleep(delay)
         delay = min(delay * 2, LOCK_POLL_MAX)
+    if owner:
+        with contextlib.suppress(OSError):
+            os.write(handle, owner.encode("utf-8"))
     try:
         yield
     finally:
@@ -128,6 +174,8 @@ def locked(path: Path) -> Iterator[None]:
                     time.sleep(0.01)
                 except OSError:
                     break
+        if events:
+            _count(path, *events)
 
 
 def _read_state(path: Path) -> tuple[dict, str]:

@@ -74,7 +74,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Set aside**: what happens to a state file that can't be read. It is renamed with a `.corrupt-` suffix and a timestamp, routing carries on with that state empty, and `/model-router:models` lists it. Only the three newest copies of each file are kept.
 
-**Skipped write**: a state write a hook drops because another process held the file's lock past one second. Writing without the lock could drop that process's update, so the hook loses its own one update instead.
+**Skipped write**: a state write a hook drops because another process held the file's lock past one second. Writing without the lock could drop that process's update, so the hook loses its own one update instead. Skipped writes, lock waits and stale locks broken are counted per file in `locks.json` and shown by `/model-router:models`.
 
 **Upstream**: the public feeds the plugin compares against what was last reviewed: Claude Code releases, the docs index, model aliases and model status.
 
