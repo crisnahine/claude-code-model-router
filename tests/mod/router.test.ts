@@ -242,6 +242,33 @@ test("a redo's first request gets the redo's effort, not the run it replaces", a
   assert.equal(sent.effort, 'high')
 })
 
+test("two spawns of one brief in flight together never trade efforts, whichever pick lands first", async () => {
+  const mod = load()
+  // Each mod-spawn call waits until the test answers it, so the two picks can land out of order.
+  const answer: Record<string, (stdout: string) => void> = {}
+  const run = mod.$.process.run
+  mod.$.process.run = (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) =>
+    argv[2] !== 'mod-spawn' ? run(argv, init) : new Promise((resolve) => {
+      answer[JSON.parse(init.stdin).tool_use_id] = (stdout) =>
+        resolve({ exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
+    })
+  const sent: Record<string, any> = {}
+  const a = mod.spawn(spawnEvent({ tool_use_id: 'tuA' }), async (e: any) => ({ model: e.model, agentId: 'a1' }))
+  const b = mod.spawn(spawnEvent({ tool_use_id: 'tuB' }), async (e: any) => {
+    await a // b's agent starts only after a's spawn has its pick
+    await mod.start({ turnId: 'ta2', agentId: 'a2', text: e.prompt })
+    sent.a2 = await mod.step(stepEvent({ turnId: 'ta2', agentId: 'a2', effort: 'max' }))
+    return { model: e.model, agentId: 'a2' }
+  })
+  while (!answer.tuA || !answer.tuB) await new Promise((r) => setImmediate(r))
+  answer.tuB(JSON.stringify({ model: 'sonnet', reason: 'the call named its own effort' }))
+  await new Promise((r) => setImmediate(r))
+  answer.tuA(PICK.stdout)
+  await Promise.all([a, b])
+  assert.equal(sent.a2.effort, 'max')
+  assert.equal((await mod.step(stepEvent({ turnId: 'ta1', agentId: 'a1', effort: 'max' }))).effort, 'low')
+})
+
 test('an effort on the Agent call reaches mod-spawn', async () => {
   const mod = load()
   const call = { tool: 'Agent', tool_use_id: 'tu1', effort: 'high', prompt: 'p' }

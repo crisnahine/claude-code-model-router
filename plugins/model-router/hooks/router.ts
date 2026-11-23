@@ -95,9 +95,10 @@ export const register: Register = (on, options) => {
   const turnEffort = new Map<string, ModelEffort>()
   // agent.spawn carries no effort: an effort the caller put on the Agent call is read here.
   const callerEffort = new Map<string, ModelEffort>()
-  // A subagent's first request can go out before its spawn hook has the agent's id. The newest spawn of
-  // a prompt sets it, null when that spawn got no effort, so a later spawn never inherits an older one's.
-  const promptEffort = new Map<string, ModelEffort | null>()
+  // A subagent's first request can go out before its spawn hook has the agent's id. The spawns of each prompt
+  // between their pick and next() returning, with the effort each got (null for none): the first request takes
+  // that effort only while every one of them got the same, so it never runs at another spawn's.
+  const inFlight = new Map<string, (ModelEffort | null)[]>()
   // Each request's usage by turn: Haiku 5.5 bills a long prompt per request, not per turn.
   const turnRequests = new Map<string, TurnUsage[]>()
 
@@ -133,10 +134,18 @@ export const register: Register = (on, options) => {
         ...(effort ? { effort } : {}),
       },
     })
-    remember(promptEffort, e.prompt, pick?.effort ?? null)
-    const started = await next(pick?.model ? { ...e, model: pick.model } : e)
-    if (pick?.effort && started.agentId) remember(agentEffort, started.agentId, pick.effort)
-    return started
+    const mine = pick?.effort ?? null
+    const efforts = inFlight.get(e.prompt) ?? []
+    efforts.push(mine)
+    inFlight.set(e.prompt, efforts)
+    try {
+      const started = await next(pick?.model ? { ...e, model: pick.model } : e)
+      if (pick?.effort && started.agentId) remember(agentEffort, started.agentId, pick.effort)
+      return started
+    } finally {
+      efforts.splice(efforts.indexOf(mine), 1)
+      if (!efforts.length) inFlight.delete(e.prompt)
+    }
   }).catch(($, e, next) => next(e))
 
   // Where the prompt that starts the next main-loop turn came from: a teammate's report or
@@ -183,8 +192,8 @@ export const register: Register = (on, options) => {
       })
       if (pick?.effort) remember(turnEffort, e.turnId, pick.effort)
     } else if (!agentEffort.has(e.agentId)) {
-      const effort = promptEffort.get(e.text)
-      if (effort) remember(agentEffort, e.agentId, effort)
+      const [effort, ...others] = inFlight.get(e.text) ?? []
+      if (effort && others.every((other) => other === effort)) remember(agentEffort, e.agentId, effort)
     }
     return next(e)
   }).catch(($, e, next) => next(e))
