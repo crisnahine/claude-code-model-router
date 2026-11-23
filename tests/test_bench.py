@@ -1170,7 +1170,8 @@ n = int(calls.read_text()) if calls.exists() else 0
 calls.write_text(str(n + 1))
 if n < int(os.environ["STUB_LIMITED"]):
     print(json.dumps({"is_error": True, "subtype": "error_during_execution", "api_error_status": 429,
-                      "result": "API Error: 429 rate limit reached", "total_cost_usd": 0.001, "modelUsage": {}}))
+                      "result": "API Error: 429 rate limit reached",
+                      "total_cost_usd": float(os.environ.get("STUB_LIMIT_COST", "0.001")), "modelUsage": {}}))
     sys.exit(1)
 print(json.dumps({"is_error": False, "subtype": "success", "api_error_status": None, "total_cost_usd": 0.01,
                   "result": "read_retry_limit in app/settings.py; a rate limit design is off topic", "modelUsage": {}}))
@@ -1295,16 +1296,16 @@ class AgentCosts(unittest.TestCase):
 class Limits(unittest.TestCase):
     """A rate or usage limit pauses the bench and retries the run; it is never recorded as a failed task."""
 
-    def bench(self, limited: int) -> tuple[int, list[dict], list[dict], list[float]]:
+    def bench(self, limited: int, cost: str = "0.001", *spend: str) -> tuple[int, list[dict], list[dict], list[float]]:
         with tempfile.TemporaryDirectory() as tmp:
             claude = stub(tmp, LIMIT_STUB)
             out = Path(tmp) / "out.jsonl"
-            env = {"STUB_CALLS": str(Path(tmp) / "calls"), "STUB_LIMITED": str(limited)}
+            env = {"STUB_CALLS": str(Path(tmp) / "calls"), "STUB_LIMITED": str(limited), "STUB_LIMIT_COST": cost}
             pauses: list[float] = []
             with unittest.mock.patch.dict("os.environ", env), \
                     unittest.mock.patch.object(run.time, "sleep", pauses.append):
                 code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "1",
-                                 "--max-total", "3", "--claude", *claude, "--out", str(out)])
+                                 "--max-total", "3", *spend, "--claude", *claude, "--out", str(out)])
             read = lambda p: [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []  # noqa: E731
             self.assertEqual(sorted(p.name for p in Path(tmp).glob("*.jsonl")), ["out.jsonl"] if out.exists() else [])
             # subprocess also calls time.sleep in short steps while it waits on a slow child.
@@ -1323,6 +1324,12 @@ class Limits(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(rows, [])
         self.assertEqual(len(limited), run.LIMIT_RETRIES + 1)
+
+    def test_a_retry_never_starts_past_the_total_cap(self):
+        code, rows, limited, pauses = self.bench(99, "0.5", "--budget", "0.5", "--max-total", "1")
+        self.assertEqual((code, rows), (1, []))
+        self.assertLessEqual(sum(r["total_cost_usd"] for r in limited), 1)
+        self.assertEqual(len(limited), 1)
 
     def test_a_lost_network_is_retried_like_a_limit(self):
         # The answers Claude Code gave during the 2026-11-22 outage, plus a dropped connection.
