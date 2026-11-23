@@ -1855,6 +1855,18 @@ class QualityTier(unittest.TestCase):
                    rel: "from . import order\n" + solution.replace("sorted({src, dst})", "order.ordered(src, dst)")}
         self.assertTrue(self.run_with(task, ordered))
 
+    def test_wallet_check_takes_a_same_wallet_transfer_that_returns_early(self):
+        task = "rootcause-wallet-race"
+        rel = "ledger/wallet.py"
+        solution = self.source(task, "solution/ledger/wallet.py")
+        early = solution.replace(
+            "    with contextlib.ExitStack() as locks:",
+            "    if src == dst:\n        return\n    with contextlib.ExitStack() as locks:")
+        self.assertNotEqual(early, solution)
+        got, wrong = self.wallet_phases({rel: early})
+        self.assertEqual(wrong, [])
+        self.assertEqual(got["E"]["raised"], [])
+
     def test_a_locked_wallet_solution_does_not_wait_out_the_barriers(self):
         with tempfile.TemporaryDirectory() as tmp:
             task, work = self.shipped("rootcause-wallet-race", tmp)
