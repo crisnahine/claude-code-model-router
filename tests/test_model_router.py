@@ -67,7 +67,7 @@ class Sandbox(unittest.TestCase):
         self.patch = mock.patch.dict(os.environ, self.env)
         self.patch.start()
         for name in list(os.environ):
-            if name.startswith(("CLAUDE_PLUGIN_OPTION_", "CLAUDE_CODE_SUBAGENT_", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_USE_", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "DISABLE_PROMPT_CACHING", "ANTHROPIC_")):
+            if name.startswith(("CLAUDE_PLUGIN_OPTION_", "CLAUDE_CODE_SUBAGENT_", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_USE_", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "DISABLE_PROMPT_CACHING", "ANTHROPIC_")):
                 del os.environ[name]
         self.managed = self.home / "managed-settings.json"
         self.managed_root = mock.patch.object(allowlist, "MANAGED_ROOT", self.home)
@@ -4340,6 +4340,18 @@ class MachineReadable(Sandbox):
         self.assertEqual(json.loads(self.out("models", "--reset", "--json"))["schema"], "model-router.models/1")
         store.save_json(upstream.path(), {"cache": {"aliases": "saga"}})  # a corrupt cache lists nothing
         self.assertEqual(self.json_out("models")["not_in_registry"], [])
+
+    def test_a_workflow_model_pin_is_reported_and_routing_is_unchanged(self):
+        hook_input = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                      "kind": "workflow", "tool_input": {"subagent_type": "stage", "prompt": LOOKUP}}
+        before = hooks.mod_spawn(hook_input)
+        self.assertIsNone(self.json_out("models")["workflow_model"])
+        self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="claude-opus-5-5")
+        self.assertEqual(self.json_out("models")["workflow_model"], "claude-opus-5-5")
+        self.assertIn("pins every workflow agent to claude-opus-5-5", self.out("models"))
+        note = hooks.session_start({"session_id": "s1"})["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on claude-opus-5-5", note)
+        self.assertEqual(hooks.mod_spawn(hook_input), before)
 
     def test_models_json_names_state_files_set_aside_or_left_read_only(self):
         data = self.json_out("models")

@@ -55,6 +55,10 @@ def session_start(hook_input: dict) -> dict | None:
                 "their effort. Without it in the user's settings, the router would put each subtask on the "
                 "cheapest model strong enough for it. Worth telling the user once."
             )
+        if options.workflow_model:
+            parts.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model}. "
+                         "Model Router still sets a workflow agent's model, and the docs don't say which of the two "
+                         "wins. Worth telling the user once.")
     elif mode == "advise":
         parts.append(
             "Model Router is in advise mode: it estimates the model each request needs and changes no call. "

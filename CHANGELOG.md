@@ -12,6 +12,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 
 ### Changed
 
+- `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` is named in the session-start note and in `/model-router:models` (`workflow_model` in `--json`) as a pin on every workflow agent. Routing doesn't change for it, since the docs don't say whether it or a mod's model wins.
 - Every effort the router sets, for an agent or a main-loop turn, is held to `maxEffortLevel` from your settings, managed ones included, with a `modelSettings` entry replacing its source's cap for that model. The ledger reason and `/model-router:route` say when the cap held it. Claude Code applies the cap itself, so this changes what is reported, and what a redo asks for, to what runs.
 - Complex runs on Opus at `high`, where it ran on Sonnet at `high`. Migrations, schema changes, performance work and security review get the stronger model. Hardest runs Opus at `xhigh`, so a redo of a complex call is a fresh subagent on Opus at more effort. The headline benchmark figures predate this ladder.
 - A brief that fixes or hunts a defect profiles at complex at least, not standard, and so does the person's request: a fix request raises the main turn's effort and counts toward the strong-agent check. Only "fix" and "debug" count as verbs ("the fix", "fixture" and "debug logging" don't); the other hunt verbs, such as "investigate" and "diagnose", match anywhere. A fix the brief rules out doesn't count.

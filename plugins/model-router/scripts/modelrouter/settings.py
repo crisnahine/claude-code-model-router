@@ -32,6 +32,7 @@ class Settings:
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
     force: bool = False  # CLAUDE_CODE_SUBAGENT_MODEL_FORCE
     subagent_effort: str | None = None  # CLAUDE_CODE_SUBAGENT_EFFORT
+    workflow_model: str | None = None  # CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL, reported only
     effort_level: str | None = None  # CLAUDE_CODE_EFFORT_LEVEL
     cloud: str | None = None  # bedrock, vertex or foundry, from CLAUDE_CODE_USE_<NAME>
     provider: str | None = None  # the one provider the CLAUDE_CODE_USE_<NAME> switches select, if clear
@@ -102,6 +103,7 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),
         force=truthy(env("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")),
         subagent_effort=env("CLAUDE_CODE_SUBAGENT_EFFORT"),
+        workflow_model=env("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL"),
         effort_level=env("CLAUDE_CODE_EFFORT_LEVEL"),
         cloud=next((c for c in CLOUDS if truthy(env(f"CLAUDE_CODE_USE_{c.upper()}"))), None),
         provider=_provider({p for p in PROVIDERS if truthy(env(f"CLAUDE_CODE_USE_{p.upper()}"))}),

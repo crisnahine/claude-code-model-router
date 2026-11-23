@@ -81,6 +81,7 @@ def models_data(snap: settings.Snapshot) -> dict:
         "set_aside": [str(p) for p in store.set_aside()],
         "newer_files": [str(p) for p in store.newer_files()],
         "newer_config": [str(p) for p in cfg.newer_overrides()],
+        "workflow_model": options.workflow_model,
     }
 
 
@@ -94,6 +95,10 @@ def models(snap: settings.Snapshot) -> str:
         lines += ["", "| Subtask level | Routed calls | Votes it was too low | Raised |", "| :- | -: | -: | :- |"]
         lines += [f"| {lv['level']} | {lv['routed_calls']} | {lv['votes_too_low']} | "
                   f"{'yes' if lv['raised'] else 'no'} |" for lv in data["levels"]]
+    if data["workflow_model"]:
+        lines += ["", f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins every workflow agent to {data['workflow_model']}. "
+                  "Model Router still sets a workflow agent's model, and the docs don't say which of the two wins; "
+                  "/model-router:usage shows the model each one ran on."]
     if data["doc_aliases"]:
         lines += ["", "Model aliases in the current Claude Code docs: " + ", ".join(data["doc_aliases"]) + "."]
         if data["not_in_registry"]:
