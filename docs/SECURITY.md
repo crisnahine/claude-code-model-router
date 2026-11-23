@@ -47,7 +47,7 @@ How long a fetch can take:
 
 Fetches run from the async `SessionStart` hook once a day after a successful fetch (`upstream.refresh`, `upstream.CACHE_TTL_SECONDS`). After a failed fetch, session starts wait an hour before trying again, doubling with each failure in a row up to a day, and a success resets the wait (`upstream.FAILED_RETRY_SECONDS`, `upstream._retry_wait`, `upstream.refresh`); each try is capped at 25 seconds. `/model-router:refresh` fetches whenever you run it. Claude Code doesn't enforce `timeout` on an async hook (https://code.claude.com/docs/en/hooks.md#run-hooks-in-the-background), so the 25-second budget is what ends a stuck refresh. Turning the `update_check` option off stops the fetch at session start (`hooks.refresh_cache`).
 
-The manifest lists the same three hosts under `network.hosts`. That field only declares them: it doesn't allow or block any host (https://code.claude.com/docs/en/plugins-reference.md).
+The manifest lists the same three hosts under `network.hosts`. That field only declares them: it doesn't allow or block any host (https://code.claude.com/docs/en/plugins/manifest-reference.md#fields).
 
 ## Credentials
 
@@ -76,13 +76,12 @@ Each skill's `allowed-tools` pre-approves only the launcher commands that skill 
 
 ## GitHub workflows
 
-- `ci.yml` has `contents: read` (the top-level `permissions` of `.github/workflows/ci.yml`). Its `validate` job installs the latest `@anthropic-ai/claude-code` from npm, unpinned (the install step of its `validate` job). With read-only contents and no secrets, a bad release could fail CI but not change the repository.
+- `ci.yml` has `contents: read` (the top-level `permissions` of `.github/workflows/ci.yml`). Its `validate` job installs `@anthropic-ai/claude-code` from npm at pinned versions, 2.1.329 and 2.1.330 (the job's `matrix`), and its `eval` job installs 2.1.330. With read-only contents, a bad release could fail CI but not change the repository.
 - `upstream-watch.yml` has `contents: read` and `issues: write` (the top-level `permissions` of `.github/workflows/upstream-watch.yml`). It creates or edits one issue. Fetched text goes into the issue body through a file, never into a shell command.
-- Neither workflow uses a secret other than `github.token` (the `GH_TOKEN` env of `.github/workflows/upstream-watch.yml`). Every action is pinned to a commit SHA.
+- `ci.yml`'s `eval` job runs only when started by hand (`workflow_dispatch`), and it is the only job given a secret: `ANTHROPIC_API_KEY`, which `claude plugin eval` uses for live model calls, with `--max-cost-usd 2` as a ceiling on the estimated list-price cost (https://code.claude.com/docs/en/plugin-evals.md#command-options). It runs the checked-out branch's plugin code with `--trust-plugin`, so start it only on a branch whose code you trust. `upstream-watch.yml` uses no secret other than `github.token` (its `GH_TOKEN` env). Every action is pinned to a commit SHA.
 
 ## Open items
 
 | Item | Status |
 | :- | :- |
 | A private channel for reports | Waiting on the maintainer to turn on GitHub private vulnerability reporting |
-| The `validate` CI job installs an unpinned Claude Code | Open, low risk: it has read-only access and no secrets |
