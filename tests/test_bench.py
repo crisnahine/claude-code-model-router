@@ -1127,8 +1127,7 @@ class Isolation(unittest.TestCase):
 
     def test_a_check_sees_no_credentials(self):
         secret = {"CLAUDE_CODE_OAUTH_TOKEN": "t", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "3", "ANTHROPIC_API_KEY": "k",
-                  "ANTHROPIC_BASE_URL": "u", "GITHUB_TOKEN": "g", "AWS_SECRET_ACCESS_KEY": "s", "DB_PASSWORD": "p",
-                  "api_key": "lower"}
+                  "ANTHROPIC_BASE_URL": "u", "GITHUB_TOKEN": "g", "AWS_SECRET_ACCESS_KEY": "s", "DB_PASSWORD": "p"}
         with tempfile.TemporaryDirectory() as tmp:
             check = Path(tmp) / "check.py"
             check.write_text("import os, sys\n"
@@ -1138,6 +1137,10 @@ class Isolation(unittest.TestCase):
             with unittest.mock.patch.dict("os.environ", {**secret, "MRBENCH_KEPT": "yes"}):
                 self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt"))
                 self.assertEqual(sorted(set(secret) & set(run.grading_env(dict(os.environ)))), [])
+
+    def test_credential_names_are_matched_in_any_case(self):
+        # A plain dict: environment names are upper-cased on Windows, so os.environ can't hold these there.
+        self.assertEqual(run.grading_env({"api_key": "1", "keep": "2"}), {"keep": "2"})
 
     def test_a_check_that_hangs_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
