@@ -27,7 +27,7 @@ ERRORS = json.loads((FIXTURES / "model-errors.json").read_text())
 FRAMING = json.loads((FIXTURES / "prompt-framing.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, allowlist, calls, cli, gates, health, hooks, intake, learn, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
+from modelrouter import agents, allowlist, calls, cli, gates, health, hooks, intake, learn, ledger, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 
 LOOKUP = "list the files under src"
@@ -139,7 +139,7 @@ class Sandbox(unittest.TestCase):
         hooks.agent_stopped(hook_input if answer is None else {**hook_input, "last_assistant_message": answer})
 
     def ledger(self) -> list[dict]:
-        return store.read_ledger()
+        return ledger.read()
 
     def next_message(self) -> None:
         """Claude's next message comes seconds after this one: waiting rewrites are older."""
@@ -488,7 +488,7 @@ class Store(Sandbox):
         store.append_ledger({"event": "spawn"})
         with store.ledger_path().open("a") as fh:
             fh.write("not json\n[1]\n")
-        self.assertEqual(len(store.read_ledger(7)), 1)
+        self.assertEqual(len(ledger.read(7)), 1)
 
     def test_updates_from_processes_running_at_once_are_all_kept(self):
         code = ("import sys; sys.path.insert(0, sys.argv[1])\n"
@@ -540,7 +540,7 @@ class Store(Sandbox):
                 mock.patch.object(store, "write_atomic", slow_trim):
             store.append_ledger({"event": "spawn"})
         self.racer.join()
-        self.assertIn("racer", [row.get("event") for row in store.read_ledger()])
+        self.assertIn("racer", [row.get("event") for row in ledger.read()])
 
     def test_two_hooks_trimming_the_ledger_at_once_keep_half_of_it(self):
         path = store.ledger_path()
@@ -557,7 +557,7 @@ class Store(Sandbox):
         with mock.patch.object(store, "LEDGER_MAX_BYTES", path.stat().st_size), \
                 mock.patch.object(store, "locked", racing):
             store.append_ledger({"event": "spawn"})
-        self.assertEqual(len(store.read_ledger()), 51)
+        self.assertEqual(len(ledger.read()), 51)
 
 
 class Registry(Sandbox):
@@ -2350,6 +2350,52 @@ class ModPayloads(Sandbox):
         self.assertEqual((row["event"], row["agent_id"], row["cost_usd"]), ("usage", "a1", 6.0))
 
 
+class Ledger(Sandbox):
+    def test_each_row_kind_keeps_its_shape(self):
+        decision = self.decide("general-purpose", LOOKUP)
+        ledger.spawn("s1", "mod", decision, "d" * 200, kind="subagent")
+        ledger.result("s1", "general-purpose", "haiku", "claude-haiku-5-5", "completed", 1200)
+        ledger.model_error("s1", "deep", "fable")
+        ledger.turn("s1", "complex", "high", command="hard")
+        ledger.turn("s1", "complex", "high")
+        ledger.usage(cfg.load_config(), "s1", "a1", {"model": "claude-opus-5-5", "input_tokens": 1_000_000,
+                     "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}, None)
+        rows = ledger.read()
+        self.assertEqual([list(r) for r in rows], [
+            ["ts", "event", "via", "session", "agent", "action", "level", "signals", "model", "was", "effort", "source",
+             "escalated_from", "reason", "description", "kind"],
+            ["ts", "event", "session", "agent", "asked", "resolved_model", "status", "total_tokens"],
+            ["ts", "event", "session", "agent", "model"],
+            ["ts", "event", "session", "level", "effort", "command"],
+            ["ts", "event", "session", "level", "effort"],
+            ["ts", "event", "session", "agent_id", "model", "input_tokens", "output_tokens", "cache_read_input_tokens",
+             "cache_creation_input_tokens", "cost_usd"]])
+        self.assertEqual((len(rows[0]["description"]), rows[-1]["cost_usd"]), (120, 4.0))
+
+    def test_a_fallback_spawn_row_has_no_kind(self):
+        ledger.spawn("s1", "fallback", self.decide("general-purpose", LOOKUP), None)
+        self.assertNotIn("kind", ledger.read()[0])
+
+    def test_rows_are_read_from_an_explicit_path(self):
+        other = Path(self.tmp.name) / "elsewhere.jsonl"
+        other.write_text(json.dumps({"ts": "2099-01-01T00:00:00+00:00", "event": "spawn"}) + "\nnot json\n")
+        self.assertEqual(ledger.read(path=other), [{"ts": "2099-01-01T00:00:00+00:00", "event": "spawn"}])
+        self.assertEqual(ledger.read(), [])
+
+    def test_a_malformed_usage_writes_no_row(self):
+        for usage in ({"input_tokens": 1}, "x", None, {"model": 5}):
+            ledger.usage(cfg.load_config(), "s1", None, usage, None)
+        self.assertEqual(ledger.read(), [])
+
+    def test_a_turn_is_unpriced_if_any_request_is_unpriced(self):
+        config = cfg.load_config()
+        usage = {"model": "claude-opus-5-5", "input_tokens": 1_000_000}
+        requests = [usage, {"model": "claude-unknown-9", "input_tokens": 5}, "junk"]
+        self.assertIsNone(ledger.turn_cost(config, usage, requests))
+        self.assertEqual(ledger.turn_cost(config, usage, requests[:1]), 4.0)
+        self.assertEqual(ledger.turn_cost(config, usage, None), 4.0)
+
+
 class LongPromptPricing(Sandbox):
     """Haiku 5.5 bills a request whose prompt is over 100,000 tokens at 5x, each request on its own:
     https://platform.claude.com/docs/en/about-claude/pricing.md#long-context-pricing"""
@@ -2361,8 +2407,7 @@ class LongPromptPricing(Sandbox):
 
     def cost(self, usage: dict, requests: list | None = None):
         payload = {"session_id": "s1", "agent_id": "a1", "usage": usage}
-        hooks.mod_usage({**payload, "requests": requests} if requests is not None else payload)
-        return self.ledger()[-1]["cost_usd"]
+        return ledger.turn_cost(cfg.load_config(), usage, requests)
 
     def test_a_request_over_100k_pays_the_long_prompt_rate(self):
         short = self.haiku(input_tokens=10_000, cache_write=20_000, output_tokens=1_000)  # 30K prompt

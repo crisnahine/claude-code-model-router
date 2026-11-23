@@ -287,22 +287,3 @@ def append_ledger(entry: dict) -> None:
                 write_atomic(path, "".join(lines[len(lines) // 2:]))
     except OSError:
         pass
-
-
-def read_ledger(days: int | None = None) -> list[dict]:
-    rows: list[dict] = []
-    cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days) if days else None
-    try:
-        lines = ledger_path().read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return rows
-    for line in lines:
-        try:
-            row = json.loads(line)
-            if cutoff and _dt.datetime.fromisoformat(row["ts"]) < cutoff:
-                continue
-        except (KeyError, ValueError, TypeError):
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows

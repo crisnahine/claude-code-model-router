@@ -64,7 +64,8 @@ Why the mod comes first: it reaches teammates and workflow stages, which the `Ag
 | `upstream` | Compares releases, the docs index, model aliases and model status with what was last reviewed |
 | `settings` | The plugin's options and the environment facts routing depends on, resolved once per hook call or command |
 | `allowlist` | Which registry models `availableModels` and `deniedModels` leave open, from the settings layers the mod reads from the engine, with the settings files for any source the mod didn't send; the managed files always apply as a floor |
-| `hooks`, `cli`, `report`, `store`, `config` | Handlers for settings hooks and mod calls, commands, tables, state files, and the registry and override files |
+| `ledger` | One append per row kind, the turn Spend rule, and reading rows from the data folder or a given path |
+| `hooks`, `cli`, `report`, `store`, `config` | Handlers for settings hooks and mod calls, commands, tables, state files and the ledger file, and the registry and override files |
 
 All of it is standard-library Python, plus the one TypeScript file the engine runs. No module names a model: the shipped models, and aliases such as `best`, are entries in `config/models.json`.
 

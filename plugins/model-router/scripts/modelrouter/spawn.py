@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from . import agents, allowlist, calls, gates, learn, registry, request, router, session, settings, store
+from . import agents, allowlist, calls, gates, learn, ledger, registry, request, router, session, settings, store
 from . import config as cfg
 
 # Adjusts a decision before it is logged and recorded: (decision, call key, config, settings).
@@ -54,14 +54,8 @@ def run(hook_input: dict, via: str, guard: Guard | None = None) -> dict:
         guard(decision, key, config, options)
     session_id = hook_input.get("session_id")
     action = decision["action"]
-    row = {"event": "spawn", "via": via, "session": session_id, "agent": decision["agent"], "action": action,
-           "level": decision["level"], "signals": decision["signals"],
-           "model": None if action == "deny" else decision["model"] or decision["was"],
-           "was": decision["was"], "effort": decision["effort"], "source": decision["source"],
-           "escalated_from": decision["escalated_from"], "reason": decision["reason"], "description": str(found.tool_input.get("description") or "")[:120]}
-    if via == "mod":
-        row["kind"] = hook_input.get("kind") or "subagent"
-    store.append_ledger(row)
+    ledger.spawn(session_id, via, decision, found.tool_input.get("description"),
+                 kind=(hook_input.get("kind") or "subagent") if via == "mod" else None)
     if action != "deny":
         try:
             _record(config, session_id, key, decision, found.raises,

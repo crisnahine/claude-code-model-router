@@ -2,7 +2,7 @@
 fall back to what the last SessionStart recorded."""
 from __future__ import annotations
 
-from . import agents, allowlist, health, ladder, learn, registry, store, upstream
+from . import agents, allowlist, health, ladder, learn, ledger, registry, store, upstream
 from . import config as cfg
 from .profile import profile_call, profile_prompt
 from .settings import Settings
@@ -164,7 +164,7 @@ def status(changes: dict | None) -> str:
 def usage_data(days: int, exact: bool = False) -> dict:
     """What the ledger shows for the last `days` days, in the `model-router.usage/1` shape.
     Dollars are rounded to six places unless `exact`, which the table uses."""
-    rows = store.read_ledger(days)
+    rows = ledger.read(days)
     by_agent: dict[str, dict] = {}
 
     def row(agent: object) -> dict:

@@ -56,9 +56,9 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Request**: one prompt from the user and the turns it starts. Redos count only within one request. Its record is kept by `request.py`.
 
-**Ledger**: the append-only log of every spawn, result, turn effort and turn's spend, with the reason for each decision.
+**Ledger** (`ledger.py`): the append-only log of every spawn, result, turn effort and turn's spend, with the reason for each decision.
 
-**Spend**: a request's tokens priced at list price from the registry, summed per turn. A model with no price is counted as unpriced, never priced as its neighbour.
+**Spend** (`ledger.py`): a request's tokens priced at list price from the registry, summed per turn. A model with no price is counted as unpriced, never priced as its neighbour.
 
 **Gate**: a check before a turn ends (`gates.py`). One asks for a test run when code in the project changed and nothing checked it. The other asks for a stronger agent's review when a weak session model answered a hard request alone. Each asks once and then lets go. The test-run check needs the `verify_gate` option on (off by default); the stronger-agent check is on unless `strong_agent_gate` is off.
 

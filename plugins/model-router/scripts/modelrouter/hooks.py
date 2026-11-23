@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import time
 
-from . import allowlist, calls, gates, health, intake, ladder, learn, registry, request, session, settings, spawn, store, upstream
+from . import allowlist, calls, gates, health, intake, ladder, learn, ledger, registry, request, session, settings, spawn, store, upstream
 from . import config as cfg
 
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bno)\s+(?:\w+\s+){0,3}$")
@@ -231,10 +231,8 @@ def post_agent(hook_input: dict) -> dict | None:
         health.ran(asked, ran_as, registry.family(config, ran_as), settings.resolve(config).force)
     except OSError:
         pass
-    store.append_ledger({
-        "event": "result", "session": hook_input.get("session_id"),
-        "agent": calls.identify(tool_input)[0], "asked": asked,
-        "resolved_model": ran_as, "status": response.get("status"), "total_tokens": response.get("totalTokens")})
+    ledger.result(hook_input.get("session_id"), calls.identify(tool_input)[0], asked, ran_as,
+                  response.get("status"), response.get("totalTokens"))
     return None
 
 
@@ -263,14 +261,12 @@ def agent_failed(hook_input: dict) -> dict | None:
         # The mod sent the family's newest ID, and this provider refused it: the alias runs
         # from now on, and the ID is tried again after the outage.
         health.failed(newest, error, newest=True)
-        store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
-                             "agent": tool_input.get("subagent_type"), "model": newest})
+        ledger.model_error(hook_input.get("session_id"), tool_input.get("subagent_type"), newest)
         return _context("PostToolUseFailure", (
             f"{newest} isn't available here. Re-issue this agent call unchanged: it now runs on the "
             f"'{asked}' alias, as Claude Code resolves it for this provider."))
     fails = health.failed(asked, error)
-    store.append_ledger({"event": "model_error", "session": hook_input.get("session_id"),
-                         "agent": tool_input.get("subagent_type"), "model": asked})
+    ledger.model_error(hook_input.get("session_id"), tool_input.get("subagent_type"), asked)
     cap = settings.resolve(config).cap
     allowed = allowlist.read(hook_input.get("session_id"), cfg.project_dir(hook_input))
     usable = [n for n in registry.available(config, cap, allowed=allowed) if n != asked]
@@ -392,40 +388,16 @@ def mod_turn(hook_input: dict) -> dict | None:
     effort = ((config.get("main") or {}).get("effort") or {}).get(level)
     if effort not in cfg.EFFORTS:
         return None
-    store.append_ledger({"event": "turn", "session": hook_input.get("session_id"), "level": level,
-                         "effort": effort, **({"command": seen.command} if seen.command else {})})
+    ledger.turn(session_id, level, effort, seen.command)
     return {"level": level, "effort": effort}
-
-
-def _tokens(usage: dict) -> dict:
-    tokens = {k: int(usage.get(k) or 0) for k in
-              ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
-    if "ephemeral_1h_input_tokens" in usage:
-        tokens["ephemeral_1h_input_tokens"] = int(usage.get("ephemeral_1h_input_tokens") or 0)
-    return tokens
-
-
-def _usage(value: object) -> bool:
-    return isinstance(value, dict) and isinstance(value.get("model"), str)
 
 
 def mod_usage(hook_input: dict) -> dict | None:
     """One ledger row per turn, its cost the sum of its requests, each priced on its own."""
     usage = hook_input.get("usage")
-    if not _usage(usage):
-        return None
-    config = cfg.load_config(hook_input)
-    tokens = _tokens(usage)
-    requests = hook_input.get("requests")
-    requests = [r for r in requests if _usage(r)] if isinstance(requests, list) else []
-    if requests:
-        costs = [registry.cost(config, r["model"], _tokens(r)) for r in requests]
-        spent = None if None in costs else round(sum(costs), 6)
-    else:
-        spent = registry.cost(config, usage["model"], tokens, whole_turn=True)
-    store.append_ledger({"event": "usage", "session": hook_input.get("session_id"),
-                         "agent_id": hook_input.get("agent_id"), "model": usage["model"], **tokens,
-                         "cost_usd": spent})
+    if isinstance(usage, dict) and isinstance(usage.get("model"), str):
+        ledger.usage(cfg.load_config(hook_input), hook_input.get("session_id"), hook_input.get("agent_id"),
+                     usage, hook_input.get("requests"))
     return None
 
 
