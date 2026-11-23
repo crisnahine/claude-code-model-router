@@ -118,13 +118,13 @@ Two changes made the difference. The request's strongest spawn is no longer writ
 | File | Bytes after 1,000 calls | Bounded | What bounds it |
 | :- | -: | :- | :- |
 | `ledger.jsonl` | 798,174 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
-| `routes.json` | 206,970 | yes | The 200 most recently written sessions (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
+| `routes.json` | 206,970 | yes | The sessions written in the last day (`calls.KEPT_FOR`), at most the 200 most recently written (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
 | `done.json` | 114,486 | yes | Same |
 | `prompts.json` | 5,140 | yes | The 200 most recently written sessions |
 | `edits.json` | 3,120 | yes | Same |
 | `sessions.json` | 2,911 | yes | Same |
 | `mod.json` | 1,738 | yes | Same |
-| `launched.json` | 1,619 | yes | Same |
+| `launched.json` | 1,619 | yes | Same as `routes.json` |
 | `pending.json` | 816 | yes | Same |
 | `state.json` | 713 | yes | One record of options |
 | `learned.json` | 144 | yes | One entry per level |

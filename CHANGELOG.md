@@ -80,6 +80,7 @@ Run `/model-router:models reset` once after upgrading. A level's learned raise n
 - A bench check can no longer be fooled by a `unittest.py` the agent leaves in the work directory: every check runs isolated, and the root-cause checks run the work directory's tests in a child that imports `unittest` first.
 - A bench run that errored during execution with a zero cost counts as an unknown cost and books the whole budget. A run the API refused for a rate limit or a lost network keeps its zero, since nothing started.
 - A state write no longer goes ahead without its lock. When the lock stayed held past two seconds the hook wrote anyway, and could drop another hook's update to the same file, such as a redo record, a health strike or a vote. A busy lock is now tried again with backoff for up to one second, then that write is skipped and counted. `models --reset` says when another process held the file.
+- Spawns issued together no longer lose their routes to a full `routes.json`. It kept 200 sessions of up to 100 routes each, and every spawn rewrites the whole file under its lock, so at 2.8 MB 20 of 50 spawns started at once waited past the lock's one second and skipped their route. Such a spawn's redo didn't climb a level, its result was checked against the wrong model, and a swapped run couldn't take its count back. `routes.json`, `launched.json` and `done.json` now drop a session a day after its last write there.
 
 ### Security
 
