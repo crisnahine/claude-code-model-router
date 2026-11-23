@@ -2488,9 +2488,10 @@ class Health(Sandbox):
         store.update_state(lambda s: s.update(health={"opus": {"unavailable_until": "soon", "outages": -3},
                                                       "sonnet": "x", "haiku": {"last_model": 5},
                                                       "fable": {"unavailable_until": float("nan"), "outages": float("inf")},
-                                                      "saga": {"unavailable_until": float("inf"), "outages": float("nan")}}))
+                                                      "saga": {"unavailable_until": float("inf"), "outages": float("nan")},
+                                                      "huge": {"unavailable_until": 10 ** 400, "outages": 10 ** 400}}))
         seen = health.load()
-        self.assertEqual([seen.healthy(n) for n in ("opus", "sonnet", "haiku", "fable", "saga")], [True] * 5)
+        self.assertEqual([seen.healthy(n) for n in ("opus", "sonnet", "haiku", "fable", "saga", "huge")], [True] * 6)
         self.assertEqual(seen.seen_running(), [])
 
     def test_the_record_keeps_its_shape(self):
