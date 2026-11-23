@@ -126,9 +126,14 @@ def main(argv: list[str] | None = None) -> int:
         changes = upstream.pending()
         print(json.dumps(changes, indent=2) if args.json else report.status(changes))
     elif args.cmd == "ack":
-        version = upstream.ack()
-        if version is None:
+        acked = upstream.ack()
+        if acked is None:
             print("Nothing cached yet; run refresh first.")
+            return 1
+        version, status = acked
+        if status != "saved":
+            left = {"newer": _NEWER, "busy": _BUSY}.get(status, "left as is: {} could not be read or written.")
+            print("Review mark " + left.format("upstream.json"))
             return 1
         print(f"Marked Claude Code {version} and the current docs index as reviewed.")
     elif args.cmd == "usage":

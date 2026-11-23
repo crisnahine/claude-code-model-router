@@ -4099,6 +4099,15 @@ class Upstream(Sandbox):
         self.assertIn("as reviewed", self.out("ack"))
         self.assertFalse(upstream.has_pending(upstream.pending()))
 
+    def test_ack_says_so_when_the_review_mark_was_not_written(self):
+        store.save_json(upstream.path(), {"schema": 99, "cache": {"claude_code_version": "2.1.330"}})
+        self.assertEqual(self.out("ack"), "Review mark left as is: upstream.json was written by a newer Model Router release.\n")
+        store.save_json(upstream.path(), {"cache": {"claude_code_version": "2.1.330"}})
+        Path(f"{upstream.path()}.lock").write_text("other")  # held by someone else, and fresh
+        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
+            self.assertEqual(cli.main(["ack"]), 1)
+        self.assertNotIn("reviewed", json.loads(upstream.path().read_text()))
+
     def test_cache_ttl_skips_the_network(self):
         store.save_json(upstream.path(), {"cache": {"fetched_at": 10**12}})
         with mock.patch.object(upstream, "http_get", side_effect=AssertionError("network used")):
