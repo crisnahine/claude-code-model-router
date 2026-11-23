@@ -1120,6 +1120,39 @@ class Sessions(unittest.TestCase):
             self.assertEqual(list((home / "projects").iterdir()), [])  # the shared folder is still cleaned up
 
 
+class Stopped(unittest.TestCase):
+    """Once claude returns the run is paid for: whatever stops the steps after it, its row is written and its
+    scratch and session folders are removed."""
+
+    def stop(self, error: type, *argv: str, **patches) -> tuple[list[dict], list[Path], list[Path]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, scratch, out = Path(tmp) / "config", Path(tmp) / "scratch", Path(tmp) / "out.jsonl"
+            scratch.mkdir()
+            (Path(tmp) / "a-file").write_text("not a folder")
+            argv = tuple(a.replace("<tmp>", tmp) for a in argv)
+            with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}), \
+                    unittest.mock.patch.object(tempfile, "tempdir", str(scratch)), \
+                    (unittest.mock.patch.multiple(run, **patches) if patches else contextlib.nullcontext()), \
+                    self.assertRaises(error):
+                run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "1", "--max-total", "3",
+                          "--claude", *stub(tmp, SESSION_STUB), "--out", str(out), *argv])
+            rows = [json.loads(line) for line in out.read_text().splitlines()] if out.exists() else []
+            sessions = list((home / "projects").iterdir()) if (home / "projects").exists() else []
+            return rows, list(scratch.iterdir()), sessions
+
+    def test_an_interrupt_while_grading_still_writes_the_row_and_cleans_up(self):
+        rows, scratch, sessions = self.stop(KeyboardInterrupt, grade=unittest.mock.Mock(side_effect=KeyboardInterrupt))
+        self.assertEqual([(r["grade"]["verdict"], r["total_cost_usd"], r["passed"]) for r in rows],
+                         [("broken", 0.01, False)])
+        self.assertIn("KeyboardInterrupt", rows[0]["grade"]["reason"])
+        self.assertEqual((scratch, sessions), ([], []))
+
+    def test_a_keep_folder_that_cannot_be_written_keeps_the_graded_row_and_cleans_up(self):
+        rows, scratch, sessions = self.stop(OSError, "--keep", str(Path("<tmp>") / "a-file"))
+        self.assertEqual([(r["grade"]["verdict"], r["total_cost_usd"], "kept" in r) for r in rows], [("pass", 0.01, False)])
+        self.assertEqual((scratch, sessions), ([], []))
+
+
 class SuiteCoverage(unittest.TestCase):
     """Every task class and baseline the suite claims to cover is there and can't be passed by gaming."""
 

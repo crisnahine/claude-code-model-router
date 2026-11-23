@@ -367,26 +367,38 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
     except ValueError:
         result = {}
     answer = result.get("result") or ""
-    (scratch / "answer.txt").write_text(answer, encoding="utf-8")
-    # Read before grading: the check also runs the code the run left, which could rewrite these files.
-    ledger = ledger_rows(env) if config.get("plugin") else None
-    types = agent_types(work, env) if config.get("plugin") else {}
-    final = final_answer(task["dir"] / "repo", work, answer)
-    graded = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
-    kept = None
-    if options.get("keep"):
-        # The work the run left, its answer, the router's own data and ledger, and the session's transcripts.
-        kept = Path(options["keep"]) / scratch.name
-        shutil.copytree(scratch, kept, symlinks=True)
-        if session_dir(work, env).is_dir():
-            shutil.copytree(session_dir(work, env), kept / "session", symlinks=True)
+    ledger, types, final, graded, kept, stopped = None, {}, None, None, None, None
+    # The run is paid for now: whatever stops the steps below, its row is still built and its scratch removed.
+    try:
+        (scratch / "answer.txt").write_text(answer, encoding="utf-8")
+        # Read before grading: the check also runs the code the run left, which could rewrite these files.
+        ledger = ledger_rows(env) if config.get("plugin") else None
+        types = agent_types(work, env) if config.get("plugin") else {}
+        final = final_answer(task["dir"] / "repo", work, answer)
+        graded = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
+        if options.get("keep"):
+            # The work the run left, its answer, the router's own data and ledger, and the session's transcripts.
+            target = Path(options["keep"]) / scratch.name
+            shutil.copytree(scratch, target, symlinks=True)
+            if session_dir(work, env).is_dir():
+                shutil.copytree(session_dir(work, env), target / "session", symlinks=True)
+            kept = target
+    except BaseException as exc:
+        stopped = exc
     session_removed = _forget_session(session_dir(work, env))
     shutil.rmtree(scratch, ignore_errors=True)
-    return record(task, config, options, registry_config, result,
-                  {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr,
-                   "grade": graded._asdict(), "final_answer": final,
-                   "plugin_state": plugin_state, "ledger": ledger, "agent_types": types,
-                   "session_dir_removed": session_removed, "kept": kept and str(kept)})
+    if graded is None:
+        graded = Grade("broken", f"the bench stopped before the check finished: {stopped!r}",
+                       check_hash(task["dir"] / "check.py"))
+    row = record(task, config, options, registry_config, result,
+                 {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr,
+                  "grade": graded._asdict(), "final_answer": final,
+                  "plugin_state": plugin_state, "ledger": ledger, "agent_types": types,
+                  "session_dir_removed": session_removed, "kept": kept and str(kept)})
+    if stopped is not None:
+        stopped.row = row  # main writes it before the bench stops
+        raise stopped
+    return row
 
 
 def record(task: dict, config: dict, options: dict, registry_config: Registry, result: dict, facts: dict) -> dict:
@@ -473,7 +485,19 @@ def main(argv: list[str] | None = None) -> int:
             if not can_start(spent, args.budget, args.max_total):  # a retry spends too
                 print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
                 return 1
-            row = run_one(task, config, options, registry_config)
+            try:
+                row = run_one(task, config, options, registry_config)
+            except BaseException as exc:
+                row = getattr(exc, "row", None)
+                if row is not None:  # the run was paid for, so it goes on record where the loop would put it
+                    row["run"], reason = run_index, refusal(row)
+                    if reason:
+                        row["limited_reason"] = reason
+                    path = args.out.parent / "limited" / args.out.name if reason else args.out
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with path.open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps(row, sort_keys=True) + "\n")
+                raise
             row["run"] = run_index
             spent += row["total_cost_usd"]
             reason = refusal(row)
