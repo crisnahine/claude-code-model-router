@@ -50,7 +50,7 @@ No, Model Router never switches the main conversation's model, because each mode
 
 ## Does Model Router work on Amazon Bedrock, Google Vertex AI and Microsoft Foundry?
 
-Yes, routing works on third-party providers through the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves for your provider. Some providers resolve an alias to an older model, so on those the mod starts routed work on the family's newest model (`claude-opus-5-5`, `claude-sonnet-5-5` or `claude-haiku-5-5`) and falls back to the alias if the provider refuses it. Setting `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` keeps the alias. The main conversation's effort is left alone on Bedrock, Vertex and Foundry, where an effort change would re-read the context uncached ([guide](GUIDE.md#third-party-providers)).
+Yes, routing works on third-party providers through the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves for your provider. Some providers resolve an alias to an older model, so on those the mod starts routed work on the family's newest model (`claude-opus-5-5`, `claude-sonnet-5-5` or `claude-haiku-5-5`) and falls back to the alias if the provider refuses it. Setting `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` keeps the alias. The main conversation's effort is left alone on Bedrock and Vertex, where an effort change would re-read the context uncached, and on Foundry and behind a custom gateway, where the router can't confirm the cache survives it ([guide](GUIDE.md#third-party-providers)).
 
 ## What does Model Router store on my machine, and what leaves it?
 
