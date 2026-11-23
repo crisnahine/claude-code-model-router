@@ -26,27 +26,26 @@ The latest results, with the commands that produce them. Replace this file's num
 | `typecheck` | success | the mod type-checks with `tsc` | 9 s |
 | `validate` | success | marketplace and plugin both "Validation passed" | 12 s |
 
-The test counts come from each job's log (`gh run view --job <id> --log`), and the times from each job's start and end. Windows skips more because the stub `claude` the bench tests use is a shebang script. Commits after `b836649` have not run in CI yet. CI runs on pushes to `main` and on pull requests, so a work branch is covered once it has an open PR.
+The test counts come from each job's log (`gh run view --job <id> --log`), and the times from each job's start and end. Windows skipped more there because the stub `claude` the bench tests used was a shebang script; the stub now runs as `python stub.py` on every OS. Commits after `b836649` have not run in CI yet. CI runs on pushes to `main` and on pull requests, so a work branch is covered once it has an open PR.
 
 ## Local
 
-Run 2026-11-23 on macOS (Darwin 27.2.0), on `27b94e6` and the commits after it, up to `3c92f05`, on branch `deepen-modules`, plus the change that updated this file.
+Run 2026-11-23 on macOS (Darwin 27.2.0), on `ff24018` with `deepen-bench` (`2d3b008`) merged in, on branch `deepen-modules`.
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 483 tests OK |
-| Unit tests, the system Python 3.9.6 | `/usr/bin/python3 -m unittest discover -s tests` | 483 tests OK |
-| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 483 tests OK |
-| Unit tests, Python 3.15.2 | `python3.15 -m unittest discover -s tests` | 483 tests OK |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` | 545 tests OK |
+| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 545 tests OK |
 | Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 23 of 23 pass |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
 | Docs assets | `python3 tools/docs_assets.py --check` | Every generated asset, page head and site block matches the script |
+| Benchmarks page | `python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check` | The committed page matches the results |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 | Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78; run 2026-11-23 on `9b27510` |
 
-The 483 local tests are 413 in `tests/test_model_router.py`, 58 in `tests/test_bench.py`, 4 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 5 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 250 briefs over-routed (0.8%), budget 2%; 4 known under-routes" on each of the interpreters run. CI's run on `8ec8eec` had 180.
+The 545 local tests are 413 in `tests/test_model_router.py`, 108 in `tests/test_bench.py`, 4 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 17 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 250 briefs over-routed (0.8%), budget 2%; 4 known under-routes" on each of the interpreters run. CI's run on `8ec8eec` had 180.
 
 Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
 

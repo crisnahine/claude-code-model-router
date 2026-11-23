@@ -79,7 +79,7 @@ def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[l
         # The run's own plugins root, so the router's data never lands in the folder other sessions share.
         env["CLAUDE_CODE_PLUGIN_CACHE_DIR"] = options["plugins_root"]
     env.update(config.get("env", {}))
-    cmd = [options["claude"], "-p", prompt, "--output-format", "json",
+    cmd = [*options["claude"], "-p", prompt, "--output-format", "json",
            "--model", config.get("model", options["model"]),
            "--max-budget-usd", str(options["budget"]), "--setting-sources", "project", "--strict-mcp-config",
            "--permission-mode", "dontAsk"]
@@ -125,6 +125,26 @@ def rate_limited(row: dict) -> bool:
     return refusal(row) is not None
 
 
+SECRET_NAMES = ("TOKEN", "KEY", "SECRET", "PASSWORD")
+
+
+def grading_env(env: dict) -> dict:
+    """The environment a check runs in: the harness's own, minus credentials, since the check's process also runs
+    the code a run left in the work dir."""
+    return {k: v for k, v in env.items()
+            if not (any(w in k.upper() for w in SECRET_NAMES) or k.upper().startswith(("ANTHROPIC_", "CLAUDE_CODE_OAUTH")))}
+
+
+def grade(check: Path, work: Path, answer: Path, timeout: int = 120) -> bool:
+    """Whether the task's check passes. -I keeps the check's folder and the work dir off sys.path and ignores
+    PYTHON* variables, so code a run left behind can't shadow what the check imports."""
+    try:
+        return subprocess.run([sys.executable, "-I", str(check), str(work), str(answer)], capture_output=True,
+                              env=grading_env(dict(os.environ)), timeout=timeout).returncode == 0
+    except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
+        return False
+
+
 def can_start(spent: float, budget: float, max_total: float) -> bool:
     # A run can pass --max-budget-usd by one response plus what running subagents spend before they stop, so
     # this leaves room for twice its cap. That is a margin, not a bound.
@@ -147,25 +167,38 @@ def session_dir(work: Path, env: dict) -> Path:
     return home / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(work.resolve()))
 
 
-def agent_costs(work: Path, env: dict) -> dict | None:
-    """A router run's spend by agent type, from the router's own ledger: its usage rows carry the subagent's
-    agent_id, or none for the main loop, and the saved session names each subagent's type in
-    subagents/agent-<id>.meta.json (as Claude Code 2.1.330 writes it). None when the run kept no ledger."""
+def ledger_rows(env: dict) -> list[dict] | None:
+    """The router's ledger rows for a run, in order; None when it kept no ledger. Lines that aren't objects are skipped."""
     ledger = plugin_data_dir(env) / "ledger.jsonl"
     if not ledger.is_file():
         return None
+    rows = []
+    for line in ledger.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def agent_types(work: Path, env: dict) -> dict[str, str]:
+    """Each subagent's type by id, from the saved session's subagents/agent-<id>.meta.json (as Claude Code 2.1.330
+    writes it)."""
     types = {}
     for meta in session_dir(work, env).glob("*/subagents/agent-*.meta.json"):
         try:
             types[meta.name[len("agent-"):-len(".meta.json")]] = json.loads(meta.read_text(encoding="utf-8"))["agentType"]
         except (OSError, ValueError, KeyError):
             continue
+    return types
+
+
+def spend_by_agent(ledger: list[dict], types: dict[str, str]) -> dict[str, float]:
+    """A router run's spend by agent type: usage rows carry the subagent's agent_id, or none for the main loop."""
     spend: dict = {}
-    for line in ledger.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
+    for row in ledger:
         if row.get("event") != "usage" or not isinstance(row.get("cost_usd"), (int, float)):
             continue
         who = "main" if not row.get("agent_id") else types.get(row["agent_id"], "unknown")
@@ -176,21 +209,10 @@ def agent_costs(work: Path, env: dict) -> dict | None:
 ROUTED_KEYS = ("agent", "level", "model", "effort", "escalated_from")
 
 
-def routed(env: dict) -> list | None:
-    """A router run's spawn decisions, in order, from its ledger. A key the router didn't log stays out, so an
-    older router's missing escalated_from reads as unknown rather than as no escalation."""
-    ledger = plugin_data_dir(env) / "ledger.jsonl"
-    if not ledger.is_file():
-        return None
-    out = []
-    for line in ledger.read_text(encoding="utf-8").splitlines():
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if row.get("event") == "spawn":
-            out.append({k: row[k] for k in ROUTED_KEYS if k in row})
-    return out
+def spawns(ledger: list[dict]) -> list[dict]:
+    """A router run's spawn decisions, in order. A key the router didn't log stays out, so an older router's
+    missing escalated_from reads as unknown rather than as no escalation."""
+    return [{k: row[k] for k in ROUTED_KEYS if k in row} for row in ledger if row.get("event") == "spawn"]
 
 
 def _forget_session(folder: Path) -> bool:
@@ -249,13 +271,9 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
         result = {}
     answer = result.get("result") or ""
     (scratch / "answer.txt").write_text(answer, encoding="utf-8")
-    try:
-        passed = subprocess.run([sys.executable, str(task["dir"] / "check.py"), str(work), str(scratch / "answer.txt")],
-                                capture_output=True, text=True, timeout=120).returncode == 0
-    except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
-        passed = False
-    costs = agent_costs(work, env) if config.get("plugin") else None
-    spawns = routed(env) if config.get("plugin") else None
+    passed = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
+    ledger = ledger_rows(env) if config.get("plugin") else None
+    types = agent_types(work, env) if config.get("plugin") else {}
     kept = None
     if options.get("keep"):
         # The work the run left, its answer, the router's own data and ledger, and the session's transcripts.
@@ -265,30 +283,62 @@ def run_one(task: dict, config: dict, options: dict, prices: dict) -> dict:
             shutil.copytree(session_dir(work, env), kept / "session", symlinks=True)
     session_removed = _forget_session(session_dir(work, env))
     shutil.rmtree(scratch, ignore_errors=True)
+    return record(task, config, options, prices, result,
+                  {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr, "passed": passed,
+                   "plugin_state": plugin_state, "ledger": ledger, "agent_types": types,
+                   "session_dir_removed": session_removed, "kept": kept and str(kept)})
+
+
+def record(task: dict, config: dict, options: dict, prices: dict, result: dict, facts: dict) -> dict:
+    """The row for one run, from Claude Code's parsed result and what the runner saw around the process."""
     models = {name: {k: usage.get(k) for k in ("inputTokens", "outputTokens", "cacheReadInputTokens",
                                                 "cacheCreationInputTokens", "costUSD", "costBasis")}
               for name, usage in (result.get("modelUsage") or {}).items()}
     agents = result.get("subagent_stats") or {}
     cost = result.get("total_cost_usd")
+    ledger, code = facts["ledger"], facts["exit_code"]
+    stderr = facts["stderr"][-300:] if code else ""
+    refused = refusal({"is_error": result.get("is_error"), "exit_code": code, "stderr": stderr,
+                       "api_error_status": result.get("api_error_status"), "answer": result.get("result")})
+    # A cost of 0 on error_during_execution "may be zeroed" (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md),
+    # except when the API refused the run: it never started, so nothing was spent.
+    known = isinstance(cost, (int, float)) and not (
+        result.get("subtype") == "error_during_execution" and cost == 0 and not refused)
     return {
         "schema": 1, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
         "config": config["id"],
-        "started_at": started, "claude_version": options["claude_version"],
+        "started_at": facts["started_at"], "claude_version": options["claude_version"],
         "main_model": config.get("model", options["model"]),
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
-        "plugin_state": plugin_state, "agent_costs": costs, "routed": spawns, "plugin_ref": config.get("plugin_ref"), "plugin_data_own": True, "sessions_saved": True, "session_dir_removed": session_removed,
+        "plugin_state": facts["plugin_state"],
+        "agent_costs": None if ledger is None else spend_by_agent(ledger, facts["agent_types"]),
+        "routed": None if ledger is None else spawns(ledger),
+        "plugin_ref": config.get("plugin_ref"), "plugin_data_own": True, "sessions_saved": True,
+        "session_dir_removed": facts["session_dir_removed"],
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
         "api_error_status": result.get("api_error_status"),
-        # Without a result the cost is unknown; count the whole budget so totals never understate spend.
-        "total_cost_usd": cost if isinstance(cost, (int, float)) else options["budget"],
-        "cost_known": isinstance(cost, (int, float)),
-        "duration_ms": result.get("duration_ms"), "wall_ms": wall_ms, "num_turns": result.get("num_turns"),
+        # Without a known cost, count the whole budget so totals never understate spend.
+        "total_cost_usd": cost if known else options["budget"],
+        "cost_known": known,
+        "duration_ms": result.get("duration_ms"), "duration_api_ms": result.get("duration_api_ms"),
+        "wall_ms": facts["wall_ms"], "num_turns": result.get("num_turns"),
         "models": models, "prices": {name: prices.get(name) for name in models},
         "subagents": {k: agents.get(k) for k in ("spawned", "completed", "failed", "by_type")},
         "permission_denials": [d.get("tool_name") for d in result.get("permission_denials") or []],
-        "passed": passed, "answer": answer[:2000], **({"kept": str(kept)} if kept else {}),
-        "stderr": stderr[-300:] if code else "",
+        "passed": facts["passed"], "answer": (result.get("result") or "")[:2000],
+        **({"kept": facts["kept"]} if facts["kept"] else {}),
+        "stderr": stderr,
     }
+
+
+def schedule(tasks: list[dict], configs: list[dict], runs: int, first_run: int = 0) -> list[tuple[int, dict, dict]]:
+    """Each run to make as (run number, task, configuration). The configuration order rotates with the run number
+    so none always goes first on a cold prompt cache."""
+    out = []
+    for run_index in range(first_run, first_run + runs):
+        shift = run_index % len(configs)
+        out += [(run_index, task, config) for task in tasks for config in configs[shift:] + configs[:shift]]
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -301,51 +351,47 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--budget", type=float, default=0.5, help="--max-budget-usd for each run")
     parser.add_argument("--max-total", type=float, required=True, help="stop before total spend could pass this")
     parser.add_argument("--timeout", type=int, default=900, help="seconds before a run is killed")
-    parser.add_argument("--claude", default="claude")
+    parser.add_argument("--claude", nargs="+", default=["claude"], help="the claude command as an argv prefix")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--keep", type=Path, help="copy each run's scratch folder and transcripts here")
     args = parser.parse_args(argv)
 
     tasks = [t for t in load_tasks() if not args.tasks or t["id"] in args.tasks]
     configs = [c for c in load_configs() if not args.configs or c["id"] in args.configs]
-    version = subprocess.run([args.claude, "--version"], capture_output=True, text=True).stdout.strip()
+    version = subprocess.run([*args.claude, "--version"], capture_output=True, text=True).stdout.strip()
     prices = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["prices"]
     options = {"claude": args.claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,
                "plugin_dir": str(PLUGIN), "claude_version": version, "commit": _git_head(), "dirty": _git_dirty(),
                "keep": str(args.keep) if args.keep else None}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     spent = 0.0
-    for run_index in range(args.first_run, args.first_run + args.runs):
-        # Rotate the order so no configuration always runs first on a cold prompt cache.
-        shift = run_index % len(configs)
-        for task in tasks:
-            for config in configs[shift:] + configs[:shift]:
-                if not can_start(spent, args.budget, args.max_total):
-                    print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
-                    return 1
-                begin = time.time()
-                for attempt in range(LIMIT_RETRIES + 1):
-                    row = run_one(task, config, options, prices)
-                    row["run"] = run_index
-                    spent += row["total_cost_usd"]
-                    if not rate_limited(row):
-                        break
-                    row["limited_reason"] = refusal(row)
-                    # Kept apart, outside results/*.jsonl, so the spend is on record but never a failed task.
-                    limited = args.out.parent / "limited" / args.out.name
-                    limited.parent.mkdir(parents=True, exist_ok=True)
-                    with limited.open("a", encoding="utf-8") as fh:
-                        fh.write(json.dumps(row, sort_keys=True) + "\n")
-                    if attempt == LIMIT_RETRIES:
-                        print(f"stopped: still rate or usage limited after {LIMIT_RETRIES} pauses, "
-                              f"${spent:.4f} spent", file=sys.stderr)
-                        return 2
-                    print(f"{task['id']} {config['id']}: rate or usage limited, pausing", file=sys.stderr)
-                    time.sleep(LIMIT_PAUSE * 2 ** attempt)
-                with args.out.open("a", encoding="utf-8") as fh:
-                    fh.write(json.dumps(row, sort_keys=True) + "\n")
-                print(f"{task['id']} {config['id']} run {run_index}: passed={row['passed']} "
-                      f"${row['total_cost_usd']:.4f} {time.time() - begin:.0f}s, total ${spent:.4f}")
+    for run_index, task, config in schedule(tasks, configs, args.runs, args.first_run):
+        if not can_start(spent, args.budget, args.max_total):
+            print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
+            return 1
+        begin = time.time()
+        for attempt in range(LIMIT_RETRIES + 1):
+            row = run_one(task, config, options, prices)
+            row["run"] = run_index
+            spent += row["total_cost_usd"]
+            if not rate_limited(row):
+                break
+            row["limited_reason"] = refusal(row)
+            # Kept apart, outside results/*.jsonl, so the spend is on record but never a failed task.
+            limited = args.out.parent / "limited" / args.out.name
+            limited.parent.mkdir(parents=True, exist_ok=True)
+            with limited.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(row, sort_keys=True) + "\n")
+            if attempt == LIMIT_RETRIES:
+                print(f"stopped: still rate or usage limited after {LIMIT_RETRIES} pauses, "
+                      f"${spent:.4f} spent", file=sys.stderr)
+                return 2
+            print(f"{task['id']} {config['id']}: rate or usage limited, pausing", file=sys.stderr)
+            time.sleep(LIMIT_PAUSE * 2 ** attempt)
+        with args.out.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, sort_keys=True) + "\n")
+        print(f"{task['id']} {config['id']} run {run_index}: passed={row['passed']} "
+              f"${row['total_cost_usd']:.4f} {time.time() - begin:.0f}s, total ${spent:.4f}")
     return 0
 
 

@@ -403,21 +403,21 @@ footer nav { display: flex; flex-wrap: wrap; gap: 18px; }
 <section id="results">
   <div class="wrap">
     <h2>Does it reduce Claude Code cost?</h2>
-    <p class="intro">On an Opus 5.5 session the router cost less per solved task than Claude Code's defaults in seven of eight task classes, but opusplan and every subagent on Haiku cost less still, so no class is a win against the best baseline. On a Sonnet session it is behind the best baseline in seven of eight (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/BENCHMARKS.md">benchmarks</a>).</p>
+    <p class="intro">On an Opus 5.5 session the router cost less per solved task than Claude Code's defaults in <!-- bench:opus.below.defaults -->7<!-- /bench --> of <!-- bench:opus.classes -->8<!-- /bench --> task classes, but opusplan and every subagent on Haiku cost less still, so no class is a win against the best baseline. On a Sonnet session it is behind the best baseline in <!-- bench:sonnet.status.FAIL -->7<!-- /bench --> of <!-- bench:sonnet.classes -->8<!-- /bench --> (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/BENCHMARKS.md">benchmarks</a>).</p>
     <div class="facts">
-      <div class="fact"><b>$0.119</b><span>per solved task with the router on an Opus 5.5 session, 21% less than the defaults' $0.152, 80 of 80 runs solved each</span></div>
-      <div class="fact"><b>8 of 8</b><span>task classes on Opus where a cheaper baseline still wins (FAIL): opusplan, or every subagent on Haiku</span></div>
-      <div class="fact"><b>7 of 8</b><span>task classes on Sonnet where the router costs more than the best baseline (FAIL), 7 to 63% more</span></div>
+      <div class="fact"><b><!-- bench:opus.pooled.plugin-next -->$0.119<!-- /bench --></b><span>per solved task with the router on an Opus 5.5 session, <!-- bench:opus.pooled_less.defaults -->21<!-- /bench -->% less than the defaults' <!-- bench:opus.pooled.defaults -->$0.152<!-- /bench -->, <!-- bench:opus.solved.defaults -->80 of 80<!-- /bench --> runs solved each</span></div>
+      <div class="fact"><b><!-- bench:opus.status.FAIL -->8<!-- /bench --> of <!-- bench:opus.classes -->8<!-- /bench --></b><span>task classes on Opus where a cheaper baseline still wins (FAIL): opusplan, or every subagent on Haiku</span></div>
+      <div class="fact"><b><!-- bench:sonnet.status.FAIL -->7<!-- /bench --> of <!-- bench:sonnet.classes -->8<!-- /bench --></b><span>task classes on Sonnet where the router costs more than the best baseline (FAIL), <!-- bench:sonnet.behind.min -->7<!-- /bench --> to <!-- bench:sonnet.behind.max -->63<!-- /bench -->% more</span></div>
     </div>
     <figure>
       <div class="figure">
         <picture>
           <source media="(max-width: 600px)" srcset="assets/benchmark-phone.svg">
-          <img src="assets/benchmark.svg" width="920" height="1366" loading="lazy" alt="Cost per solved task by task class, from docs/BENCHMARKS.md, 10 runs per class and configuration. On an Opus 5.5 session the router cost less than Claude Code's defaults in seven classes, for example lookup $0.0630 against $0.0989, but more than the cheapest baseline in all eight (FAIL): opusplan, which runs Sonnet throughout when headless, in six classes, and every subagent on Haiku in root cause and research, for example lookup $0.0630 against $0.0498 for opusplan. On a Sonnet session the router is cheapest only in lookup ($0.0363 against $0.0479, PASS) and costs more than the best baseline in the other seven (FAIL), from 7% more in root cause to 63% more in design.">
+          <img src="assets/benchmark.svg" width="920" height="1366" loading="lazy" alt="Cost per solved task by task class, from docs/BENCHMARKS.md, 10 runs per class and configuration. On an Opus 5.5 session the router cost less than Claude Code's defaults in 7 classes, for example lookup $0.0630 against $0.0989, but more than the cheapest baseline in all 8 (FAIL): opusplan, which runs Sonnet throughout when headless, in 6 classes, and every subagent on Haiku in root cause and research, for example lookup $0.0630 against $0.0498 for opusplan. On a Sonnet session the router is cheapest only in lookup ($0.0363 against $0.0479, PASS) and costs more than the best baseline in the other 7 (FAIL), from 7% more in root cause to 63% more in design.">
         </picture>
       </div>
     </figure>
-    <p class="note">The router ran the routing code at commit 780ee86, beside every baseline, 10 runs per class and configuration. On these tasks Haiku subagents and a Sonnet main loop solve nearly every run, so the router's stronger picks cost more without a pass-rate gain to show here. A harder task tier and the fast priority come next on the roadmap. The project claims "cheapest" only for a benchmark row marked PASS.</p>
+    <p class="note">The router ran the routing code at commit <!-- bench:opus.commit -->780ee86<!-- /bench -->, beside every baseline, <!-- bench:per_cell -->10<!-- /bench --> runs per class and configuration. On these tasks Haiku subagents and a Sonnet main loop solve nearly every run, so the router's stronger picks cost more without a pass-rate gain to show here. A harder task tier and the fast priority come next on the roadmap. The project claims "cheapest" only for a benchmark row marked PASS.</p>
   </div>
 </section>
 

@@ -33,7 +33,7 @@ docs/FAQ.md                    questions and answers
 docs/GUIDE.md                  commands, options, precedence, limits and compatibility in full
 docs/assets/                   logo, banners, badges and diagrams, and BRAND.md
 tools/traceability.py          counts the requirement statuses in docs/TRACEABILITY.md
-tools/docs_assets.py           writes the docs' SVGs, page heads, the site's asset copies and CITATION.cff
+tools/docs_assets.py           writes the docs' SVGs, page heads, benchmark figures, the site's asset copies and CITATION.cff
 docs/BENCHMARKS.md             cost and quality results against Claude Code without the plugin
 bench/                         the benchmark: pinned tasks, configurations, runner and analysis (not shipped)
 site/                          the project site, sitemap, robots.txt and llms.txt; a workflow deploys it to GitHub Pages from main once Pages is on
@@ -54,6 +54,7 @@ claude plugin validate --strict plugins/model-router
 python3 tools/traceability.py
 sh tests/mod/typecheck.sh
 python3 tools/docs_assets.py --check
+python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check
 ```
 
 `sh tests/mod/typecheck.sh` type-checks the mod and its test with `tsc` against Claude Code's published mod API types, pinned to a commit, with the tsconfig in `tests/mod`, outside the plugin folder; CI runs it too. To check against the types your installed Claude Code writes, see [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md). A change to routing reruns `claude plugin eval plugins/model-router --trust-plugin`; it runs live models, so record what it cost.
@@ -68,7 +69,7 @@ The routing evals also run free in CI. Each case under `plugins/model-router/eva
 - A claim about Claude Code or a model comes from the newest official docs (`code.claude.com/docs`, `platform.claude.com/docs`) or the installed binary, with the link. Anything without a primary source is marked UNCONFIRMED in `docs/research/` and nothing is built on it.
 - A change updates every document it makes wrong, in the same commit. When it changes a requirement's status, update its row in [docs/TRACEABILITY.md](docs/TRACEABILITY.md), run `python3 tools/traceability.py`, and paste its output over the "Summary:" line. `tests/test_traceability.py` fails until they agree.
 - A new module or concept gets a term in [GLOSSARY.md](GLOSSARY.md).
-- Docs images, page heads, the site's asset copies and `CITATION.cff` come from `tools/docs_assets.py`. Change the script, run it, and keep `--check` passing. [docs/assets/BRAND.md](docs/assets/BRAND.md) has the palette and how to add a banner.
+- Docs images, page heads, the site's asset copies and `CITATION.cff` come from `tools/docs_assets.py`. Change the script, run it, and keep `--check` passing. It also fills the benchmark figures marked `<!-- bench:KEY -->value<!-- /bench -->` in README.md, docs/FAQ.md, docs/TRACEABILITY.md and the site from `bench/analyze.py`'s summary, so a figure changes by rerunning analyze, never by hand. [docs/assets/BRAND.md](docs/assets/BRAND.md) has the palette and how to add a banner.
 - A change to the shape of `config/models.json`, a `model-router.json` override, a state file, a `--json` output or a plugin option follows the policy in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#compatibility): a breaking change bumps that shape's version and keeps the old one readable.
 - Code comments explain a reason the code can't show, in a line. No ticket numbers, no history of the change.
 

@@ -6,6 +6,7 @@ Run: python3 tools/docs_assets.py            write everything
 """
 from __future__ import annotations
 
+import functools
 import html
 import json
 import re
@@ -312,8 +313,6 @@ def with_cards(current: str) -> str:
         before, rest = current.split(CARDS_START, 1)
         return before + cards() + rest.split(CARDS_END, 1)[1]
     return current
-# Written by bench/analyze.py instead, so this script only checks that page's head.
-GENERATED_ELSEWHERE = {"docs/BENCHMARKS.md"}
 
 
 def banner(slug, title, question, icon, group) -> str:
@@ -901,31 +900,32 @@ BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(config id, 
         ("opusplan", "opusplan (runs Sonnet when headless)", "r4"),
     ]),
 }
-CELL = re.compile(r"(\d+) of (\d+) solved .*?\$([\d.]+) per solved")
+@functools.lru_cache(maxsize=1)
+def bench_summary() -> dict:
+    sys.path.insert(0, str(ROOT / "bench"))
+    import analyze
+    return analyze.summary_data(analyze.load(analyze.default_paths()))
 
 
 def bench_data():
-    page = (ROOT / "docs" / "BENCHMARKS.md").read_text(encoding="utf-8")
-    head = re.search(r"(\d[\d,]*) runs, \$[\d.]+ at list price, on ([\d-]+)", page)
+    data = bench_summary()
+    by_model = {s["model"]: s for s in data["sessions"]}
     sessions = []
     for session, (heading, series) in BENCH_SERIES.items():
-        section = page.split(f"## Results: session model `{session}`", 1)
-        if len(section) < 2:
-            raise SystemExit(f"docs/BENCHMARKS.md has no results table for {session}")
-        table = [ln for ln in section[1].split("\n## ")[0].split("### ")[0].splitlines() if ln.startswith("|")]
-        cols = [c.strip() for c in table[0].strip("|").split("|")]
+        if session not in by_model:
+            raise SystemExit(f"bench results have no runs for {session}")
         rows = []
-        for line in table[2:]:
-            cells = [c.strip() for c in line.strip("|").split("|")]
+        for cls in by_model[session]["classes"]:
             values = []
             for config, _, _ in series:
-                if config not in cols:
-                    raise SystemExit(f"docs/BENCHMARKS.md has no {config} column for {session}; update BENCH_SERIES")
-                m = CELL.search(cells[cols.index(config)])
-                values.append((int(m.group(1)), int(m.group(2)), float(m.group(3))) if m else None)
-            rows.append((cells[0], values, cells[-1]))
+                cell = cls["configs"].get(config)
+                if cell is None:
+                    raise SystemExit(f"bench results have no {config} runs for {session}; update BENCH_SERIES")
+                cps = cell["cost_per_solved"]
+                values.append((cell["solved"], cell["runs"], None if cps is None else float(f"{cps:.4f}")))
+            rows.append((cls["class"], values, cls["status"]))
         sessions.append((heading, series, rows))
-    return sessions, head.group(1), head.group(2)
+    return sessions, str(data["runs"]), data["dates"][0]
 
 
 def status_summary(rows) -> str:
@@ -937,7 +937,7 @@ def status_summary(rows) -> str:
 
 def bench_chart(phone=False) -> str:
     sessions, runs, date = bench_data()
-    peak = max(v[2] for _, _, rows in sessions for _, vals, _ in rows for v in vals if v)
+    peak = max((v[2] for _, _, rows in sessions for _, vals, _ in rows for v in vals if v[2] is not None), default=0)
     axis = max(0.1, -(-peak // 0.1) * 0.1)
     w = 520 if phone else 920
     label_w = 0 if phone else 150
@@ -983,18 +983,19 @@ def bench_chart(phone=False) -> str:
                 room("benchmark.svg: class name", 32 + width_of(cls_name, 13.5, bold=True), bar_x - 8)
             for k, v in enumerate(vals):
                 by = y + k * (bh + gap)
-                if not v:
-                    out.append(text(bar_x, by + bh - 1, "not run", "mono mut", 11))
-                    continue
                 solved, total, cost = v
                 runs_per_cell.add(total)
+                if cost is None:
+                    out.append(text(bar_x, by + bh - 1, f"none solved ({solved} of {total})", "mono mut", 11))
+                    continue
                 bw = max(2.0, bar_w * cost / axis)
                 out.append(f'<rect x="{bar_x}" y="{by}" width="{bw:.1f}" height="{bh}" rx="3" '
                            f'class="{series[k][2]} bar" style="animation-delay:{delay * 0.04 + k * 0.05:.2f}s"/>')
                 out.append(text(bar_x + bw + 8, by + bh - 1.5, f"${cost:.4f} ({solved} of {total})", "mono mut",
                                 12.5 if phone else 11))
             delay += 1
-            bits = [f"{series[k][1]} ${v[2]:.4f} ({v[0]} of {v[1]} solved)" for k, v in enumerate(vals) if v]
+            bits = [f"{series[k][1]} " + (f"${v[2]:.4f} ({v[0]} of {v[1]} solved)" if v[2] is not None
+                                          else f"none solved ({v[0]} of {v[1]})") for k, v in enumerate(vals)]
             parts.append(f"{heading}, {cls_name}, {status}: " + ", ".join(bits))
         y0 = bottom + 80
     each = " or ".join(str(n) for n in sorted(runs_per_cell))
@@ -1029,6 +1030,139 @@ def social_preview() -> str:
     return svg(w, h, "Model Router social preview", label, body, theme="dark")
 
 
+# ---------------------------------------------------------------- the headline figures in the docs
+
+BENCH_SPAN = re.compile(r"<!-- bench:([\w.-]+) -->(.*?)<!-- /bench -->")
+SESSION_NAMES = {"claude-opus-5-5": "opus", "sonnet": "sonnet"}
+CLASS_WORDS = {"security-review": "security review", "root-cause": "root cause"}
+BENCH_ALT = (
+    "Cost per solved task by task class, from docs/BENCHMARKS.md, {per_cell} runs per class and configuration. "
+    "On an Opus 5.5 session the router cost less than Claude Code's defaults in {opus.below.defaults} classes, "
+    "for example lookup {opus.cell.lookup.plugin-next} against {opus.cell.lookup.defaults}, but more than the "
+    "cheapest baseline in all {opus.status.FAIL} (FAIL): opusplan, which runs Sonnet throughout when headless, in "
+    "{opus.best_count.opusplan} classes, and every subagent on Haiku in {opus.best.haiku} and "
+    "{opus.best.haiku-high}, for example lookup {opus.cell.lookup.plugin-next} against "
+    "{opus.cell.lookup.opusplan} for opusplan. On a Sonnet session the router is cheapest only in "
+    "{sonnet.pass_classes} ({sonnet.cell.lookup.plugin-next} against {sonnet.cell.lookup.defaults}, PASS) and "
+    "costs more than the best baseline in the other {sonnet.status.FAIL} (FAIL), from {sonnet.behind.min}% more in "
+    "{sonnet.behind.min_class} to {sonnet.behind.max}% more in {sonnet.behind.max_class}.")
+
+
+def class_word(k: str) -> str:
+    return CLASS_WORDS.get(k, k)
+
+
+def words(items: list) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def pct(x: float) -> str:
+    return f"{100 * x:.0f}"
+
+
+def session_figures(name: str, session: dict) -> dict:
+    f = {}
+    router = session["router"]
+    classes = session["classes"]
+    if session.get("plugin_ref"):
+        f["commit"] = session["plugin_ref"]
+        f["commit_code"] = f"`{session['plugin_ref']}`"  # the span must sit outside the code span
+    f["classes"] = str(len(classes))
+    for status in ("PASS", "FAIL", "PARTIAL"):
+        f[f"status.{status}"] = str(sum(c["status"] == status for c in classes))
+    passed = [class_word(c["class"]) for c in classes if c["status"] == "PASS"]
+    if passed:
+        f["pass_classes"] = words(passed)
+    cps = lambda c, cfg: c["configs"][cfg]["cost_per_solved"]  # noqa: E731
+    for c in classes:
+        for cfg, cell in c["configs"].items():
+            v = cell["cost_per_solved"]
+            f[f"cell.{c['class']}.{cfg}"] = "n/a" if v is None else f"${v:.4f}"
+            f[f"cell_solved.{c['class']}.{cfg}"] = f"{cell['solved']} of {cell['runs']}"
+    pooled = session["pooled"]
+    for cfg, p in pooled.items():
+        f[f"runs.{cfg}"] = str(p["runs"])
+        f[f"solved.{cfg}"] = f"{p['solved']} of {p['runs']}"
+        if p["solved"]:
+            f[f"pooled.{cfg}"] = f"${p['cost_usd'] / p['solved']:.3f}"
+    pr = pooled.get(router)
+    pooled_router = pr["cost_usd"] / pr["solved"] if pr and pr["solved"] else None
+    baselines = sorted({cfg for c in classes for cfg in c["differences"]})
+    for cfg in baselines:
+        if pooled_router is not None and cfg in pooled and pooled[cfg]["solved"]:
+            f[f"pooled_less.{cfg}"] = pct(1 - pooled_router / (pooled[cfg]["cost_usd"] / pooled[cfg]["solved"]))
+        diffs = [(c, c["differences"][cfg]) for c in classes if cfg in c["differences"]]
+        below = [c for c, (lo, hi) in diffs if hi < 0]
+        f[f"below.{cfg}"] = str(len(below))
+        level = [class_word(c["class"]) for c, (lo, hi) in diffs if lo <= 0 <= hi]
+        if level:
+            f[f"level.{cfg}"] = words(level)
+        less = [1 - cps(c, router) / cps(c, cfg) for c in below if cps(c, cfg) and cps(c, router) is not None]
+        if less:
+            f[f"less.{cfg}.min"], f[f"less.{cfg}.max"] = pct(min(less)), pct(max(less))
+        best = [class_word(c["class"]) for c in classes if c["best_baseline"] == cfg]
+        if best:
+            f[f"best.{cfg}"], f[f"best_count.{cfg}"] = words(best), str(len(best))
+    behind = [(cps(c, router) / cps(c, c["best_baseline"]) - 1, class_word(c["class"]))
+              for c in classes if c["status"] == "FAIL" and c["best_baseline"]
+              and cps(c, router) is not None and cps(c, c["best_baseline"])]
+    if behind:
+        lo, hi = min(behind, key=lambda b: b[0]), max(behind, key=lambda b: b[0])
+        f["behind.min"], f["behind.min_class"] = pct(lo[0]), lo[1]
+        f["behind.max"], f["behind.max_class"] = pct(hi[0]), hi[1]
+    f["trace"] = "; ".join(class_trace(c, router) for c in classes)
+    return {f"{name}.{k}": v for k, v in f.items()}
+
+
+def class_trace(c: dict, router: str) -> str:
+    def usd(v):
+        return "n/a" if v is None else f"${v:.3f}"
+
+    def missed(cell):
+        return f", {cell['solved']} of {cell['runs']} solved" if cell["solved"] < cell["runs"] else ""
+
+    cell = c["configs"][router]
+    key = lambda cfg: (c["configs"][cfg]["cost_per_solved"] is None, c["configs"][cfg]["cost_per_solved"] or 0, cfg)  # noqa: E731
+    base = ", ".join(
+        f"`{cfg}` {usd(c['configs'][cfg]['cost_per_solved'])} "
+        f"({c['differences'][cfg][0]:+.3f} to {c['differences'][cfg][1]:+.3f}{missed(c['configs'][cfg])})"
+        for cfg in sorted(c["differences"], key=key))
+    return f"{class_word(c['class'])} {c['status']} (router {usd(cell['cost_per_solved'])}{missed(cell)}; {base})"
+
+
+def bench_figures(data: dict) -> dict:
+    f = {"runs": f"{data['runs']:,}", "usd": f"${data['usd']:,.2f}",
+         "dates": " to ".join(dict.fromkeys(data["dates"])),
+         "claude": ", ".join(v.replace(" (Claude Code)", "") for v in data["claude_versions"]),
+         "per_cell": " or ".join(str(n) for n in sorted({
+             cell["runs"] for s in data["sessions"] for c in s["classes"] for cell in c["configs"].values()}))}
+    for s in data["sessions"]:
+        if s["model"] in SESSION_NAMES:
+            f.update(session_figures(SESSION_NAMES[s["model"]], s))
+    return f
+
+
+def fill(template: str, figures: dict, where: str) -> str:
+    def one(m):
+        if m.group(1) not in figures:
+            raise SystemExit(f"{where}: unknown benchmark figure {m.group(1)}")
+        return figures[m.group(1)]
+    return re.sub(r"\{([\w.-]+)\}", one, template)
+
+
+def with_figures(path: str, text: str, figures: dict) -> str:
+    def one(m):
+        if m.group(1) not in figures:
+            raise SystemExit(f"{path}: unknown benchmark figure {m.group(1)}")
+        return f"<!-- bench:{m.group(1)} -->{figures[m.group(1)]}<!-- /bench -->"
+    return BENCH_SPAN.sub(one, text)
+
+
+def bench_alt(page: str, figures: dict) -> str:
+    alt = fill(BENCH_ALT, figures, "benchmark figure alt text")
+    return re.sub(r'(benchmark\.svg"[^>]*? alt=")[^"]*"', lambda m: m.group(1) + alt + '"', page)
+
+
 # ---------------------------------------------------------------- the site
 
 FAQ_HTML = ("<!-- FAQ, written by tools/docs_assets.py from docs/FAQ.md. -->", "<!-- End of FAQ. -->")
@@ -1036,10 +1170,9 @@ FAQ_LD = ("<!-- FAQ data, written by tools/docs_assets.py from docs/FAQ.md. -->"
 SITE_URL = re.compile(r"<!-- SITE_URL: (\S+) -->")
 
 
-def faq_entries() -> list:
-    text_ = (ROOT / "docs" / "FAQ.md").read_text(encoding="utf-8")
+def faq_entries(text: str) -> list:
     out = []
-    for block in text_.split("\n## ")[1:]:
+    for block in BENCH_SPAN.sub(lambda m: m.group(2), text).split("\n## ")[1:]:
         question, _, answer = block.partition("\n")
         out.append((question.strip(), " ".join(answer.split())))
     return out
@@ -1065,16 +1198,16 @@ def md_plain(s: str) -> str:
     return s.replace("`", "")
 
 
-def site_faq_html() -> str:
+def site_faq_html(faq: str) -> str:
     items = [f'<details{" open" if i == 0 else ""}><summary><h3>{esc(q)}</h3></summary><p>{md_html(a)}</p></details>'
-             for i, (q, a) in enumerate(faq_entries())]
+             for i, (q, a) in enumerate(faq_entries(faq))]
     return FAQ_HTML[0] + "\n" + "\n".join(items) + "\n" + FAQ_HTML[1]
 
 
-def site_faq_ld() -> str:
+def site_faq_ld(faq: str) -> str:
     data = {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
         {"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": md_plain(a)}}
-        for q, a in faq_entries()]}
+        for q, a in faq_entries(faq)]}
     return (FAQ_LD[0] + '\n<script type="application/ld+json">\n' + json.dumps(data, indent=2, ensure_ascii=False)
             + "\n</script>\n" + FAQ_LD[1])
 
@@ -1084,7 +1217,7 @@ def between(current: str, marks: tuple, body: str) -> str:
     return before + body + rest.split(marks[1], 1)[1]
 
 
-def site_files() -> dict:
+def site_files(faq: str, figures: dict) -> dict:
     index = SITE / "index.html"
     if not index.exists():
         return {}
@@ -1098,11 +1231,12 @@ def site_files() -> dict:
     if old and old != url:
         head, sep, tail = page.partition("-->")
         page = head + sep + tail.replace(old, url)
-    page = between(page, FAQ_HTML, site_faq_html())
-    page = between(page, FAQ_LD, site_faq_ld())
+    page = between(page, FAQ_HTML, site_faq_html(faq))
+    page = between(page, FAQ_LD, site_faq_ld(faq))
     v, day = version(), release_date(version())
     page = re.sub(r'"softwareVersion": "[^"]*"', f'"softwareVersion": "{v}"', page)
     page = badge_alt(page, v)
+    page = bench_alt(with_figures("site/index.html", page, figures), figures)
     page = re.sub(r'"datePublished": "[^"]*"', f'"datePublished": "{day}"', page)
     page = re.sub(r'Version [^,]+, released <time datetime="[^"]*">[^<]*</time>',
                   f'Version {v}, released <time datetime="{day}">{day}</time>', page)
@@ -1170,6 +1304,7 @@ SITE_ASSETS = ["logo-mark.svg", "logo.svg", "routing-call.svg", "badge-version.s
 def build() -> dict:
     LAYOUT.clear()
     check_ladder_against_registry()
+    figures = bench_figures(bench_summary())
     v = version()
     files = {}
     assets = {}
@@ -1191,16 +1326,18 @@ def build() -> dict:
     for name, body in assets.items():
         files[f"docs/assets/{name}"] = body
     for path, *_ in PAGES:
-        if path in GENERATED_ELSEWHERE:
-            continue
         p = ROOT / path
         if p.exists():
             files[path] = with_head(path, p.read_text(encoding="utf-8"))
             if path == "docs/README.md":
                 files[path] = with_cards(files[path])
-    files["README.md"] = badge_alt((ROOT / "README.md").read_text(encoding="utf-8"), v)
+    readme = badge_alt((ROOT / "README.md").read_text(encoding="utf-8"), v)
+    files["README.md"] = bench_alt(readme, figures)
+    for path in ("README.md", "docs/FAQ.md", "docs/TRACEABILITY.md"):
+        if path in files:
+            files[path] = with_figures(path, files[path], figures)
     files["CITATION.cff"] = citation(v)
-    files.update(site_files())
+    files.update(site_files(files.get("docs/FAQ.md", ""), figures))
     return files
 
 
@@ -1263,10 +1400,6 @@ def main(argv: list) -> int:
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(body.encode("utf-8"))
-    for path in GENERATED_ELSEWHERE:
-        text_now = (ROOT / path).read_text(encoding="utf-8")
-        if not text_now.startswith(page_head(path)):
-            problems.append(f"{path}: its head differs from page_head(); fix the header in bench/analyze.py")
     for name in SITE_ASSETS:
         src, dst = ASSETS / name, SITE / "assets" / name
         if src.exists() and (not dst.exists() or dst.read_bytes() != src.read_bytes()):
