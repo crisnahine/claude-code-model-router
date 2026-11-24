@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
@@ -84,6 +85,32 @@ class ExactModelKept(Sandbox):
         health.failed("claude-opus-5-5", "API Error: 404 not_found_error", newest=True)
         self.assertEqual(self.spawn("designer")["model"], "opus")
         self.assertEqual(self.pre("designer", "design the store")["updatedInput"]["model"], "opus")
+
+    def test_modeloverrides_still_keep_an_exact_id_the_agent_names(self):
+        # Claude Code maps a named ID through modelOverrides whether or not the router keeps it.
+        arn = "arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/sonnet-55"
+        cases = [({"CLAUDE_CODE_USE_BEDROCK": "1"}, "claude-sonnet-5-5", {"claude-sonnet-5-5": arn}),
+                 ({"CLAUDE_CODE_USE_FOUNDRY": "1"}, "claude-opus-5-5", {"claude-opus-5-5": "opus-55-prod"}),
+                 ({"CLAUDE_CODE_USE_FOUNDRY": "1"}, "claude-opus-5-5", {"claude-haiku-4-5": "my-haiku"})]
+        for n, (env, pinned, overrides) in enumerate(cases):
+            with self.subTest(pinned=pinned, overrides=overrides), mock.patch.dict(os.environ, env):
+                self.agent("pinned", pinned)
+                answer = self.spawn("pinned", f"o{n}", settings={"user": {"modelOverrides": overrides}})
+                self.assertEqual(answer["model"], pinned)
+                self.assertNotIn("model", self.pre("pinned", "design the store", session_id=f"o{n}")["updatedInput"])
+
+    def test_a_redo_on_the_same_family_keeps_the_exact_model(self):
+        self.agent("reader", "sonnet[1m]")
+        self.spawn("reader", tool_use_id="x1")
+        hooks.post_agent({**self.call("reader", "design the store"), "tool_use_id": "x1",
+                          "tool_response": {"resolvedModel": "claude-sonnet-5-5[1m]", "status": "completed",
+                                            "totalTokens": 10}})
+        redo = modpath.spawn({"session_id": "s1", "cwd": str(self.project), "kind": "subagent",
+                              "parent_model": "claude-opus-5-5", "tool_use_id": "x2",
+                              "tool_input": {"subagent_type": "reader", "prompt": "design the store",
+                                             "description": "Redo: design"}})
+        self.assertEqual(redo["model"], "sonnet[1m]")
+        self.assertEqual(redo["effort"], "high")
 
 
 class SpawnAnswer(Sandbox):

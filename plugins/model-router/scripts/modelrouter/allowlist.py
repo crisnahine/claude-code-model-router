@@ -147,6 +147,11 @@ class Allowlist:
         modelOverrides, which Claude Code applies to the ID itself."""
         return self._lists_permit(reg, name, model_id) and not self.overrides
 
+    def permits_named(self, reg: Registry, name: str, model_id: str) -> bool:
+        """Whether a full ID the caller or the agent named may run. Only the lists count: Claude Code
+        maps that ID through modelOverrides whether the router sends it or leaves the call alone."""
+        return self._lists_permit(reg, name, model_id)
+
     def effort_cap(self, reg: Registry, name: str | None) -> str | None:
         """The highest effort `name`'s family may run at, or None for no cap. The lowest cap of any
         source applies, and a source's modelSettings entry for the model replaces its top-level

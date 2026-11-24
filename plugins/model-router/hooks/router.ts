@@ -134,6 +134,11 @@ function capped(model: string | undefined, maxTier: string | undefined): string 
   return cap >= 0 && named > cap ? TIERS[cap] : undefined
 }
 
+// routing_mode as the runtime reads it (config.parse_mode): advise, from older releases, is off.
+function routing(opts: Record<string, string>): boolean {
+  return !['off', 'advise'].includes((opts.CLAUDE_PLUGIN_OPTION_ROUTING_MODE ?? '').trim().toLowerCase())
+}
+
 function remember<V>(map: Map<string, V>, key: string, value: V): void {
   map.set(key, value)
   if (map.size > KEPT) map.delete(map.keys().next().value as string)
@@ -200,8 +205,8 @@ export const register: Register = (on, options) => {
         ...(effort ? { effort } : {}),
       },
     }))
-    // Without an answer neither path routed this call, so only the cap can still be held.
-    const model = pick ? pick.model : capped(e.model, opts.CLAUDE_PLUGIN_OPTION_MAX_TIER)
+    // Without an answer neither path routed this call, so only the cap can still be held, and only while routing.
+    const model = pick ? pick.model : routing(opts) ? capped(e.model, opts.CLAUDE_PLUGIN_OPTION_MAX_TIER) : undefined
     const mine: Want | null = pick?.effort ? { effort: pick.effort, raiseOnly: !!e.workflow } : null
     const efforts = inFlight.get(e.prompt) ?? []
     efforts.push(mine)

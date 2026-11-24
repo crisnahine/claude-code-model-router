@@ -81,7 +81,7 @@ def exact(snap: settings.Snapshot, decision: dict) -> str | None:
     version = decision["version"]
     if decision["action"] != "rewrite" or not version:
         return None
-    permitted = snap.allowed.permits_id(snap.registry, decision["model"], version) and snap.health.healthy(version)
+    permitted = snap.allowed.permits_named(snap.registry, decision["model"], version) and snap.health.healthy(version)
     return version if permitted else None
 
 

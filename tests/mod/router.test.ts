@@ -389,6 +389,16 @@ test('a call whose spawn round trip fails still runs within max_tier, and one th
   assert.equal(seen.at(-1), 'opus')
 })
 
+test('with routing off, a call whose spawn round trip fails runs as named', async () => {
+  const seen: unknown[] = []
+  const next = (x: any) => { seen.push(x.model); return { agentId: 'a1' } }
+  for (const routing_mode of ['off', 'advise']) {
+    const mod = load({ 'mod-spawn': { exitCode: 1, stdout: '' } }, { routing_mode, max_tier: 'sonnet' })
+    await mod.spawn(spawnEvent({ model: 'opus' }), next)
+  }
+  assert.deepEqual(seen, ['opus', 'opus'])
+})
+
 test('with no Python the launcher answers nothing, so no call is marked', async () => {
   const none = { stdout: '' }
   const mod = load({ 'mod-start': none, 'mod-usage': none, 'mod-spawn': none })

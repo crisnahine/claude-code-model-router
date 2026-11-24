@@ -172,8 +172,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     named = tool_input.get("model") if source == "caller" else own_model if source == "pin" else None
     clamped = reg.clamp(target, usable)
     final = reg.past_lag(clamped, usable, facts.lagging) if chosen else clamped
-    # The caller's exact ID only survives a cap that keeps its family.
-    out["version"] = named if isinstance(named, str) and named.lower() != final and reg.family(named) == final else None
+    out["version"] = _version(reg, named, final)
     if clamped != target:
         why += f"; {target} is over the cap or unavailable here"
     if final != clamped:
@@ -216,6 +215,8 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
     effort, floor_note = _session_floor(ladder.at_most(reg, final, effort) if free else None, final, facts)
     effort, capped_note = capped(effort, facts.effort_caps.get(final))
     came = "the run that came back before" if facts.on_record else "the run it would get unmarked"
+    # Left alone, the call runs on its own model, else the agent's.
+    out["version"] = _version(reg, facts.tool_input.get("model") or (facts.definition or {}).get("model"), final)
     out.update(model=final, source="router", level=ladder.rung(reg, final, effort), escalated_from=done_level,
                reason=f"a redo of {came} ({ran} at {before or 'its default effort'}): {how}"
                + ("" if free else ", at the effort the environment sets") + clamp_note + floor_note + capped_note + held)
@@ -223,6 +224,11 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
         return out
     out.update(action="rewrite", effort=effort)
     return out
+
+
+def _version(reg: Registry, named: object, final: str | None) -> str | None:
+    """The caller's or the agent's exact ID, which only survives a cap that keeps its family."""
+    return named if isinstance(named, str) and named.lower() != final and reg.family(named) == final else None
 
 
 def _pinned(out: Decision, pin: str, scope: str, pinned: str | None, level: Level | None, effort: str | None,
