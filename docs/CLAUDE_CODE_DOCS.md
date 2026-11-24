@@ -65,7 +65,7 @@ Last checked against the live docs on 2026-11-24, on Claude Code 2.1.330 and 2.1
 | The docs say | Model Router | Checked by |
 | :- | :- | :- |
 | `engines` and `userConfig` are manifest fields, and `network` names the hosts a plugin reaches ([manifest](https://code.claude.com/docs/en/plugins/manifest-reference.md#fields)) | Requires Claude Code 2.1.329 or later and offers its options in `/config`. It reaches no host, so it sets no `network` | `claude plugin validate --strict` (S9.3) |
-| Options reach hooks as `CLAUDE_PLUGIN_OPTION_<KEY>` and skill content as `${user_config.KEY}`, and `${CLAUDE_PLUGIN_DATA}` is kept across updates ([user configuration](https://code.claude.com/docs/en/plugins/manifest-reference.md#reference-a-saved-value)) | Hooks read the options there, the `models` skill passes them to the CLI as flags, and its state stays in its data folder | Node test "plugin options reach the CLI env" (S2.8) |
+| Options reach hooks as `CLAUDE_PLUGIN_OPTION_<KEY>` and skill content as `${user_config.KEY}`, and `${CLAUDE_PLUGIN_DATA}` is kept across updates ([user configuration](https://code.claude.com/docs/en/plugins/manifest-reference.md#reference-a-saved-value)) | Hooks read the options there, the `models` and `route` skills pass them to the CLI as flags, and its state stays in its data folder | Node test "plugin options reach the CLI env" (S2.8) |
 | `plugin validate --strict` treats warnings as errors, and `plugin eval` runs live cases ([CLI reference](https://code.claude.com/docs/en/plugins/cli-reference.md#plugin-validate)) | CI runs `validate` on every change and `eval` as a manual job | S9.3, S9.4 |
 
 ## Skills and agents

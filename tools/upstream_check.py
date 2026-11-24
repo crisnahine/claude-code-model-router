@@ -11,6 +11,7 @@ import hashlib
 import http.client
 import json
 import re
+import sys
 import time
 import urllib.request
 from pathlib import Path
@@ -184,7 +185,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--write", action="store_true", help="overwrite the baseline with live data")
     parser.add_argument("--json-out", type=Path, help="also write the changes, and whether any is pending, as JSON")
     args = parser.parse_args(argv)
-    live = fetch()
+    try:
+        live = fetch()
+    except (OSError, ValueError, http.client.HTTPException) as exc:
+        # The refresh skill shows this line; a `!` command that exits non-zero aborts the skill instead.
+        fails = bool(args.write or args.json_out)
+        print(f"Upstream check failed: {exc}", file=sys.stderr if fails else sys.stdout)
+        return int(fails)
     if args.write:
         baseline = snapshot(live)
         args.baseline.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8")

@@ -464,19 +464,51 @@ class SkillGrants(unittest.TestCase):
                 for reset in ("reset", "--reset"):
                     self.assertFalse(self.allowed(rules, f"{self.PREFIX} models {reset}"), name)
 
-    # The skills whose commands read the options. Each passes every one, as ${user_config.KEY} after the
-    # subcommand (https://code.claude.com/docs/en/plugins/manifest-reference.md#reference-a-saved-value).
-    OPTION_SKILLS = ("models",)
-
     def test_each_skill_command_that_reads_the_options_passes_them_all(self):
-        flags = [f'--{key.replace("_", "-")}="${{user_config.{key}}}"' for key in settings.OPTIONS]
-        for name in self.OPTION_SKILLS:
-            text = (PLUGIN / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
-            runs = re.findall(r"!`%s ([a-z-]+) ([^`]*)`" % re.escape(self.PREFIX), text)
-            self.assertTrue(runs, name)
-            for command, rest in runs:
-                self.assertIn(command, ("policy", "models", "explain"), name)
-                self.assertEqual(rest.split()[:len(flags)], flags, name)
+        # As ${user_config.KEY} after the subcommand
+        # (https://code.claude.com/docs/en/plugins/manifest-reference.md#reference-a-saved-value).
+        flags = [f"--{key.replace('_', '-')}='${{user_config.{key}}}'" for key in settings.OPTIONS]
+        readers = set()
+        for path in (PLUGIN / "skills").glob("*/SKILL.md"):
+            text = path.read_text(encoding="utf-8")
+            for command, rest in re.findall(r"`%s (policy|models|explain)\b([^`]*)`" % re.escape(self.PREFIX), text):
+                readers.add(path.parent.name)
+                self.assertEqual(rest.split()[:len(flags)], flags, f"{path.parent.name}: {command}")
+        self.assertLessEqual({"route", "models"}, readers)
+
+
+@unittest.skipUnless(shutil.which("sh"), "needs sh")
+class SkillLines(Sandbox):
+    """Each skill's `!` line, filled in the way Claude Code fills it, runs under sh."""
+
+    SET = {"routing_mode": "off", "priority": "quality", "max_tier": "haiku", "agent_pins": "override",
+           "verify_gate": "false"}
+
+    def run_line(self, name: str, arguments: str = "", values: dict | None = None) -> subprocess.CompletedProcess:
+        text = (PLUGIN / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+        line = re.search(r"^!`([^`]*)`", text, re.M).group(1)
+        for key, value in (values or {}).items():
+            line = line.replace("${user_config.%s}" % key, value)
+        line = (line.replace("$ARGUMENTS", arguments).replace("${CLAUDE_PLUGIN_ROOT}", PLUGIN.as_posix())
+                .replace("${CLAUDE_PLUGIN_DATA}", self.data.as_posix()))
+        return subprocess.run(["sh", "-c", line], capture_output=True, text=True, env={**os.environ})
+
+    def test_the_route_skill_shows_the_options_the_user_set(self):
+        res = self.run_line("route", values=self.SET)
+        self.assertIn("Routing: **off**. Priority: **quality**. Cap: **haiku**", res.stdout)
+
+    def test_a_line_with_an_option_left_unsubstituted_still_runs_on_the_defaults(self):
+        for name in ("route", "models", "usage"):
+            res = self.run_line(name)
+            self.assertEqual(res.returncode, 0, f"{name}: {res.stderr}")
+        self.assertIn("Routing: **auto**. Priority: **balanced**. Cap: **none**", self.run_line("route").stdout)
+
+    def test_the_models_skill_shows_the_table_whatever_words_follow_it(self):
+        for arguments in ("", "json", "please reset"):
+            res = self.run_line("models", arguments, self.SET)
+            self.assertEqual(res.returncode, 0, f"{arguments!r}: {res.stderr}")
+            self.assertNotIn('"schema"', res.stdout, arguments)
+        self.assertIn("availability", self.run_line("models", "please reset", self.SET).stdout.splitlines()[0])
 
 
 class Intake(Sandbox):

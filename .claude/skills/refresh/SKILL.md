@@ -15,7 +15,7 @@ allowed-tools:
 
 ## Steps
 
-1. If the output above ends with "Nothing to review.", tell the user nothing upstream affects the plugin and stop.
+1. If the output above ends with "Nothing to review.", tell the user nothing upstream affects the plugin and stop. If it starts with "Upstream check failed", tell the user why in one line and stop.
 2. Otherwise send the list above to `model-router:docs-researcher`, starting the brief with today's date: !`date +%F`. Ask it to read each new release's entry in the changelog and each listed page, and report items that affect:
    - model aliases or new models (the registry in `plugins/model-router/config/models.json` lists the models the plugin routes to)
    - agent or skill frontmatter fields

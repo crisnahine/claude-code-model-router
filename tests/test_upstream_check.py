@@ -10,7 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -134,14 +134,32 @@ class Command(unittest.TestCase):
         self.assertIs(self.pending(), True)
         self.assertIn(DOCS + "hooks.md", out)
 
+    def failed_check(self, *argv: str, get) -> tuple[int, str, str]:
+        with mock.patch.object(up, "http_get", side_effect=get), redirect_stdout(io.StringIO()) as out, \
+                redirect_stderr(io.StringIO()) as err:
+            code = up.main(["--baseline", str(self.baseline), *argv])
+        return code, out.getvalue(), err.getvalue()
+
     def test_an_empty_feed_is_an_error_not_data(self):
         for feed in (up.CHANGELOG_PAGE, up.DOCS_INDEX, up.MODEL_CONFIG_PAGE, up.DEPRECATIONS_PAGE):
             def down(url, feed=feed):
                 return "<html>Down for maintenance</html>" if url == feed else fake(url)
 
-            with self.subTest(feed=feed), self.assertRaises(ValueError):
-                self.run_check("--write", get=down)
+            with self.subTest(feed=feed):
+                self.assertEqual(self.failed_check("--write", get=down)[0], 1)
+                self.assertEqual(self.failed_check("--json-out", str(self.changes), get=down)[0], 1)
             self.assertFalse(self.baseline.exists())
+            self.assertFalse(self.changes.exists())
+
+    def test_a_failed_check_is_one_line_in_the_report_and_fails_ci(self):
+        def offline(url):
+            raise OSError("no network")
+
+        self.run_check("--write")
+        code, out, err = self.failed_check(get=offline)
+        self.assertEqual((code, out, err), (0, "Upstream check failed: no network\n", ""))
+        code, out, err = self.failed_check("--json-out", str(self.changes), get=offline)
+        self.assertEqual((code, out, err), (1, "", "Upstream check failed: no network\n"))
 
 
 class Requests(unittest.TestCase):

@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         sub.add_parser(name)
     sub.add_parser("policy", parents=[options])
     p = sub.add_parser("models", parents=[options])
-    p.add_argument("action", nargs="?", choices=("reset",))
+    p.add_argument("action", nargs="*")  # the skill passes whatever the user typed; only reset counts
     p.add_argument("--reset", action="store_true")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("explain", parents=[options])
@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "policy":
         print(report.policy(snap))
     elif args.cmd == "models":
-        if args.reset or args.action == "reset":
+        if args.reset or "reset" in args.action:
             cleared = f"{_reset_health()}\n"
             if not args.json:
                 print(cleared)

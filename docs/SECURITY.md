@@ -52,9 +52,9 @@ New Claude Code releases, docs changes and model retirements are checked in this
 
 ## Skills
 
-Each skill's `allowed-tools` pre-approves only the launcher commands that skill runs, with the fixed `--data-dir "${CLAUDE_PLUGIN_DATA}"` prefix (the frontmatter of `skills/*/SKILL.md`): `route` runs `policy` and `explain *`, `models` runs `models *`, and `usage` runs `usage *`. A grant applies for the turn that invokes the skill (https://code.claude.com/docs/en/skills.md#pre-approve-tools-for-a-skill). Claude Code checks each part of a compound command and an output redirect against your file rules on its own (https://code.claude.com/docs/en/permissions.md), so no grant covers a write to another file. `SkillGrants.test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files` checks this.
+Each skill's `allowed-tools` pre-approves only the launcher commands that skill runs, with the fixed `--data-dir "${CLAUDE_PLUGIN_DATA}"` prefix (the frontmatter of `skills/*/SKILL.md`): `route` runs `policy *` and `explain *`, `models` runs `models *`, and `usage` runs `usage *`. A grant applies for the turn that invokes the skill (https://code.claude.com/docs/en/skills.md#pre-approve-tools-for-a-skill). Claude Code checks each part of a compound command and an output redirect against your file rules on its own (https://code.claude.com/docs/en/permissions.md), so no grant covers a write to another file. `SkillGrants.test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files` checks this.
 
-`usage` and `models` pass `$ARGUMENTS` to their `!` shell lines unquoted. Both have `disable-model-invocation: true`, so only text the user typed reaches those lines. The `models` line also passes each option as `--<option>="${user_config.<option>}"`, which Claude Code fills from your user or managed settings only, never a repository's (https://code.claude.com/docs/en/settings-reference.md#pluginconfigs).
+`usage` and `models` pass `$ARGUMENTS` to their `!` shell lines unquoted. Both have `disable-model-invocation: true`, so only text the user typed reaches those lines. The `models` and `route` lines also pass each option as `--<option>='${user_config.<option>}'`, which Claude Code fills from your user or managed settings only, never a repository's (https://code.claude.com/docs/en/settings-reference.md#pluginconfigs).
 
 ## GitHub workflows
 
