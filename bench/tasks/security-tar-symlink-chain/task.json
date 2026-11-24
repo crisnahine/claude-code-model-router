@@ -1,0 +1,6 @@
+{
+  "class": "security-review",
+  "revision": 1,
+  "posix_only": true,
+  "brief": "Plugin bundles from the marketplace and backups that users upload are both unpacked with archive.extract.safe_extract, and neither source is trusted. Review archive extraction for a way an archive can create, change or point to anything outside the folder it is unpacked into, and fix it so neither caller can be attacked that way. Keep what SECURITY.md says safe_extract promises, and keep normal archives, links included, unpacking as they do now. test_extract.py must pass, unchanged. Reply with what you found and how you fixed it."
+}

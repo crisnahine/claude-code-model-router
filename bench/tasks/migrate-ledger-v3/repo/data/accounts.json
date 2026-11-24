@@ -1,0 +1,5 @@
+{
+  "acc-ny": {"name": "Hudson Coffee Roasters", "currency": "USD", "utc_offset": "-05:00"},
+  "acc-ber": {"name": "Spree Fahrradwerkstatt", "currency": "EUR", "utc_offset": "+01:00"},
+  "acc-lon": {"name": "Thames Print Co", "currency": "GBP", "utc_offset": "+00:00"}
+}

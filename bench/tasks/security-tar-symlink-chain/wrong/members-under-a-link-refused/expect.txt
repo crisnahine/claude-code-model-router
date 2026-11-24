@@ -1,0 +1,1 @@
+a link whose target runs through another link: extracted instead of being refused

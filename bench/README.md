@@ -58,9 +58,28 @@ Each process checks only its own spend, so the shares must add up to $45 or less
 
 Cost guide: assuming these tasks cost 3 times the old ones (a guess), the pilot costs about $35. A process stops before its last runs when the real multiplier is above about 3.7 (single) or 3.2 (each $15 share); rows already written are kept.
 
+## The hard tasks
+
+Four tasks are built to tell a small model from a strong one: `cachefix-stale-across-services` (root-cause), `perf-nlogn-rewrite` and `migrate-ledger-v3` (implementation), and `security-tar-symlink-chain` (security-review). Each has a repository of about 1,000 lines over 10 or more files, a brief that gives the goal but not the cause, a test the agent can run, and a check that tries far more than that test does. For each one, a known wrong answer passes the visible test and still fails the check (`HardTasks` in `tests/test_bench.py`), and every wrong answer has an `expect.txt` naming the mistake it fails for.
+
+- The cache task's bug report points at the order service. The cause is in the shared cache's invalidation path. The check drives twelve write orders and also fails a fix that stops caching.
+- The report task checks speed. The check runs 200,000 rows in a child and fails it past 10 seconds. A correct rewrite took about 2 seconds on Python 3.9 on the machine these checks were written on, and each quadratic step left behind took minutes, so the verdict holds on any machine up to about three times slower. A slow answer costs the check up to 20 seconds.
+- The migration task's sample shows each v2 quirk once. The check runs 338 lines that hold every quirk many times over and in combination.
+- The archive task's visible tests pass as shipped. The check tries eight symlink chains, through `safe_extract` and through both of its callers, and four normal archives that must still unpack as they are.
+
+They have no runs yet, so none of them is shown to split the models. Run a calibration round before any of them counts in a comparison, for example:
+
+```bash
+python3 bench/run.py --tasks cachefix-stale-across-services perf-nlogn-rewrite migrate-ledger-v3 \
+    security-tar-symlink-chain --configs defaults haiku-high --runs 3 --budget 2 --max-total 60 \
+    --model claude-opus-5-5 --out "bench/results/pilot/hard-calibration-$(date +%F).jsonl"
+```
+
+The $2 cap per run is a guess: these repositories are bigger than any other task's. Each task expects the agent to run its visible test, so read a row's `permission_denials` before its verdict.
+
 ## Adding a task
 
-Make `tasks/<id>/` with `task.json` (`class` is one of the names in `run.CLASSES`), `repo/`, `check.py`, and `solution/` or `reference_answer`, plus a `wrong_answer` for an answer given in the reply. Give a task `wrong/` answers for each mistake it is built around, and `right/` answers for each fair form of a right one (a test fails for a task with neither a `wrong_answer` nor a `wrong/` folder). A task whose answer is one choice among candidates (a security review naming the vulnerable line) asks for a JSON file with fixed keys, so a list, a range or a second finding fails. Run `python3 -m unittest tests.test_bench`.
+Make `tasks/<id>/` with `task.json` (`class` is one of the names in `run.CLASSES`), `repo/`, `check.py`, and `solution/` or `reference_answer`, plus a `wrong_answer` for an answer given in the reply. Give a task `wrong/` answers for each mistake it is built around, and `right/` answers for each fair form of a right one (a test fails for a task with neither a `wrong_answer` nor a `wrong/` folder). A task whose answer is one choice among candidates (a security review naming the vulnerable line) asks for a JSON file with fixed keys, so a list, a range or a second finding fails. A task whose files need POSIX symlinks sets `"posix_only": true`; the tests skip its checks on Windows, and a run of it there tells nothing. Run `python3 -m unittest tests.test_bench`.
 
 A check must be deterministic. It ends with `passcheck.finish(ok, reason)`, which prints the reason a row records (18 older checks end with `sys.exit` instead, and 16 of those give no reason, so their row says "the check exited 1"). Lines that run the work dir's code sit in `with passcheck.agent_code():`, so whatever that code raises (an exit included) fails the task, while an error in the check itself exits 2. A check never catches `Exception` or `BaseException`. To import the run's code, a check adds the work dir with `passcheck.use_work`, which appends it to `sys.path` (so it can't replace a standard-library module). A `SystemExit` the run's code raises fails the task only inside `passcheck.agent_code()`. A check runs the work dir's own tests with `passcheck.tests_pass`, which returns False for a test the run removed or made unreadable, a test that hangs and output that isn't UTF-8 (a shipped test that can't be read raises, so it reads as a broken check). A check that imports the run's code shares its process, so that code can end it with exit code 0.
 

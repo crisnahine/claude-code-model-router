@@ -27,6 +27,11 @@ import passcheck  # noqa: E402
 import run  # noqa: E402
 
 
+def gradable_tasks():
+    """The tasks whose checks can run on this system: a posix_only task needs POSIX symlinks, which Windows lacks."""
+    return [t for t in run.load_tasks() if not (t.get("posix_only") and sys.platform == "win32")]
+
+
 def rows(config, cls, costs, passes):
     return [{"config": config, "class": cls, "task": f"{cls}-1", "total_cost_usd": c, "passed": p}
             for c, p in zip(costs, passes)]
@@ -925,7 +930,7 @@ class Tasks(unittest.TestCase):
         return run.grade(task["dir"] / "check.py", Path(workdir), result, timeout=60).passed
 
     def test_every_task_has_a_known_class_and_a_check_that_tells_right_from_wrong(self):
-        tasks = run.load_tasks()
+        tasks = gradable_tasks()
         self.assertGreaterEqual(len(tasks), 6)
         for cls in ("lookup", "implementation", "bugfix"):
             self.assertGreaterEqual(sum(t["class"] == cls for t in tasks), 2, cls)
@@ -985,7 +990,7 @@ class KnownAnswers(unittest.TestCase):
                 self.assertTrue(task.get("wrong_answer") is not None or overlay_dirs(task, "wrong"))
 
     def test_every_wrong_answer_fails_and_every_right_answer_passes(self):
-        for task in run.load_tasks():
+        for task in gradable_tasks():
             for kind, verdict in (("wrong", "fail"), ("right", "pass")):
                 for overlay in overlay_dirs(task, kind):
                     with self.subTest(task=task["id"], answer=f"{kind}/{overlay.name}"):
@@ -1002,6 +1007,53 @@ class KnownAnswers(unittest.TestCase):
                 for overlay in overlay_dirs(task, kind):
                     with self.subTest(task=task["id"], answer=f"{kind}/{overlay.name}"):
                         self.assertTrue(any(p.is_file() for p in overlay.rglob("*")))
+
+
+class HardTasks(unittest.TestCase):
+    """The tasks built to tell a small model from a strong one: a real repository, a test the agent can run, and a
+    check that knows more than that test."""
+
+    VISIBLE = {"cachefix-stale-across-services": "test_checkout.py", "perf-nlogn-rewrite": "test_report.py",
+               "migrate-ledger-v3": "test_migrate.py", "security-tar-symlink-chain": "test_extract.py"}
+
+    def tasks(self):
+        return {t["id"]: t for t in run.load_tasks()}
+
+    def test_each_has_a_thousand_lines_over_ten_files_and_its_visible_test(self):
+        tasks = self.tasks()
+        for task_id, test in self.VISIBLE.items():
+            with self.subTest(task=task_id):
+                files = [p for p in (tasks[task_id]["dir"] / "repo").rglob("*") if p.is_file()]
+                self.assertGreaterEqual(len(files), 10)
+                self.assertGreaterEqual(sum(len(p.read_text(encoding="utf-8").splitlines()) for p in files), 1000)
+                self.assertIn(test, {p.name for p in files})
+                self.assertIn(f'"{test}"', (tasks[task_id]["dir"] / "check.py").read_text(encoding="utf-8"))
+
+    def test_some_wrong_answer_passes_the_visible_test_and_still_fails_the_check(self):
+        tasks = {t["id"]: t for t in gradable_tasks()}
+        for task_id, test in self.VISIBLE.items():
+            if task_id not in tasks:
+                continue
+            with self.subTest(task=task_id):
+                task = tasks[task_id]
+                wrong = overlay_dirs(task, "wrong")
+                self.assertGreaterEqual(len(wrong), 2)
+
+                def visible_passes(overlay):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        work = Path(tmp) / "work"
+                        build_work(task, overlay, work)
+                        return passcheck.tests_pass(work, task["dir"] / "repo", test)
+
+                self.assertTrue(any(visible_passes(o) for o in wrong), "the visible test already catches every one")
+
+    def test_the_archive_task_is_graded_everywhere_but_windows(self):
+        everything = len(run.load_tasks())
+        for platform, kept in (("win32", False), ("linux", True), ("darwin", True)):
+            with self.subTest(platform=platform), unittest.mock.patch.object(sys, "platform", platform):
+                ids = {t["id"] for t in gradable_tasks()}
+                self.assertEqual("security-tar-symlink-chain" in ids, kept)
+                self.assertEqual(len(ids), everything - (not kept))
 
 
 STUB = '''#!/usr/bin/env python3
@@ -1668,7 +1720,7 @@ class Isolation(unittest.TestCase):
                 passcheck.tests_pass(work, shipped, "test_y.py")
 
     def test_planted_stdlib_names_cannot_fake_a_pass(self):
-        for task in run.load_tasks():
+        for task in gradable_tasks():
             with self.subTest(task=task["id"]), tempfile.TemporaryDirectory() as tmp:
                 work = Path(tmp) / "work"
                 shutil.copytree(task["dir"] / "repo", work)
