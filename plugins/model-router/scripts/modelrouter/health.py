@@ -14,7 +14,7 @@ OUTAGE_DAYS = (1, 3, 7)
 # "model" only as a word of its own: an unknown agent's error quotes names like data-modeler.
 MODEL_ERROR = re.compile(
     r"(?<![\w:-])model(?![\w-]).{0,80}(?:not[ _]found|not available|unavailable|does not exist|not supported|"
-    r"no access|not allowed|invalid|permission)|(?:not_found_error|(?:invalid|unknown) model(?![\w-])).{0,80}",
+    r"no access|not allowed|invalid|permission)|(?:not_found_error|model_not_found|(?:invalid|unknown) model(?![\w-])).{0,80}",
     re.I | re.S)
 REFUSED = "a call rewritten to this model came back without having run"
 
