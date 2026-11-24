@@ -87,7 +87,7 @@ def _record(spawned: Spawn, via: str, newest: str | None) -> None:
     kind = hook_input.get("kind") or ("teammate" if spawned.facts.teammate else learn.SUBAGENT)
     reg, current = spawned.snap.registry, request.load(session_id)
     runs_on = decision["model"] or decision["was"]
-    source = None if decision["repeat_of"] else decision["source"]  # passed through untouched: no pick, no level
+    source = learn._source(decision)
     rewrote = decision["action"] == "rewrite"
     facts = spawned.facts
     # The effort it runs at, whoever chose it, so a redo can tell it would only repeat this run.
