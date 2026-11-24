@@ -1,7 +1,9 @@
 """Pass when MISMATCHES.json lists exactly the refs that don't reconcile, each once with its kind."""
+import csv
 import importlib.util
-import json
+import re
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location("passcheck", Path(__file__).resolve().parent.parent / "passcheck.py")
@@ -9,9 +11,39 @@ passcheck = importlib.util.module_from_spec(_spec)
 sys.modules["passcheck"] = passcheck
 _spec.loader.exec_module(passcheck)
 
-WANT = {"TRX-109065": "period", "TRX-175986": "period", "TRX-200492": "amount", "TRX-221296": "missing",
-        "TRX-629108": "duplicate", "TRX-749309": "currency", "TRX-761986": "missing", "TRX-835237": "amount",
-        "TRX-869479": "amount", "TRX-978664": "sign"}
+SHIPPED = Path(__file__).resolve().parent / "repo"
+ROUNDING = Decimal("0.50")
+
+
+def kind(bank, rows):
+    """The kind RECONCILE.md gives a bank row (None for no bank row) against its GL rows, or None if they reconcile."""
+    if bank is None or not rows:
+        return "missing"
+    amount, total = Decimal(bank["amount_usd"]), sum(Decimal(r["amount_usd"]) for r in rows)
+    if abs(total) > abs(amount) + ROUNDING and any(abs(Decimal(r["amount_usd"]) - amount) <= ROUNDING for r in rows):
+        return "duplicate"
+    if abs(total - amount) <= ROUNDING:
+        return None if {r["posting_date"][:7] for r in rows} == {bank["value_date"][:7]} else "period"
+    foreign = re.search(r"WIRE .* ([\d,.]+) FX ", bank["description"])
+    if foreign and abs(abs(total) - Decimal(foreign.group(1).replace(",", ""))) <= ROUNDING:
+        return "currency"
+    return "sign" if abs(total + amount) <= ROUNDING else "amount"
+
+
+def expected():
+    with open(SHIPPED / "bank.csv", encoding="utf-8") as fh:
+        bank = {r["ref"]: r for r in csv.DictReader(fh)}
+    gl = {}
+    with open(SHIPPED / "gl.csv", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            gl.setdefault(r["ref"], []).append(r)
+    month = {r["value_date"][:7] for r in bank.values()}
+    refs = set(bank) | {ref for ref, rows in gl.items() if any(r["posting_date"][:7] in month for r in rows)}
+    kinds = {ref: kind(bank.get(ref), gl.get(ref)) for ref in refs}
+    return {ref: k for ref, k in kinds.items() if k}
+
+
+WANT = expected()
 
 
 def verdict(d):

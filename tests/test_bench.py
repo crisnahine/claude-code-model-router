@@ -2200,6 +2200,29 @@ class WorkTasks(unittest.TestCase):
         words = len((tasks["legal-services-agreement"] / "Services-Agreement.md").read_text(encoding="utf-8").split())
         self.assertGreater(words, 3500)  # about eight pages
 
+    def test_the_finance_checks_work_their_answer_out_from_the_shipped_data(self):
+        edits = {"finance-ledger-reconcile": ("gl.csv", "TRX-200492,1010 Operating cash,-2412.10",
+                                              "TRX-200492,1010 Operating cash,-2412.61", "TRX-200492 reconciles but is listed"),
+                 "finance-runway-forecast": ("actuals.csv", ",2150000\n", ",2250000\n",
+                                             "months_of_runway is 10.2, expected 10.66")}
+        for task_id, (name, old, new, reason) in edits.items():
+            with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
+                copy = Path(tmp) / "tasks" / task_id
+                shutil.copytree(run.BENCH / "tasks" / task_id, copy)
+                shutil.copy(run.BENCH / "tasks" / "passcheck.py", copy.parent)
+                data = copy / "repo" / name
+                text = data.read_text(encoding="utf-8")
+                self.assertIn(old, text)
+                data.write_text(text.replace(old, new), encoding="utf-8")
+                task = {"dir": copy}
+                work = Path(tmp) / "work"
+                build_work(task, None, work)
+                answer = Path(tmp) / "answer.txt"
+                answer.write_text("", encoding="utf-8")
+                graded = run.grade(copy / "check.py", work, answer, timeout=60)
+                self.assertEqual(graded.verdict, "fail", graded.reason)
+                self.assertIn(reason, graded.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

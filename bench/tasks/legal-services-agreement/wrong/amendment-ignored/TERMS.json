@@ -1,5 +1,5 @@
 {
-  "liability_cap_usd": 5000000,
+  "liability_cap_usd": 1423200,
   "termination_notice_days": {
     "customer": 90,
     "provider": 90
