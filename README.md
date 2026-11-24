@@ -44,7 +44,7 @@ Model Router uses only the extension points Claude Code documents (the plugin ma
 
 - It keeps the docs' subagent model order: a model on the call, the agent's own model and `CLAUDE_CODE_SUBAGENT_MODEL` come first, and the router fills in only what none of them set ([sub-agents](https://code.claude.com/docs/en/sub-agents.md#choose-a-model)).
 - It never switches the main conversation's model, because a switch re-reads the history with no cache hits ([prompt caching](https://code.claude.com/docs/en/prompt-caching.md#switching-models)).
-- It starts low and re-runs failures one level higher, which Anthropic found is the cheapest way to a high pass rate ([cost and intelligence](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence#re-run-failures-at-higher-effort)).
+- It starts low and re-runs failures one level higher, modeled on Anthropic's finding that low effort with failures re-run at high costs less than running every task at high ([cost and intelligence](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence#re-run-failures-at-higher-effort)).
 - Its hooks fail open: a bug never blocks a tool call, a spawn or a session ([exit codes](https://code.claude.com/docs/en/hooks.md#exit-code-output)).
 
 The saving comes from Claude Code's own advice to put simple subagents on Haiku ([best practices](https://code.claude.com/docs/en/best-practices.md#know-what-subagents-cost)), applied to every call. The banner above shows each model's price per million input tokens. [Built on the docs](docs/CLAUDE_CODE_DOCS.md) lists every rule, its doc page and its test, and where the plugin goes past the docs.

@@ -8,7 +8,9 @@ Install it in Claude Code:
 /plugin install model-router --marketplace crisnahine/claude-code-model-router
 ```
 
-Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. In a session the command opens the plugin in `/plugin`, where you pick a scope. Its eight options in `/config` start at their defaults, so nothing has to be set.
+In a session this opens the plugin in `/plugin`, where you pick a scope.
+
+Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. The eight options in `/config` start at their defaults, so nothing has to be set.
 
 Commands: `/model-router:route`, `/model-router:usage`, `/model-router:models`, `/model-router:refresh` and `/model-router:ship`. Type `/model-router:ship` in full: where Claude Code has its own `/ship`, the bare `/ship` runs that command, which can commit, push and open a pull request with no confirmation prompt.
 

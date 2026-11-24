@@ -10,23 +10,24 @@ The latest results, with the commands that produce them. Replace this file's num
 
 ## CI on `main`
 
-The last CI run whose job logs were read for this table is [45077498725](https://github.com/crisnahine/claude-code-model-router/actions/runs/45077498725), on `b836649`, started 2026-11-22 22:23 UTC: success, 11 of 11 jobs, 378 tests on each Python job. The run before it, [45076035812](https://github.com/crisnahine/claude-code-model-router/actions/runs/45076035812) on `3f036a1`, failed on Windows with Python 3.9, where two set-asides of a state file in one clock tick clashed; `4a475f2` fixed it. The runs on `27b94e6` and `8ec8eec` ([45004998622](https://github.com/crisnahine/claude-code-model-router/actions/runs/45004998622)) passed.
+The last CI run whose job logs were read for this table is [45361583123](https://github.com/crisnahine/claude-code-model-router/actions/runs/45361583123), on the 0.1.2 release merge `9e247d3`, started 2026-11-24 09:03 UTC: success, the 12 jobs that ran (`eval` runs only by hand), 710 tests on each Python job. The release PR's first run, [45357531102](https://github.com/crisnahine/claude-code-model-router/actions/runs/45357531102) on `d51403e`, failed on Windows; `fc6fb34` fixed it, and PR run [45360301092](https://github.com/crisnahine/claude-code-model-router/actions/runs/45360301092) passed.
 
 | Job | Result | Tests | Took |
 | :- | :- | :- | -: |
-| `test (ubuntu-latest, 3.13)` | success | 378 OK, 1 skipped | 44 s |
-| `test (ubuntu-24.04, 3.9)` | success | 378 OK, 1 skipped | 45 s |
-| `test (macos-latest, 3.9)` | success | 378 OK, 1 skipped | 127 s |
-| `test (macos-latest, 3.13)` | success | 378 OK, 1 skipped | 94 s |
-| `test (windows-latest, 3.9)` | success | 378 OK, 19 skipped | 105 s |
-| `test (windows-latest, 3.13)` | success | 378 OK, 19 skipped | 92 s |
-| `mod (ubuntu-latest)` | success | 18 of 18 pass | 5 s |
-| `mod (macos-latest)` | success | 18 of 18 pass | 9 s |
-| `mod (windows-latest)` | success | 18 of 18 pass | 15 s |
-| `typecheck` | success | the mod type-checks with `tsc` | 9 s |
-| `validate` | success | marketplace and plugin both "Validation passed" | 12 s |
+| `test (ubuntu-latest, 3.13)` | success | 710 OK, 1 skipped | 265 s |
+| `test (ubuntu-24.04, 3.9)` | success | 710 OK, 1 skipped | 275 s |
+| `test (macos-latest, 3.9)` | success | 710 OK, 1 skipped | 409 s |
+| `test (macos-latest, 3.13)` | success | 710 OK, 1 skipped | 353 s |
+| `test (windows-latest, 3.9)` | success | 710 OK, 10 skipped | 409 s |
+| `test (windows-latest, 3.13)` | success | 710 OK, 10 skipped | 330 s |
+| `mod (ubuntu-latest)` | success | 30 of 30 pass | 6 s |
+| `mod (macos-latest)` | success | 30 of 30 pass | 10 s |
+| `mod (windows-latest)` | success | 30 of 30 pass | 18 s |
+| `typecheck` | success | the mod type-checks with `tsc` | 11 s |
+| `validate (2.1.329)` | success | marketplace and plugin both "Validation passed" | 19 s |
+| `validate (2.1.330)` | success | marketplace and plugin both "Validation passed" | 12 s |
 
-Counts come from each job's log (`gh run view --job <id> --log`), times from its start and end. Windows skipped more because the bench tests' stub `claude` was a shebang script; it now runs as `python stub.py` on every OS. Later runs on `main` (`gh run list --branch main`) aren't tabulated here. CI runs on pushes to `main` and on pull requests.
+Counts come from each job's log (`gh run view --job <id> --log`), times from its start and end. Later runs on `main` (`gh run list --branch main`) aren't tabulated here. CI runs on pushes to `main` and on pull requests.
 
 ## Local
 

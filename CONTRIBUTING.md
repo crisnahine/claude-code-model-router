@@ -25,7 +25,7 @@ plugins/model-router/
   skills/                      ship, route, models, usage, refresh
   evals/                       routing evals
 tests/                         unit tests, run on Linux, macOS and Windows; tests/mod holds the mod's tests
-compat/baseline.json           the Claude Code version, docs index, model list and model status last reviewed
+compat/baseline.json           the Claude Code version, docs index, model aliases and model status last reviewed
 docs/                          the pages indexed in docs/README.md, docs/research and docs/assets (BRAND.md)
 tools/                         traceability.py counts docs/TRACEABILITY.md rows; docs_assets.py writes the docs' generated files;
                                docs_pages.py is the page index and page heads
@@ -57,7 +57,7 @@ CI runs all of them: the unit tests include the traceability count, `docs_assets
 - The labeled corpora in `tests/fixtures` (Agent briefs, the user's requests, agent names) fail a change that moves a level, so a row changes only with its reason in the commit.
 - A change to routing reruns `claude plugin eval plugins/model-router --trust-plugin`. It runs live models, so record what it cost. CI's `eval` job runs it on Claude Code 2.1.330 when started by hand from the Actions tab, with the repository's `ANTHROPIC_API_KEY` secret.
 
-The routing evals also run free in the unittest gate. Each case under `plugins/model-router/evals` states its route in `expected_outcome` (`level L, model M, effort E`), and `RoutingEvals` in `tests/test_model_router.py` checks it against what `spawn.decide` gives for the brief the case hands a subagent, in a session on the case's own model. To run only that check: `python3 -m unittest tests.test_model_router.RoutingEvals`. A change that moves a case's route on purpose updates its `expected_outcome` in the same commit.
+The routing evals also run free in the unittest gate: `RoutingEvals` in `tests/test_model_router.py` runs `spawn.decide` on the brief each case under `plugins/model-router/evals` hands a subagent, in a session on the case's model, and compares it with `expected_outcome` (`level L, model M, effort E`). For `route-redo-escalates` that covers the first call only; the Sonnet redo is checked only by the live run. To run only that check: `python3 -m unittest tests.test_model_router.RoutingEvals`. A change that moves a case's route on purpose updates its `expected_outcome` in the same commit.
 
 ## Rules for a change
 
