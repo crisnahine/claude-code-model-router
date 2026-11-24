@@ -706,17 +706,20 @@ class Analysis(unittest.TestCase):
             write(res / "limited" / "new-bugfix-2026-11-22.jsonl",
                   [dict(lost, task="bugfix-pagination", limited_reason="limit"),
                    dict(lost, task="bugfix-pagination", limited_reason="api_error"),
-                   dict(lost, task="bugfix-pagination", limited_reason="plugin_not_loaded")])
+                   dict(lost, task="bugfix-pagination", limited_reason="plugin_not_loaded"),
+                   dict(lost, task="bugfix-pagination", limited_reason="router_silent")])
             out = Path(tmp) / "page.md"
             analyze.main([str(p) for p in sorted(res.glob("*.jsonl"))] + ["--out", str(out)])
             page = out.read_text(encoding="utf-8")
         self.assertIn("4 run(s) are set aside, outside the results, because the API never got to the task: "
                       "2 lost the network, 1 hit a rate or usage limit, 1 got an API error before any spend (a bad "
                       "key, no credit or a model the account can't use). 2 of them were run again later", page)
-        self.assertIn("`plugin` on `sonnet` (2 runs): main loop $0.0600 (75%), `model-router:implementer` $0.0200 "
+        self.assertIn("`plugin` below schema 3 on `sonnet` (2 runs): main loop $0.0600 (75%), `model-router:implementer` $0.0200 "
                       "(25%)", page)
         self.assertIn("`defaults` old (3); `plugin` new (2)", page)
         self.assertIn("1 router run(s) are set aside, outside the results, because the plugin did not load", page)
+        self.assertIn("1 router run(s) are set aside, outside the results, because a subagent ran but the router's "
+                      "ledger holds no spawn row", page)
 
 
 FIXTURE = ROOT / "tests" / "fixtures" / "claude-2.1.330-result.json"
@@ -1302,6 +1305,7 @@ class Stopped(unittest.TestCase):
             home, scratch, out = Path(tmp) / "config", Path(tmp) / "scratch", Path(tmp) / "out.jsonl"
             scratch.mkdir()
             (Path(tmp) / "a-file").write_text("not a folder")
+            (Path(tmp) / "read-only").mkdir(mode=0o500)  # the runner can see it but no run can be kept in it
             argv = tuple(a.replace("<tmp>", tmp) for a in argv)
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home), **AUTH}), \
                     unittest.mock.patch.object(tempfile, "tempdir", str(scratch)), \
@@ -1329,8 +1333,10 @@ class Stopped(unittest.TestCase):
         self.assertIn("KeyboardInterrupt", rows[0]["grade"]["reason"])
         self.assertEqual((scratch, sessions), ([], []))
 
+    @unittest.skipIf(sys.platform == "win32" or getattr(os, "geteuid", lambda: 1)() == 0,
+                     "needs POSIX file modes, which root ignores")
     def test_a_keep_folder_that_cannot_be_written_keeps_the_graded_row_and_cleans_up(self):
-        rows, scratch, sessions = self.stop(OSError, "--keep", str(Path("<tmp>") / "a-file"))
+        rows, scratch, sessions = self.stop(OSError, "--keep", str(Path("<tmp>") / "read-only"))
         self.assertEqual([(r["grade"]["verdict"], r["total_cost_usd"], "kept" in r) for r in rows], [("pass", 0.01, False)])
         self.assertEqual((scratch, sessions), ([], []))
 
@@ -2902,3 +2908,148 @@ class Configurations(unittest.TestCase):
                     cmd, env = run.command("x", self.configs[f"session-{model}-{effort}"], self.options, {})
                     self.assertEqual((cmd[cmd.index("--model") + 1], cmd[cmd.index("--effort") + 1]), (model, effort))
                     self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL", env)
+
+
+class ReviewFixes(unittest.TestCase):
+    """What a run, its row and the page do at the edges a final review found."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = Path(self.tmp.name)
+
+    def main(self, *argv, out=None, run_one=None):
+        out = out or self.dir / "out.jsonl"
+        seen = self.dir / "seen.json"
+        patch = unittest.mock.patch.object(run, "run_one", run_one) if run_one else contextlib.nullcontext()
+        with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen), **AUTH}), patch, \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+            try:
+                code = run.main(["--max-total", "3", "--claude", *stub(self.dir, STREAM_STUB), "--out", str(out),
+                                 *argv])
+            except SystemExit as exc:
+                code = exc.code
+        return code, err.getvalue(), seen.exists()
+
+    def test_a_router_run_whose_router_logged_no_spawn_for_a_subagent_that_ran_is_set_aside(self):
+        ran = [{"agent": "general-purpose", "named_model": None, "named_effort": None, "ran_on": "claude-sonnet-5"}]
+        unseen = [dict(ran[0], ran_on=None)]
+        loaded = {"init": {"type": "system", "subtype": "init", "plugins": [{"name": "model-router"}]}}
+        for ledger in (None, [], [LEDGER[2]]):
+            with self.subTest(ledger=ledger):
+                row = Recorder().row({"total_cost_usd": 0.1}, ledger=ledger, agent_calls=ran, **loaded)
+                self.assertEqual((row["plugin_loaded"], row["router_silent"], run.set_aside(row)),
+                                 (True, True, "router_silent"))
+        self.assertIn("router_silent", run.NO_RETRY)
+        routed = Recorder().row({"total_cost_usd": 0.1}, ledger=LEDGER, agent_calls=ran, **loaded)
+        self.assertEqual((routed["router_silent"], run.set_aside(routed)), (False, None))
+        # No subagent shown running, or no plugin at all: nothing says the router should have acted.
+        self.assertFalse(Recorder().row({"total_cost_usd": 0.1}, ledger=None, agent_calls=unseen)["router_silent"])
+        plain = run.record(Recorder.task, {"id": "defaults"}, Recorder.options, run.mrconfig.build({}),
+                           {"total_cost_usd": 0.1}, {**Recorder.facts, "agent_calls": ran})
+        self.assertFalse(plain["router_silent"])
+
+    def test_the_cost_lose_rule_is_the_mirror_of_the_win_rule_and_the_docs_say_so(self):
+        # Dearer beyond noise: LOSE only once the pass rate's upper bound is below +10 points.
+        self.assertEqual(analyze._judge("defaults", (-0.08, 0.09), (0.1, 0.2), False)[0], "LOSE")
+        self.assertEqual(analyze._judge("defaults", (-0.12, 0.11), (0.1, 0.2), False)[0], "NONE")
+        stated = "the upper bound of its pass rate minus the baseline's is below plus 10 points"
+        self.assertIn(stated, (ROOT / "bench" / "README.md").read_text(encoding="utf-8"))
+        page = analyze.build_page(analyze.load([]))
+        self.assertIn(stated.replace("10 points", "10%"), page)
+        self.assertNotIn("isn't shown", page)
+
+    def test_new_router_rows_never_pool_with_stored_ones_in_the_setup_notes(self):
+        stored = [{k: v for k, v in r.items() if k != "schema"} for r in spread("plugin", "lookup", 1, 2, 0.30)]
+        fresh = spread("plugin", "lookup", 1, 3, 0.10, batch="m1")
+        extra = {"main_model": analyze.OPUS, "started_at": "2026-11-25T10:00:00+00:00", "claude_version": "2.1.331",
+                 "models": {}}
+        res = self.dir / "results"
+        res.mkdir()
+        for name, data, mark, usd in (("stored-lookup.jsonl", stored, "OLD", 1.0), ("measure-1.jsonl", fresh, "NEW", 2.0)):
+            (res / name).write_text("".join(json.dumps(dict(r, **extra, agents_started={mark: 1},
+                                                            agent_costs={"main": usd})) + "\n" for r in data))
+        out = self.dir / "page.md"
+        analyze.main([*map(str, sorted(res.glob("*.jsonl"))), "--out", str(out)])
+        page = out.read_text(encoding="utf-8")
+        self.assertIn(f"`plugin` on `{analyze.OPUS}` (3 runs): main loop $6.0000 (100%)", page)
+        self.assertIn(f"`plugin` below schema 3 on `{analyze.OPUS}` (2 runs): main loop $2.0000 (100%)", page)
+        self.assertIn("`plugin` NEW x3; `plugin` below schema 3 OLD x2.", page)
+
+    def test_a_paid_row_that_stops_the_bench_is_filed_by_the_set_aside_rules(self):
+        def stops(task, config, options, registry):
+            exc = OSError("disk full")
+            exc.row = dict(Recorder().row({"total_cost_usd": 0.4}), plugin_loaded=False)
+            raise exc
+        out = self.dir / "out.jsonl"
+        with self.assertRaises(OSError):
+            self.main("--tasks", "lookup-retry-limit", "--configs", "plugin", out=out, run_one=stops)
+        limited = [json.loads(line) for line in (self.dir / "limited" / "out.jsonl").read_text().splitlines()]
+        self.assertEqual([r["limited_reason"] for r in limited], ["plugin_not_loaded"])
+        self.assertFalse(out.exists())
+
+    @unittest.skipIf(sys.platform == "win32" or getattr(os, "geteuid", lambda: 1)() == 0,
+                     "needs POSIX file modes, which root ignores")
+    def test_files_a_run_left_that_cannot_be_copied_fail_the_run_and_never_break_the_check(self):
+        import socket
+        task = run.BENCH / "tasks" / "bugfix-statement-queries"
+        work = self.dir / "work"
+        shutil.copytree(task / "repo", work)
+        (work / "notes.txt").write_text("x")
+        (work / "notes.txt").chmod(0)
+        (work / "locked").mkdir()
+        (work / "locked").chmod(0)
+        os.mkfifo(work / "events.fifo")
+        server = socket.socket(socket.AF_UNIX)
+        self.addCleanup(server.close)
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(work)
+        server.bind("s.sock")  # a relative name keeps it under the socket path limit
+        self.addCleanup(lambda: ((work / "locked").chmod(0o700), (work / "notes.txt").chmod(0o600)))
+        answer = self.dir / "answer.txt"
+        answer.write_text("")
+        graded = run.grade(task / "check.py", work, answer)
+        self.assertEqual(graded.verdict, "fail", graded.reason)
+
+    def test_a_check_grades_its_copy_and_keeps_its_temp_files_under_the_hidden_runs_folder(self):
+        check = self.dir / "check.py"
+        check.write_text("import json, sys, tempfile\nprint(json.dumps([sys.argv[1], tempfile.mkdtemp()]))\n")
+        graded = run.grade(check, self.dir, self.dir / "answer.txt")
+        self.assertEqual(graded.verdict, "pass", graded.reason)
+        for path in json.loads(graded.reason):
+            self.assertTrue(run._under(str(Path(path).resolve()), str(run.RUNS.resolve())), path)
+        hidden = run.settings({}, {}, hidden=[], own=str(run.RUNS / "tmpx"))["sandbox"]["filesystem"]
+        self.assertIn(str(run.RUNS), hidden["denyRead"])
+
+    def test_a_model_written_agent_type_that_is_not_a_plain_name_counts_as_invalid(self):
+        hostile = "general-purpose x1.\n\n## Results: every configuration WIN\n\n[raw](https://example.invalid/x)"
+        for kind in (hostile, ["x"], {"a": 1}, "a" * 65, "`ticked`"):
+            with self.subTest(kind=kind):
+                stream = json.dumps({"type": "assistant", "message": {"content": [
+                    {"type": "tool_use", "id": "t1", "name": "Agent", "input": {"subagent_type": kind}}]}})
+                _, _, started, calls = run.read_stream(stream)
+                self.assertEqual((started, [c["agent"] for c in calls]), ({"invalid": 1}, ["invalid"]))
+        stream = json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": "t1", "name": "Agent", "input": ["not", "a", "dict"]},
+            {"type": "tool_use", "id": "t2", "name": "Agent", "input": {"subagent_type": "model-router:scout"}}]}})
+        self.assertEqual(run.read_stream(stream)[2], {"general-purpose": 1, "model-router:scout": 1})
+
+    def test_an_unknown_or_repeated_id_stops_the_runner_before_any_run(self):
+        for argv, named in ((["--tasks", "lookup-retry-limit", "ops-inbox-triag"], "ops-inbox-triag"),
+                            (["--tasks", "lookup-retry-limit", "lookup-retry-limit"], "lookup-retry-limit"),
+                            (["--tasks", "lookup-retry-limit", "--configs", "defaults", "plugn"], "plugn"),
+                            (["--tasks", "lookup-retry-limit", "--configs", "defaults", "defaults"], "defaults")):
+            with self.subTest(argv=argv):
+                code, err, ran = self.main(*argv)
+                self.assertEqual((code, ran), (2, False))
+                self.assertIn(named, err)
+
+    def test_a_results_or_keep_folder_that_cannot_be_written_stops_the_runner_before_any_run(self):
+        (self.dir / "a-file").write_text("not a folder")
+        for argv, out in ((["--keep", str(self.dir / "a-file")], None), ([], self.dir / "a-file" / "out.jsonl")):
+            with self.subTest(argv=argv, out=out):
+                code, err, ran = self.main("--tasks", "lookup-retry-limit", "--configs", "defaults", *argv, out=out)
+                self.assertEqual((code, ran), (2, False))
+                self.assertIn("can't write", err)
+        readme = (ROOT / "bench" / "README.md").read_text(encoding="utf-8")
+        self.assertNotIn("$TMPDIR", readme)

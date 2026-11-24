@@ -75,6 +75,15 @@ This release changes who picks a subagent's model. Claude now names the model an
 - Hook input is read as bytes, so its decoding no longer follows the system's locale.
 - `/model-router:models json`, or any word other than `reset`, shows the table instead of an argument error.
 - A bench run with `plugin_ref` no longer leaves an exported copy of the plugin in the system's temp folder.
+- A bench router run where a subagent ran but the router logged no spawn is set aside as `router_silent`, so a router whose hooks never acted no longer counts as a router run.
+- The bench's LOSE rule on cost now reads as the code applies it: the upper bound of the router's pass rate minus the baseline's must be below plus 10 points. With every run solved, that can't show before round 5.
+- The bench page's spend and agents-started notes keep new router rows apart from the stored rows below schema 3.
+- A paid bench run that stops the bench is filed by the same set-aside rules as any other, so a run whose plugin didn't load no longer lands in the results as a failed task.
+- A socket, a pipe or an unreadable file a bench run leaves in its work dir fails the run, where it made the check read as broken.
+- The bench smoke command keeps its files in `~/mrb-smoke/`, and `run.py` checks it can write the results, `limited/` and `--keep` before the first paid run.
+- A bench check grades its copy of a run's work, and makes its own temp copies, under the folder every run's sandbox hides.
+- A bench subagent type that isn't a plain name counts as `invalid`, so text a model writes can't add Markdown to the page or stop the stream parse.
+- `bench/run.py` stops with exit code 2 on a task or configuration id that matches nothing or is named twice, where it dropped the id and ran fewer tasks.
 
 ### Added
 
@@ -91,11 +100,11 @@ This release changes who picks a subagent's model. Claude now names the model an
 Nothing here ships in the plugin. The harness is rebuilt so that a verdict can stand, and no run has used it yet.
 
 - Each run gets its own Claude Code config folder (`CLAUDE_CONFIG_DIR`) and needs `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` or a provider switch. Bash runs in the OS sandbox with no network, writes stay in the work dir, and the sandbox and permission rules hide every copy of the answers: this checkout, its worktrees, the results and kept runs. A check grades a throwaway copy of the work.
-- `run.py` reads `stream-json`, copies and hashes the plugin once per batch, shuffles the run order with a recorded `--seed`, records the `--batch`, and has two prompt arms, `delegate` and `direct`. A run that never started, a router run whose plugin didn't load or didn't get its options, and a `pinned` run off its pins are set aside, never counted as failed tasks.
+- `run.py` reads `stream-json`, copies and hashes the plugin once per batch, shuffles the run order with a recorded `--seed`, records the `--batch`, and has two prompt arms, `delegate` and `direct`. A run that never started, a router run whose plugin didn't load, whose router never acted or that didn't get its options, and a `pinned` run off its pins are set aside, never counted as failed tasks.
 - Each row lists its Agent calls with the model and effort each call named and the model it ran on, and the page counts how often Claude named one. New rows are schema 3.
 - New configurations: `plugin-nogate` (`verify_gate` off), `pinned` (three inline agents, each on a fixed model and effort), every subagent on Haiku, Sonnet or Opus at `low`, `medium` or `high`, and the whole session on one model and effort. `opusplan` is now `sonnet-via-opusplan`, since a headless run stays on Sonnet, and its stored rows map to the new id.
 - Five tasks of work that isn't code: a services agreement (`document`), a ledger reconciliation and a runway forecast (`analysis`), a study synthesis (`research`) and an inbox triage (`operations`). That makes 35 tasks in 11 classes. None of the five has a run yet.
-- The verdict rules: against each baseline the router gets WIN, LOSE, no difference shown or no verdict, on each class row and on an `all tasks` row, from runs paired by task and resampled by task, then by run. WIN needs a cost per solved task lower beyond noise, a pass rate shown no more than 10 points below the baseline's, and at least the baseline's share of runs solved. LOSE is a pass rate behind beyond noise, or a higher cost beyond noise without a pass rate shown 10 points ahead. There is no verdict when the two ran in different batches, either has rows below schema 3, or Bash was denied in more than a quarter of either's runs.
+- The verdict rules: against each baseline the router gets WIN, LOSE, no difference shown or no verdict, on each class row and on an `all tasks` row, from runs paired by task and resampled by task, then by run. WIN needs a cost per solved task lower beyond noise, a pass rate shown no more than 10 points below the baseline's, and at least the baseline's share of runs solved. LOSE is a pass rate behind beyond noise, or a higher cost beyond noise while the upper bound of its pass rate minus the baseline's is below plus 10 points. There is no verdict when the two ran in different batches, either has rows below schema 3, or Bash was denied in more than a quarter of either's runs.
 - Every stored row is below schema 3, so it sits in its own "Before the sandbox" tables with no verdict or rank. Their router rows measured the older design that scored the brief.
 
 ## 0.1.2 - 2026-11-24
