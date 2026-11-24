@@ -1,8 +1,10 @@
 """What a person types after a skill command never aborts the skill."""
 from __future__ import annotations
 
+import io
 import shutil
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 
 import test_model_router as t
 from test_model_router import Sandbox, ledger
@@ -32,16 +34,30 @@ class TypedWords(Sandbox):
     def test_a_stray_word_is_named_and_the_output_still_shows(self):
         res = self.run_line("usage", "30 days")
         self.assertIn("last 30 days", res.stdout)
-        self.assertIn("Ignored 'days': usage takes only a number of days.", res.stdout)
+        self.assertIn("Ignored 'days': usage takes only a number of days and --json.", res.stdout)
         res = self.run_line("models", "--verbose", self.SET)
         self.assertIn("| haiku |", res.stdout)
-        self.assertIn("Ignored '--verbose': models takes only reset.", res.stdout)
+        self.assertIn("Ignored '--verbose': models takes only reset, --json and the option flags.", res.stdout)
 
     def test_a_malformed_flag_gets_one_short_line(self):
         res = self.run_line("usage", "--json=1")
         self.assertEqual(res.stdout.strip().splitlines(),
                          ["model-router usage: argument --json: ignored explicit argument '1'. "
-                          "It takes only a number of days, so nothing was shown."])
+                          "It takes only a number of days and --json, so nothing was shown."])
+
+    def test_under_json_a_malformed_flag_leaves_stdout_empty(self):
+        with redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(cli.main(["usage", "--json", "--json=1"]), 0)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("ignored explicit argument '1'", err.getvalue())
+
+    def test_a_day_count_that_means_7_by_default_is_named(self):
+        for typed in ("0", "-3", "٠٠"):
+            with self.subTest(typed=typed):
+                self.assertIn(f"Ignored {typed!r}", self.out("usage", typed))
+        for typed in ("7", "07", "٧"):
+            with self.subTest(typed=typed):
+                self.assertNotIn("Ignored", self.out("usage", typed))
 
     def test_reset_counts_after_a_flag_like_word(self):
         for words in ("reset --force", "--force reset", "a --x reset"):
@@ -60,9 +76,11 @@ class TypedWords(Sandbox):
 class DayCount(Sandbox):
     def test_a_day_count_is_a_positive_whole_number_capped_at_100_years(self):
         for typed, days in (("7", 7), ("30", 30), ("0030", 30), ("36500", 36500), ("1000000", 36500),
-                            (HUGE, 36500), ("١٢", 12), ("²", 7), ("0", 7), ("٠", 7), ("-3", 7), ("abc", 7)):
+                            (HUGE, 36500), ("١٢", 12), ("٠٠٠٠٠٠٧", 7), ("٠٠٠٠٠١٢", 12), ("²", None),
+                            ("0", None), ("٠", None), ("٠٠٠٠٠٠", None), ("-3", None), ("abc", None)):
             with self.subTest(typed=typed[:20]):
                 self.assertEqual(cli._days(typed), days)
+                days = days or 7
                 self.assertIn(f"last {days} days", self.out("usage", typed))
 
 

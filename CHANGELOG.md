@@ -74,7 +74,7 @@ This release changes who picks a subagent's model. Claude now names the model an
 - A plugin agent listed in `plugin.json` or its marketplace entry is found, a stale `agents/` file that Claude Code ignores isn't, and a listed path outside the plugin folder is skipped.
 - Hook input is read as bytes, so its decoding no longer follows the system's locale.
 - `/model-router:models` and `/model-router:usage` show their output whatever words follow them. A word they don't take, such as `json`, `days` or `--verbose`, is ignored and named, and a malformed flag such as `--json=1` prints one line, never an error that aborts the skill.
-- `/model-router:usage` with a huge day count or a character like `²` no longer crashes. The day count is capped at 36500.
+- `/model-router:usage` with a huge day count or a character like `²` no longer crashes. The day count is capped at 36500, and a count it can't use, `0` included, means 7 and is named.
 - The usage table's second count column is now "Rewritten by router". It counts every call the router changed, including those where it only filled in the effort, so "Model set by router" overstated it.
 - A bench run with `plugin_ref` no longer leaves an exported copy of the plugin in the system's temp folder.
 

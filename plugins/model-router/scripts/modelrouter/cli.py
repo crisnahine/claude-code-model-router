@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import sys
+import unicodedata
 
 from . import health, hooks, report, settings, store
 
@@ -55,7 +56,7 @@ def _reset_health() -> str:
 
 
 # What the two skills that pass the user's words through accept; anything else is ignored.
-_TAKES = {"models": "reset", "usage": "a number of days"}
+_TAKES = {"models": "reset, --json and the option flags", "usage": "a number of days and --json"}
 
 
 class _Typed(Exception):
@@ -66,13 +67,14 @@ def _reject(cmd: str, message: str) -> None:
     raise _Typed(f"model-router {cmd}: {message}. It takes only {_TAKES[cmd]}, so nothing was shown.")
 
 
-def _days(typed: str) -> int:
-    """A positive whole number of days, capped at 100 years so the cutoff stays a date; else 7."""
+def _days(typed: str) -> int | None:
+    """A positive whole number of days, capped at 100 years so the cutoff stays a date; else None."""
     if not typed.isdecimal():
-        return 7
-    digits = typed.lstrip("0")
-    days = 36500 if len(digits) > 5 else int(digits or "0")
-    return min(days, 36500) if days > 0 else 7
+        return None
+    digits = "".join(str(unicodedata.decimal(c)) for c in typed).lstrip("0")
+    if not digits:
+        return None
+    return 36500 if len(digits) > 5 else min(int(digits), 36500)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -103,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         args, extra = parser.parse_known_args(argv)
     except _Typed as exc:
-        print(exc)
+        print(exc, file=sys.stderr if "--json" in (sys.argv if argv is None else argv) else sys.stdout)
         return 0
     if extra and args.cmd not in _TAKES:
         parser.error("unrecognized arguments: " + " ".join(extra))
@@ -146,9 +148,10 @@ def main(argv: list[str] | None = None) -> int:
         print(report.explain(snap, " ".join(args.text), args.agent, args.model, args.effort))
     elif args.cmd == "usage":
         days = _days(args.days)
-        print(json.dumps(report.usage_data(days), indent=2) if args.json else report.usage(days))
-        if not args.days.isdecimal():
+        if days is None:
+            days = 7
             extra.insert(0, args.days)
+        print(json.dumps(report.usage_data(days), indent=2) if args.json else report.usage(days))
     ignored = [word for word in extra if word != "reset" or args.cmd != "models"]
     if ignored:
         print(f"Ignored {' '.join(ignored)!r}: {args.cmd} takes only {_TAKES[args.cmd]}.",

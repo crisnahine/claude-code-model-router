@@ -3652,7 +3652,7 @@ class Reports(Sandbox):
         store.append_ledger({"ts": old, "event": "usage", "session": "s1", "agent_id": "a1", "agent": "Explore",
                              "models": [tokens("claude-opus-5-5", 1_000_000)], "running": True, "cost_usd": 20.0})
         self.assertIn("Claude Code's estimate and not the bill: $20.00", self.out("usage", "30"))
-        self.assertEqual(self.out("usage", "0").strip(), "No activity recorded in the last 7 days.")
+        self.assertEqual(self.out("usage", "0").splitlines()[0], "No activity recorded in the last 7 days.")
         data = json.loads(self.out("usage", "0", "--json"))
         self.assertEqual((data["days"], data["spend"]["total_usd"]), (7, 0))
 
