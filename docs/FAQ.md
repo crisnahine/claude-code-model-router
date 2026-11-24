@@ -74,4 +74,4 @@ No. The plugin never approves a tool call, and your permission rules and auto mo
 
 ## How do I see what it routed and what it spent?
 
-Run `/model-router:usage` for what ran where and what it cost at list price, and `/model-router:models` for the models in use, what each runs as, and what is capped, unavailable or learned. `/model-router:route <task>` explains which model a task would get and why before you run it ([README](../README.md#commands)).
+Run `/model-router:usage` for what ran where and what it cost at list price, and `/model-router:models` for the models in use, what each runs as, and what is capped, unavailable or routed around. `/model-router:route <task>` explains which model a task would get and why before you run it ([README](../README.md#commands)).

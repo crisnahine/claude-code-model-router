@@ -24,7 +24,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Route**: where one spawn went, written for every spawn that isn't denied, on either path (`calls.Route`): the model it runs on, the model it would have run on untouched (`was`), the name or ID the path sent, the level, the effort, who chose the model (`router`, a `pin`, a `rule` or the `caller`), the path and the request. It is kept under the spawn's own id where the path has one (the Agent call's `tool_use_id`; a workflow's agents share one, so they have none), else under the call. `calls.strongest` reads the strongest model a spawn of the current request ran on from these.
 
-**Outcome**: a result, a failure or a stop coming back for a call (`calls.Outcome`). One rule set reads it for either path (`calls.returned`): the done record a redo reads, the health evidence, the ledger row, and the count a swapped run takes back. A model error strikes the full ID the spawn sent, or else the model it was routed to.
+**Outcome**: a result, a failure or a stop coming back for a call (`calls.Outcome`). One rule set reads it for either path (`calls.returned`): the done record a redo reads, the health evidence and the ledger row. A model error strikes the full ID the spawn sent, or else the model it was routed to.
 
 **Level**: how much reasoning a call needs: lookup, standard, complex, hardest or frontier. It comes from the call's brief and the agent's name. In code it is `config.Level`, a `str` written to state files and JSON as its bare name but ordered by difficulty (a plain `str` sorts alphabetically), so levels compare and `max` works on them. `Level.up()` is the next one.
 

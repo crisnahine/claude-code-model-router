@@ -10,7 +10,7 @@ from .registry import Registry
 
 
 def spawn(session_id: str | None, via: str, decision: router.Decision, description: object,
-          kind: str | None = None) -> None:
+          kind: str | None = None, on_record: bool = True) -> None:
     action = decision["action"]
     row = {"event": "spawn", "via": via, "session": session_id, "agent": decision["agent"], "action": action,
            "level": decision["level"], "signals": decision["signals"],
@@ -22,6 +22,8 @@ def spawn(session_id: str | None, via: str, decision: router.Decision, descripti
         row["kind"] = kind
     if decision.get("held"):
         row["held"] = decision["held"]
+    if not on_record:
+        row["on_record"] = False
     store.append_ledger(row)
 
 

@@ -88,7 +88,7 @@ Nothing has to be set: the eight options in `/config` under the plugin start at 
    ```
 
 3. Work as you always do. Every agent call is routed as it starts.
-4. Later, `/model-router:usage` shows what ran where and what it cost, and `/model-router:models` shows the models in use and anything capped, unavailable or learned. To change how it routes, see [Configuration](#configuration).
+4. Later, `/model-router:usage` shows what ran where and what it cost, and `/model-router:models` shows the models in use and anything capped, unavailable or routed around. To change how it routes, see [Configuration](#configuration).
 
 ## How it works: picking a subagent model
 
@@ -125,7 +125,7 @@ The run measured the routing code at <!-- bench:opus.commit_code -->`780ee86`<!-
 | :- | :- |
 | `/model-router:ship <task or issue>` | Plans, builds, verifies, reviews and commits a change on a branch, and stops before pushing, merging or deploying |
 | `/model-router:route <task>` | Explains which model a task would get and why, and how to split it |
-| `/model-router:models [reset] [--json]` | Lists the models in use, what each runs as, and what is capped, unavailable or learned. `reset` clears it |
+| `/model-router:models [reset] [--json]` | Lists the models in use, what each runs as, and what is capped, unavailable or routed around. `reset` clears learned availability |
 | `/model-router:usage [days] [--json]` | Shows what ran where and what it cost at list price, over `days` (default 7) |
 | `/model-router:refresh` | Reviews new Claude Code releases, docs changes and model retirements |
 

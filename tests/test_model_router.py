@@ -5190,14 +5190,37 @@ class MachineReadable(Sandbox):
 
     def test_usage_counts_redos_by_the_level_they_climbed_from(self):
         self.session_on("claude-opus-5-5")
+        self.pre("general-purpose", BUILD, description="parser change")
+        self.done("general-purpose", BUILD, "claude-sonnet-5-5", description="parser change")
+        self.pre("general-purpose", BUILD + " and keep the old API", description="Redo: parser change")
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
         self.pre("general-purpose", LOOKUP)
-        self.pre("general-purpose", BUILD, description="Redo: parser change")
-        self.assertEqual(self.json_out("usage")["redos"], {"lookup": 1, "standard": 1})
+        self.assertEqual(list(self.json_out("usage")["redos"].items()), [("lookup", 1), ("standard", 1)])
         text = self.out("usage")
         self.assertIn("Redos by the level they climbed from: lookup x1, standard x1.", text)
         self.assertIn("A level that keeps coming back can be raised under `levels` in ~/.claude/model-router.json.", text)
+
+    def test_a_refused_redo_counts_once_whether_passed_through_or_denied(self):
+        self.session_on("claude-opus-5-5")
+        for prompt, cap in ((LOOKUP, ""), ("list the tests", "sonnet")):
+            self.options(max_tier=cap)
+            self.pre("general-purpose", prompt)
+            self.done("general-purpose", prompt, "claude-haiku-5-5")
+            self.pre("general-purpose", prompt)
+            self.next_message()
+            self.pre("general-purpose", prompt)
+        spawns = [r for r in self.ledger() if r.get("event") == "spawn"]
+        self.assertEqual([(r["action"], r["escalated_from"]) for r in spawns[2::3]], [("keep", None), ("deny", None)])
+        self.assertEqual(self.json_out("usage")["redos"], {"lookup": 2})
+
+    def test_a_marked_redo_with_no_run_on_record_is_not_counted(self):
+        # The level it climbs from is what its own brief gets, and nothing shows that ran.
+        self.session_on("claude-opus-5-5")
+        self.pre("general-purpose", BUILD, description="Redo: second try")
+        row = self.ledger()[-1]
+        self.assertEqual((row["escalated_from"], row["on_record"]), ("standard", False))
+        self.assertNotIn("redos", self.json_out("usage"))
 
     def test_usage_json_sums_an_agents_turns_beside_its_final_request(self):
         self.pre("general-purpose", LOOKUP)

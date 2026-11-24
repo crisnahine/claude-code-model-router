@@ -59,7 +59,8 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     if marked and earlier is None and task:
         earlier = calls.last_run(session_id, task)
     found = router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable,
-                         definition=definition, parent=parent, earlier=earlier, marked=marked, floor=floor, teammate=teammate, workflow=workflow,
+                         definition=definition, parent=parent, earlier=earlier, marked=marked,
+                         floor=floor, teammate=teammate, workflow=workflow,
                          session_effort=session_effort, effort_caps=caps)
     if marked and earlier is None:
         found = replace(found, earlier=_unmarked_run(found, snap), on_record=False)
@@ -88,7 +89,8 @@ def record(spawned: Spawn, via: str, newest: str | None = None) -> None:
     session_id = hook_input.get("session_id")
     spawned.snap.settle()
     ledger.spawn(session_id, via, decision, spawned.facts.tool_input.get("description"),
-                 kind=(hook_input.get("kind") or "subagent") if via == "mod" else None)
+                 kind=(hook_input.get("kind") or "subagent") if via == "mod" else None,
+                 on_record=spawned.facts.on_record)
     if decision["action"] != "deny":
         try:
             _record(spawned, via, newest)

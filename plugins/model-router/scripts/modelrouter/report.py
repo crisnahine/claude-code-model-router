@@ -232,8 +232,10 @@ def usage_data(days: int, exact: bool = False) -> dict:
             a["routed"] += r.get("action") == "rewrite"
             if r.get("level"):
                 a["levels"][r["level"]] = a["levels"].get(r["level"], 0) + 1
-            if r.get("escalated_from"):
+            # A marked redo with no run on record climbed from a level nothing shows ran.
+            if r.get("escalated_from") and r.get("on_record") is not False:
                 redos[r["escalated_from"]] = redos.get(r["escalated_from"], 0) + 1
+    redos = {level: redos[level] for level in cfg.LEVELS if level in redos}
     by_model: dict[str, dict] = {}
     for r in rows:
         if r.get("event") == "result":

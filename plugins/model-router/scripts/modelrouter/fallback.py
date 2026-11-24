@@ -67,6 +67,8 @@ def _guard(session_id: str | None, key: str, decision: router.Decision, reg: Reg
     earlier = refused(session_id, key)
     if earlier is None:
         return
+    # This copy runs no climb, and the first copy's row already names it.
+    decision["escalated_from"] = None
     cap, untouched, changed = options.cap, decision["was"], bool(decision["model"])
     if changed and cap and reg.strength(untouched) > reg.strength(cap):
         decision.update(action="deny", reason=(
