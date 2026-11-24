@@ -40,7 +40,7 @@ Without it, a subagent that names no model runs on its conversation's model ([Cl
 
 - Sets the model and effort of every subagent, teammate and workflow agent as it starts. The agent the caller chose stays the same.
 - Runs a call one level higher when Claude redoes a weak result, and `/model-router:usage` counts the redos per level.
-- Asks once, before a turn ends, for a test run when code changed unchecked, and for a stronger agent's check when a weak session model answered a hard request alone.
+- Asks once, before a turn ends, for a test run when code changed unchecked.
 - Logs what each turn cost at list price in `/model-router:usage`, and checks the Claude Code changelog, docs and model retirements once a day.
 
 ## Built on the Claude Code docs
@@ -66,7 +66,7 @@ In a session this opens the plugin in the `/plugin` panel, where you pick a scop
 
 Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. Without Python its hooks do nothing and its skills say why.
 
-Nothing has to be set: the eight options in `/config` under the plugin start at their defaults ([options](docs/GUIDE.md#configuration)), and Claude model routing is on from the first session. To try it from a clone, run `claude --plugin-dir ./plugins/model-router`.
+Nothing has to be set: the six options in `/config` under the plugin start at their defaults ([options](docs/GUIDE.md#configuration)), and Claude model routing is on from the first session. To try it from a clone, run `claude --plugin-dir ./plugins/model-router`.
 
 ## Quick start
 
@@ -135,13 +135,13 @@ The plugin also ships seven role agents for work no better-fitting agent covers:
 
 ## Configuration
 
-Eight options in `/config` under the plugin, each with a working default: `routing_mode` (`auto`; `advise` only estimates, `off` only keeps the ledger), `priority` (`balanced`; or `quality`, `fast`), `max_tier` (none), `agent_pins` (`respect`; or `override`), `main_effort` (off), `update_check` (on), `verify_gate` (on) and `strong_agent_gate` (on). Leave `main_effort` off in a HIPAA organization, or if Claude Desktop reaches Claude through a Claude apps gateway. What each option does, and where `main_effort` stays off on its own, is in the [guide](docs/GUIDE.md#configuration).
+Six options in `/config` under the plugin, each with a working default: `routing_mode` (`auto`; `advise` only logs each call's level, `off` only keeps the ledger), `priority` (`balanced`; or `quality`, `fast`), `max_tier` (none), `agent_pins` (`respect`; or `override`), `update_check` (on) and `verify_gate` (on). What each option does is in the [guide](docs/GUIDE.md#configuration).
 
 Rules and extra models go in `~/.claude/model-router.json` (yours, applies everywhere) or `.claude/model-router.json` (a project's). A project's file only raises: a cloned repository can make its subagents cost more, never run weaker, and it can't get a model past your `max_tier`. The file's shape, every key and the trust rules are in the [guide](docs/GUIDE.md#configuration).
 
 ## What it can't do
 
-- It doesn't switch the main conversation's model, because a switch re-reads the conversation uncached. `main_effort` can raise that turn's effort instead.
+- It doesn't change the main conversation's model or effort, because a model switch re-reads the conversation uncached. For a hard request, type `ultrathink` or use `/effort`.
 - It reads the brief's wording and the agent's name, never the code, so a level is an estimate. Claude can overrule it on any call, and a redo moves it up. It reads English: a brief in another script starts at standard.
 - It leaves forks alone, and agents whose definition it can't read, such as one defined on the command line.
 - It routes a new model family only once the registry has an entry for it, and does nothing when hooks are switched off.

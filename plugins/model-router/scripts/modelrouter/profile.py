@@ -1,4 +1,4 @@
-"""Score how much reasoning a request or a subtask needs, from its wording and from
+"""Score how much reasoning a subtask needs, from its brief's wording and from
 the agent it is given to. Deterministic and fast: this runs on every agent call.
 
 It is an estimate. Claude sees the code and can overrule it by naming a model on a
@@ -107,11 +107,6 @@ _FIX = (rf"(?:{_VERB_START})(?:fix(?:es|ing)?\b(?!\s*#)|debug\b(?!{_COMPOUND}|\s
         rf"\bfix(?:es|ing)?(?={_OBJECT})")
 _HUNT = rf"\b(?:{_HUNT_OTHER})\b"
 _DEFECT = rf"{_FIX}|{_HUNT}"
-# A person's request says "analyze the sales numbers" about data as often as about code, so there a hunt verb
-# counts only beside a word for a defect.
-_DEFECT_NOUN = (r"\b(?:bugs?|failures?|failing|errors?|exceptions?|flaky|crash(?:es|ed|ing)?|regressions?|broken|races?|"
-                r"leak(?:s|ing)?|hang(?:s|ing)?|hung|time[sd]?[- ]?outs?|timing out|deadlocks?|panics?|outages?|"
-                r"slow|wrong|incorrect|issues?|problems?|not working)\b")
 _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"
 _LOOKUP = (r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|describe|summari[sz]e|"
            r"is there|does)\b")
@@ -136,23 +131,20 @@ def _named_for(name: str, pattern: str, lead: str | None = None) -> bool:
 @dataclass(frozen=True)
 class Role:
     """What an agent is for, which no brief changes: a heavy role is raised to its floor, a light one held to
-    its cap. `strong` agents start no lower than the request's level, a `checker` reports on finished work, and
-    an agent that doesn't `write` has no Write or Edit tool."""
+    its cap, and a `checker` reports on finished work."""
     kind: str | None = None
     floor: Level | None = None
     cap: Level | None = None
-    strong: bool = False
     checker: bool = False
-    writes: bool = True
 
 
 ARCHITECT, REVIEWER, DEEP_SOLVER = "architect", "reviewer", "deep-solver"
 # Our own role agents by full name, then the two kinds any agent's name can show. Another plugin's solver is
 # only a heavy role; ours is for what the others couldn't do.
 ROLES = {
-    f"{PLUGIN_NAME}:{ARCHITECT}": Role("heavy", floor=Level.complex, strong=True, writes=False),
-    f"{PLUGIN_NAME}:{REVIEWER}": Role("heavy", floor=Level.complex, strong=True, writes=False),
-    f"{PLUGIN_NAME}:{DEEP_SOLVER}": Role("heavy", floor=Level.hardest, strong=True),
+    f"{PLUGIN_NAME}:{ARCHITECT}": Role("heavy", floor=Level.complex),
+    f"{PLUGIN_NAME}:{REVIEWER}": Role("heavy", floor=Level.complex),
+    f"{PLUGIN_NAME}:{DEEP_SOLVER}": Role("heavy", floor=Level.hardest),
     "heavy": Role("heavy", floor=Level.complex),
     "light": Role("light", cap=Level.standard),
 }
@@ -219,21 +211,16 @@ def signals(text: str) -> list[str]:
     return [name for name in found if name != "load" or re.search(_CHOICE, text)]
 
 
-def _fixes_a_defect(asked: str, request: bool = False) -> bool:
-    asked = re.sub(_RULED_OUT, "", asked)
-    if not request:
-        return bool(re.search(_DEFECT, asked))
-    return bool(re.search(_FIX, asked) or re.search(rf"\b(?:{_FIND_DEFECT})", asked)
-                or re.search(_HUNT, asked) and re.search(_DEFECT_NOUN, asked))
+def _fixes_a_defect(asked: str) -> bool:
+    return bool(re.search(_DEFECT, re.sub(_RULED_OUT, "", asked)))
 
 
 @dataclass(frozen=True)
 class Reading:
-    """What a brief says, read once and the same way for a call and for a request: the difficulty signals,
-    whether it asks for a change or for reasoning, whether it fixes or hunts a defect, frontier and
-    thoroughness wording, whether it is phrased as a lookup, whether it is English, and how long it is.
-    `judgment` (asks to review, design or plan) and `systems` (names several systems in a list) are the
-    call's own extra reasons for complex, and `request_defect` is the request's narrower defect rule."""
+    """What a brief says: the difficulty signals, whether it asks for a change or for reasoning, whether it
+    fixes or hunts a defect, frontier and thoroughness wording, whether it is phrased as a lookup, whether it
+    is English, and how long it is. `judgment` (asks to review, design or plan) and `systems` (names several
+    systems in a list) are extra reasons for complex."""
     signals: tuple[str, ...]
     acts: frozenset[str]  # "change" and "reason"
     defect: bool
@@ -244,60 +231,31 @@ class Reading:
     length: int
     judgment: bool = False
     systems: bool = False
-    request_defect: bool = False
 
 
-def read(text: str, limits: bool = True) -> Reading:
+def read(text: str) -> Reading:
     """Read a brief. A negated limit ("do not change any files") restricts the work and doesn't ask for it, so
-    with `limits` its scope, ambiguity and change words are set aside, and its risk words still count. A request
-    is read with `limits` off: its wording counts as it stands, except for the defect rule."""
+    its scope, ambiguity and change words are set aside, and its risk words still count."""
     text = (text or "").lower()
-    asked = re.sub(_NEGATED, "", text)
-    seen = asked if limits else text
+    seen = re.sub(_NEGATED, "", text)
     hits = signals(seen)
-    if limits and "risk" not in hits and "risk" in signals(text):
+    if "risk" not in hits and "risk" in signals(text):
         hits.insert(0, "risk")
     acts = set()
     if re.search(_CHANGE, seen):
         acts.add("change")
     if re.search(_REASONING, seen) or re.search(rf"\b(?:{_DECISION})\b", seen):
         acts.add("reason")
-    return Reading(signals=tuple(hits), acts=frozenset(acts), defect=_fixes_a_defect(asked),
+    return Reading(signals=tuple(hits), acts=frozenset(acts), defect=_fixes_a_defect(seen),
                    frontier=bool(re.search(_FRONTIER, seen)), thorough=bool(re.search(_THOROUGH, text)),
                    lookup_form=bool(re.search(_LOOKUP, text)), english=not _not_english(text), length=len(text),
-                   judgment=bool(re.search(_JUDGMENT, seen)), systems=bool(re.search(rf"\b{_SYSTEMS}\b", seen)),
-                   request_defect=_fixes_a_defect(asked, request=True))
+                   judgment=bool(re.search(_JUDGMENT, seen)), systems=bool(re.search(rf"\b{_SYSTEMS}\b", seen)))
 
 
-def level(reading: Reading, kind: str, role: Role | None = None) -> dict:
-    """The level a reading needs, as a "call" or as a "request", with the reasons. The two differ on purpose.
-    A call that asks for nothing is a lookup, while a request with signals and no verb still scores; a request
-    over 1,500 characters gains scope, and a call over 4,000 only lifts a lookup to standard."""
-    if kind == "request":
-        return _request_level(reading)
-    return _call_level(reading, role or Role())
-
-
-def _request_level(r: Reading) -> dict:
-    hits = list(r.signals)
-    if r.length > 1500 and "scope" not in hits:
-        hits.append("scope")  # a long brief is rarely a small task
-    if len(hits) >= 3:
-        result = Level.frontier if r.frontier else Level.hardest
-    elif len(hits) == 2:
-        result = Level.complex
-    elif "change" in r.acts or hits:
-        result = Level.standard
-    elif (r.lookup_form or r.length < 80) and r.english:
-        result = Level.lookup
-    else:
-        result = Level.standard
-    if result < Level.complex and r.request_defect:
-        result, hits = Level.complex, hits + ["fixes or hunts a defect"]
-    return {"level": result, "signals": hits}
-
-
-def _call_level(r: Reading, held: Role) -> dict:
+def level(r: Reading, held: Role | None = None) -> dict:
+    """The level a reading needs, with the reasons. A brief that asks for nothing is a lookup, and one over
+    4,000 characters only lifts a lookup to standard."""
+    held = held or Role()
     hits = list(r.signals)
     why = list(hits)
     if r.acts:
@@ -326,25 +284,8 @@ def _call_level(r: Reading, held: Role) -> dict:
     return {"level": result, "signals": why}
 
 
-def profile_prompt(prompt: str) -> dict:
-    """The user's request as a whole. Used to tell whether the conversation's own model
-    is strong enough for it. Fixing or hunting a defect is at least complex, as in profile_call, except that a
-    hunt verb such as "analyze" counts only beside a defect word such as "bug" or "failing"."""
-    reading = read(prompt, limits=False)
-    return {**level(reading, "request"), "changes": "change" in reading.acts}
-
-
 def profile_call(tool_input: dict, agent_type: str) -> dict:
     """One agent call, judged by its own brief and by what its agent is for."""
     text = f"{tool_input.get('description') or ''}\n{tool_input.get('prompt') or ''}"
-    return level(read(text), "call", role(agent_type))
+    return level(read(text), role(agent_type))
 
-
-def asks_for_work(text: str) -> bool:
-    """Whether text says what to do rather than only naming a target: once paths, numbers, flags and URLs are
-    set aside, a change, reasoning or lookup verb with at least one other word. Length alone, or a signal word
-    ("the payments service"), names a target without asking for anything."""
-    words = [w for w in (text or "").lower().split() if not re.search(r"[/\\.:#]", w) and w[0] not in "-0123456789"]
-    phrase = " ".join(words)
-    return len(words) >= 2 and bool(re.search(_CHANGE, phrase) or re.search(_REASONING, phrase)
-                                    or re.search(_LOOKUP, phrase))

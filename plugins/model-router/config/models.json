@@ -66,21 +66,6 @@
       "effort": "high"
     }
   },
-  "main": {
-    "$comment": "Effort for the main conversation per turn, by the request's level. Only raises: a level below what the session already runs at is left alone.",
-    "effort": {
-      "complex": "high",
-      "hardest": "xhigh",
-      "frontier": "xhigh"
-    },
-    "effort_keeps_cache": {
-      "$comment": "Families whose prompt cache survives an effort change, with an API key or a subscription (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level). A '>=' prefix means that version or later; a bare version means that version only.",
-      "fable": ">=5.1",
-      "opus": "5.5",
-      "sonnet": "5.5",
-      "haiku": "5.5"
-    }
-  },
   "prices": {
     "claude-fable-5-2": {
       "input": 8,

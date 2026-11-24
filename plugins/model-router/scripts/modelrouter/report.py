@@ -2,7 +2,7 @@
 fall back to what the last SessionStart recorded."""
 from __future__ import annotations
 
-from . import intake, ladder, ledger, router, settings, spawn, store, upstream
+from . import ladder, ledger, router, settings, spawn, store, upstream
 from . import config as cfg
 from . import registry
 
@@ -162,7 +162,7 @@ def lock_table(rows: list[dict]) -> list[str]:
 
 def explain(snap: settings.Snapshot, text: str, agent: str | None = None) -> str:
     """What the router would make of an agent call with this brief, and why: a dry run of spawn.decide, which
-    writes nothing. Without an agent, the text also reads as the user's own request."""
+    writes nothing."""
     options, usable = snap.options, snap.usable
     call = {"session_id": snap.session_id, "tool_input": {"prompt": text, "subagent_type": agent or "general-purpose"}}
     decision = spawn.decide(call, snap).decision
@@ -172,14 +172,6 @@ def explain(snap: settings.Snapshot, text: str, agent: str | None = None) -> str
            f"Model: **{decision['model'] or 'left as it is'}**, effort: {decision['effort'] or 'unchanged'}.",
            f"Why: {decision['reason']}.",
            f"Priority {options.priority}; models in use: {', '.join(usable) or 'none: availableModels and deniedModels leave no registry model open'}."]
-    if not agent:
-        seen = intake.from_prompt(text, snap.project)
-        if seen.person:
-            need = snap.pick(seen.level).model
-            out.append(f"As your own request it reads **{seen.level}** ({', '.join(seen.signals) or 'no signals'}), "
-                       f"which needs about {need or 'no model change'}.")
-        else:
-            out.append("It is not read as your own request: it is a delivered or machine message.")
     return "\n".join(out)
 
 

@@ -1,4 +1,4 @@
-"""The profiler against labeled corpora: Agent briefs, the user's requests and agent names.
+"""The profiler against labeled corpora: Agent briefs and agent names.
 Run: python3 -m unittest discover -s tests
 
 Each brief in tests/fixtures/routing-corpus.json carries the lowest level it needs and the highest that is still a
@@ -69,25 +69,7 @@ class RoutingCorpus(unittest.TestCase):
             self.fail(f"over-route rate above {OVER_ROUTE_BUDGET:.0%}:\n" + show(over))
 
 
-REQUESTS = json.loads((FIXTURES / "request-corpus.json").read_text(encoding="utf-8"))["requests"]
 NAMES = json.loads((FIXTURES / "agent-name-corpus.json").read_text(encoding="utf-8"))
-
-
-class RequestCorpus(unittest.TestCase):
-    """The user's own prompt is read by the request rules, which differ from a call's: signals without a verb
-    still score, a long prompt gains scope, and there is no thorough or long-brief rule."""
-
-    def test_every_request_keeps_its_level_and_reasons(self):
-        self.assertGreaterEqual(len(REQUESTS), 60)
-        for row in REQUESTS:
-            got = profile.profile_prompt(row["prompt"])
-            self.assertEqual((got["level"], got["signals"]), (row["level"], row["signals"]), row["prompt"][:80])
-
-    def test_the_corpus_holds_the_cases_the_two_rules_split_on(self):
-        self.assertTrue(any(r["signals"] == ["risk"] and r["level"] == "standard" for r in REQUESTS))
-        self.assertTrue(any("scope" in r["signals"] and len(r["prompt"]) > 1500 for r in REQUESTS))
-        self.assertTrue(any(r["level"] == "frontier" for r in REQUESTS))
-        self.assertGreaterEqual(sum(not r["prompt"].isascii() for r in REQUESTS), 4)
 
 
 class AgentNameCorpus(unittest.TestCase):

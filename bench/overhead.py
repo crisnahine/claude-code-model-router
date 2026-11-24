@@ -61,7 +61,7 @@ MOD_INPUTS = {
     "mod-start": {},
     "mod-spawn": {"parent_model": SESSION_MODEL, "kind": "subagent",
                   "tool_input": {"subagent_type": "general-purpose", "prompt": BRIEFS[1], "description": "fix"}},
-    "mod-turn": {"text": BRIEFS[2], "model": SESSION_MODEL},
+    "mod-turn": {},
     "mod-usage": {"agent_id": "a1", "usage": USAGE},
 }
 # Files the simulation must have written, or the run didn't exercise their path.
@@ -252,9 +252,8 @@ def in_process(base: Path, calls: int, runs: int):
                                      "model": SESSION_MODEL})
                 if mod:
                     modpath.start({"session_id": session})
-                    modpath.turn({"session_id": session, "text": BRIEFS[i % 3], "model": SESSION_MODEL})
-                else:
-                    hooks.user_prompt({"session_id": session, "cwd": project, "prompt": BRIEFS[i % 3]})
+                    hooks.HANDLERS["mod-turn"]({"session_id": session})
+                hooks.user_prompt({"session_id": session, "cwd": project, "prompt": BRIEFS[i % 3]})
             routed_call(session, i, mod)
             if i % 5 == 0:
                 hooks.post_edit({"session_id": session, "cwd": project,

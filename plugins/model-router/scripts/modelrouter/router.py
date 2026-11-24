@@ -46,7 +46,6 @@ class Facts:
     earlier: dict | None = None  # the finished run a redo climbs from: this call's, or for a marked redo its agent's
     marked: bool = False  # calls.marked_redo: the description says the call redoes a weak result
     on_record: bool = True  # False when `earlier` is what a marked redo's own brief would run at, not a finished run
-    floor: Level | None = None  # the request's level, for a hand-off to a strong role agent
     teammate: bool = False  # an agent-team teammate, which CLAUDE_CODE_SUBAGENT_EFFORT doesn't reach
     workflow: bool = False  # a workflow agent, which CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins
     session_effort: str | None = None  # the main conversation's level, for a call made from it
@@ -77,10 +76,9 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     rule = reg.rules.get(agent) or Rule()
     profile = profile_call(tool_input, agent)
     level = rule.level or profile["level"]
-    # A project's rule can raise a level, never lower it; so can the request's own.
-    for floor in (rule.floor, facts.floor):
-        if floor and floor > level:
-            level = floor
+    # A project's rule can raise a level, never lower it.
+    if rule.floor and rule.floor > level:
+        level = rule.floor
     done = facts.earlier
     done_level = Level.parse(done.get("level")) if done else None
     redo = bool(done_level and not tool_input.get("model"))

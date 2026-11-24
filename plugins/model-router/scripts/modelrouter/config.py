@@ -356,15 +356,11 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
             aliases[alias] = target
         else:
             problems.append(f"aliases.{alias} names no model, dropped")
-    main = base.get("main") if isinstance(base.get("main"), dict) else {}
-    cache_rules = main.get("effort_keeps_cache") if isinstance(main.get("effort_keeps_cache"), dict) else {}
     return Registry(
         models=models,
         levels=_levels(_merge(shipped_levels, project_levels), problems),
         aliases=aliases,
         prices=_merge(base.get("prices") or {}, mine.get("prices") or {}),
-        main_effort={Level(k): e for k, e in (main.get("effort") or {}).items() if Level.parse(k) and e in EFFORTS},
-        keeps_cache={k: v for k, v in cache_rules.items() if not k.startswith("$") and isinstance(v, str)},
         newest={k: v for k, v in (base.get("newest") or {}).items() if not k.startswith("$") and isinstance(v, str)},
         older_aliases={k: tuple(v) for k, v in (base.get("older_aliases") or {}).items()
                        if not k.startswith("$") and isinstance(v, list)},

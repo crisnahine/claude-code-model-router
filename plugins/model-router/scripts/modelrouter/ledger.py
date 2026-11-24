@@ -38,13 +38,6 @@ def model_error(session_id: str | None, agent: object, model: str) -> None:
     store.append_ledger({"event": "model_error", "session": session_id, "agent": agent, "model": model})
 
 
-def turn(session_id: str | None, level: str, effort: str | None, command: str | None = None,
-         reason: str | None = None) -> None:
-    """A main-loop turn: the effort it was raised to, or null with the reason it wasn't."""
-    store.append_ledger({"event": "turn", "session": session_id, "level": level, "effort": effort,
-                         **({"command": command} if command else {}), **({"reason": reason} if reason else {})})
-
-
 def _tokens(usage: dict) -> dict:
     tokens = {k: int(usage.get(k) or 0) for k in
               ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}

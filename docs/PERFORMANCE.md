@@ -63,10 +63,9 @@ Measured 2026-11-23 on Claude Code 2.1.330 with a headless Sonnet run that only 
 | Session-start note (`hooks.session_start`) | At session start, resume, clear, compact and fork | 147 tokens | 128 |
 | The seven role agents' names, descriptions and tools in the agent list | Once per session | 493 | 493 |
 | The `route` skill's listing (the other four skills set `disable-model-invocation`, so theirs aren't in context, https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill) | Once per session | 84 | 61 |
-| The hard-request note | Per prompt, only when the request needs more than the session's model | about 88 | about 106 |
-| The stronger-agent check at `Stop` | Once per request, only when that check fires | about 97 | about 95 |
+| The note that the request names a model | Per prompt, only when the request names one | about 34 | about 34 |
 
-The first three are measured, the last two are rendered text at about 4 characters a token. On the fallback path each routed spawn also gets a one-line note.
+The first three are measured, the last is rendered text at about 4 characters a token. On the fallback path each routed spawn also gets a one-line note.
 
 A once-per-session source is cached on the first request and read from the cache on later ones, until it lapses or the conversation is compacted (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md). On Sonnet 5.5 the 683 tokens cost about $0.0027 to write at the one-hour price (a Claude subscription's main conversation, within its plan) or $0.0017 at the five-minute price (an API key, usage credits or a cloud provider), then $0.00007 per later request (https://code.claude.com/docs/en/prompt-caching.md#which-ttl-each-request-gets, https://platform.claude.com/docs/en/about-claude/pricing.md). No subagent gets them: in kept benchmark transcripts the main loop's first request was 730 tokens bigger with the plugin and the subagents' first requests weren't. In the benchmark of commit `27b94e6` on a Sonnet session, the router lost by $0.009 to $0.012 a run in implementation, bugfix, cross-module and security review, and this text is about $0.003 of that. In the kept security-review pair, the router's subagent at `high` effort cost $0.0064 more than `defaults`' at the session's default.
 

@@ -8,7 +8,7 @@
 
 ## The idea
 
-Model Router sets the model and reasoning effort of every agent Claude Code starts: subagents from any plugin, skill or agent, teammates, and workflow stages. With the `main_effort` option on, it also raises the main conversation's effort for a hard request. The agent the caller chose, its prompt and its tools stay as they were.
+Model Router sets the model and reasoning effort of every agent Claude Code starts: subagents from any plugin, skill or agent, teammates, and workflow stages. The agent the caller chose, its prompt and its tools stay as they were.
 
 The aim is the lowest cost per finished task at a high quality bar. Every subtask starts on the cheapest model and effort that should do it, and moves up only when its result comes back for a redo. Anthropic's own measurements back that order: running at low effort and re-running failures at high solved about 97% of a coding benchmark for $0.17 a task, against 95.3% for $0.29 with every task at high ([docs/research/model-control.md](research/model-control.md), Q7).
 
@@ -16,22 +16,20 @@ The aim is the lowest cost per finished task at a high quality bar. Every subtas
 
 ![Two control paths, one router: Claude Code engine events reach the mod, hooks/router.ts, and the settings hooks in hooks/hooks.json are the fallback and do the bookkeeping. Both run sh model-router.sh, which calls one Python runtime that decides every spawn.](assets/two-paths.svg)
 
-The mod (`hooks/router.ts`, loaded from `hooks/hooks.json` under `modules`) is the primary path. It hooks eight engine events and asks the Python runtime through four `mod-*` commands, each payload with `session_id`:
+The mod (`hooks/router.ts`, loaded from `hooks/hooks.json` under `modules`) is the primary path. It hooks six engine events and asks the Python runtime through four `mod-*` commands, each payload with `session_id`:
 
 | Event | Command and payload keys | What the mod does |
 | :- | :- | :- |
 | `tool.call` (`Agent`) | none | Keeps the `effort` Claude put on the call, by `tool_use_id`, since `agent.spawn` has no effort field. |
 | `session.start` | `mod-start`: `settings` | Marks the session as routed by the mod and sends the settings layers it read. |
 | `agent.spawn` | `mod-spawn`: `settings`, `cwd`, `parent_agent_id`, `parent_model`, `session_effort`, `kind`, `tool_use_id`, `tool_input` | Fires for every subagent, teammate and workflow agent before its model resolves, and passes the pick on as `model`. `parentModel` is the parent's exact effective model. `kind` is `subagent`, `teammate` or `workflow`. `tool_use_id` is left out for a workflow's agents, which share one. Forks and resumed runs are left alone. |
-| `prompt.submit` | none | Keeps where an idle prompt came from (`origin.kind`), and a typed `/skill`'s name and arguments. |
-| `skill.prompt` | none | Keeps the body a typed `/skill` renders. |
-| `turn.start` | `mod-turn`: `settings`, `text`, `model`, `first_party`, `origin`, `command` | For the main loop, asks for the turn's effort. A typed `/skill` turn's text is a `<command-message>` line, so the command's name, arguments and body go with it. An agent turn that starts before the spawn hook has the agent's id is matched by its prompt, and takes the effort its waiting spawns got, only while they all got the same one. |
-| `turn.step` | none | Applies the agent's routed effort, or the main loop's turn effort when that is a raise, to each model request. Remembers the main loop's effort as `session_effort`, and keeps each request's usage. |
+| `turn.start` | `mod-turn`: `settings` | For the main loop, marks the session as routed by the mod again, since `session.start` doesn't fire after `/clear`, and sends the settings layers. An agent turn that starts before the spawn hook has the agent's id is matched by its prompt, and takes the effort its waiting spawns got, only while they all got the same one. |
+| `turn.step` | none | Applies the agent's routed effort to each model request. Remembers the main loop's effort as `session_effort`, and keeps each request's usage. |
 | `turn.complete` | `mod-usage`: `agent_id`, `subagent_type` (workflow agents), `usage`, `requests` | Writes the turn's usage and cost to the ledger. Each request is priced on its own, because Haiku 5.5 bills a prompt over 100,000 tokens at a higher rate (https://platform.claude.com/docs/en/about-claude/pricing.md, Long context pricing). A turn without its requests is priced at the base rate. |
 
 The mod runs the launcher the settings hooks use, through `$.process.run` with the plugin's hook environment and an 8-second timeout, so there is one decision procedure and one state store. A `mod-spawn` round trip takes about 58 ms warm and 187 ms cold (p50), almost all of it starting Python ([Performance](PERFORMANCE.md#mod-path)).
 
-The settings hooks do every job the mod doesn't: the session-start note, the request profile, availability tracking from each `Agent` result, redo bookkeeping, and the two checks before a turn ends. `PreToolUse` on `Agent` is the fallback path: it rewrites the call's `model` and `effort` with `updatedInput`, and stands down once any mod command has marked the session (`mod.active`), so a call is never routed twice. It covers Claude Code versions without mods and organizations that don't load user mods.
+The settings hooks do every job the mod doesn't: the session-start note, the request's record, availability tracking from each `Agent` result, redo bookkeeping, and the check before a turn ends. `PreToolUse` on `Agent` is the fallback path: it rewrites the call's `model` and `effort` with `updatedInput`, and stands down once any mod command has marked the session (`mod.active`), so a call is never routed twice. It covers Claude Code versions without mods and organizations that don't load user mods.
 
 The mod comes first for three reasons. It reaches teammates and workflow stages, which the `Agent` call doesn't carry. It sets the model after auto mode reviewed the call, so auto mode's "input changed after review" denial doesn't apply. And it can set effort on each request, the only lever a forced subagent model leaves.
 
@@ -41,19 +39,19 @@ The mod comes first for three reasons. It reaches teammates and workflow stages,
 | :- | :- |
 | `config` | Builds the `Registry` from `config/models.json` and the two override files (`config.load`); holds the `Level` type |
 | `registry` | The `Registry` every step reads, with `available`, `select`, `clamp`, `family`, `newest_id` and `cost` |
-| `profile` | Reads a brief (`read`), scores it as a call or a request (`level`), and maps agent names to roles (`ROLES`, `role`) |
+| `profile` | Reads a brief (`read`), scores it (`level`), and maps agent names to roles (`ROLES`, `role`) |
 | `ladder` | A level and the priority give the pick: a model and an effort |
 | `spawn` | The procedure both paths call: `decide`, then `record` |
 | `router` | The order of authority: one decision from the facts it is given alone |
 | `fallback` | The `Agent` call path's rewrite, its waiting record, the refused-rewrite guard and the one deny |
-| `mod` | The mod path's four commands, `active`, and the pure `turn_effort(TurnFacts, registry)` |
-| `intake` | Whether a prompt or turn is the person's request, and its level |
-| `request` | The current request: level and floor, the model the user named (`named_model`), start time, the escalation asked, code changed, and `Request.below` |
-| `calls` | A `Route` per spawn, the request's strongest spawn (`strongest`), and the one rule set for what comes back (`returned`) |
+| `mod` | The mod path's commands and `active` |
+| `intake` | Whether a prompt is the person's request or a message Claude Code delivered |
+| `request` | The current request: its `prompt_id`, start time and the model the user named (`named_model`) |
+| `calls` | A `Route` per spawn, and the one rule set for what comes back (`returned`) |
 | `health` | Model errors, substitutions and refused rewrites in; healthy or routed around, and last ran as, out |
 | `agents` | An agent's definition: the project, the user folder, this plugin, another installed plugin, or a built-in |
 | `session` | The model the conversation runs on |
-| `gates` | The two checks before a turn ends |
+| `gates` | The check before a turn ends |
 | `upstream` | Releases, the docs index, aliases and model status against what was last reviewed |
 | `settings` | Options, environment facts, and the `Snapshot` each hook call builds once. A read writes nothing; a spawn writes what reads noticed (`Snapshot.settle`) |
 | `allowlist` | The models `availableModels` and `deniedModels` leave open, and each model's `maxEffortLevel` cap |
@@ -78,15 +76,9 @@ The profile scores each subtask from its own brief. It looks for four signals: r
 
 The agent's name counts too, by its whole parts split on `-`, `_` and `:`. A heavy name such as `architecture-advisor` or `cybersecurity-analyst` sets a complex floor. A search or check name such as `docs-researcher` or `lint-runner` caps the brief at standard, while `researcher` and `information-extractor` are neither. `docs` counts only before another part, so `docs-lookup` is a search agent and `update-docs` isn't.
 
-A brief whose work is to fix or hunt a defect is at least complex, however small: Claude Code's effort guide puts "work where verification matters or edge cases are likely, such as fixing a bug in an existing codebase" at `high` (https://code.claude.com/docs/en/model-config.md, choose an effort level), and the research notes pick Opus for risky, judgment-heavy work (`docs/research/quality-first-routing.md`). `fix` and `debug` count only as verbs ("the fix", "fixture" and "debug logging" don't), and a fix the brief rules out ("do not fix", "out of scope") doesn't count. "Find why" and "find" before a defect noun ("find the race condition") hunt a defect, while "find the regression tests" stays a lookup. The request profile (`profile_prompt`) applies the same rule to the person's request, except that a hunt verb such as "analyze" or "investigate" counts only beside a defect word such as "bug", "failing" or "slow", since people "analyze the sales numbers" too.
+A brief whose work is to fix or hunt a defect is at least complex, however small: Claude Code's effort guide puts "work where verification matters or edge cases are likely, such as fixing a bug in an existing codebase" at `high` (https://code.claude.com/docs/en/model-config.md, choose an effort level), and the research notes pick Opus for risky, judgment-heavy work (`docs/research/quality-first-routing.md`). `fix` and `debug` count only as verbs ("the fix", "fixture" and "debug logging" don't), and a fix the brief rules out ("do not fix", "out of scope") doesn't count. "Find why" and "find" before a defect noun ("find the race condition") hunt a defect, while "find the regression tests" stays a lookup.
 
-Calls and requests are read the same way (`profile.read`) and scored by `profile.level`, with their own rules on purpose:
-
-| | A call | A request |
-| :- | :- | :- |
-| Asks for no change or reasoning | a lookup (standard with two signals) | still scores from its signals |
-| Long text | over 4,000 characters lifts a lookup to standard | over 1,500 characters adds scope |
-| A negated limit ("do not change any files") | set aside | counts as written |
+A brief that asks for no change or reasoning is a lookup, or standard with two signals. One over 4,000 characters lifts a lookup to standard. A negated limit ("do not change any files") is set aside, though its risk words still count.
 
 Each step comes from the measurements in the research notes:
 
@@ -103,7 +95,7 @@ When the pick is weaker than the level's `needs` (a cap, the allowlist or model 
 
 Both paths call one procedure in two steps. `spawn.decide` gathers the facts (the agent's definition, the model it would inherit, the usable models, this call's finished run earlier in the request) and passes them to `router.decide`. It writes nothing. `spawn.record` writes the ledger row (`via` names the path) and the spawn's route in `calls`, each under its own file's lock, so one failed write doesn't cost the other. The fallback adjusts the decision between the two steps, so the ledger row shows the guarded result. The fallback turns the decision into `updatedInput` and a note, the mod into `{model, effort, reason}`.
 
-`router.decide` reads no state: everything arrives as facts. It returns keep or rewrite, the model, effort, level and a reason, which the ledger keeps so every choice can be explained. The `explain` command and `/model-router:route` run `spawn.decide` on a text, so they report what a real call would get, rules, pins, a redo and the request's floor included, and write nothing. Without `--agent` they also read the text as the user's own request.
+`router.decide` reads no state: everything arrives as facts. It returns keep or rewrite, the model, effort, level and a reason, which the ledger keeps so every choice can be explained. The `explain` command and `/model-router:route` run `spawn.decide` on a text, so they report what a real call would get, rules, pins and a redo included, and write nothing.
 
 Order of authority, strongest first:
 
@@ -119,13 +111,13 @@ Then `Registry.clamp` moves the result to the closest usable model at or below i
 
 The scout, verifier and docs-researcher pin Haiku at `medium` in their own definitions, so step 5 keeps them, also where the router doesn't route. At `low` the model is more likely to skip a search, stop early or skip a check in a long agent prompt (https://platform.claude.com/docs/en/build-with-claude/effort), which matters most for the verifier, the check the cheap-first ladder rests on. The implementer, architect, reviewer and deep-solver name no model or effort, so step 7 routes them by their brief, or step 6 when `CLAUDE_CODE_SUBAGENT_MODEL` is set. Where the router doesn't route, they run on `CLAUDE_CODE_SUBAGENT_MODEL` if set, else on the conversation's model (https://code.claude.com/docs/en/sub-agents.md#choose-a-model).
 
-Role names set floors (`profile.ROLES`): complex for the architect and reviewer, hardest for this plugin's `model-router:deep-solver` only, so `sudoku-solver` gets complex and `resolver` none. The hard-request note (`UserPromptSubmit`) and the `Stop` check name a strong agent, the architect or for a frontier request the deep-solver, by name only (`gates.strong_agent`). A call to the architect, reviewer or deep-solver starts no lower than the request's level (`spawn.facts`), since a hand-off brief often reads simpler than the request; the floor is off while Claude handles another session's or a teammate's message. A redo still climbs from there, which a model named on the call would stop at step 3.
+Role names set floors (`profile.ROLES`): complex for the architect and reviewer, hardest for this plugin's `model-router:deep-solver` only, so `sudoku-solver` gets complex and `resolver` none. A redo still climbs from there, which a model named on the call would stop at step 3.
 
 Effort is set when the router, a rule or the agent's pin chose the model and nobody chose an effort: not the call, the agent's definition, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` (`router._effort_decided`). `CLAUDE_CODE_SUBAGENT_EFFORT` "doesn't apply to forks, forked skills, or teammates" (https://code.claude.com/docs/en/env-vars.md), so the router sets a teammate's effort anyway. The mod knows a teammate by the spawn's `kind`. On the fallback, a call from the main conversation with a `name` and no `isolation` launches as a teammate when agent teams are on (https://code.claude.com/docs/en/sub-agents.md#subagent-names), so the router treats it as one (`router.Facts.teammate`).
 
 On the session's own model, an agent with no other effort runs at the session's level (https://code.claude.com/docs/en/model-config.md#effort-level-of-subagents-and-teammates), such as `xhigh` under ultracode. So for a call from the main conversation, an effort the router sets on that model is raised to the session's level when that is higher (`router._session_floor`), after the redo step and before the cap, on the two pinned branches too. The mod sends that level as `session_effort`; the fallback reads the hook input's `effort.level`. A nested call gets no floor, since it runs at its parent's effort. The ledger records the raised effort, so a redo asks for more than the run it replaces.
 
-Every effort the router sets is then held to `maxEffortLevel` for the model that runs (`router.capped`, `allowlist.Allowlist.effort_cap`). The lowest cap of any source applies, a source's `modelSettings` entry for a model replaces that source's top-level cap, and `max` sets none (https://code.claude.com/docs/en/settings-reference.md#maxeffortlevel). `modelSettings` is keyed by model ID; several IDs of one family read as the highest of their caps. Claude Code applies the cap anyway; doing it here keeps the ledger and `/model-router:route` true to what runs. The reason then says "effort held to <cap> by maxEffortLevel", as does a main-loop turn row's `reason`.
+Every effort the router sets is then held to `maxEffortLevel` for the model that runs (`router.capped`, `allowlist.Allowlist.effort_cap`). The lowest cap of any source applies, a source's `modelSettings` entry for a model replaces that source's top-level cap, and `max` sets none (https://code.claude.com/docs/en/settings-reference.md#maxeffortlevel). `modelSettings` is keyed by model ID; several IDs of one family read as the highest of their caps. Claude Code applies the cap anyway; doing it here keeps the ledger and `/model-router:route` true to what runs. The reason then says "effort held to <cap> by maxEffortLevel".
 
 Some details of how the rules apply:
 
@@ -166,37 +158,15 @@ Neither path approves anything. The hook returns `updatedInput` and a one-line n
 
 ## The conversation's own model
 
-A mod could send the main loop's requests to another model, and the first probe of this design did. The router doesn't, by choice: each model keeps its own prompt cache, so a switch re-reads the whole conversation uncached, and switching back does it again. An effort change keeps the cache on current models with an API key or a subscription, so the main loop gets effort instead.
+A mod could send the main loop's requests to another model, and the first probe of this design did. The router doesn't, by choice: each model keeps its own prompt cache, so a switch re-reads the whole conversation uncached, and switching back does it again. It leaves the main loop's effort alone too. For a hard request, the person types `ultrathink` or uses `/effort` (https://code.claude.com/docs/en/model-config.md#adjust-effort-level).
 
-`turn.start` profiles the request. With the `main_effort` option on (off by default), a complex, hardest or frontier request raises that turn's effort to `main.effort` in the registry (`high`, `xhigh`, `xhigh`), held to any `maxEffortLevel` cap. `turn.step` applies it only above what the session already asks for, so `/effort`, `ultrathink` and the user's settings win. `mod.turn_effort` decides from `TurnFacts` alone, so every case is a row in its table test. A turn at complex or above that gets no effort writes a `turn` ledger row with `effort: null` and the first reason that applied; under routing `off` no turn row is written.
+`UserPromptSubmit` records the person's request (`request.start`): its `prompt_id`, its start time and a model it names. Redo bookkeeping reads the `prompt_id` to tell one request from the next. `intake.py` decides whether a prompt is the person's, so a delivered message never replaces the record or adds a note. Not the person's: text framed as "Another Claude session sent a message:" over a `<teammate-message>` or `<cross-session-message>`; text that opens with a framing tag Claude Code adds (`<task-notification>`, `<command-...>`, `<bash-...>`, `<local-command-...>`, `<system-reminder>`); and text that is nothing but elements with hyphenated tag names, as every framing seen so far has. A request that opens with its own tag (`<button> does nothing on Safari`) or is written in XML tags (`<task>...</task>`) is the person's.
 
-The raise is skipped wherever an effort change drops the cache (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level), or the router can't confirm it survives:
+When the request names a model ("use opus"), the note says an Agent call with that `model` runs on it, or within the user's `max_tier` when it is above the cap. Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` Claude can't pass a model (https://code.claude.com/docs/en/sub-agents.md#run-every-subagent-on-one-model), so there is no note. Any other prompt gets no note and costs no extra tokens.
 
-| Skipped when | Why |
-| :- | :- |
-| Routing isn't `auto`, `main_effort` is off, or `CLAUDE_CODE_EFFORT_LEVEL` is set | The user decided |
-| `$.session.authorize()` finds no first-party credential | A Claude apps gateway or a third-party provider. A null in the desktop app, which never lends its sign-in to plugins, counts as unknown and is raised |
-| Bedrock (Mantle included) or Vertex | The cache drops |
-| Foundry, or `ANTHROPIC_BASE_URL` | The docs don't list Foundry, and a gateway decides what stays cached |
-| `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` | The cache drops |
-| `DISABLE_PROMPT_CACHING`, or its variant for the session model's family (https://code.claude.com/docs/en/env-vars.md) | No cache to keep |
-| The session's model is known and not under `main.effort_keeps_cache` (Fable 5.1 or later, Opus 5.5, Sonnet 5.5, Haiku 5.5) | The cache drops |
+The `Stop` check ([Guide](GUIDE.md#the-check-before-a-turn-ends)) asks once per batch of edits. `verify_gate` asks when code in the project (under `cwd` or `CLAUDE_PROJECT_DIR`, prose files such as `.md` and `.txt` aside) changed and, after the last edit, no check command ran and no verifier or reviewer is still running. A command is split at `&&`, `||`, `;`, `|` and newlines, even inside quotes, and a part counts when it names a test, lint, type-check or build tool and doesn't start with a word that only installs, finds, reads or mentions one (`gates.is_check`): `cd api && pytest` counts, `pip install pytest` doesn't. A subagent's commands count too, read from the transcript `SubagentStop` names (`agent_transcript_path`).
 
-An unknown model, as after `/clear` when SessionStart sends none, is raised. The model is the mod's `$.session.model()` when that is a model ID, else what SessionStart or PostModelSwitch recorded.
-
-`intake.py` decides, for both paths, whether a turn is the person's request, so a delivered message never raises effort, replaces the request's profile or adds a note. Not the person's: text framed as "Another Claude session sent a message:" over a `<teammate-message>` or `<cross-session-message>`; text that opens with a framing tag Claude Code adds (`<task-notification>`, `<command-...>`, `<bash-...>`, `<local-command-...>`, `<system-reminder>`); and text that is nothing but elements with hyphenated tag names, as every framing seen so far has. A request that opens with its own tag (`<button> does nothing on Safari`) or is written in XML tags (`<task>...</task>`) is the person's. The mod also skips five `prompt.submit` origins (`task-notification`, `peer`, `peer-send-message`, `observer`, `observer-activity`); every other kind, a new one included, is the person's (`intake.ORIGINS`).
-
-A skill typed as `/name` is profiled by what it asks for (`intake.profile_skill`). When its content takes the arguments through a placeholder (`$ARGUMENTS`, `$1` or a declared `arguments` name, https://code.claude.com/docs/en/skills.md#available-string-substitutions) and the arguments say what to do (a change, reasoning or lookup verb plus another word, once paths, numbers, flags and URLs are set aside: `profile.asks_for_work`), the arguments alone set the level. So `/model-router:ship fix a typo` routes as that fix. Arguments that only name targets (`482`, `src/a.py`, `the payments service`) leave the task to the body, held at most complex, since a template body serves any target. When nothing takes them, the engine appends them as `ARGUMENTS: ...`, and the higher of the arguments' level and that of the body's first 1,500 characters counts, as for a skill typed bare. A body's length never reads as scope.
-
-The mod gets the body from `prompt.submit`'s `command` and the `skill.prompt` text, and sends it only to a turn that opens with that command's `<command-message>` line. `UserPromptSubmit` sees only the typed line (https://code.claude.com/docs/en/hooks.md#userpromptsubmit-input), so it reads the raw `SKILL.md` or command file from the project or user folder, a regular file of at most 64 KB, and finds placeholders itself (an unescaped `$ARGUMENTS`, `$N` or `$ARGUMENTS[N]` with an argument at that index, or a declared name the body uses; `$500` is prose). A plugin's skill is read from `skills/<name>/SKILL.md` under this plugin's root or a root in Claude Code's install record (`agents.installed_roots`, which walks nothing, since this runs on every typed line). One the record doesn't list, such as a `--plugin-dir` plugin, is profiled by its arguments alone. The paths can disagree where the engine's substitution differs from this reading, such as quoted arguments. A `/skill` typed while a turn runs is queued, and the mod doesn't profile it yet.
-
-When the readings differ, the request keeps the higher. `UserPromptSubmit` starts the request (`request.start`). The mod's `turn.start` raises its level (`request.raise_to`) for the person's typed command, under any routing mode but `off` and whatever `main_effort` says, so a command the settings hook couldn't read still gets the strong-agent floor and the Stop check. It never lowers the level, starts a request, or raises from plain turn text, which may carry other hooks' context.
-
-When the request needs more than the session's model (`Request.below`), the `UserPromptSubmit` note says a strong subagent can give the plan or decision when a few reads of the code can't settle it, and that the conversation works directly otherwise. For the architect it adds that the agent writes nothing. A normal prompt gets no note, so it costs no extra tokens.
-
-The two `Stop` checks ([Guide](GUIDE.md#the-checks-before-a-turn-ends)) each ask once. `strong_agent_gate` blocks when a complex or harder request on a weaker session ended with no agent of the needed strength started (`calls.strongest`). It asks for the reviewer, given a saved diff, when code changed during the request, else the architect, or the deep-solver for a frontier request; the reviewer starts no lower than the request's level too. `verify_gate` asks when code in the project (under `cwd` or `CLAUDE_PROJECT_DIR`, prose files such as `.md` and `.txt` aside) changed and, after the last edit, no check command ran and no verifier or reviewer is still running. A command is split at `&&`, `||`, `;`, `|` and newlines, even inside quotes, and a part counts when it names a test, lint, type-check or build tool and doesn't start with a word that only installs, finds, reads or mentions one (`gates.is_check`): `cd api && pytest` counts, `pip install pytest` doesn't. A subagent's commands count too, read from the transcript `SubagentStop` names (`agent_transcript_path`).
-
-Neither check runs when routing isn't `auto`, on a stop the hook already blocked (`stop_hook_active`), or while a workflow or subagent runs in the background (`gates.still_running`), since the turn is only paused. The verify check also waits while a verifier or reviewer runs in the background.
+The check doesn't run when routing isn't `auto`, on a stop the hook already blocked (`stop_hook_active`), or while a workflow or subagent runs in the background (`gates.still_running`), since the turn is only paused. It also waits while a verifier or reviewer runs in the background.
 
 ## Discovery and adaptation
 
@@ -231,14 +201,14 @@ The mod's events are in the table under [Two control paths](#two-control-paths-o
 SessionStart ─┬─ session-start   records options and the session model; explains routing
               └─ refresh-cache   (async) refreshes the upstream cache if older than 24 h,
                                  waiting 1 h to a day after a failed fetch
-UserPromptSubmit ─ user-prompt   profiles the request; notes a model the user may be asking for
+UserPromptSubmit ─ user-prompt   records the request; notes a model the user may be asking for
 PostModelSwitch ─ model-switch   records the session's new model
 PreToolUse (Agent|Task) ─ pre-agent      fallback: fallback.route, returns updatedInput
 PostToolUse (Agent|Task) ─ post-agent    the model that ran; a finished result is kept for redos
 SubagentStop ─ agent-stopped    a background agent's result or handback is back; counts its checks
 PostToolUseFailure (Agent|Task) ─ agent-failed   counts model errors
 PostToolUse (Edit|Write|NotebookEdit) ─ post-edit   notes that code changed
-Stop ─ stop                      the two checks
+Stop ─ stop                      the check before a turn ends
 ```
 
 `cli.py` catches whatever a handler raises and exits 0, and every mod hook has a `.catch` that passes the event on unchanged. The launcher exits 0 when Python is missing and turns any other hook failure into exit 1, since exit 2 would block the tool call, the prompt or the stop (https://code.claude.com/docs/en/hooks.md#exit-code-2-behavior-per-event). A bug here can cost routing, never block a session.
@@ -263,10 +233,9 @@ Every ledger row has `ts`, `event` and `session`:
 | `spawn` | `via`, `agent`, `action`, `level`, `signals`, `model`, `was`, `effort`, `source`, `escalated_from`, `reason`, `description` (first 120 characters); `kind` on the mod path; `held` when a project rule's model was held; `on_record: false` on a marked redo with no finished run on record |
 | `result` | `agent`, `asked`, `resolved_model`, `status` (`cut_off` for an API-error answer), `total_tokens`; `models_used` only on a mid-run swap |
 | `model_error` | `agent`, `model` |
-| `turn` | `level`, `effort` (null when a complex or harder turn got none), `command` for a typed skill, `reason` |
 | `usage` | `agent_id` (none for the main loop), `model`, the four token counts, `ephemeral_1h_input_tokens` when reported, `cost_usd` at list price (null when unpriced); `agent` for a workflow agent, which has no result row |
 
-The request's strongest spawn isn't stored: `calls.strongest` reads it from the routes written since the request started (its `prompt_id`, else its `started` time). A request with more than 100 spawns can lose its strongest one, which at worst asks once more for the Stop check's agent. A spawn in flight when a session upgrades has no route, so its result finishes nothing, which costs at most one redo. An older `prompts.json` entry keeps `calls`, `routed` and `top_spawn` keys that nothing reads.
+A spawn in flight when a session upgrades has no route, so its result finishes nothing, which costs at most one redo. An older `prompts.json` entry keeps keys such as `level`, `need`, `calls` and `top_spawn` that nothing reads.
 
 Writes are atomic, and state files are compact JSON. Each read-modify-write takes a lock file, because agents started in one message run their hooks at the same moment. A busy lock is retried from 1 ms, doubling to 10 ms between tries, for at most one second (`store.LOCK_WAIT_SECONDS`). If it is still held, the write is skipped and counted, and the hook goes on with what it read: a write without the lock could drop another hook's update, and a hook must never hang a session. A lock file older than ten seconds was left by a dead process, so it is removed and counted. The lock file names the session that took it, so a wait on another session's lock can be told apart. `locks.json` is written without a lock, after the state lock is let go, so two hooks at once can lose a count but never state. A spawn takes two locks on the mod path and three on the fallback ([Performance](PERFORMANCE.md#state-locks-a-spawn-takes)).
 
@@ -283,7 +252,7 @@ The user's `~/.claude/model-router.json` is trusted in full. A repository's `.cl
 - A `needs` or `effort` below the shipped value, or the user's, is dropped (`config._raises_only`).
 - Its agent rules only raise: `level` is a floor, `model` applies only when it isn't weaker than what the call would run on without it (`Rule.suggested`, checked in `router.decide`), and `route: false` is ignored. So it can't lower an agent whose own file pins a stronger model.
 - It can't switch routing on, set prices, or re-rank a model that ships or the user defined. A name it adds that sits inside one of those names, or contains one, is dropped, and its names match a model ID last (`Registry.family`), so `claude` can't claim the shipped IDs.
-- Models it adds (`Model.project`) are never the router's pick (`Registry.select`), the stand-in `Registry.clamp` gives a named model that can't run, or the next model up for a redo `maxEffortLevel` holds, and are ignored while the user has a cap. One runs only when a call or the user's own rule names it, and a run on one never counts as the strong agent the Stop check wants (`calls.strongest`).
+- Models it adds (`Model.project`) are never the router's pick (`Registry.select`), the stand-in `Registry.clamp` gives a named model that can't run, or the next model up for a redo `maxEffortLevel` holds, and are ignored while the user has a cap. One runs only when a call or the user's own rule names it.
 
 In every file, a non-finite `needs` (`NaN`, `Infinity`, which `json` accepts) or a key of the wrong type is dropped. `config.build` lists what it dropped (`Registry.problems`) and what it held back from the project (`Registry.held`, plus rule models a spawn found weaker, kept as the spawn row's `held`); `/model-router:models` and `models --json` (`config_problems`, `held_back`) show both. The user's `max_tier` still caps every model (`Registry.available`, `Registry.clamp`), while the effort a project set stays. Override files are only read. [Security](SECURITY.md#who-can-influence-routing) maps every source of influence to its limits.
 
@@ -346,8 +315,6 @@ Plugin options have no version key, since `userConfig` has Claude Code's shape (
 - Answer quality. The profile estimates from the brief's wording and the agent's name, and redo escalation reacts to what Claude redoes. Neither measures whether an answer was right.
 - Another mod that also sets a spawn's model. Mods run in their own order; the ledger shows the model that ran.
 - `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`. The env-vars page doesn't list it or say whether it beats a mod's `agent.spawn` model (https://code.claude.com/docs/en/changelog, 2.1.296); in a live run on 2.1.331 it did, so while it is set the router sets only a workflow agent's effort ([Guide](GUIDE.md#who-decides-the-model)).
-- A HIPAA organization. An effort change there re-reads the context uncached (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level), and the router has no reliable sign of that configuration, so `main_effort` still raises. Leave it off, its default, there.
-- A Claude apps gateway through the Claude Desktop app. `$.session.authorize()` is null in Desktop whatever the session signed in to, and Desktop reads the gateway URL from its own managed configuration (https://code.claude.com/docs/en/claude-apps-gateway.md#deliver-policy-to-claude-desktop-sessions), which a hook can't read, so `main_effort` still raises. Leave it off there.
 - The fallback's rewrite in auto mode. Auto mode reviewed the input Claude wrote, so Claude Code can deny the changed `Agent` call ("a hook changed this call's input after auto mode reviewed it"). A command hook can change Bash, PowerShell, Monitor, Edit, Write and NotebookEdit input without that denial, and Agent isn't among them (https://code.claude.com/docs/en/hooks.md#pretooluse-updatedinput-in-auto-mode). A repeat of the call runs untouched ([Rewrites that don't take](#rewrites-that-dont-take)). The mod changes no input, so the denial doesn't reach it.
 - A state write while another hook holds that file's lock for over a second: it is skipped and counted, and that one update is lost ([State](#state)).
 - A Stop check that can't run. When `Stop` or `SubagentStop` fails or times out, the turn ends without the checks, and `onFailure` "has no effect" on those events, since "Claude can't repair a hook that won't run" (https://code.claude.com/docs/en/hooks.md#block-the-action-when-a-hook-fails). The checks fail open, like every hook here.

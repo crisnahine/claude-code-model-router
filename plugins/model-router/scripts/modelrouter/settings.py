@@ -26,10 +26,8 @@ class Settings:
     priority: str = "balanced"
     cap: str | None = None  # max_tier, when it names a registry model
     pins: str = "respect"  # agent_pins: respect or override
-    main_effort: bool = False
     update_check: bool = True
     verify_gate: bool = True
-    strong_agent_gate: bool = True
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
     force: bool = False  # CLAUDE_CODE_SUBAGENT_MODEL_FORCE
     subagent_effort: str | None = None  # CLAUDE_CODE_SUBAGENT_EFFORT
@@ -40,9 +38,6 @@ class Settings:
     provider: str | None = None  # the one provider the CLAUDE_CODE_USE_<NAME> switches select, if clear
     api_key: str | None = field(default=None, repr=False)  # ANTHROPIC_API_KEY
     base_url: bool = False  # ANTHROPIC_BASE_URL is set
-    no_betas: bool = False  # CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
-    mantle: bool = False  # CLAUDE_CODE_USE_MANTLE
-    cache_off: tuple[str, ...] = ()  # the suffix of each DISABLE_PROMPT_CACHING* switch that is on: "" for all models
 
 
 def truthy(value: str | None) -> bool:
@@ -64,14 +59,6 @@ def _provider(on: set) -> str | None:
     if "anthropic_google_cloud" in on:
         on = on - {"vertex"}
     return next(iter(on)) if len(on) == 1 else None
-
-
-def _cache_off() -> tuple[str, ...]:
-    """Found by prefix, so a new per-model variant needs no code
-    (https://code.claude.com/docs/en/env-vars.md)."""
-    prefix = "DISABLE_PROMPT_CACHING"
-    return tuple(sorted(name[len(prefix):].lstrip("_").lower() for name, value in os.environ.items()
-                        if name.startswith(prefix) and name[len(prefix):len(prefix) + 1] in ("", "_") and truthy(value)))
 
 
 def resolve(reg: Registry | None = None, recorded: bool = False) -> Settings:
@@ -97,10 +84,8 @@ def resolve(reg: Registry | None = None, recorded: bool = False) -> Settings:
         priority=option("priority") if option("priority") in PRIORITIES else "balanced",
         cap=cap if reg and cap in reg.models else None,
         pins="override" if option("agent_pins") == "override" else "respect",
-        main_effort=truthy(option("main_effort")),
         update_check=_on(option("update_check")),
         verify_gate=_on(option("verify_gate")),
-        strong_agent_gate=_on(option("strong_agent_gate")),
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),
         force=truthy(env("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")),
         subagent_effort=env("CLAUDE_CODE_SUBAGENT_EFFORT"),
@@ -111,9 +96,6 @@ def resolve(reg: Registry | None = None, recorded: bool = False) -> Settings:
         provider=_provider({p for p in PROVIDERS if truthy(env(f"CLAUDE_CODE_USE_{p.upper()}"))}),
         api_key=env("ANTHROPIC_API_KEY"),
         base_url=bool(env("ANTHROPIC_BASE_URL")),
-        no_betas=truthy(env("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")),
-        mantle=truthy(env("CLAUDE_CODE_USE_MANTLE")),
-        cache_off=_cache_off(),
     )
 
 
@@ -159,8 +141,6 @@ def record(settings: Settings) -> None:
     flag = {True: "true", False: "false"}
     options = {"routing_mode": settings.routing_mode, "priority": settings.priority,
                "max_tier": settings.cap or "", "agent_pins": settings.pins,
-               "main_effort": flag[settings.main_effort], "update_check": flag[settings.update_check],
-               "verify_gate": flag[settings.verify_gate],
-               "strong_agent_gate": flag[settings.strong_agent_gate]}
+               "update_check": flag[settings.update_check], "verify_gate": flag[settings.verify_gate]}
     if any(store.load_state().get(k) != v for k, v in options.items()):
         store.update_state(lambda state: state.update(options))

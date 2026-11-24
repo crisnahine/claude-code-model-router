@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from . import agents, calls, gates, ledger, profile, request, router, session, settings
+from . import agents, calls, gates, ledger, request, router, session, settings
 from . import config as cfg
 from .config import EFFORTS, Level
 
@@ -37,9 +37,6 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
         parent = None
     else:
         parent = reg.family(session.model(hook_input.get("session_id"), hook_input.get("transcript_path")))
-    # A hand-off brief often reads simpler than the request it serves, so the strong role
-    # agents start no lower than the request's level; a redo still climbs from there.
-    floor = request.load(hook_input.get("session_id")).floor if profile.role(agent).strong else None
     # The mod says so. On the fallback, a named call from the main conversation without `isolation` launches
     # as a teammate only when agent teams are on (agent-teams.md); under -p it never does, which a hook can't see.
     name = tool_input.get("name")
@@ -60,7 +57,7 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
         earlier = calls.last_run(session_id, task)
     found = router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable,
                          definition=definition, parent=parent, earlier=earlier, marked=marked,
-                         floor=floor, teammate=teammate, workflow=workflow,
+                         teammate=teammate, workflow=workflow,
                          session_effort=session_effort, effort_caps=caps)
     if marked and earlier is None:
         found = replace(found, earlier=_unmarked_run(found, snap), on_record=False)

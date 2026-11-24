@@ -34,7 +34,7 @@
     "routing_mode": {
       "type": "string",
       "title": "Routing mode",
-      "description": "auto (default): the model and reasoning effort of every subagent call are set automatically. advise: Claude is told the estimate but nothing is changed. off: no routing.",
+      "description": "auto (default): the model and reasoning effort of every subagent call are set automatically. advise: the level each agent call reads as is logged, and nothing is changed. off: no routing.",
       "default": "auto",
       "options": [
         "auto",
@@ -76,12 +76,6 @@
         "override"
       ]
     },
-    "main_effort": {
-      "type": "boolean",
-      "title": "Effort for the main conversation",
-      "description": "Raise the main conversation's reasoning effort for a request that looks complex or hardest, for that turn only. It never lowers what you set. It stays off when CLAUDE_CODE_EFFORT_LEVEL is set, on Foundry and behind ANTHROPIC_BASE_URL or another third-party provider, where it can't confirm the cache survives, and wherever an effort change re-reads the context uncached: on Bedrock (including its Mantle endpoint), Vertex or a Claude apps gateway, with CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS set, with prompt caching turned off (DISABLE_PROMPT_CACHING or a per-model variant), and on a session model other than Fable 5.1 or later, Opus 5.5, Sonnet 5.5 or Haiku 5.5. The router doesn't detect a HIPAA organization, and in the Claude Desktop app it can't tell a gateway sign-in from a subscription, so leave this off in a HIPAA organization, or if Claude Desktop reaches Claude through a Claude apps gateway.",
-      "default": false
-    },
     "update_check": {
       "type": "boolean",
       "title": "Check for Claude Code updates",
@@ -92,12 +86,6 @@
       "type": "boolean",
       "title": "Test run before finishing",
       "description": "On by default. Claude is asked once, before it finishes a turn, to run the verifier when code in the project changed and no test, lint or build ran afterwards. This check is the failure signal that lets the router start cheap and re-run what fails. Turn it off to skip the ask.",
-      "default": true
-    },
-    "strong_agent_gate": {
-      "type": "boolean",
-      "title": "Stronger agent's check on hard requests",
-      "description": "On by default. When a hard request was answered by a session model weaker than it needs, with no agent of the needed strength started, Claude is asked once, before it finishes, to have a stronger agent check the result. It rarely fires on a strong session model. Turn it off to never be asked.",
       "default": true
     }
   }

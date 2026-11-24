@@ -30,16 +30,12 @@ Options, in `/config` under the plugin:
 
 | Option | Default | Meaning |
 | :- | :- | :- |
-| `routing_mode` | `auto` | `auto` sets model and effort on every agent. `advise` only tells Claude the estimate. `off` does nothing but keep the ledger |
+| `routing_mode` | `auto` | `auto` sets model and effort on every agent. `advise` only logs the level each call reads as. `off` does nothing but keep the ledger |
 | `priority` | `balanced` | `balanced`: the cheapest model strong enough. `quality`: one step stronger. `fast`: one step lighter, and the quickest that qualifies. Fast sets no effort above `low`, so a lookup runs at Claude Code's own default for Haiku, `medium` ([effort](https://code.claude.com/docs/en/model-config.md#adjust-effort-level)) |
 | `max_tier` | none | The strongest model subagents may run on: `haiku`, `sonnet`, `opus` or `fable`. Anything stronger is lowered to it |
 | `agent_pins` | `respect` | `respect` keeps the model an agent names for itself. `override` routes those agents by task too |
-| `main_effort` | off | Raises the main conversation's effort for a complex or harder request, for that turn, and never lowers it. Where it stays off is below the table |
 | `update_check` | on | The daily check of the changelog, docs index, model list and deprecations |
 | `verify_gate` | on | Asks for a test run before a turn ends when code changed and nothing checked it. It is the failure signal the router needs to start cheap and rerun what fails ([cost and intelligence](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence)), at the price of a turn and sometimes an agent |
-| `strong_agent_gate` | on | Asks for a stronger agent's check before a turn ends when a weak session model answered a hard request alone. It rarely fires on a strong session model |
-
-`main_effort` stays off wherever an effort change would re-read the context uncached: on Bedrock (including its Mantle endpoint), Vertex or a Claude apps gateway, with `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set, with prompt caching turned off (`DISABLE_PROMPT_CACHING` or a per-model variant), and on a model other than Fable 5.1 or later, Opus 5.5, Sonnet 5.5 and Haiku 5.5 (`main.effort_keeps_cache` in `config/models.json`). It is also off on Foundry, behind `ANTHROPIC_BASE_URL` and on another third-party provider, where the router can't confirm the cache survives, and while `CLAUDE_CODE_EFFORT_LEVEL` is set. When the model isn't known, as after `/clear`, effort is raised as usual. Leave it off in a HIPAA organization, which the router doesn't detect, or if Claude Desktop reaches Claude through a Claude apps gateway, which it can't tell from a subscription.
 
 On plans where Fable bills to usage credits, a frontier subtask sent to Fable bills there too. A background or teammate session may have nobody to answer the consent prompt, so Claude Code ends the turn when its `dialogExpiry` deadline passes, and `claude -p` or an Agent SDK host with no prompt bills without asking ([Fable and usage credits](https://code.claude.com/docs/en/model-config.md#fable-and-usage-credits)). Set `max_tier` to `opus` where that matters.
 
@@ -95,15 +91,13 @@ A routed stage runs at its level's effort, except that on the session's own mode
 
 A script can also pass an `effort` to `agent()`, but the spawn event carries none, so on a stage that names no model the router can't see it and sets its own. Name the model too and the router leaves both alone.
 
-Stages whose briefs land on the same level get the same model and effort, which a fan-out needs to share a prompt cache ([fan-out](https://code.claude.com/docs/en/workflows.md#prompt-caching-in-a-fan-out)). A stage never reaches the `Agent` tool's result hook, so it is never redone one level up. While a workflow or a background subagent is running, the checks before a turn ends wait, since the turn is paused, not done. These were run live under `--effort ultracode` on Claude Code 2.1.331 ([verified live](ARCHITECTURE.md#verified-live)).
+Stages whose briefs land on the same level get the same model and effort, which a fan-out needs to share a prompt cache ([fan-out](https://code.claude.com/docs/en/workflows.md#prompt-caching-in-a-fan-out)). A stage never reaches the `Agent` tool's result hook, so it is never redone one level up. While a workflow or a background subagent is running, the check before a turn ends waits, since the turn is paused, not done. These were run live under `--effort ultracode` on Claude Code 2.1.331 ([verified live](ARCHITECTURE.md#verified-live)).
 
-## The checks before a turn ends
+## The check before a turn ends
 
-![The checks before a turn ends. strong_agent_gate, on by default, blocks the stop once when a complex or harder request was answered by a weaker session model with no agent of the needed strength started, and asks for a stronger agent's check. verify_gate, on by default, asks once for a test run when code changed and nothing checked it.](assets/stop-checks.svg)
+![The check before a turn ends. verify_gate, on by default, asks once for a test run when code changed and nothing checked it.](assets/stop-checks.svg)
 
-Before Claude ends a turn, the `Stop` hook runs two checks. The stronger-agent check asks once per request and the test-run check once per batch of edits, then each lets the turn end.
-
-`strong_agent_gate`, when on: a complex or harder request that a weaker session model answered alone, with no agent of the needed strength started, gets one blocked stop and a request for a stronger agent's check. That is the reviewer, given a saved diff, once code changed during the request, else the architect, or the deep-solver for a frontier request. The agent starts no lower than the request's level, so a short hand-off brief can't route it lower, and a redo of it still climbs. A complex request needs Opus, so a Sonnet session is below its need and gets the stop check.
+Before Claude ends a turn, the `Stop` hook runs one check, once per batch of edits, then lets the turn end.
 
 `verify_gate`, when on: Claude is asked once for a test run when code in the project changed and no test, lint, type-check or build ran after the last edit, and no verifier or reviewer is still running. A test run inside a subagent counts.
 
@@ -111,7 +105,7 @@ Before Claude ends a turn, the `Stop` hook runs two checks. The stronger-agent c
 
 These limits come from what Claude Code lets a plugin do, or from choices made to protect quality and cost.
 
-- It doesn't switch the main conversation's model. A mod could, but each model keeps its own prompt cache, so a switch re-reads the whole conversation uncached. It changes the main conversation's effort instead, which keeps the cache on current models, and when a request looks harder than the session's model, Claude is told a strong subagent can take the plan or decision.
+- It doesn't change the main conversation's model or effort. A mod could switch the model, but each model keeps its own prompt cache, so a switch re-reads the whole conversation uncached. For a hard request, type `ultrathink` or use `/effort` ([model configuration](https://code.claude.com/docs/en/model-config.md#adjust-effort-level)).
 - It leaves forks alone. A fork reads its parent's cache and always runs on its parent's model.
 - It leaves alone an agent whose definition it can't read, such as one defined on the command line, unless `agent_pins` is `override`. Workflow stages and teammate roles are routed.
 - It sees a model swap only in a foreground result, since a background agent's launch carries no usage fields. A run that ends on an API error, such as an overload, counts as a retry when sent again, not a redo.
@@ -160,8 +154,6 @@ Routing uses the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Cod
 Sonnet 4.5 retires on 2026-11-30, replaced by `claude-sonnet-5-5`, on Anthropic-operated platforms such as the Claude API and Microsoft Foundry. Amazon Bedrock and Claude Models on Google Cloud (Google managed) set their own date ([model deprecations](https://platform.claude.com/docs/en/about-claude/model-deprecations.md)).
 
 So on those providers the mod starts routed work for those families on the newest model: it sends `claude-opus-5-5`, `claude-sonnet-5-5` or `claude-haiku-5-5`, which Bedrock and Agent Platform map to their own IDs and Foundry sends as the deployment name. If the provider refuses it, the call runs on the alias, and the newest model is tried again after a day (then three days, then a week, if it keeps failing). To keep the alias for a family, set its `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` variable to the version you want. `modelOverrides`, or an `availableModels` or `deniedModels` setting that rules the newest version out, keeps the alias too. Where mods don't load, the `Agent` call fallback can only pass an alias.
-
-`main_effort` stays off on these providers, as [Configuration](#configuration) lists. The prompt-caching docs don't list Foundry among the places where an effort change drops the cache, and through a gateway what stays cached "depends on how the gateway handles the `cache_control` markers" ([changing effort](https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level), [where the cache lives](https://code.claude.com/docs/en/prompt-caching.md#where-the-cache-lives)).
 
 ### Versions
 

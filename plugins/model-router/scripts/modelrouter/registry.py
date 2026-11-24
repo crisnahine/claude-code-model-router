@@ -66,8 +66,6 @@ class Registry:
     levels: Mapping[Level, LevelSpec]  # in level order; `needs` never falls as the level rises
     aliases: Mapping[str, str] = field(default_factory=dict)
     prices: Mapping[str, Any] = field(default_factory=dict)
-    main_effort: Mapping[Level, str] = field(default_factory=dict)
-    keeps_cache: Mapping[str, str] = field(default_factory=dict)
     newest: Mapping[str, str] = field(default_factory=dict)
     older_aliases: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     crew: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)

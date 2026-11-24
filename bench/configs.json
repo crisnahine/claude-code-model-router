@@ -56,9 +56,6 @@
         }
       }
     },
-    "plugin_options": {
-      "main_effort": false
-    },
     "price_model": "sonnet"
   },
   {
@@ -82,7 +79,6 @@
       }
     },
     "plugin_options": {
-      "main_effort": false,
       "verify_gate": false
     },
     "price_model": "sonnet"

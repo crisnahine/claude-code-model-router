@@ -49,7 +49,7 @@ def session_start(hook_input: dict) -> dict | None:
                          "so the router sets only their effort. Worth telling the user once.")
     elif mode == "advise":
         parts.append(
-            "Model Router is in advise mode: it estimates the model each request needs and changes no call. "
+            "Model Router is in advise mode: it logs the level it reads for each agent call and changes no call. "
             "Agents keep the model their definition sets, which a model passed on a call would override."
         )
     if options.update_check:
@@ -78,50 +78,22 @@ def session_start(hook_input: dict) -> dict | None:
 
 
 def user_prompt(hook_input: dict) -> dict | None:
-    """Size up the request against the conversation's own model. Says nothing when there
-    is nothing Claude needs to do differently, so an ordinary prompt costs no tokens."""
+    """Record the person's new request. Says something only when the request names a model."""
     snap = settings.Snapshot(hook_input)
     reg, options = snap.registry, snap.options
-    mode = options.mode
-    if mode == "off":
+    if options.mode == "off":
         return None
     prompt = hook_input.get("prompt")
-    prompt = prompt if isinstance(prompt, str) else ""
-    session_id = hook_input.get("session_id")
-    seen = intake.from_prompt(prompt, snap.project)
-    if seen.delivered:
-        # Work for someone else's message isn't the user's request, so it doesn't get its floor.
-        # A task notification continues the user's request and keeps it.
-        try:
-            request.deliver(session_id)
-        except OSError:
-            pass
-    if not seen.person:
+    if not intake.is_user_prompt(prompt):
+        return None  # a task notification or a delivered message continues the user's request
+    wanted = request.named_model(reg, prompt)
+    request.start(hook_input.get("session_id"), prompt_id=hook_input.get("prompt_id"), named=wanted)
+    if not wanted or options.mode != "auto" or options.force:
         return None
-    model = session.model(session_id, hook_input.get("transcript_path"))
-    started = request.start(session_id, seen, reg, model, snap.usable, priority=options.priority,
-                            prompt_id=hook_input.get("prompt_id"), named=request.named_model(reg, prompt))
-    level, need, current, wanted = started.level, started.need, started.session_tier, started.named
-    below = started.below(reg, model)
-    why = f" (wording suggests: {', '.join(seen.signals)})" if seen.signals else ""
-    notes = []
-    if mode == "advise":
-        if need:
-            notes.append(f"Routing estimate for this request: {level}{why}, about {need}-level reasoning, "
-                         "from its wording alone.")
-    elif below:
-        agent = gates.strong_agent(reg, need, level)
-        asked = " A stop before a stronger agent has looked is held once." if options.strong_agent_gate else ""
-        writes = "; it writes nothing, so the change stays here" if gates.writes_nothing(agent) else ""
-        notes.append(
-            f"This request looks {level}{why}: about {need}-level reasoning, and this conversation runs on "
-            f"{current}. If the design, root cause or risky choice can't be settled from the code in a few reads, "
-            f"{agent} can give the plan or decision{writes}. Otherwise this conversation works directly.{asked}"
-        )
-    if wanted and mode == "auto":
-        notes.append(f"The request mentions the {wanted} model. If it asks for that model, an Agent call with "
-                     f"model: \"{wanted}\" runs on it, and Model Router keeps it.")
-    return _context("UserPromptSubmit", " ".join(notes)) if notes else None
+    runs = (f"runs within the cap the user set, {options.cap}" if options.cap and reg.stronger(wanted, options.cap)
+            else "runs on it, and Model Router keeps it")
+    return _context("UserPromptSubmit", f"The request mentions the {wanted} model. If it asks for that model, an "
+                                        f"Agent call with model: \"{wanted}\" {runs}.")
 
 
 def pre_agent(hook_input: dict) -> dict | None:
@@ -228,7 +200,7 @@ def post_edit(hook_input: dict) -> dict | None:
 
 def stop(hook_input: dict) -> dict | None:
     snap = settings.Snapshot(hook_input)
-    reason = gates.before_stop(hook_input, snap.registry, snap.options)
+    reason = gates.before_stop(hook_input, snap.options)
     return {"decision": "block", "reason": reason} if reason else None
 
 
@@ -245,7 +217,7 @@ def refresh_cache(hook_input: dict) -> dict | None:
 
 
 HANDLERS = {
-    "mod-start": mod.start, "mod-spawn": mod.spawn, "mod-turn": mod.turn, "mod-usage": mod.usage,
+    "mod-start": mod.start, "mod-spawn": mod.spawn, "mod-turn": mod.start, "mod-usage": mod.usage,
     "session-start": session_start, "user-prompt": user_prompt, "pre-agent": pre_agent,
     "post-agent": post_agent, "agent-failed": agent_failed, "agent-stopped": agent_stopped,
     "post-edit": post_edit, "stop": stop,

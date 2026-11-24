@@ -1299,7 +1299,7 @@ class RouterVariants(unittest.TestCase):
 
     def test_a_variant_gets_its_router_file_and_options_and_nothing_else_does(self):
         variant = {"id": "v", "plugin": True, "env": {}, "router_config": {"levels": {"standard": {"effort": "medium"}}},
-                   "plugin_options": {"main_effort": False}}
+                   "plugin_options": {"verify_gate": False}}
         with tempfile.TemporaryDirectory() as tmp:
             claude = stub(tmp, VARIANT_STUB)
             seen = Path(tmp) / "seen.json"
@@ -1313,7 +1313,7 @@ class RouterVariants(unittest.TestCase):
                 plain = json.loads(seen.read_text())
         self.assertEqual(got["project"], {"levels": {"standard": {"effort": "medium"}}})
         settings = json.loads(got["argv"][got["argv"].index("--settings") + 1])
-        self.assertEqual(settings, {"pluginConfigs": {"model-router@inline": {"options": {"main_effort": False}}}})
+        self.assertEqual(settings, {"pluginConfigs": {"model-router@inline": {"options": {"verify_gate": False}}}})
         self.assertTrue(row["passed"])
         self.assertIsNone(plain["project"])
         self.assertNotIn("--settings", plain["argv"])

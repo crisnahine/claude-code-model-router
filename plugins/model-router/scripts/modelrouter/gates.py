@@ -1,4 +1,4 @@
-"""Checks before a turn ends. Each asks once and then lets go."""
+"""The check before a turn ends: it asks once and then lets go."""
 from __future__ import annotations
 
 import datetime as _dt
@@ -6,10 +6,8 @@ import os
 import re
 from pathlib import Path
 
-from . import calls, profile, request, session, store
+from . import profile, session, store
 from . import config as cfg
-from .config import Level
-from .registry import Registry
 from .settings import Settings
 
 _NON_CODE = (".md", ".mdx", ".txt", ".rst", ".adoc", ".csv", ".log")
@@ -39,7 +37,6 @@ def note_edit(hook_input: dict) -> None:
     path = str(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
     if path and not path.lower().endswith(_NON_CODE) and _in_project(hook_input, path):
         store.update_entry("edits", hook_input.get("session_id"), edited_at=store.now())
-        request.note_edit(hook_input.get("session_id"))
 
 
 def _in_project(hook_input: dict, path: str) -> bool:
@@ -89,59 +86,6 @@ def checks_ran_since(transcript_path: object, since: float) -> bool:
     return False
 
 
-def strong_agent(reg: Registry, need: str, level: Level | None = None) -> str:
-    """The role agent to hand hard thinking to, by name only: the router routes its brief with the
-    role's floor and a redo still climbs, which a model named on the call would stop. Only with no
-    role agent does the needed model go on the call."""
-    name = profile.DEEP_SOLVER if level == Level.frontier else profile.ARCHITECT
-    if name not in reg.crew:
-        return f'a subagent with model: "{need}"'
-    return f"{cfg.PLUGIN_NAME}:{name}"
-
-
-def writes_nothing(agent: str) -> bool:
-    """The architect and the reviewer have no Write or Edit tool, so a task whose deliverable is a file fails there."""
-    return not profile.role(agent).writes
-
-
-def finished_check(reg: Registry, hook_input: dict, need: str, level: Level | None) -> str:
-    """The agent to check a finished result. The reviewer stops without a diff file, so it is named only
-    once code changed in this request, which is when a diff can be saved; otherwise the plan is still open."""
-    if request.load(hook_input.get("session_id")).edited and profile.REVIEWER in reg.crew:
-        return f"{cfg.PLUGIN_NAME}:{profile.REVIEWER}"
-    return strong_agent(reg, need, level)
-
-
-def escalation(reg: Registry, hook_input: dict) -> str | None:
-    """A request estimated above the conversation's own model, answered without any
-    agent of that strength: ask once for a stronger model to check the result."""
-    session_id = hook_input.get("session_id")
-    entry = request.load(session_id)
-    if entry.escalation_asked or not entry.level or entry.level < Level.complex:
-        return None
-    need = entry.need
-    # On a session's first prompt the model isn't known yet; by now the transcript has it.
-    model = session.model(session_id, hook_input.get("transcript_path"))
-    if not entry.below(reg, model) or reg.strength(calls.strongest(reg, session_id)) >= reg.strength(need):
-        return None
-    current = reg.family(model) or entry.session_tier
-    try:
-        request.mark_escalation(session_id, current)
-    except OSError:
-        return None
-    agent = finished_check(reg, hook_input, need, entry.level)
-    act = ("to check; it writes nothing, so what it finds is applied here" if writes_nothing(agent)
-           else "to check and improve")
-    given = ("The task and the path of the diff, saved to a file, go" if agent.endswith(f":{profile.REVIEWER}")
-             else "The task and the result go")
-    return (
-        f"This request was estimated as {entry.level}: about {need}-level reasoning, on a conversation running "
-        f"{current}, with no {need}-level agent having looked. {given} to {agent} {act}, and "
-        "the user gets the reconciled answer. If the task was simple and the estimate wrong, one line saying so "
-        "finishes the turn."
-    )
-
-
 def unverified_edit(hook_input: dict) -> str | None:
     session_id = hook_input.get("session_id")
     entry = store.load_entry("edits", session_id)
@@ -169,8 +113,8 @@ def still_running(hook_input: dict) -> bool:
                for task in hook_input.get("background_tasks") or [])
 
 
-def before_stop(hook_input: dict, reg: Registry, settings: Settings) -> str | None:
-    if hook_input.get("stop_hook_active") or settings.mode != "auto" or still_running(hook_input):
+def before_stop(hook_input: dict, settings: Settings) -> str | None:
+    if hook_input.get("stop_hook_active") or settings.mode != "auto" or not settings.verify_gate \
+            or still_running(hook_input):
         return None
-    return ((escalation(reg, hook_input) if settings.strong_agent_gate else None)
-            or (unverified_edit(hook_input) if settings.verify_gate else None))
+    return unverified_edit(hook_input)

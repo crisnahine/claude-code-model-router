@@ -957,53 +957,36 @@ def diagram_precedence() -> str:
 
 def diagram_stop_checks() -> str:
     w, h = 920, 486
-    out = [frame(w, h), text(32, 42, "The checks before a turn ends", "ink b", 17),
-           text(32, 66, "The Stop hook runs two checks. Each asks once, then lets the turn end.", "mut", 13.5)]
+    out = [frame(w, h), text(32, 42, "The check before a turn ends", "ink b", 17),
+           text(32, 66, "The Stop hook runs one check. It asks once, then lets the turn end.", "mut", 13.5)]
     out.append(card(320, 88, 280, 50, rx=25))
     out.append(text(460, 118, "Claude is about to end the turn", "ink b", 13.5, "middle"))
     arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
-    out.append(f'<path d="M400 138V156H237V176M232 171L237 176L242 171" {arrow}/>')
-    out.append(f'<path d="M520 138V156H683V176M678 171L683 176L688 171" {arrow}/>')
-    lanes = [
-        (32, "strong_agent_gate", "on by default", "r1", "tag",
-         ["the request is complex or harder,", "the session model is weaker than it needs,",
-          "and no agent of the needed strength started."],
-         ["Blocks the stop once and asks for a stronger", "agent's check: the architect, or the deep-solver",
-          "for a frontier request, started no lower than", "the request's level."], 1.0),
-        (478, "verify_gate", "on by default", "r1", "tag",
-         ["code in the project changed, and no test, lint,", "type-check or build ran after the last edit,",
-          "and no verifier or reviewer is still running."],
-         ["Asks once for a test run (the verifier)", "before the turn ends. It is the failure signal", "the router reruns on. Turn it off in /config."],
-         1.0),
-    ]
-    for x, name, state, cls, tcls, when, then, op in lanes:
-        out.append(f'<g opacity="{op}">')
-        out.append(card(x, 182, 410, 252, rx=12))
-        out.append(text(x + 20, 212, name, "mono ink b", 14))
-        p, _ = pill(x + 26 + width_of(name, 14, True), 194, state, cls=cls, tcls=tcls, size=11.5, h=24, pad=10)
-        out.append(p)
-        out.append(text(x + 20, 244, "Asks when", "mut b", 12))
-        out.append(lines(x + 20, 266, when, "ink", 13, 20))
-        out.append(f'<path d="M{x + 20} 336H{x + 390}" class="ln" stroke-width="1"/>')
-        out.append(text(x + 20, 360, "Then", "mut b", 12))
-        out.append(lines(x + 62, 360, then, "ink", 13, 19))
-        out.append("</g>")
-    out.append(text(32, 464, "Both are options in /config. The stronger-agent hand-off starts at the request's "
-                    "level, so a short hand-off brief can't route it lower.", "mut", 13))
+    out.append(f'<path d="M460 138V176M455 171L460 176L465 171" {arrow}/>')
+    x, name = 255, "verify_gate"
+    when = ["code in the project changed, and no test, lint,", "type-check or build ran after the last edit,",
+            "and no verifier or reviewer is still running."]
+    then = ["Asks once for a test run (the verifier)", "before the turn ends. It is the failure signal",
+            "the router reruns on. Turn it off in /config."]
+    out.append(card(x, 182, 410, 252, rx=12))
+    out.append(text(x + 20, 212, name, "mono ink b", 14))
+    p, _ = pill(x + 26 + width_of(name, 14, True), 194, "on by default", cls="r1", tcls="tag", size=11.5, h=24, pad=10)
+    out.append(p)
+    out.append(text(x + 20, 244, "Asks when", "mut b", 12))
+    out.append(lines(x + 20, 266, when, "ink", 13, 20))
+    out.append(f'<path d="M{x + 20} 336H{x + 390}" class="ln" stroke-width="1"/>')
+    out.append(text(x + 20, 360, "Then", "mut b", 12))
+    out.append(lines(x + 62, 360, then, "ink", 13, 19))
+    out.append(text(32, 464, "A workflow or a background subagent still running holds the check, since the turn "
+                    "is paused, not done.", "mut", 13))
     out.append('<circle cx="0" cy="0" r="6" class="rt sa"/>')
-    pts = [(400, 138), (400, 156), (237, 156), (237, 182)]
-    stops = [(0, f"transform:translate({pts[0][0]}px,{pts[0][1]}px);opacity:0"),
-             (8, f"transform:translate({pts[0][0]}px,{pts[0][1]}px);opacity:1")]
-    for k, (px, py) in enumerate(pts[1:], 1):
-        stops.append((8 + k * 10, f"transform:translate({px}px,{py}px);opacity:1"))
-    stops += [(44, f"transform:translate(237px,182px);opacity:0"), (100, "transform:translate(237px,182px);opacity:0")]
+    stops = [(0, "transform:translate(460px,138px);opacity:0"), (8, "transform:translate(460px,138px);opacity:1"),
+             (28, "transform:translate(460px,182px);opacity:1"), (44, "transform:translate(460px,182px);opacity:0"),
+             (100, "transform:translate(460px,182px);opacity:0")]
     css = ".sa{opacity:0;animation:sa 5s linear infinite}" + keyframes("sa", stops)
-    title = "The checks before a turn ends: strong_agent_gate and verify_gate"
-    label = ("When Claude is about to end a turn, the Stop hook runs two checks. strong_agent_gate, on by default, "
-             "blocks the stop once when a complex or harder request was answered by a weaker session model with no "
-             "agent of the needed strength started, and asks for a stronger agent's check, started no lower than "
-             "the request's level. verify_gate, on by default, asks once for a test run when code changed and "
-             "nothing checked it.")
+    title = "The check before a turn ends: verify_gate"
+    label = ("When Claude is about to end a turn, the Stop hook runs one check. verify_gate, on by default, asks "
+             "once for a test run when code changed and nothing checked it.")
     return svg(w, h, title, label, "".join(out), css)
 
 
