@@ -263,7 +263,7 @@ def usage(days: int) -> str:
         return f"No activity recorded in the last {days} days."
     since = f" (the ledger starts {data['since'][:10]})" if data.get("since") else ""
     lines = [f"Subagent usage, last {days} days{since}", "",
-             "| Agent | Calls | Model set by router | Levels | Ran on |", "| :- | -: | -: | :- | :- |"]
+             "| Agent | Calls | Rewritten by router | Levels | Ran on |", "| :- | -: | -: | :- | :- |"]
     for a in data["agents"]:
         levels = ", ".join(f"{level} x{n}" for level, n in a["levels"].items()) or "-"
         ran = ", ".join(f"{m} x{n}" for m, n in sorted(a["ran_on"].items())) or "-"
