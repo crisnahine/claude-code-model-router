@@ -1047,6 +1047,26 @@ class HardTasks(unittest.TestCase):
 
                 self.assertTrue(any(visible_passes(o) for o in wrong), "the visible test already catches every one")
 
+    @unittest.skipIf(sys.platform == "win32", "the archive task needs POSIX symlinks")
+    def test_the_archive_answers_refuse_members_that_collide_before_writing_anything(self):
+        """Not an escape, so the check doesn't grade it, but a right answer must not fail halfway through either."""
+        task = self.tasks()["security-tar-symlink-chain"]
+        cases = [{"name": "a file under a link to a file", "via": "extract",
+                  "members": [["file", "f", "1"], ["link", "g", "f"], ["file", "g/x", "2"]]},
+                 {"name": "a link on a folder the archive made", "via": "extract",
+                  "members": [["file", "a/x", "1"], ["link", "a", "."]]},
+                 {"name": "two names for one file", "via": "extract",
+                  "members": [["link", "a", "."], ["file", "x", "1"], ["file", "a/x", "2"]]}]
+        for answer in [None] + overlay_dirs(task, "right"):
+            with self.subTest(answer=answer and answer.name), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp) / "work"
+                build_work(task, answer, work)
+                got = passcheck.probe(work, task["dir"] / "probe.py", {"cases": cases})
+                for case in cases:
+                    self.assertEqual(got[case["name"]]["error"], "UnsafeArchive", case["name"])
+                    self.assertEqual(sorted(got[case["name"]]["tree"]),
+                                     ["l1", "l1/l2", "l1/l2/l3", "l1/l2/l3/dest", "outside.txt"], case["name"])
+
     def test_the_archive_task_is_graded_everywhere_but_windows(self):
         everything = len(run.load_tasks())
         for platform, kept in (("win32", False), ("linux", True), ("darwin", True)):

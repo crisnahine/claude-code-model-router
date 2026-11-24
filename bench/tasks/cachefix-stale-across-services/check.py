@@ -1,6 +1,6 @@
 """Pass when test_checkout.py, unchanged, passes and, run in a child after each of several write orders, every
-product page, listing and service read shows what the database holds, while a page no change touched and a second
-read of anything are still served from the cache."""
+product page, listing and service read shows what the database holds, while a page, a listing and the service
+reads that no change touched, and a second read of anything, are still served from the cache."""
 import copy
 import importlib.util
 import sys
@@ -19,30 +19,34 @@ PRODUCTS = [
     {"sku": "D-4", "name": "Delta", "category": "c2", "price": 4000, "units": 7},
 ]
 CATEGORIES = ["c1", "c2", "c3"]
-# Each scenario runs on a fresh shop with every page and listing cached; "untouched" names a sku no step changes.
+# Each scenario runs on a fresh shop with every page and listing cached; "untouched" names a sku and "quiet" a
+# category that no step changes.
 SCENARIOS = [
-    {"name": "price then name", "untouched": "B-2", "steps": [{"save": ["A-1", {"price": 900, "name": "Alpha Two"}]}]},
-    {"name": "name then price", "untouched": "D-4",
+    {"name": "price then name", "untouched": "B-2", "quiet": "c2",
+     "steps": [{"save": ["A-1", {"price": 900, "name": "Alpha Two"}]}]},
+    {"name": "name then price", "untouched": "D-4", "quiet": "c2",
      "steps": [{"unit": [["name", "A-1", "Alpha Two"], ["price", "A-1", 900]]}]},
-    {"name": "stock then price", "untouched": "C-3", "steps": [{"unit": [["stock", "A-1", -3], ["price", "A-1", 950]]}]},
-    {"name": "price then stock", "untouched": "A-1", "steps": [{"unit": [["price", "B-2", 2100], ["stock", "B-2", 4]]}]},
-    {"name": "move then rename", "untouched": "D-4",
+    {"name": "stock then price", "untouched": "C-3", "quiet": "c1",
+     "steps": [{"unit": [["stock", "A-1", -3], ["price", "A-1", 950]]}]},
+    {"name": "price then stock", "untouched": "A-1", "quiet": "c1",
+     "steps": [{"unit": [["price", "B-2", 2100], ["stock", "B-2", 4]]}]},
+    {"name": "move then rename", "untouched": "D-4", "quiet": "c2",
      "steps": [{"unit": [["move", "A-1", "c3"], ["name", "A-1", "Alpha Moved"]]}]},
-    {"name": "rename then move", "untouched": "A-1",
+    {"name": "rename then move", "untouched": "A-1", "quiet": "c3",
      "steps": [{"unit": [["name", "B-2", "Bravo X"], ["move", "B-2", "c2"]]}]},
-    {"name": "every facet of one sku", "untouched": "B-2",
+    {"name": "every facet of one sku", "untouched": "B-2", "quiet": "c3",
      "steps": [{"unit": [["name", "C-3", "Charlie Z"], ["move", "C-3", "c1"], ["price", "C-3", 3100],
                          ["stock", "C-3", 2]]}]},
-    {"name": "two skus in one unit", "untouched": "C-3",
+    {"name": "two skus in one unit", "untouched": "C-3", "quiet": "c1",
      "steps": [{"unit": [["price", "A-1", 1100], ["name", "D-4", "Delta Q"], ["stock", "A-1", -1],
                          ["price", "D-4", 4100]]}]},
-    {"name": "a read inside the unit", "untouched": "B-2",
+    {"name": "a read inside the unit", "untouched": "B-2", "quiet": "c2",
      "steps": [{"unit": [["price", "A-1", 1200], ["read", "A-1"], ["list", "c1"], ["name", "A-1", "Alpha R"]]}]},
-    {"name": "separate units", "untouched": "D-4",
+    {"name": "separate units", "untouched": "D-4", "quiet": "c2",
      "steps": [{"save": ["A-1", {"price": 1300}]}, {"save": ["A-1", {"name": "Alpha S"}]}]},
-    {"name": "a unit that failed", "untouched": "B-2",
+    {"name": "a unit that failed", "untouched": "B-2", "quiet": "c1",
      "steps": [{"unit": [["price", "B-2", 9999], ["name", "B-2", "Nope"]], "fail": True}]},
-    {"name": "restock then bulk reprice", "untouched": "C-3",
+    {"name": "restock then bulk reprice", "untouched": "C-3", "quiet": "c2",
      "steps": [{"restock": ["D-4", 3]}, {"reprice": {"A-1": 800, "D-4": 3900}}]},
 ]
 OPS = {"price": "price", "name": "name", "move": "category", "stock": "units"}
@@ -67,7 +71,7 @@ def expected(scenario):
     listings = {c: [[sku, p["name"]] for sku, p in sorted(shop.items()) if p["category"] == c] for c in CATEGORIES}
     facets = {sku: [{"sku": sku, "name": p["name"], "category": p["category"]}, p["price"], p["units"]]
               for sku, p in shop.items()}
-    return {"error": None, "pages": pages, "listings": listings, "facets": facets, "reads_other": 0, "reads_again": 0}
+    return {"error": None, "pages": pages, "listings": listings, "facets": facets}
 
 
 def wrong(name, got, want):
@@ -79,9 +83,16 @@ def wrong(name, got, want):
             seen = (got.get(field) or {}).get(item)
             if seen != value:
                 return f"after {name}, {label} {item} is {seen!r}, expected {value!r}"
-    untouched = next(s["untouched"] for s in SCENARIOS if s["name"] == name)
-    if got.get("reads_other") != 0:
-        return f"after {name}, reading page {untouched}, which no change touched, went to the database"
+    scenario = next(s for s in SCENARIOS if s["name"] == name)
+    sku, category = scenario["untouched"], scenario["quiet"]
+    labels = [f"page {sku}", f"the catalog's product {sku}", f"the price of {sku}", f"the stock of {sku}",
+              f"listing {category}"]
+    counts = got.get("reads_other")
+    if not isinstance(counts, list) or len(counts) != len(labels):
+        return f"after {name}, the probe counted no reads for what no change touched"
+    for label, count in zip(labels, counts):
+        if count != 0:
+            return f"after {name}, reading {label}, which no change touched, went to the database"
     if got.get("reads_again") != 0:
         return f"after {name}, reading everything a second time went to the database"
     return None

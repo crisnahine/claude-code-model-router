@@ -9,6 +9,8 @@ The app unpacks tar archives from two sources, and trusts neither:
 - **Backups** (`backups/restore.py`). A user can upload any tar as a backup of their workspace; nothing proves
   the app made it. The restore runs on the shared workers, next to every other user's workspace.
 
+The app servers and the shared workers run Linux, on case-sensitive filesystems.
+
 Both go through `archive.extract.safe_extract`, and nothing else in the app may unpack an archive. Its promise:
 
 1. Nothing is created, changed or removed outside the destination folder.

@@ -73,9 +73,14 @@ def run(scenario):
     everything(app, skus, categories)
     for s in scenario["steps"]:
         step(app, s)
-    before = reads(app)
-    app.storefront.page(scenario["untouched"])
-    other = reads(app) - before
+    sku, category = scenario["untouched"], scenario["quiet"]
+    other = []
+    # The page goes first, or a dropped page would be rebuilt from the facets just reloaded and cost no read.
+    for read in (lambda: app.storefront.page(sku), lambda: app.catalog.product(sku), lambda: app.pricing.price(sku),
+                 lambda: app.inventory.stock(sku), lambda: app.catalog.listing(category)):
+        before = reads(app)
+        read()
+        other.append(reads(app) - before)
     seen = everything(app, skus, categories)
     before = reads(app)
     everything(app, skus, categories)

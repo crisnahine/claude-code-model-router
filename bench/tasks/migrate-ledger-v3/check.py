@@ -1,7 +1,7 @@
 """Pass when test_migrate.py, unchanged, passes and ledger.migrate_v3.migrate, run in a child on a generated export
 that holds every v2 quirk many times over (revisions out of file order, repeated revisions, legacy kind codes,
-timestamps without an offset, null and foreign currencies, currencies without two decimals), writes exactly the
-v3 file the formats describe and returns its record count."""
+timestamps without an offset, null and foreign currencies, currencies without two decimals, amounts written
+without their trailing zeros), writes exactly the v3 file the formats describe and returns its record count."""
 import datetime
 import importlib.util
 import json
@@ -36,7 +36,9 @@ def amount_text(rng, currency):
     places = PLACES.get(currency, 2)
     minor = rng.choice([1, 5, 99, 100, 1250, 7000, rng.randint(1, 500000)])
     whole, part = divmod(minor, 10 ** places)
-    return f"{whole}.{part:0{places}d}" if places else str(whole)
+    text = f"{whole}.{part:0{places}d}" if places else str(whole)
+    # Some exporters dropped trailing zeros: "12.5" USD is 1250 cents, "0.5" KWD is 500 fils.
+    return text.rstrip("0").rstrip(".") if places and rng.random() < 0.3 else text
 
 
 def entry(rng, n, account):

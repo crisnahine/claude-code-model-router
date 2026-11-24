@@ -18,6 +18,8 @@ HELLO = json.dumps({"name": "hello", "version": "1.2.0", "entry": "main.py"})
 PWN = ("file", "{}/pwn.txt", "owned\n")
 NO_MANIFEST = json.dumps({"files": {}, "links": {}})
 REFUSED = {"extract": "UnsafeArchive", "install": "BundleRejected", "restore": "UnsafeArchive"}
+SIDESTEP = [("dir", "deep"), ("dir", "deep/er"), ("dir", "side"), ("link", "deep/er/l", "../../side"),
+            ("link", "deep/er/l/x", "../../../l3"), ("file", "deep/er/l/x/pwn.txt", "owned\n")]
 # Each chain is made of links that pass the shipped checks one at a time.
 CHAINS = [
     ("a link to . and a link under it", "extract",
@@ -36,6 +38,10 @@ CHAINS = [
     ("a backup with a chain", "restore",
      [("file", "MANIFEST.json", NO_MANIFEST), ("dir", "d"), ("link", "d/up", ".."), ("link", "d/up/out", ".."),
       ("file", "out/pwn.txt", "owned\n")]),
+    ("a link that a later link turns outward", "extract", [("link", "p", "q/.."), ("link", "q", ".")]),
+    # No link here points at a folder holding it, and pwn.txt lands in the folder holding the destination.
+    ("a link made through another link", "extract", SIDESTEP),
+    ("a backup with a link made through another link", "restore", [("file", "MANIFEST.json", NO_MANIFEST)] + SIDESTEP),
 ]
 DEPLOY = [("link", "config", "current/app.conf"), ("link", "current", "releases/v2"), ("dir", "empty"),
           ("link", "latest.log", "logs/2024-06.log"), ("dir", "logs"), ("dir", "notes"), ("dir", "releases"),

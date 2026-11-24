@@ -1,8 +1,9 @@
 """Unpacking a tar archive into a folder without letting it reach outside that folder.
 
 Archives reach us from two places, plugin bundles (plugins/installer.py) and user backups (backups/restore.py), and
-neither is trusted. safe_extract unpacks into a staging folder next to the destination, checking each member
-against what is really on disk as it goes, and moves the result into place only when every member passed.
+neither is trusted. safe_extract unpacks into a staging folder inside the destination, checking each member
+against what is really on disk as it goes, checks every link again once all of them exist, and moves the result
+into place only when everything passed.
 """
 import os
 import shutil
@@ -25,7 +26,7 @@ def safe_extract(tar_path, dest):
     root = os.path.realpath(dest)
     if not os.path.isdir(root):
         raise NotADirectoryError(dest)
-    staging = os.path.realpath(tempfile.mkdtemp(prefix=".unpacking-", dir=os.path.dirname(root)))
+    staging = os.path.realpath(tempfile.mkdtemp(prefix=".unpacking-", dir=root))
     try:
         with tarfile.open(tar_path) as tar:
             members = tar.getmembers()
@@ -33,6 +34,7 @@ def safe_extract(tar_path, dest):
             names = []
             for member in members:
                 names.append(place(tar, member, staging, names))
+        check_links(staging)
         for entry in os.listdir(staging):
             os.rename(os.path.join(staging, entry), os.path.join(root, entry))
     finally:
@@ -52,6 +54,11 @@ def place(tar, member, staging, earlier):
     parent = os.path.realpath(paths.under(staging, "/".join(parts[:-1])) if len(parts) > 1 else staging)
     if not paths.is_within(staging, parent):
         raise UnsafeArchive(f"{name} would be written outside the destination")
+    folder = parent
+    while not os.path.lexists(folder):
+        folder = os.path.dirname(folder)
+    if not os.path.isdir(folder):
+        raise UnsafeArchive(f"{name} would be written under a file")
     target = os.path.join(parent, parts[-1])
     if os.path.lexists(target) and not (member.isdir() and os.path.isdir(target)):
         raise UnsafeArchive(f"{name} lands on something already extracted")
@@ -70,3 +77,12 @@ def place(tar, member, staging, earlier):
             shutil.copyfileobj(src, out)
         os.chmod(target, EXEC_MODE if member.mode & 0o100 else FILE_MODE)
     return name
+
+
+def check_links(staging):
+    """UnsafeArchive when a link, with every other link now in place, leads out of staging."""
+    for here, dirs, files in os.walk(staging):
+        for entry in dirs + files:
+            path = os.path.join(here, entry)
+            if os.path.islink(path) and not paths.is_within(staging, os.path.realpath(path)):
+                raise UnsafeArchive(f"{os.path.relpath(path, staging)} leads outside the destination")

@@ -65,18 +65,27 @@ def plan_members(root, members):
 
     Names alone don't say where a member lands: a link the archive made earlier can sit in the middle of a later
     name or target. So each member is placed by following the archive's own links, and once every link is known,
-    each one is followed again, since a later link can change where an earlier one points."""
-    seen, links, plan = set(), {}, []
+    each one is followed again, since a later link can change where an earlier one points. A member that would land
+    under a file, or on a folder an earlier member needed, is refused here rather than failing halfway through."""
+    seen, dirs, links, plan = set(), set(), {}, []
     for member in members:
         name = paths.clean_name(member.name)
         parts = name.split("/")
         parent = resolve(parts[:-1], links)
         if parent is None:
             raise UnsafeArchive(f"{name} would be written outside the destination")
+        folders = ["/".join(parent[:n]) for n in range(1, len(parent) + 1)]
+        if any(folder in seen and folder not in dirs for folder in folders):
+            raise UnsafeArchive(f"{name} would be written under a file")
         real = "/".join(parent + parts[-1:])
         if real in seen:
             raise UnsafeArchive(f"{name} is listed twice")
+        if real in dirs and not member.isdir():
+            raise UnsafeArchive(f"{name} lands on a folder the archive already made")
         seen.add(real)
+        dirs.update(folders)
+        if member.isdir():
+            dirs.add(real)
         target = paths.under(root, real)
         # realpath also catches a link that was already in dest before this archive.
         if not paths.is_within(root, os.path.realpath(target)):

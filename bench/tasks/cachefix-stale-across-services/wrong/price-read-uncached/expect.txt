@@ -1,1 +1,1 @@
-reading everything a second time went to the database
+reading the price of B-2, which no change touched, went to the database
