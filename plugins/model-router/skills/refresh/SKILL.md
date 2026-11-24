@@ -16,7 +16,7 @@ allowed-tools:
 
 ## Steps
 
-1. If the output above shows nothing after the "No new releases." line, tell the user everything is current and stop.
+1. If the output above starts with "Couldn't reach the Claude Code docs", tell the user the check failed and why, and that the rest is the last check. If that last check shows nothing after the "No new releases." line, stop there. Otherwise, if the output shows nothing after the "No new releases." line, tell the user everything is current and stop.
 2. Otherwise send the list above to `model-router:docs-researcher`, starting the brief with today's date: !`date +%F`. Ask it to read each new release's changelog entry and each high-impact docs page, and report items that affect:
    - model aliases or new models (the registry in `config/models.json` lists the models this plugin routes to)
    - agent or skill frontmatter fields
