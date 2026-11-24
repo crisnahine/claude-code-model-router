@@ -2943,6 +2943,10 @@ class ReviewFixes(unittest.TestCase):
         self.assertIn("router_silent", run.NO_RETRY)
         routed = Recorder().row({"total_cost_usd": 0.1}, ledger=LEDGER, agent_calls=ran, **loaded)
         self.assertEqual((routed["router_silent"], run.set_aside(routed)), (False, None))
+        # A subagent whose transcript shows it ran, though the stream shows no message from it.
+        hidden = Recorder().row({"total_cost_usd": 0.1}, ledger=None, agent_calls=unseen,
+                                agent_types={"a1": "general-purpose"}, **loaded)
+        self.assertEqual((hidden["router_silent"], run.set_aside(hidden)), (True, "router_silent"))
         # No subagent shown running, or no plugin at all: nothing says the router should have acted.
         self.assertFalse(Recorder().row({"total_cost_usd": 0.1}, ledger=None, agent_calls=unseen)["router_silent"])
         plain = run.record(Recorder.task, {"id": "defaults"}, Recorder.options, run.mrconfig.build({}),
@@ -3010,6 +3014,14 @@ class ReviewFixes(unittest.TestCase):
         answer.write_text("")
         graded = run.grade(task / "check.py", work, answer)
         self.assertEqual(graded.verdict, "fail", graded.reason)
+        for mode in (0, 0o300):  # the work dir itself made unreadable
+            with self.subTest(mode=oct(mode)):
+                root = self.dir / f"root-{mode}"
+                shutil.copytree(task / "repo", root)
+                root.chmod(mode)
+                self.addCleanup(root.chmod, 0o700)
+                graded = run.grade(task / "check.py", root, answer)
+                self.assertEqual(graded.verdict, "fail", graded.reason)
 
     def test_a_check_grades_its_copy_and_keeps_its_temp_files_under_the_hidden_runs_folder(self):
         check = self.dir / "check.py"
@@ -3038,7 +3050,10 @@ class ReviewFixes(unittest.TestCase):
         for argv, named in ((["--tasks", "lookup-retry-limit", "ops-inbox-triag"], "ops-inbox-triag"),
                             (["--tasks", "lookup-retry-limit", "lookup-retry-limit"], "lookup-retry-limit"),
                             (["--tasks", "lookup-retry-limit", "--configs", "defaults", "plugn"], "plugn"),
-                            (["--tasks", "lookup-retry-limit", "--configs", "defaults", "defaults"], "defaults")):
+                            (["--tasks", "lookup-retry-limit", "--configs", "defaults", "defaults"], "defaults"),
+                            (["--tasks", "lookup-retry-limit", "--arms", "delegate", "delegate"], "delegate"),
+                            (["--configs", "defaults", "--tasks"], "--tasks"),
+                            (["--tasks", "lookup-retry-limit", "--configs"], "--configs")):
             with self.subTest(argv=argv):
                 code, err, ran = self.main(*argv)
                 self.assertEqual((code, ran), (2, False))

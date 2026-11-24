@@ -75,12 +75,12 @@ This release changes who picks a subagent's model. Claude now names the model an
 - Hook input is read as bytes, so its decoding no longer follows the system's locale.
 - `/model-router:models json`, or any word other than `reset`, shows the table instead of an argument error.
 - A bench run with `plugin_ref` no longer leaves an exported copy of the plugin in the system's temp folder.
-- A bench router run where a subagent ran but the router logged no spawn is set aside as `router_silent`, so a router whose hooks never acted no longer counts as a router run.
+- A bench router run where a subagent ran but the router logged no spawn is set aside as `router_silent`, so a router whose hooks never acted no longer counts as a router run. A subagent counts as run when the stream or its transcript shows it.
 - The bench's LOSE rule on cost now reads as the code applies it: the upper bound of the router's pass rate minus the baseline's must be below plus 10 points. With every run solved, that can't show before round 5.
 - The bench page's spend and agents-started notes keep new router rows apart from the stored rows below schema 3.
 - A paid bench run that stops the bench is filed by the same set-aside rules as any other, so a run whose plugin didn't load no longer lands in the results as a failed task.
-- A socket, a pipe or an unreadable file a bench run leaves in its work dir fails the run, where it made the check read as broken.
-- The bench smoke command keeps its files in `~/mrb-smoke/`, and `run.py` checks it can write the results, `limited/` and `--keep` before the first paid run.
+- A socket, a pipe or an unreadable file a bench run leaves in its work dir fails the run, where it made the check read as broken. A work dir the run made unreadable is opened again for the check.
+- The bench smoke command keeps its files in `~/mrb-smoke/`, and `run.py` checks it can write the results, `limited/` and `--keep` before the first paid run. A repeated `--arms` value, or `--tasks` or `--configs` with no id after it, stops it too, where it ran every run twice or every task.
 - A bench check grades its copy of a run's work, and makes its own temp copies, under the folder every run's sandbox hides.
 - A bench subagent type that isn't a plain name counts as `invalid`, so text a model writes can't add Markdown to the page or stop the stream parse.
 - `bench/run.py` stops with exit code 2 on a task or configuration id that matches nothing or is named twice, where it dropped the id and ran fewer tasks.

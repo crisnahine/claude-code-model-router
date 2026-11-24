@@ -353,6 +353,8 @@ def grade(check: Path, work: Path, answer: Path, timeout: int = 120) -> Grade:
     scratch = Path(tempfile.mkdtemp(prefix="mrbench-grade-", dir=runs_folder()))
     try:
         copy = scratch / "work"
+        if not os.access(work, os.R_OK | os.X_OK):  # the ignore callback never sees the root, and the harness owns it
+            os.chmod(work, stat.S_IRWXU)
         shutil.copytree(work, copy, symlinks=True, ignore=_uncopyable)
         res = subprocess.run([sys.executable, "-I", "-c", _LAUNCH, str(check), str(copy), str(answer)],
                              capture_output=True, cwd=scratch,
@@ -753,7 +755,8 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         "agent_costs": None if ledger is None else spend_by_agent(ledger, facts["agent_types"], cost if known else None),
         "routed": None if ledger is None else spawns(ledger),
         # shortcut: a fork leaves no spawn row and isn't told apart; key on its fork flag if a fork-only run shows up.
-        "router_silent": bool(config.get("plugin")) and any(c.get("ran_on") for c in facts.get("agent_calls") or [])
+        "router_silent": bool(config.get("plugin"))
+        and (any(c.get("ran_on") for c in facts.get("agent_calls") or []) or bool(facts.get("agent_types")))
         and not any(r.get("event") == "spawn" for r in ledger or []),
         "gate_events": sum(r.get("event") == "gate" for r in ledger or []),
         "plugin_ref": config.get("plugin_ref"), "plugin_data_own": True, "sessions_saved": True,
@@ -814,8 +817,8 @@ NO_RETRY = {"api_error": "API error before any spend", "no_start": "claude stopp
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--tasks", nargs="*", help="task ids (default: all)")
-    parser.add_argument("--configs", nargs="*", help="configuration ids (default: all)")
+    parser.add_argument("--tasks", nargs="+", help="task ids (default: all)")
+    parser.add_argument("--configs", nargs="+", help="configuration ids (default: all)")
     parser.add_argument("--runs", type=int, default=1, help="runs of each task under each configuration")
     parser.add_argument("--first-run", type=int, default=0, help="number of the first run, to go on from an earlier round")
     parser.add_argument("--arms", nargs="+", choices=sorted(PROMPTS), default=["delegate"],
@@ -833,7 +836,8 @@ def main(argv: list[str] | None = None) -> int:
 
     tasks = [t for t in load_tasks() if not args.tasks or t["id"] in args.tasks]
     configs = [c for c in load_configs() if not args.configs or c["id"] in args.configs]
-    for flag, asked, found in (("--tasks", args.tasks, tasks), ("--configs", args.configs, configs)):
+    for flag, asked, found in (("--tasks", args.tasks, tasks), ("--configs", args.configs, configs),
+                               ("--arms", args.arms, [{"id": arm} for arm in PROMPTS])):
         known = {item["id"] for item in found}
         unknown = [i for i in asked or [] if i not in known]
         repeated = sorted({i for i in asked or [] if asked.count(i) > 1})
