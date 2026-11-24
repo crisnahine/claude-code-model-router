@@ -208,7 +208,7 @@ def status(changes: dict | None) -> str:
 
 def _runs(rows: list[dict]) -> dict[str, dict]:
     """Each subagent's usage, by agent id: a listed agent's newest row holds all of its turns so far, and a
-    workflow agent's rows are one turn each, so they add up."""
+    row of one turn's tokens, a workflow agent's or one the engine stopped listing, adds on top."""
     runs: dict[str, dict] = {}
     for r in rows:
         if r.get("event") != "usage" or not r.get("agent_id") or not isinstance(r.get("models"), list):
@@ -216,7 +216,7 @@ def _runs(rows: list[dict]) -> dict[str, dict]:
         key = str(r["agent_id"])
         if r.get("running") or key not in runs:
             runs[key] = {**r, "models": list(r["models"])}
-        elif not runs[key].get("running"):
+        else:
             runs[key]["models"] += r["models"]
     return runs
 
@@ -321,7 +321,7 @@ def usage(days: int) -> str:
     if spend["rows"]:
         lines += ["", f"Subagent spend, Claude Code's estimate and not the bill: ${spend['total_usd']:,.2f}"]
         if spend["subscription"]:
-            lines.append("This session is on a subscription: usage inside the plan is not billed in dollars.")
+            lines.append("A session in this window was on a subscription: usage inside the plan isn't billed in dollars.")
         lines += ["", "| Agent | Runs | USD |", "| :- | -: | -: |"]
         lines += [f"| {v['agent']} | {v['runs']} | {v['usd']:,.2f} |" for v in spend["rows"]]
         if spend["unknown_price"]:

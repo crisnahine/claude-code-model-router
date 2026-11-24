@@ -151,7 +151,8 @@ def parse_mode(value: Any) -> str | None:
 def _clean(override: Any, source: str, problems: list[str], plain_keys: bool = False) -> dict:
     """Keep only the well-formed parts of an override file, so a typo can't break a hook or put a
     value on an agent call that Claude Code would reject. What is dropped is added to `problems`.
-    With `plain_keys`, a model or agent key that isn't a short plain name is dropped unnamed."""
+    With `plain_keys`, a model or agent key that isn't a short plain name, or a levels key that isn't a level,
+    is dropped unnamed."""
     if not isinstance(override, dict):
         return {}
 
@@ -188,6 +189,9 @@ def _clean(override: Any, source: str, problems: list[str], plain_keys: bool = F
     if isinstance(levels, dict):
         out["levels"] = {}
         for name, spec in levels.items():
+            if plain_keys and name not in LEVELS:
+                problems.append(f"{source}: a key under levels that is not a level, dropped")
+                continue
             if not isinstance(name, str) or name not in LEVELS or not isinstance(spec, dict):
                 bad(f"levels.{name}", "is not a level with an object")
                 continue
@@ -331,6 +335,8 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
     held: list[Held] = []
     user_file, project_file = user or {}, project or {}
     mine = _clean(user_file, USER_FILE, problems)
+    if isinstance(user_file, dict) and "prices" in user_file:
+        problems.append(f"{USER_FILE}: prices is no longer read, since the dollars shown are Claude Code's estimate")
     theirs = _clean(project_file, PROJECT_FILE, problems, plain_keys=True)
     vouched = set(base.get("models") or {}) | set(mine.get("models") or {})
     added = {}

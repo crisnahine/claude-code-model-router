@@ -99,7 +99,9 @@ def write_atomic(path: Path, text: str) -> None:
 
 
 def _private_file(path: Path, flags: int) -> Any:
-    return os.fdopen(os.open(str(path), flags, 0o600), "a" if flags & os.O_APPEND else "w", encoding="utf-8")
+    # Without O_BINARY a Windows descriptor translates newlines a second time, so each row would end in \r\r\n.
+    fd = os.open(str(path), flags | getattr(os, "O_BINARY", 0), 0o600)
+    return os.fdopen(fd, "a" if flags & os.O_APPEND else "w", encoding="utf-8")
 
 
 # The session whose hook is running, written into the lock files it holds, so a wait can
@@ -379,9 +381,11 @@ def ledger_path() -> Path:
 
 
 def _older(line: str, cutoff: _dt.datetime) -> bool | None:
-    """Whether a ledger line's row is older than `cutoff`, or None when it has no readable time."""
+    """Whether a ledger line's row is older than `cutoff`, or None when it has no readable time.
+    A time with no zone is read as UTC."""
     try:
-        return _dt.datetime.fromisoformat(json.loads(line)["ts"]) < cutoff
+        ts = _dt.datetime.fromisoformat(json.loads(line)["ts"])
+        return (ts if ts.tzinfo else ts.replace(tzinfo=_dt.timezone.utc)) < cutoff
     except (KeyError, ValueError, TypeError):
         return None
 
@@ -404,7 +408,7 @@ def append_ledger(entry: dict) -> None:
             big = path.stat().st_size > LEDGER_MAX_BYTES
             if oldest or big:
                 lines = [line for line in path.read_text(encoding="utf-8").splitlines(keepends=True)
-                         if not _older(line, cutoff)]
+                         if line.strip() and not _older(line, cutoff)]
                 if sum(len(line.encode("utf-8")) for line in lines) > LEDGER_MAX_BYTES:
                     lines = lines[len(lines) // 2:]
                 write_atomic(path, "".join(lines))

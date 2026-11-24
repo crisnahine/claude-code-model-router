@@ -234,9 +234,11 @@ def read(session_id: str | None, project: Path, sent: object = None) -> Allowlis
     merged = {s: layers[s] if s in layers else files[s] for s in SOURCES}
     floor = files["policy"]
     if "policy" in layers:
-        # Under first-wins Claude Code can skip these files, and its answer is what runs; maxEffortLevel alone
-        # is read from every admin source (https://code.claude.com/docs/en/managed-settings.md).
-        floor = {k: v for k, v in floor.items() if k == "maxEffortLevel"}
+        # Under first-wins Claude Code can skip these files, and its answer is what runs. maxEffortLevel is read
+        # from every admin source, but a policyHelper's output replaces them all, so a reported cap stands alone
+        # (https://code.claude.com/docs/en/managed-settings.md).
+        own_cap = "maxEffortLevel" in layers["policy"]
+        floor = {k: v for k, v in floor.items() if k == "maxEffortLevel" and not own_cap}
     return from_layers(merged, "engine" if layers else "files", floor=floor)
 
 
