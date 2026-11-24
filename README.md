@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="docs/assets/badge-version.svg" height="28" alt="version 0.1.0"></a>
+  <a href="CHANGELOG.md"><img src="docs/assets/badge-version.svg" height="28" alt="version 0.1.2"></a>
   <a href="#install-the-claude-code-plugin"><img src="docs/assets/badge-claude-code.svg" height="28" alt="Claude Code 2.1.329 or later"></a>
   <a href="#install-the-claude-code-plugin"><img src="docs/assets/badge-python.svg" height="28" alt="Python 3.9 or later"></a>
   <a href="CONTRIBUTING.md#rules-for-a-change"><img src="docs/assets/badge-dependencies.svg" height="28" alt="dependencies: none, standard library only"></a>
@@ -150,7 +150,7 @@ Rules and extra models go in `~/.claude/model-router.json` (yours, applies every
 - Workflows and ultracode: every workflow agent is routed by its brief, a model the script names is kept, and on the session's own model a stage never runs below the session's effort, such as `xhigh` under ultracode ([details](docs/GUIDE.md#workflows-and-ultracode)).
 - Permissions: the plugin never approves a tool call. Your permission rules and auto mode still review every spawn.
 - Amazon Bedrock, Google Cloud's Agent Platform (Vertex AI) and Microsoft Foundry: routing uses the aliases `haiku`, `sonnet`, `opus` and `fable`, and where one resolves to an older model the mod sends the family's newest ID ([details](docs/GUIDE.md#third-party-providers)). These providers aren't tested live yet.
-- Versions: Claude Code 2.1.329 or later. Tested live on 2.1.330 and 2.1.331 on macOS, ultracode included; the unit tests also run on Linux and Windows in CI. This is version 0.1.0, and [release readiness](docs/RELEASE_READINESS.md) lists what is still open.
+- Versions: Claude Code 2.1.329 or later. Tested live on 2.1.330 and 2.1.331 on macOS, ultracode included; the unit tests also run on Linux and Windows in CI. This is version 0.1.2, and [release readiness](docs/RELEASE_READINESS.md) lists what is still open.
 - Failure: every hook fails open. A bug can cost routing, never block a tool call, a spawn or a session.
 
 <a id="security"></a>
