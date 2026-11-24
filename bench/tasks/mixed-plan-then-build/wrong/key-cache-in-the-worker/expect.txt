@@ -1,1 +1,1 @@
-sent from another process
+sent to the other host

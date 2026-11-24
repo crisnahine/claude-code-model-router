@@ -1,1 +1,1 @@
-webhook_attempts is 5
+webhook_attempts is 7

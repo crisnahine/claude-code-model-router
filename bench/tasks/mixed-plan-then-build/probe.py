@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location("passcheck", Path(__file__).resolve().parent.parent / "passcheck.py")
@@ -13,6 +14,11 @@ _spec.loader.exec_module(passcheck)
 
 passcheck.use_work(Path(sys.argv[1]))
 payload = json.load(sys.stdin)
+host = Path(payload["host"])
+for name, folder in (("HOME", "home"), ("TMPDIR", "tmp"), ("TMP", "tmp"), ("TEMP", "tmp")):
+    (host / folder).mkdir(exist_ok=True)
+    os.environ[name] = str(host / folder)
+tempfile.tempdir = None
 out = {"error": None, "result": None}
 try:
     if payload["action"] == "init":

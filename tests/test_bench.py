@@ -1,8 +1,10 @@
 """Tests for the cost and quality benchmark under bench/. Run: python3 -m unittest discover -s tests"""
 from __future__ import annotations
 
+import configparser
 import contextlib
 import dataclasses
+import fnmatch
 import importlib.util
 import io
 import json
@@ -2205,12 +2207,56 @@ class DelegationTasks(unittest.TestCase):
             argv = json.loads(seen.read_text())["argv"]
         self.assertEqual(argv[argv.index("-p") + 1], run.prompt_for(task))
 
+    def test_a_run_row_records_its_tasks_shape(self):
+        defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
+        for task_id, shape in (("redo-failing-check", "redo"), ("lookup-retry-limit", "single")):
+            with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
+                options = {"claude": stub(tmp, STUB), "model": "sonnet", "budget": 0.5, "timeout": 60,
+                           "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+                row = run.run_one(self.task(task_id), defaults, options, {})
+            self.assertEqual(row["shape"], shape)
+
+    def test_level_accuracy_counts_single_agent_runs_and_the_page_gives_the_redo_rate(self):
+        real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
+        tasks = {t["id"]: t for t in run.load_tasks()}
+
+        def row(task_id, config, passed, spawned, **extra):
+            task = tasks[task_id]
+            return dict(real, main_model="sonnet", config=config, passed=passed, task=task_id, wall_ms=1000,
+                        task_revision=task.get("revision", 1), subagents={"spawned": spawned}, **{"class": task["class"]},
+                        **extra)
+        first = {"agent": "general-purpose", "level": "standard", "escalated_from": None}
+        design = {"agent": "general-purpose", "level": "lookup", "escalated_from": None}
+        rows = [row("cross-amount-cents", "plugin", True, 1, routed=[first]),  # recorded before `shape`
+                row("mixed-plan-then-build", "plugin", False, 2, routed=[design, first], shape="plan-build"),
+                row("redo-failing-check", "plugin", True, 2, routed=[first, first], shape="redo"),
+                row("redo-failing-check", "plugin", True, 1, routed=[first], shape="redo"),
+                row("redo-failing-check", "defaults", False, 1, shape="redo")]
+        rows[0].pop("shape", None)
+        with tempfile.TemporaryDirectory() as tmp:
+            res = Path(tmp) / "a-2026-11-24.jsonl"
+            res.write_text("".join(json.dumps(r) + "\n" for r in rows))
+            out = Path(tmp) / "page.md"
+            analyze.main([str(res), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        metrics = page.split("### Run metrics")[1].split("##")[0]
+        cross = next(line for line in metrics.splitlines() if line.startswith("| cross-module "))
+        self.assertIn("accuracy by level: standard 1/1 (1 of 2 runs)", cross)
+        self.assertNotIn("redo", cross)
+        redo = next(line for line in metrics.splitlines() if line.startswith("| redo "))
+        self.assertIn("redo 1 of 2 runs, accuracy by level n/a", redo)
+        self.assertIn("redo 0 of 1 runs, not routed", redo)
+
     def lint(self, work):
         return subprocess.run([sys.executable, "-I", "tools/check_changelog.py", "2.4.0"], cwd=work,
                               capture_output=True, text=True, timeout=60)
 
-    def test_the_visible_changelog_check_agrees_with_the_grade_and_says_why(self):
+    # The grade also reads what each line says; the visible check reads only a line's place and its PR number.
+    WORDING = {"text-swapped-between-lines", "commit-subjects-pasted"}
+
+    def test_the_visible_changelog_check_agrees_with_the_grade_on_shape_and_says_why(self):
         task = self.task("redo-failing-check")
+        self.assertLessEqual(self.WORDING, {o.name for o in overlay_dirs(task, "wrong")})
         for overlay in [None, *overlay_dirs(task, "wrong"), *overlay_dirs(task, "right")]:
             with self.subTest(answer=overlay and overlay.name), tempfile.TemporaryDirectory() as tmp:
                 work = Path(tmp) / "work"
@@ -2219,9 +2265,46 @@ class DelegationTasks(unittest.TestCase):
                 answer.write_text("", encoding="utf-8")
                 graded = run.grade(task["dir"] / "check.py", work, answer, timeout=60)
                 linted = self.lint(work)
+                if overlay is not None and overlay.name in self.WORDING:
+                    self.assertEqual((linted.returncode, graded.verdict), (0, "fail"), linted.stdout + graded.reason)
+                    continue
                 self.assertEqual(linted.returncode == 0, graded.passed, linted.stdout + graded.reason)
                 if not graded.passed:
                     self.assertTrue(linted.stdout.strip(), "the visible check printed no reason")
+
+    def test_the_first_answer_contributing_md_leads_to_fails_the_visible_check_with_the_fix(self):
+        task = self.task("redo-failing-check")
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "work"
+            build_work(task, task["dir"] / "wrong" / "breaking-change-not-marked", work)
+            res = self.lint(work)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("**Breaking:**", res.stdout)
+        self.assertNotIn("breaking", (task["dir"] / "repo" / "CONTRIBUTING.md").read_text(encoding="utf-8").lower())
+
+    def test_each_build_the_plan_build_check_runs_the_agents_tests_on_is_broken(self):
+        task = self.task("mixed-plan-then-build")
+        mutants = overlay_dirs(task, "mutants")
+        self.assertEqual({m.name for m in mutants}, {"charges-again", "no-body-check"})
+        exported = {"api/payments.py", "db/schema.sql", "payments/service.py"}
+        for mutant in mutants:
+            with self.subTest(mutant=mutant.name), tempfile.TemporaryDirectory() as tmp:
+                self.assertEqual({p.relative_to(mutant).as_posix() for p in mutant.rglob("*") if p.is_file()}, exported)
+                work = Path(tmp) / "work"
+                build_work(task, mutant, work)
+                answer = Path(tmp) / "answer.txt"
+                answer.write_text("", encoding="utf-8")
+                graded = run.grade(task["dir"] / "check.py", work, answer, timeout=120)
+                self.assertEqual(graded.verdict, "fail", graded.reason)
+                self.assertNotIn("test_idempotency.py", graded.reason)
+
+    def test_the_fanout_ini_decoy_is_wrong_read_as_retries_or_as_attempts(self):
+        task = self.task("fanout-three-lookups")
+        ini = configparser.ConfigParser()
+        ini.read(task["dir"] / "repo" / "config" / "base.ini")
+        decoy = ini.getint("webhooks", "max_retries")
+        want = json.loads((task["dir"] / "solution" / "ANSWERS.json").read_text())["webhook_attempts"]
+        self.assertNotIn(want, (decoy, decoy + 1))
 
     def test_the_visible_changelog_check_fails_the_shipped_changelog_with_a_reason(self):
         task = self.task("redo-failing-check")
@@ -2231,17 +2314,36 @@ class DelegationTasks(unittest.TestCase):
         self.assertEqual(res.returncode, 1)
         self.assertIn("2.4.0", res.stdout)
 
+    # Per task, the brief or a glob of shipped files, and the words that would give an answer away there.
+    LEAKS = {
+        "redo-failing-check": {"brief": ["save card", "#220", "revert", "breaking", "link"],
+                               "CHANGELOG.md": ["save card", "#220", "revert", "breaking"],
+                               "CONTRIBUTING.md": ["revert", "breaking", "link", "!:"]},
+        "fanout-three-lookups": {"brief": ["send_refund_receipt", "emails.py", "100"],
+                                 "README.md": ["send_refund_receipt", "emails.py", "DEFAULT_RETRIES", "retries"],
+                                 "docs/*": ["send_refund_receipt", "emails.py", "DEFAULT_RETRIES", "retries"],
+                                 "*": ["4 attempts", "attempts = 4", "four attempts", "tried 4 times"]},
+        "mixed-plan-then-build": {"brief": ["choose b", "option b is", "pick b", "architecture", "worker", "host"],
+                                  "*": ["choose b", "option b is", "pick b", "recommend", "prefer"],
+                                  "docs/PROPOSAL.md": ["worker", "process", "host"],
+                                  "test_payments.py": ["idempotency"]},
+    }
+
     def test_no_shipped_file_names_an_answer(self):
-        leaks = {"redo-failing-check": ["save card", "#220"], "fanout-three-lookups": [],
-                 "mixed-plan-then-build": ["choose b", "option b is", "pick b"]}
-        for task_id, words in leaks.items():
-            files = [p for p in (self.task(task_id)["dir"] / "repo").rglob("*") if p.is_file()]
-            names = {p.name for p in files}
+        for task_id, places in self.LEAKS.items():
+            task = self.task(task_id)
+            files = {p.relative_to(task["dir"] / "repo").as_posix(): p
+                     for p in (task["dir"] / "repo").rglob("*") if p.is_file() and "__pycache__" not in p.parts}
             with self.subTest(task=task_id):
-                self.assertFalse(names & {"ANSWERS.json", "DESIGN.json", "test_idempotency.py"})
-                text = self.task(task_id)["brief"].lower()
-                for word in words:
-                    self.assertNotIn(word, text)
+                self.assertFalse({Path(f).name for f in files} & {"ANSWERS.json", "DESIGN.json", "test_idempotency.py"})
+            for where, words in places.items():
+                texts = {"brief": task["brief"]} if where == "brief" else {
+                    f: p.read_text(encoding="utf-8") for f, p in files.items() if fnmatch.fnmatch(f, where)}
+                with self.subTest(task=task_id, where=where):
+                    self.assertTrue(texts, "the pattern matches no shipped file")
+                    for name, text in texts.items():
+                        for word in words:
+                            self.assertNotIn(word.lower(), text.lower(), name)
 
 
 if __name__ == "__main__":

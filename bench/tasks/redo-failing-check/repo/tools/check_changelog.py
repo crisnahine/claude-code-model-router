@@ -12,15 +12,16 @@ HEADING_FOR = {"feat": "Added", "perf": "Changed", "deprecate": "Deprecated", "r
 LEFT_OUT = {"refactor", "test", "docs", "ci", "chore", "build"}
 COMPARE = "https://git.example.com/shop/compare/"
 COMMIT = re.compile(r"^[0-9a-f]{7} (.+) \(#(\d+)\)$")
-TYPED = re.compile(r"^(\w+)(?:\([\w-]+\))?!?: ")
+TYPED = re.compile(r"^(\w+)(?:\([\w-]+\))?(!?): ")
+BREAKING = "- **Breaking:** "
 REVERT = re.compile(r'^Revert "(.+) \(#(\d+)\)"$')
 RELEASE = re.compile(r"^## \[([^\]]+)\](.*)$", re.M)
 LINK = re.compile(r"^\[([^\]]+)\]: (\S+)$", re.M)
 
 
 def read_commits(text):
-    """{pr: type} for each commit, and {pr: the pr that reverted it}."""
-    kinds, reverted = {}, {}
+    """{pr: type} for each commit, {pr: the pr that reverted it}, and the prs marked breaking with a !."""
+    kinds, reverted, breaking = {}, {}, set()
     for line in text.splitlines():
         m = COMMIT.match(line.strip())
         if not m:
@@ -34,7 +35,9 @@ def read_commits(text):
         if not typed:
             raise ValueError(f"commits.txt: #{pr} has no type: {subject}")
         kinds[pr] = typed.group(1)
-    return kinds, reverted
+        if typed.group(2):
+            breaking.add(pr)
+    return kinds, reverted, breaking
 
 
 def sections(changelog):
@@ -50,8 +53,8 @@ def sections(changelog):
 
 
 def listed(body, version):
-    """{pr: [heading, ...]} for the section's lines, plus problems with its shape."""
-    problems, seen, heading, used = [], {}, None, []
+    """{pr: [heading, ...]} and {pr: its first line} for the section's lines, plus problems with its shape."""
+    problems, seen, lines, heading, used = [], {}, {}, None, []
     for line in body.splitlines():
         line = line.rstrip()
         if line.startswith("### "):
@@ -68,6 +71,7 @@ def listed(body, version):
                 problems.append(f"the line {line!r} in ## [{version}] doesn't end with its PR number, like (#123)")
                 continue
             seen.setdefault(m.group(1), []).append(heading)
+            lines.setdefault(m.group(1), line)
         elif line.strip() and heading is not None:
             problems.append(f"the line {line!r} in ## [{version}] isn't a list item")
     known = [h for h in used if h in ORDER]
@@ -76,7 +80,7 @@ def listed(body, version):
     for h in used:
         if not re.search(rf"^### {re.escape(h)}\n+- ", body, re.M):
             problems.append(f"### {h} in ## [{version}] has nothing under it; leave it out")
-    return seen, problems
+    return seen, lines, problems
 
 
 def problems(changelog, commits, version):
@@ -93,9 +97,9 @@ def problems(changelog, commits, version):
     _, rest, body = found[names.index(version)]
     if not re.fullmatch(r" - \d{4}-\d{2}-\d{2}", rest):
         out.append(f"the heading must read ## [{version}] - YYYY-MM-DD, with the release date")
-    seen, shape = listed(body, version)
+    seen, lines, shape = listed(body, version)
     out += shape
-    kinds, reverted = read_commits(commits)
+    kinds, reverted, breaking = read_commits(commits)
     for pr, headings in sorted(seen.items(), key=lambda p: int(p[0])):
         kind = kinds.get(pr)
         if len(headings) > 1:
@@ -110,6 +114,9 @@ def problems(changelog, commits, version):
             out.append(f"#{pr} is a {kind} commit; those don't go in the changelog")
         elif headings[0] != HEADING_FOR[kind]:
             out.append(f"#{pr} is under {headings[0]}; a {kind} commit goes under {HEADING_FOR[kind]}")
+        if pr in breaking and not lines[pr].startswith(BREAKING):
+            out.append(f"#{pr} is a breaking change ({kind}!), so its line must start with **Breaking:**, as in "
+                       f"{BREAKING}<what changed> (#{pr})")
     for pr, kind in sorted(kinds.items(), key=lambda p: int(p[0])):
         if kind in HEADING_FOR and pr not in reverted and pr not in seen:
             out.append(f"#{pr} ({kind}) is missing from ## [{version}]; it goes under {HEADING_FOR[kind]}")

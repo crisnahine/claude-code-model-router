@@ -14,7 +14,7 @@ All notable changes to the shop are listed here. The format follows [Keep a Chan
 ### Changed
 
 - The order history page loads faster. (#218)
-- The `/v1/checkout` endpoint is gone. Use `/v2/checkout`. (#224)
+- **Breaking:** The `/v1/checkout` endpoint is gone. Use `/v2/checkout`. (#224)
 
 ### Fixed
 

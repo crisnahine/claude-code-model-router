@@ -448,7 +448,7 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         result.get("subtype") == "error_during_execution" and cost == 0 and not refused)
     return {
         "schema": ROW_SCHEMA, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
-        "config": config["id"],
+        "shape": task.get("shape", "single"), "config": config["id"],
         "started_at": facts["started_at"], "claude_version": options["claude_version"],
         "main_model": config.get("model", options["model"]),
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),

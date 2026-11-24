@@ -1,1 +1,1 @@
-a retry with the same key and body, sent from another process, got [200
+a retry with the same key and body, sent to the other host, got [200

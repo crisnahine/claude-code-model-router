@@ -298,11 +298,16 @@ def _metric_text(cell: list[dict], routed: bool) -> str:
              + (f" ({len(secs)} of {len(cell)} runs)" if len(secs) < len(cell) else "") if secs else "latency n/a"]
     share = _cache_share(cell)
     parts.append("cache n/a" if share is None else f"cache {share:.0%}")
+    redo = [r["subagents"]["spawned"] for r in cell if r.get("shape") == "redo"
+            and isinstance((r.get("subagents") or {}).get("spawned"), int)]
+    if redo:
+        parts.append(f"redo {sum(n > 1 for n in redo)} of {len(redo)} runs")
     if not routed:
         return ", ".join(parts + ["not routed"])
     known = [r for r in cell if isinstance(r.get("routed"), list)]
-    # A run's level is the one its first subagent got: the bench hands each task to one subagent.
-    first = [(r["routed"][0]["level"], bool(r.get("passed"))) for r in known if r["routed"] and r["routed"][0].get("level")]
+    # A run's level is the one its first subagent got, which holds only where one subagent does the whole task.
+    first = [(r["routed"][0]["level"], bool(r.get("passed"))) for r in known
+             if r.get("shape", "single") == "single" and r["routed"] and r["routed"][0].get("level")]
     levels: dict[str, list[int]] = {}
     for level, ok in first:
         levels.setdefault(level, [0, 0])
@@ -585,6 +590,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         for name, count in ((r.get("subagents") or {}).get("by_type") or {}).items():
             agents.setdefault(r["config"], {}).setdefault(name, 0)
             agents[r["config"]][name] += count
+    shapes = {r.get("shape", "single") for r in rows}
+    uncovered = [name for shape, name in (("fanout", "fan-out"), ("plan-build", "plan-then-build"), ("redo", "redo"))
+                 if shape not in shapes] + ["workflow", "team"]
     predate = sum(1 for r in rows if _lacks(r, "plugin_state"))
     unsaved = sum(1 for r in rows if _lacks(r, "sessions_saved"))
     borrowed = sum(1 for r in rows if r.get("plugin_state") is not None and _lacks(r, "plugin_data_own"))
@@ -635,7 +643,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "- Run metrics, per class and configuration: p50 and p90 are nearest-rank percentiles of each run's wall "
         "time (`wall_ms`, the runner's clock around the `claude` process). Cache is cache-read tokens over all input tokens, which are input plus cache reads "
         "plus cache writes (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md), summed over "
-        "every model that ran. For a router configuration, accuracy by level is the pass rate of its runs grouped by "
+        "every model that ran. Redo, for a task with the redo shape, counts the runs that started more than one "
+        "subagent, that is, sent the work back after the check (`subagents.spawned`). For a router configuration, "
+        "accuracy by level is the pass rate of its single-agent runs grouped by "
         "the level the router gave the run's first subagent. Escalated counts the spawns the router moved one level "
         "up because the same call came back for a redo, over the spawns whose ledger row says either way. Both "
         "come from the run's `routed` line, and n/a means no run in the cell has it.", "",
@@ -652,7 +662,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
                     for c in used) + ".",
         *_notes(results),
         "- Shape: a single agent. The session hands each task to one subagent with the Agent tool and relays its "
-        "answer, so the subagent is what each configuration changes.",
+        "answer, so the subagent is what each configuration changes. A task with a `shape` in its task.json wraps "
+        "its brief in another prompt (`run.SHAPES`): `redo` runs the check the brief names and sends the work back, "
+        "`fanout` gives each question its own subagent, all started at once, and `plan-build` hands out the steps "
+        "in order. Each row records its `shape`; a row without one ran a single agent.",
         "- Each run starts in a fresh copy of the task's files, outside any repository, with "
         "`--setting-sources project`, `--strict-mcp-config`, "
         "`--permission-mode dontAsk`, `--allowedTools` " + ", ".join(f"`{t}`" for t in run.TOOLS) + " (every "
@@ -720,7 +733,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "spend. The full suite needs the maintainer's go-ahead before it runs.", "",
         "Defined in `bench/configs.json` but not run here: "
         + (", ".join(f"`{c['id']}`" for c in results.configs if c["id"] not in used) or "none") + ".", "",
-        "Not covered yet: the fan-out, workflow, team and redo shapes; a cold and a warm prompt cache measured "
+        "Not covered yet: the " + ", ".join(uncovered[:-1]) + f" and {uncovered[-1]} shapes; a cold and a warm "
+        "prompt cache measured "
         "apart; router overhead per spawn and per turn; and each `priority` setting. `opusplan` in a headless `dontAsk` run never enters plan mode, so it runs Sonnet "
         "throughout (https://code.claude.com/docs/en/model-config.md#opusplan-model-setting, "
         "https://code.claude.com/docs/en/permission-modes.md). The advisor needs the Anthropic API, Claude "

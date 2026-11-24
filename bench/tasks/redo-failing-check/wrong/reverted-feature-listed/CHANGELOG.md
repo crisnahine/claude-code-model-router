@@ -18,7 +18,7 @@ All notable changes to the shop are listed here. The format follows [Keep a Chan
 
 ### Removed
 
-- The `/v1/checkout` endpoint, deprecated in 2.3.0. Use `/v2/checkout`. (#224)
+- **Breaking:** The `/v1/checkout` endpoint, deprecated in 2.3.0, is gone. Use `/v2/checkout`. (#224)
 
 ### Fixed
 

@@ -3,7 +3,7 @@ Commits on main since v2.3.1, newest first (git log --oneline v2.3.1..main).
 c41d9e0 fix(api): return 404 instead of 500 for an order that was deleted (#228)
 7ab03f2 docs: fix the install steps in README (#227)
 e19c5d4 Revert "feat: save card details for the next checkout (#220)" (#226)
-5d2a8b1 remove: drop the /v1/checkout endpoint (#224)
+5d2a8b1 remove!: drop the /v1/checkout endpoint (#224)
 0f6e3c9 test: cover coupon expiry during checkout (#223)
 b88a1d7 fix: show the right tax line for Canadian addresses (#222)
 93c0e5f refactor: split the checkout service into steps (#221)

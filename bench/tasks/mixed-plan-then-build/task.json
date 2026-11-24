@@ -1,6 +1,9 @@
 {
   "class": "cross-module",
   "shape": "plan-build",
-  "revision": 1,
+  "revision": 2,
+  "revisions": {
+    "2": "requests take turns between two copies of the work dir, so state kept in the code tree or a temp file is lost between hosts, and test_idempotency.py must fail on two broken builds"
+  },
   "brief": "Payment requests need idempotency keys, and docs/PROPOSAL.md says what we want and gives two ways to build it. First, pick one of the two options and write the pick to DESIGN.json as {\"choice\": \"<A or B>\", \"reasons\": [\"...\"]}. Then build the option you picked, with tests for it in test_idempotency.py that pass. Keep test_payments.py passing, and use the standard library only."
 }
