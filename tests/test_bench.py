@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bench"))
 sys.path.insert(0, str(ROOT / "bench" / "tasks"))
 import analyze  # noqa: E402
+import overhead  # noqa: E402
 import passcheck  # noqa: E402
 import run  # noqa: E402
 
@@ -581,12 +582,14 @@ class Analysis(unittest.TestCase):
                   agent_costs={"main": 0.03, "model-router:implementer": 0.01})] * 2)
             write(res / "infra" / "new-network.jsonl", [dict(lost, infra_reason="network outage")] * 2)
             write(res / "limited" / "new-bugfix-2026-11-22.jsonl",
-                  [dict(lost, task="bugfix-pagination", limited_reason="limit")])
+                  [dict(lost, task="bugfix-pagination", limited_reason="limit"),
+                   dict(lost, task="bugfix-pagination", limited_reason="api_error")])
             out = Path(tmp) / "page.md"
             analyze.main([str(p) for p in sorted(res.glob("*.jsonl"))] + ["--out", str(out)])
             page = out.read_text(encoding="utf-8")
-        self.assertIn("3 run(s) are set aside, outside the results, because the API never got to the task: "
-                      "2 lost the network, 1 hit a rate or usage limit. 2 of them were run again later", page)
+        self.assertIn("4 run(s) are set aside, outside the results, because the API never got to the task: "
+                      "2 lost the network, 1 hit a rate or usage limit, 1 got an API error before any spend (a bad "
+                      "key, no credit or a model the account can't use). 2 of them were run again later", page)
         self.assertIn("`plugin` on `sonnet` (2 runs): main loop $0.0600 (75%), `model-router:implementer` $0.0200 "
                       "(25%)", page)
         self.assertIn("`defaults` old (3); `plugin` new (2)", page)
@@ -750,9 +753,55 @@ class Runner(unittest.TestCase):
         for rule in ("Bash(python3 *)", "Bash(tail *)", "Bash(head *)", "Bash(echo *)"):
             self.assertIn(rule, cmd)
 
+    def test_a_task_or_configuration_list_that_matches_nothing_is_an_error_naming_it(self):
+        for flag, ids in (("--tasks", ["no-such-task"]), ("--configs", ["defualts", "plugn"])):
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as tmp:
+                with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit) as caught:
+                    run.main([flag, *ids, "--max-total", "3", "--claude", *stub(tmp, LIMIT_STUB),
+                              "--out", str(Path(tmp) / "out.jsonl")])
+                self.assertEqual(caught.exception.code, 2)
+                self.assertIn(", ".join(ids), err.getvalue())
+
     def test_the_runner_stops_before_a_run_could_pass_the_total_cap(self):
         self.assertTrue(run.can_start(spent=2.0, budget=0.5, max_total=3.0))
         self.assertFalse(run.can_start(spent=2.3, budget=0.5, max_total=3.0))
+
+    def test_a_run_that_times_out_is_a_failed_row_charged_the_whole_budget(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            claude = stub(tmp, HANGING_STUB)
+            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 1,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "defaults"), options, {})
+        self.assertEqual((row["exit_code"], row["passed"], row["cost_known"], row["total_cost_usd"], row["answer"]),
+                         (None, False, False, 0.5, ""))
+        self.assertGreaterEqual(row["wall_ms"], 1000)
+
+
+HANGING_STUB = '''#!/usr/bin/env python3
+import sys, time
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+print('{"result": "half an ans', flush=True)
+time.sleep(30)
+'''
+
+
+class Overhead(unittest.TestCase):
+    def test_percentile_is_the_nearest_rank(self):
+        ten = [10.0, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+        for samples, share, want in ((ten, 0.5, 5), (ten, 0.95, 10), (ten, 0.1, 1), (ten, 0.11, 2),
+                                     (list(range(1, 21)), 0.95, 19), ([7.0], 0.5, 7), ([7.0], 0.95, 7),
+                                     ([3.0, 1, 2], 0.5, 2), ([1.0, 2], 0.5, 1)):
+            with self.subTest(samples=samples, share=share):
+                self.assertEqual(overhead.percentile(samples, share), want)
+        self.assertEqual(ten[0], 10.0)  # sorts a copy
+
+    def test_summary_rounds_each_figure_and_keeps_the_labels(self):
+        self.assertEqual(overhead.summary([1.26, 1.24, 3.04], command="pre-agent", warm=True),
+                         {"command": "pre-agent", "warm": True, "runs": 3, "p50_ms": 1.3, "p95_ms": 3.0, "max_ms": 3.0})
+        self.assertEqual(overhead.summary([10.4, 20.6, 30.2, 40.4], digits=0),
+                         {"runs": 4, "p50_ms": 21, "p95_ms": 40, "max_ms": 40})
 
 
 FILES_STUB = '''#!/usr/bin/env python3
@@ -1080,6 +1129,62 @@ class Sessions(unittest.TestCase):
             self.assertEqual(list((home / "projects").iterdir()), [])  # the shared folder is still cleaned up
 
 
+# Ctrl-C while claude runs: the session has started, then the bench gets SIGINT mid-call.
+INTERRUPT_STUB = '''#!/usr/bin/env python3
+import os, re, signal, sys, time
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+folder = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(Path.cwd().resolve()))
+(folder / "s1").mkdir(parents=True)
+(folder / "s1.jsonl").write_text("{}")
+os.kill(os.getppid(), signal.SIGINT)
+time.sleep(30)
+'''
+
+
+class Stopped(unittest.TestCase):
+    """Once claude starts the run costs money: whatever stops it or the steps after it, its row is written and
+    its scratch and session folders are removed."""
+
+    def stop(self, error: type, *argv: str, source: str = SESSION_STUB,
+             **patches) -> tuple[list[dict], list[Path], list[Path]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, scratch, out = Path(tmp) / "config", Path(tmp) / "scratch", Path(tmp) / "out.jsonl"
+            scratch.mkdir()
+            (Path(tmp) / "a-file").write_text("not a folder")
+            argv = tuple(a.replace("<tmp>", tmp) for a in argv)
+            with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}), \
+                    unittest.mock.patch.object(tempfile, "tempdir", str(scratch)), \
+                    (unittest.mock.patch.multiple(run, **patches) if patches else contextlib.nullcontext()), \
+                    self.assertRaises(error):
+                run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "1", "--max-total", "3",
+                          "--claude", *stub(tmp, source), "--out", str(out), *argv])
+            rows = [json.loads(line) for line in out.read_text().splitlines()] if out.exists() else []
+            sessions = list((home / "projects").iterdir()) if (home / "projects").exists() else []
+            return rows, list(scratch.iterdir()), sessions
+
+    @unittest.skipIf(sys.platform == "win32", "needs a POSIX SIGINT sent to the bench")
+    def test_an_interrupt_during_the_claude_call_writes_a_broken_row_charged_the_budget_and_cleans_up(self):
+        rows, scratch, sessions = self.stop(KeyboardInterrupt, source=INTERRUPT_STUB)
+        self.assertEqual([(r["grade"]["verdict"], r["exit_code"], r["cost_known"], r["total_cost_usd"]) for r in rows],
+                         [("broken", None, False, 0.5)])
+        self.assertIn("KeyboardInterrupt", rows[0]["grade"]["reason"])
+        self.assertEqual((scratch, sessions), ([], []))
+
+    def test_an_interrupt_while_grading_still_writes_the_row_and_cleans_up(self):
+        rows, scratch, sessions = self.stop(KeyboardInterrupt, grade=unittest.mock.Mock(side_effect=KeyboardInterrupt))
+        self.assertEqual([(r["grade"]["verdict"], r["total_cost_usd"], r["passed"]) for r in rows],
+                         [("broken", 0.01, False)])
+        self.assertIn("KeyboardInterrupt", rows[0]["grade"]["reason"])
+        self.assertEqual((scratch, sessions), ([], []))
+
+    def test_a_keep_folder_that_cannot_be_written_keeps_the_graded_row_and_cleans_up(self):
+        rows, scratch, sessions = self.stop(OSError, "--keep", str(Path("<tmp>") / "a-file"))
+        self.assertEqual([(r["grade"]["verdict"], r["total_cost_usd"], "kept" in r) for r in rows], [("pass", 0.01, False)])
+        self.assertEqual((scratch, sessions), ([], []))
+
+
 class SuiteCoverage(unittest.TestCase):
     """Every task class and baseline the suite claims to cover is there and can't be passed by gaming."""
 
@@ -1168,7 +1273,8 @@ n = int(calls.read_text()) if calls.exists() else 0
 calls.write_text(str(n + 1))
 if n < int(os.environ["STUB_LIMITED"]):
     print(json.dumps({"is_error": True, "subtype": "error_during_execution", "api_error_status": 429,
-                      "result": "API Error: 429 rate limit reached", "total_cost_usd": 0.001, "modelUsage": {}}))
+                      "result": "API Error: 429 rate limit reached",
+                      "total_cost_usd": float(os.environ.get("STUB_LIMIT_COST", "0.001")), "modelUsage": {}}))
     sys.exit(1)
 print(json.dumps({"is_error": False, "subtype": "success", "api_error_status": None, "total_cost_usd": 0.01,
                   "result": "read_retry_limit in app/settings.py; a rate limit design is off topic", "modelUsage": {}}))
@@ -1293,16 +1399,16 @@ class AgentCosts(unittest.TestCase):
 class Limits(unittest.TestCase):
     """A rate or usage limit pauses the bench and retries the run; it is never recorded as a failed task."""
 
-    def bench(self, limited: int) -> tuple[int, list[dict], list[dict], list[float]]:
+    def bench(self, limited: int, cost: str = "0.001", *spend: str) -> tuple[int, list[dict], list[dict], list[float]]:
         with tempfile.TemporaryDirectory() as tmp:
             claude = stub(tmp, LIMIT_STUB)
             out = Path(tmp) / "out.jsonl"
-            env = {"STUB_CALLS": str(Path(tmp) / "calls"), "STUB_LIMITED": str(limited)}
+            env = {"STUB_CALLS": str(Path(tmp) / "calls"), "STUB_LIMITED": str(limited), "STUB_LIMIT_COST": cost}
             pauses: list[float] = []
             with unittest.mock.patch.dict("os.environ", env), \
                     unittest.mock.patch.object(run.time, "sleep", pauses.append):
                 code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "1",
-                                 "--max-total", "3", "--claude", *claude, "--out", str(out)])
+                                 "--max-total", "3", *spend, "--claude", *claude, "--out", str(out)])
             read = lambda p: [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []  # noqa: E731
             self.assertEqual(sorted(p.name for p in Path(tmp).glob("*.jsonl")), ["out.jsonl"] if out.exists() else [])
             # subprocess also calls time.sleep in short steps while it waits on a slow child.
@@ -1321,6 +1427,12 @@ class Limits(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(rows, [])
         self.assertEqual(len(limited), run.LIMIT_RETRIES + 1)
+
+    def test_a_retry_never_starts_past_the_total_cap(self):
+        code, rows, limited, pauses = self.bench(99, "0.5", "--budget", "0.5", "--max-total", "1")
+        self.assertEqual((code, rows), (1, []))
+        self.assertLessEqual(sum(r["total_cost_usd"] for r in limited), 1)
+        self.assertEqual(len(limited), 1)
 
     def test_a_lost_network_is_retried_like_a_limit(self):
         # The answers Claude Code gave during the 2026-11-22 outage, plus a dropped connection.
@@ -1374,8 +1486,66 @@ class Limits(unittest.TestCase):
         self.assertTrue(run.rate_limited({"is_error": False, "exit_code": 1, "api_error_status": None,
                                           "stderr": "Error: API Error: Repeated 529 Overloaded errors", "answer": ""}))
 
+    def test_an_api_error_before_any_spend_is_set_aside_not_retried(self):
+        # What Claude Code 2.1.330 printed for an invalid API key: an error, nothing spent, no model usage.
+        result = json.loads(API_ERROR.read_text(encoding="utf-8"))
+        row = run.record({"id": "t", "class": "lookup"}, {"id": "defaults"}, Recorder.options, run.mrconfig.build({}),
+                         result, dict(Recorder.facts, exit_code=1))
+        self.assertEqual(run.refusal(row), "api_error")
+        self.assertFalse(run.rate_limited(row))  # waiting fixes no key, balance or model access
+        self.assertEqual((row["total_cost_usd"], row["cost_known"]), (0, True))
+        errored = {"is_error": True, "exit_code": 1, "api_error_status": None, "stderr": "", "subtype": "success"}
+        # The messages for the other two at https://code.claude.com/docs/en/errors.md.
+        for answer in ("Credit balance is too low", "Model 'claude-fable-5-2' not found"):
+            self.assertEqual(run.refusal(dict(errored, answer=answer, total_cost_usd=0)), "api_error", answer)
+        # A run that spent tried the task, and a zero cost on error_during_execution may have been zeroed.
+        self.assertIsNone(run.refusal(dict(errored, answer="The fix is incomplete.", total_cost_usd=0.02)))
+        self.assertIsNone(run.refusal(dict(errored, answer="", subtype="error_during_execution", total_cost_usd=0)))
+        self.assertIsNone(run.refusal(dict(errored, is_error=False, exit_code=0, answer="hi", total_cost_usd=0)))
 
-CWD_STUB = '''#!/usr/bin/env python3
+    def refused(self, refuse: str, configs: list[str], runs: int) -> tuple[int, list[dict], list[dict], list[float]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            claude = stub(tmp, API_ERROR_STUB)
+            out = Path(tmp) / "out.jsonl"
+            pauses: list[float] = []
+            with unittest.mock.patch.dict("os.environ", {"STUB_ERROR": str(API_ERROR), "STUB_REFUSED": refuse}), \
+                    unittest.mock.patch.object(run.time, "sleep", pauses.append):
+                code = run.main(["--tasks", "lookup-retry-limit", "--configs", *configs, "--runs", str(runs),
+                                 "--max-total", "3", "--claude", *claude, "--out", str(out)])
+            read = lambda p: [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []  # noqa: E731
+            return code, read(out), read(Path(tmp) / "limited" / "out.jsonl"), [p for p in pauses if p >= run.LIMIT_PAUSE]
+
+    def test_api_errors_in_a_row_stop_the_bench_without_a_failed_task(self):
+        code, rows, limited, pauses = self.refused("every run", ["defaults"], runs=run.API_ERROR_STOP + 2)
+        self.assertEqual(code, 2)
+        self.assertEqual(rows, [])
+        self.assertEqual([r["limited_reason"] for r in limited], ["api_error"] * run.API_ERROR_STOP)
+        self.assertEqual(pauses, [])
+
+    def test_a_configuration_the_account_cannot_run_does_not_stop_the_others(self):
+        code, rows, limited, pauses = self.refused("fable", ["defaults", "fable"], runs=run.API_ERROR_STOP)
+        self.assertEqual(code, 0)
+        self.assertEqual([(r["config"], r["passed"]) for r in rows], [("defaults", True)] * run.API_ERROR_STOP)
+        self.assertEqual([(r["config"], r["limited_reason"]) for r in limited], [("fable", "api_error")] * run.API_ERROR_STOP)
+        self.assertEqual(pauses, [])
+
+
+API_ERROR = ROOT / "tests" / "fixtures" / "claude-2.1.330-api-error.json"
+
+API_ERROR_STUB = '''#!/usr/bin/env python3
+import json, os, sys
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+if os.environ["STUB_REFUSED"] in ("every run", os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL")):
+    with open(os.environ["STUB_ERROR"], encoding="utf-8") as fh:
+        sys.stdout.write(fh.read())
+    sys.exit(1)
+print(json.dumps({"is_error": False, "subtype": "success", "api_error_status": None, "total_cost_usd": 0.01,
+                  "result": "read_retry_limit in app/settings.py", "modelUsage": {}}))
+'''
+
+
+CWD_STUB ='''#!/usr/bin/env python3
 import json, os, sys
 if "--version" in sys.argv:
     print("9.9.9 (stub)"); sys.exit(0)

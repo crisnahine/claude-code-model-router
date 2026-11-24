@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import threading
 import time
@@ -286,7 +285,7 @@ def snapshot(cache: dict) -> dict:
 def _failures(failed: object) -> int:
     """Failed fetches in a row, or 0 for no record or one that doesn't make sense."""
     if not isinstance(failed, dict) or not all(
-            cfg._number(failed.get(key)) and math.isfinite(failed[key]) for key in ("at", "count")):
+            cfg._number(failed.get(key)) for key in ("at", "count")):
         return 0
     return max(0, int(failed["count"]))
 
@@ -324,14 +323,16 @@ def refresh(settings: Settings, force: bool = False) -> dict:
     return store.update_dict(path(), apply)
 
 
-def ack() -> str | None:
+def ack() -> tuple[str, str] | None:
+    """The version marked as reviewed and the write's status (`store.try_update`), or None with nothing cached."""
     if not load().get("cache"):
         return None
 
     def apply(data: dict) -> None:
         data["reviewed"] = {**snapshot(data.get("cache") or {}), "reviewed_at": int(store.now())}
 
-    return store.update_dict(path(), apply)["reviewed"]["claude_code_version"]
+    data, status = store.try_update(path(), apply)
+    return data["reviewed"]["claude_code_version"], status
 
 
 def pending(data: dict | None = None) -> dict | None:

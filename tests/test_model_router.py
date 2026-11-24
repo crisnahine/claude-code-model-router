@@ -531,9 +531,20 @@ class Intake(Sandbox):
             self.assertEqual((seen.delivered, seen.person, seen.level), (True, False, None), text)
             self.assertFalse(intake.from_turn(text, None, None).person, text)
         for text in FRAMING["machine"]:
-            self.assertEqual((intake.from_prompt(text, self.project).delivered, intake.is_user_prompt(text)), (False, False))
+            with self.subTest(machine=text):
+                self.assertEqual((intake.from_prompt(text, self.project).delivered, intake.is_user_prompt(text)),
+                                 (False, False))
+                self.assertFalse(intake.from_turn(text, None, "composer").person)
         for text in FRAMING["person"]:
-            self.assertTrue(intake.from_prompt(text, self.project).person, text)
+            with self.subTest(person=text):
+                self.assertTrue(intake.from_prompt(text, self.project).person)
+                self.assertTrue(intake.from_turn(text, None, "composer").person)
+
+    def test_a_long_run_after_a_bracket_is_read_quickly(self):
+        for text in ("<" + "a" * 80_000, "<" + "a-" * 40_000, "<" + "a-b" * 27_000):
+            started = time.monotonic()
+            self.assertTrue(intake.is_user_prompt(text))
+            self.assertLess(time.monotonic() - started, 0.5, text[:8])
 
     def test_a_command_is_this_turns_only_when_its_line_opens_the_turn(self):
         line = SlashSkills.LINE.format("hard", "")  # no arguments: the body is the task
@@ -2193,6 +2204,22 @@ class Router(Sandbox):
         self.override({"agents": {"worker": {"model": "sonnet"}}})  # a project can't take it back or lower it
         self.assertEqual(self.decide("worker", HARD)["model"], "haiku")
 
+    def test_a_project_rule_cannot_put_an_agent_on_a_model_the_project_added(self):
+        self.agent("worker")
+        self.override({"models": {"gpt-mini": {"strength": 9, "cost": 0}},
+                       "agents": {"worker": {"model": "gpt-mini"}, "general-purpose": {"model": "gpt-mini"}}})
+        for agent in ("worker", "general-purpose"):
+            for brief in (LOOKUP, HARD):
+                with self.subTest(agent=agent, brief=brief):
+                    d = self.decide(agent, brief)
+                    self.assertNotEqual(d["model"], "gpt-mini")
+                    self.assertIn(f"a project rule names gpt-mini for {agent}, a model only that file vouches for",
+                                  d["held"])
+        self.assertEqual(self.decide("worker", HARD, model="gpt-mini")["model"], "gpt-mini")  # a call may name it
+        self.override({"agents": {"worker": {"model": "gpt-mini"}}}, user=True)  # and so may the user's own rule
+        mine = self.decide("worker", HARD)
+        self.assertEqual((mine["source"], mine["model"], mine["held"]), ("rule", "gpt-mini", None))
+
     def test_a_project_rule_level_is_a_floor(self):
         self.agent("worker")
         self.override({"agents": {"worker": {"level": "complex"}}})
@@ -2400,6 +2427,17 @@ class RepeatGuard(Sandbox):
         self.assertEqual(self.decide("general-purpose", "list the files under c")["model"], "sonnet")
         self.assertIn(health.REFUSED, self.out("models"))
 
+    def test_a_refused_effort_only_rewrite_under_force_passes_through(self):
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", max_tier="sonnet")
+        for session_id in ("s1", "s2"):  # s2's own model is unknown
+            self.assertEqual(self.pre("general-purpose", LOOKUP, session_id=session_id)["updatedInput"]["effort"], "medium")
+            for _ in range(2):
+                self.next_message()
+                self.assertIsNone(self.pre("general-purpose", LOOKUP, session_id=session_id))
+            self.assertIn("passed through", self.ledger()[-1]["reason"])
+        self.assertTrue(health.load().healthy("opus"))  # the rewrite never changed the model
+        self.assertEqual(learn.stats()["lookup"]["calls"], 2)  # a pass-through isn't a routed call
+
     def test_a_model_known_to_work_is_not_blamed(self):
         health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
         for prompt in ("list the files under a", "list the files under b"):
@@ -2445,6 +2483,28 @@ class RepeatGuard(Sandbox):
         again = self.decide("general-purpose", hard)
         self.assertEqual((again["action"], again["level"], again["model"], again["effort"], again["escalated_from"]),
                          ("rewrite", "frontier", "fable", "xhigh", None))
+
+    def test_a_redo_keeps_the_effort_the_call_names(self):
+        self.pre("general-purpose", HARD)
+        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="high")
+        for named in ("max", "low"):
+            with self.subTest(effort=named):
+                again = self.decide("general-purpose", HARD, effort=named)
+                self.assertEqual((again["escalated_from"], again["model"], again["effort"]), ("complex", "opus", None))
+
+    def test_a_redo_that_would_repeat_the_run_at_the_environments_effort_goes_one_model_up(self):
+        for sid, name in (("e1", "CLAUDE_CODE_SUBAGENT_EFFORT"), ("e2", "CLAUDE_CODE_EFFORT_LEVEL")):
+            with self.subTest(env=name):
+                self.options(**{name: "high"})
+                self.session_on("claude-sonnet-5-5", sid)
+                first = self.decide("general-purpose", HARD, session_id=sid)
+                self.assertEqual((first["level"], first["model"], first["effort"]), ("complex", "opus", None))
+                self.pre("general-purpose", HARD, session_id=sid)
+                self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", session_id=sid)
+                again = self.decide("general-purpose", HARD, session_id=sid)  # hardest is opus too: the same run
+                self.assertEqual((again["escalated_from"], again["model"], again["effort"]), ("complex", "fable", None))
+                self.assertIn("so it goes to fable", again["reason"])
+                os.environ.pop(name)
 
 
 class Calls(Sandbox):
@@ -2532,6 +2592,29 @@ class Calls(Sandbox):
         self.assertIsNone(self.route(call, spawn_id="t3", prompt_id="p2"))
         self.assertIsNone(self.route({"prompt": "other"}, source="caller"))
         self.assertIsNone(self.route({"prompt": "other"}))  # a caller's run is no run to be redone
+
+    def test_a_sessions_calls_are_dropped_a_day_after_it_last_wrote_them(self):
+        # Every spawn rewrites these files whole under a lock it waits 1 s for, so old sessions cost lost writes.
+        def run(session: str) -> None:
+            for key, agent_id in (("k1", None), ("k2", "a1")):
+                calls.routed(session, key, calls.Route(model="haiku", sent=None, level=cfg.Level.lookup, effort="low",
+                                                       source="router", path="mod"))
+                calls.returned(session, calls.Outcome("result", key=key, launched=bool(agent_id), agent_id=agent_id))
+
+        def sessions() -> dict:
+            return {name: sorted(store.load_state_file(store._keyed(name))) for name in ("routes", "launched", "done")}
+
+        run("old")
+        self.advance(calls.KEPT_FOR)
+        run("recent")
+        self.assertEqual(sessions(), dict.fromkeys(("routes", "launched", "done"), ["old", "recent"]))
+        self.advance(1)
+        run("new")
+        self.assertEqual(sessions(), dict.fromkeys(("routes", "launched", "done"), ["new", "recent"]))
+        store.save_entry("sessions", "kept", {"model": "opus"})
+        self.advance(calls.KEPT_FOR + 1)
+        store.save_entry("sessions", "next", {"model": "opus"})
+        self.assertEqual(sorted(store.load_state_file(store._keyed("sessions"))), ["kept", "next"])  # other files keep theirs
 
     def test_a_route_with_junk_in_it_reads_as_none(self):
         key = calls.identify({"prompt": LOOKUP})[1]
@@ -3937,10 +4020,29 @@ class Gates(Sandbox):
         self.assertIsNone(hooks.stop({"session_id": "s1", "transcript_path": self.transcript("pytest", stamp)}))
 
     def test_check_command_patterns(self):
-        for command in ("pytest -q", "npm test", "pnpm run lint", "cargo test", "go vet ./...", "tsc --noEmit"):
-            self.assertTrue(gates.CHECK_COMMAND.search(command), command)
-        for command in ("ls -la", "git status", "cat test.txt"):
-            self.assertFalse(gates.CHECK_COMMAND.search(command), command)
+        for command in ("pytest -q", "npm test", "pnpm run lint", "cargo test", "go vet ./...", "tsc --noEmit",
+                        "python -m pytest", "python3 -m unittest discover -s tests", "npx jest", "cd x && pytest",
+                        "uv run pytest", "poetry run mypy .", "make test", "CI=1 npm test", "env CI=1 pytest",
+                        "time pytest", "timeout 600 pytest -x", "bundle exec rspec", "./node_modules/.bin/eslint .",
+                        ".venv/bin/python -m pytest", "docker compose run web pytest", "docker exec -it app rspec",
+                        "sh -c 'pytest -q'", "(cd api && rubocop)", "git add -A; pytest", "ruff check . | tail -5",
+                        "./gradlew build", "cargo clippy --all-targets", "nice -n 19 cargo test",
+                        "timeout 200 uv run --python 3.9 python -m unittest discover -s tests",
+                        "xargs bundle exec rspec < f", 'PATH="$HOME/.cargo/bin:$PATH" cargo clippy --workspace',
+                        "$P -m pytest -q", "sudo -E make check", "uv pip install -e . && pytest",
+                        "rspec spec 2>&1 | grep -c failures"):
+            self.assertTrue(gates.is_check(command), command)
+        for command in ("ls -la", "git status", "cat test.txt", "pip install pytest", "npm install --save-dev jest eslint",
+                        "which pytest", "grep -rn ruff pyproject.toml", "cat jest.config.js", "brew install golangci-lint",
+                        "git commit -m 'Run mypy in CI'", "git commit -m 'Run make test in CI'",
+                        "tail -50 rspec.log", "command -v pytest",
+                        "uv tool install ruff", "yarn add -D vitest", "CI=1 sudo pip3 install tox"):
+            self.assertFalse(gates.is_check(command), command)
+
+    def test_installing_a_test_tool_after_an_edit_still_asks(self):
+        self.edit()
+        out = hooks.stop({"session_id": "s1", "transcript_path": self.transcript("pip install pytest")})
+        self.assertIn("model-router:verifier", out["reason"])
 
     def test_hard_request_on_a_weak_session_needs_a_strong_agent(self):
         self.session_on("claude-haiku-5-5")
@@ -3953,6 +4055,14 @@ class Gates(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": HARD})
         self.pre("general-purpose", HARD)  # routed to opus
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
+
+    def test_an_agent_on_a_model_the_project_added_never_satisfies_escalation(self):
+        self.override({"models": {"gpt-mini": {"strength": 9, "cost": 0}}})
+        self.session_on("claude-haiku-5-5")
+        hooks.user_prompt({"session_id": "s1", "prompt": HARD})
+        self.pre("general-purpose", HARD, model="gpt-mini")
+        self.assertIn("model-router:", (hooks.stop({"session_id": "s1"}) or {}).get("reason", "no check asked"))
+        self.assertIsNone(calls.strongest(cfg.load(), "s1"))
 
     def test_agents_started_together_cant_hide_the_strong_one(self):
         self.session_on("claude-haiku-5-5")
@@ -4064,6 +4174,15 @@ class Upstream(Sandbox):
         self.assertTrue(upstream.has_pending(upstream.pending()))
         self.assertIn("as reviewed", self.out("ack"))
         self.assertFalse(upstream.has_pending(upstream.pending()))
+
+    def test_ack_says_so_when_the_review_mark_was_not_written(self):
+        store.save_json(upstream.path(), {"schema": 99, "cache": {"claude_code_version": "2.1.330"}})
+        self.assertEqual(self.out("ack"), "Review mark left as is: upstream.json was written by a newer Model Router release.\n")
+        store.save_json(upstream.path(), {"cache": {"claude_code_version": "2.1.330"}})
+        Path(f"{upstream.path()}.lock").write_text("other")  # held by someone else, and fresh
+        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
+            self.assertEqual(cli.main(["ack"]), 1)
+        self.assertNotIn("reviewed", json.loads(upstream.path().read_text()))
 
     def test_cache_ttl_skips_the_network(self):
         store.save_json(upstream.path(), {"cache": {"fetched_at": 10**12}})
@@ -4413,6 +4532,15 @@ class Reports(Sandbox):
         self.assertIn("Spend at list price: $20.50", text)
         self.assertIn("| main | claude-opus-5-5 | 1 | 1,000,000 | 20.00 |", text)
         self.assertIn("No price in the registry for: claude-new-9", text)
+
+    def test_usage_of_zero_days_reads_the_default_window_it_names(self):
+        old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=20)).isoformat(timespec="seconds")
+        store.append_ledger({"ts": old, "event": "usage", "session": "s1", "agent_id": None, "model": "claude-opus-5-5",
+                             "input_tokens": 0, "output_tokens": 1_000_000, "cost_usd": 20.0})
+        self.assertIn("Spend at list price: $20.00", self.out("usage", "30"))
+        self.assertEqual(self.out("usage", "0").strip(), "No activity recorded in the last 7 days.")
+        data = json.loads(self.out("usage", "0", "--json"))
+        self.assertEqual((data["days"], data["spend"]["total_usd"]), (7, 0))
 
     def test_data_dir_flag(self):
         other = Path(self.tmp.name) / "other"
@@ -5010,6 +5138,11 @@ class MachineReadable(Sandbox):
                          [{"model": "claude-haiku-5-5", "runs": 1, "tokens": 1200, "run_tokens": 5000}])
         self.assertIn("| claude-haiku-5-5 | 1 | 1,200 | 5,000 |", self.out("usage"))
 
+    def test_a_model_the_project_added_is_never_shown_as_the_strongest_in_use(self):
+        self.override({"models": {"gpt-mini": {"strength": 9, "cost": 0}}})
+        self.assertEqual(self.json_out("models")["strongest_in_use"], "fable")
+        self.assertIn("Strongest model in use: **fable**", self.out("policy"))
+
     def test_models_json(self):
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
@@ -5198,6 +5331,37 @@ class SecurityClaims(Sandbox):
         self.assertNotIn("pus", config.models)
         self.assertIn("saga", config.available())
         self.assertNotIn("saga", config.available(cap="sonnet"))
+
+    def test_a_project_model_is_never_the_routers_pick(self):
+        shipped = cfg.load()
+        self.override({"models": {"gpt-mini": {"strength": 9, "cost": 0, "speed": 9}, "saga": {"strength": 2.5}}})
+        config = cfg.load()
+        for priority in cfg.PRIORITIES:
+            for level in Level:
+                with self.subTest(priority=priority, level=level):
+                    self.assertEqual(ladder.pick(config, level, priority, config.available(), {}),
+                                     ladder.pick(shipped, level, priority, shipped.available(), {}))
+        self.session_on("claude-opus-5-5")
+        self.assertEqual(self.decide("general-purpose", HARD, model="gpt-mini")["model"], "gpt-mini")
+
+    def test_a_named_model_that_cant_run_never_falls_to_a_project_model(self):
+        self.override({"models": {"saga": {"strength": 2.5}, "tiny": {"strength": 1.5}}})
+        self.session_on("claude-opus-5-5")
+        for name in ("opus", "haiku", "opus", "haiku"):
+            health.failed(name, "model not found")
+        self.assertEqual(self.decide("general-purpose", HARD, model="opus")["model"], "sonnet")
+        self.assertEqual(self.decide("general-purpose", LOOKUP, model="haiku")["model"], "sonnet")
+
+    def test_a_redo_the_effort_cap_holds_never_moves_to_a_project_model(self):
+        self.override({"models": {"saga": {"strength": 3.5}, "titan": {"strength": 5}}})
+        self.session_on("claude-opus-5-5")
+        (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "high"}))
+        frontier = "research a novel fix for the auth migration across every service, root cause unknown"
+        for prompt, ran, redo in ((HARD, "opus", "fable"), (frontier, "fable", "fable")):
+            with self.subTest(ran=ran):
+                self.pre("general-purpose", prompt)
+                self.done("general-purpose", prompt, f"claude-{ran}-5-{2 if ran == 'fable' else 5}", model=ran, effort="high")
+                self.assertEqual(self.decide("general-purpose", prompt)["model"], redo)
 
     def test_it_writes_only_under_its_data_directory(self):
         outside = [self.home, self.project]

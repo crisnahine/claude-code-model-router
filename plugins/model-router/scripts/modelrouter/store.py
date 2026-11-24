@@ -34,7 +34,7 @@ def now() -> float:
 
 
 def stamp(value: Any) -> float:
-    """A stored time to sort by: the number itself, or 0 when it is junk, nan or infinite."""
+    """A stored time or count: the number itself, or 0 when it is junk, nan, infinite or too big for a float."""
     try:
         ok = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
     except OverflowError:
@@ -317,10 +317,11 @@ def load_entry(name: str, key: str | None) -> dict:
     return entry if isinstance(entry, dict) else {}
 
 
-def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any]) -> str:
+def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any], max_age: float | None = None) -> str:
     """Edit one record of a keyed file in place, under the file's lock. Each file keeps
-    its KEEP_ENTRIES most recently written records. Returns "saved", or why nothing was
-    written (see try_update; "unkeyed" with no key)."""
+    its KEEP_ENTRIES most recently written records, and with `max_age` drops those not
+    written for longer than that. Returns "saved", or why nothing was written (see
+    try_update; "unkeyed" with no key)."""
     if not key:
         return "unkeyed"
 
@@ -330,9 +331,13 @@ def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any]) -> s
         change(entry)
         entry["_at"] = now()
         data[key] = entry
+
+        def written(k: str) -> float:
+            return stamp(data[k].get("_at")) if isinstance(data[k], dict) else 0
+        if max_age is not None:
+            for old in [k for k in data if now() - written(k) > max_age]:
+                del data[old]
         if len(data) > KEEP_ENTRIES:
-            def written(k: str) -> float:
-                return stamp(data[k].get("_at")) if isinstance(data[k], dict) else 0
             for old in sorted(data, key=written)[:len(data) - KEEP_ENTRIES]:
                 del data[old]
 

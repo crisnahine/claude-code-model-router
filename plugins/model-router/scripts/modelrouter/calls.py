@@ -19,6 +19,9 @@ from .registry import Registry
 
 # Without a request id to compare, a call seen again within this long counts as a redo.
 REDO_WINDOW = 30 * 60
+# A session that wrote no route, launch or finished run for this long is dropped from those files: each spawn
+# rewrites them whole under a lock it waits 1 s for, so old sessions there cost lost writes.
+KEPT_FOR = 24 * 3600
 
 _MODEL_ID = re.compile(r"[A-Za-z0-9._:/\[\]-]{1,100}")
 MAX_SWAPPED = 5
@@ -144,6 +147,10 @@ def _latest(routes: dict, key: str) -> list[dict]:
     return sorted(found, key=lambda r: store.stamp(r.get("at")), reverse=True)
 
 
+def _mutate(name: str, session_id: str | None, change) -> None:
+    store.mutate_entry(name, session_id, change, max_age=KEPT_FOR)
+
+
 def routed(session_id: str | None, key: str, route: Route, spawn_id: str | None = None) -> Route | None:
     """Write where a spawn went, under its own id when the path has one (a copy of the same call can't
     overwrite it) and else under the call's key. Returns the route this call had earlier in the request
@@ -159,7 +166,7 @@ def routed(session_id: str | None, key: str, route: Route, spawn_id: str | None 
                 break
         store.keep(entry, spawn_id or key, _record(route, key))
 
-    store.mutate_entry("routes", session_id, update)
+    _mutate("routes", session_id, update)
     return earlier[0] if earlier else None
 
 
@@ -179,7 +186,8 @@ def strongest(reg: Registry, session_id: str | None) -> str | None:
     current = request.load(session_id)
     ran = [r.model for r in map(_route, store.load_entry("routes", session_id).values())
            if r and r.model and _in(current, r)]
-    return max(ran, key=reg.strength, default=None)
+    # A model a repository added is only as strong as that repository claims, so it never counts.
+    return max((n for n in ran if n not in reg.models or reg.models[n].trusted), key=reg.strength, default=None)
 
 
 def _in(current: request.Request, route: Route) -> bool:
@@ -220,10 +228,10 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
 def _wait_or_finish(session_id: str | None, outcome: Outcome, route: Route, finished: bool) -> None:
     if finished:
         run = {**route.run, "prompt_id": request.load(session_id).prompt_id}
-        store.mutate_entry("done", session_id, lambda done: store.keep(done, outcome.key, run))
+        _mutate("done", session_id, lambda done: store.keep(done, outcome.key, run))
     else:
         run = {**route.run, "prompt_id": request.load(session_id).prompt_id, "key": outcome.key}
-        store.mutate_entry("launched", session_id, lambda waiting: store.keep(waiting, outcome.agent_id, run))
+        _mutate("launched", session_id, lambda waiting: store.keep(waiting, outcome.agent_id, run))
 
 
 def _failed(session_id: str | None, outcome: Outcome, route: Route | None, asked: str | None) -> Returned:
@@ -253,11 +261,11 @@ def _stopped(session_id: str | None, outcome: Outcome) -> Returned:
         waiting = launched.pop(agent_id, None)
         run.update(waiting if isinstance(waiting, dict) else {})
 
-    store.mutate_entry("launched", session_id, take)
+    _mutate("launched", session_id, take)
     finished = outcome.answered and Level.parse(run.get("level")) is not None and isinstance(run.get("key"), str)
     if finished:
         done = {k: run.get(k) for k in ("level", "model", "effort", "prompt_id")}
-        store.mutate_entry("done", session_id, lambda records: store.keep(records, run["key"], done))
+        _mutate("done", session_id, lambda records: store.keep(records, run["key"], done))
     return Returned(run.get("model") if isinstance(run.get("model"), str) else None, None, finished)
 
 

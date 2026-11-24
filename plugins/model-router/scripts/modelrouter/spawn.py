@@ -83,8 +83,11 @@ def _record(spawned: Spawn, via: str, newest: str | None) -> None:
     runs_on = decision["model"] or decision["was"]
     source = None if decision["repeat_of"] else decision["source"]  # passed through untouched: no pick, no level
     rewrote = decision["action"] == "rewrite"
+    facts = spawned.facts
+    # The effort it runs at, whoever chose it, so a redo can tell it would only repeat this run.
+    effort = router.runs_at(decision["effort"], facts.tool_input, facts.definition, spawned.snap.options, facts.teammate)
     route = calls.Route(model=runs_on, sent=newest or (decision["model"] if rewrote else None),
-                        level=Level.parse(decision["level"]), effort=decision["effort"], source=source, path=via,
+                        level=Level.parse(decision["level"]), effort=effort, source=source, path=via,
                         counted=learn.counted(decision, kind), prompt_id=current.prompt_id, rewrote=rewrote,
                         was=decision["was"])
     spawn_id = hook_input.get("tool_use_id")

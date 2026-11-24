@@ -126,13 +126,18 @@ def main(argv: list[str] | None = None) -> int:
         changes = upstream.pending()
         print(json.dumps(changes, indent=2) if args.json else report.status(changes))
     elif args.cmd == "ack":
-        version = upstream.ack()
-        if version is None:
+        acked = upstream.ack()
+        if acked is None:
             print("Nothing cached yet; run refresh first.")
+            return 1
+        version, status = acked
+        if status != "saved":
+            left = {"newer": _NEWER, "busy": _BUSY}.get(status, "left as is: {} could not be read or written.")
+            print("Review mark " + left.format("upstream.json"))
             return 1
         print(f"Marked Claude Code {version} and the current docs index as reviewed.")
     elif args.cmd == "usage":
-        days = int(args.days) if str(args.days).isdigit() else 7
+        days = int(args.days) if str(args.days).isdigit() and int(args.days) > 0 else 7  # ledger.read(0) is everything
         print(json.dumps(report.usage_data(days), indent=2) if args.json else report.usage(days))
     elif args.cmd == "upstream-check":
         baseline_path = Path(args.baseline)

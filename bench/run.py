@@ -101,6 +101,7 @@ def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[l
 
 LIMIT_RETRIES = 5
 LIMIT_PAUSE = 60  # seconds before the first retry; each later pause is twice as long
+API_ERROR_STOP = 3  # API errors before any spend, in a row, that stop the bench: the key or the account is wrong
 # The messages Claude Code prints when the API refuses for a limit (https://code.claude.com/docs/en/errors.md).
 _LIMIT_MESSAGE = (r"API Error: (?:Repeated )?(?:429|529)\b|API Error: Repeated 529 Overloaded|Request rejected \(429\)|"
                   r"Server is temporarily limiting requests|You've hit your (?:session|weekly|Opus|Sonnet) limit")
@@ -113,9 +114,10 @@ _NETWORK_MESSAGE = (r"API Error: [^\n]*\((?:ENOTFOUND|ENETUNREACH|ECONNRESET|ECO
 
 
 def refusal(row: dict) -> str | None:
-    """Why the API never got to the task: "limit" or "network", else None. Only an errored run counts, and only
-    on the API's status or Claude Code's own message, at the start of the answer (which is then that message) or
-    in stderr. Task text that talks about limits or network codes is never read as one."""
+    """Why the API never got to the task: "limit" or "network", "api_error" for any other error before a cent was
+    spent (a bad key, no credit, a model the account can't use), else None. Only an errored run counts, and a limit
+    or network only on the API's status or Claude Code's own message, at the start of the answer (which is then that
+    message) or in stderr. Task text that talks about limits or network codes is never read as one."""
     if not (row.get("is_error") or row.get("exit_code")):
         return None
     if row.get("api_error_status") in (429, 529):
@@ -124,12 +126,16 @@ def refusal(row: dict) -> str | None:
     for reason, message in (("limit", _LIMIT_MESSAGE), ("network", _NETWORK_MESSAGE)):
         if re.match(rf"\s*(?:{message})", answer) or re.search(message, stderr):
             return reason
+    # No spend means no model reply, so no tool ran. error_during_execution's zero cost may have been zeroed.
+    if row.get("total_cost_usd") == 0 and row.get("subtype") != "error_during_execution":
+        return "api_error"
     return None
 
 
 def rate_limited(row: dict) -> bool:
-    """A run refused for a rate or usage limit or a lost network: no measurement, not a failed task."""
-    return refusal(row) is not None
+    """A run refused for a rate or usage limit or a lost network, which waiting can lift: no measurement, not a
+    failed task."""
+    return refusal(row) in ("limit", "network")
 
 
 SECRET_NAMES = ("TOKEN", "KEY", "SECRET", "PASSWORD", "AUTH", "CREDENTIAL")
@@ -349,38 +355,54 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     plugin_state = state_hashes(plugin_data_dir(env)) if config.get("plugin") else None
     clock = time.monotonic()
+    stdout, stderr, code, wall_ms, result = "", "interrupted", None, None, {}
+    ledger, types, final, graded, kept, stopped = None, {}, None, None, None, None
+    # Once claude starts the run costs money: whatever stops it or the steps after it, its row is still built and its
+    # scratch removed. With no result yet the cost is unknown, so the row is charged the whole budget.
     try:
-        proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=options["timeout"])
-        stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
-    except subprocess.TimeoutExpired as exc:
-        stdout, stderr, code = _text(exc.stdout), "timed out", None
-    # The run's wall time: Claude Code's own duration_ms can fall short of it.
-    wall_ms = round((time.monotonic() - clock) * 1000)
-    try:
-        result = json.loads(stdout)
-    except ValueError:
-        result = {}
-    answer = result.get("result") or ""
-    (scratch / "answer.txt").write_text(answer, encoding="utf-8")
-    # Read before grading: the check also runs the code the run left, which could rewrite these files.
-    ledger = ledger_rows(env) if config.get("plugin") else None
-    types = agent_types(work, env) if config.get("plugin") else {}
-    final = final_answer(task["dir"] / "repo", work, answer)
-    graded = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
-    kept = None
-    if options.get("keep"):
-        # The work the run left, its answer, the router's own data and ledger, and the session's transcripts.
-        kept = Path(options["keep"]) / scratch.name
-        shutil.copytree(scratch, kept, symlinks=True)
-        if session_dir(work, env).is_dir():
-            shutil.copytree(session_dir(work, env), kept / "session", symlinks=True)
+        try:
+            proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=options["timeout"])
+            stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
+        except subprocess.TimeoutExpired as exc:
+            stdout, stderr, code = _text(exc.stdout), "timed out", None
+        # The run's wall time: Claude Code's own duration_ms can fall short of it.
+        wall_ms = round((time.monotonic() - clock) * 1000)
+        try:
+            result = json.loads(stdout)
+        except ValueError:
+            result = {}
+        answer = result.get("result") or ""
+        (scratch / "answer.txt").write_text(answer, encoding="utf-8")
+        # Read before grading: the check also runs the code the run left, which could rewrite these files.
+        ledger = ledger_rows(env) if config.get("plugin") else None
+        types = agent_types(work, env) if config.get("plugin") else {}
+        final = final_answer(task["dir"] / "repo", work, answer)
+        graded = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
+        if options.get("keep"):
+            # The work the run left, its answer, the router's own data and ledger, and the session's transcripts.
+            target = Path(options["keep"]) / scratch.name
+            shutil.copytree(scratch, target, symlinks=True)
+            if session_dir(work, env).is_dir():
+                shutil.copytree(session_dir(work, env), target / "session", symlinks=True)
+            kept = target
+    except BaseException as exc:
+        stopped = exc
+    if wall_ms is None:
+        wall_ms = round((time.monotonic() - clock) * 1000)
     session_removed = _forget_session(session_dir(work, env))
     shutil.rmtree(scratch, ignore_errors=True)
-    return record(task, config, options, registry_config, result,
-                  {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr,
-                   "grade": graded._asdict(), "final_answer": final,
-                   "plugin_state": plugin_state, "ledger": ledger, "agent_types": types,
-                   "session_dir_removed": session_removed, "kept": kept and str(kept)})
+    if graded is None:
+        graded = Grade("broken", f"the bench stopped before the check finished: {stopped!r}",
+                       check_hash(task["dir"] / "check.py"))
+    row = record(task, config, options, registry_config, result,
+                 {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr,
+                  "grade": graded._asdict(), "final_answer": final,
+                  "plugin_state": plugin_state, "ledger": ledger, "agent_types": types,
+                  "session_dir_removed": session_removed, "kept": kept and str(kept)})
+    if stopped is not None:
+        stopped.row = row  # main writes it before the bench stops
+        raise stopped
+    return row
 
 
 def record(task: dict, config: dict, options: dict, registry_config: Registry, result: dict, facts: dict) -> dict:
@@ -393,7 +415,8 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
     ledger, code = facts["ledger"], facts["exit_code"]
     stderr = facts["stderr"][-300:] if code else ""
     refused = refusal({"is_error": result.get("is_error"), "exit_code": code, "stderr": stderr,
-                       "api_error_status": result.get("api_error_status"), "answer": result.get("result")})
+                       "api_error_status": result.get("api_error_status"), "answer": result.get("result"),
+                       "subtype": result.get("subtype"), "total_cost_usd": cost})
     # A cost of 0 on error_during_execution "may be zeroed" (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md),
     # except when the API refused the run: it never started, so nothing was spent.
     known = isinstance(cost, (int, float)) and not (
@@ -453,36 +476,64 @@ def main(argv: list[str] | None = None) -> int:
 
     tasks = [t for t in load_tasks() if not args.tasks or t["id"] in args.tasks]
     configs = [c for c in load_configs() if not args.configs or c["id"] in args.configs]
+    for flag, asked, found in (("--tasks", args.tasks, tasks), ("--configs", args.configs, configs)):
+        if asked and not found:
+            parser.error(f"{flag} matches no id: {', '.join(asked)}")
     version = subprocess.run([*args.claude, "--version"], capture_output=True, text=True).stdout.strip()
     registry_config = mrconfig.shipped()
     options = {"claude": args.claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,
                "plugin_dir": str(PLUGIN), "claude_version": version, "commit": _git_head(), "dirty": _git_dirty(),
                "keep": str(args.keep) if args.keep else None}
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    spent = 0.0
+    spent, errors = 0.0, 0
     for run_index, task, config in schedule(tasks, configs, args.runs, args.first_run):
-        if not can_start(spent, args.budget, args.max_total):
-            print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
-            return 1
         begin = time.time()
         for attempt in range(LIMIT_RETRIES + 1):
-            row = run_one(task, config, options, registry_config)
+            if not can_start(spent, args.budget, args.max_total):  # a retry spends too
+                print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
+                return 1
+            try:
+                row = run_one(task, config, options, registry_config)
+            except BaseException as exc:
+                row = getattr(exc, "row", None)
+                if row is not None:  # the run was paid for, so it goes on record where the loop would put it
+                    row["run"], reason = run_index, refusal(row)
+                    if reason:
+                        row["limited_reason"] = reason
+                    path = args.out.parent / "limited" / args.out.name if reason else args.out
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with path.open("a", encoding="utf-8") as fh:
+                        fh.write(json.dumps(row, sort_keys=True) + "\n")
+                raise
             row["run"] = run_index
             spent += row["total_cost_usd"]
-            if not rate_limited(row):
+            reason = refusal(row)
+            if reason is None:
                 break
-            row["limited_reason"] = refusal(row)
+            row["limited_reason"] = reason
             # Kept apart, outside results/*.jsonl, so the spend is on record but never a failed task.
             limited = args.out.parent / "limited" / args.out.name
             limited.parent.mkdir(parents=True, exist_ok=True)
             with limited.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row, sort_keys=True) + "\n")
+            if reason == "api_error":  # a pause fixes no key, balance or model access
+                break
             if attempt == LIMIT_RETRIES:
                 print(f"stopped: still rate or usage limited after {LIMIT_RETRIES} pauses, "
                       f"${spent:.4f} spent", file=sys.stderr)
                 return 2
             print(f"{task['id']} {config['id']}: rate or usage limited, pausing", file=sys.stderr)
             time.sleep(LIMIT_PAUSE * 2 ** attempt)
+        if row.get("limited_reason") == "api_error":
+            errors += 1
+            print(f"{task['id']} {config['id']}: API error before any spend, set aside: {row['answer'][:200]}",
+                  file=sys.stderr)
+            if errors == API_ERROR_STOP:
+                print(f"stopped: {errors} API errors in a row before any spend; check the key, the credit balance "
+                      "and the account's model access", file=sys.stderr)
+                return 2
+            continue
+        errors = 0
         with args.out.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, sort_keys=True) + "\n")
         print(f"{task['id']} {config['id']} run {run_index}: passed={row['passed']} "

@@ -18,6 +18,14 @@ CHECK_COMMAND = re.compile(
     r"ruff|eslint|flake8|pylint|clippy|golangci-lint|rubocop)\b|"
     r"\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|lint|typecheck|check|build)\b|"
     r"\b(?:cargo|go|dotnet|mvn|gradle|gradlew|make|just|swift|mix|deno)\s+\S*\s*(?:test|check|build|vet|lint|verify)\b")
+# A command part led by one of these only installs, finds, reads or mentions a tool, as in "pip install pytest",
+# "grep ruff pyproject.toml" or "git commit -m 'Run mypy'". Separators inside quotes still split the command.
+_PARTS = re.compile(r"&&|\|\||[;|\n]")
+_LEAD = re.compile(r"[\s({`$]*(?:(?:\w+=\S*|sudo)\s+)*")
+_MENTION = re.compile(
+    r"(?:pip3?|pipx|brew|apt(?:-get)?|which|type|whereis|command\s+-[vV]|e?grep|rg|ag|cat|less|more|head|tail|sed|"
+    r"awk|echo|printf|git|ls|find|wc|open|(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|ci|remove|uninstall|view|info|ls)|"
+    r"uv\s+(?:pip|add|tool\s+install))(?:\s|$)")
 # A message's tool_use rows are stamped before its Edit's PostToolUse records the edit.
 _SAME_MESSAGE_SLACK = 5
 
@@ -60,6 +68,12 @@ def note_agent_checks(hook_input: dict) -> None:
         note_check(session_id)
 
 
+def is_check(command: str) -> bool:
+    """A test, lint, type-check or build command: CHECK_COMMAND in a part of it no mention word leads."""
+    return any(CHECK_COMMAND.search(part) and not _MENTION.match(part, _LEAD.match(part).end())
+               for part in _PARTS.split(command))
+
+
 def checks_ran_since(transcript_path: object, since: float) -> bool:
     """Did a test, lint, type-check or build command run after `since`?"""
     for row, block in session.tool_calls(transcript_path, '"command"'):
@@ -70,7 +84,7 @@ def checks_ran_since(transcript_path: object, since: float) -> bool:
         if stamp < since - _SAME_MESSAGE_SLACK:
             continue
         command = (block.get("input") or {}).get("command") if isinstance(block.get("input"), dict) else None
-        if isinstance(command, str) and CHECK_COMMAND.search(command):
+        if isinstance(command, str) and is_check(command):
             return True
     return False
 

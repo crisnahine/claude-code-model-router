@@ -65,5 +65,7 @@ def page_head(path: str, pages: list = PAGES) -> str:
 def with_head(path: str, current: str, pages: list = PAGES) -> str:
     """`current` under the page's own head, whatever head it had."""
     if current.startswith(HEAD_START):
-        current = current.split(HEAD_END, 1)[1]
+        _, end, current = current.partition(HEAD_END)
+        if not end:
+            raise SystemExit(f"{path}: the page head has no {HEAD_END.strip()!r} marker")
     return page_head(path, pages) + current

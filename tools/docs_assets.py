@@ -280,8 +280,7 @@ def cards(pages: list = PAGES) -> str:
 
 def with_cards(current: str, pages: list = PAGES) -> str:
     if CARDS_START in current:
-        before, rest = current.split(CARDS_START, 1)
-        return before + cards(pages) + rest.split(CARDS_END, 1)[1]
+        return between(current, (CARDS_START, CARDS_END), cards(pages), "docs/README.md")
     return current
 
 
@@ -1055,6 +1054,8 @@ def class_trace(c: dict, router: str) -> str:
     def missed(cell):
         return f", {cell['solved']} of {cell['runs']} solved" if cell["solved"] < cell["runs"] else ""
 
+    if router not in c["configs"]:
+        raise SystemExit(f"bench results have no {router} runs for {c['class']}")
     cell = c["configs"][router]
     key = lambda cfg: (c["configs"][cfg]["cost_per_solved"] is None, c["configs"][cfg]["cost_per_solved"] or 0, cfg)  # noqa: E731
     base = ", ".join(
@@ -1146,16 +1147,22 @@ def site_faq_ld(faq: str) -> str:
             + "\n</script>\n" + FAQ_LD[1])
 
 
-def between(current: str, marks: tuple, body: str) -> str:
-    before, rest = current.split(marks[0], 1)
-    return before + body + rest.split(marks[1], 1)[1]
+def between(current: str, marks: tuple, body: str, where: str) -> str:
+    before, start, rest = current.partition(marks[0])
+    end, after = rest.partition(marks[1])[1:]
+    if not (start and end):
+        raise SystemExit(f"{where}: no {(marks[1] if start else marks[0])!r} marker")
+    return before + body + after
 
 
 def site_files(faq: str, figures: dict, texts: dict, v: str, day: str) -> dict:
     if "site/index.html" not in texts:
         return {}
     page = texts["site/index.html"]
-    url = SITE_URL.search(page).group(1)
+    found = SITE_URL.search(page)
+    if not found:
+        raise SystemExit("site/index.html: no <!-- SITE_URL: ... --> comment")
+    url = found.group(1)
     old = None
     if "site/sitemap.xml" in texts:
         m = re.search(r"<loc>(\S+?)</loc>", texts["site/sitemap.xml"])
@@ -1163,8 +1170,8 @@ def site_files(faq: str, figures: dict, texts: dict, v: str, day: str) -> dict:
     if old and old != url:
         head, sep, tail = page.partition("-->")
         page = head + sep + tail.replace(old, url)
-    page = between(page, FAQ_HTML, site_faq_html(faq))
-    page = between(page, FAQ_LD, site_faq_ld(faq))
+    page = between(page, FAQ_HTML, site_faq_html(faq), "site/index.html")
+    page = between(page, FAQ_LD, site_faq_ld(faq), "site/index.html")
     page = re.sub(r'"softwareVersion": "[^"]*"', f'"softwareVersion": "{v}"', page)
     page = badge_alt(page, v)
     page = bench_alt(with_figures("site/index.html", page, figures), figures)

@@ -133,18 +133,22 @@ class Registry:
         return [n for n in names if table.healthy(n)] or names
 
     def clamp(self, name: str, usable: list[str]) -> str:
-        """The usable model closest to `name` without exceeding it, else the weakest usable."""
+        """The usable model closest to `name` without exceeding it, else the weakest usable. The
+        stand-in is never a model a repository added, whose rank is only that repository's claim."""
         if name in usable or not usable:
             return name
-        lower = [n for n in usable if self.strength(n) <= self.strength(name)]
-        return lower[-1] if lower else usable[0]
+        trusted = [n for n in usable if self.models[n].trusted] or usable
+        lower = [n for n in trusted if self.strength(n) <= self.strength(name)]
+        return lower[-1] if lower else trusted[0]
 
     def select(self, needs: float, priority: str, usable: list[str]) -> str | None:
         """balanced: the cheapest model strong enough. quality: one step stronger than needed.
-        fast: one step below, and the quickest of what qualifies."""
+        fast: one step below, and the quickest of what qualifies. A model a repository added is
+        never picked: its rank, cost and speed are only that repository's claim."""
+        usable = [n for n in usable if self.models[n].trusted]
         if not usable:
             return None
-        steps = sorted({self.strength(n) for n in self.models})
+        steps = sorted({self.strength(n) for n, m in self.models.items() if m.trusted})
         floor, top = steps[0], self.strength(usable[-1])
 
         def step(value: float, by: int) -> float:
