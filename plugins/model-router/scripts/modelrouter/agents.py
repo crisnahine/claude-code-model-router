@@ -102,7 +102,8 @@ def _listed(plugin: str, root: Path) -> list[Path]:
     for source in sources:
         value = source.get("agents")
         for item in [value] if isinstance(value, str) else value if isinstance(value, list) else []:
-            if isinstance(item, str):
+            # Claude Code doesn't load a listed path that escapes the plugin root.
+            if isinstance(item, str) and (root / item).resolve().is_relative_to(root.resolve()):
                 listed.append(root / item)
     return listed
 

@@ -61,14 +61,14 @@ SKILL_BODY_CHARS = 1500
 _FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*\r?\n", re.S)
 
 
-def _receives(body: str, frontmatter: str, count: int) -> bool:
+def _receives(body: str, frontmatter: str, count: int | None) -> bool:
     """Whether a raw skill file has a placeholder that receives one of `count` arguments: an unescaped
-    $ARGUMENTS, $N or $ARGUMENTS[N] with N below count (0-based), or a declared name the body uses.
-    A $ followed by an amount ($500, $1.00) is prose."""
+    $ARGUMENTS, $N or $ARGUMENTS[N] with N below count (0-based, any N when count is None), or a declared
+    name the body uses. A $ followed by an amount ($500, $1.00) is prose."""
     if re.search(r"(?<!\\)\$ARGUMENTS\b(?!\[)", body):
         return True
     for index in re.findall(r"(?<!\\)\$(?:ARGUMENTS\[(\d+)\]|(\d+)(?![\d.,]))", body):
-        if int(index[0] or index[1]) < count:
+        if count is None or int(index[0] or index[1]) < count:
             return True
     block = re.search(r"(?ms)^arguments\s*:(.*?)(?=^\S|\Z)", frontmatter)
     names = re.findall(r"[A-Za-z_]\w*", block.group(1)) if block else []
@@ -76,10 +76,10 @@ def _receives(body: str, frontmatter: str, count: int) -> bool:
 
 
 def _placeholder(raw: str) -> bool:
-    """Whether a raw skill file has a placeholder for its first argument."""
+    """Whether a raw skill file has a placeholder of any kind."""
     raw = raw.lstrip("\ufeff")
     front = _FRONTMATTER.match(raw)
-    return _receives(raw[front.end():] if front else raw, front.group(1) if front else "", 1)
+    return _receives(raw[front.end():] if front else raw, front.group(1) if front else "", None)
 
 
 def profile_skill(args: object, body: object, rendered: bool, raw: object = None) -> dict:
@@ -102,7 +102,7 @@ def profile_skill(args: object, body: object, rendered: bool, raw: object = None
         takes_args = not trailer if args else isinstance(raw, str) and _placeholder(raw)
         body = head if trailer else body
     else:
-        takes_args = _receives(body, front.group(1) if front else "", len(args.split()) or 1)
+        takes_args = _receives(body, front.group(1) if front else "", len(args.split()) or None)
     if takes_args and asks_for_work(args):
         return profile_prompt(args)
     parts = [profile_prompt(text) for text in (args, body[:SKILL_BODY_CHARS])]
@@ -131,10 +131,11 @@ def _skill_file(plugin: str | None, name: str, project: Path) -> str | None:
     typed line."""
     if plugin:
         roots = [cfg.PLUGIN_ROOT] if plugin == cfg.PLUGIN_NAME else agents.installed_roots(plugin)
-        return _read_skill([root / "skills" / name / "SKILL.md" for root in roots])
+        return _read_skill([root / "skills" / name / "SKILL.md" for root in roots]
+                           + [root / "commands" / f"{name}.md" for root in roots])
     project, home = project / ".claude", store.claude_home()
-    return _read_skill([project / "skills" / name / "SKILL.md", home / "skills" / name / "SKILL.md",
-                        project / "commands" / f"{name}.md", home / "commands" / f"{name}.md"])
+    return _read_skill([home / "skills" / name / "SKILL.md", project / "skills" / name / "SKILL.md",
+                        home / "commands" / f"{name}.md", project / "commands" / f"{name}.md"])
 
 
 def _typed_skill(prompt: str, project: Path) -> dict | None:
