@@ -95,9 +95,12 @@ def generate(seed, count=240):
         elif shape < 0.12:
             group = [first, edited(rng, first, 2)]  # edited between attempts
         elif shape < 0.20:
-            group = [edited(rng, first, 2), first]  # an older batch retried after a newer one
+            # An older batch retried after a newer one, so it carries the later exported_at.
+            group = [edited(rng, first, 2), dict(first, exported_at="2023-01-06T03:00:00Z")]
         elif shape < 0.26:
-            group = [first, dict(first, memo=first["memo"] + " (late edit)")]  # same rev, newer memo
+            late = dict(first, memo=first["memo"] + " (late edit)")
+            # Same rev: the later line wins, even when it drops memo text or carries an earlier exported_at.
+            group = [first, late] if n % 2 else [late, dict(first, exported_at="2023-01-04T22:00:00Z")]
         elif shape < 0.30:
             group = [first, edited(rng, first, 3), edited(rng, first, 2)]
         else:

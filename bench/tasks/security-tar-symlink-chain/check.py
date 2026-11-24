@@ -22,6 +22,14 @@ NO_MANIFEST = json.dumps({"files": {}, "links": {}})
 REFUSED = {"extract": "UnsafeArchive", "install": "BundleRejected", "restore": "UnsafeArchive"}
 SIDESTEP = [("dir", "deep"), ("dir", "deep/er"), ("dir", "side"), ("link", "deep/er/l", "../../side"),
             ("link", "deep/er/l/x", "../../../l3"), ("file", "deep/er/l/x/pwn.txt", "owned\n")]
+
+
+def ladder(n):
+    """n links that each lead to the one before, down to the destination, and a link that climbs out past them."""
+    return ([("link", "h0", ".")] + [("link", f"h{i}", f"h{i - 1}") for i in range(1, n)] +
+            [("link", "esc", f"h{n - 1}/..")])
+
+
 # Each chain is made of links that pass the shipped checks one at a time.
 CHAINS = [
     ("a link to . and a link under it", "extract",
@@ -59,10 +67,15 @@ CHAINS = [
     ("a backup with a link to a folder that shares the prefix", "restore",
      [("file", "MANIFEST.json", NO_MANIFEST), ("link", "x", "../restoredx"), ("dir", "x/sub"),
       ("file", "x/sub/pwn.txt", "owned\n")]),
+    # Past any hop limit a resolver would pick: the kernel follows 31 links here (macOS allows 32), 40 below (Linux 40).
+    ("a chain of thirty links", "extract", ladder(30) + [("file", "esc/pwn.txt", "owned\n")]),
+    ("a link through thirty-nine links", "extract", ladder(39)),
 ]
 DEPLOY = [("link", "config", "current/app.conf"), ("link", "current", "releases/v2"), ("dir", "empty"),
           ("link", "latest.log", "logs/2024-06.log"), ("dir", "logs"), ("dir", "notes"), ("dir", "releases"),
-          ("dir", "shared"), ("file", "logs/2024-05.log", "may\n"), ("file", "logs/2024-06.log", "june\n"),
+          ("dir", "shared"), ("link", "previous", "releases/v0"), ("link", "prev.conf", "previous/app.conf"),
+          ("link", "old.log", "logs/2023-12.log"), ("file", "logs/2024-05.log", "may\n"),
+          ("file", "logs/2024-06.log", "june\n"),
           ("file", "notes/café.txt", "ok\n"), ("dir", "releases/v1"), ("dir", "releases/v2"),
           ("file", "releases/v1/app.conf", "port=8000\n"), ("file", "releases/v2/app.conf", "port=8080\n"),
           ("dir", "releases/v2/bin"), ("link", "releases/v2/shared", "../../shared"),
@@ -79,9 +92,10 @@ NORMAL = [
       ("file", "bin/hello", "#!/bin/sh\n", 0o755), ("link", "docs", "assets")]),
     ("a backup", "restore",
      [("dir", "docs"), ("file", "docs/plan.md", PLAN), ("link", "plan", "docs/plan.md"),
-      ("link", "docs/latest", "plan.md"),
+      ("link", "docs/latest", "plan.md"), ("link", "docs/draft", "drafts/plan.md"),
       ("file", "MANIFEST.json", json.dumps({"files": {"docs/plan.md": hashlib.sha256(PLAN.encode()).hexdigest()},
-                                            "links": {"docs/latest": "plan.md", "plan": "docs/plan.md"}}))]),
+                                            "links": {"docs/latest": "plan.md", "plan": "docs/plan.md",
+                                                      "docs/draft": "drafts/plan.md"}}))]),
 ]
 BASE = "l1/l2/l3"
 WHERE = {"extract": f"{BASE}/dest", "install": f"{BASE}/plugins/hello", "restore": f"{BASE}/restored"}

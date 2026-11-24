@@ -1,0 +1,1 @@
+too slow: python3 -m reports --standings on 200,000 rows took far more than 10 seconds

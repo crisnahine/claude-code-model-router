@@ -1,7 +1,8 @@
-"""Pass when reports.render, run in a child, prints byte for byte what the shipped code prints on awkward inputs
-(ties, regions with no sales, spellings that casefold together, decomposed accents, half cents, reused ids, quoted
-fields), builds the report for 20,000 rows in a few seconds, keeps test_report.py passing unchanged, and builds the
-right report for 200,000 rows, with every awkward row above spread through them, in at most 10 seconds."""
+"""Pass when reports.render and python3 -m reports with --out, --standings and --verify, run in a child, write byte
+for byte what the shipped code writes on awkward inputs (ties, regions with no sales, spellings that casefold
+together, decomposed accents, half cents, reused ids, quoted fields, padded headers), render builds the report for
+20,000 rows in a few seconds, test_report.py passes unchanged, and each of them writes the right output for 200,000
+rows, with every awkward row above spread through them, in at most 10 seconds."""
 import csv
 import datetime
 import hashlib
@@ -65,6 +66,10 @@ HAND = [
     ("a duplicate with a different amount", REGIONS, sales(
         row(1, "Ana", "5.00"), row(1, "Ana", "500.00"), row(2, "Bo", "6.00"), row(2, "Bo", "6.00", "E"))),
     ("no rows at all", REGIONS, HEADER),
+    ("a header with spaces around its names", REGIONS,
+     " txn_id , date,region ,customer,  product,amount \n" + sales(row(1, "Ana", "3.00")).split("\n", 1)[1]),
+    ("region names with extra spaces", "code,name\n N ,  North   Side \nE,East\t\n S,\tSouth \n",
+     sales(row(1, "Ana", "3.00"), row(2, "Bo", "2.00", "E"), row(3, "Cy", "1.00", "S"))),
 ]
 
 CUSTOMERS = ["Straße", "STRASSE", "strasse", "José", "José", "  Ana   Lima ", "ana lima", "ANA LIMA", "Zoë",
@@ -187,7 +192,7 @@ def ranked(entries):
 
 
 def reference(sales_text, regions_text):
-    """The report the shipped code prints, built in one pass over the rows."""
+    """The report and the standings CSV the shipped code writes, built in one pass over the rows."""
     regions = [(r[0].strip(), " ".join(r[1].split())) for r in list(csv.reader(io.StringIO(regions_text)))[1:] if r]
     order = {code: n for n, (code, _) in enumerate(regions)}
     read = rejected = duplicates = 0
@@ -250,7 +255,12 @@ def reference(sales_text, regions_text):
     standings += table([[r, e[0], money(e[1]), e[2], " ".join(sorted(e[3], key=order.__getitem__))]
                         for r, e in everyone], "rlrrl") if everyone else ["none"]
     blocks.append(standings)
-    return "\n\n".join("\n".join(b) for b in blocks) + "\n"
+    out = io.StringIO()
+    csv.writer(out, lineterminator="\n").writerows(
+        [["rank", "customer", "total", "sales", "regions"]] +
+        [[r, e[0], money(e[1]).replace(",", ""), e[2], " ".join(sorted(e[3], key=order.__getitem__))]
+         for r, e in everyone])
+    return "\n\n".join("\n".join(b) for b in blocks) + "\n", out.getvalue()
 
 
 def first_difference(got, want):
@@ -262,18 +272,23 @@ def first_difference(got, want):
 
 
 work = Path(sys.argv[1])
-payload = {"cases": [{"sales": s, "regions": r} for _, r, s in CASES]}
-want = passcheck.probe(HERE / "repo", PROBE, payload)
-if not isinstance(want, list) or len(want) != len(CASES) or any(w["error"] for w in want):
-    raise RuntimeError(f"the shipped report failed on the check's own inputs: {want!r}"[:300])
-got = passcheck.probe(work, PROBE, payload)
-if not isinstance(got, list) or len(got) != len(CASES):
-    passcheck.finish(False, f"reports.render didn't run: {got!r}"[:300])
-for (name, _, _), g, w in zip(CASES, got, want):
-    if g.get("error"):
-        passcheck.finish(False, f"on {name}, reports.render raised {g['error']}"[:300])
-    if g.get("text") != w["text"]:
-        passcheck.finish(False, f"on {name}, {first_difference(str(g.get('text')), w['text'])}"[:300])
+for via, what in (("render", "reports.render"), ("command", "python3 -m reports")):
+    payload = {"cases": [{"sales": s, "regions": r} for _, r, s in CASES], "via": via}
+    want = passcheck.probe(HERE / "repo", PROBE, payload)
+    if not isinstance(want, list) or len(want) != len(CASES) or any(w["error"] for w in want):
+        raise RuntimeError(f"the shipped report failed on the check's own inputs: {want!r}"[:300])
+    got = passcheck.probe(work, PROBE, payload)
+    if not isinstance(got, list) or len(got) != len(CASES):
+        passcheck.finish(False, f"{what} didn't run: {got!r}"[:300])
+    for (name, _, _), g, w in zip(CASES, got, want):
+        if g.get("error"):
+            passcheck.finish(False, f"on {name}, {what} raised {g['error']}"[:300])
+        if g.get("text") != w["text"]:
+            # The probe joins the command's report and standings CSV with a NUL.
+            parts = [str(g.get("text")).partition("\0")[::2], w["text"].partition("\0")[::2]]
+            for label, a, b in zip(("", "the standings CSV, "), *parts):
+                if a != b:
+                    passcheck.finish(False, f"on {name}, {what} wrote {label}{first_difference(a, b)}"[:300])
 # The 20,000-row run only ends a slow answer early; the 200,000-row run decides, whatever the machine's speed.
 gate = passcheck.probe(work, PROBE, {"cases": [{"sales": big(20_000, 5), "regions": REGIONS}], "digest": True},
                        timeout=4)
@@ -288,6 +303,19 @@ if full[0]["error"]:
     passcheck.finish(False, f"on 200,000 rows, reports.render raised {full[0]['error']}"[:300])
 if full[0]["seconds"] > BUDGET:
     passcheck.finish(False, f"too slow: 200,000 rows took {full[0]['seconds']:.1f} seconds")
-if full[0]["sha256"] != hashlib.sha256(reference(text, REGIONS).encode("utf-8")).hexdigest():
+report, table = reference(text, REGIONS)
+if full[0]["sha256"] != hashlib.sha256(report.encode("utf-8")).hexdigest():
     passcheck.finish(False, "the report for 200,000 rows differs from the shipped code's")
+# The standings export reads the sales again, so a rewrite that only speeds up render leaves it as slow as it was.
+full = passcheck.probe(work, PROBE, {"cases": [{"sales": text, "regions": REGIONS}], "digest": True, "via": "command"},
+                       timeout=int(BUDGET) + 5)
+COMMAND = "python3 -m reports --standings on 200,000 rows"
+if not full:
+    passcheck.finish(False, f"too slow: {COMMAND} took far more than {BUDGET:g} seconds")
+if full[0]["error"]:
+    passcheck.finish(False, f"{COMMAND} raised {full[0]['error']}"[:300])
+if full[0]["seconds"] > BUDGET:
+    passcheck.finish(False, f"too slow: {COMMAND} took {full[0]['seconds']:.1f} seconds")
+if full[0]["sha256"] != hashlib.sha256((report + "\0" + table).encode("utf-8")).hexdigest():
+    passcheck.finish(False, f"{COMMAND} writes a report or standings CSV unlike the shipped code's")
 passcheck.finish(passcheck.tests_pass(work, HERE / "repo", "test_report.py"), "test_report.py doesn't pass unchanged")

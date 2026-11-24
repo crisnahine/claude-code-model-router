@@ -20,8 +20,28 @@ passcheck.use_work(Path(sys.argv[1]))
 payload = json.load(sys.stdin)
 tmp = tempfile.mkdtemp()
 out = []
+
+
+def read(path):
+    with open(path, encoding="utf-8", newline="") as f:
+        return f.read()
+
+
+def command(sales, regions):
+    """python3 -m reports with every flag the README lists: (exit code, the report, the standings CSV)."""
+    report, table = os.path.join(tmp, "report.txt"), os.path.join(tmp, "standings.csv")
+    for path in (report, table):
+        if os.path.exists(path):
+            os.remove(path)
+    code = importlib.import_module("reports.__main__").main(
+        [sales, regions, "--out", report, "--standings", table, "--verify"])
+    if code != 0:
+        raise RuntimeError(f"python3 -m reports exited {code}")
+    return read(report) + "\0" + read(table)
+
+
 try:
-    render = importlib.import_module("reports").render
+    render = importlib.import_module("reports").render if payload.get("via") != "command" else command
     for n, case in enumerate(payload["cases"]):
         sales, regions = os.path.join(tmp, f"sales{n}.csv"), os.path.join(tmp, f"regions{n}.csv")
         for path, text in ((sales, case["sales"]), (regions, case["regions"])):
