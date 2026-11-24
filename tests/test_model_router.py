@@ -2382,6 +2382,15 @@ class RepeatGuard(Sandbox):
         self.assertIn("passed through", self.ledger()[-1]["reason"])
         self.assertIsNotNone(self.pre("general-purpose", "list the tests"))  # a different call is routed
 
+    def test_a_passed_through_call_is_routed_and_counted_with_no_source(self):
+        key = calls.identify(self.call("general-purpose", LOOKUP)["tool_input"])[1]
+        self.pre("general-purpose", LOOKUP)
+        self.assertEqual(calls.route_of("s1", key).source, "router")
+        self.next_message()
+        self.pre("general-purpose", LOOKUP)
+        route = calls.route_of("s1", key)
+        self.assertEqual((route.source, route.counted), (None, None))
+
     def test_after_a_result_the_same_call_is_routed_again(self):
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
