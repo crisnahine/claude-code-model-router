@@ -32,6 +32,11 @@ for key, want in (("page_size", 100), ("webhook_attempts", 4)):
         passcheck.finish(False, f"{key} is {data[key]!r}, expected {want}")
 where = data["refund_email"]
 m = re.fullmatch(r"\s*`?(.+?):(\w+)(?:\(\))?`?\s*", where) if isinstance(where, str) else None
-ok = bool(m) and ("/" + m.group(1).replace("\\", "/")).endswith("/shop/notify/emails.py") \
-    and m.group(2) == "send_refund_receipt"
+path = m.group(1).replace("\\", "/") if m else ""
+if m and "/" not in path and not path.endswith(".py"):
+    path = path.replace(".", "/") + ".py"  # a dotted module path
+# A path from the root, from any folder above it, or from inside the repo, as long as it names one shipped file.
+named = [rel.as_posix() for rel in shipped if ("/" + rel.as_posix()).endswith("/" + path.lstrip("./"))]
+ok = bool(m) and m.group(2) == "send_refund_receipt" and (
+    ("/" + path).endswith("/shop/notify/emails.py") or named == ["shop/notify/emails.py"])
 passcheck.finish(ok, f"refund_email is {where!r}, expected shop/notify/emails.py:send_refund_receipt")

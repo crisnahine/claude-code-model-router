@@ -298,8 +298,9 @@ def _metric_text(cell: list[dict], routed: bool) -> str:
              + (f" ({len(secs)} of {len(cell)} runs)" if len(secs) < len(cell) else "") if secs else "latency n/a"]
     share = _cache_share(cell)
     parts.append("cache n/a" if share is None else f"cache {share:.0%}")
-    redo = [r["subagents"]["spawned"] for r in cell if r.get("shape") == "redo"
-            and isinstance((r.get("subagents") or {}).get("spawned"), int)]
+    # A redo starts the same agent type again; a worker plus a verifier is two types, not a redo.
+    redo = [max(r["subagents"]["by_type"].values(), default=0) for r in cell if r.get("shape") == "redo"
+            and isinstance((r.get("subagents") or {}).get("by_type"), dict)]
     if redo:
         parts.append(f"redo {sum(n > 1 for n in redo)} of {len(redo)} runs")
     if not routed:
@@ -643,8 +644,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "- Run metrics, per class and configuration: p50 and p90 are nearest-rank percentiles of each run's wall "
         "time (`wall_ms`, the runner's clock around the `claude` process). Cache is cache-read tokens over all input tokens, which are input plus cache reads "
         "plus cache writes (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md), summed over "
-        "every model that ran. Redo, for a task with the redo shape, counts the runs that started more than one "
-        "subagent, that is, sent the work back after the check (`subagents.spawned`). For a router configuration, "
+        "every model that ran. Redo, for a task with the redo shape, counts the runs that started one agent type "
+        "twice or more, that is, sent the work back to a new subagent (`subagents.by_type`). Work sent back as a "
+        "message to the same subagent isn't counted, and neither is a subagent that ran the check and fixed its "
+        "own work. For a router configuration, "
         "accuracy by level is the pass rate of its single-agent runs grouped by "
         "the level the router gave the run's first subagent. Escalated counts the spawns the router moved one level "
         "up because the same call came back for a redo, over the spawns whose ledger row says either way. Both "

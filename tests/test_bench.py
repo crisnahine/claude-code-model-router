@@ -2220,18 +2220,24 @@ class DelegationTasks(unittest.TestCase):
         real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
         tasks = {t["id"]: t for t in run.load_tasks()}
 
-        def row(task_id, config, passed, spawned, **extra):
+        def row(task_id, config, passed, spawned, by_type=None, **extra):
             task = tasks[task_id]
+            by_type = by_type or {"general-purpose": spawned}
             return dict(real, main_model="sonnet", config=config, passed=passed, task=task_id, wall_ms=1000,
-                        task_revision=task.get("revision", 1), subagents={"spawned": spawned}, **{"class": task["class"]},
-                        **extra)
+                        task_revision=task.get("revision", 1), subagents={"spawned": spawned, "by_type": by_type},
+                        **{"class": task["class"]}, **extra)
         first = {"agent": "general-purpose", "level": "standard", "escalated_from": None}
         design = {"agent": "general-purpose", "level": "lookup", "escalated_from": None}
         rows = [row("cross-amount-cents", "plugin", True, 1, routed=[first]),  # recorded before `shape`
                 row("mixed-plan-then-build", "plugin", False, 2, routed=[design, first], shape="plan-build"),
                 row("redo-failing-check", "plugin", True, 2, routed=[first, first], shape="redo"),
                 row("redo-failing-check", "plugin", True, 1, routed=[first], shape="redo"),
+                # A worker and a verifier is two agents, not the work sent back.
+                row("redo-failing-check", "plugin", True, 2, {"model-router:implementer": 1, "model-router:verifier": 1},
+                    routed=[first, first], shape="redo"),
+                row("redo-failing-check", "plugin", True, 2, {}, routed=[first, first], shape="redo"),
                 row("redo-failing-check", "defaults", False, 1, shape="redo")]
+        rows[-2]["subagents"].pop("by_type")
         rows[0].pop("shape", None)
         with tempfile.TemporaryDirectory() as tmp:
             res = Path(tmp) / "a-2026-11-24.jsonl"
@@ -2244,7 +2250,7 @@ class DelegationTasks(unittest.TestCase):
         self.assertIn("accuracy by level: standard 1/1 (1 of 2 runs)", cross)
         self.assertNotIn("redo", cross)
         redo = next(line for line in metrics.splitlines() if line.startswith("| redo "))
-        self.assertIn("redo 1 of 2 runs, accuracy by level n/a", redo)
+        self.assertIn("redo 1 of 3 runs, accuracy by level n/a", redo)
         self.assertIn("redo 0 of 1 runs, not routed", redo)
 
     def lint(self, work):
@@ -2252,7 +2258,9 @@ class DelegationTasks(unittest.TestCase):
                               capture_output=True, text=True, timeout=60)
 
     # The grade also reads what each line says; the visible check reads only a line's place and its PR number.
-    WORDING = {"text-swapped-between-lines", "commit-subjects-pasted"}
+    WORDING = {"text-swapped-between-lines", "commit-subjects-pasted", "commit-lines-with-hashes",
+               "space-before-the-colon", "type-in-brackets", "hashes-left-on-lines", "removal-called-a-deprecation",
+               "removal-described-as-a-new-rule", "coupon-fix-described-as-a-feature"}
 
     def test_the_visible_changelog_check_agrees_with_the_grade_on_shape_and_says_why(self):
         task = self.task("redo-failing-check")
@@ -2282,21 +2290,41 @@ class DelegationTasks(unittest.TestCase):
         self.assertIn("**Breaking:**", res.stdout)
         self.assertNotIn("breaking", (task["dir"] / "repo" / "CONTRIBUTING.md").read_text(encoding="utf-8").lower())
 
-    def test_each_build_the_plan_build_check_runs_the_agents_tests_on_is_broken(self):
+    # A retry, then the key reused with another amount, through the solution's handle_post with a mutant installed.
+    SCENARIO = """import importlib.util, json, os, sys, tempfile
+sys.path.append(sys.argv[1])
+if sys.argv[3]:
+    spec = importlib.util.spec_from_file_location("_mutant", sys.argv[2])
+    mutant = importlib.util.module_from_spec(spec); spec.loader.exec_module(mutant); mutant.install(sys.argv[3])
+import db
+from api.payments import handle_post
+path = os.path.join(tempfile.mkdtemp(), "shop.db"); db.init(path); conn = db.connect(path)
+conn.execute("INSERT INTO customers (id, email) VALUES (1, 'ana@example.com')"); conn.commit()
+got = [handle_post(conn, {"headers": {"Idempotency-Key": "k"}, "body": {"customer_id": 1, "cents": c}}) for c in (5, 5, 7)]
+print(json.dumps([got, conn.execute("SELECT COUNT(*) FROM gateway_log").fetchone()[0]]))
+"""
+
+    def test_each_mutant_breaks_the_feature_without_breaking_the_work(self):
         task = self.task("mixed-plan-then-build")
-        mutants = overlay_dirs(task, "mutants")
-        self.assertEqual({m.name for m in mutants}, {"charges-again", "no-body-check"})
-        exported = {"api/payments.py", "db/schema.sql", "payments/service.py"}
-        for mutant in mutants:
-            with self.subTest(mutant=mutant.name), tempfile.TemporaryDirectory() as tmp:
-                self.assertEqual({p.relative_to(mutant).as_posix() for p in mutant.rglob("*") if p.is_file()}, exported)
-                work = Path(tmp) / "work"
-                build_work(task, mutant, work)
-                answer = Path(tmp) / "answer.txt"
-                answer.write_text("", encoding="utf-8")
-                graded = run.grade(task["dir"] / "check.py", work, answer, timeout=120)
-                self.assertEqual(graded.verdict, "fail", graded.reason)
-                self.assertNotIn("test_idempotency.py", graded.reason)
+        mutants = task["dir"] / "mutants.py"
+        spec = importlib.util.spec_from_file_location("plan_build_mutants", mutants)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        names = list(module.MUTANTS)
+        self.assertEqual(names, ["ignores-the-key", "no-body-check"])
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "work"
+            build_work(task, None, work)
+            outcomes = {}
+            for name in ("", *names):
+                res = subprocess.run([sys.executable, "-I", "-c", self.SCENARIO, str(work), str(mutants), name],
+                                     cwd=work, capture_output=True, text=True, timeout=60)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                (first, retry, reused), charges = json.loads(res.stdout)
+                outcomes[name] = (first[0], retry == first, reused[0], charges)
+        self.assertEqual(outcomes, {"": (201, True, 409, 1), "ignores-the-key": (201, False, 201, 3),
+                                    "no-body-check": (201, True, 201, 1)})
+        self.assertFalse((task["dir"] / "mutants").exists())
 
     def test_the_fanout_ini_decoy_is_wrong_read_as_retries_or_as_attempts(self):
         task = self.task("fanout-three-lookups")

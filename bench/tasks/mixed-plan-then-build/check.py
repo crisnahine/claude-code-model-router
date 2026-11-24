@@ -1,9 +1,10 @@
 """Pass when POST /payments replays a repeated key without a second charge and refuses a reused one, with requests
 taking turns between two copies of the work dir (two hosts, each with its own temp and home folder) on one database;
 DESIGN.json picks the option that keeps no state in a worker; the shipped tests still pass; and test_idempotency.py
-passes on the work but fails on the code as shipped and on each build in mutants/ laid over the work. Requests run
-one at a time, so a build that looks the key up, charges and then stores it with no lock passes, though two requests
-with one key at the same moment would both charge."""
+passes on the work but fails on the code as shipped and on each broken build in mutants.py. A mutant wraps the work's
+own handle_post, so the test is judged on the requests it sends, not on the names it imports. Requests run one at a
+time, so a build that looks the key up, charges and then stores it with no lock passes, though two requests with one
+key at the same moment would both charge."""
 import importlib.util
 import re
 import shutil
@@ -18,10 +19,8 @@ sys.modules["passcheck"] = passcheck
 _spec.loader.exec_module(passcheck)
 
 HERE = Path(__file__).resolve().parent
+mutants = passcheck.load(HERE, "mutants")
 REUSED = [409, {"error": "idempotency key reused"}]
-# Each keeps every name the solution has, so a test that only imports them can't tell the build is broken.
-MUTANTS = {"charges-again": "charges a retry with the same key again",
-           "no-body-check": "replays a reused key without comparing the body"}
 
 
 def request(customer, cents, key=None):
@@ -66,15 +65,15 @@ def behaviour(work, tmp):
     return None
 
 
-def runs(folder):
-    """Whether test_idempotency.py in folder runs at least one test and passes."""
+def runs(folder, mutant=None):
+    """Whether test_idempotency.py in folder runs at least one test and passes, with that mutant installed if named."""
+    argv = ["-c", passcheck.LAUNCHER, str(folder), "test_idempotency"] if mutant is None else \
+        ["-c", mutants.LAUNCHER, str(folder), "test_idempotency", str(HERE / "mutants.py"), mutant]
     try:
-        res = subprocess.run([sys.executable, "-I", "-c", passcheck.LAUNCHER, str(folder), "test_idempotency"],
-                             cwd=folder, capture_output=True, text=True, timeout=60)
+        res = subprocess.run([sys.executable, "-I", *argv], cwd=folder, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError):
         return False
     return res.returncode == 0 and re.search(r"Ran [1-9]\d* tests?", res.stderr) is not None and "OK" in res.stderr
-
 
 work = Path(sys.argv[1])
 with tempfile.TemporaryDirectory() as tmp:
@@ -99,13 +98,11 @@ with tempfile.TemporaryDirectory() as tmp:
     shutil.copyfile(work / "test_idempotency.py", shipped / "test_idempotency.py")
     if runs(shipped):
         passcheck.finish(False, "test_idempotency.py also passes on the code as shipped, so it doesn't test the feature")
-for name, broken in MUTANTS.items():
+for name, broken in mutants.MUTANTS.items():
     with tempfile.TemporaryDirectory() as tmp:
-        # Over a copy of the work, so the test's own helpers and modules are all still there.
-        mutant = Path(tmp) / "work"
-        shutil.copytree(work, mutant, symlinks=True)
-        shutil.copytree(HERE / "mutants" / name, mutant, dirs_exist_ok=True)
-        if runs(mutant):
+        copy = Path(tmp) / "work"
+        shutil.copytree(work, copy, symlinks=True)
+        if runs(copy, name):
             passcheck.finish(False, f"test_idempotency.py still passes on a build that {broken}, so it doesn't test "
                                     "the feature")
 passcheck.finish(True)
