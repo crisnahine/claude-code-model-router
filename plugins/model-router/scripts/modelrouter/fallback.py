@@ -3,7 +3,7 @@ the rewrite waiting for its result, the refused-rewrite guard and the one deny. 
 for the call is `calls.py`'s, the same on both paths."""
 from __future__ import annotations
 
-from . import settings, spawn, store
+from . import mod, settings, spawn, store
 from . import config as cfg
 from . import router
 from .registry import Registry
@@ -18,7 +18,9 @@ def route(hook_input: dict, snap: settings.Snapshot) -> dict | None:
     spawned = spawn.decide(hook_input, snap)
     session_id, decision = hook_input.get("session_id"), spawned.decision
     _guard(session_id, spawned.key, decision, snap.registry, snap.options)
-    spawn.record(spawned, "fallback")
+    # The Agent tool's model takes only an alias, so an exact model is kept by leaving the call's own.
+    kept = mod.exact(snap, decision)
+    spawn.record(spawned, "fallback", kept)
     if decision["action"] == "rewrite":
         # A rewrite auto mode denies after review gets no result, so it stays pending and
         # the next copy counts as refused (https://code.claude.com/docs/en/hooks.md#pretooluse-decision-control).
@@ -27,8 +29,8 @@ def route(hook_input: dict, snap: settings.Snapshot) -> dict | None:
         except OSError:
             pass
         return {"hookSpecificOutput": {
-            "hookEventName": "PreToolUse", "updatedInput": _rewritten_input(cfg.tool_input(hook_input), decision),
-            "additionalContext": _note(decision)}}
+            "hookEventName": "PreToolUse", "updatedInput": _rewritten_input(cfg.tool_input(hook_input), decision, kept),
+            "additionalContext": _note(decision, kept)}}
     if decision["action"] == "deny":
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                        "permissionDecisionReason": decision["reason"]}}
@@ -81,19 +83,19 @@ def _guard(session_id: str | None, key: str, decision: router.Decision, reg: Reg
         decision["source"] = None
 
 
-def _rewritten_input(tool_input: dict, decision: router.Decision) -> dict:
+def _rewritten_input(tool_input: dict, decision: router.Decision, kept: str | None = None) -> dict:
     """The whole call as it should run: Claude Code replaces the input, it doesn't merge."""
     updated = dict(tool_input)
-    if decision.get("model"):
+    if decision.get("model") and not kept:
         updated["model"] = decision["model"]
     if decision.get("effort"):
         updated["effort"] = decision["effort"]
     return updated
 
 
-def _note(decision: router.Decision) -> str:
+def _note(decision: router.Decision, kept: str | None = None) -> str:
     """One line for Claude, delivered with the agent's result."""
-    if decision.get("model"):
+    if decision.get("model") and not kept:
         effort = f" at {decision['effort']} effort" if decision.get("effort") else ""
         what = f"model to {decision['model']}{effort}"
     else:

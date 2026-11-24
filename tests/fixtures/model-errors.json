@@ -15,6 +15,9 @@
     "Agent type 'model-router:archtect' not found. Available agents: general-purpose, Explore",
     "Agent type 'data-modeler' not found. Available agents: general-purpose, Explore",
     "Agent type 'my-plugin:model' not found. Available agents: general-purpose, Explore",
+    "Agent type 'not_found_error' not found. Available agents: general-purpose, Explore",
+    "Agent type '404 not_found_error' not found. Available agents: general-purpose, Explore",
+    "Agent type 'model-router:archtect' not found. Available agents: general-purpose, Explore, model_not_found",
     "model User is invalid",
     "404 model not found"
   ]

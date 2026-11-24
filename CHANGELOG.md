@@ -82,6 +82,11 @@ This release changes who picks a subagent's model. Claude now names the model an
 - Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` or `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`, the effort the router sets no longer goes past the model's top effort, `high` on Haiku.
 - A redo of a call made inside a subagent now moves to a stronger model where one is usable. It used to ask for the same model at an effort that could be below the one that ran.
 - A workflow's stages no longer push a running call's route out, so a redo of that call still climbs from the run that came back.
+- On Bedrock and Google Cloud's Agent Platform, a newest model ID the account hasn't enabled now falls back to the alias after one failure. Claude Code shows that refusal as "AWS authentication failed" or "Google Cloud authentication failed", which the router didn't count before, so every Sonnet and Haiku subagent kept failing.
+- An Agent call for an unknown agent type no longer strikes a model when the type Claude wrote or an agent's name in Claude Code's error looks like an API error type, such as `not_found_error`.
+- Setting effort, or a redo that climbs effort on the same family, no longer swaps an exact model an agent names, such as `claude-opus-5-5` or `sonnet[1m]`, for the family's alias, also when `modelOverrides` is set. On Foundry, Bedrock and Agent Platform that alias runs an older model, and the alias drops the 1M context window.
+- When the plugin's runtime fails on a call the mod already took over, a model the call names above `max_tier` is still lowered to it, unless `routing_mode` is `off`. A runtime that answers nothing hands later calls back to the fallback.
+- Two agents started at once no longer mark every settings source as slow, so a `deniedModels` change reaches the next agent instead of the one after it.
 
 ### Added
 

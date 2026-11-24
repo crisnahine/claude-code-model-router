@@ -130,7 +130,7 @@ class NestedRedo(Sandbox):
                                             "tool_use_id": tid})
 
     def test_a_redo_of_a_nested_run_at_its_parents_effort_moves_to_a_stronger_model(self):
-        self.assertIsNone(self.spawn("Parser tests", "toolu_1"))
+        self.assertEqual(self.spawn("Parser tests", "toolu_1"), modpath.OK)
         hooks.post_agent({"session_id": "s1", "agent_id": "sub1", "cwd": str(self.project), "tool_use_id": "toolu_1",
                           "tool_input": {"subagent_type": "general-purpose", "prompt": self.PROMPT,
                                          "description": "Parser tests"},
@@ -149,9 +149,9 @@ class NestedRedo(Sandbox):
                                                             effort=effort, description="Redo: parser tests"),
                                                 "tool_use_id": f"toolu_{effort}"})
         self.assertEqual(redo("medium")["model"], "opus")
-        self.assertIsNone(redo("max"))  # the caller picked the effort lever, so it runs as named
+        self.assertEqual(redo("max"), modpath.OK)  # the caller picked the effort lever, so it runs as named
         self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
-        self.assertIsNone(redo("max"))  # the pin's effort step never lowers it
+        self.assertEqual(redo("max"), modpath.OK)  # the pin's effort step never lowers it
 
     def test_a_nested_redo_with_nothing_on_record_moves_to_a_stronger_model(self):
         self.assertEqual(self.spawn("Redo: other tests", "toolu_3")["model"], "opus")
@@ -169,7 +169,7 @@ class NestedRedo(Sandbox):
             return hooks.HANDLERS["mod-spawn"]({**mod_input(self.project, "general-purpose", self.PROMPT,
                                                             parent="claude-sonnet-5-5", nested=True, model="sonnet",
                                                             description=description), "tool_use_id": tid})
-        self.assertIsNone(named("Parser tests", "toolu_1"))
+        self.assertEqual(named("Parser tests", "toolu_1"), modpath.OK)
         hooks.post_agent({"session_id": "s1", "agent_id": "sub1", "cwd": str(self.project), "tool_use_id": "toolu_1",
                           "tool_input": {"subagent_type": "general-purpose", "prompt": self.PROMPT,
                                          "description": "Parser tests", "model": "sonnet"},
