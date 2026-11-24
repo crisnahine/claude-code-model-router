@@ -51,6 +51,6 @@ if not re.fullmatch(r"\d{4}-\d{2}", month):
     passcheck.finish(False, f"cash_out_month {month!r} isn't YYYY-MM")
 reasons = [f"cash_out_month is {month}, expected {OUT}"] if month != OUT else []
 # The brief asks for two decimals, so anything that doesn't round to the right hundredth is wrong.
-if abs(months - MONTHS) > 0.005:
+if not abs(months - MONTHS) <= 0.005:
     reasons.append(f"months_of_runway is {months:g}, expected {MONTHS:.2f}")
 passcheck.finish(not reasons, "; ".join(reasons))

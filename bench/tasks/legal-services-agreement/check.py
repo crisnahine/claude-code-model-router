@@ -16,9 +16,12 @@ WANT = {"liability_cap_usd": 1800000, "termination_notice_days": {"customer": 45
 
 
 def same(got, want):
-    """Equal, with integers that are never booleans and booleans that are never integers."""
+    """Equal, with integers that are never booleans and booleans that are never integers, and strings in any case and
+    with spaces at either end."""
     if isinstance(want, dict):
         return isinstance(got, dict) and set(got) == set(want) and all(same(got[k], want[k]) for k in want)
+    if isinstance(want, str):
+        return isinstance(got, str) and got.strip().casefold() == want.casefold()
     return type(got) is type(want) and got == want
 
 

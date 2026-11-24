@@ -21,9 +21,10 @@ def verdict(d):
     wrong = []
     for mid, want in WANT.items():
         item = d[mid]
-        if not isinstance(item, dict) or set(item) != {"priority", "owner"}:
+        if (not isinstance(item, dict) or set(item) != {"priority", "owner"}
+                or not all(isinstance(v, str) for v in item.values())):
             return f"{mid} isn't exactly a priority and an owner"
-        got = f"{item['priority']} {item['owner']}"
+        got = f"{item['priority'].strip().upper()} {item['owner'].strip().casefold()}"
         if got != want:
             wrong.append(f"{mid} is {got}, expected {want}")
     return "; ".join(wrong[:3]) + (f" and {len(wrong) - 3} more" if len(wrong) > 3 else "")

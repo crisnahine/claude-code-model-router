@@ -2172,6 +2172,8 @@ WORK_TASKS = {"legal-services-agreement": ("document", "TERMS.json"),
 class WorkTasks(unittest.TestCase):
     """The tasks of work that isn't code: an answer file a check grades, built around traps a careless pass falls into."""
 
+    check, shipped, run_with = HardTier.check, HardTier.shipped, HardTier.run_with
+
     def test_each_work_task_has_its_class_and_names_its_answer_file(self):
         tasks = {t["id"]: t for t in run.load_tasks()}
         for task_id, (cls, answer) in WORK_TASKS.items():
@@ -2199,6 +2201,18 @@ class WorkTasks(unittest.TestCase):
         self.assertEqual(len(list((tasks["ops-inbox-triage"] / "inbox").glob("*.txt"))), 30)
         words = len((tasks["legal-services-agreement"] / "Services-Agreement.md").read_text(encoding="utf-8").split())
         self.assertGreater(words, 3500)  # about eight pages
+
+    def test_a_number_that_isnt_finite_is_no_number(self):
+        for value in (float("nan"), float("inf"), float("-inf"), "nan", "NaN", "inf", "-Infinity"):
+            with self.subTest(value=value):
+                self.assertIsNone(passcheck.numeric(value))
+        self.assertEqual(passcheck.numeric("10.2"), 10.2)
+
+    def test_the_runway_check_fails_a_runway_that_isnt_a_finite_number(self):
+        for months in ("NaN", '"nan"', "Infinity", '"inf"'):
+            with self.subTest(months=months):
+                body = '{"months_of_runway": ' + months + ', "cash_out_month": "2027-08"}'
+                self.assertFalse(self.run_with("finance-runway-forecast", {"RUNWAY.json": body}))
 
     def test_the_finance_checks_work_their_answer_out_from_the_shipped_data(self):
         edits = {"finance-ledger-reconcile": ("gl.csv", "TRX-200492,1010 Operating cash,-2412.10",
