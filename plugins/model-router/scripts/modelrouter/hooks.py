@@ -101,7 +101,7 @@ def user_prompt(hook_input: dict) -> dict | None:
 def pre_agent(hook_input: dict) -> dict | None:
     if mod.routes(hook_input.get("tool_use_id")):
         return None  # the plugin's mod routes this call when it spawns
-    return fallback.route(hook_input, settings.Snapshot(hook_input))
+    return fallback.route(hook_input, settings.Snapshot(hook_input, sends_ids=False))
 
 
 def _outcome(kind: str, hook_input: dict, reg: Registry, **fields: Any) -> calls.Outcome:
@@ -164,7 +164,8 @@ def agent_failed(hook_input: dict) -> dict | None:
         return None
     asked = returned.asked
     # snap.health may predate the strike just written, so the list reads the table again.
-    usable = [n for n in reg.available(snap.options.cap, allowed=snap.allowed, table=health.load()) if n != asked]
+    usable = [n for n in reg.available(snap.options.cap, allowed=snap.allowed, table=health.load(),
+                                       sendable=snap.sendable) if n != asked]
     if not usable:
         return None
     return _context("PostToolUseFailure", (

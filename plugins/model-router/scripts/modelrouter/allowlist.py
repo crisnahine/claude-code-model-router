@@ -11,13 +11,13 @@ import re
 from dataclasses import dataclass
 
 from . import store
-from .config import EFFORTS
+from .config import EFFORTS, project_dir
 from .registry import Registry
 
 SOURCES = ("policy", "user", "project", "local", "flag")
 KEYS = ("availableModels", "deniedModels", "availableModelsMatch", "modelOverrides", "maxEffortLevel", "modelSettings")
 # Where a blocked family alias moves to the newest permitted version (https://code.claude.com/docs/en/model-config.md).
-# None is the Anthropic API, or a provider the switches don't make clear.
+# None is the Anthropic API.
 SUBSTITUTING = (None, "anthropic_aws")
 MAX_ENTRIES = 200
 MAX_CHARS = 200
@@ -114,11 +114,11 @@ class Allowlist:
     effort_caps: tuple[dict, ...] = ()  # each source's maxEffortLevel and modelSettings caps
     provider: str | None = None  # settings.provider: whether a blocked alias moves to a permitted version
 
-    def permitted(self, reg: Registry) -> set[str]:
+    def permitted(self, reg: Registry, sendable: frozenset = frozenset()) -> set[str]:
         """Registry models the lists leave open. An allow entry matches its family, so
         claude-opus-4-6 permits opus. A deny entry blocks a family only when it names the family.
-        On a provider whose alias doesn't move, a family also needs the version its alias runs, or
-        its newest ID that the mod can send, to be permitted."""
+        On a provider whose alias doesn't move, a family also needs the version its alias runs to be
+        permitted, unless it is in `sendable` (`Snapshot.sendable`): its newest ID is sent instead."""
         names = set(reg.models)
         if self.allow is not None:
             found = {reg.family(e) for e in _effective(reg, self.allow)}
@@ -130,9 +130,8 @@ class Allowlist:
         if self.provider in SUBSTITUTING:
             return names
         runs = reg.older_aliases.get(self.provider or "") or {}
-        # shortcut: the Agent call fallback sends only aliases, so there the newest ID doesn't count; it rarely runs.
-        return {n for n in names if n not in reg.newest
-                or self._lists_permit(reg, n, runs.get(n, reg.newest[n])) or self.permits_id(reg, n, reg.newest[n])}
+        return {n for n in names if n not in reg.newest or n in sendable
+                or self._lists_permit(reg, n, runs.get(n, reg.newest[n]))}
 
     def _lists_permit(self, reg: Registry, name: str, model_id: str) -> bool:
         def names(entries: tuple[str, ...], prefix: bool) -> bool:
@@ -194,7 +193,7 @@ def remember(session_id: str | None, sent: object) -> dict[str, dict] | None:
         return None
     try:
         if session_id and layers != stored:
-            store.save_entry("allowlist", session_id, {"layers": layers})
+            store.save_entry("allowlist", session_id, {"layers": layers, "project": str(project_dir())})
     except Exception:
         pass  # these layers still answer this call
     return layers
@@ -214,11 +213,13 @@ def _sent(session_id: str | None, sent: object) -> tuple[dict[str, dict] | None,
 
 
 def _latest() -> dict[str, dict]:
-    """The layers the most recent session sent.
-    shortcut: a skill command runs through Bash with no session id, so it reads these, which may be another project's."""
+    """The layers the most recent session in this project sent, else the most recent session's.
+    shortcut: a skill command has no session id, so with no session of its project on record it reads
+    another project's; pass skill commands the session id if that misleads a report."""
     try:
         entries = [e for e in store.load_state_file(store.data_dir() / "allowlist.json").values() if isinstance(e, dict)]
-        return _layers(max(entries, key=lambda e: store.stamp(e.get("_at")), default={}).get("layers"))
+        here = [e for e in entries if e.get("project") == str(project_dir())]
+        return _layers(max(here or entries, key=lambda e: store.stamp(e.get("_at")), default={}).get("layers"))
     except Exception:
         return {}
 

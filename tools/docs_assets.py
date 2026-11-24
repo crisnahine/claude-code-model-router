@@ -919,8 +919,8 @@ def diagram_precedence() -> str:
     out.append(f'<path d="M592 {top + 5 * rh + 26}H612V{top + 26}H624M619 {top + 21}L624 {top + 26}L619 {top + 31}" '
                f'{arrow}/>')
     cap = ["For 2, 3, 4 and 6, the winner has to", "be usable: inside max_tier, allowed", "by your availableModels and",
-           "deniedModels settings, and known to", "work. If it isn't, the strongest usable", "model below it runs, or the weakest",
-           "usable one when none is below it."]
+           "deniedModels settings, and known to", "work. If it isn't, the next stronger", "usable model runs, else the strongest",
+           "usable one left."]
     out.append(card(632, 92, 256, 66 + 19 * len(cap), rx=12))
     out.append(f'<rect x="633" y="108" width="4" height="{34 + 19 * len(cap)}" rx="2" class="rt"/>')
     out.append(text(652, 120, "Then the cap", "ink b", 14.5))
@@ -950,8 +950,8 @@ def diagram_precedence() -> str:
     label = ("Strongest first: CLAUDE_CODE_SUBAGENT_MODEL_FORCE, then a model named on the call, then a per-agent "
              "rule in model-router.json, then the agent's own model field, then CLAUDE_CODE_SUBAGENT_MODEL, then "
              "the parent's model. For all but the two environment variables, the winner must be usable under the "
-             "cap and your settings, else the strongest usable model below it runs. Effort follows the model's level "
-             "unless something already sets it.")
+             "cap and your settings, else the next stronger usable model runs, or the strongest usable one when "
+             "nothing stronger is left. Effort follows the model's level unless something already sets it.")
     return svg(w, h, title, label, "".join(out), css)
 
 

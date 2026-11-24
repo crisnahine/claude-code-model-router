@@ -1,12 +1,12 @@
 {
   "model_error": [
     "API Error: 404 not_found_error: model: claude-fable-5-2",
-    "API Error: 403 permission_error: model: claude-fable-5-2",
     "API Error: 400 Claude Code 2.1.219 does not support this model; version 2.1.255 or newer is required. (claude_code_version_too_old)",
     "Agent terminated early due to an API error: There's an issue with the selected model (claude-fable-5-2). It may not exist or you may not have access to it. (error type model_not_found, HTTP 404, request id req_011CXabc, model sent to the API: claude-fable-5-2)"
   ],
   "other": [
     "Command timed out",
+    "API Error: 403 permission_error: model: claude-fable-5-2",
     "API Error: 529 overloaded_error",
     "API Error: Rate limit reached",
     "API Error: 500 api_error: Internal server error",

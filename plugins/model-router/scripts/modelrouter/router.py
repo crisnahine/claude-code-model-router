@@ -47,7 +47,7 @@ class Facts:
     workflow: bool = False  # a workflow agent, which CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins
     session_effort: str | None = None  # the main conversation's level, for a call made from it
     effort_caps: Mapping[str, str] = field(default_factory=dict)  # maxEffortLevel per registry model, where set
-    lagging: frozenset = frozenset()  # Snapshot.lagging: families the router's own picks pass over
+    lagging: frozenset = frozenset()  # Snapshot.lagging: the router's own pick moves one family up from these
 
 
 def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
@@ -77,7 +77,6 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if not usable:
         out["reason"] = "availableModels and deniedModels leave no registry model open here, so the call is left as it is"
         return out
-    picks = [n for n in usable if n not in facts.lagging] or usable
     rule = reg.rules.get(agent) or Rule()
     if rule.route is False:
         out["reason"] = "a rule in model-router.json leaves this agent alone"
@@ -158,7 +157,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         runs_on = out["was"]
         if redo:
             level, source, chosen = climb(level), "router", True
-            target = ladder.pick(reg, level, picks).model
+            target = ladder.pick(reg, level, usable).model
             came = "run that came back before" if facts.on_record else "run it would get unmarked, as it is marked a redo"
             steps = "one level above" if level.rank - done_level.rank == 1 else "above"
             why = f"{level} subtask" + (f", {steps} the {out['escalated_from']} {came}" if out["escalated_from"]
@@ -182,12 +181,14 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         level = climb(level)
 
     named = tool_input.get("model") if source == "caller" else own_model if source == "pin" else None
-    final = reg.clamp(target, picks if chosen else usable)
+    clamped = reg.clamp(target, usable)
+    final = reg.past_lag(clamped, usable, facts.lagging) if chosen else clamped
     # The caller's exact ID only survives a cap that keeps its family.
     out["version"] = named if isinstance(named, str) and named.lower() != final and reg.family(named) == final else None
-    if final != target:
-        why += (f"; {target}'s alias runs an older model here" if target in usable
-                else f"; {target} is over the cap or unavailable here")
+    if clamped != target:
+        why += f"; {target} is over the cap or unavailable here"
+    if final != clamped:
+        why += f"; {clamped}'s alias runs an older model here"
     # Effort is set whenever nobody chose it: on current models it is the cheaper lever for quality.
     effort = None if decided else ladder.effort_on(reg, level, final)
     if redo and not decided:

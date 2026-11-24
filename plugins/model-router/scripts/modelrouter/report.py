@@ -52,7 +52,7 @@ def models_data(snap: settings.Snapshot) -> dict:
     """Each registry model's state here, in the `model-router.models/3` shape."""
     reg, options, table, usable = snap.registry, snap.options, snap.health, snap.usable
     limit = options.cap
-    allowed = snap.allowed.permitted(reg)
+    allowed = snap.allowed.permitted(reg, snap.sendable)
     rows = []
     for name in reg.by_strength():
         if limit and reg.strength(name) > reg.strength(limit):

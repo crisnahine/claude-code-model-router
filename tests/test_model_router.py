@@ -972,9 +972,18 @@ class Allowlist(Sandbox):
                          "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}})
         self.assertEqual(allowlist.read("s1").permitted(self.config), {"opus"})
 
+    def test_a_skill_command_reads_the_latest_layers_of_its_own_project(self):
+        modpath.start({"session_id": "s1", "settings": {"policy": {"availableModels": ["opus"]}}})
+        self.advance(1)
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(Path(self.tmp.name) / "elsewhere")}):
+            modpath.start({"session_id": "s2", "settings": {"policy": {"availableModels": ["haiku"]}}})
+        self.assertEqual(settings.Snapshot().allowed.permitted(self.config), {"opus"})
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(Path(self.tmp.name) / "new")}):
+            self.assertEqual(settings.Snapshot().allowed.permitted(self.config), {"haiku"})  # none here: the latest
+
     def test_nothing_left_prints_no_none_in_the_reports(self):
         modpath.start({"session_id": "s1", "settings": {"user": {"availableModels": ["some-other-model"]}}})
-        snap = settings.Snapshot()  # a skill command: no session id, so the latest session's layers
+        snap = settings.Snapshot()  # a skill command: no session id, so the latest layers of this project
         self.assertNotIn("None", report.policy(snap))
         self.assertIn("left as it is", report.policy(snap))
         text = report.explain(snap, LOOKUP)
@@ -1022,9 +1031,12 @@ class Allowlist(Sandbox):
 
     def test_a_blocked_alias_counts_only_where_it_moves_or_a_permitted_version_runs(self):
         # model-config.md: the alias moves to the newest permitted version on the Anthropic API and Claude Platform on AWS only.
-        def permitted(provider, overrides=False, **policy):
+        def permitted(provider, overrides=False, sends_ids=True, **policy):
             layers = {"policy": policy, **({"user": {"modelOverrides": {"a": "b"}}} if overrides else {})}
-            return allowlist.from_layers(layers, provider).permitted(self.config)
+            switch = {f"CLAUDE_CODE_USE_{provider.upper()}": "1"} if provider else {}
+            with mock.patch.dict(os.environ, switch):
+                snap = settings.Snapshot({"session_id": "s1", "settings": layers}, sends_ids=sends_ids)
+                return snap.allowed.permitted(self.config, snap.sendable)
 
         every = set(self.config.models)
         newest_only = {"availableModels": ["claude-opus-5-5", "sonnet", "haiku", "fable"]}
@@ -1032,10 +1044,15 @@ class Allowlist(Sandbox):
             self.assertEqual(permitted(provider, **newest_only), every, provider)
         self.assertEqual(permitted("foundry", **newest_only), every)  # the mod sends claude-opus-5-5
         self.assertEqual(permitted("foundry", overrides=True, **newest_only), every - {"opus"})
+        self.assertEqual(permitted("foundry", sends_ids=False, **newest_only), every - {"opus"})  # the Agent call fallback
         old_and_new = {"deniedModels": ["claude-haiku-4-5", "claude-haiku-5-5"]}
         self.assertEqual(permitted(None, **old_and_new), every)
         self.assertEqual(permitted("vertex", **old_and_new), every - {"haiku"})
+        self.assertEqual(permitted("mantle", **old_and_new), every - {"haiku"})  # unknown aliases, never the API's rule
         self.assertEqual(permitted("vertex", deniedModels=["claude-haiku-4"]), every)  # the newest still runs
+        self.assertEqual(permitted("vertex", sends_ids=False, deniedModels=["claude-haiku-4"]), every - {"haiku"})
+        health.failed("claude-haiku-5-5", "API Error: 404 not_found_error", newest=True)
+        self.assertEqual(permitted("vertex", deniedModels=["claude-haiku-4"]), every - {"haiku"})  # routed around
 
     def test_nothing_left_leaves_the_call_as_it_is(self):
         modpath.start({"session_id": "s1", "settings": {"user": {"availableModels": ["some-other-model"]}}})
@@ -2479,6 +2496,22 @@ class Mod(Sandbox):
             self.done("rev", brief, "claude-sonnet-5-5")
         self.assertEqual(health.load().why_routed_around("opus"), "ran as claude-sonnet-5-5 instead")
 
+    def test_a_failure_of_a_fallback_call_left_on_a_guessed_parent_model_strikes_nothing(self):
+        self.session_on("claude-opus-5-5")
+        refused = {"error": "API Error: 404 not_found_error: model: claude-sonnet-5-5"}
+        for number in range(2):
+            brief = f"{HARD} {number}"
+            self.assertIsNone(self.pre("general-purpose", brief))
+            self.assertIsNone(hooks.agent_failed({**self.call("general-purpose", brief), **refused}))
+        self.assertTrue(health.load().healthy("opus"))
+        self.assertNotIn("model_error", [r["event"] for r in self.ledger()])
+        self.agent("rev", "opus", extra="effort: high\n")  # a pin the router keeps is no guess
+        for number in range(2):
+            brief = f"{HARD} rev {number}"
+            self.assertIsNone(self.pre("rev", brief))
+            hooks.agent_failed({**self.call("rev", brief), **refused})
+        self.assertFalse(health.load().healthy("opus"))
+
     def test_a_result_reads_no_agent_files(self):
         self.agent("rev", "opus")
         self.spawn("rev", LOOKUP)
@@ -2668,7 +2701,8 @@ class NewestOnProviders(Sandbox):
                             (("anthropic_google_cloud",), "anthropic_google_cloud"),
                             (("bedrock", "anthropic_aws"), "bedrock"), (("foundry", "anthropic_aws"), "foundry"),
                             (("anthropic_google_cloud", "vertex"), "anthropic_google_cloud"),
-                            (("mantle",), None), (("bedrock", "mantle"), None), (("bedrock", "vertex"), None)):
+                            (("mantle",), "unknown"), (("bedrock", "mantle"), "unknown"),
+                            (("bedrock", "vertex"), "unknown")):
             with mock.patch.dict(os.environ, {f"CLAUDE_CODE_USE_{f.upper()}": "1" for f in flags}):
                 self.assertEqual(settings.resolve().provider, want, flags)
 
@@ -2748,9 +2782,28 @@ class NewestOnProviders(Sandbox):
         self.assertEqual([health.load().healthy("haiku"), health.load().healthy("claude-haiku-5-5")], [True, False])
 
     def test_a_host_managed_provider_sends_only_aliases(self):
-        os.environ.update(CLAUDE_CODE_USE_BEDROCK="1", CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST="1")
-        self.assertIsNone(settings.resolve().provider)
+        os.environ.update(CLAUDE_CODE_USE_BEDROCK="1", CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST="desktop")  # any value counts
+        self.assertEqual(settings.resolve().provider, "unknown")
         self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "sonnet"))
+
+    def test_a_lagging_pick_moves_one_family_up_at_most(self):
+        os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
+        modpath.start({"session_id": "s1", "settings": {"user": {"modelOverrides": {"claude-opus-5-5": "my-deployment"}}}})
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        self.assertEqual(snap.lagging, frozenset({"opus", "sonnet", "haiku"}))  # no newest ID is sent
+        self.assertEqual([snap.pick(level).model for level in (Level.lookup, Level.standard, Level.complex)],
+                         ["sonnet", "opus", "fable"])
+        self.override({"agents": {"general-purpose": {"level": "lookup"}}})
+        out = self.decide("general-purpose", LOOKUP)
+        self.assertEqual(out["model"], "sonnet")
+        self.assertIn("haiku's alias runs an older model here", out["reason"])
+
+    def test_on_the_agent_call_fallback_every_lagging_alias_lags(self):
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)}, sends_ids=False)
+        self.assertEqual((snap.lagging, snap.pick(Level.lookup).model), (frozenset({"sonnet", "haiku"}), "sonnet"))
+        self.override({"agents": {"general-purpose": {"level": "lookup"}}})
+        self.assertEqual(self.pre("general-purpose", LOOKUP)["updatedInput"]["model"], "sonnet")
 
     def test_the_routers_own_pick_passes_over_a_family_that_would_run_an_older_model(self):
         os.environ["CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD"] = "1"  # only haiku's alias lags here

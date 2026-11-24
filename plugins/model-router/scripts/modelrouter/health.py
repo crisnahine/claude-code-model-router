@@ -12,7 +12,7 @@ from . import store
 # Claude Code remembers a model the account can't invoke for up to a day (https://code.claude.com/docs/en/amazon-bedrock.md).
 OUTAGE = 86400
 # The hooks page calls the error text display text, so only the API's error type identifiers count, never its wording.
-MODEL_ERROR = re.compile(r"\b(?:not_found_error|permission_error|model_not_found|claude_code_version_too_old)\b")
+MODEL_ERROR = re.compile(r"\b(?:not_found_error|model_not_found|claude_code_version_too_old)\b")
 
 
 class Health:

@@ -51,7 +51,8 @@ def effort_on(reg: Registry, level: Level, model: str | None) -> str | None:
     return value
 
 
-def pick(reg: Registry, level: Level, usable: list[str]) -> Pick:
-    """The cheapest usable model for `level`, and the effort it runs that level at."""
-    model = reg.select(reg.levels[level].needs, usable)
+def pick(reg: Registry, level: Level, usable: list[str], lagging: frozenset = frozenset()) -> Pick:
+    """The cheapest usable model for `level`, one family up when its alias is in `lagging`, and the
+    effort it runs that level at."""
+    model = reg.past_lag(reg.select(reg.levels[level].needs, usable), usable, lagging)
     return Pick(model, effort_on(reg, level, model))

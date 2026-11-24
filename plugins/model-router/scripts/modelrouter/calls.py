@@ -206,8 +206,11 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
         return _stopped(session_id, outcome)
     route = route_of(session_id, outcome.key, outcome.spawn_id)
     asked = route.model if route and route.model else outcome.named
+    # A fallback call left as it is runs on the parent's model, which the router only guessed from the transcript.
+    guessed = (route is not None and route.path == "fallback" and not route.rewrote
+               and not outcome.named and route.source != "pin")
     if outcome.kind == "failure":
-        return _failed(session_id, outcome, route, asked)
+        return _failed(session_id, outcome, route, asked, guessed)
     swapped = bool(outcome.models_used)
     finished = not outcome.launched and not swapped and not outcome.cut_off
     try:
@@ -215,9 +218,6 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
             _wait_or_finish(session_id, outcome, route, finished)
     except OSError:
         pass
-    # A fallback call left as it is runs on the parent's model, which the router only guessed from the transcript.
-    guessed = (route is not None and route.path == "fallback" and not route.rewrote
-               and not outcome.named and route.source != "pin")
     try:
         if not guessed or outcome.ran_family == asked:
             health.ran(asked, outcome.ran_as, outcome.ran_family, outcome.forced, swapped=swapped,
@@ -244,8 +244,9 @@ def _keep_done(done: dict, key: str, task: object, run: dict) -> None:
         store.keep(done, _TASK + task, run)
 
 
-def _failed(session_id: str | None, outcome: Outcome, route: Route | None, asked: str | None) -> Returned:
-    if not asked or not health.is_model_error(outcome.error, outcome.interrupted):
+def _failed(session_id: str | None, outcome: Outcome, route: Route | None, asked: str | None,
+            guessed: bool) -> Returned:
+    if guessed or not asked or not health.is_model_error(outcome.error, outcome.interrupted):
         return Returned(asked, route, False)
     sent = route.sent if route and route.model == asked else None
     if sent and sent.lower() != asked:

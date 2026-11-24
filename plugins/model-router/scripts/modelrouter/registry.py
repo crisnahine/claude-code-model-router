@@ -113,10 +113,10 @@ class Registry:
         return model_id if allowed.permits_id(self, name, model_id) and table.healthy(model_id) else None
 
     def available(self, cap: str | None = None, *, allowed: allowlist.Allowlist | None = None,
-                  table: health.Health | None = None) -> list[str]:
+                  table: health.Health | None = None, sendable: frozenset = frozenset()) -> list[str]:
         """Usable models, weakest first: inside the cap, permitted by `allowed` (none: no
-        allowlist filter), and healthy. The health filter is dropped rather than leave nothing
-        to route to; the allowlist's is not."""
+        allowlist filter; `sendable` as in `Allowlist.permitted`), and healthy. The health filter
+        is dropped rather than leave nothing to route to; the allowlist's is not."""
         names = self.by_strength()
         if cap:
             # Under a cap, only models whose strength the user vouches for count: a model a
@@ -124,7 +124,7 @@ class Registry:
             vouched = [n for n in names if self.models[n].trusted] or names
             names = [n for n in names if n in vouched and self.strength(n) <= self.strength(cap)]
         if allowed is not None:
-            permitted = allowed.permitted(self)
+            permitted = allowed.permitted(self, sendable)
             names = [n for n in names if n in permitted]
         table = table or health.load()
         return [n for n in names if table.healthy(n)] or names
@@ -138,6 +138,13 @@ class Registry:
         trusted = [n for n in usable if self.models[n].trusted] or usable
         higher = [n for n in trusted if self.strength(n) > self.strength(name)]
         return higher[0] if higher else trusted[-1]
+
+    def past_lag(self, name: str | None, usable: list[str], lagging: frozenset) -> str | None:
+        """`name`, or the next stronger usable model when `name`'s alias runs an older version here
+        (`Snapshot.lagging`): one family up at most, whether or not that one lags too."""
+        if name not in lagging:
+            return name
+        return next((n for n in self.by_strength(usable) if self.models[n].trusted and self.stronger(n, name)), name)
 
     def select(self, needs: float, usable: list[str]) -> str | None:
         """The cheapest usable model strong enough for `needs`, else the strongest usable. A model a
