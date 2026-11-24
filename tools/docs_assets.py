@@ -59,7 +59,7 @@ def palette_css(p: dict) -> str:
     rules = [
         f".card{{fill:{p['card']};stroke:{p['line']}}}", f".ink{{fill:{p['ink']}}}",
         f".mut{{fill:{p['muted']}}}", f".faint{{fill:{p['faint']}}}", f".ln{{stroke:{p['line']}}}",
-        f".lnm{{stroke:{p['muted']}}}", f".inks{{stroke:{p['ink']}}}", f".rt{{fill:{p['route']}}}",
+        f".lnm{{stroke:{p['muted']}}}", f".rt{{fill:{p['route']}}}",
         f".rts{{stroke:{p['route']}}}", f".rtsoft{{fill:{p['routesoft']}}}", f".halo{{stroke:{p['card']}}}",
         f".tag{{fill:{p['tag']}}}",
     ]

@@ -11,7 +11,7 @@ How Model Router looks, and how to make a diagram that fits. [`tools/docs_assets
 Model Router starts each agent on a rung of a ladder and climbs one when the work comes back. The visuals follow that:
 
 - The mark is a ladder of five rungs, one per level, colored from the lightest model (lookup, at the bottom) to the strongest (frontier, at the top). An amber route enters on one rung and steps up to the next.
-- Amber means the call: the route, a redo tag, and the row or label of a routed call.
+- Amber means the call: the route, a redo tag, and the row or label of a routed call. Its one other use is the site's eyebrow, the small capital label above the title.
 - The five rung colors always mean the five levels, in the same order.
 
 | File | Use |
@@ -35,7 +35,7 @@ Write "Model Router" in prose and `model-router` for the plugin id. Leave clear 
 | `faint` | `#E7EDF5` | `#1A263A` | Chips, pills, empty meter segments |
 | `ink` | `#0C1524` | `#E7EDF6` | Text and icons |
 | `muted` | `#4A5871` | `#9BA9BD` | Secondary text, arrows |
-| `route` | `#A65200` | `#FFB23E` | The call (route, redo tag, a routed call's row or label) |
+| `route` | `#A65200` | `#FFB23E` | The call (route, redo tag, a routed call's row or label) and the site's eyebrow |
 | `routesoft` | `#FFF1DE` | `#33260F` | The row a call is on |
 | rung 1, lookup | `#0E8C6F` | `#38D3A8` | Haiku, medium |
 | rung 2, standard | `#0A78B8` | `#45B4F2` | Sonnet, medium |
@@ -48,7 +48,7 @@ Write "Model Router" in prose and `model-router` for the plugin id. Leave clear 
 ## Type
 
 - Sans: `-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif`, at 600 for headings and labels.
-- Mono: `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace`, for code, options, and model names in pills.
+- Mono: `ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace`, for code, options, model names in pills and the site's eyebrow.
 - No web fonts: GitHub shows README images through `<img>`, which can't load them.
 
 ## Rules for every SVG
