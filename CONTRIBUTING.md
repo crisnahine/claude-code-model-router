@@ -1,6 +1,4 @@
 <!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
-<p align="center"><img src="docs/assets/banner-contributing.svg" width="880" alt="Contributing: How does a change get merged?"></p>
-
 <p align="center"><a href="README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="docs/README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="CHANGELOG.md">Changelog</a> &nbsp;&middot;&nbsp; Next: <a href="RELEASING.md">Releasing</a></p>
 <!-- End of page head. -->
 
@@ -32,7 +30,7 @@ tools/                         traceability.py counts docs/TRACEABILITY.md rows;
                                docs_pages.py is the page index and page heads; plugin_version.py is CI's version check;
                                upstream_check.py is the daily upstream check
 bench/                         the benchmark: pinned tasks and their pass checks, configurations, runner and analysis (not shipped)
-site/                          the project site, sitemap, robots.txt and llms.txt; a workflow deploys it to GitHub Pages from main
+site/                          the project site, sitemap and llms.txt; a workflow copies in docs/assets and deploys it to GitHub Pages from main
 ```
 
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the design and the reasons behind it. A daily GitHub workflow runs `tools/upstream_check.py`, which compares live Claude Code releases, docs pages, model aliases and model status with `compat/baseline.json` and opens an issue when something this plugin is built on changes. `/refresh` in this repository reviews the changes, and `python3 tools/upstream_check.py --baseline compat/baseline.json --write` marks them reviewed.
@@ -69,7 +67,7 @@ The routing evals also run free in the unittest gate. Each case under `plugins/m
 - A claim about Claude Code or a model comes from the newest official docs (`code.claude.com/docs`, `platform.claude.com/docs`) or the installed binary, with the link. Anything without a primary source is marked UNCONFIRMED in `docs/research/` and nothing is built on it.
 - A change updates every document it makes wrong, in the same commit. When it changes a requirement's status, update its row in [docs/TRACEABILITY.md](docs/TRACEABILITY.md), run `python3 tools/traceability.py`, and paste its output over the "Summary:" line. `tests/test_traceability.py` fails until they agree.
 - A new module or concept gets a term in [GLOSSARY.md](GLOSSARY.md).
-- Docs images, page heads, the site's asset copies and `CITATION.cff` come from `tools/docs_assets.py`: change the script, run it, and keep `--check` passing. It also fills the benchmark figures marked `<!-- bench:KEY -->value<!-- /bench -->` (in the README, the docs pages that carry them and the site) from `bench/analyze.py`, so a figure changes by rerunning analyze, never by hand. [docs/assets/BRAND.md](docs/assets/BRAND.md) has the palette and how to add a banner.
+- The diagrams, badges, page heads, the docs index, the site's FAQ and `CITATION.cff` come from `tools/docs_assets.py`: change the script, run it, and keep `--check` passing. It also fills the benchmark figures marked `<!-- bench:KEY -->value<!-- /bench -->` (in the README, the docs pages that carry them, the site and `site/llms.txt`) from `bench/analyze.py`, so a figure changes by rerunning analyze, never by hand. [docs/assets/BRAND.md](docs/assets/BRAND.md) has the palette and how to add a page.
 - Every change that reaches `main` under `plugins/model-router/` sets a version in `plugin.json` that `main` has never carried, since installs keep their cached copy until the version changes. CI's `version` job (`tools/plugin_version.py`) fails a pull request that keeps a version the base branch has carried at any point or one tagged `v<version>`; a change to `plugins/model-router/README.md` alone is exempt.
 - A change to the shape of `config/models.json`, a `model-router.json` override, a state file, a `--json` output or a plugin option follows the policy in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#compatibility): a breaking change bumps that shape's version and keeps the old one readable.
 - Code comments explain a reason the code can't show, in a line. No ticket numbers, no history of the change.

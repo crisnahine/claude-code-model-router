@@ -1,6 +1,4 @@
 <!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
-<p align="center"><img src="assets/banner-traceability.svg" width="880" alt="Traceability: Where is each requirement, and is it met?"></p>
-
 <p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="TEST_RESULTS.md">Test results</a> &nbsp;&middot;&nbsp; Next: <a href="RELEASE_READINESS.md">Release readiness</a></p>
 <!-- End of page head. -->
 
@@ -168,7 +166,7 @@ Paths are under `plugins/model-router/` unless they start with `tests/`, `docs/`
 | S10.10 | CI green on the release PR and on the merge commit in `main` before tagging | Release checklist | `RELEASING.md` | CI | PR run 45004814197 and main run 45004998622 on `8ec8eec`; PR run 45055301092 on `bbb5827` and main run 45055601879 on `27b94e6`; main run 45077498725 on `b836649`; the 0.1.0 release merge `da1e68c`, run 45088194790; 0.1.2 PR run 45360301092 on `fc6fb34` and its merge `9e247d3`, run 45361583123; all passed | PASS |
 | S10.11 | Reproducible cost and quality results | Benchmark harness and a full run | `bench/`, `docs/BENCHMARKS.md` | Benchmark | <!-- bench:runs -->1,120<!-- /bench --> runs on <!-- bench:dates -->2026-11-22 to 2026-11-23<!-- /bench --> (Claude Code <!-- bench:claude -->2.1.330<!-- /bench -->), <!-- bench:usd -->$134.97<!-- /bench --> at list price, <!-- bench:per_cell -->5 or 10<!-- /bench --> per class and configuration, raw lines and commands committed: the routing code at <!-- bench:opus.commit_code -->`780ee86`<!-- /bench --> beside every baseline Section 14 names on an Opus 5.5 session, and beside `defaults`, `sonnet-medium`, `sonnet-high` and `opusplan` on a Sonnet session. Opus table: <!-- bench:opus.status.FAIL -->6<!-- /bench --> FAIL rows. Sonnet table: <!-- bench:sonnet.status.PASS -->0<!-- /bench --> PASS and <!-- bench:sonnet.status.FAIL -->6<!-- /bench --> FAIL, under the Section 14 rule. The page names the archived earlier rows and why they're left out | PASS |
 | S10.12 | A security assessment | [SECURITY.md](SECURITY.md): who can influence routing, the network, state files, the mod, skills, workflows, open items | `docs/SECURITY.md` | Inspection | Each claim names the module and the function, class or constant it was checked against on 2026-11-24 | PASS |
-| S10.13 | Professional documentation and install steps, README at release polish with SVG diagrams | Short README with the headline banner and the hero; diagrams in ARCHITECTURE.md and GUIDE.md | `README.md`, `docs/GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/assets/` | Unit, inspection | `ReadmeDiagrams` class (7 tests); the changelog's Python claim is corrected (S8.2) | PASS |
+| S10.13 | Professional documentation and install steps, README at release polish with SVG diagrams | Short README with badges and a video still; diagrams in ARCHITECTURE.md and GUIDE.md | `README.md`, `docs/GUIDE.md`, `docs/ARCHITECTURE.md`, `docs/assets/` | Unit, inspection | `ReadmeDiagrams` class (6 tests); the changelog's Python claim is corrected (S8.2) | PASS |
 
 ## Section 11: final delivery
 

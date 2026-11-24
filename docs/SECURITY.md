@@ -1,6 +1,4 @@
 <!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
-<p align="center"><img src="assets/banner-security.svg" width="880" alt="Security: What reaches the network, and who can steer it?"></p>
-
 <p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="PERFORMANCE.md">Performance</a> &nbsp;&middot;&nbsp; Next: <a href="CLAUDE_CODE_DOCS.md">Built on the docs</a></p>
 <!-- End of page head. -->
 
@@ -64,7 +62,7 @@ Every action in all three workflows is pinned to a commit SHA.
 - `ci.yml` has `contents: read` (its top-level `permissions`). Its `validate` job installs `@anthropic-ai/claude-code` from npm at 2.1.329, 2.1.331 and `latest` (the job's `matrix`), and its `eval` job installs 2.1.331 when started by hand and `latest` on its weekly run. The `version` job reads only git history. The `typecheck` job downloads Claude Code's published mod types at a pinned commit and installs `typescript` and `@types/node` at pinned versions (`tests/mod/typecheck.sh`). With read-only contents, a bad release could fail CI and can't change the repository.
 - `ci.yml`'s `eval` job runs when started by hand (`workflow_dispatch`) and once a week on `main` (`schedule`), and it is the only job given a secret: `ANTHROPIC_API_KEY`, for the live model calls of `claude plugin eval`, with `--max-cost-usd 2` as a ceiling on the estimated list-price cost (https://code.claude.com/docs/en/plugin-evals.md#command-options). It runs the checked-out branch's plugin code with `--trust-plugin`, so start it only on a branch you trust.
 - `upstream-watch.yml` runs daily and by hand with `contents: read` and `issues: write`. It runs `tools/upstream_check.py`, which reads public docs pages and sends no credential. It creates or edits one issue, and fetched text goes into the issue body through a file, never into a shell command. Its only secret is `github.token` (the `GH_TOKEN` env). Its `newest` job installs `@anthropic-ai/claude-code@latest` and downloads the newest published mod types, so it has only `contents: read`.
-- `pages.yml` runs on pushes to `main` that touch `site/**` or `pages.yml`, and by hand. It has `contents: read`, and only its `deploy` job adds `pages: write` and `id-token: write`. It uses no secret.
+- `pages.yml` runs on pushes to `main` that touch `site/**`, `docs/assets/**` or `pages.yml`, and by hand. It has `contents: read`, and only its `deploy` job adds `pages: write` and `id-token: write`. It uses no secret.
 
 ## Open items
 
