@@ -10,7 +10,7 @@ The latest results, with the commands that produce them. Replace this file's num
 
 ## CI on `main`
 
-The last CI run whose job logs were read for this table is [45361583123](https://github.com/crisnahine/claude-code-model-router/actions/runs/45361583123), on the 0.1.2 release merge `9e247d3`, started 2026-11-24 09:03 UTC: success, the 12 jobs that ran (`eval` runs only by hand), 710 tests on each Python job. The release PR's first run, [45357531102](https://github.com/crisnahine/claude-code-model-router/actions/runs/45357531102) on `d51403e`, failed on Windows; `fc6fb34` fixed it, and PR run [45360301092](https://github.com/crisnahine/claude-code-model-router/actions/runs/45360301092) passed.
+The last CI run whose job logs were read for this table is [45361583123](https://github.com/crisnahine/claude-code-model-router/actions/runs/45361583123), on the 0.1.2 release merge `9e247d3`, started 2026-11-24 09:03 UTC: success, the 12 jobs that ran (`eval` doesn't run on push), 710 tests on each Python job. The release PR's first run, [45357531102](https://github.com/crisnahine/claude-code-model-router/actions/runs/45357531102) on `d51403e`, failed on Windows; `fc6fb34` fixed it, and PR run [45360301092](https://github.com/crisnahine/claude-code-model-router/actions/runs/45360301092) passed.
 
 | Job | Result | Tests | Took |
 | :- | :- | :- | -: |
@@ -97,7 +97,7 @@ No routing error was found. Most spawns ran under the force setting, so this led
 
 ## Type-checking the mod
 
-`sh tests/mod/typecheck.sh` is the gate, and CI's `typecheck` job runs it. It downloads Claude Code's published mod API types (https://github.com/anthropics/claude-code/blob/main/mods/types/claude-code.d.ts) at a pinned commit, installs `typescript` 6.0.3 and `@types/node` 22.20.5 into a temporary folder, and runs `tsc` with the options in `tests/mod/tsconfig.json`. The published copy can be older than your Claude Code (https://code.claude.com/docs/en/plugins/mods/reference.md); move the pin when the mod uses something newer.
+`sh tests/mod/typecheck.sh` is the gate, and CI's `typecheck` job runs it. It downloads Claude Code's published mod API types (https://github.com/anthropics/claude-code/blob/main/mods/types/claude-code.d.ts) at a pinned commit, installs `typescript` 6.0.3 and `@types/node` 22.20.5 into a temporary folder, and runs `tsc` with the options in `tests/mod/tsconfig.json`. The published copy can be older than your Claude Code (https://code.claude.com/docs/en/plugins/mods/reference.md); move the pin when the mod uses something newer. The daily `newest` job in `upstream-watch.yml` also runs it unpinned, as `TYPES_COMMIT=main sh tests/mod/typecheck.sh`, against the newest published types.
 
 To check against the types your installed build writes, copy `tests/mod/tsconfig.json` outside the plugin folder, add `"paths": {"claude-code": ["<plugin-authoring skill>/types/claude-code.d.ts"]}` and `"files": ["<repo>/plugins/model-router/hooks/router.ts", "<repo>/tests/mod/router.test.ts"]`, install `@types/node` beside it, and run `tsc -p` on it, with `"types": ["node"]` and no DOM library. The 2.1.330 types redeclare `URL`, `URLSearchParams` and other globals in ways `@types/node` rejects, so pass `--skipLibCheck`; then `hooks/router.ts` and `tests/mod/router.test.ts` are clean.
 

@@ -23,21 +23,7 @@ jobs:
       - name: A plugin change carries a new version
         env:
           BASE: ${{ github.base_ref }}
-        run: |
-          manifest=plugins/model-router/.claude-plugin/plugin.json
-          if git diff --quiet "origin/$BASE" HEAD -- plugins/model-router ':(exclude)plugins/model-router/README.md'; then
-            echo "No plugin change."; exit 0
-          fi
-          read_version() { python3 -c "import json,sys;print(json.load(sys.stdin)['version'])"; }
-          version=$(read_version < "$manifest")
-          base=$(git show "origin/$BASE:$manifest" | read_version)
-          if [ "$version" = "$base" ]; then
-            echo "::error file=$manifest::version $version is the same as on $BASE; set a version $BASE has never carried"; exit 1
-          fi
-          if [ -n "$(git tag -l "v$version")" ]; then
-            echo "::error file=$manifest::version $version is already tagged v$version; set a new version"; exit 1
-          fi
-          echo "Version $version is new."
+        run: python3 tools/plugin_version.py "origin/$BASE"
 
   test:
     strategy:

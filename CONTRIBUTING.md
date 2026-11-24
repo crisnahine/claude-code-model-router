@@ -28,7 +28,7 @@ tests/                         unit tests, run on Linux, macOS and Windows; test
 compat/baseline.json           the Claude Code version, docs index, model aliases and model status last reviewed
 docs/                          the pages indexed in docs/README.md, docs/research and docs/assets (BRAND.md)
 tools/                         traceability.py counts docs/TRACEABILITY.md rows; docs_assets.py writes the docs' generated files;
-                               docs_pages.py is the page index and page heads
+                               docs_pages.py is the page index and page heads; plugin_version.py is CI's version check
 bench/                         the benchmark: pinned tasks and their pass checks, configurations, runner and analysis (not shipped)
 site/                          the project site, sitemap, robots.txt and llms.txt; a workflow deploys it to GitHub Pages from main
 ```
@@ -68,7 +68,7 @@ The routing evals also run free in the unittest gate: `RoutingEvals` in `tests/t
 - A change updates every document it makes wrong, in the same commit. When it changes a requirement's status, update its row in [docs/TRACEABILITY.md](docs/TRACEABILITY.md), run `python3 tools/traceability.py`, and paste its output over the "Summary:" line. `tests/test_traceability.py` fails until they agree.
 - A new module or concept gets a term in [GLOSSARY.md](GLOSSARY.md).
 - Docs images, page heads, the site's asset copies and `CITATION.cff` come from `tools/docs_assets.py`: change the script, run it, and keep `--check` passing. It also fills the benchmark figures marked `<!-- bench:KEY -->value<!-- /bench -->` (in the README, the docs pages that carry them and the site) from `bench/analyze.py`, so a figure changes by rerunning analyze, never by hand. [docs/assets/BRAND.md](docs/assets/BRAND.md) has the palette and how to add a banner.
-- Every change that reaches `main` under `plugins/model-router/` sets a version in `plugin.json` that `main` has never carried, since installs keep their cached copy until the version changes. CI's `version` job fails a pull request that keeps the base branch's version or reuses a tagged one; a change to `plugins/model-router/README.md` alone is exempt.
+- Every change that reaches `main` under `plugins/model-router/` sets a version in `plugin.json` that `main` has never carried, since installs keep their cached copy until the version changes. CI's `version` job (`tools/plugin_version.py`) fails a pull request that keeps a version the base branch has carried at any point or one tagged `v<version>`; a change to `plugins/model-router/README.md` alone is exempt.
 - A change to the shape of `config/models.json`, a `model-router.json` override, a state file, a `--json` output or a plugin option follows the policy in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#compatibility): a breaking change bumps that shape's version and keeps the old one readable.
 - Code comments explain a reason the code can't show, in a line. No ticket numbers, no history of the change.
 
