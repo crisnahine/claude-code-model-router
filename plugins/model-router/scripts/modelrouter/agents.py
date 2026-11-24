@@ -80,6 +80,34 @@ def installed_roots(plugin: str) -> list[Path]:
     return roots
 
 
+def _listed(plugin: str, root: Path) -> list[Path]:
+    """The agent files the plugin's manifest and its marketplace entry name. Naming any replaces the agents/
+    scan; the entry's are appended to the manifest's, or are the manifest when the plugin has none."""
+    plugins = store.claude_home() / "plugins"
+    sources = [store.load_dict(root / ".claude-plugin" / "plugin.json")]
+    record = store.load_dict(plugins / "installed_plugins.json").get("plugins")
+    known = store.load_dict(plugins / "known_marketplaces.json")
+    for key, installs in record.items() if isinstance(record, dict) else []:
+        name, _, market = str(key).partition("@")
+        installs = installs if isinstance(installs, list) else [installs]
+        if name != plugin or str(root) not in [i.get("installPath") for i in installs if isinstance(i, dict)]:
+            continue
+        location = known.get(market)
+        location = location.get("installLocation") if isinstance(location, dict) else None
+        entries = store.load_dict(Path(location) / ".claude-plugin" / "marketplace.json").get("plugins") \
+            if isinstance(location, str) else None
+        sources += [e for e in entries if isinstance(e, dict) and e.get("name") == plugin] \
+            if isinstance(entries, list) else []
+    listed = []
+    for source in sources:
+        value = source.get("agents")
+        for item in [value] if isinstance(value, str) else value if isinstance(value, list) else []:
+            # Claude Code doesn't load a listed path that escapes the plugin root.
+            if isinstance(item, str) and (root / item).resolve().is_relative_to(root.resolve()):
+                listed.append(root / item)
+    return listed
+
+
 def _plugin_roots(plugin: str) -> list[Path]:
     """Install folders of a plugin: the install record, else a bounded walk of the plugins folder by name."""
     roots = installed_roots(plugin)
@@ -106,6 +134,13 @@ def find(agent_type: str, project: Path) -> dict | None:
         leaf = name.split(":")[-1]
         ours = plugin == cfg.PLUGIN_NAME
         roots = [cfg.PLUGIN_ROOT] if ours else _plugin_roots(plugin)
+        listed = [path for root in roots for path in _listed(plugin, root)] if not ours else []
+        if listed:
+            for path in listed:
+                found = parse(path, "plugin")
+                if found and found["name"] == leaf:
+                    return found
+            return None
         found = _search([("plugin", root / "agents") for root in roots], leaf)
         if found or ours:
             return found

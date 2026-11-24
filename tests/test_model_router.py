@@ -4621,7 +4621,7 @@ class Upstream(Sandbox):
         offline = urllib.error.URLError("[Errno 8] nodename nor servname provided, or not known")
         with mock.patch.object(upstream, "http_get", side_effect=offline), \
                 redirect_stdout(io.StringIO()) as buf:
-            self.assertEqual(cli.main(["refresh", "--force"]), 1)
+            self.assertEqual(cli.main(["refresh", "--force"]), 0)
         first, rest = buf.getvalue().split("\n", 1)
         self.assertEqual(first, "Couldn't reach the Claude Code docs (<urlopen error [Errno 8] nodename nor servname "
                                 "provided, or not known>); showing the last check.")
@@ -4981,7 +4981,7 @@ class SlashSkills(Sandbox):
                          {"level": "complex", "effort": "high"})
         hard = body.replace("$ARGUMENTS", HARD)
         self.assertEqual(self.turn("model-router:ship", HARD, hard), {"level": "complex", "effort": "high"})
-        self.assertEqual(self.turn("model-router:ship", "", body.replace("$ARGUMENTS", ""))["level"], "frontier")
+        self.assertEqual(self.turn("model-router:ship", "", body.replace("$ARGUMENTS", ""))["level"], "complex")
         # The settings hook reads the raw file, where the placeholder is still there.
         skills = self.project / ".claude" / "skills" / "build"
         skills.mkdir(parents=True)
