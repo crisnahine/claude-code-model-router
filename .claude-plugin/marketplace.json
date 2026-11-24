@@ -1,6 +1,6 @@
 {
   "name": "claude-code-model-router",
-  "description": "Marketplace for Model Router, a plugin for Claude Code that routes every subagent to the Claude model and reasoning effort its task needs.",
+  "description": "Marketplace for Model Router, a plugin for Claude Code that keeps the Claude model and effort Claude names for each subagent within your cap.",
   "owner": {
     "name": "Cris",
     "url": "https://github.com/crisnahine"
@@ -14,8 +14,7 @@
         "model-router",
         "model-routing",
         "multi-model",
-        "subagents",
-        "cost-optimization"
+        "subagents"
       ]
     }
   ]

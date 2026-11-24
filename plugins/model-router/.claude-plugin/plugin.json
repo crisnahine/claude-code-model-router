@@ -1,8 +1,8 @@
 {
   "name": "model-router",
   "displayName": "Model Router",
-  "version": "0.1.2",
-  "description": "Keeps the Claude model and reasoning effort Claude names for every subagent, agent-team teammate and workflow agent within your cap, fills in the effort nobody named, and runs a marked redo with more effort or on a stronger model.",
+  "version": "0.3.0",
+  "description": "Keeps the Claude model and effort Claude names for every subagent, teammate and workflow agent within your cap, fills in the effort when only a model is named, and runs a marked redo with more effort or a stronger model.",
   "author": {
     "name": "Cris",
     "url": "https://github.com/crisnahine"
@@ -15,7 +15,6 @@
     "model-routing",
     "multi-model",
     "subagents",
-    "cost-optimization",
     "code-review"
   ],
   "engines": {
@@ -25,7 +24,7 @@
     "routing_mode": {
       "type": "string",
       "title": "Routing mode",
-      "description": "auto (default): the model and effort Claude names on each subagent call are kept within your limits, and an effort nobody named is set. off: no routing.",
+      "description": "auto (default): the model and effort Claude names on each subagent call are kept within your limits, and the effort is filled in when only a model is named. off: calls are left as they are, with no session note and no check before finishing.",
       "default": "auto",
       "options": [
         "auto",
@@ -35,7 +34,7 @@
     "max_tier": {
       "type": "string",
       "title": "Strongest model allowed",
-      "description": "The most capable model subagents may run on: haiku, sonnet, opus or fable. Anything stronger is lowered to it. Leave as none for no cap.",
+      "description": "The most capable model subagents may run on: haiku, sonnet, opus or fable. A stronger model from the call, a rule, the agent's definition or a parent model the router can see is lowered to it. A model set by CLAUDE_CODE_SUBAGENT_MODEL, CLAUDE_CODE_SUBAGENT_MODEL_FORCE or CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL isn't, and a fork always runs on its conversation's model. Leave as none for no cap.",
       "default": "none",
       "options": [
         "none",
@@ -48,7 +47,7 @@
     "verify_gate": {
       "type": "boolean",
       "title": "Check before finishing",
-      "description": "On by default, as this plugin's own choice. When files in the project changed and no check ran afterwards, Claude is asked once, before it finishes a turn, to run the work's own check: tests, build or linter for code, a recompute for figures, a reread against the request for a document. That costs one more turn. Set it to false to skip the ask.",
+      "description": "On by default, as this plugin's own choice, and only while routing_mode is auto. When Claude edited a project file with Edit, Write or NotebookEdit and no check command ran afterwards, Claude is asked once, before it finishes a turn, to run the work's own check: tests, build or linter for code, a recompute for figures, a reread against the request for a document. A file changed by a shell command doesn't count. There is no ask while background work runs or when the session's transcript can't be read. An ask costs one more turn. Set it to false to skip it.",
       "default": true
     }
   }

@@ -8,7 +8,7 @@ How Model Router looks, and how to make a diagram that fits. [`tools/docs_assets
 
 ## The idea
 
-Model Router starts each agent on a rung of a ladder and climbs one when the work comes back. The visuals follow that:
+In Model Router each model stands for a rung of a ladder, and a call Claude marks as a redo climbs: more effort first, then a stronger model. The visuals follow that:
 
 - The mark is a ladder of five rungs, one per level, colored from the lightest model (lookup, at the bottom) to the strongest (frontier, at the top). An amber route enters on one rung and steps up to the next.
 - Amber means the call: the route, a redo tag, and the row or label of a routed call. Its one other use is the site's eyebrow, the small capital label above the title.
@@ -19,7 +19,7 @@ Model Router starts each agent on a rung of a ladder and climbs one when the wor
 | `logo-mark.svg` | The mark alone, the site's favicon. Kept as a file; the script doesn't write it. |
 | `logo.svg` | Mark and wordmark, following the viewer's light or dark setting, in the site's header. Kept as a file. |
 | `social-preview.png` | The 1280 x 640 link-preview card for the site. Kept as a file. |
-| `video.mp4`, `video-poster.jpg`, `video-play.jpg` | The 22-second video, its first frame for the site's player, and a still with a play button for Markdown pages to link from. They are rendered outside the script. Music: Sascha Ende, ende.app (CC BY 4.0). |
+| `video.mp4`, `video-poster.jpg`, `video-play.jpg` | The 22-second video, its first frame, and a still with a play button for Markdown pages to link from. They show the design before 0.3.0, where the router picked each call's level from its brief, so the site no longer plays the video. They are rendered outside the script. Music: Sascha Ende, ende.app (CC BY 4.0). |
 
 The rest of `docs/assets/` is the badges and the diagrams.
 

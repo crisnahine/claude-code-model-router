@@ -13,4 +13,4 @@ allowed-tools:
 
 Show the output above. "Last ran as" is the model Claude Code reported for the most recent agent on that model. With `reset` as the argument, the first line says what was cleared, or what was left and why: `reset` is for a model marked "routed around" that should be tried again now.
 
-If a model is routed around, explain in one line what that means: calls that would have used it go to the next usable model that is strong enough, or the strongest one left if none is (a model set by name, on the call, a pin or a rule, goes to the next stronger usable one, or the strongest usable one if nothing stronger is left), until it is tried again a day later.
+If a model is routed around, explain in one line what that means: calls that would have used it go to the next stronger usable model, or the strongest usable one if nothing stronger is left, until it is tried again a day later.

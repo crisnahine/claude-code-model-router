@@ -13,23 +13,25 @@ Branch from `main` and work in a git worktree (`git worktree add ../<name> -b <n
 ```text
 plugins/model-router/
   .claude-plugin/plugin.json   manifest and options
-  config/models.json           the model registry, levels, prices and role agents
+  config/models.json           the models, aliases, newest IDs, lagging provider aliases, levels and prices
   hooks/router.ts              the mod: tool.call, session.start, agent.spawn, turn.start, turn.step,
                                turn.complete
   hooks/hooks.json             loads the mod, and the SessionStart, UserPromptSubmit, PreToolUse,
                                PostToolUse, PostToolUseFailure, PostModelSwitch, SubagentStop and Stop hooks
+  scripts/model-router.sh      the launcher hooks and skills run: python3, else python, 3.9 or later, with -I
   scripts/modelrouter/         the runtime, standard library only
   agents/                      the five role agents
   skills/                      route, models, usage
+  evals/                       routing evals for claude plugin eval
 .claude/skills/                refresh and deliver, maintainer skills for this repository (not shipped)
-  evals/                       routing evals
 tests/                         unit tests, run on Linux, macOS and Windows; tests/mod holds the mod's tests
 compat/baseline.json           the Claude Code version, docs pages, model aliases and model status last reviewed
 docs/                          the pages indexed in docs/README.md, docs/research and docs/assets (BRAND.md)
 tools/                         traceability.py counts docs/TRACEABILITY.md rows; docs_assets.py writes the docs' generated files;
                                docs_pages.py is the page index and page heads; plugin_version.py is CI's version check;
                                upstream_check.py is the daily upstream check
-bench/                         the benchmark: pinned tasks and their pass checks, configurations, runner and analysis (not shipped)
+bench/                         the benchmark: pinned tasks and their pass checks, configurations, runner and analysis,
+                               and overhead.py for hook time and state size (not shipped)
 site/                          the project site, sitemap and llms.txt; a workflow copies in docs/assets and deploys it to GitHub Pages from main
 ```
 
@@ -61,7 +63,7 @@ The routing evals also run free in the unittest gate. Each case under `plugins/m
 ## Rules for a change
 
 - The runtime is Python 3.9 or later on the standard library only. Never add a dependency.
-- The mod stays thin: it forwards events to the runtime and holds no routing rule of its own.
+- The mod stays thin: it forwards events to the runtime and picks no model or effort of its own.
 - Every hook fails open. A bug may cost routing, never a tool call, a spawn or a session.
 - A claim about Claude Code or a model comes from the newest official docs (`code.claude.com/docs`, `platform.claude.com/docs`) or the installed binary, with the link. Anything without a primary source is marked UNCONFIRMED in `docs/research/` and nothing is built on it.
 - A change updates every document it makes wrong, in the same commit. When it changes a requirement's status, update its row in [docs/TRACEABILITY.md](docs/TRACEABILITY.md), run `python3 tools/traceability.py`, and paste its output over the "Summary:" line. `tests/test_traceability.py` fails until they agree.

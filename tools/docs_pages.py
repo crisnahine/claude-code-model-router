@@ -16,6 +16,8 @@ PAGES = [
      "What can the router save without losing quality?", 2),
     ("docs/research/caller-levels-and-redo.md", "Redo research",
      "Who names a call's level, and what marks a redo?", 2),
+    ("docs/research/architecture-review.md", "Architecture review",
+     "Which design choices held up against the docs, and what changed?", 2),
     ("docs/PERFORMANCE.md", "Performance", "What does the router cost in time and disk?", 2),
     ("docs/SECURITY.md", "Security", "What reaches the network, and who can steer it?", 2),
     ("docs/CLAUDE_CODE_DOCS.md", "Built on the docs", "Which Claude Code docs does it follow, and where?", 3),

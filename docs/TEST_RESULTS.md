@@ -8,7 +8,7 @@ The latest results, with the commands that produce them. Replace this file's num
 
 ## CI on `main`
 
-The last CI run whose job logs were read for this table is [45361583123](https://github.com/crisnahine/claude-code-model-router/actions/runs/45361583123), on the 0.1.2 release merge `9e247d3`, started 2026-11-24 09:03 UTC: success, the 12 jobs that ran (`eval` doesn't run on push), 710 tests on each Python job. The release PR's first run, [45357531102](https://github.com/crisnahine/claude-code-model-router/actions/runs/45357531102) on `d51403e`, failed on Windows; `fc6fb34` fixed it, and PR run [45360301092](https://github.com/crisnahine/claude-code-model-router/actions/runs/45360301092) passed.
+The last CI run whose job logs were read for this table is [45361583123](https://github.com/crisnahine/claude-code-model-router/actions/runs/45361583123), on the 0.1.2 release merge `9e247d3`, started 2026-11-24 09:03 UTC: success, the 12 jobs that ran (`eval` doesn't run on push), 710 tests on each Python job. The release PR's first run, [45357531102](https://github.com/crisnahine/claude-code-model-router/actions/runs/45357531102) on `d51403e`, failed on Windows; `fc6fb34` fixed it, and PR run [45360301092](https://github.com/crisnahine/claude-code-model-router/actions/runs/45360301092) passed. That run tested 0.1.2. The redesigned tree at `0c700b9`, where Claude names each call's model and effort, is on no remote branch and has not run in CI.
 
 | Job | Result | Tests | Took |
 | :- | :- | :- | -: |
@@ -29,30 +29,31 @@ Counts come from each job's log (`gh run view --job <id> --log`), times from its
 
 ## Local
 
-Run 2026-11-24 on macOS (Darwin 27.2.0), on the commit that records these results, which changes only docs.
+Run 2026-11-25 on macOS (Darwin 27.2.0), on the working tree at `0c700b9` with the docs edits made alongside these results not yet committed.
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` (`python3` is the system `/usr/bin/python3` here) | 710 tests OK |
-| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 710 tests OK |
-| Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 30 of 30 pass |
+| Unit tests, Python 3.9.6 | `cd tests && python3 -m unittest` with every `test_*` module but `test_bench` (`python3` is the system `/usr/bin/python3` here) | 476 tests, FAILED (failures=1, skipped=1): `DocsAssets.test_the_committed_assets_match_the_script`, the docs-assets gate below |
+| Unit tests, Python 3.13.13 | the same with `python3.13` | 476 tests, FAILED (failures=1, skipped=1), the same test |
+| Benchmark harness tests | `python3 -m unittest discover -s tests -p test_bench.py` | 146 tests, counted, not run in this pass |
+| Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 31 of 31 pass |
 | Marketplace, Claude Code 2.1.331 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.331 | `claude plugin validate --strict plugins/model-router` | Validation passed |
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
-| Docs assets | `python3 tools/docs_assets.py --check` | Every generated asset, page head and site block matches the script |
+| Docs assets | `python3 tools/docs_assets.py --check` | Fails, exit 1, with the docs mid-edit: `docs/assets/badge-version.svg`, `docs/README.md`, `docs/research/caller-levels-and-redo.md`, `docs/PERFORMANCE.md`, `README.md` and `site/index.html` are out of date. `test_docs_assets` runs this check, so the unit gate fails with it until `python3 tools/docs_assets.py` is rerun |
 | Benchmarks page | `python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check` | The committed page matches the results |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
-| Plugin evals, Claude Code 2.1.331 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78, on the earlier three cases |
+| Plugin evals, Claude Code 2.1.331 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | Last run 2026-11-24, on the design before this one and the earlier three cases: 3 of 3 pass with the plugin and none without, mean delta 0.78. Not run on this tree |
 
-The 710 unit tests are 524 in `tests/test_model_router.py`, 145 in `tests/test_bench.py`, 8 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 30 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 268 briefs over-routed (0.7%), budget 2%; 4 known under-routes" on each interpreter. CI's run on `8ec8eec` had 180 tests.
+The 622 unit tests are 399 in `tests/test_model_router.py`, 146 in `tests/test_bench.py`, 32 in `tests/test_docs_assets.py`, 13 in `tests/test_upstream_check.py`, 11 in `tests/test_project_trust.py`, 8 in `tests/test_ci.py`, 5 in `tests/test_store_lock.py`, 3 in `tests/test_traceability.py`, 3 in `tests/test_skill_and_agent_lookup.py` and 2 in `tests/test_session_model_and_teammates.py`, counted with the unittest loader. The one skip is `ModApiTypes.test_router_ts_uses_only_events_and_fields_the_types_declare`: it needs the installed Claude Code's mod types, and none were found here (set `MODEL_ROUTER_MOD_TYPES` to run it).
 
-Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
+Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live", all on the design before this one), the plugin evals and the benchmark.
 
 ## Plugin evals
 
 ### Routing cases
 
-The cases changed after this run: the session note now has Claude name a model and effort for each kind of work, and a contract summary and a design question that names no agent were added. The five cases haven't run live yet, so the numbers below are for the earlier three.
+The cases changed after this run: the session note now has Claude name a model and effort for each kind of work, the redo case marks each redo "Redo:", and a contract summary and a design question that names no agent were added. The five cases haven't run live yet, so the numbers below are for the earlier three, run on the design before this one, which picked the model from the brief.
 
 Run 2026-11-24 on Claude Code 2.1.331, on the working tree at `338dc7e` plus the change that recorded it, on the three cases in `plugins/model-router/evals/`:
 
@@ -61,7 +62,7 @@ CLAUDE_CODE_PLUGIN_CACHE_DIR=<scratch>/plugins claude plugin eval plugins/model-
   --ablation with-without --runs 3 -j 2 --max-cost-usd 2 --no-publish --output-dir <scratch>/out --json <scratch>/result.json
 ```
 
-It ran from the checkout, which registered no linked worktrees at the time (earlier runs used a `git archive` export, since the CLI refuses a plugin folder whose git directory registers more linked worktrees than it can screen), in the same clean environment as the first run below. Each case tells Claude to make one `Agent` call with an exact brief and no model, and a `regex` grader reads the run's trace for the `resolvedModel` Claude Code reports on that call's result. Without the router a subagent with no model runs on the session's model, so the no-plugin arm fails by design. No `--allow-tools` grant is needed: routing runs in the plugin's hooks and mod, which start their own processes, not through the Bash tool.
+It ran from the checkout, which registered no linked worktrees at the time (earlier runs used a `git archive` export, since the CLI refuses a plugin folder whose git directory registers more linked worktrees than it can screen), in the same clean environment as the first run below. The lookup and review cases told Claude to make one `Agent` call with an exact brief and no model; the redo case told it to make that call, then exactly the same call again. A `regex` grader reads the run's trace for the `resolvedModel` Claude Code reports on each call's result. Without the router a subagent with no model runs on the session's model, so the no-plugin arm fails by design. No `--allow-tools` grant is needed: routing runs in the plugin's hooks and mod, which start their own processes, not through the Bash tool.
 
 | Case | Session | Grader | With the plugin | Without | Cost with / without (3 runs each) |
 | :- | :- | :- | -: | -: | -: |
@@ -84,7 +85,7 @@ Total $1.61 including the judge, 148 seconds, not partial. Every judge vote was 
 
 ## Dogfood ledger
 
-This repository's own sessions run with the plugin loaded. The ledger (`~/.claude/plugins/data/model-router-claude-code-model-router/ledger.jsonl`) was read from a copy taken 2026-11-22 at 12:07 UTC: 400 rows from 07:16 to 12:06 UTC, across 16 sessions, all parsed. Only counts are recorded here, never brief text.
+This repository's own sessions run with the plugin loaded. This ledger was read on the design before this one, which scored each brief for its level and raised the main loop's effort; both are deleted, and no ledger of the current tree has been read. The ledger (`~/.claude/plugins/data/model-router-claude-code-model-router/ledger.jsonl`) was read from a copy taken 2026-11-22 at 12:07 UTC: 400 rows from 07:16 to 12:06 UTC, across 16 sessions, all parsed. Only counts are recorded here, never brief text.
 
 - 45 spawns, all on the mod path (`agent.spawn`): 25 `model-router:reviewer`, 14 `model-router:verifier`, 4 `general-purpose`, 1 `model-router:docs-researcher` and 1 `web-fetch`.
 - 40 were kept unchanged: these sessions set `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, which pins every subagent's model, and each role agent then set its own `effort` (reviewer `high`, verifier `low`, docs-researcher `medium`), so the router had nothing to set. Levels: 22 complex, 14 standard, 2 hardest, 1 frontier, 1 lookup.
@@ -103,7 +104,7 @@ To check against the types your installed build writes, copy `tests/mod/tsconfig
 
 ## Benchmark raw data
 
-[BENCHMARKS.md](BENCHMARKS.md) is generated by `python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md`. Notes about the raw lines that the script doesn't write go here.
+[BENCHMARKS.md](BENCHMARKS.md) is generated by `python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md`. Notes about the raw lines that the script doesn't write go here. Every stored row measured a design before this one; the current tree has no benchmark rows.
 
 Each raw line records `bench_commit`, the HEAD it ran on, and `bench_dirty`, whether `bench/` or the plugin had changes HEAD doesn't hold. When the `m6-*` files were recorded, the check also counted the bench's own output under `bench/results/`, so once a session's first results file was written, every later line said `bench_dirty: true`. That is why the 320 main rows of the `m6-*` files carry it while the 16 probe rows before them don't. The code that ran for all of them is `499d046`; the check now leaves `bench/results/` out.
 
@@ -114,5 +115,5 @@ Wall time: rows from builds before `27b94e6`, under `bench/results/archive/early
 All runs below used Claude Code 2.1.330 and had `bench_dirty` false on every row. Every cell reached its run count, and no run lost the network or hit a limit.
 
 - The `27b94e6` run (2026-11-22, bench and router at `27b94e6`): `--runs 5` per task, so 10 per class and configuration, at `--budget 1.0`. Stage 1, an Opus 5.5 session (`--model claude-opus-5-5`), `plugin` and `defaults` on all 16 tasks: 160 runs, $21.88. Stage 2, a Sonnet session (`--model sonnet`), `plugin`, `defaults`, `sonnet-medium` and `sonnet-high`: 320 runs, $22.66. The total is $44.54 at list price. Each class ran as its own `run.py`, in parallel workers (2 on Opus, 4 on Sonnet) that shared the stage's cap ($30 and $36). The 810 earlier rows went to `bench/results/archive/`, so the tables compare the router at `27b94e6` only with baselines run beside it, on the same commit, task revisions and Claude Code version.
-- The `780ee86` run (2026-11-22 UTC): `plugin-next`, the plugin exported from `780ee86`, which differs from this release in its license, a state-file fix and the architect's description, on every task, `--runs 5`, so 10 per class. Sonnet session: 80 runs, $6.01, under an $8 cap. Opus 5.5 session: 80 runs, $9.55, under a $12 cap. The total is $15.56 at list price. The baselines weren't rerun: they are the `27b94e6` run's rows, on the same version, machine and task revisions. These runs used `--budget 0.6` where the baselines used 1.0, so `run.py`'s reserve of twice the budget fit one worker per stage under its cap; no `27b94e6` run had cost more than $0.37, so the lower cap ended no run. Command: `python3 bench/run.py --tasks <the class's task ids> --configs plugin-next --runs 5 --budget 0.6 --max-total <cap> --model sonnet --out bench/results/<name>.jsonl` (then `--model claude-opus-5-5`), one class at a time.
+- The `780ee86` run (2026-11-22 UTC): `plugin-next`, the plugin exported from `780ee86`, which differs from 0.1.0 in its license, a state-file fix and the architect's description, on every task, `--runs 5`, so 10 per class. Sonnet session: 80 runs, $6.01, under an $8 cap. Opus 5.5 session: 80 runs, $9.55, under a $12 cap. The total is $15.56 at list price. The baselines weren't rerun: they are the `27b94e6` run's rows, on the same version, machine and task revisions. These runs used `--budget 0.6` where the baselines used 1.0, so `run.py`'s reserve of twice the budget fit one worker per stage under its cap; no `27b94e6` run had cost more than $0.37, so the lower cap ended no run. Command: `python3 bench/run.py --tasks <the class's task ids> --configs plugin-next --runs 5 --budget 0.6 --max-total <cap> --model sonnet --out bench/results/<name>.jsonl` (then `--model claude-opus-5-5`), one class at a time.
 - The baseline run (2026-11-23): `haiku`, `haiku-high`, `opus`, `opus-high`, `fable`, `fable-high`, `opusplan` and the advisor on an Opus 5.5 session (`--model claude-opus-5-5`), every task, 10 runs per class, `--budget 1.0`. That's 640 runs, $94.83, plus $0.22 for one run each of the advisor and `opusplan` first to check this account can run them, so $95.06 under a $100 cap. The dearest run cost $0.54 (`fable-high` on `cross-currency`), and none errored. It ran in rounds (`--first-run`), so a cap stop could never leave a cell uneven: one round of every task under all eight, then four more for seven of them, then `fable-high`'s four. `opusplan` sets its own session model, so its rows join both session tables on the page; headless, it never enters plan mode and runs Sonnet throughout.

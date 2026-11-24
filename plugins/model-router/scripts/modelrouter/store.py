@@ -212,7 +212,7 @@ if os.name == "nt":
 else:
     import fcntl
 
-    # Anything else, such as ENOLCK on a mount without flock, raises so the hook fails open.
+    # Anything else, such as ENOLCK on a mount without flock, means this filesystem can't lock, so `locked` writes without one.
     _HELD = BlockingIOError
 
     def _try_lock(handle: int) -> None:

@@ -28,11 +28,11 @@ Every page about Model Router, the Claude Code plugin that routes each agent to 
 </tr>
 <tr>
 <td width="50%" valign="top"><a href="research/caller-levels-and-redo.md"><b>Redo research</b></a><br>Who names a call's level, and what marks a redo?</td>
-<td width="50%" valign="top"><a href="PERFORMANCE.md"><b>Performance</b></a><br>What does the router cost in time and disk?</td>
+<td width="50%" valign="top"><a href="research/architecture-review.md"><b>Architecture review</b></a><br>Which design choices held up against the docs, and what changed?</td>
 </tr>
 <tr>
+<td width="50%" valign="top"><a href="PERFORMANCE.md"><b>Performance</b></a><br>What does the router cost in time and disk?</td>
 <td width="50%" valign="top"><a href="SECURITY.md"><b>Security</b></a><br>What reaches the network, and who can steer it?</td>
-<td width="50%"></td>
 </tr>
 <tr><th colspan="2" align="left">Evidence<br><sub>What was measured and tested, and what is still open.</sub></th></tr>
 <tr>
