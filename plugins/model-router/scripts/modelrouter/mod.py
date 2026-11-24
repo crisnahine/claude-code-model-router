@@ -49,10 +49,14 @@ def _sweep() -> None:
             pass
 
 
-def start(hook_input: dict) -> None:
+OK = {"ok": True}  # the launcher answers nothing when no Python runs, so this tells the mod the runtime ran
+
+
+def start(hook_input: dict) -> dict:
     """The session started: keep the settings layers the mod read, and clear old marks."""
     allowlist.remember(hook_input.get("session_id"), hook_input.get("settings"))
     _sweep()
+    return OK
 
 
 def spawn(hook_input: dict) -> dict | None:
@@ -79,10 +83,11 @@ def _newest(snap: settings.Snapshot, decision: dict) -> str | None:
     return snap.registry.newest_id(decision["model"], snap.options.provider, snap.allowed, snap.health)
 
 
-def usage(hook_input: dict) -> None:
+def usage(hook_input: dict) -> dict:
     """One ledger row per turn, its cost the sum of its requests, each priced on its own."""
     found = hook_input.get("usage")
     if isinstance(found, dict) and isinstance(found.get("model"), str):
         stage = hook_input.get("subagent_type")
         ledger.usage(settings.Snapshot(hook_input).registry, hook_input.get("session_id"), hook_input.get("agent_id"),
                      found, hook_input.get("requests"), stage if isinstance(stage, str) and stage else None)
+    return OK

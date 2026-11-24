@@ -27,8 +27,8 @@ function optionEnv(options: PluginOptions): Record<string, string> {
   return env
 }
 
-// The runtime's answer, null for none, or undefined when the round trip failed. Never throws: a hook that
-// already called next(e) must not reach its .catch and call it again.
+// The runtime's answer (mod-start and mod-usage answer { ok: true }), null for none, or undefined when the round
+// trip failed. Never throws: a hook that already called next(e) must not reach its .catch and call it again.
 async function ask($: EngineInterface, options: Record<string, string>, command: string, payload: object): Promise<Pick | undefined> {
   try {
     const env = { ...(await $.process.hookEnv()), ...options }
@@ -44,13 +44,16 @@ async function ask($: EngineInterface, options: Record<string, string>, command:
   }
 }
 
-// Tells the fallback's PreToolUse hook, which runs after this one, that agent.spawn routes this call. Never throws.
-async function mark($: EngineInterface, toolUseId: string): Promise<void> {
+// Tells the fallback's PreToolUse hook, which runs after this one, that agent.spawn routes this call. Whether the
+// mark was written. Never throws.
+async function mark($: EngineInterface, toolUseId: string): Promise<boolean> {
   try {
     const data = (await $.process.hookEnv()).CLAUDE_PLUGIN_DATA
-    if (data) await $.fs.write(`${data}/mod-calls/${toolUseId}`, '')
+    if (!data) return false
+    await $.fs.write(`${data}/mod-calls/${toolUseId}`, '')
+    return true
   } catch {
-    // unmarked: the fallback routes the call too
+    return false
   }
 }
 
@@ -67,24 +70,35 @@ function effortCaps(raw: unknown): unknown {
       ? [[id, { maxEffortLevel: (entry as Record<string, unknown>).maxEffortLevel }]] : []))
 }
 
-// Only these keys cross to the runtime. A source whose read fails or is still pending after
-// two seconds is left out, and the runtime fills it from the files. Never throws, like ask.
-async function modelSettings($: EngineInterface): Promise<Record<string, Record<string, unknown>> | undefined> {
+type Layers = Record<string, Record<string, unknown>>
+// Each source's newest answer, the reads not answered yet, and the sources that once missed SETTINGS_MS.
+type Reads = { latest: Layers; out: Set<SettingsSource>; slow: Set<SettingsSource> }
+
+// Only these keys cross to the runtime. A source whose read fails is left out, and the runtime keeps what it last
+// sent or reads its file. A source still out after two seconds is read without waiting from then on, so its answer
+// goes with a later command. Never throws, like ask.
+async function modelSettings($: EngineInterface, reads: Reads): Promise<Layers | undefined> {
   try {
-    const layers: Record<string, Record<string, unknown>> = {}
-    const reads = SOURCES.map(async source => {
-      try {
-        const read = (await $.settings.read({ source })) as Record<string, unknown>
-        layers[source] = Object.fromEntries(KEYS.filter(key => key in read)
-          .map(key => [key, key === 'modelSettings' ? effortCaps(read[key]) : read[key]]))
-      } catch {
-        // left out
-      }
+    const waited = SOURCES.filter(source => !reads.out.has(source)).map(source => {
+      reads.out.add(source)
+      const read = (async () => {
+        try {
+          const found = (await $.settings.read({ source })) as Record<string, unknown>
+          reads.latest[source] = Object.fromEntries(KEYS.filter(key => key in found)
+            .map(key => [key, key === 'modelSettings' ? effortCaps(found[key]) : found[key]]))
+        } catch {
+          delete reads.latest[source]
+        } finally {
+          reads.out.delete(source)
+        }
+      })()
+      return reads.slow.has(source) ? undefined : read
     })
     let timer: { cancel: () => void } | undefined
-    await Promise.race([Promise.all(reads), new Promise<void>(resolve => { timer = $.clock.after(SETTINGS_MS, resolve) })])
+    await Promise.race([Promise.all(waited), new Promise<void>(resolve => { timer = $.clock.after(SETTINGS_MS, resolve) })])
     timer?.cancel()
-    return Object.keys(layers).length ? { ...layers } : undefined
+    for (const source of reads.out) reads.slow.add(source)
+    return Object.keys(reads.latest).length ? { ...reads.latest } : undefined
   } catch {
     return undefined
   }
@@ -97,8 +111,17 @@ function remember<V>(map: Map<string, V>, key: string, value: V): void {
 
 export const register: Register = (on, options) => {
   const opts = optionEnv(options)
-  // Whether the runtime's last round trip worked. Until one has, and after one fails, the fallback routes.
+  // Whether the runtime answers. Only an answer turns it on, since the launcher answers nothing when no Python runs,
+  // and a failed round trip turns it off. While it's off, the fallback routes each Agent call.
   let answering = false
+  const heard = (reply: Pick | undefined): Pick | undefined => {
+    if (reply === undefined) answering = false
+    else if (reply) answering = true
+    return reply
+  }
+  // Each Agent call this mod heard, by tool_use_id: whether it marked the call or left it to the fallback.
+  const marked = new Map<string, boolean>()
+  const reads: Reads = { latest: {}, out: new Set(), slow: new Set() }
   const agentEffort = new Map<string, Want>()
   // The type of each workflow agent this mod started, so its usage can name it: it has no Agent result.
   const agentType = new Map<string, string>()
@@ -114,23 +137,27 @@ export const register: Register = (on, options) => {
   const turnRequests = new Map<string, TurnUsage[]>()
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
-    if (e.tool_use_id && typeof e.effort === 'string') remember(callerEffort, e.tool_use_id, e.effort)
-    if (answering && typeof e.tool_use_id === 'string' && PLAIN_ID.test(e.tool_use_id)) await mark($, e.tool_use_id)
+    const id = typeof e.tool_use_id === 'string' ? e.tool_use_id : ''
+    if (id && typeof e.effort === 'string') remember(callerEffort, id, e.effort)
+    if (id) remember(marked, id, answering && PLAIN_ID.test(id) && await mark($, id))
     return next(e)
   }).catch(($, e, next) => next(e))
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    const layers = await modelSettings($)
-    answering = (await ask($, opts, 'mod-start', { ...(layers ? { settings: layers } : {}) })) !== undefined
+    const layers = await modelSettings($, reads)
+    heard(await ask($, opts, 'mod-start', { ...(layers ? { settings: layers } : {}) }))
     return started
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     if (e.fork || e.resume) return next(e)
+    const unmarked = marked.get(e.tool_use_id) === false
+    marked.delete(e.tool_use_id)
+    if (unmarked) return next(e) // the fallback routed it
     const effort = callerEffort.get(e.tool_use_id)
-    const layers = await modelSettings($)
-    const pick = await ask($, opts, 'mod-spawn', {
+    const layers = await modelSettings($, reads)
+    const pick = heard(await ask($, opts, 'mod-spawn', {
       ...(layers ? { settings: layers } : {}),
       parent_agent_id: e.parentAgentId,
       parent_model: e.parentModel,
@@ -145,8 +172,7 @@ export const register: Register = (on, options) => {
         ...(e.model ? { model: e.model } : {}),
         ...(effort ? { effort } : {}),
       },
-    })
-    answering = pick !== undefined
+    }))
     const mine: Want | null = pick?.effort ? { effort: pick.effort, raiseOnly: !!e.workflow } : null
     const efforts = inFlight.get(e.prompt) ?? []
     efforts.push(mine)
@@ -196,9 +222,9 @@ export const register: Register = (on, options) => {
     turnRequests.delete(e.turnId)
     const type = e.agentId !== undefined ? agentType.get(e.agentId) : undefined
     if (e.usage) {
-      answering = (await ask($, opts, 'mod-usage', {
+      heard(await ask($, opts, 'mod-usage', {
         agent_id: e.agentId, ...(type ? { subagent_type: type } : {}), usage: e.usage, ...(requests ? { requests } : {}),
-      })) !== undefined
+      }))
     }
     return done
   }).catch(($, e, next) => next(e))

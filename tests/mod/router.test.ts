@@ -9,6 +9,8 @@ type Reply = { exitCode?: number; stdout: string }
 type Call = { command: string; argv: readonly string[]; stdin: any; env: Record<string, string> }
 
 const same = <T>(e: T): T => e
+// What the runtime answers to the commands that set nothing (scripts/modelrouter/mod.py OK).
+const RAN: Reply = { stdout: JSON.stringify({ ok: true }) }
 
 function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}, settings: Record<string, object | Error> = {}) {
   const hooks: Record<string, Hook> = {}
@@ -44,7 +46,7 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}, 
       run: async (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) => {
         const command = argv[2] ?? ''
         calls.push({ command, argv, stdin: JSON.parse(init.stdin), env: init.env })
-        const reply = replies[command] ?? { stdout: '' }
+        const reply = replies[command] ?? (command === 'mod-spawn' ? { stdout: '' } : RAN)
         return { exitCode: reply.exitCode ?? 0, stdout: reply.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
       },
     },
@@ -107,7 +109,8 @@ test('mod-start and mod-spawn carry the allowlist and effort cap keys of each se
 })
 
 test('a settings read that fails leaves that source out and sends the others', async () => {
-  const mod = load({ 'mod-spawn': PICK }, {}, { policy: new Error('denied'), user: { availableModels: ['haiku'] } })
+  const settings: Record<string, object | Error> = { policy: new Error('denied'), user: { availableModels: ['haiku'] } }
+  const mod = load({ 'mod-spawn': PICK }, {}, settings)
   await mod.sessionStart({ source: 'startup' })
   await mod.spawn(spawnEvent())
   assert.equal(mod.calls.length, 2)
@@ -115,6 +118,9 @@ test('a settings read that fails leaves that source out and sends the others', a
     assert.deepEqual(Object.keys(call.stdin.settings).sort(), ['flag', 'local', 'project', 'user'])
     assert.deepEqual(call.stdin.settings.user, { availableModels: ['haiku'] })
   }
+  settings.user = new Error('gone') // one that answered before is left out too
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu2' }))
+  assert.deepEqual(Object.keys(mod.calls[2]!.stdin.settings).sort(), ['flag', 'local', 'project'])
 })
 
 test('settings reads that all fail send no settings', async () => {
@@ -136,6 +142,30 @@ test('a settings read that hangs is left out after two seconds', async () => {
     mock.timers.tick(2000)
     await started
     assert.deepEqual(Object.keys(mod.calls[0]!.stdin.settings).sort(), ['flag', 'local', 'project', 'user'])
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("a source still out after two seconds isn't waited on again, and its late answer goes with a later command", async () => {
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    const mod = load({ 'mod-spawn': PICK })
+    const answers: ((layer: object) => void)[] = []
+    mod.$.settings.read = async ({ source }: { source: string }) =>
+      source === 'policy' ? new Promise(resolve => { answers.push(resolve) }) : {}
+    const started = mod.sessionStart({ source: 'startup' })
+    await new Promise(resolve => setImmediate(resolve))
+    mock.timers.tick(2000)
+    await started
+    const unwaited = (e: object) => Promise.race([mod.spawn(e), new Promise(resolve => setImmediate(() => resolve('waited')))])
+    assert.notEqual(await unwaited(spawnEvent({ tool_use_id: 'tu1' })), 'waited')
+    assert.equal(answers.length, 1) // not read again while its first read is out
+    answers[0]!({ deniedModels: ['opus'] })
+    await new Promise(resolve => setImmediate(resolve))
+    assert.notEqual(await unwaited(spawnEvent({ tool_use_id: 'tu2' })), 'waited')
+    assert.deepEqual(mod.calls.map(c => c.stdin.settings.policy), [undefined, undefined, { deniedModels: ['opus'] }])
+    assert.equal(answers.length, 2) // read again, without waiting, once it answered
   } finally {
     mock.timers.reset()
   }
@@ -278,11 +308,12 @@ test("two spawns of one brief in flight together never trade efforts, whichever 
 
 test('an effort on the Agent call reaches mod-spawn', async () => {
   const mod = load()
+  await mod.sessionStart({ source: 'startup' })
   const call = { tool: 'Agent', tool_use_id: 'tu1', effort: 'high', prompt: 'p' }
   assert.equal(await mod.toolCall(call), call)
   assert.deepEqual(mod.matchers['tool.call'], { tool: 'Agent' })
   await mod.spawn(spawnEvent())
-  assert.equal(mod.calls[0]!.stdin.tool_input.effort, 'high')
+  assert.equal(mod.calls.find(c => c.command === 'mod-spawn')!.stdin.tool_input.effort, 'high')
 })
 
 test("a main-loop turn's start asks the runtime nothing, and its effort is left alone", async () => {
@@ -316,6 +347,32 @@ test('an Agent call is marked for the fallback only while the runtime answers', 
   assert.deepEqual(mod.writes.map(([path]) => path), ['/tmp/x/mod-calls/toolu_1', '/tmp/x/mod-calls/toolu_4'])
 })
 
+test('with no Python the launcher answers nothing, so no call is marked', async () => {
+  const none = { stdout: '' }
+  const mod = load({ 'mod-start': none, 'mod-usage': none, 'mod-spawn': none })
+  await mod.sessionStart({ source: 'startup' })
+  await mod.toolCall(agentCall('toolu_1'))
+  await mod.complete(completeEvent({ usage: payloads['mod-usage'].usage }))
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu9' }))
+  await mod.toolCall(agentCall('toolu_2'))
+  assert.deepEqual(mod.writes, [])
+})
+
+test("a call the mod left unmarked is the fallback's alone, so its spawn asks the runtime nothing", async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  await mod.toolCall(agentCall('tu1')) // before any round trip: the fallback routes it
+  const e = spawnEvent({ tool_use_id: 'tu1' })
+  let seen: unknown
+  await mod.spawn(e, (x: unknown) => { seen = x; return { model: 'm', agentId: 'a1' } })
+  assert.equal(seen, e)
+  assert.equal(mod.calls.length, 0)
+  await mod.sessionStart({ source: 'startup' })
+  await mod.toolCall(agentCall('tu2'))
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu2' }))
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu3' })) // a spawn no Agent call this mod heard started
+  assert.deepEqual(mod.calls.map(c => [c.command, c.stdin.tool_use_id]), [['mod-start', undefined], ['mod-spawn', 'tu2'], ['mod-spawn', 'tu3']])
+})
+
 test('only a plain call id is marked, and a failing write still passes the call on once', async () => {
   const mod = load()
   await mod.sessionStart({ source: 'startup' })
@@ -329,6 +386,10 @@ test('only a plain call id is marked, and a failing write still passes the call 
   const result = await Promise.resolve(mod.hooks['tool.call']!(mod.$, e, next)).catch(() => mod.catches['tool.call']!(mod.$, e, next))
   assert.equal(result, e)
   assert.equal(runs, 1)
+  const asked = mod.calls.length
+  await mod.spawn(spawnEvent({ tool_use_id: 'toolu_5' }))
+  await mod.spawn(spawnEvent({ tool_use_id: '../x' }))
+  assert.equal(mod.calls.length, asked) // both unmarked, so the fallback routed them
 })
 
 test("a workflow agent's effort is raised to the pick, never lowered", async () => {

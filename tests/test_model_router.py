@@ -2774,8 +2774,8 @@ class Mod(Sandbox):
         self.assertEqual(self.ledger(), [])
 
     def test_only_a_plain_tool_use_id_is_looked_up(self):
+        self.mark("toolu_1")  # with the marks folder there, "../x" resolves to the file below
         outside = self.data / "x"
-        outside.parent.mkdir(parents=True, exist_ok=True)
         outside.write_text("")
         for bad in ("../x", "a/b", "..", "", None, 5, "x" * 300):
             self.assertFalse(modpath.routes(bad), bad)
@@ -3248,6 +3248,12 @@ class ModPayloads(Sandbox):
 
     def test_each_command_has_a_handler(self):
         self.assertEqual(set(self.payloads), {name for name in hooks.HANDLERS if name.startswith("mod-")})
+
+    def test_start_and_usage_answer_that_the_runtime_ran(self):
+        # The launcher answers nothing when no Python runs, so the mod marks calls only after an answer.
+        self.assertEqual(modpath.start(self.payloads["mod-start"]), {"ok": True})
+        self.assertEqual(modpath.usage(self.payloads["mod-usage"]), {"ok": True})
+        self.assertEqual(modpath.usage({"session_id": "s1"}), {"ok": True})
 
     def test_start_stores_the_settings_layers(self):
         modpath.start(self.payloads["mod-start"])

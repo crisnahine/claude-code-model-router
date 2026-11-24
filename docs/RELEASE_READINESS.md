@@ -59,7 +59,7 @@ None.
 
 ### Incomplete or not verified enough (PARTIAL)
 
-- No live run: Desktop, VS Code, JetBrains and the Agent SDK (S3.7); an API-key login, which needs a key (S3.9); Bedrock, Vertex and Foundry (S3.10); `allowManagedHooksOnly` (S3.13); Linux and Windows installs (S6.1); undocumented binary behaviour beyond macOS (S5.6).
-- Edge cases without a test or with a known gap: a short brief, or a language outside the profile's list (S12.10); on the mod path, a spawn another plugin's mod moves to another family counts as a substitution (S12.14); the upstream workflow, whose scheduled runs on `main` passed but have not yet flagged a real change (S6.16).
+- No live run: Desktop, VS Code, JetBrains and the Agent SDK (S3.7); an API-key login, which needs a key (S3.9); Bedrock, Vertex and Foundry (S3.10); `allowManagedHooksOnly` (S3.13); Linux and Windows installs (S6.1); undocumented binary behaviour beyond macOS (S5.6); the per-call mark that decides which path routes an `Agent` call (S2.7).
+- Edge cases without a test or with a known gap: a short brief, or a language outside the profile's list (S12.10); on the mod path, a spawn another plugin's mod moves to another family counts as a substitution (S12.14); the upstream workflow, whose scheduled runs on `main` passed but have not yet flagged a real change (S6.16); a release that changes a mod field, since only a pinned copy of the types is checked (S12.26).
 - Not measured: fan-out, workflow, team and redo shapes, cache temperature and `priority` (S4.13).
 - Design and process: the cap denial (S2.25); the mod's in-flight effort match (S5.2, S13.2); an inline skill's effort is left to the skill, `ultrathink` or `/effort` (S3.4); agents with no definition on disk are left alone (S3.6); fast mode in the spend ledger (S10.7).
