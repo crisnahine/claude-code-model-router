@@ -96,7 +96,7 @@ Every outside project, library, benchmark and tool these docs name, with its pri
 | :- | :- | :- |
 | SWE-Bench Pro (Scale AI) | The cost and effort figures quoted from Anthropic's cost guide ([research](research/model-control.md)) | https://labs.scale.com/papers/swe_bench_pro |
 | Percentile bootstrap (Efron, Annals of Statistics 7(1)) | The 95% intervals in [BENCHMARKS.md](BENCHMARKS.md) | https://doi.org/10.1214/aos/1176344552 |
-| `@anthropic-ai/claude-code` on npm | CI's `validate` job ([SECURITY.md](SECURITY.md)) | https://github.com/anthropics/claude-code (the package's homepage in the registry) |
+| `@anthropic-ai/claude-code` on npm | CI's `validate` and `eval` jobs and the daily `newest` job ([SECURITY.md](SECURITY.md)) | https://github.com/anthropics/claude-code (the package's homepage in the registry) |
 | TypeScript `tsc` 6.0.3 and `skipLibCheck` | The mod type check ([TEST_RESULTS.md](TEST_RESULTS.md)) | https://www.typescriptlang.org/tsconfig/#skipLibCheck |
 | `@types/node` 22.20.5 | The mod test's type check | https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node (the package's homepage in the registry) |
 | Node.js test runner and type stripping | The mod tests | https://nodejs.org/api/test.html, https://nodejs.org/api/typescript.html |

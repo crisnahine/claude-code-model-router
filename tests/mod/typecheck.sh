@@ -6,7 +6,8 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-TYPES_COMMIT=1006c2e4f783f016963fb290d3eb4afaa2d448b1
+# TYPES_COMMIT=main checks against the newest published types instead of the pinned ones.
+TYPES_COMMIT=${TYPES_COMMIT:-1006c2e4f783f016963fb290d3eb4afaa2d448b1}
 curl -fsSL -o "$work/claude-code.d.ts" \
   "https://raw.githubusercontent.com/anthropics/claude-code/$TYPES_COMMIT/mods/types/claude-code.d.ts"
 npm install --prefix "$work" --no-save --no-package-lock --no-audit --no-fund typescript@6.0.3 @types/node@22.20.5 >/dev/null

@@ -5,11 +5,40 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "41 15 * * 1"
 
 permissions:
   contents: read
 
 jobs:
+  version:
+    # Installs keep their cached copy until the version string changes.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - name: A plugin change carries a new version
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          manifest=plugins/model-router/.claude-plugin/plugin.json
+          if git diff --quiet "origin/$BASE" HEAD -- plugins/model-router ':(exclude)plugins/model-router/README.md'; then
+            echo "No plugin change."; exit 0
+          fi
+          read_version() { python3 -c "import json,sys;print(json.load(sys.stdin)['version'])"; }
+          version=$(read_version < "$manifest")
+          base=$(git show "origin/$BASE:$manifest" | read_version)
+          if [ "$version" = "$base" ]; then
+            echo "::error file=$manifest::version $version is the same as on $BASE; set a version $BASE has never carried"; exit 1
+          fi
+          if [ -n "$(git tag -l "v$version")" ]; then
+            echo "::error file=$manifest::version $version is already tagged v$version; set a new version"; exit 1
+          fi
+          echo "Version $version is new."
+
   test:
     strategy:
       fail-fast: false
@@ -62,8 +91,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The plugin's floor and the version it was last tested on.
-        claude-code: ["2.1.329", "2.1.330"]
+        # The plugin's floor, the version it was last tested on, and the newest release.
+        claude-code: ["2.1.329", "2.1.331", "latest"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -78,8 +107,8 @@ jobs:
         run: claude plugin validate --strict plugins/model-router
 
   eval:
-    # Runs live models on the API key's bill, so only when started by hand.
-    if: github.event_name == 'workflow_dispatch'
+    # Runs live models on the API key's bill, so only by hand and once a week.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -87,7 +116,8 @@ jobs:
         with:
           node-version: "22"
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code@2.1.330
+        # The weekly run takes the newest release, so a change upstream shows end to end.
+        run: npm install -g @anthropic-ai/claude-code@${{ github.event_name == 'schedule' && 'latest' || '2.1.331' }}
       - name: Routing evals
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

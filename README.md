@@ -64,7 +64,7 @@ In Claude Code:
 
 In a session this opens the plugin in the `/plugin` panel, where you pick a scope (you in every project, everyone in this repository, or you in this repository only). In your shell, `claude plugin install model-router --marketplace crisnahine/claude-code-model-router` installs at user scope unless you pass `--scope project` or `--scope local` ([install docs](https://code.claude.com/docs/en/plugins/install.md#add-a-marketplace-and-install-in-one-command)).
 
-Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. Without Python its hooks do nothing and its skills say why.
+Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. Without Python its hooks do nothing and its skills say why. Claude Code 2.1.271 to 2.1.322 does not read the `engines` floor and loads the plugin anyway, so update Claude Code first.
 
 Nothing has to be set: the six options in `/config` under the plugin start at their defaults ([options](docs/GUIDE.md#configuration)), and Claude model routing is on from the first session. To try it from a clone, run `claude --plugin-dir ./plugins/model-router`.
 
