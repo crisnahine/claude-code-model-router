@@ -1,0 +1,14 @@
+{
+  "liability_cap_usd": 1423200,
+  "termination_notice_days": {
+    "customer": 90,
+    "provider": 90
+  },
+  "governing_law": "New York",
+  "renewal": {
+    "automatic": true,
+    "renewal_term_months": 24,
+    "non_renewal_notice_days": 60
+  },
+  "appliance_risk_at_site": "customer"
+}

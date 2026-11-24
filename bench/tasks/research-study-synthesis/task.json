@@ -1,0 +1,5 @@
+{
+  "class": "research",
+  "revision": 1,
+  "brief": "Synthesise the evidence in studies/ on whether the Brightline program improves grade 3 reading comprehension, following PROTOCOL.md; the journals' notices are in notices.md. Write SYNTHESIS.json in the repository root with exactly these keys: \"supporting\" (a list of the ids, such as \"S01\", of the included studies that support the claim), \"excluded\" (an object mapping the id of each excluded study to its reason, one of \"retracted\", \"different_outcome\", \"different_population\", \"no_comparison_group\") and \"direction\" (one of \"benefit\", \"harm\", \"no_clear_effect\")."
+}

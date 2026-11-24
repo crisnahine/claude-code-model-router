@@ -1,0 +1,14 @@
+{
+  "supporting": [
+    "S01",
+    "S02",
+    "S06",
+    "S08",
+    "S10"
+  ],
+  "excluded": {
+    "S04": "retracted",
+    "S05": "different_outcome"
+  },
+  "direction": "no_clear_effect"
+}

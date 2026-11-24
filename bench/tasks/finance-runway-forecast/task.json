@@ -1,0 +1,5 @@
+{
+  "class": "analysis",
+  "revision": 1,
+  "brief": "How long will the company's cash last? Forecast it by the method in FORECAST.md, using actuals.csv, hiring-plan.csv and NOTES.md. Write RUNWAY.json in the repository root with exactly two keys: \"months_of_runway\" (a number, to two decimal places) and \"cash_out_month\" (the month cash runs out, as \"YYYY-MM\")."
+}

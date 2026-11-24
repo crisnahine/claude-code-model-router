@@ -29,23 +29,22 @@ Counts come from each job's log (`gh run view --job <id> --log`), times from its
 
 ## Local
 
-Run 2026-11-25 on macOS (Darwin 27.2.0), on the working tree at `0c700b9` with the docs edits made alongside these results not yet committed.
+Run 2026-11-25 on macOS (Darwin 27.2.0), on `d6f9d0a` with `v02-bench` (`f19bf85`) merged, before that merge was committed.
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `cd tests && python3 -m unittest` with every `test_*` module but `test_bench` (`python3` is the system `/usr/bin/python3` here) | 476 tests, FAILED (failures=1, skipped=1): `DocsAssets.test_the_committed_assets_match_the_script`, the docs-assets gate below |
-| Unit tests, Python 3.13.13 | the same with `python3.13` | 476 tests, FAILED (failures=1, skipped=1), the same test |
-| Benchmark harness tests | `python3 -m unittest discover -s tests -p test_bench.py` | 146 tests, counted, not run in this pass |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` (`python3` is the system `/usr/bin/python3` here) | 670 tests, OK (skipped=1), 362 s |
+| Unit tests, Python 3.13.13 | the same with `python3.13` | 670 tests, OK (skipped=1), 268 s |
 | Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 31 of 31 pass |
 | Marketplace, Claude Code 2.1.331 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.331 | `claude plugin validate --strict plugins/model-router` | Validation passed |
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
-| Docs assets | `python3 tools/docs_assets.py --check` | Fails, exit 1, with the docs mid-edit: `docs/assets/badge-version.svg`, `docs/README.md`, `docs/research/caller-levels-and-redo.md`, `docs/PERFORMANCE.md`, `README.md` and `site/index.html` are out of date. `test_docs_assets` runs this check, so the unit gate fails with it until `python3 tools/docs_assets.py` is rerun |
+| Docs assets | `python3 tools/docs_assets.py --check` | Every generated file is current, exit 0 |
 | Benchmarks page | `python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check` | The committed page matches the results |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 | Plugin evals, Claude Code 2.1.331 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | Last run 2026-11-24, on the design before this one and the earlier three cases: 3 of 3 pass with the plugin and none without, mean delta 0.78. Not run on this tree |
 
-The 622 unit tests are 399 in `tests/test_model_router.py`, 146 in `tests/test_bench.py`, 32 in `tests/test_docs_assets.py`, 13 in `tests/test_upstream_check.py`, 11 in `tests/test_project_trust.py`, 8 in `tests/test_ci.py`, 5 in `tests/test_store_lock.py`, 3 in `tests/test_traceability.py`, 3 in `tests/test_skill_and_agent_lookup.py` and 2 in `tests/test_session_model_and_teammates.py`, counted with the unittest loader. The one skip is `ModApiTypes.test_router_ts_uses_only_events_and_fields_the_types_declare`: it needs the installed Claude Code's mod types, and none were found here (set `MODEL_ROUTER_MOD_TYPES` to run it).
+The 670 unit tests are 399 in `tests/test_model_router.py`, 194 in `tests/test_bench.py`, 32 in `tests/test_docs_assets.py`, 13 in `tests/test_upstream_check.py`, 11 in `tests/test_project_trust.py`, 8 in `tests/test_ci.py`, 5 in `tests/test_store_lock.py`, 3 in `tests/test_traceability.py`, 3 in `tests/test_skill_and_agent_lookup.py` and 2 in `tests/test_session_model_and_teammates.py`, counted with the unittest loader. The one skip is `ModApiTypes.test_router_ts_uses_only_events_and_fields_the_types_declare`: it needs the installed Claude Code's mod types, and none were found here (set `MODEL_ROUTER_MOD_TYPES` to run it).
 
 Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live", all on the design before this one), the plugin evals and the benchmark.
 

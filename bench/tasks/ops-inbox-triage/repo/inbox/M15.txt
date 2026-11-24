@@ -1,0 +1,5 @@
+From: Raj Patel <raj@copperleaf.co>
+Date: 2026-11-23 16:00 UTC
+Subject: Scheduled reports stopped sending
+
+Our scheduled reports have not been sent since Friday. The schedules still show as active. There's no other way for us to get these reports to our clients on time, and everything else in the product works.

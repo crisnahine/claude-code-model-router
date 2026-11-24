@@ -1,0 +1,1 @@
+supporting is ['S01', 'S02', 'S06', 'S08', 'S10'], expected

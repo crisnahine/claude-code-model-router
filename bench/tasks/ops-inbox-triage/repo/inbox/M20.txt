@@ -1,0 +1,5 @@
+From: Jo Hollis <jo@hollis-law.com>
+Date: 2026-11-23 18:00 UTC
+Subject: Clause 7 data residency
+
+Clause 7 of your terms says customer data is stored in the EU. Does that cover backups too? We need to confirm this for a client.
