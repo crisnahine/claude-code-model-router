@@ -92,6 +92,11 @@ class ProjectNeedsKeepANamedModelsRung(Sandbox):
                 self.assertEqual(answer["model"], "opus", levels)
                 self.assertGreaterEqual(EFFORTS.index(answer["effort"]), EFFORTS.index("high"), levels)
 
+    def test_a_needs_raise_still_lifts_a_named_model_through_a_floor(self):
+        self.override({"levels": {"standard": {"needs": 3}}, "agents": {"general-purpose": {"level": "standard"}}})
+        answer = modpath.spawn(mod_input(self.project, "general-purpose", parent="sonnet", model="sonnet"))
+        self.assertEqual(answer["model"], "opus")
+
 
 class ProjectRuleOnTheSameModel(Sandbox):
     def test_a_project_model_the_call_runs_on_anyway_changes_nothing(self):
@@ -132,21 +137,60 @@ class NestedRedo(Sandbox):
                           "tool_response": {"resolvedModel": "claude-sonnet-5-5", "status": "completed"}})
         self.assertEqual(self.spawn("Redo: parser tests", "toolu_2")["model"], "opus")
 
-    def test_a_nested_redo_naming_the_same_model_and_effort_still_climbs(self):
+    def test_a_nested_redo_naming_the_same_model_climbs_unless_it_names_more_than_its_levels_effort(self):
         self.spawn("Parser tests", "toolu_1")
         hooks.post_agent({"session_id": "s1", "agent_id": "sub1", "cwd": str(self.project), "tool_use_id": "toolu_1",
                           "tool_input": {"subagent_type": "general-purpose", "prompt": self.PROMPT,
                                          "description": "Parser tests"},
                           "tool_response": {"resolvedModel": "claude-sonnet-5-5", "status": "completed"}})
-        redo = hooks.HANDLERS["mod-spawn"]({**mod_input(self.project, "general-purpose", self.PROMPT,
-                                                        parent="claude-sonnet-5-5", nested=True, model="sonnet",
-                                                        effort="high", description="Redo: parser tests"),
-                                            "tool_use_id": "toolu_2"})
-        self.assertEqual(redo["model"], "opus")
+        def redo(effort: str):
+            return hooks.HANDLERS["mod-spawn"]({**mod_input(self.project, "general-purpose", self.PROMPT,
+                                                            parent="claude-sonnet-5-5", nested=True, model="sonnet",
+                                                            effort=effort, description="Redo: parser tests"),
+                                                "tool_use_id": f"toolu_{effort}"})
+        self.assertEqual(redo("medium")["model"], "opus")
+        self.assertIsNone(redo("max"))  # the caller picked the effort lever, so it runs as named
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        self.assertIsNone(redo("max"))  # the pin's effort step never lowers it
 
     def test_a_nested_redo_with_nothing_on_record_moves_to_a_stronger_model(self):
         self.assertEqual(self.spawn("Redo: other tests", "toolu_3")["model"], "opus")
         self.assertFalse(self.ledger()[-1]["on_record"])
+
+    def test_a_nested_redo_with_no_stronger_model_still_takes_an_effort_step(self):
+        self.options(max_tier="sonnet")
+        redo = self.spawn("Redo: other tests", "toolu_3")
+        self.assertEqual((redo["model"], redo["effort"]), ("sonnet", "high"))
+
+    def test_a_nested_redo_under_the_force_pin_still_takes_an_effort_step(self):
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+
+        def named(description: str, tid: str):
+            return hooks.HANDLERS["mod-spawn"]({**mod_input(self.project, "general-purpose", self.PROMPT,
+                                                            parent="claude-sonnet-5-5", nested=True, model="sonnet",
+                                                            description=description), "tool_use_id": tid})
+        self.assertIsNone(named("Parser tests", "toolu_1"))
+        hooks.post_agent({"session_id": "s1", "agent_id": "sub1", "cwd": str(self.project), "tool_use_id": "toolu_1",
+                          "tool_input": {"subagent_type": "general-purpose", "prompt": self.PROMPT,
+                                         "description": "Parser tests", "model": "sonnet"},
+                          "tool_response": {"resolvedModel": "claude-sonnet-5-5", "status": "completed"}})
+        for description in ("Redo: parser tests", "Redo: other tests"):  # on record, then nothing on record
+            redo = named(description, "toolu_2")
+            self.assertEqual((self.ledger()[-1]["action"], redo["effort"]), ("rewrite", "high"), description)
+
+
+class ProjectFloorsSayWhyTheyDidNothing(Sandbox):
+    def test_a_project_floor_the_router_cant_apply_is_held_with_its_reason(self):
+        self.override({"agents": {"Plan": {"level": "complex"}}})
+        self.assertIsNone(modpath.spawn(mod_input(self.project, "Plan")))
+        self.assertIn("a project rule raises Plan to complex", self.ledger()[-1]["held"])
+        self.options(max_tier="sonnet")
+        self.override({"agents": {"general-purpose": {"level": "complex"}}})
+        self.assertIsNone(modpath.spawn(mod_input(self.project, "general-purpose", parent="sonnet")))
+        self.assertIn("no stronger than the parent's sonnet", self.ledger()[-1]["held"])
+        self.override({"agents": {"general-purpose": {"level": "lookup"}}})
+        modpath.spawn(mod_input(self.project, "general-purpose", parent="sonnet"))
+        self.assertNotIn("held", self.ledger()[-1])  # it stands above the floor, so the floor holds
 
 
 class WorkflowStagesWriteNoRoute(Sandbox):

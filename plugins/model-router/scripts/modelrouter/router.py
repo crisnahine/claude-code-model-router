@@ -154,7 +154,14 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if target is None:
         # Nothing names a model, so Claude Code's own order applies: the parent's model.
         runs_on = out["was"]
-        if floor and _floor_lifts(reg, rule, floor, level, runs_on, usable):
+        lifts = bool(floor) and _floor_lifts(reg, rule, floor, level, runs_on, usable)
+        if floor and not lifts and not rule.level and (level is None or level < floor):
+            note = f"a project rule raises {agent} to {floor}, " + (
+                f"whose model here is no stronger than the parent's {runs_on}" if runs_on
+                else "and the model the call would run on isn't known")
+            out["held"] = f"{out['held']}; {note}" if out["held"] else note
+            held += f"; {note}"
+        if lifts:
             level, target, source, chosen = floor, ladder.model_for(reg, floor), "rule", True
             why = f"a rule in model-router.json raises this agent to {floor}"
             unseen = runs_on is None and not rule.level and facts.session_effort is None
@@ -169,7 +176,8 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
             out.update(level=level, reason="no model is named for this call, so it runs on "
                        + (f"the parent's model, {runs_on}" if runs_on else "Claude Code's own choice") + held)
             return out
-    elif floor and level < floor:
+    elif floor and (level < floor or reg.stronger(ladder.model_for(reg, floor), target)):
+        # A named model keeps its rung from the ladder without a project's file, which may still raise the floor's model.
         level, target, chosen = floor, ladder.model_for(reg, floor), True
         why += f"; a rule in model-router.json raises it to {floor}"
 
@@ -202,7 +210,8 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
     up = ladder.at_most(reg, ran, _one_step(before))
     gains = free and _above(capped(up, facts.effort_caps.get(ran))[0], before)
     stronger = next((n for n in facts.usable if reg.models[n].trusted and reg.stronger(n, ran)), None)
-    if gains and EFFORTS.index(before) < EFFORTS.index("high"):
+    # A nested run at its parent's effort (`spawn._inherited`) may already have run at the step up.
+    if gains and not done.get("inherited") and EFFORTS.index(before) < EFFORTS.index("high"):
         model, effort, how = ran, up, f"one effort step up on {ran}"
     elif stronger:
         model, effort, how = stronger, ladder.effort(reg, ladder.rung(reg, stronger)), f"the next stronger model, {stronger}"
@@ -220,9 +229,9 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
     effort, floor_note = _session_floor(ladder.at_most(reg, final, effort) if free else None, final, facts)
     effort, capped_note = capped(effort, facts.effort_caps.get(final))
     came = "the run that came back before" if facts.on_record else "the run it would get unmarked"
-    default = "its parent's effort" if done.get("inherited") else "its default effort"
+    at = "its parent's effort" if done.get("inherited") else before or "its default effort"
     out.update(model=final, source="router", level=ladder.rung(reg, final, effort), escalated_from=done_level,
-               reason=f"a redo of {came} ({ran} at {before or default}): {how}"
+               reason=f"a redo of {came} ({ran} at {at}): {how}"
                + ("" if free else ", at the effort the environment sets") + clamp_note + floor_note + capped_note + held)
     if final == out["was"] and not effort:
         return out
@@ -271,11 +280,8 @@ def capped(effort: str | None, cap: str | None) -> tuple[str | None, str]:
 
 
 def _ran_at(reg: Registry, done: dict, level: Level) -> str | None:
-    """The effort the run a redo redoes ran at; one nothing on record set ran at its level's, as far as the router knows,
-    and one a nested call took from its parent (`spawn._inherited`) at an effort the router can't see."""
-    if done.get("effort") in EFFORTS:
-        return done["effort"]
-    return None if done.get("inherited") else ladder.effort(reg, level)
+    """The effort the run a redo redoes ran at; one nothing on record set ran at its level's, as far as the router knows."""
+    return done.get("effort") if done.get("effort") in EFFORTS else ladder.effort(reg, level)
 
 
 def _one_step(effort: str | None) -> str | None:
