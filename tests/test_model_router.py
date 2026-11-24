@@ -4473,6 +4473,20 @@ class Upstream(Sandbox):
                 upstream.refresh(settings.Settings(), force=True)
         self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
 
+    def test_refresh_offline_says_so_in_one_line_and_shows_the_last_check(self):
+        import urllib.error
+        store.save_json(upstream.path(), {"reviewed": {"claude_code_version": "2.1.330"},
+                                          "cache": {"fetched_at": 1, "releases": [{"version": "2.1.331"}]}})
+        offline = urllib.error.URLError("[Errno 8] nodename nor servname provided, or not known")
+        with mock.patch.object(upstream, "http_get", side_effect=offline), \
+                redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(cli.main(["refresh", "--force"]), 1)
+        first, rest = buf.getvalue().split("\n", 1)
+        self.assertEqual(first, "Couldn't reach the Claude Code docs (<urlopen error [Errno 8] nodename nor servname "
+                                "provided, or not known>); showing the last check.")
+        self.assertIn("Last reviewed Claude Code version: 2.1.330", rest)
+        self.assertIn("- 2.1.331", rest)
+
 
 class RefreshBackoff(Sandbox):
     """A failed daily fetch waits before the next try: an hour, doubling to a day."""

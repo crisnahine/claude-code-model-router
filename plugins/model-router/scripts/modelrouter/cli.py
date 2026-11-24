@@ -121,7 +121,13 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "explain":
         print(report.explain(snap, " ".join(args.text), args.agent))
     elif args.cmd == "refresh":
-        print(report.status(upstream.pending(upstream.refresh(options, force=args.force))))
+        try:
+            data = upstream.refresh(options, force=args.force)
+        except Exception as exc:  # noqa: BLE001 - offline or blocked: say so and show what is on disk
+            print(f"Couldn't reach the Claude Code docs ({exc}); showing the last check.")
+            print(report.status(upstream.pending()))
+            return 1
+        print(report.status(upstream.pending(data)))
     elif args.cmd == "status":
         changes = upstream.pending()
         print(json.dumps(changes, indent=2) if args.json else report.status(changes))
