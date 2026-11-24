@@ -284,9 +284,11 @@ def usage_data(days: int, exact: bool = False) -> dict:
         total = round(total, 6)
         for s_row in spend_rows:
             s_row["usd"] = round(s_row["usd"], 6)
+    since = ledger.since(days)
     return {
         "schema": USAGE_SCHEMA,
         "days": days,
+        **({"since": since} if since else {}),
         "agents": sorted(by_agent.values(), key=lambda a: -a["calls"]),
         "models": [by_model[m] for m in sorted(by_model)],
         "model_errors": sum(1 for r in rows if r.get("event") == "model_error"),
@@ -299,7 +301,8 @@ def usage(days: int) -> str:
     spend = data["spend"]
     if not data["agents"] and not spend["rows"]:
         return f"No activity recorded in the last {days} days."
-    lines = [f"Subagent usage, last {days} days", "",
+    since = f" (the ledger starts {data['since'][:10]})" if data.get("since") else ""
+    lines = [f"Subagent usage, last {days} days{since}", "",
              "| Agent | Calls | Model set by router | Levels | Ran on |", "| :- | -: | -: | :- | :- |"]
     for a in data["agents"]:
         levels = ", ".join(f"{level} x{n}" for level, n in a["levels"].items()) or "-"
