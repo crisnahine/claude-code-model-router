@@ -1,4 +1,4 @@
-<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->
+<!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
 <p align="center"><img src="assets/banner-docs.svg" width="880" alt="Documentation: Every page, and the question each one answers"></p>
 
 <p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; Previous: <a href="GUIDE.md">Guide</a> &nbsp;&middot;&nbsp; Next: <a href="ARCHITECTURE.md">Architecture</a></p>
@@ -8,7 +8,7 @@
 
 Every page about Model Router, the Claude Code plugin that routes each agent to the cheapest Claude model and effort that should do the job. New here? Start with the [README](../README.md) and the [questions](FAQ.md).
 
-<!-- Cards, written by tools/docs_assets.py from its PAGES table. -->
+<!-- Cards, written by tools/docs_assets.py from PAGES in tools/docs_pages.py. -->
 <table>
 <tr><th colspan="2" align="left">Start here<br><sub>What it is, and the questions people ask first.</sub></th></tr>
 <tr>
@@ -26,20 +26,24 @@ Every page about Model Router, the Claude Code plugin that routes each agent to 
 </tr>
 <tr>
 <td width="50%" valign="top"><img src="assets/icon-research.svg" width="20" height="20" alt=""> <a href="research/model-control.md"><b>Research</b></a><br>What can a plugin control in Claude Code?</td>
-<td width="50%" valign="top"><img src="assets/icon-performance.svg" width="20" height="20" alt=""> <a href="PERFORMANCE.md"><b>Performance</b></a><br>What does the router cost in time and disk?</td>
+<td width="50%" valign="top"><img src="assets/icon-research-quality.svg" width="20" height="20" alt=""> <a href="research/quality-first-routing.md"><b>Quality research</b></a><br>What can the router save without losing quality?</td>
 </tr>
 <tr>
+<td width="50%" valign="top"><img src="assets/icon-performance.svg" width="20" height="20" alt=""> <a href="PERFORMANCE.md"><b>Performance</b></a><br>What does the router cost in time and disk?</td>
 <td width="50%" valign="top"><img src="assets/icon-security.svg" width="20" height="20" alt=""> <a href="SECURITY.md"><b>Security</b></a><br>What reaches the network, and who can steer it?</td>
-<td width="50%"></td>
 </tr>
 <tr><th colspan="2" align="left">Evidence<br><sub>What was measured and tested, and what is still open.</sub></th></tr>
 <tr>
+<td width="50%" valign="top"><img src="assets/icon-claude-code-docs.svg" width="20" height="20" alt=""> <a href="CLAUDE_CODE_DOCS.md"><b>Built on the docs</b></a><br>Which Claude Code docs does it follow, and where?</td>
 <td width="50%" valign="top"><img src="assets/icon-benchmarks.svg" width="20" height="20" alt=""> <a href="BENCHMARKS.md"><b>Benchmarks</b></a><br>What does a solved task cost, with and without it?</td>
-<td width="50%" valign="top"><img src="assets/icon-test-results.svg" width="20" height="20" alt=""> <a href="TEST_RESULTS.md"><b>Test results</b></a><br>What ran last, and what passed?</td>
 </tr>
 <tr>
+<td width="50%" valign="top"><img src="assets/icon-test-results.svg" width="20" height="20" alt=""> <a href="TEST_RESULTS.md"><b>Test results</b></a><br>What ran last, and what passed?</td>
 <td width="50%" valign="top"><img src="assets/icon-traceability.svg" width="20" height="20" alt=""> <a href="TRACEABILITY.md"><b>Traceability</b></a><br>Where is each requirement, and is it met?</td>
+</tr>
+<tr>
 <td width="50%" valign="top"><img src="assets/icon-release-readiness.svg" width="20" height="20" alt=""> <a href="RELEASE_READINESS.md"><b>Release readiness</b></a><br>Is this release ready, and what is still open?</td>
+<td width="50%"></td>
 </tr>
 <tr><th colspan="2" align="left">The project<br><sub>What comes next, what changed, and how to take part.</sub></th></tr>
 <tr>
@@ -59,15 +63,15 @@ Every page about Model Router, the Claude Code plugin that routes each agent to 
 
 ## Delivery items
 
-Every delivery item the project keeps, where it lives, and whether it exists yet. Checked 2026-11-22.
+Where each delivery item lives, and whether it exists yet. Checked 2026-11-22.
 
 | # | Item | Where | Exists |
 | -: | :- | :- | :- |
 | 1 | Source code and architecture | [ARCHITECTURE.md](ARCHITECTURE.md), [GLOSSARY.md](../GLOSSARY.md) | Yes |
 | 2 | Capabilities and commands | [README.md](../README.md) "Commands", "Configuration", [GUIDE.md](GUIDE.md) | Yes |
-| 3 | Primary-source research | [research/model-control.md](research/model-control.md) | Yes |
+| 3 | Primary-source research | [research/model-control.md](research/model-control.md), [research/quality-first-routing.md](research/quality-first-routing.md) | Yes |
 | 4 | Supported Claude Code versions, surfaces, platforms and providers | [README.md](../README.md) "Compatibility", [GUIDE.md](GUIDE.md) "Compatibility", [ARCHITECTURE.md](ARCHITECTURE.md) "Verified live" | Yes |
-| 5 | Install and usage | [README.md](../README.md) "Install" | Yes |
+| 5 | Install and usage | [README.md](../README.md) "Install the Claude Code plugin" | Yes |
 | 6 | Automated test results | [TEST_RESULTS.md](TEST_RESULTS.md) | Yes |
 | 7 | Security assessment | [SECURITY.md](SECURITY.md) | Yes |
 | 8 | Reproducible cost and quality results, with raw data | [BENCHMARKS.md](BENCHMARKS.md), raw data under [bench/results/](../bench/results/) | Yes |
@@ -78,15 +82,11 @@ Every delivery item the project keeps, where it lives, and whether it exists yet
 | 13 | Comparison against the baselines | [BENCHMARKS.md](BENCHMARKS.md) | Yes |
 | 14 | Release checklist and changelog | [RELEASING.md](../RELEASING.md), [CHANGELOG.md](../CHANGELOG.md) | Yes |
 
-Also kept:
-
-- [TRACEABILITY.md](TRACEABILITY.md): one row per requirement with its implementation, source, verification, evidence and status. `python3 tools/traceability.py` counts it.
-- [CONTRIBUTING.md](../CONTRIBUTING.md): gates, commit rules and where to work.
-- [compat/baseline.json](../compat/baseline.json): the Claude Code version, docs index, model aliases and model status last reviewed.
+Also kept: [TRACEABILITY.md](TRACEABILITY.md) (one row per requirement, counted by `python3 tools/traceability.py`), [CONTRIBUTING.md](../CONTRIBUTING.md) (gates, commit rules and where to work) and [compat/baseline.json](../compat/baseline.json) (the Claude Code version, docs index, model aliases and model status last reviewed).
 
 ## Outside tools and sources
 
-Every outside project, library, benchmark and tool these docs name, with its primary source. Checked 2026-11-22: each page loaded, or, for npm packages, `npm view` returned the version. Claude Code and Claude API claims cite code.claude.com and platform.claude.com where they are made.
+Every outside project, library, benchmark and tool these docs name, with its primary source. Checked 2026-11-22: each page loaded, or, for npm packages, `npm view` returned the version. Claude Code and Claude API claims cite code.claude.com and platform.claude.com where made.
 
 | Name | Used for | Primary source |
 | :- | :- | :- |

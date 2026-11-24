@@ -1,28 +1,31 @@
 # Model Router
 
-> Model Router (`model-router`) is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts (subagents, agent-team teammates and workflow stages), choosing the cheapest model that should do the job and running a call one level higher when its work comes back for a redo. Apache-2.0 license. Needs Claude Code 2.1.292 or later and Python 3.9 or later.
+> Model Router (`model-router`) is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts (subagents, agent-team teammates and workflow stages), choosing the cheapest model that should do the job and running a call one level higher when its work comes back for a redo. It picks among Claude models only (Haiku, Sonnet, Opus, Fable). It isn't a proxy to non-Claude models. An independent project by Cris Nahine (https://github.com/crisnahine), not made or endorsed by Anthropic. Apache-2.0 license. Needs Claude Code 2.1.329 or later and Python 3.9 or later. Site: https://crisnahine.github.io/claude-code-model-router/
 
 Facts, each with its source:
 
-- The ladder: lookup runs on Haiku at low effort, standard on Sonnet at medium, complex on Sonnet at high, hardest on Opus at high, frontier on Fable at high. Source: plugins/model-router/config/models.json.
-- Redo escalation: the same call issued again in the same request after its result came back runs one level higher. At least 6 votes that are also at least 30% of a level's calls raise that level. Source: docs/ARCHITECTURE.md.
+- The ladder: lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh, frontier on Fable at high. Source: plugins/model-router/config/models.json.
+- Redo escalation: the same call issued again in the same request after its result came back runs one level higher. Workflow stages are never redone. At least 6 votes that are also at least 30% of a level's calls raise that level. Source: docs/ARCHITECTURE.md and docs/GUIDE.md.
 - Who decides the model, strongest first: CLAUDE_CODE_SUBAGENT_MODEL_FORCE, a model named on the call, a per-agent rule in model-router.json, the agent's own model field, CLAUDE_CODE_SUBAGENT_MODEL, then the router's pick. Source: docs/ARCHITECTURE.md.
-- Measured on the routing code at commit 780ee86, 10 runs per task class and configuration, beside every baseline. On an Opus 5.5 session the router cost $0.119 per solved task against $0.152 for Claude Code's defaults (21% less), 80 of 80 runs solved each, but more than opusplan ($0.069) and every subagent on Haiku at high effort ($0.075) in all 8 task classes (FAIL against the best baseline). On a Sonnet session it is cheapest only in lookup and costs more per solved task than the best baseline in 7 of 8 classes at the same pass rate (FAIL). Source: docs/BENCHMARKS.md and docs/TRACEABILITY.md row S4.15.
+- Benchmarks: the last run measured the routing code at commit 780ee86, before complex moved to Opus and the verify gate was turned on, so it doesn't price today's defaults. On an Opus 5.5 session the router solved 70 of 70 runs, as many as Claude Code's defaults, for $0.121 per solved task against the defaults' $0.151. It isn't the cheapest setup on these tasks: every subagent on Haiku at high effort also solved 70 of 70, for $0.075. On a Sonnet session the router cost more per solved task than the cheapest other setup in 6 of 8 task classes. Source: docs/BENCHMARKS.md and docs/TRACEABILITY.md row S4.15.
 - Privacy: no prompt, brief, path or code leaves the machine. The only network traffic is a daily fetch from code.claude.com and platform.claude.com, and api.anthropic.com for the account's model list when an Anthropic API key is set. Source: docs/SECURITY.md.
 
 ## Docs
 
-- [README](https://github.com/crisnahine/claude-code-model-router/blob/main/README.md): what it does, install, options, compatibility
-- [Questions](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/FAQ.md): short answers, each in its first sentence
-- [Guide](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/GUIDE.md): commands, every option, who decides the model, limits, providers, update and uninstall
-- [Architecture](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/ARCHITECTURE.md): the two paths, the ladder, the decision and its order of authority
-- [Glossary](https://github.com/crisnahine/claude-code-model-router/blob/main/GLOSSARY.md): the project's own words
-- [Benchmarks](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/BENCHMARKS.md): cost per solved task against Claude Code without the plugin, with raw data
-- [Security](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/SECURITY.md): what reaches the network and who can influence routing
-- [Performance](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/PERFORMANCE.md): hook latency, state size and the context the plugin adds
+- [Site](https://crisnahine.github.io/claude-code-model-router/): the project page
+- [README](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/README.md): what it does, install, options, compatibility
+- [Questions](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/FAQ.md): short answers to common questions
+- [Guide](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/GUIDE.md): commands, every option, who decides the model, workflows and ultracode, limits, providers, update and uninstall
+- [Built on the docs](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/CLAUDE_CODE_DOCS.md): each Claude Code and Claude docs rule the plugin follows, with its doc page and test
+- [Architecture](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/ARCHITECTURE.md): the two paths, the ladder, the decision and its order of authority
+- [Glossary](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/GLOSSARY.md): the project's own words
+- [Benchmarks](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/BENCHMARKS.md): cost per solved task against Claude Code without the plugin, with raw data
+- [Security](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/SECURITY.md): what reaches the network and who can influence routing
+- [Performance](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/PERFORMANCE.md): hook latency, state size and the context the plugin adds
 
 ## Optional
 
-- [Research](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/research/model-control.md): what a plugin can and can't control in Claude Code, from primary sources
-- [Changelog](https://github.com/crisnahine/claude-code-model-router/blob/main/CHANGELOG.md)
-- [Roadmap](https://github.com/crisnahine/claude-code-model-router/blob/main/docs/ROADMAP.md)
+- [Research](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/research/model-control.md): what a plugin can and can't control in Claude Code, from primary sources
+- [Quality research](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/research/quality-first-routing.md): what the router can save without losing quality, from primary sources
+- [Changelog](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/CHANGELOG.md)
+- [Roadmap](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/ROADMAP.md)

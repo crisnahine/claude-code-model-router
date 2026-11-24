@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -58,6 +59,11 @@ jobs:
         run: sh tests/mod/typecheck.sh
 
   validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        # The plugin's floor and the version it was last tested on.
+        claude-code: ["2.1.329", "2.1.330"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -65,8 +71,30 @@ jobs:
         with:
           node-version: "22"
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g @anthropic-ai/claude-code@${{ matrix.claude-code }}
       - name: Validate marketplace
         run: claude plugin validate --strict .
       - name: Validate plugin
         run: claude plugin validate --strict plugins/model-router
+
+  eval:
+    # Runs live models on the API key's bill, so only when started by hand.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.330
+      - name: Routing evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        # No --model: it would override the session model each case sets for itself.
+        run: |
+          claude plugin eval plugins/model-router --trust-plugin --json results.json \
+            --threshold 0.8 --max-cost-usd 2 --no-publish
+      - name: Show the result
+        if: always()
+        run: cat results.json || true

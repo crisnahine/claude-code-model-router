@@ -15,7 +15,7 @@ Run this pipeline yourself as the coordinator. Delegate each stage to the named 
 
 - If the task is a GitHub issue number or URL, read it with `gh issue view` (ask once if `gh` isn't available).
 - Read `CLAUDE.md` and the parts of the codebase the task touches. Use `model-router:scout` if that takes more than a few searches.
-- Decide the size. If the task is trivial (one obvious edit of a few lines in one file), skip steps 1 and 2 and make the edit yourself. Otherwise delegate building, even when the plan is short: running it on the implementer's cheaper model is the point.
+- Decide the size. When a few reads of the code settle the design and the change is a few edits, a single file or sequential steps, skip steps 1 and 2 and make it yourself. Otherwise plan with the architect, and delegate building only when it is more than a few edits or its parts can run in parallel or need their own context.
 - Make sure work happens on a branch, not the default branch. Create one named after the task if needed.
 
 ## 1. Plan
@@ -26,7 +26,7 @@ Show the user the plan summary in a few lines. If the plan changes a public API,
 
 ## 2. Build
 
-Give `model-router:implementer` the plan. When the plan marks steps as independent and they touch different files, run several implementers in parallel, one per step group.
+A plan of a few edits is built directly. For more, give `model-router:implementer` the plan. When the plan marks steps as independent and they touch different files, run several implementers in parallel, one per step group.
 
 ## 3. Verify
 

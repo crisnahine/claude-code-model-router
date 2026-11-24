@@ -6,6 +6,7 @@ Run: python3 tools/docs_assets.py            write everything
 """
 from __future__ import annotations
 
+import dataclasses
 import html
 import json
 import re
@@ -13,9 +14,10 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from docs_pages import PAGES, attr, rel, with_head  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
-ASSETS = ROOT / "docs" / "assets"
-SITE = ROOT / "site"
 REPO = "https://github.com/crisnahine/claude-code-model-router"
 
 SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif'
@@ -39,10 +41,6 @@ LEVELS = ["lookup", "standard", "complex", "hardest", "frontier"]
 
 def esc(s: str) -> str:
     return html.escape(str(s), quote=False)
-
-
-def attr(s: str) -> str:
-    return html.escape(str(s), quote=True)
 
 
 def width_of(text: str, size: float, mono: bool = False, bold: bool = False) -> float:
@@ -242,6 +240,8 @@ ICONS = {
               '<path d="M6.5 7.7v8.6M17.5 9.7c0 4.3-5.5 3.6-9.5 7.2"/>',
     "plug": '<path d="M9 3.5v4.5M15 3.5v4.5"/><path d="M6 8h12v3.5a6 6 0 0 1-12 0z"/><path d="M12 17.5v3"/>',
     "brand": '<circle cx="8" cy="9" r="4.5"/><circle cx="16" cy="9" r="4.5"/><circle cx="12" cy="15.5" r="4.5"/>',
+    "docs": '<path d="M4.5 18.5V5.5a2 2 0 0 1 2-2h13v14h-13a2 2 0 0 0-2 2 2 2 0 0 0 2 2h13"/>'
+            '<path d="M9 10.2l2.2 2.2 4.3-4.6"/>',
     "tag": '<path d="M3.5 12.2V4.5a1 1 0 0 1 1-1h7.7l8.6 8.6a1.4 1.4 0 0 1 0 2l-6.7 6.7a1.4 1.4 0 0 1-2 0z"/>'
            '<circle cx="8.2" cy="8.2" r="1.6"/>',
 }
@@ -254,64 +254,36 @@ def icon_body(name, x=0, y=0, s=1.0, cls="inks", sw=1.8):
 
 # ---------------------------------------------------------------- pages and banners
 
-# (file, slug, title, question, icon, group). Groups: 1 start here, 2 how it works, 3 evidence, 4 the project.
-PAGES = [
-    ("docs/FAQ.md", "faq", "Questions", "What is Model Router, and how does it pick?", "faq", 1),
-    ("docs/GUIDE.md", "guide", "Guide", "How do I configure it for my setup?", "plug", 1),
-    ("docs/README.md", "docs", "Documentation", "Every page, and the question each one answers", "index", 1),
-    ("docs/ARCHITECTURE.md", "architecture", "Architecture", "How do two paths share one router?", "architecture", 2),
-    ("GLOSSARY.md", "glossary", "Glossary", "What do call, level, pick and redo mean?", "glossary", 2),
-    ("docs/research/model-control.md", "research", "Research", "What can a plugin control in Claude Code?",
-     "research", 2),
-    ("docs/PERFORMANCE.md", "performance", "Performance", "What does the router cost in time and disk?",
-     "performance", 2),
-    ("docs/SECURITY.md", "security", "Security", "What reaches the network, and who can steer it?", "security", 2),
-    ("docs/BENCHMARKS.md", "benchmarks", "Benchmarks", "What does a solved task cost, with and without it?",
-     "benchmarks", 3),
-    ("docs/TEST_RESULTS.md", "test-results", "Test results", "What ran last, and what passed?", "tests", 3),
-    ("docs/TRACEABILITY.md", "traceability", "Traceability", "Where is each requirement, and is it met?",
-     "trace", 3),
-    ("docs/RELEASE_READINESS.md", "release-readiness", "Release readiness",
-     "Is this release ready, and what is still open?", "flag", 3),
-    ("docs/ROADMAP.md", "roadmap", "Roadmap", "What gets built next, and why first?", "roadmap", 4),
-    ("CHANGELOG.md", "changelog", "Changelog", "What changed in each release?", "changelog", 4),
-    ("CONTRIBUTING.md", "contributing", "Contributing", "How does a change get merged?", "branch", 4),
-    ("RELEASING.md", "releasing", "Releasing", "How is a release cut, step by step?", "tag", 4),
-    ("docs/assets/BRAND.md", "brand", "Brand", "Which colors, type and motion make a page ours?", "brand", 4),
-]
 # Cards on the index for pages that carry no page head of their own.
 EXTRA_CARDS = [("README.md", "readme", "Model Router", "What does it do, and how do I install it?", "plug", 1)]
 GROUPS = {1: ("Start here", "What it is, and the questions people ask first."),
           2: ("How it works", "The design, its words and sources, and what it costs to run."),
           3: ("Evidence", "What was measured and tested, and what is still open."),
           4: ("The project", "What comes next, what changed, and how to take part.")}
-CARDS_START, CARDS_END = "<!-- Cards, written by tools/docs_assets.py from its PAGES table. -->", "<!-- End of cards. -->"
+CARDS_START, CARDS_END = "<!-- Cards, written by tools/docs_assets.py from PAGES in tools/docs_pages.py. -->", "<!-- End of cards. -->"
 
 
-def cards() -> str:
+def cards(pages: list = PAGES) -> str:
     out = [CARDS_START, "<table>"]
     for group, (name, blurb) in GROUPS.items():
-        pages = [p for p in EXTRA_CARDS + PAGES if p[5] == group and p[0] != "docs/README.md"]
+        shown = [p for p in EXTRA_CARDS + pages if p[5] == group and p[0] != "docs/README.md"]
         out.append(f'<tr><th colspan="2" align="left">{name}<br><sub>{blurb}</sub></th></tr>')
-        for k in range(0, len(pages), 2):
+        for k in range(0, len(shown), 2):
             out.append("<tr>")
-            for path, slug, title, question, _, _ in pages[k:k + 2]:
+            for path, slug, title, question, _, _ in shown[k:k + 2]:
                 out.append(f'<td width="50%" valign="top"><img src="assets/icon-{slug}.svg" width="20" height="20" '
                            f'alt=""> <a href="{rel("docs/README.md", path)}"><b>{title}</b></a><br>{question}</td>')
-            if len(pages[k:k + 2]) == 1:
+            if len(shown[k:k + 2]) == 1:
                 out.append('<td width="50%"></td>')
             out.append("</tr>")
     out += ["</table>", CARDS_END]
     return "\n".join(out)
 
 
-def with_cards(current: str) -> str:
+def with_cards(current: str, pages: list = PAGES) -> str:
     if CARDS_START in current:
-        before, rest = current.split(CARDS_START, 1)
-        return before + cards() + rest.split(CARDS_END, 1)[1]
+        return between(current, (CARDS_START, CARDS_END), cards(pages), "docs/README.md")
     return current
-# Written by bench/analyze.py instead, so this script only checks that page's head.
-GENERATED_ELSEWHERE = {"docs/BENCHMARKS.md"}
 
 
 def banner(slug, title, question, icon, group) -> str:
@@ -349,52 +321,20 @@ def banner(slug, title, question, icon, group) -> str:
     return svg(w, h, f"{title}: Model Router documentation", label, body, css)
 
 
-def banner_assets() -> dict:
+def banner_assets(pages: list = PAGES) -> dict:
     out = {}
-    for _, slug, title, question, icon, group in PAGES:
+    for _, slug, title, question, icon, group in pages:
         out[f"banner-{slug}.svg"] = banner(slug, title, question, icon, group)
-    for _, slug, title, question, icon, group in PAGES + EXTRA_CARDS:
+    for _, slug, title, question, icon, group in [*pages, *EXTRA_CARDS]:
         out[f"icon-{slug}.svg"] = svg(24, 24, title, f"{title} icon", icon_body(icon))
     return out
-
-
-def rel(from_file: str, to_path: str) -> str:
-    import os
-    return os.path.relpath(ROOT / to_path, (ROOT / from_file).parent).replace(os.sep, "/")
-
-
-def page_head(path: str) -> str:
-    i = [p[0] for p in PAGES].index(path)
-    _, slug, title, question, _, _ = PAGES[i]
-    link = lambda p: f'<a href="{rel(path, p[0])}">{p[2]}</a>'  # noqa: E731
-    nav = [f'<a href="{rel(path, "README.md")}">Model Router</a>']
-    if path != "docs/README.md":
-        nav.append(f'<a href="{rel(path, "docs/README.md")}">Documentation</a>')
-    if i > 0:
-        nav.append("Previous: " + link(PAGES[i - 1]))
-    if i + 1 < len(PAGES):
-        nav.append("Next: " + link(PAGES[i + 1]))
-    return ("<!-- Page head, written by tools/docs_assets.py: edit its PAGES table, then run it. -->\n"
-            f'<p align="center"><img src="{rel(path, f"docs/assets/banner-{slug}.svg")}" width="880" '
-            f'alt="{attr(title)}: {attr(question)}"></p>\n\n'
-            f'<p align="center">{" &nbsp;&middot;&nbsp; ".join(nav)}</p>\n'
-            "<!-- End of page head. -->\n\n")
-
-
-HEAD_END = "<!-- End of page head. -->\n\n"
-
-
-def with_head(path: str, current: str) -> str:
-    if current.startswith("<!-- Page head"):
-        current = current.split(HEAD_END, 1)[1]
-    return page_head(path) + current
 
 
 # ---------------------------------------------------------------- badges
 
 BADGES = [
     ("version", "version", None),
-    ("claude-code", "claude code", "2.1.292 or later"),
+    ("claude-code", "claude code", "2.1.329 or later"),
     ("python", "python", "3.9 or later"),
     ("dependencies", "dependencies", "none"),
     ("license", "license", "Apache-2.0"),
@@ -425,16 +365,15 @@ def badge_assets(version: str) -> dict:
 # ---------------------------------------------------------------- the ladder panel (hero, social preview)
 
 LADDER = [  # level, model, effort, needs, subtask
-    ("lookup", "Haiku", "low", 1, "Find, list, summarize, run a command"),
+    ("lookup", "Haiku", "medium", 1, "Find, list, summarize, run a command"),
     ("standard", "Sonnet", "medium", 2, "Implement to a clear spec, write tests"),
-    ("complex", "Sonnet", "high", 2, "Design, review, risky or cross-module change"),
-    ("hardest", "Opus", "high", 3, "Ambiguous, multi-system and risky at once"),
+    ("complex", "Opus", "high", 3, "Fix a bug, design, review, risky change"),
+    ("hardest", "Opus", "xhigh", 3, "Ambiguous, multi-system and risky at once"),
     ("frontier", "Fable", "high", 4, "No known approach: research"),
 ]
 
 
-def check_ladder_against_registry():
-    config = json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8"))
+def check_ladder_against_registry(config: dict):
     by_strength = {m["strength"]: name for name, m in config["models"].items()}
     shipped = [(lv, by_strength[spec["needs"]], spec["effort"], spec["needs"]) for lv, spec in config["levels"].items()]
     mine = [(lv, model.lower(), effort, needs) for lv, model, effort, needs, _ in LADDER]
@@ -519,8 +458,8 @@ def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,),
 HERO_TITLE = "Model Router: every Claude Code agent on the cheapest model that should do the job"
 HERO_LABEL = ("Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and "
               "runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level "
-              "to complex, Sonnet at high effort, and is solved. The ladder runs lookup on Haiku at low, standard on "
-              "Sonnet at medium, complex on Sonnet at high, hardest on Opus at high and frontier on Fable at high.")
+              "to complex, Opus at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on "
+              "Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.")
 
 
 def hero(phone=False) -> str:
@@ -554,10 +493,214 @@ def hero(phone=False) -> str:
     return svg(w, h, HERO_TITLE, HERO_LABEL, "".join(body), css)
 
 
+# ---------------------------------------------------------------- the headline at the top of the README
+
+HEADLINE_EYEBROW = "ATTENTION, CLAUDE CODE USERS"
+HEADLINE = ("Stop paying for", "the wrong model.")
+HEADLINE_SUB = ("A subagent that names no model runs on your session's model, so easy work pays strong-model prices. "
+                "Model Router gives every call the model and effort its own brief needs, and moves a call up a level "
+                "when its work comes back.")
+PROOF_EYEBROW = "BUILT BY THE BOOK"
+PROOFS = [
+    ("Follows Claude's best practices",
+     "Haiku for simple work, as Claude Code's best practices advise, so a strong model does only the work that "
+     "needs it."),
+    ("Modeled on Anthropic's result",
+     "Anthropic found that starting low and re-running failures higher solved about 97% at $0.17 a task, against "
+     "95.3% at $0.29 all at high."),
+    ("Built on the Claude Code docs",
+     "Documented hooks, mods and settings only, checked against the changelog every day. Every hook fails open."),
+    ("Your choices come first",
+     "A model you name, an agent's own model and CLAUDE_CODE_SUBAGENT_MODEL stay, inside your max_tier."),
+]
+HEADLINE_TITLE = "Model Router: stop paying for the wrong model"
+# One brief per model. A test checks that `explain` puts each one on its level.
+CALLS = [("List the files under src", "lookup"), ("Write tests for the slugify helper", "standard"),
+         ("Review the auth change for security holes", "complex"),
+         ("Investigate open-ended data loss across services", "frontier")]
+RUNG = {level: (i + 1, model, effort) for i, (level, model, effort, *_) in enumerate(LADDER)}
+PROOF_DROP, PROOF_LINE = 27, 22  # a proof's title to its first body line, and its body line step
+
+
+@dataclasses.dataclass(frozen=True)
+class Fit:
+    """The sizes the headline uses at one width."""
+    w: int
+    margin: int
+    mark_y: int
+    mark_scale: float
+    eyebrow: float
+    head: float
+    sub: float
+    text_right: float  # where the left column's text has to end
+    price: float
+    cols: int  # proof columns
+
+
+DESKTOP = Fit(w=1200, margin=64, mark_y=48, mark_scale=0.8, eyebrow=15, head=56, sub=20, text_right=650, price=17, cols=2)
+PHONE = Fit(w=600, margin=32, mark_y=40, mark_scale=0.75, eyebrow=14, head=46, sub=19, text_right=568, price=15, cols=1)
+
+
+def headline_label() -> str:
+    models = [RUNG[level][1] for _, level in CALLS]
+    return (f"{' '.join(HEADLINE)} Four agent calls that would all run on the session's model run on "
+            f"{', '.join(models[:-1])} and {models[-1]} instead, each at the effort its brief needs.")
+
+
+def dot(cx, cy, cls, r=5.5):
+    return f'<circle cx="{cx:g}" cy="{cy:g}" r="{r:g}" class="{cls}"/>'
+
+
+def check_icon(x, y):
+    return (f'<g transform="translate({x:g} {y:g})"><circle cx="12" cy="12" r="12" class="faint"/>'
+            '<path d="M7.2 12.4l3.2 3.2 6.4-6.8" fill="none" class="inks" stroke-width="2.4" '
+            'stroke-linecap="round" stroke-linejoin="round"/></g>')
+
+
+def call_card(x, y, w, where):
+    """Four calls: one model for all of them without the router, and each on its own rung with it."""
+    pad, right = 24, x + w - 24
+    out = [text(x + pad, y + 38, "Four agent calls", "ink b", 15),
+           text(x + pad, y + 74, "WITHOUT MODEL ROUTER", "mono mut b", 11.5, extra=' letter-spacing="1.4"')]
+    session_y = y + 104
+    same = "All four run on your session's model."
+    out.append(dot(x + pad + 6, session_y - 5.5, "mut") + text(x + pad + 20, session_y, same, "mut", 15))
+    room(f"{where}: call card session line", x + pad + 20 + width_of(same, 15), right)
+    box_y = session_y + 24
+    line_y = box_y + 30
+    routed = [text(x + pad, line_y, "WITH MODEL ROUTER", "mono rt b", 11.5, extra=' letter-spacing="1.4"')]
+    for brief, level in CALLS:
+        rung, model, effort = RUNG[level]
+        quoted = f'"{brief}"'
+        line_y += 31
+        routed.append(text(x + pad, line_y, quoted, "mono ink", 12.5))
+        room(f"{where}: call card brief", x + pad + width_of(quoted, 12.5, True), right)
+        line_y += 33
+        routed.append(dot(x + pad + 6, line_y - 6.5, f"r{rung}") + text(x + pad + 20, line_y, model, "ink b", 18))
+        pill_x = x + pad + 36 + width_of(model, 18, bold=True)
+        for label in (level, effort):
+            chip, chip_w = pill(pill_x, line_y - 18.5, label, size=12.5, h=26, pad=11)
+            routed.append(chip)
+            pill_x += chip_w + 8
+        room(f"{where}: call card pills", pill_x, right)
+    box_h = line_y - box_y + 24
+    routed.insert(0, f'<rect x="{x + 10:g}" y="{box_y:g}" width="{w - 20:g}" height="{box_h:g}" rx="14" '
+                     'class="rtsoft"/>')
+    out.append('<g class="won">' + "".join(routed) + "</g>")
+    redo = "A call sent back for a redo climbs one level."
+    out.append(text(x + pad, box_y + box_h + 34, redo, "mut", 14))
+    room(f"{where}: call card redo line", x + pad + width_of(redo, 14), right)
+    h = box_y + box_h + 56 - y
+    return card(x, y, w, h, rx=18) + "".join(out), h
+
+
+def newest_prices(prices: dict) -> list:
+    """(rung, model, input price per million tokens) for the newest priced version of each model the calls use."""
+    out = []
+    for _, level in CALLS:
+        rung, model, _ = RUNG[level]
+        keys = [k for k in prices if re.fullmatch(rf"claude-{model.lower()}-\d+(-\d+)?", k)]
+        newest = max(keys, key=lambda k: [int(n) for n in k.split("-")[2:]])
+        out.append((rung, model, prices[newest]["input"]))
+    return out
+
+
+def price_row(x, y, prices: dict, size, where, limit):
+    """The list price of each model the calls run on, from the registry."""
+    gap = size * 1.4
+    out = [text(x, y, "API LIST PRICE, PER MILLION INPUT TOKENS", "mono mut b", round(size * 0.77),
+                extra=' letter-spacing="1.4"')]
+    chip_x, chip_y = x, y + size * 2.1
+    for rung, model, usd in newest_prices(prices):
+        price = f"${usd:.2f}" if usd < 1 else f"${usd:g}"
+        # One text element, so the price follows the name at the width the font really gives it.
+        out.append(dot(chip_x + 5, chip_y - size * 0.36, f"r{rung}", 5)
+                   + f'<text x="{chip_x + 16:g}" y="{chip_y:g}" font-size="{size:g}"><tspan class="ink b">'
+                   f'{esc(model)}</tspan><tspan class="mono mut" dx="{size * 0.5:g}">{esc(price)}</tspan></text>')
+        chip_x += 16 + width_of(model, size, bold=True) + size * 0.5 + width_of(price, size, True) + gap
+    room(f"{where}: price row", chip_x - gap, limit)
+    return "".join(out)
+
+
+def proof_block(x, y, w, title, body, cls, where):
+    rows = wrap(body, 14.5, w - 40)
+    room(f"{where}: proof title {title}", x + 40 + width_of(title, 17, bold=True), x + w)
+    return (f'<g class="{cls}">' + check_icon(x, y - 18) + text(x + 40, y, title, "ink b", 17)
+            + lines(x + 40, y + PROOF_DROP, rows, "mut", 14.5, PROOF_LINE) + "</g>"), len(rows)
+
+
+def proof_section(x, y, w, cols, where):
+    """A rule, the eyebrow and the proofs in rows of `cols`. Returns the SVG and the y below the last row."""
+    out = [f'<path d="M{x:g} {y:g}H{x + w:g}" class="ln" stroke-width="1"/>',
+           text(x, y + 40, PROOF_EYEBROW, "mono rt b", 13, extra=' letter-spacing="1.8"')]
+    y += 88
+    gap = 48
+    col_w = (w - (cols - 1) * gap) / cols
+    for start in range(0, len(PROOFS), cols):
+        tallest = 0
+        for k, (title, body) in enumerate(PROOFS[start:start + cols]):
+            block, n = proof_block(x + k * (col_w + gap), y, col_w, title, body, f"p{start + k + 1}", where)
+            out.append(block)
+            tallest = max(tallest, n)
+        y += PROOF_DROP + tallest * PROOF_LINE + 32
+    return "".join(out), y
+
+
+def headline_text(fit: Fit, prices: dict, where):
+    """The mark, eyebrow, headline, paragraph and price row. Returns the SVG and the y below the price row."""
+    m, scale = fit.margin, fit.mark_scale
+    eyebrow_x = m + 64 * scale + 16
+    out = [mark_body(m, fit.mark_y, scale),
+           text(eyebrow_x, fit.mark_y + 32 * scale + fit.eyebrow * 0.36, HEADLINE_EYEBROW, "mono rt b", fit.eyebrow,
+                extra=' letter-spacing="1.8"')]
+    room(f"{where}: eyebrow", eyebrow_x + width_of(HEADLINE_EYEBROW, fit.eyebrow, True) + 1.8 * len(HEADLINE_EYEBROW),
+         fit.text_right)
+    y = fit.mark_y + 64 * scale + 20 + fit.head * 0.9
+    out.append('<g class="a1">' + "".join(text(m - 2, y + i * fit.head * 1.1, line, "ink b", fit.head)
+                                          for i, line in enumerate(HEADLINE)) + "</g>")
+    for line in HEADLINE:
+        room(f"{where}: headline", m + width_of(line, fit.head, bold=True), fit.text_right)
+    y += (len(HEADLINE) - 1) * fit.head * 1.1 + fit.head * 0.55 + fit.sub * 1.4
+    sub, step = wrap(HEADLINE_SUB, fit.sub, fit.text_right - m), fit.sub * 1.55
+    prices_y = y + (len(sub) - 1) * step + fit.sub * 2.6
+    out.append('<g class="a2">' + lines(m, y, sub, "mut", fit.sub, step)
+               + price_row(m, prices_y, prices, fit.price, where, fit.text_right) + "</g>")
+    return "".join(out), prices_y + fit.price * 2.1
+
+
+HEADLINE_CSS = (
+    ".a1,.a2,.a3,.p1,.p2,.p3,.p4{animation:rise .7s ease-out both}"
+    ".a1{animation-delay:.05s}.a2{animation-delay:.25s}.a3{animation-delay:.45s}"
+    ".p1{animation-delay:1.8s}.p2{animation-delay:2s}.p3{animation-delay:2.2s}.p4{animation-delay:2.4s}"
+    ".won{animation:fade .6s ease-out 1.2s both}"
+    + keyframes("rise", [(0, "opacity:0;transform:translateY(12px)"), (100, "opacity:1;transform:none")])
+    + keyframes("fade", [(0, "opacity:0"), (100, "opacity:1")]))
+
+
+def headline(prices: dict, phone=False) -> str:
+    """A direct-response headline for the top of the README: the problem, the fix shown on four calls, and the
+    proof. Fixed dark, like the social preview, so it reads as one banner above the light page."""
+    fit, where = (PHONE, "headline-phone.svg") if phone else (DESKTOP, "headline.svg")
+    m, w = fit.margin, fit.w
+    top, text_bottom = headline_text(fit, prices, where)
+    if phone:  # the card goes under the text
+        call, call_h = call_card(m, text_bottom + 40, w - 2 * m, where)
+        bottom = text_bottom + 40 + call_h
+    else:  # the card goes beside it
+        card_w = 456
+        call, call_h = call_card(w - m - card_w, fit.mark_y, card_w, where)
+        bottom = max(text_bottom, fit.mark_y + call_h)
+    proofs, h = proof_section(m, bottom + 52, w - 2 * m, fit.cols, where)
+    body = (f'<rect width="{w}" height="{h:.0f}" rx="24" class="bg"/>'
+            f'<rect x="0.5" y="0.5" width="{w - 1}" height="{h - 1:.0f}" rx="24" fill="none" class="ln" '
+            f'stroke-width="1"/>{top}<g class="a3">{call}</g>{proofs}')
+    return svg(w, round(h), HEADLINE_TITLE, headline_label(), body, HEADLINE_CSS, theme="dark")
+
+
 # ---------------------------------------------------------------- diagrams
 
 def diagram_ladder() -> str:
-    w, h = 920, 470
+    w, h = 920, 492
     out = [frame(w, h), text(32, 42, "The ladder", "ink b", 17),
            text(32, 66, "Balanced priority: the cheapest usable model strong enough for each level.", "mut", 13.5)]
     for x, label in ((180, "Level"), (300, "Model"), (392, "Effort"), (482, "Model strength"), (590, "Typical subtask")):
@@ -592,6 +735,8 @@ def diagram_ladder() -> str:
                     "availableModels, deniedModels or failures", "mut", 13))
     out.append(text(32, 452, "rule a model out, the pick moves to the nearest usable model above it, or to the "
                     "strongest one left. A redo runs one level higher.", "mut", 13))
+    out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh, "
+                    "which makes up part of the loss.", "mut", 13))
     at = lambda lv: f"transform:translate(0px,{ys[lv] - cy}px)"  # noqa: E731
     stops = [(0, at("lookup") + ";opacity:0"), (4, at("lookup") + ";opacity:1"), (18, at("lookup")),
              (24, at("standard")), (40, at("standard")), (46, at("complex")), (62, at("complex")),
@@ -604,11 +749,12 @@ def diagram_ladder() -> str:
            + ".lredo{animation:lr 12s linear infinite}" + keyframes("lr", pulse + [(100, "opacity:0")])
            + ".lstatic{animation:hide 1s infinite}" + keyframes("hide", [(0, "opacity:0"), (100, "opacity:0")]))
     title = "The ladder: five levels to a model and an effort"
-    label = ("With balanced priority, lookup runs on Haiku at low effort, standard on Sonnet at medium, complex on "
-             "Sonnet at high, hardest on Opus at high, and frontier on Fable at high. A call climbs one rung each "
+    label = ("With balanced priority, lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on "
+             "Opus at high, hardest on Opus at xhigh, and frontier on Fable at high. A call climbs one rung each "
              "time it comes back for a redo. Quality priority goes one step stronger, fast one step lighter. When "
              "the cap, the availableModels or deniedModels settings, or failures rule a model out, the pick moves "
-             "to the nearest usable model above it, or to the strongest one left.")
+             "to the nearest usable model above it, or to the strongest one left, and a pick weaker than its level needs "
+             "gets one more effort step, up to xhigh.")
     return svg(w, h, title, label, "".join(out), css)
 
 
@@ -620,7 +766,7 @@ def diagram_redo() -> str:
         ("1. Agent call", ["Routed at its level:"], "standard, Sonnet, medium", 2),
         ("2. Result comes back", ["Recorded as finished,", "with the level it ran at."], None, 0),
         ("3. Same call again", ["In the same request:", "the answer fell short."], None, -1),
-        ("4. One level higher", ["Up a model, or up effort:"], "complex, Sonnet, high", 3),
+        ("4. One level higher", ["Up a model, or up effort:"], "complex, Opus, high", 3),
     ]
     cw, gap, top = 196, 28, 92
     for k, (head, body, code, accent) in enumerate(steps):
@@ -655,7 +801,7 @@ def diagram_redo() -> str:
                     "ink", 13))
     out.append(text(262, vy + 78, "A raise that keeps being overruled with a weaker model is undone the same way.",
                     "mut", 13))
-    note = ["One level up the ladder: lookup, complex and hardest move to a stronger model; standard stays on Sonnet",
+    note = ["One level up the ladder: lookup, standard and hardest move to a stronger model; complex stays on Opus",
             "at more effort, and a frontier redo runs at one step more effort. Not a redo: copies of one brief started",
             "together. Never escalated: a call that names its own model. A background agent's call counts as finished",
             "when the agent stops with an answer."]
@@ -674,7 +820,7 @@ def diagram_redo() -> str:
     title = "Redo escalation: the same call again runs one level higher"
     label = ("A call is routed at its level, for example standard on Sonnet at medium effort. Its result comes back "
              "and the call is recorded as finished. If Claude issues the same call again in the same request, it "
-             "runs one level higher, complex on Sonnet at high, and counts as a vote that standard was routed too "
+             "runs one level higher, complex on Opus at high, and counts as a vote that standard was routed too "
              "low. At least 6 votes that are also at least 30 percent of a level's calls raise that level one step.")
     return svg(w, h, title, label, "".join(out), css)
 
@@ -841,11 +987,11 @@ def diagram_stop_checks() -> str:
           "and no agent of the needed strength started."],
          ["Blocks the stop once and asks for a stronger", "agent's check: the architect, or the deep-solver",
           "for a frontier request, started no lower than", "the request's level."], 1.0),
-        (478, "verify_gate", "off by default", "faint", "mut",
+        (478, "verify_gate", "on by default", "r1", "tag",
          ["code in the project changed, and no test, lint,", "type-check or build ran after the last edit,",
-          "and no verifier or reviewer started."],
-         ["Asks once for a test run (the verifier)", "before the turn ends. Turn it on in /config", "under the plugin."],
-         0.62),
+          "and no verifier or reviewer is still running."],
+         ["Asks once for a test run (the verifier)", "before the turn ends. It is the failure signal", "the router reruns on. Turn it off in /config."],
+         1.0),
     ]
     for x, name, state, cls, tcls, when, then, op in lanes:
         out.append(f'<g opacity="{op}">')
@@ -873,136 +1019,8 @@ def diagram_stop_checks() -> str:
     label = ("When Claude is about to end a turn, the Stop hook runs two checks. strong_agent_gate, on by default, "
              "blocks the stop once when a complex or harder request was answered by a weaker session model with no "
              "agent of the needed strength started, and asks for a stronger agent's check, started no lower than "
-             "the request's level. verify_gate, off by default, asks once for a test run when code changed and "
+             "the request's level. verify_gate, on by default, asks once for a test run when code changed and "
              "nothing checked it.")
-    return svg(w, h, title, label, "".join(out), css)
-
-
-# ---------------------------------------------------------------- the benchmark chart
-
-BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(config id, legend label, color class)])
-    "claude-opus-5-5": ("Opus 5.5 session", [
-        ("plugin-next", "Model Router", "rt"),
-        ("defaults", "Claude Code defaults", "faintbar"),
-        ("haiku", "All subagents on Haiku", "r2"),
-        ("haiku-high", "All subagents on Haiku, high", "r3"),
-        ("opusplan", "opusplan (runs Sonnet when headless)", "r4"),
-    ]),
-    "sonnet": ("Sonnet 5.5 session", [
-        ("plugin-next", "Model Router", "rt"),
-        ("defaults", "Claude Code defaults", "faintbar"),
-        ("sonnet-medium", "All subagents on Sonnet, medium", "r2"),
-        ("sonnet-high", "All subagents on Sonnet, high", "r3"),
-        ("opusplan", "opusplan (runs Sonnet when headless)", "r4"),
-    ]),
-}
-CELL = re.compile(r"(\d+) of (\d+) solved .*?\$([\d.]+) per solved")
-
-
-def bench_data():
-    page = (ROOT / "docs" / "BENCHMARKS.md").read_text(encoding="utf-8")
-    head = re.search(r"(\d[\d,]*) runs, \$[\d.]+ at list price, on ([\d-]+)", page)
-    sessions = []
-    for session, (heading, series) in BENCH_SERIES.items():
-        section = page.split(f"## Results: session model `{session}`", 1)
-        if len(section) < 2:
-            raise SystemExit(f"docs/BENCHMARKS.md has no results table for {session}")
-        table = [ln for ln in section[1].split("\n## ")[0].split("### ")[0].splitlines() if ln.startswith("|")]
-        cols = [c.strip() for c in table[0].strip("|").split("|")]
-        rows = []
-        for line in table[2:]:
-            cells = [c.strip() for c in line.strip("|").split("|")]
-            values = []
-            for config, _, _ in series:
-                if config not in cols:
-                    raise SystemExit(f"docs/BENCHMARKS.md has no {config} column for {session}; update BENCH_SERIES")
-                m = CELL.search(cells[cols.index(config)])
-                values.append((int(m.group(1)), int(m.group(2)), float(m.group(3))) if m else None)
-            rows.append((cells[0], values, cells[-1]))
-        sessions.append((heading, series, rows))
-    return sessions, head.group(1), head.group(2)
-
-
-def status_summary(rows) -> str:
-    counts = {}
-    for _, _, status in rows:
-        counts[status] = counts.get(status, 0) + 1
-    return ", ".join(f"{status} in {n} of {len(rows)}" for status, n in counts.items())
-
-
-def bench_chart(phone=False) -> str:
-    sessions, runs, date = bench_data()
-    peak = max(v[2] for _, _, rows in sessions for _, vals, _ in rows for v in vals if v)
-    axis = max(0.1, -(-peak // 0.1) * 0.1)
-    w = 520 if phone else 920
-    label_w = 0 if phone else 150
-    bar_x = 32 + label_w
-    bar_w = w - bar_x - (150 if phone else 160)
-    bh, gap = (12, 4) if phone else (11, 3)
-    out = ["", text(32, 42, "Cost per solved task", "ink b", 18 if phone else 17),
-           text(32, 66, "Lower is cheaper. Each status compares the router with the best baseline.", "mut",
-                14 if phone else 13.5)]
-    css = ".faintbar{fill:#9AA6B8}@media (prefers-color-scheme: dark){.faintbar{fill:#5B6880}}"
-    css += ".bar{transform-box:fill-box;transform-origin:0% 50%;animation:grow 1.1s cubic-bezier(.2,.7,.2,1) both}"
-    css += keyframes("grow", [(0, "transform:scaleX(0)"), (100, "transform:scaleX(1)")])
-    y0, delay, runs_per_cell, parts = 104, 0, set(), []
-    for heading, series, rows in sessions:
-        out.append(text(32, y0, f"{heading}: {status_summary(rows)} classes", "ink b", 16 if phone else 15))
-        ly = y0 + 28
-        lx = 32
-        for k, (_, name, cls) in enumerate(series):
-            if phone:
-                ly = y0 + 28 + k * 24
-            elif lx + 20 + width_of(name, 13) > w - 32:
-                lx, ly = 32, ly + 22
-            out.append(f'<rect x="{lx}" y="{ly - 10}" width="14" height="10" rx="3" class="{cls}"/>')
-            out.append(text(lx + 20, ly, name, "ink", 14 if phone else 13))
-            if not phone:
-                lx += 40 + width_of(name, 13)
-        n = len(series)
-        row_h = (n * bh + (n - 1) * gap) + (40 if phone else 22)
-        top = ly + (34 if phone else 30)
-        bottom = top + len(rows) * row_h - 10
-        for k in range(0, int(round(axis / 0.1)) + 1):
-            gx = bar_x + bar_w * (k * 0.1) / axis
-            out.append(f'<path d="M{gx:.1f} {top - 6}V{bottom}" class="ln" stroke-width="1"/>')
-            out.append(text(gx, bottom + 18, f"${k * 0.1:.2f}", "mono mut", 11.5, "middle"))
-        for r, (cls_name, vals, status) in enumerate(rows):
-            y = top + r * row_h
-            if phone:
-                out.append(text(32, y + 4, f"{cls_name}  {status}", "ink b", 15))
-                y += 14
-            else:
-                out.append(text(32, y + 16, cls_name, "ink b", 13.5))
-                out.append(text(32, y + 33, status, "mono mut", 11.5))
-                room("benchmark.svg: class name", 32 + width_of(cls_name, 13.5, bold=True), bar_x - 8)
-            for k, v in enumerate(vals):
-                by = y + k * (bh + gap)
-                if not v:
-                    out.append(text(bar_x, by + bh - 1, "not run", "mono mut", 11))
-                    continue
-                solved, total, cost = v
-                runs_per_cell.add(total)
-                bw = max(2.0, bar_w * cost / axis)
-                out.append(f'<rect x="{bar_x}" y="{by}" width="{bw:.1f}" height="{bh}" rx="3" '
-                           f'class="{series[k][2]} bar" style="animation-delay:{delay * 0.04 + k * 0.05:.2f}s"/>')
-                out.append(text(bar_x + bw + 8, by + bh - 1.5, f"${cost:.4f} ({solved} of {total})", "mono mut",
-                                12.5 if phone else 11))
-            delay += 1
-            bits = [f"{series[k][1]} ${v[2]:.4f} ({v[0]} of {v[1]} solved)" for k, v in enumerate(vals) if v]
-            parts.append(f"{heading}, {cls_name}, {status}: " + ", ".join(bits))
-        y0 = bottom + 80
-    each = " or ".join(str(n) for n in sorted(runs_per_cell))
-    note = (f"{each} runs per class and configuration. PASS means cheaper per solved task than the best baseline, "
-            f"with the whole 95% interval of the difference below zero, at a pass rate not behind it. Source: docs/BENCHMARKS.md, "
-            f"{runs} runs on {date}.")
-    size = 14 if phone else 12.5
-    note_lines = wrap(note, size, w - 64)
-    out.append(lines(32, y0 - 30, note_lines, "mut", size, round(size * 1.45)))
-    h = int(y0 - 30 + len(note_lines) * round(size * 1.45) + 24)
-    out[0] = frame(w, h)
-    title = "Cost per solved task on Opus 5.5 and Sonnet 5.5 sessions, by task class"
-    label = ("Cost per solved task, from docs/BENCHMARKS.md, lower is cheaper. " + "; ".join(parts) + ".")
     return svg(w, h, title, label, "".join(out), css)
 
 
@@ -1016,12 +1034,134 @@ def social_preview() -> str:
             + text(74, 232, "CLAUDE CODE PLUGIN", "mono rt b", 18, extra=' letter-spacing="2.4"')
             + "".join(text(72, 300 + i * 56, s, "ink b", 46) for i, s in
                       enumerate(["Every agent on the", "cheapest model that", "should do the job."]))
-            + lines(73, 488, ["A redo climbs one level. Subagents,", "teammates and workflow stages."], "mut", 24, 36)
+            + lines(73, 488, ["For subagents, teammates and workflow", "agents. A call sent again climbs a level."], "mut", 24, 36)
             + text(74, 590, "github.com/crisnahine/claude-code-model-router", "mono mut", 18)
             + panel)
     label = ("Model Router, a Claude Code plugin: every agent on the cheapest model that should do the job, and a "
-             "redo climbs one level.")
+             "call Claude sends again climbs one level.")
     return svg(w, h, "Model Router social preview", label, body, theme="dark")
+
+
+# ---------------------------------------------------------------- the headline figures in the docs
+
+FIGURE_PAGES = ("README.md", "docs/ARCHITECTURE.md", "docs/FAQ.md", "docs/RELEASE_READINESS.md", "docs/ROADMAP.md",
+                "docs/TRACEABILITY.md")
+BENCH_SPAN = re.compile(r"<!-- bench:([\w.-]+) -->(.*?)<!-- /bench -->")
+SESSION_NAMES = {"claude-opus-5-5": "opus", "sonnet": "sonnet"}
+CLASS_WORDS = {"security-review": "security review", "root-cause": "root cause"}
+
+
+def class_word(k: str) -> str:
+    return CLASS_WORDS.get(k, k)
+
+
+def words(items: list) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def pct(x: float) -> str:
+    return f"{100 * x:.0f}"
+
+
+def session_figures(name: str, session: dict) -> dict:
+    f = {}
+    router = session["router"]
+    classes = session["classes"]
+    roles = {role: cfg for role, cfg in session["roles"].items() if cfg}
+    if session.get("plugin_ref"):
+        f["commit"] = session["plugin_ref"]
+        f["commit_code"] = f"`{session['plugin_ref']}`"  # the span must sit outside the code span
+    f["router_code"] = f"`{router}`"  # the span must sit outside the code span
+    f["classes"] = str(len(classes))
+    f["saturated"] = str(session["saturated"])
+    for status in ("PASS", "FAIL", "PARTIAL"):
+        f[f"status.{status}"] = str(sum(c["status"] == status for c in classes))
+    passed = [class_word(c["class"]) for c in classes if c["status"] == "PASS"]
+    if passed:
+        f["pass_classes"] = words(passed)
+    partial = [class_word(c["class"]) for c in classes if c["status"] == "PARTIAL"]
+    if partial:
+        f["partial_classes"] = words(partial)
+    # The router is spelled by its role, never by its id; every other configuration by its id, and some by a role too.
+    key = lambda cfg: "router" if cfg == router else cfg  # noqa: E731
+    for c in classes:
+        for cfg, cell in c["configs"].items():
+            v = cell["cost_per_solved"]
+            f[f"cell.{c['class']}.{key(cfg)}"] = "n/a" if v is None else f"${v:.4f}"
+            f[f"cell_solved.{c['class']}.{key(cfg)}"] = f"{cell['solved']} of {cell['runs']}"
+    pooled = session["pooled"]
+    spelled = {**{key(cfg): cfg for cfg in pooled}, **roles}
+    for k, cfg in spelled.items():
+        p = pooled[cfg]
+        f[f"runs.{k}"] = str(p["runs"])
+        f[f"solved.{k}"] = f"{p['solved']} of {p['runs']}"
+        if p["solved"]:
+            f[f"pooled.{k}"] = f"${p['cost_usd'] / p['solved']:.3f}"
+    against = {**{cfg: cfg for cfg in session["against"]}, **{r: roles[r] for r in ("defaults", "best", "strongest")
+                                                              if r in roles and roles[r] in session["against"]}}
+    for k, cfg in against.items():
+        a = session["against"][cfg]
+        if cfg in session["pooled_less"]:
+            f[f"pooled_less.{k}"] = pct(session["pooled_less"][cfg])
+        f[f"below.{k}"] = str(len(a["below"]))
+        if a["level"]:
+            f[f"level.{k}"] = words([class_word(c) for c in a["level"]])
+        if a["less"]:
+            f[f"less.{k}.min"], f[f"less.{k}.max"] = pct(a["less"][0]), pct(a["less"][1])
+    for cfg, a in session["against"].items():
+        if a["best_in"]:
+            f[f"best.{cfg}"], f[f"best_count.{cfg}"] = words([class_word(c) for c in a["best_in"]]), str(len(a["best_in"]))
+    if session["behind"]:
+        (lo, lo_class), (hi, hi_class) = session["behind"]["min"], session["behind"]["max"]
+        f["behind.min"], f["behind.min_class"] = pct(lo), class_word(lo_class)
+        f["behind.max"], f["behind.max_class"] = pct(hi), class_word(hi_class)
+    f["trace"] = "; ".join(class_trace(c, router) for c in classes)
+    return {f"{name}.{k}": v for k, v in f.items()}
+
+
+def class_trace(c: dict, router: str) -> str:
+    def usd(v):
+        return "n/a" if v is None else f"${v:.3f}"
+
+    def missed(cell):
+        return f", {cell['solved']} of {cell['runs']} solved" if cell["solved"] < cell["runs"] else ""
+
+    if router not in c["configs"]:
+        raise SystemExit(f"bench results have no {router} runs for {c['class']}")
+    cell = c["configs"][router]
+    key = lambda cfg: (c["configs"][cfg]["cost_per_solved"] is None, c["configs"][cfg]["cost_per_solved"] or 0, cfg)  # noqa: E731
+    base = ", ".join(
+        f"`{cfg}` {usd(c['configs'][cfg]['cost_per_solved'])} "
+        f"({c['differences'][cfg][0]:+.3f} to {c['differences'][cfg][1]:+.3f}{missed(c['configs'][cfg])})"
+        for cfg in sorted(c["differences"], key=key))
+    return f"{class_word(c['class'])} {c['status']} (router {usd(cell['cost_per_solved'])}{missed(cell)}; {base})"
+
+
+def bench_figures(data: dict) -> dict:
+    f = {"runs": f"{data['runs']:,}", "usd": f"${data['usd']:,.2f}",
+         "dates": " to ".join(dict.fromkeys(data["dates"])),
+         "claude": ", ".join(v.replace(" (Claude Code)", "") for v in data["claude_versions"]),
+         "per_cell": " or ".join(str(n) for n in data["per_cell"]),
+         "tasks": str(data["tasks"]), "tasks_total": str(data["tasks_total"])}
+    for s in data["sessions"]:
+        if s["model"] in SESSION_NAMES:
+            f.update(session_figures(SESSION_NAMES[s["model"]], s))
+    return f
+
+
+def with_figures(path: str, text: str, figures: dict) -> str:
+    def one(m):
+        if m.group(1) not in figures:
+            raise SystemExit(f"{path}: unknown benchmark figure {m.group(1)}")
+        return f"<!-- bench:{m.group(1)} -->{figures[m.group(1)]}<!-- /bench -->"
+    return BENCH_SPAN.sub(one, text)
+
+
+def img_alt(page: str, name: str, alt: str) -> str:
+    """The alt text of every <img> that shows the named asset, set to the asset's own label."""
+    if '"' in alt:
+        raise SystemExit(f"{name}: its label can't carry a double quote")
+    return re.sub(rf'({re.escape(name)}"[^>]*? alt=")[^"]*"', lambda m: m.group(1) + esc(alt) + '"', page)
 
 
 # ---------------------------------------------------------------- the site
@@ -1031,10 +1171,9 @@ FAQ_LD = ("<!-- FAQ data, written by tools/docs_assets.py from docs/FAQ.md. -->"
 SITE_URL = re.compile(r"<!-- SITE_URL: (\S+) -->")
 
 
-def faq_entries() -> list:
-    text_ = (ROOT / "docs" / "FAQ.md").read_text(encoding="utf-8")
+def faq_entries(text: str) -> list:
     out = []
-    for block in text_.split("\n## ")[1:]:
+    for block in BENCH_SPAN.sub(lambda m: m.group(2), text).split("\n## ")[1:]:
         question, _, answer = block.partition("\n")
         out.append((question.strip(), " ".join(answer.split())))
     return out
@@ -1060,52 +1199,63 @@ def md_plain(s: str) -> str:
     return s.replace("`", "")
 
 
-def site_faq_html() -> str:
+def site_faq_html(faq: str) -> str:
     items = [f'<details{" open" if i == 0 else ""}><summary><h3>{esc(q)}</h3></summary><p>{md_html(a)}</p></details>'
-             for i, (q, a) in enumerate(faq_entries())]
+             for i, (q, a) in enumerate(faq_entries(faq))]
     return FAQ_HTML[0] + "\n" + "\n".join(items) + "\n" + FAQ_HTML[1]
 
 
-def site_faq_ld() -> str:
+def site_faq_ld(faq: str) -> str:
     data = {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
         {"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": md_plain(a)}}
-        for q, a in faq_entries()]}
-    return (FAQ_LD[0] + '\n<script type="application/ld+json">\n' + json.dumps(data, indent=2, ensure_ascii=False)
-            + "\n</script>\n" + FAQ_LD[1])
+        for q, a in faq_entries(faq)]}
+    body = json.dumps(data, indent=2, ensure_ascii=False).replace("</", "<\\/")  # an answer can't close the script
+    return FAQ_LD[0] + '\n<script type="application/ld+json">\n' + body + "\n</script>\n" + FAQ_LD[1]
 
 
-def between(current: str, marks: tuple, body: str) -> str:
-    before, rest = current.split(marks[0], 1)
-    return before + body + rest.split(marks[1], 1)[1]
+def between(current: str, marks: tuple, body: str, where: str) -> str:
+    before, start, rest = current.partition(marks[0])
+    end, after = rest.partition(marks[1])[1:]
+    if not (start and end):
+        raise SystemExit(f"{where}: no {(marks[1] if start else marks[0])!r} marker")
+    return before + body + after
 
 
-def site_files() -> dict:
-    index = SITE / "index.html"
-    if not index.exists():
+def site_files(faq: str, figures: dict, texts: dict, v: str, day: str, floor: str) -> dict:
+    if "site/index.html" not in texts:
         return {}
-    page = index.read_text(encoding="utf-8")
-    url = SITE_URL.search(page).group(1)
+    page = texts["site/index.html"]
+    found = SITE_URL.search(page)
+    if not found:
+        raise SystemExit("site/index.html: no <!-- SITE_URL: ... --> comment")
+    url = found.group(1)
     old = None
-    sitemap = SITE / "sitemap.xml"
-    if sitemap.exists():
-        m = re.search(r"<loc>(\S+?)</loc>", sitemap.read_text(encoding="utf-8"))
+    if "site/sitemap.xml" in texts:
+        m = re.search(r"<loc>(\S+?)</loc>", texts["site/sitemap.xml"])
         old = m.group(1) if m else None
     if old and old != url:
         head, sep, tail = page.partition("-->")
         page = head + sep + tail.replace(old, url)
-    page = between(page, FAQ_HTML, site_faq_html())
-    page = between(page, FAQ_LD, site_faq_ld())
-    v, day = version(), release_date(version())
-    page = re.sub(r'"softwareVersion": "[^"]*"', f'"softwareVersion": "{v}"', page)
+    page = between(page, FAQ_HTML, site_faq_html(faq), "site/index.html")
+    page = between(page, FAQ_LD, site_faq_ld(faq), "site/index.html")
     page = badge_alt(page, v)
-    page = re.sub(r'"datePublished": "[^"]*"', f'"datePublished": "{day}"', page)
-    page = re.sub(r'Version [^,]+, released <time datetime="[^"]*">[^<]*</time>',
-                  f'Version {v}, released <time datetime="{day}">{day}</time>', page)
+    page = with_figures("site/index.html", page, figures)
+    ladder = "Five levels: " + ", ".join(f"{lv} on {model} at {effort}" for lv, model, effort, *_ in LADDER)
+    for pattern, value in ((r'"softwareVersion": "[^"]*"', f'"softwareVersion": "{v}"'),
+                           (r'"dateModified": "[^"]*"', f'"dateModified": "{day}"'),
+                           (r'"softwareRequirements": "Claude Code [^ ]+ or later;',
+                            f'"softwareRequirements": "Claude Code {floor} or later;'),
+                           (r'"Five levels: [^"]*"', f'"{ladder}"'),
+                           (r'Version [^,]+, released <time datetime="[^"]*">[^<]*</time>',
+                            f'Version {v}, released <time datetime="{day}">{day}</time>')):
+        page, found = re.subn(pattern, lambda m: value, page)
+        if found != 1:
+            raise SystemExit(f"site/index.html: expected one match for {pattern}, found {found}")
     return {
         "site/index.html": page,
         "site/sitemap.xml": ('<?xml version="1.0" encoding="UTF-8"?>\n'
                              '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-                             f"  <url>\n    <loc>{url}</loc>\n    <lastmod>{release_date(version())}</lastmod>\n"
+                             f"  <url>\n    <loc>{url}</loc>\n    <lastmod>{day}</lastmod>\n"
                              "  </url>\n</urlset>\n"),
         "site/robots.txt": f"User-agent: *\nAllow: /\n\nSitemap: {url}sitemap.xml\n",
     }
@@ -1117,8 +1267,12 @@ def badge_alt(page: str, v: str) -> str:
     return re.sub(r'(badge-version\.svg"[^>]*? alt=")version [^"]*"', rf'\g<1>version {v}"', page)
 
 
+def manifest() -> dict:
+    return json.loads((ROOT / "plugins/model-router/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
+
+
 def version() -> str:
-    return json.loads((ROOT / "plugins/model-router/.claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
+    return manifest()["version"]
 
 
 def release_date(v: str) -> str:
@@ -1129,7 +1283,7 @@ def release_date(v: str) -> str:
     return m.group(1)
 
 
-def citation(v: str) -> str:
+def citation(v: str, day: str) -> str:
     return f"""cff-version: 1.2.0
 message: "If you use Model Router in your work, please cite it with these details."
 type: software
@@ -1143,7 +1297,7 @@ authors:
   - given-names: Cris
     family-names: Nahine
 version: "{v}"
-date-released: "{release_date(v)}"
+date-released: "{day}"
 license: Apache-2.0
 repository-code: "{REPO}"
 url: "{REPO}"
@@ -1158,44 +1312,72 @@ keywords:
 
 SITE_ASSETS = ["logo-mark.svg", "logo.svg", "routing-call.svg", "badge-version.svg", "badge-claude-code.svg",
                "badge-python.svg", "badge-license.svg", "ladder.svg", "redo-escalation.svg",
-               "two-paths.svg", "precedence.svg", "stop-checks.svg", "benchmark.svg", "benchmark-phone.svg",
-               "social-preview.png"]
+               "two-paths.svg", "precedence.svg", "stop-checks.svg", "social-preview.png"]
 
 
-def build() -> dict:
-    LAYOUT.clear()
-    check_ladder_against_registry()
+@dataclasses.dataclass(frozen=True)
+class Snapshot:
+    """Everything `build` reads, taken once: the plugin's version, its release date and its Claude Code floor, the
+    shipped ladder, the text of every page it rewrites, the page index and the benchmark figures from
+    `analyze.figures`."""
+    version: str
+    released: str
+    claude_code: str
+    ladder: dict
+    texts: dict
+    bench: dict
+    pages: list = dataclasses.field(default_factory=lambda: list(PAGES))
+
+
+def snapshot() -> Snapshot:
+    sys.path.insert(0, str(ROOT / "bench"))
+    import analyze
     v = version()
+    wanted = [*(p[0] for p in PAGES), "README.md", "site/index.html", "site/sitemap.xml"]
+    return Snapshot(
+        version=v, released=release_date(v), claude_code=manifest()["engines"]["claude-code"].removeprefix(">="),
+        ladder=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
+        texts={path: (ROOT / path).read_text(encoding="utf-8") for path in wanted if (ROOT / path).exists()},
+        bench=analyze.figures(analyze.load(analyze.default_paths())))
+
+
+def build(snap: Snapshot) -> dict:
+    """The files to write, by path, for a snapshot of the inputs. Reads no file."""
+    LAYOUT.clear()
+    check_ladder_against_registry(snap.ladder)
+    figures = bench_figures(snap.bench)
+    v = snap.version
     files = {}
     assets = {}
     assets.update(brand_assets())
-    assets.update(banner_assets())
+    assets.update(banner_assets(snap.pages))
     assets.update(badge_assets(v))
     assets["hero.svg"] = hero()
     assets["hero-phone.svg"] = hero(phone=True)
+    assets["headline.svg"] = headline(snap.ladder["prices"])
+    assets["headline-phone.svg"] = headline(snap.ladder["prices"], phone=True)
     assets["ladder.svg"] = diagram_ladder()
     assets["redo-escalation.svg"] = diagram_redo()
     assets["two-paths.svg"] = diagram_two_paths()
     assets["precedence.svg"] = diagram_precedence()
     assets["stop-checks.svg"] = diagram_stop_checks()
-    assets["benchmark.svg"] = bench_chart()
-    assets["benchmark-phone.svg"] = bench_chart(phone=True)
     assets["social-preview.svg"] = social_preview()
     panel, css, ph = ladder_panel(1, 1, 518, prefix="c")
     assets["routing-call.svg"] = svg(520, round(ph) + 2, "One agent call, routed and redone", HERO_LABEL, panel, css)
     for name, body in assets.items():
         files[f"docs/assets/{name}"] = body
-    for path, *_ in PAGES:
-        if path in GENERATED_ELSEWHERE:
-            continue
-        p = ROOT / path
-        if p.exists():
-            files[path] = with_head(path, p.read_text(encoding="utf-8"))
+    for path, *_ in snap.pages:
+        if path in snap.texts:
+            files[path] = with_head(path, snap.texts[path], snap.pages)
             if path == "docs/README.md":
-                files[path] = with_cards(files[path])
-    files["README.md"] = badge_alt((ROOT / "README.md").read_text(encoding="utf-8"), v)
-    files["CITATION.cff"] = citation(v)
-    files.update(site_files())
+                files[path] = with_cards(files[path], snap.pages)
+    readme = badge_alt(snap.texts["README.md"], v)
+    files["README.md"] = img_alt(readme, "headline.svg", headline_label())
+    for path in FIGURE_PAGES:
+        if path in files:
+            files[path] = with_figures(path, files[path], figures)
+    files["CITATION.cff"] = citation(v, snap.released)
+    files.update(site_files(files.get("docs/FAQ.md", ""), figures, snap.texts, v, snap.released, snap.claude_code))
     return files
 
 
@@ -1243,14 +1425,13 @@ def palette_problems() -> list:
     return found
 
 
-def main(argv: list) -> int:
-    check = "--check" in argv
-    files = build()
-    problems = palette_problems() + LAYOUT
+def sync(files: dict, check: bool, root: Path = ROOT) -> list:
+    """Write `files` under `root`, or with `check` report each one that differs, and the same for the site's copies."""
+    problems = []
     for path, body in files.items():
         if path.endswith(".svg"):
             problems += problems_in_svg(path, body)
-        target = ROOT / path
+        target = root / path
         current = target.read_text(encoding="utf-8") if target.exists() else None
         if current != body:
             if check:
@@ -1258,18 +1439,21 @@ def main(argv: list) -> int:
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(body.encode("utf-8"))
-    for path in GENERATED_ELSEWHERE:
-        text_now = (ROOT / path).read_text(encoding="utf-8")
-        if not text_now.startswith(page_head(path)):
-            problems.append(f"{path}: its head differs from page_head(); fix the header in bench/analyze.py")
     for name in SITE_ASSETS:
-        src, dst = ASSETS / name, SITE / "assets" / name
+        src, dst = root / "docs" / "assets" / name, root / "site" / "assets" / name
         if src.exists() and (not dst.exists() or dst.read_bytes() != src.read_bytes()):
             if check:
                 problems.append(f"site/assets/{name}: differs from docs/assets, run python3 tools/docs_assets.py")
             else:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 dst.write_bytes(src.read_bytes())
+    return problems
+
+
+def main(argv: list) -> int:
+    check = "--check" in argv
+    files = build(snapshot())
+    problems = palette_problems() + LAYOUT + sync(files, check)
     for p in problems:
         print(p, file=sys.stderr)
     return 1 if problems else 0

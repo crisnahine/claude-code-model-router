@@ -19,8 +19,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import hooks, learn, report, settings, store, upstream
-from . import config as cfg
+from . import health, hooks, learn, report, settings, store, upstream
 
 
 # Hook fields the handlers use as text: as file keys, paths, or things to match against.
@@ -38,18 +37,21 @@ def _well_formed(hook_input: object) -> dict:
 
 
 _NEWER = "left as is: {} was written by a newer Model Router release."
+_BUSY = "left as is: another Model Router process held {}. Run it again."
 
 
 def _reset_health() -> str:
-    removed: list = []
+    removed = False
     try:
-        status = store.try_update(store.state_path(), lambda state: removed.append(state.pop("health", None)))[1]
+        removed, status = health.forget()
     except OSError:
         status = "unreadable"
     if status == "saved":
-        return "Learned availability cleared." if removed and removed[0] else "No learned availability to clear."
+        return "Learned availability cleared." if removed else "No learned availability to clear."
     if status == "newer":
         return "Learned availability " + _NEWER.format("state.json")
+    if status == "busy":
+        return "Learned availability " + _BUSY.format("state.json")
     return "Learned availability left as is: state.json could not be read or written."
 
 
@@ -59,6 +61,8 @@ def _reset_feedback() -> str:
         return "Feedback cleared." if status == "removed" else "No feedback to clear."
     if status == "newer":
         return "Feedback " + _NEWER.format("learned.json")
+    if status == "busy":
+        return "Feedback " + _BUSY.format("learned.json")
     return "Feedback left as is: learned.json could not be read or removed."
 
 
@@ -93,39 +97,47 @@ def main(argv: list[str] | None = None) -> int:
                 hook_input = json.load(sys.stdin)
             except ValueError:
                 hook_input = {}
-            output = hooks.HANDLERS[args.cmd](_well_formed(hook_input))
+            hook_input = _well_formed(hook_input)
+            if isinstance(hook_input.get("session_id"), str):
+                store.owner = hook_input["session_id"]
+            output = hooks.HANDLERS[args.cmd](hook_input)
             if output:
                 print(json.dumps(output))
         except Exception as exc:  # noqa: BLE001 - a hook must never break the session
             print(f"model-router {args.cmd}: {exc}", file=sys.stderr)
         return 0
 
-    config = cfg.load_config()
-    options = settings.resolve(config, recorded=True)
+    snap = settings.Snapshot(None, recorded=True)
+    options = snap.options
     if args.cmd == "policy":
-        print(report.policy(config, options))
+        print(report.policy(snap))
     elif args.cmd == "models":
         if args.reset:
             cleared = f"{_reset_health()}\n{_reset_feedback()}\n"
             if not args.json:
                 print(cleared)
-        print(json.dumps(report.models_data(config, options), indent=2) if args.json
-              else report.models(config, options))
+        print(json.dumps(report.models_data(snap), indent=2) if args.json
+              else report.models(snap))
     elif args.cmd == "explain":
-        print(report.explain(config, options, " ".join(args.text), args.agent))
+        print(report.explain(snap, " ".join(args.text), args.agent))
     elif args.cmd == "refresh":
         print(report.status(upstream.pending(upstream.refresh(options, force=args.force))))
     elif args.cmd == "status":
         changes = upstream.pending()
         print(json.dumps(changes, indent=2) if args.json else report.status(changes))
     elif args.cmd == "ack":
-        version = upstream.ack()
-        if version is None:
+        acked = upstream.ack()
+        if acked is None:
             print("Nothing cached yet; run refresh first.")
+            return 1
+        version, status = acked
+        if status != "saved":
+            left = {"newer": _NEWER, "busy": _BUSY}.get(status, "left as is: {} could not be read or written.")
+            print("Review mark " + left.format("upstream.json"))
             return 1
         print(f"Marked Claude Code {version} and the current docs index as reviewed.")
     elif args.cmd == "usage":
-        days = int(args.days) if str(args.days).isdigit() else 7
+        days = int(args.days) if str(args.days).isdigit() and int(args.days) > 0 else 7  # ledger.read(0) is everything
         print(json.dumps(report.usage_data(days), indent=2) if args.json else report.usage(days))
     elif args.cmd == "upstream-check":
         baseline_path = Path(args.baseline)

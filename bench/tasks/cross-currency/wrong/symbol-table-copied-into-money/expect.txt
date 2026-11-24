@@ -1,0 +1,1 @@
+with other tables in pricing/symbols.py the output is None

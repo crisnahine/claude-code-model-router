@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 import threading
 import time
 from pathlib import Path
 
 from . import config as cfg
-from . import registry, store
+from . import health, store
 from .settings import Settings
 
 CHANGELOG_RSS = "https://code.claude.com/docs/en/changelog/rss.xml"
@@ -27,7 +26,8 @@ HTTP_TIMEOUT = 10  # per request: each socket wait, and the body's download as a
 FETCH_BUDGET = 25
 # Docs pages that describe the surfaces this plugin is built on.
 WATCHED_PAGES = ("plugins", "sub-agents", "hooks", "skills", "model-config", "workflows",
-                 "plugin-evals", "mcp", "settings", "agent-teams", "costs", "permission-modes")
+                 "plugin-evals", "mcp", "settings", "agent-teams", "costs", "permission-modes",
+                 "env-vars", "prompt-caching", "fast-mode", "advisor", "headless", "best-practices")
 # Aliases that select a mode or a context size rather than a model family of their own.
 NON_FAMILY_ALIASES = {"default", "best", "opusplan"}
 
@@ -223,7 +223,7 @@ def _fetch(settings: Settings) -> dict:
         account = api_models(settings)
     except Exception:  # noqa: BLE001 - and this
         account = {}
-    return {"aliases": aliases, "lifecycle": lifecycle, "api_models": account, "fetched_at": int(time.time()),
+    return {"aliases": aliases, "lifecycle": lifecycle, "api_models": account, "fetched_at": int(store.now()),
             "releases": releases,
             "pages": {url: hashlib.sha256(s.encode()).hexdigest()[:16] for url, s in pages.items()}}
 
@@ -239,7 +239,7 @@ def _same_model(model_id: str, seen: str) -> bool:
 def diff(reviewed: dict, live: dict, routed: list[str] | None = None, in_use: list[str] | None = None) -> dict:
     """`routed` is the registry's model names; by default the ones this plugin ships.
     `in_use` is the full model IDs routed calls have really run as here."""
-    routed = list(routed if routed is not None else (cfg.base_config().get("models") or {}))
+    routed = list(routed if routed is not None else cfg.shipped().models)
     reviewed_version = reviewed.get("claude_code_version") or "0"
     old_pages, new_pages = reviewed.get("pages") or {}, live.get("pages") or {}
     added = sorted(set(new_pages) - set(old_pages))
@@ -286,7 +286,7 @@ def snapshot(cache: dict) -> dict:
 def _failures(failed: object) -> int:
     """Failed fetches in a row, or 0 for no record or one that doesn't make sense."""
     if not isinstance(failed, dict) or not all(
-            cfg._number(failed.get(key)) and math.isfinite(failed[key]) for key in ("at", "count")):
+            cfg._number(failed.get(key)) for key in ("at", "count")):
         return 0
     return max(0, int(failed["count"]))
 
@@ -302,7 +302,7 @@ def _retry_wait(failed: object, now: float) -> float:
 
 def refresh(settings: Settings, force: bool = False) -> dict:
     data = load()
-    now = time.time()
+    now = store.now()
     if not force and (now - ((data.get("cache") or {}).get("fetched_at") or 0) < CACHE_TTL_SECONDS
                       or _retry_wait(data.get("failed"), now) > 0):
         return data
@@ -324,22 +324,23 @@ def refresh(settings: Settings, force: bool = False) -> dict:
     return store.update_dict(path(), apply)
 
 
-def ack() -> str | None:
+def ack() -> tuple[str, str] | None:
+    """The version marked as reviewed and the write's status (`store.try_update`), or None with nothing cached."""
     if not load().get("cache"):
         return None
 
     def apply(data: dict) -> None:
-        data["reviewed"] = {**snapshot(data.get("cache") or {}), "reviewed_at": int(time.time())}
+        data["reviewed"] = {**snapshot(data.get("cache") or {}), "reviewed_at": int(store.now())}
 
-    return store.update_dict(path(), apply)["reviewed"]["claude_code_version"]
+    data, status = store.try_update(path(), apply)
+    return data["reviewed"]["claude_code_version"], status
 
 
 def pending(data: dict | None = None) -> dict | None:
     data = load() if data is None else data
     if not data.get("cache") or not data.get("reviewed"):
         return None
-    in_use = [i.get("last_model") for i in registry.health().values() if isinstance(i, dict)]
-    return diff(data["reviewed"], data["cache"], in_use=[m for m in in_use if isinstance(m, str)])
+    return diff(data["reviewed"], data["cache"], in_use=health.load().seen_running())
 
 
 def has_pending(changes: dict | None) -> bool:

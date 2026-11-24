@@ -1,6 +1,6 @@
 ---
 description: The same lookup issued twice in one request should run the second time one level higher, on Sonnet. Without the router both runs stay on the Haiku session's model.
-expected_outcome: "level lookup, model haiku, effort low"
+expected_outcome: "level lookup, model haiku, effort medium"
 tags: [routing, redo]
 model: haiku
 max_turns: 6

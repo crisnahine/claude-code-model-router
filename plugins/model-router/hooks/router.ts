@@ -1,4 +1,4 @@
-import type { EngineInterface, ModelEffort, PluginOptions, Register, TurnUsage } from 'claude-code'
+import type { EngineInterface, ModelEffort, PluginOptions, Register, SettingsSource, TurnUsage } from 'claude-code'
 
 // The engine's own events, forwarded to the Python runtime the settings hooks use, so
 // one router decides everything. agent.spawn sees every subagent, teammate and workflow
@@ -6,6 +6,9 @@ import type { EngineInterface, ModelEffort, PluginOptions, Register, TurnUsage }
 
 const EFFORTS: readonly ModelEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const KEPT = 500
+const SETTINGS_MS = 2000
+const SOURCES: readonly SettingsSource[] = ['policy', 'user', 'project', 'local', 'flag']
+const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides', 'maxEffortLevel', 'modelSettings']
 
 type Pick = { model?: string; effort?: ModelEffort } | null
 
@@ -46,6 +49,37 @@ async function hasFirstPartyCredential($: EngineInterface): Promise<boolean | un
   return surfaces && !surfaces.includes('desktop') ? false : undefined
 }
 
+// modelSettings can hold more per model than the effort cap, and the runtime reads only the cap.
+function effortCaps(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object') return raw
+  return Object.fromEntries(Object.entries(raw as Record<string, unknown>).flatMap(([id, entry]) =>
+    entry && typeof entry === 'object' && 'maxEffortLevel' in entry
+      ? [[id, { maxEffortLevel: (entry as Record<string, unknown>).maxEffortLevel }]] : []))
+}
+
+// Only these keys cross to the runtime. A source whose read fails or is still pending after
+// two seconds is left out, and the runtime fills it from the files. Never throws, like ask.
+async function modelSettings($: EngineInterface): Promise<Record<string, Record<string, unknown>> | undefined> {
+  try {
+    const layers: Record<string, Record<string, unknown>> = {}
+    const reads = SOURCES.map(async source => {
+      try {
+        const read = (await $.settings.read({ source })) as Record<string, unknown>
+        layers[source] = Object.fromEntries(KEYS.filter(key => key in read)
+          .map(key => [key, key === 'modelSettings' ? effortCaps(read[key]) : read[key]]))
+      } catch {
+        // left out
+      }
+    })
+    let timer: { cancel: () => void } | undefined
+    await Promise.race([Promise.all(reads), new Promise<void>(resolve => { timer = $.clock.after(SETTINGS_MS, resolve) })])
+    timer?.cancel()
+    return Object.keys(layers).length ? { ...layers } : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function effortRank(effort: ModelEffort | undefined): number {
   return effort === undefined ? -1 : EFFORTS.indexOf(effort)
 }
@@ -58,11 +92,17 @@ function remember<V>(map: Map<string, V>, key: string, value: V): void {
 export const register: Register = (on, options) => {
   const opts = optionEnv(options)
   const agentEffort = new Map<string, ModelEffort>()
+  // The type of each workflow agent this mod started, so its usage can name it: it has no Agent result.
+  const agentType = new Map<string, string>()
+  // The main conversation's level, from its latest request: an agent on its model runs at it unless told otherwise.
+  let sessionEffort: string | undefined
   const turnEffort = new Map<string, ModelEffort>()
   // agent.spawn carries no effort: an effort the caller put on the Agent call is read here.
   const callerEffort = new Map<string, ModelEffort>()
-  // A subagent's first request can go out before its spawn hook has the agent's id.
-  const promptEffort = new Map<string, ModelEffort>()
+  // A subagent's first request can go out before its spawn hook has the agent's id. The spawns of each prompt
+  // between their pick and next() returning, with the effort each got (null for none): the first request takes
+  // that effort only while every one of them got the same, so it never runs at another spawn's.
+  const inFlight = new Map<string, (ModelEffort | null)[]>()
   // Each request's usage by turn: Haiku 5.5 bills a long prompt per request, not per turn.
   const turnRequests = new Map<string, TurnUsage[]>()
 
@@ -73,18 +113,24 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await ask($, opts, 'mod-start', {})
+    const layers = await modelSettings($)
+    await ask($, opts, 'mod-start', { ...(layers ? { settings: layers } : {}) })
     return started
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     if (e.fork || e.resume) return next(e)
     const effort = callerEffort.get(e.tool_use_id)
+    const layers = await modelSettings($)
     const pick = await ask($, opts, 'mod-spawn', {
+      ...(layers ? { settings: layers } : {}),
       cwd: e.cwd,
       parent_agent_id: e.parentAgentId,
       parent_model: e.parentModel,
+      ...(sessionEffort ? { session_effort: sessionEffort } : {}),
       kind: e.workflow ? 'workflow' : e.isTeammate ? 'teammate' : 'subagent',
+      // A workflow's id is shared by all of its agents, so it can't tell one route from another.
+      ...(e.tool_use_id && !e.workflow ? { tool_use_id: e.tool_use_id } : {}),
       tool_input: {
         subagent_type: e.subagentType,
         prompt: e.prompt,
@@ -93,10 +139,19 @@ export const register: Register = (on, options) => {
         ...(effort ? { effort } : {}),
       },
     })
-    if (pick?.effort) remember(promptEffort, e.prompt, pick.effort)
-    const started = await next(pick?.model ? { ...e, model: pick.model } : e)
-    if (pick?.effort && started.agentId) remember(agentEffort, started.agentId, pick.effort)
-    return started
+    const mine = pick?.effort ?? null
+    const efforts = inFlight.get(e.prompt) ?? []
+    efforts.push(mine)
+    inFlight.set(e.prompt, efforts)
+    try {
+      const started = await next(pick?.model ? { ...e, model: pick.model } : e)
+      if (pick?.effort && started.agentId) remember(agentEffort, started.agentId, pick.effort)
+      if (started.agentId && e.workflow && e.subagentType) remember(agentType, started.agentId, e.subagentType)
+      return started
+    } finally {
+      efforts.splice(efforts.indexOf(mine), 1)
+      if (!efforts.length) inFlight.delete(e.prompt)
+    }
   }).catch(($, e, next) => next(e))
 
   // Where the prompt that starts the next main-loop turn came from: a teammate's report or
@@ -135,20 +190,23 @@ export const register: Register = (on, options) => {
       idleCommand = undefined
       const model = await Promise.resolve().then(() => $.session.model()).catch(() => undefined)
       const firstParty = options.main_effort === false ? undefined : await hasFirstPartyCredential($)
+      const layers = await modelSettings($)
       const pick = await ask($, opts, 'mod-turn', {
+        ...(layers ? { settings: layers } : {}),
         text: e.text, ...(model ? { model } : {}), ...(firstParty !== undefined ? { first_party: firstParty } : {}),
         ...(origin ? { origin } : {}), ...(command && e.text.trimStart().startsWith('<command-') ? { command } : {}),
       })
       if (pick?.effort) remember(turnEffort, e.turnId, pick.effort)
     } else if (!agentEffort.has(e.agentId)) {
-      const effort = promptEffort.get(e.text)
-      if (effort) remember(agentEffort, e.agentId, effort)
+      const [effort, ...others] = inFlight.get(e.text) ?? []
+      if (effort && others.every((other) => other === effort)) remember(agentEffort, e.agentId, effort)
     }
     return next(e)
   }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {
     const current = typeof e.effort === 'string' ? e.effort : undefined
+    if (e.agentId === undefined && current !== undefined) sessionEffort = current
     // A subagent runs at the effort its subtask was given; the main loop's turn effort
     // only ever raises what the session already asks for.
     const want = e.agentId !== undefined ? agentEffort.get(e.agentId) : turnEffort.get(e.turnId)
@@ -170,7 +228,12 @@ export const register: Register = (on, options) => {
     const requests = turnRequests.get(e.turnId)
     turnRequests.delete(e.turnId)
     if (e.agentId === undefined) turnEffort.delete(e.turnId)
-    if (e.usage) await ask($, opts, 'mod-usage', { agent_id: e.agentId, usage: e.usage, ...(requests ? { requests } : {}) })
+    const type = e.agentId !== undefined ? agentType.get(e.agentId) : undefined
+    if (e.usage) {
+      await ask($, opts, 'mod-usage', {
+        agent_id: e.agentId, ...(type ? { subagent_type: type } : {}), usage: e.usage, ...(requests ? { requests } : {}),
+      })
+    }
     return done
   }).catch(($, e, next) => next(e))
 }

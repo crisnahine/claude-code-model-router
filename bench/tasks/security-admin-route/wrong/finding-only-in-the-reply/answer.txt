@@ -1,0 +1,1 @@
+gateway/router.py decodes the path twice.

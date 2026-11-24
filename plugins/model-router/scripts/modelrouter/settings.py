@@ -7,9 +7,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from functools import cached_property
+from pathlib import Path
 
-from . import store
-from .config import MODES, PRIORITIES, parse_mode
+from . import allowlist, health, ladder, learn, store
+from . import config as cfg
+from .config import MODES, PRIORITIES, Level, parse_mode
+from .registry import Registry
 
 CLOUDS = ("bedrock", "vertex", "foundry")
 PROVIDERS = (*CLOUDS, "anthropic_aws", "anthropic_google_cloud", "mantle")
@@ -24,17 +28,20 @@ class Settings:
     pins: str = "respect"  # agent_pins: respect or override
     main_effort: bool = False
     update_check: bool = True
-    verify_gate: bool = False
+    verify_gate: bool = True
     strong_agent_gate: bool = True
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
     force: bool = False  # CLAUDE_CODE_SUBAGENT_MODEL_FORCE
     subagent_effort: str | None = None  # CLAUDE_CODE_SUBAGENT_EFFORT
+    workflow_model: str | None = None  # CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL, which pins every workflow agent's model
     effort_level: str | None = None  # CLAUDE_CODE_EFFORT_LEVEL
     cloud: str | None = None  # bedrock, vertex or foundry, from CLAUDE_CODE_USE_<NAME>
     provider: str | None = None  # the one provider the CLAUDE_CODE_USE_<NAME> switches select, if clear
     api_key: str | None = field(default=None, repr=False)  # ANTHROPIC_API_KEY
     base_url: bool = False  # ANTHROPIC_BASE_URL is set
     no_betas: bool = False  # CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
+    mantle: bool = False  # CLAUDE_CODE_USE_MANTLE
+    cache_off: tuple[str, ...] = ()  # the suffix of each DISABLE_PROMPT_CACHING* switch that is on: "" for all models
 
 
 def truthy(value: str | None) -> bool:
@@ -58,8 +65,16 @@ def _provider(on: set) -> str | None:
     return next(iter(on)) if len(on) == 1 else None
 
 
-def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
-    """`config` validates the cap and carries the override files' routing_mode.
+def _cache_off() -> tuple[str, ...]:
+    """Found by prefix, so a new per-model variant needs no code
+    (https://code.claude.com/docs/en/env-vars.md)."""
+    prefix = "DISABLE_PROMPT_CACHING"
+    return tuple(sorted(name[len(prefix):].lstrip("_").lower() for name, value in os.environ.items()
+                        if name.startswith(prefix) and name[len(prefix):len(prefix) + 1] in ("", "_") and truthy(value)))
+
+
+def resolve(reg: Registry | None = None, recorded: bool = False) -> Settings:
+    """`reg` validates the cap and carries the override files' routing_mode.
     `recorded` falls back to what SessionStart recorded, for skill commands."""
     state = store.load_state() if recorded else {}
 
@@ -72,30 +87,73 @@ def resolve(config: dict | None = None, recorded: bool = False) -> Settings:
     def env(name: str) -> str | None:
         return os.environ.get(name) or None
 
-    config = config or {}
     user = parse_mode(option("routing_mode")) or "auto"
-    from_files = parse_mode(config.get("routing_mode"))
+    from_files = parse_mode(reg.routing_mode) if reg else None
     cap = option("max_tier")
     return Settings(
         mode=from_files if from_files and MODES.index(from_files) < MODES.index(user) else user,
         routing_mode=user,
         priority=option("priority") if option("priority") in PRIORITIES else "balanced",
-        cap=cap if cap in (config.get("models") or {}) else None,
+        cap=cap if reg and cap in reg.models else None,
         pins="override" if option("agent_pins") == "override" else "respect",
         main_effort=truthy(option("main_effort")),
         update_check=_on(option("update_check")),
-        verify_gate=truthy(option("verify_gate")),
+        verify_gate=_on(option("verify_gate")),
         strong_agent_gate=_on(option("strong_agent_gate")),
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),
         force=truthy(env("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")),
         subagent_effort=env("CLAUDE_CODE_SUBAGENT_EFFORT"),
+        workflow_model=env("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL"),
         effort_level=env("CLAUDE_CODE_EFFORT_LEVEL"),
         cloud=next((c for c in CLOUDS if truthy(env(f"CLAUDE_CODE_USE_{c.upper()}"))), None),
         provider=_provider({p for p in PROVIDERS if truthy(env(f"CLAUDE_CODE_USE_{p.upper()}"))}),
         api_key=env("ANTHROPIC_API_KEY"),
         base_url=bool(env("ANTHROPIC_BASE_URL")),
         no_betas=truthy(env("CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS")),
+        mantle=truthy(env("CLAUDE_CODE_USE_MANTLE")),
+        cache_off=_cache_off(),
     )
+
+
+class Snapshot:
+    """What one hook call or command knows about this setup, built once at its entry. The
+    registry and options are read at once; the rest on first use, so a hook that never asks
+    for the allowlist or the health table never reads them."""
+
+    def __init__(self, hook_input: dict | None = None, recorded: bool = False) -> None:
+        self.hook_input = hook_input
+        self.session_id = (hook_input or {}).get("session_id")
+        self.registry = cfg.load(hook_input)
+        self.options = resolve(self.registry, recorded)
+        self.project: Path = cfg.project_dir(hook_input)
+
+    @cached_property
+    def health(self) -> health.Health:
+        return health.load()
+
+    @cached_property
+    def allowed(self) -> allowlist.Allowlist:
+        return allowlist.read(self.session_id, self.project, (self.hook_input or {}).get("settings"))
+
+    @cached_property
+    def raises(self) -> dict[str, int]:
+        return learn.raises()
+
+    def pick(self, level: Level) -> ladder.Pick:
+        """The ladder's pick for `level` under this setup's priority, usable models and learned raises."""
+        return ladder.pick(self.registry, level, self.options.priority, self.usable, self.raises)
+
+    def settle(self) -> None:
+        """Write what reads only noticed: an outage the health table found too long. Dry runs skip it."""
+        if "health" in vars(self):
+            try:
+                self.health.settle()
+            except OSError:
+                pass
+
+    @cached_property
+    def usable(self) -> list[str]:
+        return self.registry.available(self.options.cap, allowed=self.allowed, table=self.health)
 
 
 def record(settings: Settings) -> None:

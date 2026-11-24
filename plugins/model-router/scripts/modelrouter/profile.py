@@ -6,8 +6,9 @@ call, and the feedback loop in learn.py corrects levels that keep proving too lo
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, replace
 
-from .config import LEVELS, PLUGIN_NAME
+from .config import PLUGIN_NAME, Level
 
 # Two or more systems named in a list ("across the API, the web client and ...") are cross-module work.
 _SYSTEM = r"(?:services?|clients?|api|gateway|backend|frontend|workers?|apps?|layers?|modules?)"
@@ -65,19 +66,24 @@ _CHANGE = rf"\b{_CHANGE_VERB}"
 # often a noun ends it only with an object after it, so "the config and build scripts" doesn't,
 # and no verb ends it as the first half of a compound noun such as "debug logs" or "audit trails".
 _JUDGMENT_VERBS = r"review|audit|design|plan|evaluate|assess|propose"
-_HUNT_VERBS = (r"debug|diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|prove|"
-               r"verify the logic|figure out")
+# Only nouns that form a compound with these verbs; scripts, builds, records and the like are their objects.
+_COMPOUND = r"\s+(?:logs?|output|trails?|notes?|mode|flags?|messages?|statements?|info|guides?|reports?)\b"
+# "Find why it fails" or "find the race" hunts a defect; "find the regression tests" or "the bug template" looks one up.
+_FIND_DEFECT = (r"find(?:s|ing)?\s+(?:out\s+)?why|find(?:s|ing)?\s+(?:the|a|an|this|that)\s+(?:[\w-]+\s+)?"
+                r"(?:bugs?|race(?:\s+conditions?)?|races|leaks?|deadlocks?|regressions?|crash(?:es)?|culprits?|"
+                rf"causes?)\b(?!-|{_COMPOUND}|\s+(?:tests?|suites?|templates?|trackers?|tickets?|labels?|fix\w*)\b)")
+_HUNT_OTHER = (rf"diagnos\w*|investigat\w*|troubleshoot\w*|reproduc\w*|bisect|analy[sz]e|prove|"
+               rf"verify the logic|figure out|{_FIND_DEFECT}")
+_HUNT_VERBS = rf"debug|{_HUNT_OTHER}"
 _REASONING_WORDS = (rf"{_JUDGMENT_VERBS}|{_HUNT_VERBS}|find out (?:why|how|whether|what caus\w*)|root.?caus\w*|"
                     r"compare|recommend")
 # Asked for a judgment (review it, design it, plan it), not a hunt for a known kind of bug. Only the verb
 # counts, where it starts a sentence or follows and/then/to/please; "the design doc" is a noun.
-_JUDGMENT = rf"(?:^\s*|\n\s*|[.;:!?]\s+|\b(?:and|then|to|please)\s+)(?:{_JUDGMENT_VERBS})\b"
+_JUDGMENT = rf"(?:^[ \t]*|\n[ \t]*|[.;:!?]\s+|\b(?:and|then|to|please)\s+)(?:{_JUDGMENT_VERBS})\b"
 _TASK_VERB = (r"(?:implement|fix|refactor|rename|migrate|optimi[sz]e|rewrite|convert|upgrade|redesign|audit|"
               rf"{_HUNT_VERBS}|encrypt|harden|bump)\b(?!-)")
 _NOUN_VERB = (r"(?:build|update|change|design|plan|review|add|write|create|delete|remove|replace|make(?! sure)|"
               r"root.?caus\w*|port|limit|secure|escape)\b(?!-)")
-# Only nouns that form a compound with these verbs; scripts, builds, records and the like are their objects.
-_COMPOUND = r"\s+(?:logs?|output|trails?|notes?|mode|flags?|messages?|statements?|info|guides?|reports?)\b"
 _LIMIT_WORD = rf"(?:{_CHANGE_VERB}|(?:edit|modify|move|touch|{_REASONING_WORDS})\b(?!-))"
 # Only where a whole token starts: a \b inside "a-b-c" would rescan the rest of the run at every hyphen.
 _JOIN = (rf"(?<![\w'-])(?!{_LIMIT_WORD})[\w'-]+\s+(?:and|then)\s+(?:(?:also|then|instead|please|just)\s+){{0,2}}"
@@ -91,13 +97,80 @@ _LIST = rf",\s*(?:{_ITEM}(?:\s*,\s*{_ITEM}){{0,8}}?(?:\s*,)?\s+)?(?:or|nor)\s+{_
 _NEGATED = (rf"\bwithout\b{_CLAUSE}|\b(?:do not|don't|never|no need to)\b(?:\s*,(?:[^.,;:!?\n]{{0,40}},)?)?"
             rf"(?:\s*(?={_LIST_VERB}){_CLAUSE}(?:{_LIST})*|{_CLAUSE})")
 _REASONING = rf"\b(?:{_REASONING_WORDS})\b"
+# Ruled out for the defect check only: stripping these clauses from the whole brief would also drop a task
+# that follows ("avoid breaking the format and add tests").
+_RULED_OUT = rf"\b(?:avoid|must not|not to|out of scope)\b:?{_CLAUSE}"
+# Work whose point is a defect. "fix" and "debug" count only as verbs ("the fix", "fixture", "debug logging" don't),
+# and "fix" before "#" is a closing keyword. The other hunt verbs are matched as they are.
+_VERB_START = r"(?:^|\n)[ \t]*|[.;:!?,]\s+|\b(?:and|then|to|please|must|should|or|so)\s+"
+_FIX = (rf"(?:{_VERB_START})(?:fix(?:es|ing)?\b(?!\s*#)|debug\b(?!{_COMPOUND}|\s+logging\b))|"
+        rf"\bfix(?:es|ing)?(?={_OBJECT})")
+_HUNT = rf"\b(?:{_HUNT_OTHER})\b"
+_DEFECT = rf"{_FIX}|{_HUNT}"
+# A person's request says "analyze the sales numbers" about data as often as about code, so there a hunt verb
+# counts only beside a word for a defect.
+_DEFECT_NOUN = (r"\b(?:bugs?|failures?|failing|errors?|exceptions?|flaky|crash(?:es|ed|ing)?|regressions?|broken|races?|"
+                r"leak(?:s|ing)?|hang(?:s|ing)?|hung|time[sd]?[- ]?outs?|timing out|deadlocks?|panics?|outages?|"
+                r"slow|wrong|incorrect|issues?|problems?|not working)\b")
 _THOROUGH = r"\b(?:thorough(?:ly)?|comprehensive(?:ly)?|in[- ]depth|deep dive|exhaustive(?:ly)?)\b"
 _LOOKUP = (r"^\s*(?:where|what|which|who|how many|list|show|find|locate|explain|describe|summari[sz]e|"
            r"is there|does)\b")
 # What an agent is for, read from its name. Names are short and deliberate; descriptions
-# mention too many things in passing to be read this way.
-_HEAVY_NAME = r"architect|review|audit|secur|debug|design|plann|(?:^|[-_])solver(?:$|[-_])"
-_LIGHT_NAME = r"explor|search|scout|find|lookup|locat|fetch|summar|format|lint|runner|verif|docs?[-_]|grep"
+# mention too many things in passing to be read this way. Each pattern must match a whole part of
+# the name, so "researcher", "relocation-migrator" and "information-extractor" aren't search agents.
+_HEAVY_NAME = (r"architect(?:s|ure|ural)?|review(?:s|ers?|ing)?|audit(?:s|ors?|ing)?|(?:cyber)?secur(?:e|ity)|"
+               r"debug(?:gers?|ging)?|design(?:ers?|ing)?|plann(?:ers?|ing)|solver")
+_LIGHT_NAME = (r"explor(?:e|ers?|ing)|search(?:ers?|ing)?|scouts?|find(?:ers?)?|lookups?|locat(?:e|ors?)|"
+               r"fetch(?:ers?)?|summar(?:y|ies|i[sz]ers?)|format(?:ters?)?|lint(?:ers?)?|runners?|"
+               r"verif(?:y|iers?|ication)|grep")
+# Light only before another part: "docs-lookup" reads the docs, "update-docs" writes them.
+_LIGHT_LEAD = r"docs?"
+
+
+def _named_for(name: str, pattern: str, lead: str | None = None) -> bool:
+    parts = re.split(r"[-_:]", name)
+    return (any(re.fullmatch(pattern, part) for part in parts)
+            or bool(lead) and any(re.fullmatch(lead, part) for part in parts[:-1]))
+
+
+@dataclass(frozen=True)
+class Role:
+    """What an agent is for, which no brief changes: a heavy role is raised to its floor, a light one held to
+    its cap. `strong` agents start no lower than the request's level, a `checker` reports on finished work, and
+    an agent that doesn't `write` has no Write or Edit tool."""
+    kind: str | None = None
+    floor: Level | None = None
+    cap: Level | None = None
+    strong: bool = False
+    checker: bool = False
+    writes: bool = True
+
+
+ARCHITECT, REVIEWER, DEEP_SOLVER = "architect", "reviewer", "deep-solver"
+# Our own role agents by full name, then the two kinds any agent's name can show. Another plugin's solver is
+# only a heavy role; ours is for what the others couldn't do.
+ROLES = {
+    f"{PLUGIN_NAME}:{ARCHITECT}": Role("heavy", floor=Level.complex, strong=True, writes=False),
+    f"{PLUGIN_NAME}:{REVIEWER}": Role("heavy", floor=Level.complex, strong=True, writes=False),
+    f"{PLUGIN_NAME}:{DEEP_SOLVER}": Role("heavy", floor=Level.hardest, strong=True),
+    "heavy": Role("heavy", floor=Level.complex),
+    "light": Role("light", cap=Level.standard),
+}
+_KIND_NAMES = {"heavy": (_HEAVY_NAME, None), "light": (_LIGHT_NAME, _LIGHT_LEAD)}
+_CHECKERS = ("verifier", "reviewer")
+
+
+def role(agent_type: object) -> Role:
+    """The role an agent's full name (`plugin:agent` or `agent`) stands for."""
+    name = agent_type if isinstance(agent_type, str) else ""
+    found = ROLES.get(name)
+    if found is None:
+        short = name.split(":")[-1].lower()
+        found = next((ROLES[kind] for kind, (pattern, lead) in _KIND_NAMES.items()
+                      if _named_for(short, pattern, lead)), Role())
+    return replace(found, checker=True) if name.endswith(_CHECKERS) else found
+
+
 LONG_BRIEF = 4000
 # Open-ended work with no known approach: the only level the ladder gives its strongest model.
 _FRONTIER = (r"\b(?:research-grade|open[- ]ended|no known (?:fix|approach|cause|solution)|first principles|"
@@ -136,7 +209,7 @@ def _not_english(text: str) -> bool:
 
 # A load limit only makes a brief harder when a design or a choice has to be worked out against it.
 # Asking forms only: "the plan", "as designed", "the selected approach" report a choice already made.
-_PLAN = r"(?:(?<![\w])(?:to|and|then|please|let's)\s+plan|^\s*plan|\n\s*plan|[.;:!?]\s+plan)\b|\bplanning\b"
+_PLAN = r"(?:(?<![\w])(?:to|and|then|please|let's)\s+plan|^[ \t]*plan|\n[ \t]*plan|[.;:!?]\s+plan)\b|\bplanning\b"
 _CHOICE = (rf"\b(?:design(?:s|ing)?|{_ASK_CHOICE}|choices?|trade.?offs?|strateg\w*|siz(?:e|es|ing)|"
            rf"select(?:s|ing)?|how many|estimat(?:e|es|ing)|targets?|budgets?)\b|{_PLAN}")
 
@@ -146,65 +219,125 @@ def signals(text: str) -> list[str]:
     return [name for name in found if name != "load" or re.search(_CHOICE, text)]
 
 
-def profile_prompt(prompt: str) -> dict:
-    """The user's request as a whole. Used to tell whether the conversation's own model
-    is strong enough for it."""
-    text = (prompt or "").lower()
-    hits = signals(text)
-    changes = bool(re.search(_CHANGE, text))
-    if len(text) > 1500 and "scope" not in hits:
+def _fixes_a_defect(asked: str, request: bool = False) -> bool:
+    asked = re.sub(_RULED_OUT, "", asked)
+    if not request:
+        return bool(re.search(_DEFECT, asked))
+    return bool(re.search(_FIX, asked) or re.search(rf"\b(?:{_FIND_DEFECT})", asked)
+                or re.search(_HUNT, asked) and re.search(_DEFECT_NOUN, asked))
+
+
+@dataclass(frozen=True)
+class Reading:
+    """What a brief says, read once and the same way for a call and for a request: the difficulty signals,
+    whether it asks for a change or for reasoning, whether it fixes or hunts a defect, frontier and
+    thoroughness wording, whether it is phrased as a lookup, whether it is English, and how long it is.
+    `judgment` (asks to review, design or plan) and `systems` (names several systems in a list) are the
+    call's own extra reasons for complex, and `request_defect` is the request's narrower defect rule."""
+    signals: tuple[str, ...]
+    acts: frozenset[str]  # "change" and "reason"
+    defect: bool
+    frontier: bool
+    thorough: bool
+    lookup_form: bool
+    english: bool
+    length: int
+    judgment: bool = False
+    systems: bool = False
+    request_defect: bool = False
+
+
+def read(text: str, limits: bool = True) -> Reading:
+    """Read a brief. A negated limit ("do not change any files") restricts the work and doesn't ask for it, so
+    with `limits` its scope, ambiguity and change words are set aside, and its risk words still count. A request
+    is read with `limits` off: its wording counts as it stands, except for the defect rule."""
+    text = (text or "").lower()
+    asked = re.sub(_NEGATED, "", text)
+    seen = asked if limits else text
+    hits = signals(seen)
+    if limits and "risk" not in hits and "risk" in signals(text):
+        hits.insert(0, "risk")
+    acts = set()
+    if re.search(_CHANGE, seen):
+        acts.add("change")
+    if re.search(_REASONING, seen) or re.search(rf"\b(?:{_DECISION})\b", seen):
+        acts.add("reason")
+    return Reading(signals=tuple(hits), acts=frozenset(acts), defect=_fixes_a_defect(asked),
+                   frontier=bool(re.search(_FRONTIER, seen)), thorough=bool(re.search(_THOROUGH, text)),
+                   lookup_form=bool(re.search(_LOOKUP, text)), english=not _not_english(text), length=len(text),
+                   judgment=bool(re.search(_JUDGMENT, seen)), systems=bool(re.search(rf"\b{_SYSTEMS}\b", seen)),
+                   request_defect=_fixes_a_defect(asked, request=True))
+
+
+def level(reading: Reading, kind: str, role: Role | None = None) -> dict:
+    """The level a reading needs, as a "call" or as a "request", with the reasons. The two differ on purpose.
+    A call that asks for nothing is a lookup, while a request with signals and no verb still scores; a request
+    over 1,500 characters gains scope, and a call over 4,000 only lifts a lookup to standard."""
+    if kind == "request":
+        return _request_level(reading)
+    return _call_level(reading, role or Role())
+
+
+def _request_level(r: Reading) -> dict:
+    hits = list(r.signals)
+    if r.length > 1500 and "scope" not in hits:
         hits.append("scope")  # a long brief is rarely a small task
     if len(hits) >= 3:
-        level = "frontier" if re.search(_FRONTIER, text) else "hardest"
+        result = Level.frontier if r.frontier else Level.hardest
     elif len(hits) == 2:
-        level = "complex"
-    elif changes or hits:
-        level = "standard"
-    elif (re.search(_LOOKUP, text) or len(text) < 80) and not _not_english(text):
-        level = "lookup"
+        result = Level.complex
+    elif "change" in r.acts or hits:
+        result = Level.standard
+    elif (r.lookup_form or r.length < 80) and r.english:
+        result = Level.lookup
     else:
-        level = "standard"
-    return {"level": level, "signals": hits, "changes": changes}
+        result = Level.standard
+    if result < Level.complex and r.request_defect:
+        result, hits = Level.complex, hits + ["fixes or hunts a defect"]
+    return {"level": result, "signals": hits}
+
+
+def _call_level(r: Reading, held: Role) -> dict:
+    hits = list(r.signals)
+    why = list(hits)
+    if r.acts:
+        if len(hits) >= 3:
+            result = Level.frontier if r.frontier else Level.hardest
+        elif len(hits) == 2 and r.frontier:
+            result = Level.hardest  # research-grade wording on broad or open work
+        elif len(hits) == 2 or "risk" in hits or (hits and r.judgment) or r.systems:
+            result = Level.complex
+        else:
+            result = Level.standard
+        if result < Level.complex and r.defect:
+            result, why = Level.complex, why + ["fixes or hunts a defect"]
+    elif len(hits) >= 2:
+        result = Level.standard  # finds or explains something broad or sensitive, but only reads
+    elif not r.english:
+        result, why = Level.standard, why + ["not in English"]
+    else:
+        result = Level.lookup
+    if result == Level.lookup and (r.thorough or r.length > LONG_BRIEF):
+        result, why = Level.standard, why + ["thorough or long brief"]
+    if held.floor and result < held.floor:
+        result, why = held.floor, why + ["agent's role"]
+    elif held.cap and result > held.cap:
+        result, why = held.cap, why + ["search or check agent"]
+    return {"level": result, "signals": why}
+
+
+def profile_prompt(prompt: str) -> dict:
+    """The user's request as a whole. Used to tell whether the conversation's own model
+    is strong enough for it. Fixing or hunting a defect is at least complex, as in profile_call, except that a
+    hunt verb such as "analyze" counts only beside a defect word such as "bug" or "failing"."""
+    reading = read(prompt, limits=False)
+    return {**level(reading, "request"), "changes": "change" in reading.acts}
 
 
 def profile_call(tool_input: dict, agent_type: str) -> dict:
     """One agent call, judged by its own brief and by what its agent is for."""
-    text = f"{tool_input.get('description') or ''}\n{tool_input.get('prompt') or ''}".lower()
-    # A limit still names what the work touches, so its risk counts; its scope and ambiguity
-    # words describe what to avoid, so they don't, and neither do its change words.
-    asked = re.sub(_NEGATED, "", text)
-    hits = signals(asked)
-    if "risk" not in hits and "risk" in signals(text):
-        hits.insert(0, "risk")
-    why = list(hits)
-    if re.search(_CHANGE, asked) or re.search(_REASONING, asked) or re.search(rf"\b(?:{_DECISION})\b", asked):
-        if len(hits) >= 3:
-            level = "frontier" if re.search(_FRONTIER, asked) else "hardest"
-        elif len(hits) == 2 and re.search(_FRONTIER, asked):
-            level = "hardest"  # research-grade wording on broad or open work
-        elif (len(hits) == 2 or "risk" in hits or (hits and re.search(_JUDGMENT, asked))
-              or re.search(rf"\b{_SYSTEMS}\b", asked)):
-            level = "complex"
-        else:
-            level = "standard"
-    elif len(hits) >= 2:
-        level = "standard"  # finds or explains something broad or sensitive, but only reads
-    elif _not_english(text):
-        level, why = "standard", why + ["not in English"]
-    else:
-        level = "lookup"
-    if level == "lookup" and (re.search(_THOROUGH, text) or len(text) > LONG_BRIEF):
-        level, why = "standard", why + ["thorough or long brief"]
-    name = agent_type.split(":")[-1].lower()
-    if re.search(_HEAVY_NAME, name):
-        # Our deep-solver is for what the others couldn't do; another plugin's solver is only a heavy role.
-        floor = "hardest" if agent_type.lower() == f"{PLUGIN_NAME}:deep-solver" else "complex"
-        if LEVELS.index(level) < LEVELS.index(floor):
-            level, why = floor, why + ["agent's role"]
-    elif re.search(_LIGHT_NAME, name):
-        if LEVELS.index(level) > LEVELS.index("standard"):
-            level, why = "standard", why + ["search or check agent"]
-    return {"level": level, "signals": why}
+    text = f"{tool_input.get('description') or ''}\n{tool_input.get('prompt') or ''}"
+    return level(read(text), "call", role(agent_type))
 
 
 def asks_for_work(text: str) -> bool:

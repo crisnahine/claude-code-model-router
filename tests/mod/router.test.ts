@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import type { On, PluginOptions } from 'claude-code'
 import { register } from '../../plugins/model-router/hooks/router.ts'
@@ -10,7 +10,7 @@ type Call = { command: string; argv: readonly string[]; stdin: any; env: Record<
 
 const same = <T>(e: T): T => e
 
-function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}) {
+function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}, settings: Record<string, object | Error> = {}) {
   const hooks: Record<string, Hook> = {}
   const matchers: Record<string, unknown> = {}
   const catches: Record<string, Hook> = {}
@@ -22,6 +22,19 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}) 
   }
   const $ = {
     plugin: { root: '/plugin' },
+    clock: {
+      after: (ms: number, fn: () => void) => {
+        const id = setTimeout(fn, ms)
+        return { cancel: () => clearTimeout(id) }
+      },
+    },
+    settings: {
+      read: async ({ source }: { source: string }) => {
+        const v = settings[source]
+        if (v instanceof Error) throw v
+        return v ?? {}
+      },
+    },
     session: {
       model: async () => 'claude-opus-5-5',
       authorize: async (): Promise<{ handle: string; kind: string } | null> => ({ handle: 'h1', kind: 'bearer' }),
@@ -83,6 +96,79 @@ test('a spawn passes the pick model to next', async () => {
   assert.deepEqual(mod.calls.map(c => c.argv), [['sh', '/plugin/scripts/model-router.sh', 'mod-spawn']])
 })
 
+test('mod-start and mod-spawn carry the allowlist and effort cap keys of each settings source, and only the caps of modelSettings', async () => {
+  const policy = { availableModels: ['opus'], maxEffortLevel: 'high', modelSettings: { 'claude-opus-5-5': { maxEffortLevel: 'max' } } }
+  const sent = { ...policy, modelSettings: { 'claude-opus-5-5': { maxEffortLevel: 'max', alwaysThinking: true }, 'claude-haiku-5-5': { fastMode: true } } }
+  const mod = load({ 'mod-spawn': PICK }, {}, { policy: { ...sent, env: { TOKEN: 'x' }, permissions: {} } })
+  await mod.sessionStart({ source: 'startup' })
+  await mod.spawn(spawnEvent())
+  assert.equal(mod.calls.length, 2)
+  for (const call of mod.calls) {
+    assert.deepEqual(Object.keys(call.stdin.settings).sort(), ['flag', 'local', 'policy', 'project', 'user'])
+    assert.deepEqual(call.stdin.settings.policy, policy)
+    assert.equal(JSON.stringify(call.stdin).includes('TOKEN'), false)
+  }
+})
+
+test('a settings read that fails leaves that source out and sends the others', async () => {
+  const mod = load({ 'mod-spawn': PICK }, {}, { policy: new Error('denied'), user: { availableModels: ['haiku'] } })
+  await mod.sessionStart({ source: 'startup' })
+  await mod.spawn(spawnEvent())
+  assert.equal(mod.calls.length, 2)
+  for (const call of mod.calls) {
+    assert.deepEqual(Object.keys(call.stdin.settings).sort(), ['flag', 'local', 'project', 'user'])
+    assert.deepEqual(call.stdin.settings.user, { availableModels: ['haiku'] })
+  }
+})
+
+test('settings reads that all fail send no settings', async () => {
+  const failing = Object.fromEntries(['policy', 'user', 'project', 'local', 'flag'].map(s => [s, new Error('no')]))
+  const mod = load({ 'mod-spawn': PICK }, {}, failing)
+  await mod.sessionStart({ source: 'startup' })
+  await mod.spawn(spawnEvent())
+  for (const call of mod.calls) assert.equal('settings' in call.stdin, false)
+})
+
+test('a settings read that hangs is left out after two seconds', async () => {
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    const mod = load({}, {}, { user: { availableModels: ['haiku'] } })
+    mod.$.settings.read = async ({ source }: { source: string }) =>
+      source === 'policy' ? new Promise(() => {}) : source === 'user' ? { availableModels: ['haiku'] } : {}
+    const started = mod.sessionStart({ source: 'startup' })
+    await new Promise(resolve => setImmediate(resolve))
+    mock.timers.tick(2000)
+    await started
+    assert.deepEqual(Object.keys(mod.calls[0]!.stdin.settings).sort(), ['flag', 'local', 'project', 'user'])
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test('a clock that throws or hands back no cancel leaves the settings out and runs next once', async () => {
+  const clocks = [
+    () => { throw new Error('no clock') },
+    () => ({}),
+  ]
+  for (const after of clocks) {
+    const mod = load({}, {}, { user: { availableModels: ['haiku'] } })
+    ;(mod.$.clock as { after: unknown }).after = after
+    let runs = 0
+    const next = (x: object) => { runs++; return x }
+    const begin = { source: 'startup' }
+    const result = await Promise.resolve(mod.hooks['session.start']!(mod.$, begin, next)).catch(() => mod.catches['session.start']!(mod.$, begin, next))
+    assert.equal(result, begin)
+    assert.equal(runs, 1)
+    assert.equal('settings' in mod.calls[0]!.stdin, false)
+  }
+})
+
+test('a main-loop turn carries the settings layers too', async () => {
+  const mod = load({}, {}, { policy: { deniedModels: ['opus'] } })
+  await mod.start({ turnId: 't1', text: 'list the files under src' })
+  assert.deepEqual(mod.calls[0]!.stdin.settings.policy, { deniedModels: ['opus'] })
+})
+
 test('forks and resumed runs pass through with no CLI call', async () => {
   const mod = load({ 'mod-spawn': PICK })
   for (const extra of [{ fork: true }, { resume: { agentId: 'a9' } }]) {
@@ -94,10 +180,31 @@ test('forks and resumed runs pass through with no CLI call', async () => {
   assert.equal(mod.calls.length, 0)
 })
 
+test('a spawn sends its Agent call id, and a workflow agent sends none', async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  await mod.spawn(spawnEvent())
+  await mod.spawn(spawnEvent({ workflow: { runId: 'w1' } }))
+  await mod.spawn(spawnEvent({ tool_use_id: '' }))
+  assert.equal(mod.calls[0]!.stdin.tool_use_id, 'tu1')
+  assert.equal('tool_use_id' in mod.calls[1]!.stdin, false)
+  assert.equal('tool_use_id' in mod.calls[2]!.stdin, false)
+})
+
 test('a routed agent steps at the pick effort', async () => {
   const mod = load({ 'mod-spawn': PICK })
   await mod.spawn(spawnEvent())
   assert.equal((await mod.step(stepEvent({ agentId: 'a1', effort: 'high' }))).effort, 'low')
+})
+
+test("the main loop's effort reaches mod-spawn, and the agent steps at the effort the CLI decided", async () => {
+  const mod = load({ 'mod-spawn': { stdout: JSON.stringify({ model: 'opus', effort: 'xhigh', reason: 'complex subtask' }) } })
+  await mod.step(stepEvent({ effort: 'xhigh' })) // the main loop, as under --effort ultracode
+  await mod.spawn(spawnEvent())
+  assert.equal(mod.calls.find(c => c.command === 'mod-spawn')!.stdin.session_effort, 'xhigh')
+  assert.equal((await mod.step(stepEvent({ turnId: 'ta1', agentId: 'a1', effort: 'medium' }))).effort, 'xhigh')
+  const fresh = load({ 'mod-spawn': PICK })
+  await fresh.spawn(spawnEvent())
+  assert.equal(fresh.calls.find(c => c.command === 'mod-spawn')!.stdin.session_effort, undefined)
 })
 
 test('an agent stepping before its spawn resolves still gets the pick effort', async () => {
@@ -109,6 +216,68 @@ test('an agent stepping before its spawn resolves still gets the pick effort', a
     return { model: e.model }
   })
   assert.equal(sent.effort, 'low')
+})
+
+test("an agent never steps at another spawn's effort for the same brief", async () => {
+  const LEFT = { stdout: JSON.stringify({ model: 'sonnet', reason: 'the call named its own effort' }) }
+  // Each order of a picked spawn (a1, low) and an unpicked one (a2) with the same prompt, agents started late.
+  for (const order of [[PICK, LEFT], [LEFT, PICK]]) {
+    const replies: Record<string, Reply> = {}
+    const mod = load(replies)
+    const sent: Record<string, any> = {}
+    for (const [i, reply] of order.entries()) {
+      replies['mod-spawn'] = reply
+      const id = reply === PICK ? 'a1' : 'a2'
+      await mod.spawn(spawnEvent({ tool_use_id: `tu${i}` }), async (e: any) => {
+        await mod.start({ turnId: `t${id}`, agentId: id, text: e.prompt })
+        sent[id] = await mod.step(stepEvent({ turnId: `t${id}`, agentId: id, effort: 'max' }))
+        return { model: e.model, agentId: id }
+      })
+    }
+    assert.equal(sent.a2.effort, 'max', JSON.stringify(order))
+    assert.equal((await mod.step(stepEvent({ turnId: 'ta1', agentId: 'a1', effort: 'max', index: 1 }))).effort, 'low')
+  }
+})
+
+test("a redo's first request gets the redo's effort, not the run it replaces", async () => {
+  const replies: Record<string, Reply> = { 'mod-spawn': PICK }
+  const mod = load(replies)
+  await mod.spawn(spawnEvent())
+  replies['mod-spawn'] = { stdout: JSON.stringify({ model: 'sonnet', effort: 'high', reason: 'redo, one level up' }) }
+  let sent: any
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu2' }), async (e: any) => {
+    await mod.start({ turnId: 't2', agentId: 'a2', text: e.prompt })
+    sent = await mod.step(stepEvent({ turnId: 't2', agentId: 'a2', effort: 'medium' }))
+    return { model: e.model, agentId: 'a2' }
+  })
+  assert.equal(sent.effort, 'high')
+})
+
+test("two spawns of one brief in flight together never trade efforts, whichever pick lands first", async () => {
+  const mod = load()
+  // Each mod-spawn call waits until the test answers it, so the two picks can land out of order.
+  const answer: Record<string, (stdout: string) => void> = {}
+  const run = mod.$.process.run
+  mod.$.process.run = (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) =>
+    argv[2] !== 'mod-spawn' ? run(argv, init) : new Promise((resolve) => {
+      answer[JSON.parse(init.stdin).tool_use_id] = (stdout) =>
+        resolve({ exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false })
+    })
+  const sent: Record<string, any> = {}
+  const a = mod.spawn(spawnEvent({ tool_use_id: 'tuA' }), async (e: any) => ({ model: e.model, agentId: 'a1' }))
+  const b = mod.spawn(spawnEvent({ tool_use_id: 'tuB' }), async (e: any) => {
+    await a // b's agent starts only after a's spawn has its pick
+    await mod.start({ turnId: 'ta2', agentId: 'a2', text: e.prompt })
+    sent.a2 = await mod.step(stepEvent({ turnId: 'ta2', agentId: 'a2', effort: 'max' }))
+    return { model: e.model, agentId: 'a2' }
+  })
+  while (!answer.tuA || !answer.tuB) await new Promise((r) => setImmediate(r))
+  answer.tuB(JSON.stringify({ model: 'sonnet', reason: 'the call named its own effort' }))
+  await new Promise((r) => setImmediate(r))
+  answer.tuA(PICK.stdout)
+  await Promise.all([a, b])
+  assert.equal(sent.a2.effort, 'max')
+  assert.equal((await mod.step(stepEvent({ turnId: 'ta1', agentId: 'a1', effort: 'max' }))).effort, 'low')
 })
 
 test('an effort on the Agent call reaches mod-spawn', async () => {
@@ -286,8 +455,19 @@ test('every hook falls back to next(e) when it throws', async () => {
   }
 })
 
+test("a workflow agent's usage names its type, and a subagent's doesn't", async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  const usage = payloads['mod-usage'].usage
+  await mod.spawn(spawnEvent({ subagentType: 'workflow-subagent', workflow: { runId: 'wf_1', agentIndex: 1 } }), (x: object) => ({ ...x, agentId: 'w1' }))
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu2' }), (x: object) => ({ ...x, agentId: 's1' }))
+  await mod.complete(completeEvent({ turnId: 'tw', agentId: 'w1', usage }))
+  await mod.complete(completeEvent({ turnId: 'ts', agentId: 's1', usage }))
+  const sent = mod.calls.filter(c => c.command === 'mod-usage').map(c => c.stdin.subagent_type)
+  assert.deepEqual(sent, ['workflow-subagent', undefined])
+})
+
 test('each payload the mod sends matches its fixture', async () => {
-  const mod = load()
+  const mod = load({}, {}, payloads['mod-start'].settings)
   const spawn = payloads['mod-spawn']
   const usage = payloads['mod-usage']
   await mod.sessionStart({ source: 'startup' })

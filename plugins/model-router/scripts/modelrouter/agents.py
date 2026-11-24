@@ -65,19 +65,27 @@ def _markdown_files(root: Path):
                 yield Path(current) / name
 
 
-def _plugin_roots(plugin: str) -> list[Path]:
-    """Install folders of a plugin, from Claude Code's own install record, then by name."""
-    base = store.claude_home() / "plugins"
+def installed_roots(plugin: str) -> list[Path]:
+    """Install folders of a plugin from Claude Code's own install record alone. It reads one small file and
+    walks nothing, so a hot path can use it; a plugin the record doesn't list, such as one loaded with
+    --plugin-dir, isn't found."""
     roots: list[Path] = []
-    record = store.load_dict(base / "installed_plugins.json").get("plugins")
+    record = store.load_dict(store.claude_home() / "plugins" / "installed_plugins.json").get("plugins")
     for key, installs in record.items() if isinstance(record, dict) else []:
         if str(key).split("@")[0] != plugin:
             continue
         for install in installs if isinstance(installs, list) else [installs]:
             if isinstance(install, dict) and isinstance(install.get("installPath"), str):
                 roots.append(Path(install["installPath"]))
+    return roots
+
+
+def _plugin_roots(plugin: str) -> list[Path]:
+    """Install folders of a plugin: the install record, else a bounded walk of the plugins folder by name."""
+    roots = installed_roots(plugin)
     if roots:
         return roots
+    base = store.claude_home() / "plugins"
     seen = 0
     for current, dirs, files in os.walk(base):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS + ("data",)]

@@ -1,7 +1,7 @@
 {
   "name": "model-router",
   "displayName": "Model Router",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Claude Code model router: a Claude Code plugin for autonomous multi-model orchestration. Automatic Claude model routing that sets the right model and reasoning effort for every subagent, teammate and workflow agent, and the main conversation's effort per request, from any plugin, skill or agent, by task complexity, quality, speed and cost. It starts cheap, escalates work that comes back for a redo, learns from results in your setup, tracks new and retiring models, and checks the work before a turn ends.",
   "author": {
     "name": "Cris",
@@ -21,7 +21,7 @@
     "code-review"
   ],
   "engines": {
-    "claude-code": ">=2.1.292"
+    "claude-code": ">=2.1.329"
   },
   "network": {
     "hosts": [
@@ -79,7 +79,7 @@
     "main_effort": {
       "type": "boolean",
       "title": "Effort for the main conversation",
-      "description": "Raise the main conversation's reasoning effort for a request that looks complex or hardest, for that turn only. It never lowers what you set. It stays off when CLAUDE_CODE_EFFORT_LEVEL is set, and wherever an effort change re-reads the context uncached: on Bedrock, Vertex and Foundry, behind ANTHROPIC_BASE_URL, a Claude apps gateway or another third-party provider, with CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS set, and on a session model other than Fable 5.1 or later, Opus 5.5, Sonnet 5.5 or Haiku 5.5. The router doesn't detect a HIPAA organization, and in the Claude Desktop app it can't tell a gateway sign-in from a subscription, so leave this off in a HIPAA organization, or if Claude Desktop reaches Claude through a Claude apps gateway.",
+      "description": "Raise the main conversation's reasoning effort for a request that looks complex or hardest, for that turn only. It never lowers what you set. It stays off when CLAUDE_CODE_EFFORT_LEVEL is set, on Foundry and behind ANTHROPIC_BASE_URL or another third-party provider, where it can't confirm the cache survives, and wherever an effort change re-reads the context uncached: on Bedrock (including its Mantle endpoint), Vertex or a Claude apps gateway, with CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS set, with prompt caching turned off (DISABLE_PROMPT_CACHING or a per-model variant), and on a session model other than Fable 5.1 or later, Opus 5.5, Sonnet 5.5 or Haiku 5.5. The router doesn't detect a HIPAA organization, and in the Claude Desktop app it can't tell a gateway sign-in from a subscription, so leave this off in a HIPAA organization, or if Claude Desktop reaches Claude through a Claude apps gateway.",
       "default": false
     },
     "update_check": {
@@ -91,8 +91,8 @@
     "verify_gate": {
       "type": "boolean",
       "title": "Test run before finishing",
-      "description": "Off by default, since it adds turns and often an agent. When on, Claude is asked once, before it finishes a turn, to run the verifier when code in the project changed and no test, lint or build ran afterwards. Turn it on if you want a check before every finish.",
-      "default": false
+      "description": "On by default. Claude is asked once, before it finishes a turn, to run the verifier when code in the project changed and no test, lint or build ran afterwards. This check is the failure signal that lets the router start cheap and re-run what fails. Turn it off to skip the ask.",
+      "default": true
     },
     "strong_agent_gate": {
       "type": "boolean",
