@@ -1,0 +1,1 @@
+the #224 line doesn't say the /v1/checkout endpoint is gone

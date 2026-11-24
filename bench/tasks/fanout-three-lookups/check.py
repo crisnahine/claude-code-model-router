@@ -22,7 +22,7 @@ for rel in shipped:
         passcheck.finish(False, f"{rel.as_posix()} was changed or removed; the brief asks for no changes")
 
 try:
-    data = json.loads((work / "ANSWERS.json").read_text(encoding="utf-8"))
+    data = json.loads((work / "ANSWERS.json").read_text(encoding="utf-8-sig"))
 except (OSError, ValueError):
     passcheck.finish(False, "ANSWERS.json is missing or isn't JSON")
 if not isinstance(data, dict) or set(data) != {"page_size", "refund_email", "webhook_attempts"}:

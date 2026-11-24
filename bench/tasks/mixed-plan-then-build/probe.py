@@ -27,12 +27,30 @@ try:
         conn.executemany("INSERT INTO customers (id, email) VALUES (?, ?)", [(1, "ana@example.com"), (2, "ben@example.com")])
         conn.commit()
     elif payload["action"] == "post":
+        gateway = importlib.import_module("payments.gateway")
+        real_charge = gateway.charge
+
+        # The fake gateway logs inside the work's transaction, which a rollback erases; a real card stays charged.
+        def charge(*args, **kwargs):
+            got = real_charge(*args, **kwargs)
+            with open(payload["db"] + ".charges", "a", encoding="utf-8") as log:
+                log.write("charge\n")
+            return got
+
+        gateway.charge = charge
+        api = importlib.import_module("api.payments")
+        for module in [m for m in list(sys.modules.values()) if m is not sys.modules["__main__"]]:
+            for name, value in list(getattr(module, "__dict__", {}).items()):
+                if value is real_charge:
+                    setattr(module, name, charge)
         conn = importlib.import_module("db").connect(payload["db"])
-        status, body = importlib.import_module("api.payments").handle_post(conn, payload["request"])
+        status, body = api.handle_post(conn, payload["request"])
         out["result"] = json.loads(json.dumps([status, body]))
     else:
+        charges = Path(payload["db"] + ".charges")
         conn = sqlite3.connect(payload["db"])
-        out["result"] = [conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("gateway_log", "payments")]
+        out["result"] = [len(charges.read_text(encoding="utf-8").split()) if charges.is_file() else 0,
+                         conn.execute("SELECT COUNT(*) FROM payments").fetchone()[0]]
 except BaseException as e:
     out["error"] = f"{type(e).__name__}: {e}"[:300]
 # Written to the file descriptor and followed by _exit, so nothing the task code left behind can add a later line.

@@ -1,10 +1,11 @@
 {
   "class": "redo",
   "shape": "redo",
-  "revision": 3,
+  "revision": 4,
   "revisions": {
     "2": "the check reads what each line says and turns down commit subjects, and #224 is a breaking change the visible check wants marked",
-    "3": "the check turns down a commit type, hash or subject anywhere in a line, and needs each line to name what its PR did, so #224 must say the endpoint is gone"
+    "3": "the check turns down a commit type, hash or subject anywhere in a line, and needs each line to name what its PR did, so #224 must say the endpoint is gone",
+    "4": "the #224 line must say the endpoint itself is gone, a line that is otherwise right isn't failed for saying callers will stop or for naming the deprecation, more wordings for #214, #218 and #228 pass, and a #218 or #228 line that gets the change backwards fails"
   },
   "brief": "We release 2.4.0 today, 2026-11-20. Write its section in CHANGELOG.md from the commits listed in commits.txt, following CONTRIBUTING.md. When the section is written, run python3 tools/check_changelog.py 2.4.0. If it reports problems, send the work back once with what it printed, then run it again. Reply with the check's last line."
 }
