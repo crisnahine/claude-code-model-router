@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import sys
+import unicodedata
 
 from . import health, hooks, report, settings, store
 
@@ -54,6 +55,28 @@ def _reset_health() -> str:
     return "Learned availability left as is: state.json could not be read or written."
 
 
+# What the two skills that pass the user's words through accept; anything else is ignored.
+_TAKES = {"models": "reset, --json and the option flags", "usage": "a number of days and --json"}
+
+
+class _Typed(Exception):
+    """A malformed word the user typed after a skill command."""
+
+
+def _reject(cmd: str, message: str) -> None:
+    raise _Typed(f"model-router {cmd}: {message}. It takes only {_TAKES[cmd]}, so nothing was shown.")
+
+
+def _days(typed: str) -> int | None:
+    """A positive whole number of days, capped at 100 years so the cutoff stays a date; else None."""
+    if not typed.isdecimal():
+        return None
+    digits = "".join(str(unicodedata.decimal(c)) for c in typed).lstrip("0")
+    if not digits:
+        return None
+    return 36500 if len(digits) > 5 else min(int(digits), 36500)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="model-router")
     parser.add_argument("--data-dir", help="plugin data directory; skills pass ${CLAUDE_PLUGIN_DATA}")
@@ -64,19 +87,28 @@ def main(argv: list[str] | None = None) -> int:
     for name in hooks.HANDLERS:
         sub.add_parser(name)
     sub.add_parser("policy", parents=[options])
-    p = sub.add_parser("models", parents=[options])
-    p.add_argument("action", nargs="*")  # the skill passes whatever the user typed; only reset counts
-    p.add_argument("--reset", action="store_true")
-    p.add_argument("--json", action="store_true")
+    models = sub.add_parser("models", parents=[options])
+    models.add_argument("action", nargs="*")
+    models.add_argument("--reset", action="store_true")
+    models.add_argument("--json", action="store_true")
     p = sub.add_parser("explain", parents=[options])
     p.add_argument("--agent")
     p.add_argument("--model")
     p.add_argument("--effort")
     p.add_argument("text", nargs="*")
-    p = sub.add_parser("usage")
-    p.add_argument("days", nargs="?", default="7")
-    p.add_argument("--json", action="store_true")
-    args = parser.parse_args(argv)
+    usage = sub.add_parser("usage")
+    usage.add_argument("days", nargs="?", default="7")
+    usage.add_argument("--json", action="store_true")
+    # Their skill lines end in whatever the user typed, and a non-zero exit aborts the skill.
+    for name, p in (("models", models), ("usage", usage)):
+        p.error = lambda message, cmd=name: _reject(cmd, message)  # type: ignore[method-assign]
+    try:
+        args, extra = parser.parse_known_args(argv)
+    except _Typed as exc:
+        print(exc, file=sys.stderr if "--json" in (sys.argv if argv is None else argv) else sys.stdout)
+        return 0
+    if extra and args.cmd not in _TAKES:
+        parser.error("unrecognized arguments: " + " ".join(extra))
     if args.data_dir and "${" not in args.data_dir:
         os.environ["CLAUDE_PLUGIN_DATA"] = args.data_dir
     for key in settings.OPTIONS:
@@ -105,7 +137,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "policy":
         print(report.policy(snap))
     elif args.cmd == "models":
-        if args.reset or "reset" in args.action:
+        extra = args.action + extra
+        if args.reset or "reset" in extra:
             cleared = f"{_reset_health()}\n"
             if not args.json:
                 print(cleared)
@@ -114,6 +147,13 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "explain":
         print(report.explain(snap, " ".join(args.text), args.agent, args.model, args.effort))
     elif args.cmd == "usage":
-        days = int(args.days) if str(args.days).isdigit() and int(args.days) > 0 else 7  # ledger.read(0) is everything
+        days = _days(args.days)
+        if days is None:
+            days = 7
+            extra.insert(0, args.days)
         print(json.dumps(report.usage_data(days), indent=2) if args.json else report.usage(days))
+    ignored = [word for word in extra if word != "reset" or args.cmd != "models"]
+    if ignored:
+        print(f"Ignored {' '.join(ignored)!r}: {args.cmd} takes only {_TAKES[args.cmd]}.",
+              file=sys.stderr if args.json else sys.stdout)
     return 0
