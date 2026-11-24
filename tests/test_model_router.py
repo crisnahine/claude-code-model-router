@@ -1673,25 +1673,31 @@ class Profile(unittest.TestCase):
 
 
 class RoutingEvals(Sandbox):
-    """Each `claude plugin eval` case routes as its expected_outcome says, with no model call, so a
-    routing regression fails CI instead of waiting for a paid eval run. A case hands a subagent an exact
-    brief, and the router decides that call as it would in a session on the case's own model."""
+    """Each `claude plugin eval` case says in expected_outcome which model and effort Claude should name
+    for its work, and its graders check that model ran. Checked here with no model call, so a drift fails
+    CI instead of waiting for a paid eval run: the session note pairs that model with that effort for some
+    kind of work, and a call naming both runs on them in a session on the case's own model."""
 
     def test_each_eval_case_routes_as_expected(self):
         cases = sorted((PLUGIN / "evals").glob("*/prompt.md"))
-        self.assertGreaterEqual(len(cases), 2)
+        self.assertGreaterEqual(len(cases), 5)
+        note = hooks.session_start({"session_id": "rules"})["hookSpecificOutput"]["additionalContext"]
         for path in cases:
             name = path.parent.name
             fields = frontmatter(path)
-            want = re.fullmatch(r"['\"]?level (\w+), model (\w+), effort (\w+)['\"]?", fields.get("expected_outcome", ""))
-            self.assertTrue(want, f"{name}: expected_outcome must read 'level L, model M, effort E'")
-            quoted = re.search(r'this exact prompt: "([^"]+)"', path.read_text(encoding="utf-8").split("\n---\n", 1)[1])
-            self.assertTrue(quoted, f"{name}: the case must quote the brief it hands a subagent")
+            want = re.fullmatch(r"['\"]?(?:agent (\S+), )?model (\w+), effort (\w+)['\"]?",
+                                fields.get("expected_outcome", ""))
+            self.assertTrue(want, f"{name}: expected_outcome must read '[agent A, ]model M, effort E'")
+            agent, model, effort = want.groups()
+            self.assertIn(f"- {model} at {effort}: ", note, name)
+            graders = "\n".join(p.read_text(encoding="utf-8") for p in (path.parent / "graders").glob("*.md"))
+            self.assertIn(f"claude-{model}-", graders, f"{name}: no grader checks the model the subagent ran on")
+            self.assertIn(agent or "", graders, f"{name}: no grader checks the agent Claude picked")
             self.session_on(fields["model"], session_id=name)
-            hook_input = {"session_id": name, "cwd": str(self.project),
-                          "tool_input": {"subagent_type": "general-purpose", "prompt": quoted[1]}}
+            hook_input = {"session_id": name, "cwd": str(self.project), "tool_input": {
+                "subagent_type": agent or "general-purpose", "prompt": "the case's brief", "model": model, "effort": effort}}
             d = spawn.decide(hook_input, settings.Snapshot(hook_input)).decision
-            self.assertEqual((d["level"], d["model"], d["effort"]), want.groups(), name)
+            self.assertEqual((d["model"] or d["was"], d["effort"] or effort), (model, effort), name)
 
 
 class Router(Sandbox):
@@ -1795,7 +1801,7 @@ class Router(Sandbox):
                                                "model": "haiku", "effort": "medium"})
         self.assertNotIn("permissionDecision", out)
         self.assertIn("haiku at medium effort", out["additionalContext"])
-        self.assertIn('keeps its `description` with "Redo:" in front', out["additionalContext"])
+        self.assertNotIn("Redo:", out["additionalContext"])  # the session note carries the redo rule
         self.assertEqual(self.ledger()[-1]["via"], "fallback")
 
     def test_no_output_when_the_model_would_be_the_same(self):
@@ -3411,38 +3417,69 @@ class Hooks(Sandbox):
     def test_session_start_explains_automatic_routing(self):
         self.options(max_tier="opus")
         text = self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))
-        self.assertIn("Model Router sets", text)
-        self.assertNotIn("strongest model in use", text)  # changes nothing Claude does; /model-router:route says it
+        self.assertIn("keeps the `model` and `effort` an Agent call names, within the user's cap", text)
+        self.assertIn("fills in `effort` when a call names only a model", text)
+        for line in ("- haiku at medium: finding, reading and listing", "- sonnet at medium: everyday work to a clear brief",
+                     "- opus at high: work that is hard to check, high-stakes, ambiguous or broad",
+                     "- fable at high: open-ended research"):
+            self.assertIn(line, text)
+        self.assertIn("a contract or financial figures", text)  # any kind of work, not only code
+        self.assertIn("A call that names neither runs on its agent's own model or the conversation's.", text)
+        self.assertIn('A redo after a failed check or a gap in the report keeps its `description` with "Redo:" in front',
+                      text)
+        self.assertNotIn("from its brief", text)
         self.assertNotIn("model-router:deep-solver", text)  # the Agent tool lists the role agents already
-        self.assertIn("omit `effort` unless the user named one", text)
-        self.assertIn("name `model` only when the user did or when what was read shows", text)  # any work, not only code
-        self.assertIn('keeps its `description` with "Redo:" in front', text)
-        self.assertNotIn("re-issued unchanged", text)  # Claude rewrites a brief it sends again
-        self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", text)
+        self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL", text)
         self.assertEqual(session.model("s1"), "claude-sonnet-5-5")
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         text = self.text(hooks.session_start({"session_id": "s1"}))
-        self.assertIn("pins every subagent to opus, so Model Router sets only their effort", text)
-        self.assertIn("omit `effort` unless the user named one.", text)
-        self.assertNotIn("name `model`", text)  # Claude can't pass a model under FORCE (sub-agents.md)
+        self.assertIn("runs every subagent on opus, so a `model` on an Agent call has no effect", text)
+        self.assertIn("keeps the `effort` a call names, by the work: medium for finding", text)
+        self.assertNotIn("haiku at medium", text)  # Claude can't pass a model under FORCE (sub-agents.md)
+        self.assertNotIn("names only a model", text)
 
     def test_session_start_says_when_the_subagent_model_default_leaves_calls_alone(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
-        text = self.text(hooks.session_start({"session_id": "s1", "model": "claude-opus-5-5"}))
-        self.assertIn("CLAUDE_CODE_SUBAGENT_MODEL sets the model of every agent without its own", text)
-        self.options(agent_pins="override")  # then the router picks again, and the plain note is true
-        text = self.text(hooks.session_start({"session_id": "s1", "model": "claude-opus-5-5"}))
-        self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL", text)
+        out = hooks.session_start({"session_id": "s1", "source": "startup", "model": "claude-opus-5-5"})
+        self.assertIn("CLAUDE_CODE_SUBAGENT_MODEL sets the model of every agent without its own", out["systemMessage"])
+        self.assertIn("names neither runs on its agent's own model or CLAUDE_CODE_SUBAGENT_MODEL.", self.text(out))
+        self.options(agent_pins="override")  # then the router decides, so the default leaves no call alone
+        out = hooks.session_start({"session_id": "s1", "source": "startup", "model": "claude-opus-5-5"})
+        self.assertNotIn("systemMessage", out)
+        self.assertIn("names neither runs on the conversation's model.", self.text(out))
+
+    def test_notices_for_the_user_are_shown_to_the_user_when_a_session_opens(self):
+        # systemMessage is "shown to the user" and additionalContext is for Claude (hooks.md, JSON output).
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1",
+                     CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="claude-opus-5-5")
+        for source in ("startup", "resume", "fork", None):
+            out = hooks.session_start({"session_id": "s1", "source": source})
+            self.assertTrue(out["systemMessage"].startswith("Model Router: CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every "
+                                                            "subagent to opus, so Model Router sets only their effort"))
+            self.assertIn("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent", out["systemMessage"])
+            self.assertNotIn("pins every subagent", self.text(out))
+            self.assertNotIn("WORKFLOW", self.text(out))
+            self.assertNotRegex(out["systemMessage"] + self.text(out), r"(?i)worth (?:telling|mentioning)")
+        for source in ("clear", "compact"):  # the same session goes on, and the user saw them when it opened
+            out = hooks.session_start({"session_id": "s1", "source": source})
+            self.assertNotIn("systemMessage", out)
+            self.assertIn("keeps the `effort` a call names", self.text(out))
 
     def test_the_text_in_context_every_session_stays_within_budget(self):
         # The session-start note, the role agents' descriptions and the model-invoked skills' listings are in
         # the main loop's context in every session (docs/PERFORMANCE.md, "Context the plugin adds").
-        note = self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))
+        # The note holds up to 700 characters: it carries the table of which model and effort fit which work,
+        # since the Agent tool sets `effort` only when instructions such as CLAUDE.md or a skill ask for one.
+        notes = [self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))]
+        for pin in ({"CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5-5[1m]"}, {"CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}):
+            self.options(**pin, CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="claude-opus-5-5")
+            notes.append(self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"})))
         agents = [frontmatter(p)["description"] for p in (PLUGIN / "agents").glob("*.md")]
         listed = [frontmatter(p) for p in (PLUGIN / "skills").glob("*/SKILL.md")]
         skills = [f.get("description", "") + f.get("when_to_use", "") for f in listed
                   if f.get("disable-model-invocation") != "true"]
-        self.assertLessEqual(len(note), 360, note)
+        for note in notes:
+            self.assertLessEqual(len(note), 700, note)
         self.assertLessEqual(sum(map(len, agents)), 930)
         self.assertLessEqual(sum(map(len, skills)), 200)
 
@@ -3455,11 +3492,13 @@ class Hooks(Sandbox):
             "reviewed": {"claude_code_version": "2.0.0", "pages": {}, "aliases": ["haiku"]},
             "cache": {"releases": [{"version": "2.1.0", "date": "", "link": ""}], "pages": {},
                       "aliases": ["haiku", "sonnet", "opus", "fable", "saga"]}})
-        text = self.text(hooks.session_start({"session_id": "s1"}))
-        self.assertIn("saga", text)
-        self.assertIn("1 Claude Code release(s)", text)
+        out = hooks.session_start({"session_id": "s1", "source": "startup"})
+        self.assertIn("saga", out["systemMessage"])
+        self.assertIn("1 Claude Code release(s)", out["systemMessage"])
+        self.assertNotIn("saga", self.text(out))
+        self.assertNotIn("systemMessage", hooks.session_start({"session_id": "s1", "source": "compact"}))
         self.options(update_check="false")
-        self.assertNotIn("saga", self.text(hooks.session_start({"session_id": "s1"})))
+        self.assertNotIn("systemMessage", hooks.session_start({"session_id": "s1", "source": "startup"}))
 
     def test_machine_written_turns_dont_reset_the_request(self):
         hooks.user_prompt({"session_id": "s1", "prompt": HARD, "prompt_id": "p1"})
@@ -3890,8 +3929,7 @@ class Upstream(Sandbox):
         self.assertEqual(upstream.behind(["claude-opus-5[1m]", "claude-opus-5-5", "opus", None]),
                          [("claude-opus-5", "claude-opus-5-5")])
         def note(model: str) -> str:
-            out = hooks.session_start({"session_id": "s1", "model": model}) or {}
-            return (out.get("hookSpecificOutput") or {}).get("additionalContext", "")
+            return (hooks.session_start({"session_id": "s1", "model": model}) or {}).get("systemMessage", "")
         self.assertIn("claude-opus-4-7 is running here and claude-opus-5-5 is the newest of its family",
                       note("claude-opus-4-7"))
         self.assertNotIn("newest of its family", note("opus"))
@@ -4656,7 +4694,7 @@ class MachineReadable(Sandbox):
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="claude-opus-5-5")
         self.assertEqual(self.json_out("models")["workflow_model"], "claude-opus-5-5")
         self.assertIn("pins every workflow agent to claude-opus-5-5, so Model Router sets only their effort", self.out("models"))
-        note = hooks.session_start({"session_id": "s1"})["hookSpecificOutput"]["additionalContext"]
+        note = hooks.session_start({"session_id": "s1"})["systemMessage"]
         self.assertIn("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on claude-opus-5-5", note)
         self.assertIn("so the router sets only their effort", note)
         pick = modpath.spawn(stage)
@@ -5115,7 +5153,7 @@ class EdgeCases(Sandbox):
         self.assertTrue(all(state.values()), state)
         out = hooks.session_start({"session_id": "s1", "source": "compact", "cwd": str(self.project)})
         self.assertEqual(snapshot(), state)  # no model: kept as is
-        self.assertIn("Model Router sets", json.dumps(out))  # compaction drops the old note, so it is sent again
+        self.assertIn("Model Router keeps the", json.dumps(out))  # compaction drops the old note, so it is sent again
         hooks.session_start({"session_id": "s1", "source": "compact", "model": "claude-opus-5-5",
                              "cwd": str(self.project)})
         self.assertEqual(session.model("s1"), "claude-opus-5-5")

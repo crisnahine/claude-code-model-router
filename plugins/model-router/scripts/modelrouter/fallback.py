@@ -103,5 +103,4 @@ def _note(decision: router.Decision) -> str:
         what = f"model to {decision['model']}{effort}"
     else:
         what = f"effort to {decision['effort']}"
-    return (f"Model Router set this agent's {what} ({decision['reason']}). "
-            "A redo of a weak result keeps its `description` with \"Redo:\" in front, and runs one level higher.")
+    return f"Model Router set this agent's {what} ({decision['reason']})."
