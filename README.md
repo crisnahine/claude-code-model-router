@@ -182,7 +182,7 @@ Model Router runs on your machine with your user permissions, as every plugin's 
 | [Security](docs/SECURITY.md) | What reaches the network, and who can steer it? |
 | [Changelog](CHANGELOG.md) | What changed in each release? |
 
-The [documentation index](docs/README.md) lists every other page, including performance, the roadmap, the glossary and release readiness. Bugs and questions go to [GitHub issues](https://github.com/crisnahine/claude-code-model-router/issues). To work on the plugin, see [CONTRIBUTING.md](CONTRIBUTING.md).
+The [documentation index](docs/README.md) lists every other page, including performance, the roadmap, the glossary and release readiness. Bugs and questions go to [GitHub issues](https://github.com/crisnahine/claude-code-model-router/issues). For a quick question, or a call it routed wrong, join the [Discord server](https://discord.gg/AHZZ7bABJy). To work on the plugin, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
