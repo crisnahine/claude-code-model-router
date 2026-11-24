@@ -365,6 +365,11 @@ def _metric_text(cell: list[dict], routed: bool) -> str:
     share = _cache_share(cell)
     parts.append("cache n/a" if share is None else f"cache {share:.0%}")
     parts.append("Bash denied in {} of {}".format(*bash_denials(cell)))
+    told = [r for r in cell if isinstance(r.get("agent_calls"), list)]
+    calls = [c for r in told for c in r["agent_calls"] if isinstance(c, dict)]
+    parts.append(f"model named on {sum(bool(c.get('named_model')) for c in calls)} of {len(calls)} Agent calls and "
+                 f"effort on {sum(bool(c.get('named_effort')) for c in calls)}"
+                 + (f" ({len(told)} of {len(cell)} runs)" if len(told) < len(cell) else "") if told else "named n/a")
     if not routed:
         return ", ".join(parts + ["not routed"])
     known = [r for r in cell if isinstance(r.get("routed"), list)]
@@ -382,8 +387,9 @@ def _metric_text(cell: list[dict], routed: bool) -> str:
     else:
         parts.append("accuracy by level n/a")
     spawns = [s for r in known for s in r["routed"] if "escalated_from" in s]
-    parts.append(f"escalated {sum(bool(s['escalated_from']) for s in spawns)} of {len(spawns)} spawns" if spawns
-                 else "escalation n/a")
+    # A redo with no run on record climbs from the level it would get unmarked, which never ran.
+    redone = sum(bool(s["escalated_from"]) and s.get("on_record") is not False for s in spawns)
+    parts.append(f"escalated {redone} of {len(spawns)} spawns" if spawns else "escalation n/a")
     return ", ".join(parts)
 
 
@@ -412,7 +418,9 @@ def render_sessions(parts: list[tuple], meta: dict, routers: frozenset[str], own
             but = f", except {', '.join(f'`{c}`' for c in own)}, which sets its own" if own else ""
             prompt = f" The prompt is the {arm}: the brief alone, with no order to delegate." if arm else ""
             old = (" These runs predate the sandboxed harness (row schema below 3), so no row here has a verdict or a "
-                   "rank.") if group is legacy else ""
+                   "rank. Their router runs loaded an older design of Model Router, which read each subagent's brief "
+                   "and chose the model itself; the router now keeps the model and effort each call names.") \
+                if group is legacy else ""
             body += [f"## {title}: session model `{model}`" + (f", {arm}" if arm else ""), "",
                      f"Every run here had `{model}` as its session model{but}; router: `{router}`.{prompt}{old}", "",
                      *_table(summary + ([every] if every else [])), "", *_quality_lines(summary), "",
@@ -536,7 +544,9 @@ def _notes(results: Results) -> list[str]:
            "no_start": "run(s) are set aside, outside the results, because `claude` stopped before its stream began "
                        "(no `system/init` event and no result), as when the sandbox can't start",
            "off_pin": "run(s) of a configuration with pinned agents are set aside, outside the results, because they "
-                      "used none of those agents, another one, or a model or effort set on the Agent call"}
+                      "used none of those agents, another one, or a model or effort set on the Agent call",
+           "options_not_applied": "router run(s) are set aside, outside the results, because their ledger holds a row "
+                                  "their configuration's plugin options rule out"}
     aside = [row for _, row in found if row.get("limited_reason") not in own]
     where = " and ".join(f"`bench/results/{sub}/`" for sub in sorted({sub for sub, _ in found}))
     lines = []
@@ -740,10 +750,14 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "- Run metrics, per class and configuration: p50 and p90 are nearest-rank percentiles of each run's wall "
         "time (`wall_ms`, the runner's clock around the `claude` process). Cache is cache-read tokens over all input tokens, which are input plus cache reads "
         "plus cache writes (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md), summed over "
-        "every model that ran. Bash denied counts the runs whose result lists a denied Bash call. For a router "
+        "every model that ran. Bash denied counts the runs whose result lists a denied Bash call. Model named counts "
+        "the Agent calls in the runs' streams that set their own `model`, and effort the ones that set `effort` "
+        "(`agent_calls`, which also holds the model each call's first message ran on): Model Router keeps what a "
+        "call names, and a call that names no model stays on its parent's. For a router "
         "configuration, accuracy by level is the pass rate of its runs grouped by "
         "the level the router gave the run's first subagent. Escalated counts the spawns whose ledger row names the "
-        "level of a run they redo (`escalated_from`), over the spawns whose row says either way. Both "
+        "level of a run they redo (`escalated_from`, unless `on_record` is false, since then no run at that level is "
+        "on record), over the spawns whose row says either way. Both "
         "come from the run's `routed` line, and n/a means no run in the cell has it.", "",
         "## Setup", "",
         f"- Claude Code: {', '.join(versions) or 'n/a'}. Session models: {', '.join(main) or 'n/a'} (`--model`), "
@@ -791,8 +805,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "empty list doesn't prove no policy applied (https://code.claude.com/docs/en/managed-settings.md). Only a "
         "router configuration passes `--plugin-dir`, from a copy of `plugins/model-router` made once when the "
         f"batch starts, or for a `plugin_ref` an export of that commit. {since} records the hash of the plugin it "
-        "loaded in `plugin_hash`, null with no plugin, and for a router run the options the plugin saved at start "
-        "in `plugin_options`; a run whose saved options differ from its configuration's is set aside."
+        "loaded in `plugin_hash`, null with no plugin. The plugin keeps no copy of its options, so a run of a router "
+        "variant is set aside only when its ledger holds a row an option rules out (a `gate` row with `verify_gate` "
+        "off, a rewritten spawn with `routing_mode` off); `options_applied` true means no such row, not proof."
         + (f" {allowlisted} run(s) here are below row schema 3: they ran with an exact list of `python3`, "
            "`python`, `tail`, `head` and `echo` command rules instead of the sandbox, which denied many test runs."
            if allowlisted else ""),

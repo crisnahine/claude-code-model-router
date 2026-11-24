@@ -32,7 +32,6 @@ sys.path.insert(0, str(PLUGIN / "scripts"))
 from modelrouter import config as mrconfig  # noqa: E402
 from modelrouter.registry import Registry  # noqa: E402
 from modelrouter.ledger import read as read_ledger  # noqa: E402
-from modelrouter.store import load_state_file  # noqa: E402
 ROW_SCHEMA = 3  # a row's schema says which harness wrote it; analyze reads a missing key as old only below this
 CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research",
            "document", "analysis", "operations")
@@ -60,7 +59,6 @@ MANAGED_SETTINGS = ("/Library/Application Support/ClaudeCode/managed-settings.js
                     "C:\\Program Files\\ClaudeCode\\managed-settings.json", "C:\\Program Files\\ClaudeCode\\managed-settings.d")
 AUTH = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 STATE_FILES = ("state.json",)
-PLUGIN_OPTIONS = ("routing_mode", "max_tier", "verify_gate")
 # Every run's scratch folder sits here, so one sandbox rule hides the others' work from it. Short and unresolved:
 # the run's CLAUDE_CODE_TMPDIR is its scratch folder, and one over about 30 bytes falls back to the shared temp folder.
 RUNS = (Path("/tmp") / f"mrb-{os.getuid()}" if hasattr(os, "getuid")
@@ -364,11 +362,13 @@ def session_dir(env: dict) -> Path:
     return Path(env["CLAUDE_CONFIG_DIR"]) / "projects" / env["CLAUDE_CODE_PROJECT_DIR_NAME"]
 
 
-def read_stream(stdout: str) -> tuple[dict, dict, dict[str, int], int]:
-    """The system/init event, the last result line, the subagents started by type, and how many Agent calls set
-    their own model or effort, which outranks a definition's (https://code.claude.com/docs/en/sub-agents), from
-    stream-json output. A line that isn't a JSON object is skipped, as is a tool_use id seen before."""
-    init, result, started, seen, overrides = {}, {}, {}, set(), 0
+def read_stream(stdout: str) -> tuple[dict, dict, dict[str, int], list[dict]]:
+    """The system/init event, the last result line, the subagents started by type, and each Agent call in order:
+    its agent, the model and effort the call named itself, which outrank a definition's
+    (https://code.claude.com/docs/en/sub-agents), and the model of the first message the stream shows the subagent
+    sending (`parent_tool_use_id`), None when it shows none. A line that isn't a JSON object is skipped, as is a
+    tool_use id seen before."""
+    init, result, started, calls = {}, {}, {}, {}
     for line in stdout.splitlines():
         try:
             event = json.loads(line)
@@ -381,15 +381,20 @@ def read_stream(stdout: str) -> tuple[dict, dict, dict[str, int], int]:
         elif event.get("type") == "result":
             result = event
         elif event.get("type") == "assistant":
-            for block in (event.get("message") or {}).get("content") or []:
+            message = event.get("message") if isinstance(event.get("message"), dict) else {}
+            parent = event.get("parent_tool_use_id")
+            mine = calls.get(parent) if isinstance(parent, str) else None
+            if mine and mine["ran_on"] is None and isinstance(message.get("model"), str):
+                mine["ran_on"] = message["model"]
+            for block in message.get("content") or []:
                 if (isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") in ("Agent", "Task")
-                        and block.get("id") not in seen):
-                    seen.add(block.get("id"))
+                        and block.get("id") not in calls):
                     call = block.get("input") or {}
                     kind = call.get("subagent_type") or "general-purpose"
                     started[kind] = started.get(kind, 0) + 1
-                    overrides += bool(call.get("model") or call.get("effort"))
-    return init, result, started, overrides
+                    calls[block.get("id")] = {"agent": kind, "named_model": call.get("model") or None,
+                                              "named_effort": call.get("effort") or None, "ran_on": None}
+    return init, result, started, list(calls.values())
 
 
 def plugin_loaded(init: dict) -> bool:
@@ -465,19 +470,21 @@ def ledger_rows(env: dict) -> list[dict] | None:
     return read_ledger(path=path)
 
 
-def plugin_options(env: dict) -> dict:
-    """The options the router saved to its state.json at SessionStart, as it resolved them; {} with no state."""
-    state = load_state_file(plugin_data_dir(env) / "state.json")
-    return {k: state[k] for k in PLUGIN_OPTIONS if k in state}
-
-
-def options_applied(config: dict, seen: dict | None) -> bool | None:
-    """Whether every plugin option a configuration sets reached the plugin; None when it sets none."""
+def options_applied(config: dict, ledger: list[dict] | None) -> bool | None:
+    """False when the run's ledger holds a row a plugin option the configuration sets rules out: a `gate` row with
+    verify_gate off, a rewritten spawn with routing_mode off. True when it holds none, which doesn't prove the
+    options arrived, since the plugin keeps no copy of them. None when the configuration sets none or there is no
+    ledger."""
     asked = config.get("plugin_options")
-    if not asked:
+    if not asked or ledger is None:
         return None
-    text = lambda v: str(v).lower() if isinstance(v, bool) else str(v)  # noqa: E731  the state keeps strings
-    return all((seen or {}).get(k) == text(v) for k, v in asked.items())
+    said = {k: str(v).strip().lower() for k, v in asked.items()}  # a JSON false reaches the plugin as "false"
+    if said.get("verify_gate") in ("false", "0", "no", "off") and any(r.get("event") == "gate" for r in ledger):
+        return False
+    if said.get("routing_mode") == "off" and any(r.get("event") == "spawn" and r.get("action") == "rewrite"
+                                                for r in ledger):
+        return False
+    return True
 
 
 def agent_types(env: dict) -> dict[str, str]:
@@ -494,21 +501,22 @@ def agent_types(env: dict) -> dict[str, str]:
 
 def spend_by_agent(ledger: list[dict], types: dict[str, str], total: object) -> dict[str, float]:
     """A router run's spend by agent type, from Claude Code's estimate per subagent: each one's newest usage row
-    holds all of its turns. `main` is the rest of the run's total: the main loop, and agents with no estimate."""
-    last: dict[str, float] = {}
+    holds all of its turns, and names its type, else the transcripts do. `main` is the rest of the run's total: the
+    main loop, and agents with no estimate."""
+    last: dict[str, tuple[float, object]] = {}
     for row in ledger:
         if row.get("event") == "usage" and row.get("agent_id") and isinstance(row.get("cost_usd"), (int, float)):
-            last[row["agent_id"]] = row["cost_usd"]
+            last[row["agent_id"]] = (row["cost_usd"], row.get("agent"))
     spend: dict = {}
-    for agent_id, usd in last.items():
-        who = types.get(agent_id, "unknown")
+    for agent_id, (usd, agent) in last.items():
+        who = agent if isinstance(agent, str) and agent else types.get(agent_id, "unknown")
         spend[who] = round(spend.get(who, 0.0) + usd, 6)
     if isinstance(total, (int, float)):
-        spend["main"] = round(max(0.0, total - sum(last.values())), 6)
+        spend["main"] = round(max(0.0, total - sum(usd for usd, _ in last.values())), 6)
     return spend
 
 
-ROUTED_KEYS = ("agent", "level", "model", "effort", "escalated_from")
+ROUTED_KEYS = ("agent", "level", "model", "effort", "source", "escalated_from", "on_record")  # on_record only when false
 
 
 def spawns(ledger: list[dict]) -> list[dict]:
@@ -605,9 +613,8 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     plugin_state = state_hashes(plugin_data_dir(env)) if config.get("plugin") else None
     clock = time.monotonic()
-    stdout, stderr, code, wall_ms, result, init, started_agents, overrides = "", "interrupted", None, None, {}, {}, {}, 0
+    stdout, stderr, code, wall_ms, result, init, started_agents, calls = "", "interrupted", None, None, {}, {}, {}, []
     ledger, types, final, graded, kept, stopped, priced, transcripts = None, {}, None, None, None, None, None, None
-    seen_options = None
     # Once claude starts the run costs money: whatever stops it or the steps after it, its row is still built and its
     # scratch removed. With no result the row is priced from its transcripts, or charged the whole budget.
     try:
@@ -618,7 +625,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
             stdout, stderr, code = _text(exc.stdout), "timed out", None
         # The run's wall time: Claude Code's own duration_ms can fall short of it.
         wall_ms = round((time.monotonic() - clock) * 1000)
-        init, result, started_agents, overrides = read_stream(stdout)
+        init, result, started_agents, calls = read_stream(stdout)
         answer = result.get("result") or ""
         (scratch / "answer.txt").write_text(answer, encoding="utf-8")
         if not isinstance(result.get("total_cost_usd"), (int, float)) or result.get("subtype") == "error_during_execution":
@@ -626,7 +633,6 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
         # Read before grading: the check also runs the code the run left, which could rewrite these files.
         ledger = ledger_rows(env) if config.get("plugin") else None
         types = agent_types(env) if config.get("plugin") else {}
-        seen_options = plugin_options(env) if config.get("plugin") else None
         final = final_answer(task["dir"] / "repo", work, answer)
         graded = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
         denied = bool(result.get("permission_denials"))
@@ -653,7 +659,8 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
                   "grade": graded._asdict(), "final_answer": final,
                   "plugin_state": plugin_state, "ledger": ledger, "agent_types": types,
                   "kept": kept and str(kept), "init": init, "agents_started": started_agents,
-                  "agent_overrides": overrides, "plugin_options": seen_options,
+                  "agent_calls": calls,
+                  "agent_overrides": sum(bool(c["named_model"] or c["named_effort"]) for c in calls),
                   "transcript_cost": priced, "transcripts": transcripts and str(transcripts)})
     if stopped is not None:
         stopped.row = row  # main writes it before the bench stops
@@ -715,8 +722,7 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         "plugin_state": facts["plugin_state"],
         "claude_started": not unstarted, "startup_failure_reason": result.get("startup_failure_reason"),
         "plugin_loaded": plugin_loaded(facts.get("init") or {}) if config.get("plugin") else None,
-        "plugin_options": facts.get("plugin_options"),
-        "options_applied": options_applied(config, facts.get("plugin_options")),
+        "options_applied": options_applied(config, ledger) if config.get("plugin") else None,
         "agent_costs": None if ledger is None else spend_by_agent(ledger, facts["agent_types"], cost if known else None),
         "routed": None if ledger is None else spawns(ledger),
         "gate_events": sum(r.get("event") == "gate" for r in ledger or []),
@@ -730,7 +736,8 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         "duration_ms": result.get("duration_ms"), "duration_api_ms": result.get("duration_api_ms"),
         "wall_ms": facts["wall_ms"], "num_turns": result.get("num_turns"),
         "models": models, "prices": {name: registry_config.price(name) for name in models},
-        "agents_started": started, "agent_overrides": overrides, "off_pin": off_pin,
+        "agents_started": started, "agent_calls": facts.get("agent_calls") or [], "agent_overrides": overrides,
+        "off_pin": off_pin,
         "permission_denials": [_denial(d) for d in result.get("permission_denials") or [] if isinstance(d, dict)],
         "passed": facts["grade"]["verdict"] == "pass", "grade": facts["grade"],
         "answer": (result.get("result") or "")[:2000], "final_answer": facts["final_answer"],
@@ -769,7 +776,7 @@ def set_aside(row: dict) -> str | None:
 # Set-aside reasons a pause can't fix; this many in a row stop the bench.
 NO_RETRY = {"api_error": "API error before any spend", "no_start": "claude stopped before the session began",
             "plugin_not_loaded": "the plugin did not load",
-            "options_not_applied": "the plugin's state shows other options than the configuration set",
+            "options_not_applied": "the ledger holds a row the configuration's plugin options rule out",
             "off_pin": "the run didn't use its pinned agents"}
 
 

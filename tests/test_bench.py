@@ -614,15 +614,24 @@ class Analysis(unittest.TestCase):
         self.assertIn("From row schema 3 that folder is inside the run's own config folder", page)
         self.assertIn("- From row schema 3, sessions are saved in the run's own config folder", page)
         self.assertNotIn("Each run starts in a fresh copy of the task's files, outside any repository, with a", page)
+        # The stored router rows ran a design that read each brief and chose the level itself.
+        before = page.split("## Before the sandbox")[1]
+        self.assertIn("Their router runs loaded an older design of Model Router, which read each subagent's brief "
+                      "and chose the model itself", before.split("\n\n")[1])
 
     def test_the_page_reports_latency_cache_level_accuracy_and_escalation(self):
         real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
         usage = {"m": {"inputTokens": 10, "cacheReadInputTokens": 80, "cacheCreationInputTokens": 10}}
         first = {"agent": "model-router:implementer", "level": "standard", "escalated_from": None}
         redo = {"agent": "general-purpose", "level": "complex", "escalated_from": "standard"}
+        # A marked redo of a call with no run on record names the level it would get unmarked, which never ran.
+        unmarked = dict(redo, on_record=False)
+        call = {"agent": "general-purpose", "named_model": None, "named_effort": None, "ran_on": None}
         base = dict(real, main_model="sonnet", models=usage)
-        router = [dict(base, config="plugin", wall_ms=10000, passed=True, routed=[first]),
-                  dict(base, config="plugin", wall_ms=20000, passed=False, routed=[first, redo],
+        router = [dict(base, config="plugin", wall_ms=10000, passed=True, routed=[first],
+                       agent_calls=[dict(call, named_model="sonnet")]),
+                  dict(base, config="plugin", wall_ms=20000, passed=False, routed=[first, redo, unmarked],
+                       agent_calls=[call, dict(call, named_model="opus", named_effort="high"), call],
                        permission_denials=[{"tool": "Bash", "input": "python3 -m unittest"}]),
                   dict(base, config="plugin", wall_ms=40000, passed=True)]  # recorded before `routed`
         # Recorded before `wall_ms`: Claude Code's duration_ms alone is not taken as wall time.
@@ -639,9 +648,10 @@ class Analysis(unittest.TestCase):
         metrics = page.split("### Run metrics")[1].split("##")[0]
         row = next(line for line in metrics.splitlines() if line.startswith("| bugfix "))
         # Nearest-rank p50 and p90 of 10, 20 and 40 s; cache reads 80 of 100 input tokens.
-        self.assertIn("p50 20 s, p90 40 s, cache 80%, Bash denied in 1 of 3, accuracy by level: standard 1/2 "
-                      "(2 of 3 runs), escalated 1 of 3 spawns", row)
-        self.assertIn("latency n/a, cache 80%, Bash denied in 0 of 2, not routed", row)
+        self.assertIn("p50 20 s, p90 40 s, cache 80%, Bash denied in 1 of 3, model named on 2 of 4 Agent calls and "
+                      "effort on 1 (2 of 3 runs), accuracy by level: standard 1/2 (2 of 3 runs), escalated 1 of 4 "
+                      "spawns", row)
+        self.assertIn("latency n/a, cache 80%, Bash denied in 0 of 2, named n/a, not routed", row)
         self.assertIn("- Runs with a Bash denial, by configuration: `defaults` below schema 3 0 of 2; "
                       "`plugin` below schema 3 1 of 3.", page)
         self.assertIn("1 router run(s) here carry no `routed`", page)
@@ -712,14 +722,21 @@ class Analysis(unittest.TestCase):
 FIXTURE = ROOT / "tests" / "fixtures" / "claude-2.1.330-result.json"
 AUTH = {"ANTHROPIC_API_KEY": "sk-test"}  # main refuses to start without a token or a key
 
+# Rows as plugins/model-router/scripts/modelrouter/ledger.py writes them.
 LEDGER = [
-    {"event": "spawn", "agent": "model-router:implementer", "level": "standard", "model": "sonnet",
-     "effort": "medium", "escalated_from": None, "reason": "standard subtask"},
-    {"event": "spawn", "agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"},
-    {"event": "usage", "agent_id": "a1", "running": True, "cost_usd": 0.05},
-    {"event": "usage", "agent_id": "a2", "running": True, "cost_usd": 0.01},
-    {"event": "usage", "agent_id": "a1", "running": True, "cost_usd": 0.07}]  # a1's newer total holds its first turn
-AGENT_TYPES = {"a1": "model-router:implementer", "a2": "model-router:verifier"}
+    {"event": "spawn", "via": "mod", "session": "s", "agent": "model-router:implementer", "action": "rewrite",
+     "level": "standard", "model": "sonnet", "was": "opus", "effort": "medium", "source": "caller",
+     "escalated_from": None, "reason": "the call names a model"},
+    {"event": "spawn", "via": "mod", "session": "s", "agent": "model-router:verifier", "action": "rewrite",
+     "level": "complex", "model": "opus", "was": "opus", "effort": "high", "source": "router",
+     "escalated_from": "standard", "reason": "a redo of the run it would get unmarked", "on_record": False},
+    {"event": "usage", "session": "s", "agent_id": "a1", "agent": "model-router:implementer",
+     "models": [], "running": True, "cost_usd": 0.05},
+    {"event": "usage", "session": "s", "agent_id": "a2", "models": [], "running": True, "cost_usd": 0.01},
+    {"event": "usage", "session": "s", "agent_id": "a3", "agent": "workflow-stage", "models": []},  # no estimate
+    {"event": "usage", "session": "s", "agent_id": "a1", "agent": "model-router:implementer",
+     "models": [], "running": True, "cost_usd": 0.07}]  # a1's newer total holds its first turn
+AGENT_TYPES = {"a1": "general-purpose", "a2": "model-router:verifier"}  # the usage row's own type wins
 
 
 def stub(tmp: Path, source: str) -> list[str]:
@@ -814,9 +831,13 @@ class Recorder(unittest.TestCase):
         self.assertEqual(run.spend_by_agent(LEDGER, AGENT_TYPES, 0.11),
                          {"model-router:implementer": 0.07, "model-router:verifier": 0.01, "main": 0.03})
         self.assertNotIn("main", run.spend_by_agent(LEDGER, AGENT_TYPES, None))  # the run's total is unknown
-        spawned = run.spawns(LEDGER)
-        self.assertIsNone(spawned[0]["escalated_from"])
-        self.assertNotIn("escalated_from", spawned[1])
+        self.assertEqual(run.spawns(LEDGER), [
+            {"agent": "model-router:implementer", "level": "standard", "model": "sonnet", "effort": "medium",
+             "source": "caller", "escalated_from": None},
+            {"agent": "model-router:verifier", "level": "complex", "model": "opus", "effort": "high",
+             "source": "router", "escalated_from": "standard", "on_record": False}])
+        # An older router's spawn row keeps a key it didn't log unknown, not None.
+        self.assertNotIn("escalated_from", run.spawns([{"event": "spawn", "agent": "x", "level": "lookup"}])[0])
         row = self.row({"total_cost_usd": 0.11}, ledger=LEDGER, agent_types=AGENT_TYPES)
         self.assertEqual(row["agent_costs"]["main"], 0.03)
         self.assertEqual(len(row["routed"]), 2)
@@ -1442,17 +1463,20 @@ if "--version" in sys.argv:
     print("9.9.9 (stub)"); sys.exit(0)
 data = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "plugins" / "data" / "model-router-inline"
 data.mkdir(parents=True)
-rows = [{"event": "spawn", "agent": "model-router:implementer", "level": "standard", "model": "sonnet",
-         "effort": "medium", "escalated_from": None, "reason": "standard subtask"},
-        {"event": "spawn", "agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"},
-        {"event": "usage", "agent_id": "a1", "running": True, "cost_usd": 0.05},
-        {"event": "usage", "agent_id": "a2", "running": True, "cost_usd": 0.01},
-        {"event": "usage", "agent_id": "a1", "running": True, "cost_usd": 0.07}]
+rows = [{"event": "spawn", "via": "mod", "agent": "model-router:implementer", "action": "rewrite",
+         "level": "standard", "model": "sonnet", "was": "opus", "effort": "medium", "source": "caller",
+         "escalated_from": None, "reason": "the call names a model"},
+        {"event": "spawn", "via": "hook", "agent": "model-router:verifier", "action": "keep", "level": "lookup",
+         "model": "haiku", "was": "haiku", "effort": None, "source": "pin", "escalated_from": None, "reason": "x"},
+        {"event": "usage", "agent_id": "a1", "agent": "model-router:implementer", "models": [], "running": True,
+         "cost_usd": 0.05},
+        {"event": "usage", "agent_id": "a2", "models": [], "running": True, "cost_usd": 0.01},
+        {"event": "usage", "agent_id": "a1", "agent": "model-router:implementer", "models": [], "running": True,
+         "cost_usd": 0.07}]
 (data / "ledger.jsonl").write_text("\\n".join(json.dumps(r) for r in rows))
 folder = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / os.environ["CLAUDE_CODE_PROJECT_DIR_NAME"]
 sub = folder / "s1" / "subagents"
 sub.mkdir(parents=True)
-(sub / "agent-a1.meta.json").write_text(json.dumps({"agentType": "model-router:implementer"}))
 (sub / "agent-a2.meta.json").write_text(json.dumps({"agentType": "model-router:verifier"}))
 import time
 time.sleep(0.3)  # Claude Code's own duration_ms can leave time out
@@ -1498,11 +1522,11 @@ class AgentCosts(unittest.TestCase):
                                               "main": 0.03})
         self.assertEqual(row["duration_ms"], 1)
         self.assertGreaterEqual(row["wall_ms"], 300)  # the runner's own clock around the claude process
-        # A spawn row from a router that doesn't log escalated_from keeps it unknown, not None.
         self.assertEqual(row["routed"], [
             {"agent": "model-router:implementer", "level": "standard", "model": "sonnet", "effort": "medium",
-             "escalated_from": None},
-            {"agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"}])
+             "source": "caller", "escalated_from": None},
+            {"agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": None, "source": "pin",
+             "escalated_from": None}])
 
 
     def test_the_ledger_is_read_before_the_work_dir_code_runs(self):
@@ -2398,10 +2422,10 @@ line = {"type": "assistant", "message": {"id": "m1", "model": "claude-haiku-4-5"
 (folder / "s1.jsonl").write_text(json.dumps(line) + "\\n" + json.dumps(line) + "\\n")  # streamed lines repeat a message
 sub = dict(line, message=dict(line["message"], id="m2"))
 (folder / "s1" / "subagents" / "agent-a1.jsonl").write_text(json.dumps(sub) + "\\n")
-if os.environ.get("STUB_STATE"):  # what the router's SessionStart hook saves of its options
+if os.environ.get("STUB_LEDGER"):  # the rows the router's hooks write
     data = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "plugins" / "data" / "model-router-inline"
     data.mkdir(parents=True, exist_ok=True)
-    (data / "state.json").write_text(os.environ["STUB_STATE"])
+    (data / "ledger.jsonl").write_text(os.environ["STUB_LEDGER"])
 events = [init,
           {"type": "assistant", "message": {"content": [
               {"type": "tool_use", "id": "t1", "name": "Agent", "input": {"subagent_type": "Explore", "prompt": "x"}},
@@ -2595,7 +2619,7 @@ class Harness(unittest.TestCase):
         self.assertNotEqual(run.freeze_plugin(source)[1], digest)
         loaded = json.dumps([{"name": "model-router", "path": "/p"}])
         code, rows, _ = self.main("--configs", "plugin", "plugin-nogate", "defaults", "--runs", "2", "--seed", "5",
-                                  env={"STUB_PLUGINS": loaded, "STUB_STATE": json.dumps({"verify_gate": "false"})})
+                                  env={"STUB_PLUGINS": loaded})
         self.assertEqual(sorted({r["config"] for r in rows}), ["defaults", "plugin", "plugin-nogate"])
         self.assertEqual(len({r["plugin_hash"] for r in rows if r["config"] != "defaults"}), 1)
         self.assertTrue(next(r["plugin_hash"] for r in rows if r["config"] == "plugin"))
@@ -2734,18 +2758,26 @@ class Harness(unittest.TestCase):
         (folder / "s.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
         self.assertIsNone(run.transcript_cost(folder, run.mrconfig.shipped()))
 
-    def test_a_router_run_records_the_options_its_plugin_saw_and_is_set_aside_when_they_differ(self):
+    def test_a_router_run_whose_ledger_rules_out_its_options_is_set_aside(self):
+        # The plugin keeps no copy of its options, so only a row an option forbids can show it didn't apply.
         loaded = json.dumps([{"name": "model-router", "path": "/p"}])
-        took = json.dumps({"routing_mode": "auto", "max_tier": "", "verify_gate": "false"})
-        row, _ = self.one("plugin-nogate", env={"STUB_PLUGINS": loaded, "STUB_STATE": took})
-        self.assertEqual(row["plugin_options"], {"routing_mode": "auto", "max_tier": "", "verify_gate": "false"})
+        gate = json.dumps({"event": "gate", "session": "s", "kind": "verify"})
+        spawn = json.dumps({"event": "spawn", "agent": "Explore", "action": "keep", "level": "lookup"})
+        row, _ = self.one("plugin-nogate", env={"STUB_PLUGINS": loaded, "STUB_LEDGER": spawn})
+        self.assertTrue(row["options_applied"])
         self.assertIsNone(run.set_aside(row))
-        ignored, _ = self.one("plugin-nogate", env={"STUB_PLUGINS": loaded, "STUB_STATE": took.replace("false", "true")})
-        self.assertEqual(run.set_aside(ignored), "options_not_applied")
-        unsaved, _ = self.one("plugin-nogate", env={"STUB_PLUGINS": loaded})
-        self.assertEqual(run.set_aside(unsaved), "options_not_applied")
-        self.assertIsNone(run.set_aside(self.one("plugin", env={"STUB_PLUGINS": loaded})[0]))
-        self.assertIsNone(self.one("defaults")[0]["plugin_options"])
+        self.assertNotIn("plugin_options", row)
+        asked, _ = self.one("plugin-nogate", env={"STUB_PLUGINS": loaded, "STUB_LEDGER": spawn + "\n" + gate})
+        self.assertFalse(asked["options_applied"])  # the Stop check asked although verify_gate is off
+        self.assertEqual(run.set_aside(asked), "options_not_applied")
+        self.assertIsNone(self.one("plugin-nogate", env={"STUB_PLUGINS": loaded})[0]["options_applied"])  # no ledger
+        gated, _ = self.one("plugin", env={"STUB_PLUGINS": loaded, "STUB_LEDGER": gate})
+        self.assertIsNone(gated["options_applied"])
+        self.assertIsNone(run.set_aside(gated))
+        off = {"id": "off", "plugin": True, "env": {}, "plugin_options": {"routing_mode": "off"}}
+        self.assertFalse(run.options_applied(off, [{"event": "spawn", "action": "rewrite"}]))
+        self.assertTrue(run.options_applied(off, [{"event": "spawn", "action": "keep"}, {"event": "gate"}]))
+        self.assertTrue(run.options_applied({"plugin_options": {"verify_gate": "on"}}, [{"event": "gate"}]))
 
     def test_pinned_names_its_agents_and_a_run_off_its_pins_is_set_aside(self):
         pinned = self.configs["pinned"]
@@ -2767,15 +2799,27 @@ class Harness(unittest.TestCase):
         self.assertIsNone(row({"general-purpose": 1}, arm="direct")["off_pin"])  # a person's prompt picks freely
         self.assertIsNone(row({"general-purpose": 1}, config=self.configs["defaults"])["off_pin"])
 
-    def test_agent_calls_that_set_a_model_or_effort_are_counted(self):
+    def test_each_agent_call_records_what_it_named_and_what_it_ran_on(self):
         stream = "\n".join(json.dumps(e) for e in (
-            {"type": "assistant", "message": {"content": [
+            {"type": "assistant", "parent_tool_use_id": None, "message": {"model": "claude-opus-5-5", "content": [
                 {"type": "tool_use", "id": "a", "name": "Agent", "input": {"subagent_type": "worker", "model": "opus"}},
                 {"type": "tool_use", "id": "b", "name": "Agent", "input": {"subagent_type": "worker", "effort": "low"}},
-                {"type": "tool_use", "id": "c", "name": "Agent", "input": {"subagent_type": "worker"}}]}},))
-        init, result, started, overrides = run.read_stream(stream)
-        self.assertEqual((started, overrides), ({"worker": 3}, 2))
-        self.assertEqual(self.one()[0]["agent_overrides"], 0)
+                {"type": "tool_use", "id": "c", "name": "Agent", "input": {"subagent_type": "worker"}}]}},
+            {"type": "assistant", "parent_tool_use_id": "b", "message": {"model": "claude-haiku-5-5", "content": []}},
+            {"type": "assistant", "parent_tool_use_id": "b", "message": {"model": "claude-sonnet-5-5", "content": []}},
+            {"type": "assistant", "parent_tool_use_id": "a", "message": "not an object"},
+            {"type": "assistant", "parent_tool_use_id": "a", "message": {"model": "claude-opus-5-5", "content": []}}))
+        init, result, started, calls = run.read_stream(stream)
+        self.assertEqual(started, {"worker": 3})
+        self.assertEqual(calls, [
+            {"agent": "worker", "named_model": "opus", "named_effort": None, "ran_on": "claude-opus-5-5"},
+            {"agent": "worker", "named_model": None, "named_effort": "low", "ran_on": "claude-haiku-5-5"},
+            {"agent": "worker", "named_model": None, "named_effort": None, "ran_on": None}])  # no message seen
+        row = self.one()[0]
+        self.assertEqual(row["agent_overrides"], 0)
+        self.assertEqual(row["agent_calls"], [
+            {"agent": "Explore", "named_model": None, "named_effort": None, "ran_on": None},
+            {"agent": "general-purpose", "named_model": None, "named_effort": None, "ran_on": None}])
 
     def test_kept_transcripts_are_never_committed(self):
         for path in ("bench/results/transcripts/out/s/s1.jsonl", "bench/results/pilot/transcripts/smoke/s/s1.jsonl"):
@@ -2814,10 +2858,20 @@ class Configurations(unittest.TestCase):
     configs = {c["id"]: c for c in run.load_configs()}
     options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p"}
 
+    def test_no_configuration_names_a_deleted_option_or_agent(self):
+        text = (ROOT / "bench" / "configs.json").read_text(encoding="utf-8")
+        for gone in ("priority", "agent_pins", "main_effort", "update_check", "strong_agent_gate", "advise",
+                     "deep-solver", "docs-researcher"):
+            self.assertIsNone(re.search(rf"\b{gone}\b", text), gone)
+        agents = {p.stem for p in (run.PLUGIN / "agents").glob("*.md")}
+        for name in re.findall(r"model-router:([a-z-]+)", text):
+            self.assertIn(name, agents)
+
     def test_no_configuration_sets_an_option_the_plugin_drops(self):
+        sys.path.insert(0, str(run.PLUGIN / "scripts"))
+        from modelrouter import settings
         for config in self.configs.values():
-            self.assertLessEqual(set(config.get("plugin_options", {})), {"routing_mode", "max_tier", "verify_gate"},
-                                 config["id"])
+            self.assertLessEqual(set(config.get("plugin_options", {})), set(settings.OPTIONS), config["id"])
             self.assertNotIn("router_config", config, config["id"])
         for gone in ("plugin-cheap", "plugin-cheap-nomain", "plugin-cheap-nomain-nogate", "plugin-m6-08-b",
                      "plugin-m6-08-b-nogate", "plugin-m6-10", "opusplan"):
