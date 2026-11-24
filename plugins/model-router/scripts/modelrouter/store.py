@@ -128,7 +128,8 @@ def locked(path: Path) -> Iterator[None]:
     overwrite what the other just recorded. A lock still held after LOCK_WAIT_SECONDS
     raises Busy, so the caller skips its write: a hook must never hang a session, and
     a write without the lock could drop another hook's update. The lock is the OS's, on a
-    file that stays on disk, so a process that dies lets go of it at once."""
+    file that stays on disk, so a process that dies lets go of it at once. On a filesystem
+    that can't lock at all, the write goes ahead without one."""
     # Not ".lock": older releases read that file's existence as held and remove it after ten seconds.
     lock = path.with_name(path.name + ".flock")
     deadline = time.monotonic() + LOCK_WAIT_SECONDS
@@ -143,6 +144,8 @@ def locked(path: Path) -> Iterator[None]:
                 break
             except _HELD:
                 pass
+            except OSError:
+                break  # this filesystem can't lock: a write without one beats no routing
             if "waits" not in events:
                 events.append("waits")
             if owner and not holder:

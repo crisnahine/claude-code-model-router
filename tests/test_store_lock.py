@@ -100,16 +100,17 @@ class StoreLock(Sandbox):
         self.assertEqual((self.data / "state.json.flock").read_bytes(), b"")
 
     @unittest.skipIf(os.name == "nt", "flock is POSIX")
-    def test_a_filesystem_without_locks_raises_rather_than_waits(self):
+    def test_a_filesystem_without_locks_writes_without_one(self):
+        # Some NFS, SMB and FUSE mounts can't lock. A lost update there beats losing routing or a second per write.
         self.data.mkdir(exist_ok=True)
         path = self.data / "state.json"
         for code in (errno.ENOLCK, errno.EOPNOTSUPP):
             started = time.monotonic()
-            with mock.patch.object(store.fcntl, "flock", side_effect=OSError(code, os.strerror(code))), \
-                    self.assertRaises(OSError) as caught:
-                store.try_update(path, lambda data: data.update(a=1))
-            self.assertEqual(caught.exception.errno, code)
+            with mock.patch.object(store.fcntl, "flock", side_effect=OSError(code, os.strerror(code))):
+                self.assertEqual(store.try_update(path, lambda data: data.update({str(code): 1}))[1], "saved")
             self.assertLess(time.monotonic() - started, store.LOCK_WAIT_SECONDS / 2)
+        self.assertEqual({k: v for k, v in store.load_state_file(path).items() if k.isdigit()},
+                         {str(errno.ENOLCK): 1, str(errno.EOPNOTSUPP): 1})
         self.assertEqual(store.lock_counts(), {})
 
 
