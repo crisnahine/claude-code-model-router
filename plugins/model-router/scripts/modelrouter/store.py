@@ -129,7 +129,8 @@ def locked(path: Path) -> Iterator[None]:
     raises Busy, so the caller skips its write: a hook must never hang a session, and
     a write without the lock could drop another hook's update. The lock is the OS's, on a
     file that stays on disk, so a process that dies lets go of it at once."""
-    lock = path.with_name(path.name + ".lock")
+    # Not ".lock": older releases read that file's existence as held and remove it after ten seconds.
+    lock = path.with_name(path.name + ".flock")
     deadline = time.monotonic() + LOCK_WAIT_SECONDS
     delay = 0.001
     events: list[str] = []
@@ -140,7 +141,7 @@ def locked(path: Path) -> Iterator[None]:
             try:
                 _try_lock(handle)
                 break
-            except OSError:
+            except _HELD:
                 pass
             if "waits" not in events:
                 events.append("waits")
@@ -161,12 +162,14 @@ def locked(path: Path) -> Iterator[None]:
             time.sleep(delay)
             delay = min(delay * 2, LOCK_POLL_MAX)
         with contextlib.suppress(OSError):
-            os.ftruncate(handle, 0)  # a shorter name would leave the last holder's tail
+            os.ftruncate(handle, 0)  # a holder that was killed left its name
             if owner:
                 os.write(handle, b" " + owner.encode("utf-8"))
         try:
             yield
         finally:
+            with contextlib.suppress(OSError):
+                os.ftruncate(handle, 0)
             with contextlib.suppress(OSError):
                 _unlock(handle)
             if events:
@@ -178,6 +181,8 @@ def locked(path: Path) -> Iterator[None]:
 if os.name == "nt":
     import msvcrt
 
+    _HELD = OSError  # msvcrt raises PermissionError for a held range
+
     def _try_lock(handle: int) -> None:
         os.lseek(handle, 0, os.SEEK_SET)
         msvcrt.locking(handle, msvcrt.LK_NBLCK, 1)
@@ -187,6 +192,9 @@ if os.name == "nt":
         msvcrt.locking(handle, msvcrt.LK_UNLCK, 1)
 else:
     import fcntl
+
+    # Anything else, such as ENOLCK on a mount without flock, raises so the hook fails open.
+    _HELD = BlockingIOError
 
     def _try_lock(handle: int) -> None:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)

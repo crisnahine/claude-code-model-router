@@ -1,6 +1,7 @@
 """State-file lock regressions."""
 from __future__ import annotations
 
+import errno
 import os
 import subprocess
 import sys
@@ -8,6 +9,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from test_model_router import SCRIPTS, Sandbox, store
 
@@ -17,7 +19,7 @@ class StoreLock(Sandbox):
         self.data.mkdir(exist_ok=True)
         path = self.data / "learned.json"
         store.save_json(path, {"n": 0})
-        lock = self.data / "learned.json.lock"
+        lock = self.data / "learned.json.flock"
         lock.write_text("dead")
         os.utime(lock, (time.time() - 60, time.time() - 60))
         real_unlink = Path.unlink
@@ -76,6 +78,39 @@ class StoreLock(Sandbox):
         holder.stdout.close()
         self.assertEqual(store.try_update(self.data / "state.json", lambda data: data.update(a=1))[1], "saved")
         self.assertEqual(store.load_state_file(self.data / "state.json"), {"a": 1})
+
+    def test_an_older_release_never_waits_on_or_breaks_this_releases_lock(self):
+        self.data.mkdir(exist_ok=True)
+        path = self.data / "state.json"
+        old_lock = self.data / "state.json.lock"  # an older release's: held while it exists, removed after ten seconds
+        with store.locked(path):
+            old_lock.unlink(missing_ok=True)  # that release breaking it as stale
+            with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02), self.assertRaises(store.Busy):
+                with store.locked(path):
+                    pass
+            self.assertFalse(old_lock.exists())
+        self.assertFalse(old_lock.exists())
+
+    def test_a_lock_let_go_names_no_holder(self):
+        self.data.mkdir(exist_ok=True)
+        path = self.data / "state.json"
+        store.owner = "s1"
+        with store.locked(path):
+            self.assertIn(b"s1", (self.data / "state.json.flock").read_bytes())
+        self.assertEqual((self.data / "state.json.flock").read_bytes(), b"")
+
+    @unittest.skipIf(os.name == "nt", "flock is POSIX")
+    def test_a_filesystem_without_locks_raises_rather_than_waits(self):
+        self.data.mkdir(exist_ok=True)
+        path = self.data / "state.json"
+        for code in (errno.ENOLCK, errno.EOPNOTSUPP):
+            started = time.monotonic()
+            with mock.patch.object(store.fcntl, "flock", side_effect=OSError(code, os.strerror(code))), \
+                    self.assertRaises(OSError) as caught:
+                store.try_update(path, lambda data: data.update(a=1))
+            self.assertEqual(caught.exception.errno, code)
+            self.assertLess(time.monotonic() - started, store.LOCK_WAIT_SECONDS / 2)
+        self.assertEqual(store.lock_counts(), {})
 
 
 if __name__ == "__main__":
