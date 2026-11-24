@@ -5,6 +5,8 @@ name: Upstream watch
 # reviews. It never edits the plugin itself: a person (or /model-router:refresh
 # run inside this repo) reviews the changes and updates the baseline in a PR.
 # An empty changelog or docs index fails the job instead of opening an issue.
+# The newest job fails when the newest Claude Code release or the newest
+# published mod types reject the plugin; ci.yml runs the pinned type-check.
 
 on:
   schedule:
@@ -51,3 +53,23 @@ jobs:
           else
             gh issue create --title "$title" --body-file body.md
           fi
+
+  newest:
+    # It runs whatever npm and GitHub serve as newest, so it gets no issue rights.
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - name: Install the newest Claude Code
+        run: npm install -g @anthropic-ai/claude-code@latest
+      - name: Validate marketplace
+        run: claude plugin validate --strict .
+      - name: Validate plugin
+        run: claude plugin validate --strict plugins/model-router
+      - name: Type-check the mod against the newest published types
+        if: always()
+        run: TYPES_COMMIT=main sh tests/mod/typecheck.sh
