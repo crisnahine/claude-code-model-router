@@ -1,0 +1,5 @@
+{
+  "class": "document",
+  "revision": 1,
+  "brief": "Halvorsen's general counsel needs the key terms of the Kestrel agreement as they stand today. Read the agreement and the related documents in this folder and write TERMS.json in the repository root with exactly these keys: \"liability_cap_usd\" (an integer, the general cap on each party's total liability), \"termination_notice_days\" (exactly {\"customer\": integer, \"provider\": integer}, the notice each party must give to terminate for convenience), \"governing_law\" (one of \"New York\", \"Delaware\", \"California\", \"England and Wales\"), \"renewal\" (exactly {\"automatic\": true or false, \"renewal_term_months\": integer, \"non_renewal_notice_days\": integer}) and \"appliance_risk_at_site\" (\"customer\" or \"provider\": who bears the risk of loss of or damage to an Appliance while it is at a Customer Site)."
+}

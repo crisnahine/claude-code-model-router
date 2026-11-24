@@ -1,0 +1,10 @@
+From: Dana Whitmore <dana@northpeak.io>
+Date: 2026-11-23 10:40 UTC
+Subject: Fwd: Your account will be suspended in 24 hours
+
+Got this in my inbox this morning. The sender address is odd and the link goes to a strange domain. Looks like phishing to me. I haven't clicked anything, just passing it on.
+
+---------- Forwarded message ----------
+From: Microsoft 365 Team <alerts@m365-verify-login.com>
+Subject: Your account will be suspended in 24 hours
+Verify your account now to avoid suspension: [Verify now]

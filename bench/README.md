@@ -86,4 +86,8 @@ A check must be deterministic. It ends with `passcheck.finish(ok, reason)`, whic
 
 A check whose task runs the agent's code to decide the answer does not import it. It runs that code in a child, a `probe.py` beside `check.py`, through `passcheck.probe(work, script, payload)`, on data the check generates from a fixed seed, and decides in the parent from the child's last JSON line, since only JSON crosses and the parent compares it exactly. A probe never holds the expected answer.
 
+## Work that isn't code
+
+Five tasks give the agent documents or data and ask for an answer file with fixed keys, so the check is exact: `legal-services-agreement` (class `document`), `finance-ledger-reconcile` and `finance-runway-forecast` (`analysis`), `research-study-synthesis` (`research`) and `ops-inbox-triage` (`operations`). Each folder's `wrong/` answers are the mistakes a careless reading makes. The two finance checks work their expected answer out from the shipped data by the task's written method, so an edit to the CSVs moves the answer with it. A check may read its own task's shipped `repo/` this way, and never the agent's copy of the data, so a run that edits its CSVs can't move the answer. `document` and `operations` have one task each so far, so a verdict for either class rests on one task. None of the five has been run against a model yet.
+
 `run.py` starts every check without credential variables: any whose name holds `TOKEN`, `KEY`, `SECRET`, `PASSWORD`, `AUTH` or `CREDENTIAL`, has `PAT` as a whole word (`GH_PAT`, not `PATH`), or starts with `ANTHROPIC_` or `CLAUDE_CODE_OAUTH`. A credential kept in a file (`~/.aws`, `~/.netrc`) is not hidden from it.

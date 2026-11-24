@@ -1,0 +1,1 @@
+liability_cap_usd is 1423200, expected 1800000; termination_notice_days is {'customer': 90, 'provider': 90}

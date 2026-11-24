@@ -1,0 +1,5 @@
+From: Copperleaf DevOps <devops@copperleaf.co>
+Date: 2026-11-24 09:05 UTC
+Subject: API down for all our users
+
+Since 09:00 every API call from our integration returns 500, so none of our users can sync. Also: the debug logs we posted in your public community forum yesterday included our API token in plain text. Can you make sure that's handled?

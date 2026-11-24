@@ -1,0 +1,5 @@
+{
+  "class": "analysis",
+  "revision": 1,
+  "brief": "Reconcile the October bank statement against the general ledger by the rules in RECONCILE.md, using bank.csv and gl.csv. Write MISMATCHES.json in the repository root with exactly one key, \"mismatches\": a list with one object per ref that does not reconcile, each exactly {\"ref\": the ref, \"kind\": one of \"missing\", \"duplicate\", \"period\", \"currency\", \"sign\", \"amount\"}."
+}
