@@ -1,0 +1,1 @@
+a link whose target has an empty part: extracted instead of being refused

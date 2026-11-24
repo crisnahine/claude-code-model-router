@@ -1,6 +1,7 @@
 import hashlib
 import importlib
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -37,13 +38,26 @@ def command(sales, regions):
         [sales, regions, "--out", report, "--standings", table, "--verify"])
     if code != 0:
         raise RuntimeError(f"python3 -m reports exited {code}")
-    return read(report) + "\0" + read(table)
+    text = read(report) + "\0" + read(table)
+    if payload.get("digest"):
+        return text
+    real, sys.stdout = sys.stdout, io.TextIOWrapper(io.BytesIO(), encoding="utf-8", newline="\n")
+    try:
+        code = importlib.import_module("reports.__main__").main([sales, regions])
+        sys.stdout.flush()
+        printed = sys.stdout.buffer.getvalue().decode("utf-8", "replace")
+    finally:
+        sys.stdout = real
+    if code != 0:
+        raise RuntimeError(f"python3 -m reports without --out exited {code}")
+    return text + "\0" + printed
 
 
 try:
     render = importlib.import_module("reports").render if payload.get("via") != "command" else command
-    for n, case in enumerate(payload["cases"]):
-        sales, regions = os.path.join(tmp, f"sales{n}.csv"), os.path.join(tmp, f"regions{n}.csv")
+    # Every case reuses the same two paths, so an answer that caches by path hands back the last case's report.
+    sales, regions = os.path.join(tmp, "sales.csv"), os.path.join(tmp, "regions.csv")
+    for case in payload["cases"]:
         for path, text in ((sales, case["sales"]), (regions, case["regions"])):
             with open(path, "w", encoding="utf-8", newline="") as f:
                 f.write(text)

@@ -1,5 +1,6 @@
-"""Pass when reports.render and python3 -m reports with --out, --standings and --verify, run in a child, write byte
-for byte what the shipped code writes on awkward inputs (ties, regions with no sales, spellings that casefold
+"""Pass when reports.render, python3 -m reports with --out, --standings and --verify, and python3 -m reports printing
+to stdout, run in a child that rewrites the same two input files for every case, write byte for byte what the
+shipped code writes on awkward inputs (ties, regions with no sales, spellings that casefold
 together, decomposed accents, half cents, reused ids, quoted fields, padded headers), render builds the report for
 20,000 rows in a few seconds, test_report.py passes unchanged, and each of them writes the right output for 200,000
 rows, with every awkward row above spread through them, in at most 10 seconds."""
@@ -284,9 +285,12 @@ for via, what in (("render", "reports.render"), ("command", "python3 -m reports"
         if g.get("error"):
             passcheck.finish(False, f"on {name}, {what} raised {g['error']}"[:300])
         if g.get("text") != w["text"]:
-            # The probe joins the command's report and standings CSV with a NUL.
-            parts = [str(g.get("text")).partition("\0")[::2], w["text"].partition("\0")[::2]]
-            for label, a, b in zip(("", "the standings CSV, "), *parts):
+            # The probe joins the command's report, standings CSV and printed report with a NUL.
+            parts = [str(g.get("text")).split("\0"), w["text"].split("\0")]
+            labels = ("", "the standings CSV, ", "on stdout, ")
+            if len(parts[0]) != len(parts[1]):
+                passcheck.finish(False, f"on {name}, {what} wrote a NUL into its output")
+            for label, a, b in zip(labels, *parts):
                 if a != b:
                     passcheck.finish(False, f"on {name}, {what} wrote {label}{first_difference(a, b)}"[:300])
 # The 20,000-row run only ends a slow answer early; the 200,000-row run decides, whatever the machine's speed.

@@ -2,8 +2,8 @@
 that holds every v2 quirk many times over (revisions out of file order, repeated revisions, edits that move an
 entry, legacy kind codes, timestamps without an offset or at a negative half-hour one, null and foreign currencies,
 every currency money.py gives other than two decimals, amounts written without their trailing zeros), writes
-exactly the v3 file the formats describe and returns its record count, and migrates an export of 80,000 lines in a
-few seconds."""
+exactly the v3 file the formats describe and returns its record count, migrates an export of 80,000 lines in a
+few seconds, keeps amounts too big for a float exact, and refuses an amount with more places than its currency."""
 import datetime
 import importlib.util
 import json
@@ -213,4 +213,22 @@ got = migrated(lines, BIG_SECONDS)
 if got is None:
     passcheck.finish(False, f"too slow: {len(lines):,} lines took more than {BIG_SECONDS} seconds")
 reason = wrong(got, reference(lines))
-passcheck.finish(reason is None, f"on {len(lines):,} lines, {reason}"[:300])
+if reason:
+    passcheck.finish(False, f"on {len(lines):,} lines, {reason}"[:300])
+
+
+def one(n, account, amount, currency=None):
+    return {"id": f"x-{n}", "rev": 1, "account": account, "kind": "credit", "amount": amount, "currency": currency,
+            "ts": "2021-01-02T03:04:05Z", "memo": "", "exported_at": "2023-01-05T01:00:00Z"}
+
+
+# Past 2**53 minor units a float can't hold every whole number.
+lines = [one(1, "acc-ny", "123456789012345.67"), one(2, "acc-seo", "12345678901234567"),
+         one(3, "acc-kwi", "9007199254740.993")]
+reason = wrong(migrated(lines), reference(lines))
+if reason:
+    passcheck.finish(False, f"on amounts too big for a float, {reason}"[:300])
+got = migrated([one(1, "acc-ny", "5.00"), one(2, "acc-ny", "1.000000001")])
+if not (got and str(got.get("error")).startswith("MigrationError")):
+    passcheck.finish(False, f"1.000000001 USD has more places than USD allows, but migrate gave {got!r}"[:300])
+passcheck.finish(True, "")

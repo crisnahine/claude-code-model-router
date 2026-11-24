@@ -70,6 +70,12 @@ CHAINS = [
     # Past any hop limit a resolver would pick: the kernel follows 31 links here (macOS allows 32), 40 below (Linux 40).
     ("a chain of thirty links", "extract", ladder(30) + [("file", "esc/pwn.txt", "owned\n")]),
     ("a link through thirty-nine links", "extract", ladder(39)),
+    # The kernel reads a doubled or trailing slash as one slash, not as a folder with an empty name.
+    ("a link whose target has an empty part", "extract", [("link", "a", "."), ("link", "b", "a//..")]),
+    ("a write through a link whose target has an empty part", "extract",
+     [("link", "a", "."), ("link", "b", "a//.."), ("file", "b/pwn.txt", "owned\n")]),
+    ("a link through a target that ends in a slash", "extract",
+     [("link", "a", "."), ("link", "b", "a/"), ("link", "c", "b/..")]),
 ]
 DEPLOY = [("link", "config", "current/app.conf"), ("link", "current", "releases/v2"), ("dir", "empty"),
           ("link", "latest.log", "logs/2024-06.log"), ("dir", "logs"), ("dir", "notes"), ("dir", "releases"),
