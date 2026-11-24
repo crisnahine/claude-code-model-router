@@ -120,7 +120,7 @@ def find(agent_type: str, project: Path) -> dict | None:
                 if found and found["name"] == leaf:
                     return found
         return None
-    found = _search([("project", project / ".claude" / "agents"),
+    found = _search([*(("project", f / ".claude" / "agents") for f in cfg.project_folders(project)),
                      ("user", store.claude_home() / "agents")], agent_type)
     if found:
         return found

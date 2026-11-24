@@ -180,6 +180,12 @@ test('forks and resumed runs pass through with no CLI call', async () => {
   assert.equal(mod.calls.length, 0)
 })
 
+test("a spawn never sends the subagent's own cwd, so the project stays the session's", async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  await mod.spawn(spawnEvent({ cwd: '/somewhere/else' }))
+  assert.equal('cwd' in mod.calls[0]!.stdin, false)
+})
+
 test('a spawn sends its Agent call id, and a workflow agent sends none', async () => {
   const mod = load({ 'mod-spawn': PICK })
   await mod.spawn(spawnEvent())
@@ -473,7 +479,7 @@ test('each payload the mod sends matches its fixture', async () => {
   await mod.sessionStart({ source: 'startup' })
   await mod.toolCall({ tool: 'Agent', tool_use_id: 'tu1', effort: spawn.tool_input.effort })
   await mod.spawn(spawnEvent({
-    cwd: spawn.cwd, parentAgentId: spawn.parent_agent_id, parentModel: spawn.parent_model, model: spawn.tool_input.model,
+    parentAgentId: spawn.parent_agent_id, parentModel: spawn.parent_model, model: spawn.tool_input.model,
     subagentType: spawn.tool_input.subagent_type, prompt: spawn.tool_input.prompt, description: spawn.tool_input.description,
   }))
   await mod.start({ turnId: 't1', text: payloads['mod-turn'].text })

@@ -25,7 +25,8 @@ _NEGATION = re.compile(r"(?:\bnot|n't|\bnever|\bwithout|\binstead of|\bavoid|\bn
 def named_model(reg: Registry, prompt: str) -> str | None:
     """A model the user may be asking for: "use opus", "run this on haiku". These are
     ordinary words too, so this only prompts Claude to decide; it forces nothing."""
-    names = "|".join(re.escape(n) for n in reg.models)
+    # A model only a project adds is left out: its name could be any word, and the note would put it on calls.
+    names = "|".join(re.escape(n) for n, m in reg.models.items() if m.trusted)
     if not names:
         return None
     text = (prompt or "").lower()

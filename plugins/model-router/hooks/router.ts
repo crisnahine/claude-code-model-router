@@ -124,7 +124,6 @@ export const register: Register = (on, options) => {
     const layers = await modelSettings($)
     const pick = await ask($, opts, 'mod-spawn', {
       ...(layers ? { settings: layers } : {}),
-      cwd: e.cwd,
       parent_agent_id: e.parentAgentId,
       parent_model: e.parentModel,
       ...(sessionEffort ? { session_effort: sessionEffort } : {}),

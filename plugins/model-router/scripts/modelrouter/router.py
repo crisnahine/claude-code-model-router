@@ -162,8 +162,9 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         return out
 
     named = tool_input.get("model") if source == "caller" else own_model if source == "pin" else None
-    out["version"] = named if isinstance(named, str) and named.lower() != target else None
     final = reg.clamp(target, usable)
+    # The caller's exact ID only survives a cap that keeps its family.
+    out["version"] = named if isinstance(named, str) and named.lower() != final and reg.family(named) == final else None
     if final != target:
         why += f"; {target} is over the cap or unavailable here"
     effort = None
