@@ -1693,6 +1693,9 @@ class RoutingEvals(Sandbox):
             graders = "\n".join(p.read_text(encoding="utf-8") for p in (path.parent / "graders").glob("*.md"))
             self.assertIn(f"claude-{model}-", graders, f"{name}: no grader checks the model the subagent ran on")
             self.assertIn(agent or "", graders, f"{name}: no grader checks the agent Claude picked")
+            if agent and "model" not in frontmatter(PLUGIN / "agents" / f"{agent.split(':')[-1]}.md"):
+                self.assertIn(rf'"model"\s*:\s*"(?:claude-)?{model}', graders,
+                              f"{name}: {agent} sets no model, so no grader checks the model Claude names")
             self.session_on(fields["model"], session_id=name)
             hook_input = {"session_id": name, "cwd": str(self.project), "tool_input": {
                 "subagent_type": agent or "general-purpose", "prompt": "the case's brief", "model": model, "effort": effort}}
@@ -3425,8 +3428,8 @@ class Hooks(Sandbox):
             self.assertIn(line, text)
         self.assertIn("a contract or financial figures", text)  # any kind of work, not only code
         self.assertIn("A call that names neither runs on its agent's own model or the conversation's.", text)
-        self.assertIn('A redo after a failed check or a gap in the report keeps its `description` with "Redo:" in front',
-                      text)
+        self.assertIn('A redo after a failed check or a gap in the report keeps its `description` with "Redo:" in front; '
+                      "one that names neither runs one step higher.", text)
         self.assertNotIn("from its brief", text)
         self.assertNotIn("model-router:deep-solver", text)  # the Agent tool lists the role agents already
         self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL", text)
@@ -3437,11 +3440,14 @@ class Hooks(Sandbox):
         self.assertIn("keeps the `effort` a call names, by the work: medium for finding", text)
         self.assertNotIn("haiku at medium", text)  # Claude can't pass a model under FORCE (sub-agents.md)
         self.assertNotIn("names only a model", text)
+        self.assertIn("one that names no effort runs one step higher.", text)
 
     def test_session_start_says_when_the_subagent_model_default_leaves_calls_alone(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         out = hooks.session_start({"session_id": "s1", "source": "startup", "model": "claude-opus-5-5"})
-        self.assertIn("CLAUDE_CODE_SUBAGENT_MODEL sets the model of every agent without its own", out["systemMessage"])
+        self.assertIn("CLAUDE_CODE_SUBAGENT_MODEL is sonnet, so an agent call that names no model runs on its agent's "
+                      "own model or sonnet. Model Router keeps the model a call names, within your cap.",
+                      out["systemMessage"])
         self.assertIn("names neither runs on its agent's own model or CLAUDE_CODE_SUBAGENT_MODEL.", self.text(out))
         self.options(agent_pins="override")  # then the router decides, so the default leaves no call alone
         out = hooks.session_start({"session_id": "s1", "source": "startup", "model": "claude-opus-5-5"})
@@ -3471,7 +3477,8 @@ class Hooks(Sandbox):
         # The note holds up to 700 characters: it carries the table of which model and effort fit which work,
         # since the Agent tool sets `effort` only when instructions such as CLAUDE.md or a skill ask for one.
         notes = [self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))]
-        for pin in ({"CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5-5[1m]"}, {"CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}):
+        for pin in ({"CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5-5[1m]"}, {"agent_pins": "override"},
+                    {"CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}, {"routing_mode": "advise"}):
             self.options(**pin, CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="claude-opus-5-5")
             notes.append(self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"})))
         agents = [frontmatter(p)["description"] for p in (PLUGIN / "agents").glob("*.md")]

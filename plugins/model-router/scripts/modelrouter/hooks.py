@@ -18,8 +18,8 @@ def _context(event: str, text: str) -> dict:
 
 def _rules(options: settings.Settings) -> str:
     """The level rule for Claude, written as facts: the Agent tool sets `effort` only when instructions ask."""
-    redo = ("A redo after a failed check or a gap in the report keeps its `description` with \"Redo:\" in front, "
-            "names {neither}, and runs one step higher.")
+    redo = ("A redo after a failed check or a gap in the report keeps its `description` with \"Redo:\" in front; "
+            "one that names {neither} runs one step higher.")
     if options.force:
         # Claude can't pass a model under FORCE (sub-agents.md), so only the effort half applies.
         return (f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE runs every subagent on {options.subagent_model or 'one model'}, so a "
@@ -63,9 +63,9 @@ def session_start(hook_input: dict) -> dict | None:
                 "within your cap.")
         elif options.subagent_model and options.pins != "override":
             notices.append(
-                f"CLAUDE_CODE_SUBAGENT_MODEL sets the model of every agent without its own to {options.subagent_model}, "
-                "so Model Router leaves those calls as they are and sets only the effort of agents that name their "
-                "own model.")
+                f"CLAUDE_CODE_SUBAGENT_MODEL is {options.subagent_model}, so an agent call that names no model runs on "
+                f"its agent's own model or {options.subagent_model}. Model Router keeps the model a call names, within "
+                "your cap.")
         if options.workflow_model:
             notices.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model}, "
                            "so the router sets only their effort.")

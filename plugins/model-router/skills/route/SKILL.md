@@ -1,6 +1,6 @@
 ---
 name: route
-description: Explains which model Model Router gives a task and why, and how to split the work. Use when the user asks which model should do something, why an agent ran on a model, or whether it's routed right.
+description: Says which model and effort fit a task, how to brief and split it, and when to redo. Use when the user asks which model should do something, why an agent ran on a model, or whether it's routed right.
 argument-hint: "[task description]"
 allowed-tools:
   - Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" policy)

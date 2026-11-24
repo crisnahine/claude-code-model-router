@@ -71,7 +71,7 @@ Nothing has to be set: the six options in `/config` under the plugin start at th
 ## Quick start
 
 1. Start a new session. The plugin's commands start with `/model-router:`.
-2. Check what a task would get: `/model-router:route list the files under src`. It names the level, model and effort, and why. For three briefs, its first two lines read:
+2. Check what a task would get: `/model-router:route list the files under src`. It names the kind of work the task is, the model and effort that fit it, and what the router's `explain` says the call runs on. For three briefs, the first two lines of `explain` read:
 
    ```text
    > List the files under src and say which ones import requests
