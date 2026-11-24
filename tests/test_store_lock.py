@@ -17,9 +17,9 @@ from test_model_router import SCRIPTS, Sandbox, store
 class StoreLock(Sandbox):
     def test_two_waiters_on_a_lock_left_by_a_dead_hook_never_both_hold_it(self):
         self.data.mkdir(exist_ok=True)
-        path = self.data / "learned.json"
+        path = self.data / "sample.json"
         store.save_json(path, {"n": 0})
-        lock = self.data / "learned.json.flock"
+        lock = self.data / "sample.json.flock"
         lock.write_text("dead")
         os.utime(lock, (time.time() - 60, time.time() - 60))
         real_unlink = Path.unlink

@@ -2,7 +2,7 @@
   "name": "model-router",
   "displayName": "Model Router",
   "version": "0.1.2",
-  "description": "Claude Code model router: a Claude Code plugin for autonomous multi-model orchestration. Automatic Claude model routing that sets the right model and reasoning effort for every subagent, teammate and workflow agent, and the main conversation's effort per request, from any plugin, skill or agent, by task complexity, quality, speed and cost. It starts cheap, escalates work that comes back for a redo, learns from results in your setup, tracks new and retiring models, and checks the work before a turn ends.",
+  "description": "Claude Code model router: a Claude Code plugin for autonomous multi-model orchestration. Automatic Claude model routing that sets the right model and reasoning effort for every subagent, teammate and workflow agent, and the main conversation's effort per request, from any plugin, skill or agent, by task complexity, quality, speed and cost. It starts cheap, escalates work that comes back for a redo, tracks new and retiring models, and checks the work before a turn ends.",
   "author": {
     "name": "Cris",
     "url": "https://github.com/crisnahine"

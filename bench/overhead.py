@@ -65,7 +65,7 @@ MOD_INPUTS = {
     "mod-usage": {"agent_id": "a1", "usage": USAGE},
 }
 # Files the simulation must have written, or the run didn't exercise their path.
-STATE_FILES = ("ledger.jsonl", "state.json", "learned.json")
+STATE_FILES = ("ledger.jsonl", "state.json")
 _TOP_KEYS = ("prompt", "text")
 
 

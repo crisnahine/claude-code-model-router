@@ -2,7 +2,7 @@
 the agent it is given to. Deterministic and fast: this runs on every agent call.
 
 It is an estimate. Claude sees the code and can overrule it by naming a model on a
-call, and the feedback loop in learn.py corrects levels that keep proving too low."""
+call, and a call redone after a weak result runs one level higher."""
 from __future__ import annotations
 
 import re

@@ -17,7 +17,7 @@ Checked 2026-11-24 for 0.1.2 on Claude Code 2.1.330 and 2.1.331; the evals and t
 | Every subagent, teammate and workflow stage routed on the mod path | PASS | Unit and Node tests cover all three; all three ran live on 2.1.330, and workflow agents under ultracode on 2.1.331 (S10.1) |
 | A working fallback where mods don't load | PASS | Fallback tests, and live runs of the `Agent` call path in default and auto mode (S10.2) |
 | The precedence order and the cap honored in every case | PASS | `Router` tests; the cap holds even when a lowering rewrite didn't take (S10.3) |
-| Redo escalation and learning that never loop and never lower quality | PASS | `RepeatGuard` and `Feedback` tests; a run cut off by an API error is retried, not escalated (S10.4, S12.33) |
+| Redo escalation that never loops and never lowers quality | PASS | `RepeatGuard` tests; a run cut off by an API error is retried, not escalated (S10.4, S12.33) |
 | Availability tracking that routes around a model that doesn't work here | PASS | `Registry` and `Router` tests (S10.5) |
 | The daily upstream check, failing quietly offline | PASS | `Upstream` tests for a failed fetch, an empty feed, and a fetch that runs past its deadline (S10.6) |
 | A spend ledger that matches list prices | PARTIAL | One-hour cache writes, unpriced models and Haiku's long-prompt rate per request are tested. Fast mode requests are logged at standard rates, because Claude Code doesn't say which ran fast (S10.7, S4.8) |

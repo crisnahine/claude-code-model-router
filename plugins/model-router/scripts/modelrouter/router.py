@@ -46,7 +46,6 @@ class Facts:
     earlier: dict | None = None  # the finished run a redo climbs from: this call's, or for a marked redo its agent's
     marked: bool = False  # calls.marked_redo: the description says the call redoes a weak result
     on_record: bool = True  # False when `earlier` is what a marked redo's own brief would run at, not a finished run
-    raises: dict = field(default_factory=dict)  # learn.raises: the learned raise of each level
     floor: Level | None = None  # the request's level, for a hand-off to a strong role agent
     teammate: bool = False  # an agent-team teammate, which CLAUDE_CODE_SUBAGENT_EFFORT doesn't reach
     workflow: bool = False  # a workflow agent, which CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins
@@ -95,7 +94,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
             level = done_level  # a redo of a top-rung run stays there and asks for more effort
         elif facts.marked and level > done_level:
             out["escalated_from"] = done_level  # the rewritten brief already reads above the run it redoes
-    pick, pick_effort = ladder.pick(reg, level, settings.priority, usable, facts.raises)
+    pick, pick_effort = ladder.pick(reg, level, settings.priority, usable)
     level_effort = ladder.effort(reg, level, settings.priority)
     out.update(level=level, signals=profile["signals"], pick=pick)
 

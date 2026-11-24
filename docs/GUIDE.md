@@ -12,7 +12,7 @@ How to use, configure and run Model Router, and how it behaves on your setup. Th
 
 The five commands and their arguments are in the [README](../README.md#commands). Type `/model-router:ship` in full: where Claude Code has its own `/ship`, the bare `/ship` runs that command, which can commit, push and open a pull request with no confirmation prompt ([ship command](https://code.claude.com/docs/en/ship-command.md)). A plugin skill always loads under its `plugin:skill` name, so both stay available ([skills](https://code.claude.com/docs/en/skills.md#resolve-skills-that-share-a-name)).
 
-With `--json`, `models` and `usage` print one JSON object instead of the tables. Its `schema` key names the shape and version, `model-router.models/1` and `model-router.usage/1`. A new key keeps the version; a key removed, renamed or changed in meaning bumps it. Scripts can run the commands without Claude: `sh <plugin>/scripts/model-router.sh --data-dir <plugin data dir> usage 30 --json`. The shapes are in [ARCHITECTURE.md](ARCHITECTURE.md#machine-readable-output).
+With `--json`, `models` and `usage` print one JSON object instead of the tables. Its `schema` key names the shape and version, `model-router.models/2` and `model-router.usage/1`. A new key keeps the version; a key removed, renamed or changed in meaning bumps it. Scripts can run the commands without Claude: `sh <plugin>/scripts/model-router.sh --data-dir <plugin data dir> usage 30 --json`. The shapes are in [ARCHITECTURE.md](ARCHITECTURE.md#machine-readable-output).
 
 ## Role agents
 
@@ -95,7 +95,7 @@ A routed stage runs at its level's effort, except that on the session's own mode
 
 A script can also pass an `effort` to `agent()`, but the spawn event carries none, so on a stage that names no model the router can't see it and sets its own. Name the model too and the router leaves both alone.
 
-Stages whose briefs land on the same level get the same model and effort, which a fan-out needs to share a prompt cache ([fan-out](https://code.claude.com/docs/en/workflows.md#prompt-caching-in-a-fan-out)). A stage never reaches the `Agent` tool's result hook, so it is never redone one level up and doesn't vote to raise a level. While a workflow or a background subagent is running, the checks before a turn ends wait, since the turn is paused, not done. These were run live under `--effort ultracode` on Claude Code 2.1.331 ([verified live](ARCHITECTURE.md#verified-live)).
+Stages whose briefs land on the same level get the same model and effort, which a fan-out needs to share a prompt cache ([fan-out](https://code.claude.com/docs/en/workflows.md#prompt-caching-in-a-fan-out)). A stage never reaches the `Agent` tool's result hook, so it is never redone one level up. While a workflow or a background subagent is running, the checks before a turn ends wait, since the turn is paused, not done. These were run live under `--effort ultracode` on Claude Code 2.1.331 ([verified live](ARCHITECTURE.md#verified-live)).
 
 ## The checks before a turn ends
 
@@ -115,7 +115,7 @@ These limits come from what Claude Code lets a plugin do, or from choices made t
 - It leaves forks alone. A fork reads its parent's cache and always runs on its parent's model.
 - It leaves alone an agent whose definition it can't read, such as one defined on the command line, unless `agent_pins` is `override`. Workflow stages and teammate roles are routed.
 - It sees a model swap only in a foreground result, since a background agent's launch carries no usage fields. A run that ends on an API error, such as an overload, counts as a retry when sent again, not a redo.
-- It doesn't judge answers. The profile reads the brief's wording and the agent's name, never the code, so it is an estimate. Claude has read the code, so the session-start note asks it to name a `model` on a call when the task is harder or easier than its brief reads, and to put "Redo:" in front of a redo's `description`. Redo escalation and the feedback loop correct levels that prove too low.
+- It doesn't judge answers. The profile reads the brief's wording and the agent's name, never the code, so it is an estimate. Claude has read the code, so the session-start note asks it to name a `model` on a call when the task is harder or easier than its brief reads, and to put "Redo:" in front of a redo's `description`. A redo runs one level higher, and `/model-router:usage` counts redos by level.
 - The profile reads English. A brief mostly in another script, such as Japanese or Cyrillic, or with enough common French, Spanish, Portuguese, Italian, German or Dutch words, starts at standard instead of lookup. A very short brief may still score lookup, and a redo moves it up.
 - It doesn't route to a new model family on its own. A new alias in the docs is reported within a day, and routed to once it has an entry under `models`. New versions inside a family need nothing, since Claude Code moves each alias to the newest version. When your session's model or an alias runs an older version than its family's newest, session start says so, usually because a `model` setting names a full version or Claude Code hasn't moved its alias yet.
 - It does nothing when hooks are switched off, by `disableAllHooks` or by `allowManagedHooksOnly`. Where an organization blocks user mods, routing falls back to the `Agent` call.

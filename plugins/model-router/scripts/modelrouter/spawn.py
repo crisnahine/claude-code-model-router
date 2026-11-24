@@ -1,11 +1,11 @@
 """One procedure for every spawn, whichever path it came by, in two steps: decide (the facts
-and the router's decision, writing nothing), then record (the ledger row, the route and the
-votes it carries). A path may adjust the decision between them."""
+and the router's decision, writing nothing), then record (the ledger row and the route).
+A path may adjust the decision between them."""
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from . import agents, calls, gates, learn, ledger, profile, request, router, session, settings
+from . import agents, calls, gates, ledger, profile, request, router, session, settings
 from . import config as cfg
 from .config import EFFORTS, Level
 
@@ -59,8 +59,7 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     if marked and earlier is None and task:
         earlier = calls.last_run(session_id, task)
     found = router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable,
-                         definition=definition, parent=parent, earlier=earlier, marked=marked, raises=snap.raises,
-                         floor=floor, teammate=teammate, workflow=workflow,
+                         definition=definition, parent=parent, earlier=earlier, marked=marked, floor=floor, teammate=teammate, workflow=workflow,
                          session_effort=session_effort, effort_caps=caps)
     if marked and earlier is None:
         found = replace(found, earlier=_unmarked_run(found, snap), on_record=False)
@@ -83,7 +82,7 @@ def decide(hook_input: dict, snap: settings.Snapshot) -> Spawn:
 
 
 def record(spawned: Spawn, via: str, newest: str | None = None) -> None:
-    """Write the spawn's ledger row and, unless it is denied, its route and votes. `via` is "mod" or "fallback";
+    """Write the spawn's ledger row and, unless it is denied, its route. `via` is "mod" or "fallback";
     `newest` is the full ID the mod sends in place of the decided alias."""
     hook_input, decision = spawned.hook_input, spawned.decision
     session_id = hook_input.get("session_id")
@@ -99,29 +98,21 @@ def record(spawned: Spawn, via: str, newest: str | None = None) -> None:
 
 def _record(spawned: Spawn, via: str, newest: str | None) -> None:
     hook_input, decision = spawned.hook_input, spawned.decision
-    # The fallback's input has no kind; a named call it flags as a teammate must not vote as a subagent.
     session_id = hook_input.get("session_id")
-    kind = hook_input.get("kind") or ("teammate" if spawned.facts.teammate else learn.SUBAGENT)
-    reg, current = spawned.snap.registry, request.load(session_id)
     runs_on = decision["model"] or decision["was"]
-    source = learn._source(decision)
+    # A call the repeat guard passed through untouched: neither the pick nor the level applied.
+    source = None if decision["repeat_of"] else decision["source"]
     rewrote = decision["action"] == "rewrite"
     facts = spawned.facts
     # The effort it runs at, whoever chose it, so a redo can tell it would only repeat this run.
     effort = router.runs_at(decision["effort"], facts.tool_input, facts.definition, spawned.snap.options, facts.teammate)
     route = calls.Route(model=runs_on, sent=newest or (decision["model"] if rewrote else None),
                         level=Level.parse(decision["level"]), effort=effort, source=source, path=via,
-                        counted=learn.counted(decision, kind), prompt_id=current.prompt_id, rewrote=rewrote,
-                        was=decision["was"])
+                        prompt_id=request.load(session_id).prompt_id, rewrote=rewrote, was=decision["was"])
     spawn_id = hook_input.get("tool_use_id")
-    earlier = None
-    try:  # a route that can't be written mustn't cost the spawn's votes
-        earlier = calls.routed(session_id, spawned.key, route, spawn_id if isinstance(spawn_id, str) and spawn_id else None)
+    try:  # a route that can't be written mustn't cost the checker's note
+        calls.routed(session_id, spawned.key, route, spawn_id if isinstance(spawn_id, str) and spawn_id else None)
     except OSError:
         pass
-    user_named = source == "caller" and decision["was"] == current.named
-    # A redo with no run on record can't say its first level was too low: nothing is known to have run there.
-    cast = decision if facts.on_record else {**decision, "escalated_from": None}
-    learn.spawned(reg, cast, kind, earlier, user_named, spawned.facts.raises)
     if gates.is_checker(decision["agent"]):
         gates.note_check(session_id)

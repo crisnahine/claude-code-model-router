@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Mapping
 
 from . import ladder, store
 from .config import Level
@@ -83,23 +82,22 @@ def begin(session_id: str | None, *, prompt_id: str | None, level: str | None, n
         "started": store.now()})
 
 
-def _need(reg: Registry, level: Level, priority: str, usable: list[str], raises: Mapping[str, int]) -> str | None:
-    return ladder.pick(reg, level, priority, usable, raises).model
+def _need(reg: Registry, level: Level, priority: str, usable: list[str]) -> str | None:
+    return ladder.pick(reg, level, priority, usable).model
 
 
 def start(session_id: str | None, reading: Intake, reg: Registry, session_model: object, usable: list[str],
-          raises: Mapping[str, int], *, priority: str = "balanced", prompt_id: str | None = None,
-          named: str | None = None) -> Request:
+          *, priority: str = "balanced", prompt_id: str | None = None, named: str | None = None) -> Request:
     """The person's new request, at the level of `reading`, with the model that level needs."""
     level = reading.level
     tier = reg.family(session_model)
-    need = _need(reg, level, priority, usable, raises) if level else None
+    need = _need(reg, level, priority, usable) if level else None
     begin(session_id, prompt_id=prompt_id, level=level, need=need, session_tier=tier, named=named)
     return Request(prompt_id=prompt_id, level=level, need=need, session_tier=tier, named=named)
 
 
 def raise_to(session_id: str | None, reading: Intake, reg: Registry, usable: list[str],
-             raises: Mapping[str, int], *, priority: str = "balanced") -> bool:
+             *, priority: str = "balanced") -> bool:
     """Lift the current request to the level of a turn's reading, and never lower it. A turn can't start a
     request, and only a typed command's reading counts: plain turn text may carry other hooks' context.
     Returns whether the raise was written; a busy lock skips it."""
@@ -114,7 +112,7 @@ def raise_to(session_id: str | None, reading: Intake, reg: Registry, usable: lis
     def update(entry: dict) -> None:
         held = Level.parse(entry.get("level"))
         if held is not None and held < level:
-            entry["level"], entry["need"] = level, _need(reg, level, priority, usable, raises)
+            entry["level"], entry["need"] = level, _need(reg, level, priority, usable)
             raised.append(True)
 
     status = store.mutate_entry("prompts", session_id, update)

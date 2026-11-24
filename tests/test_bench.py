@@ -1013,9 +1013,9 @@ answer = "read_retry_limit in app/settings.py"
 if "--plugin-dir" in sys.argv:
     root = os.environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR") or str(Path(os.environ["CLAUDE_CONFIG_DIR"]) / "plugins")
     data = Path(root) / "data" / "model-router-inline"
-    answer += " (had state)" if (data / "learned.json").exists() else " (fresh)"
+    answer += " (had state)" if (data / "state.json").exists() else " (fresh)"
     data.mkdir(parents=True, exist_ok=True)
-    (data / "learned.json").write_text('{"lookup": {"bump": 1}}')
+    (data / "state.json").write_text('{"max_tier": "haiku"}')
     (data / "ledger.jsonl").write_text("written by the run")
 print(json.dumps({"result": answer, "total_cost_usd": 0.01, "modelUsage": {}}))
 '''
@@ -1029,8 +1029,8 @@ class PluginState(unittest.TestCase):
             home = Path(tmp) / "config"
             shared = home / "plugins" / "data" / "model-router-inline"
             shared.mkdir(parents=True)
-            (shared / "learned.json").write_text('{"lookup": {"calls": 2}}')
-            os.utime(shared / "learned.json", (1000, 1000))
+            (shared / "state.json").write_text('{"max_tier": "opus"}')
+            os.utime(shared / "state.json", (1000, 1000))
             claude = stub(tmp, STUB)
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
             configs = {c["id"]: c for c in run.load_configs()}
@@ -1044,13 +1044,13 @@ class PluginState(unittest.TestCase):
                     baseline = run.run_one(task, configs["defaults"], options, {})
             finally:
                 shared.chmod(0o755)
-            self.assertEqual([p.name for p in shared.iterdir()], ["learned.json"])
-            self.assertEqual((shared / "learned.json").read_text(), '{"lookup": {"calls": 2}}')
-            self.assertEqual((shared / "learned.json").stat().st_mtime, 1000)
+            self.assertEqual([p.name for p in shared.iterdir()], ["state.json"])
+            self.assertEqual((shared / "state.json").read_text(), '{"max_tier": "opus"}')
+            self.assertEqual((shared / "state.json").stat().st_mtime, 1000)
             self.assertTrue(first["passed"])
             self.assertIn("(fresh)", first["answer"])
             self.assertIn("(fresh)", second["answer"])
-            self.assertEqual(first["plugin_state"], {"state.json": None, "learned.json": None})
+            self.assertEqual(first["plugin_state"], {"state.json": None})
             self.assertIsNone(baseline["plugin_state"])
             self.assertIn("bench_dirty", first)
 

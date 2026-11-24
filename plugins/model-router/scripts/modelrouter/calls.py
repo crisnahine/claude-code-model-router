@@ -1,6 +1,6 @@
 """What happened to each call: where it was routed and what came back. A spawn writes a Route
 on either path; a result, a failure or a stop comes back as an Outcome, and one rule set turns
-it into the done record, the health evidence, the ledger row and the count taken back.
+it into the done record, the health evidence and the ledger row.
 The only module that reads or writes those records.
 
 Per session, `routes` holds a Route per spawn, and `launched` and `done` hold the per-call
@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from . import health, learn, ledger, request, store
+from . import health, ledger, request, store
 from .config import LEVEL_SOURCES, Level
 from .registry import Registry
 
@@ -38,15 +38,13 @@ ROUTED_AROUND = "routed-around"  # ... and it is now routed around
 class Route:
     """Where one spawn went, written by `spawn.record` on either path. `sent` is the name or ID the
     path put on the call, a full ID where the alias lags; `was` is the model the call would have run on
-    untouched (the parent's, or the agent's pin); `rewrote` says the decision changed the call; `counted` is the level the spawn counted toward (`learn.counted`), so a run that swapped models
-    can take its own count back."""
+    untouched (the parent's, or the agent's pin); `rewrote` says the decision changed the call."""
     model: str | None
     sent: str | None
     level: Level | None
     effort: str | None
     source: str | None
     path: str
-    counted: Level | None = None
     prompt_id: str | None = None
     at: float = 0.0
     rewrote: bool = False
@@ -162,15 +160,14 @@ def _route(record: object) -> Route | None:
     return Route(model=_text(record.get("model")), sent=_text(record.get("sent")),
                  level=Level.parse(record.get("level")), effort=_text(record.get("effort")),
                  source=_text(record.get("source")), path=_text(record.get("path")) or "",
-                 counted=Level.parse(record.get("counted")), prompt_id=_text(record.get("prompt_id")),
+                 prompt_id=_text(record.get("prompt_id")),
                  at=float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else 0.0,
                  rewrote=record.get("rewrote") is True, was=_text(record.get("was")))
 
 
 def _record(route: Route, key: str) -> dict:
     record = {"model": route.model, "sent": route.sent, "level": route.level.value if route.level else None,
-              "effort": route.effort, "source": route.source, "path": route.path,
-              "counted": route.counted.value if route.counted else None, "prompt_id": route.prompt_id,
+              "effort": route.effort, "source": route.source, "path": route.path, "prompt_id": route.prompt_id,
               "rewrote": route.rewrote or None, "was": route.was, "call": key}
     return {k: v for k, v in record.items() if v is not None}
 
@@ -185,23 +182,10 @@ def _mutate(name: str, session_id: str | None, change) -> None:
     store.mutate_entry(name, session_id, change, max_age=KEPT_FOR)
 
 
-def routed(session_id: str | None, key: str, route: Route, spawn_id: str | None = None) -> Route | None:
+def routed(session_id: str | None, key: str, route: Route, spawn_id: str | None = None) -> None:
     """Write where a spawn went, under its own id when the path has one (a copy of the same call can't
-    overwrite it) and else under the call's key. Returns the route this call had earlier in the request
-    and ran at its level, which the votes compare with."""
-    earlier: list[Route] = []
-
-    def update(entry: dict) -> None:
-        # Under the lock: calls issued together record at the same moment.
-        for record in _latest(entry, key):
-            before = _route(record)
-            if before and before.leveled and _same_request(before.prompt_id, before.at, route.prompt_id):
-                earlier.append(before)
-                break
-        store.keep(entry, spawn_id or key, _record(route, key))
-
-    _mutate("routes", session_id, update)
-    return earlier[0] if earlier else None
+    overwrite it) and else under the call's key."""
+    _mutate("routes", session_id, lambda entry: store.keep(entry, spawn_id or key, _record(route, key)))
 
 
 def route_of(session_id: str | None, key: str, spawn_id: str | None = None) -> Route | None:
@@ -254,8 +238,6 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
         pass
     ledger.result(session_id, outcome.agent, asked, outcome.ran_as, CUT_OFF if outcome.cut_off else outcome.status,
                   outcome.tokens, models_used=list(outcome.models_used) or None)
-    if swapped:
-        learn.swapped(route)
     return Returned(asked, route, finished, SWAPPED if swapped else None)
 
 

@@ -1,5 +1,5 @@
 {
-  "schema": "model-router.models/1",
+  "schema": "model-router.models/2",
   "cap": null,
   "strongest_in_use": "opus",
   "priority": "balanced",
@@ -39,20 +39,6 @@
       "last_ran_as": null,
       "status": "routed_around",
       "detail": "routed around until retried (ran as claude-opus-5-5 instead)"
-    }
-  ],
-  "levels": [
-    {
-      "level": "lookup",
-      "routed_calls": 3,
-      "votes_too_low": 0,
-      "raised": false
-    },
-    {
-      "level": "complex",
-      "routed_calls": 5,
-      "votes_too_low": 1,
-      "raised": true
     }
   ],
   "doc_aliases": [

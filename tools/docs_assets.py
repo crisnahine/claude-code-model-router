@@ -759,7 +759,7 @@ def diagram_ladder() -> str:
 
 
 def diagram_redo() -> str:
-    w, h = 920, 450
+    w, h = 920, 336
     out = [frame(w, h), text(32, 42, "Redo escalation", "ink b", 17),
            text(32, 66, "The same call, issued again in the same request after its result came back.", "mut", 13.5)]
     steps = [
@@ -791,37 +791,21 @@ def diagram_redo() -> str:
     last = 32 + 3 * (cw + gap) + cw / 2
     out.append(f'<g class="rtok"><circle cx="{last}" cy="{track}" r="11" class="halo" fill="none" stroke-width="5"/>'
                f'<circle cx="{last}" cy="{track}" r="9" class="rt"/></g>')
-    vy = 256
-    out.append(card(32, vy, 856, 92, rx=12))
-    out.append(text(56, vy + 32, "Each redo is a vote that the first level was routed too low", "ink b", 14.5))
-    for k in range(6):
-        out.append(f'<circle cx="{66 + k * 30}" cy="{vy + 62}" r="10" class="faint"/>'
-                   f'<circle cx="{66 + k * 30}" cy="{vy + 62}" r="10" class="r2 v{k}"/>')
-    out.append(text(262, vy + 58, "At least 6 votes that are also at least 30% of the level's calls raise it one step.",
-                    "ink", 13))
-    out.append(text(262, vy + 78, "A raise that keeps being overruled with a weaker model is undone the same way.",
-                    "mut", 13))
     note = ["One level up the ladder: lookup, standard and hardest move to a stronger model; complex stays on Opus",
             "at more effort, and a frontier redo runs at one step more effort. Not a redo: copies of one brief started",
             "together. Never escalated: a call that names its own model. A background agent's call counts as finished",
             "when the agent stops with an answer."]
-    out.append(lines(32, 378, note, "mut", 13, 20))
+    out.append(lines(32, 264, note, "mut", 13, 20))
     xs = [32 + k * (cw + gap) + cw / 2 - last for k in range(4)]
     at = lambda k: f"transform:translate({xs[k]:g}px,0px)"  # noqa: E731
     css = (".rtok{animation:rt 9s ease-in-out infinite}"
            + keyframes("rt", [(0, at(0) + ";opacity:0"), (4, at(0) + ";opacity:1"), (14, at(0)), (22, at(1)),
                               (32, at(1)), (40, at(2)), (50, at(2)), (58, at(3)), (92, at(3) + ";opacity:1"),
                               (100, at(3) + ";opacity:0")]))
-    for k in range(6):
-        on = 58 + k * 5
-        css += (f".v{k}{{animation:v{k} 9s linear infinite}}"
-                + keyframes(f"v{k}", [(0, "opacity:0"), (on, "opacity:0"), (on + 1, "opacity:1"), (96, "opacity:1"),
-                                      (100, "opacity:0")]))
     title = "Redo escalation: the same call again runs one level higher"
     label = ("A call is routed at its level, for example standard on Sonnet at medium effort. Its result comes back "
              "and the call is recorded as finished. If Claude issues the same call again in the same request, it "
-             "runs one level higher, complex on Opus at high, and counts as a vote that standard was routed too "
-             "low. At least 6 votes that are also at least 30 percent of a level's calls raise that level one step.")
+             "runs one level higher, complex on Opus at high.")
     return svg(w, h, title, label, "".join(out), css)
 
 
@@ -873,8 +857,7 @@ def diagram_two_paths() -> str:
     out.append(card(132, 404, 656, 110, rx=12))
     out.append('<rect x="133" y="420" width="4" height="78" rx="2" class="rt"/>')
     out.append(text(156, 434, "scripts/modelrouter: one Python runtime, one router", "ink b", 15))
-    out.append(chip_row(156, 450, ["spawn", "router.decide", "ladder", "registry", "profile", "calls", "learn",
-                                   "gates"], 11.5))
+    out.append(chip_row(156, 450, ["spawn", "router.decide", "ladder", "registry", "profile", "calls", "gates"], 11.5))
     out.append(text(156, 500, "One decision procedure and one state store for both paths.", "mut", 13))
     for name in ("pa", "pb", "pc"):
         out.append(f'<circle cx="0" cy="0" r="6" class="rt {name}"/>')

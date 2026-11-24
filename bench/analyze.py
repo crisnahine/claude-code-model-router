@@ -662,13 +662,13 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "(`CLAUDE_CODE_USE_*`) and `CLAUDE_CODE_OAUTH_TOKEN`, so `CLAUDE_CODE_SUBAGENT_MODEL`, "
         "`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and the effort variables are set only by a configuration. Only the "
         "router configuration passes `--plugin-dir`.",
-        "- The router keeps learned state across sessions (model health, level raises and its ledger) in its "
+        "- The router keeps learned state across sessions (model health and its ledger) in its "
         "plugin data folder, by default `~/.claude/plugins/data/model-router-inline/`, which every `--plugin-dir` "
         "session on the machine shares. The runner gives each run a plugins root of its own inside its scratch "
         "copy with `CLAUDE_CODE_PLUGIN_CACHE_DIR` (https://code.claude.com/docs/en/env-vars.md), so every router "
         "run starts from an empty data folder, never reads or writes the shared one, and its data goes when the "
         "scratch copy does. Each raw line records `plugin_data_own` and, for router runs, hashes of the "
-        "`state.json` and `learned.json` the run started from in `plugin_state`."
+        "state files the run started from in `plugin_state`."
         + (f" {borrowed} router run(s) here borrowed the shared folder instead: the runner copied it before the "
            "run and put it back after, which also wiped what other sessions wrote there meanwhile." if borrowed else "")
         + (f" {predate} run(s) here predate this: their lines have no `plugin_state`, and their router runs "

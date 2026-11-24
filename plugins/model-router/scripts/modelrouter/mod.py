@@ -165,7 +165,7 @@ def turn(hook_input: dict) -> dict | None:
     if options.mode != "off" and seen.person and seen.command:
         # The level is the request's, which the floor and the Stop check read, whatever the effort switches say.
         try:
-            request.raise_to(session_id, seen, reg, snap.usable, snap.raises, priority=options.priority)
+            request.raise_to(session_id, seen, reg, snap.usable, priority=options.priority)
         except OSError:
             pass
     decided = turn_effort(_facts(hook_input, snap, seen), reg)

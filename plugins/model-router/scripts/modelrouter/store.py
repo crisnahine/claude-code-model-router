@@ -289,27 +289,6 @@ def try_update(path: Path, change: Callable[[dict], Any]) -> tuple[dict, str]:
         return data, "busy"
 
 
-def remove_state_file(path: Path) -> str:
-    """Delete one state file under its lock: removed, missing, or why it was left (newer,
-    unreadable, busy). A file that fails to parse is moved aside, as a write would."""
-    try:
-        with locked(path):
-            status = _read_state(path)[1]
-            if status in ("newer", "unreadable"):
-                return status
-            if status == "corrupt":
-                return "removed" if _set_aside(path) else "unreadable"
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                return "missing"
-            except OSError:
-                return "unreadable"
-            return "removed"
-    except Busy:
-        return "busy"
-
-
 def update_dict(path: Path, change: Callable[[dict], Any]) -> dict:
     return try_update(path, change)[0]
 

@@ -76,18 +76,10 @@ Every read-modify-write of a state file takes that file's lock ([State](ARCHITEC
 
 | Path | Locks per spawn before | After | Files after |
 | :- | -: | -: | :- |
-| Mod (`mod-spawn`) | 3.1 | 3.0 | `ledger.jsonl`, `routes.json`, `learned.json` |
-| Fallback (`PreToolUse`) | 4.1 | 4.0 | the same, and `pending.json` for the rewrite waiting for its result |
+| Mod (`mod-spawn`) | 3.0 | 2.0 | `ledger.jsonl`, `routes.json` |
+| Fallback (`PreToolUse`) | 4.0 | 3.0 | the same, and `pending.json` for the rewrite waiting for its result |
 
-The simulation sends one prompt per 20 calls, so only one spawn in ten was the request's strongest so far; a real request starts with that spawn, which used to lock `prompts.json`. Counted on single spawns in a test:
-
-| Spawn | Mod before | Mod after | Fallback before | Fallback after |
-| :- | -: | -: | -: | -: |
-| The first of a request, or stronger than its siblings | 4 | 3 | 5 | 4 |
-| A redo the router chose (its count and its vote) | 5 | 3 | 6 | 4 |
-| Weaker than or as strong as a sibling already routed | 3 | 3 | 4 | 4 |
-
-The strongest spawn is no longer written (`calls.strongest` reads it from the routes), and a spawn's count and vote are one write to `learned.json`. What is left is one lock per file a spawn writes. Folding `pending.json` into the route would take the fallback to three, and waits until `locks.json` shows it matters.
+Before is the code that also wrote each spawn's count and votes to `learned.json`, a state file that is gone. Now every spawn takes one lock per file it writes, which a test counts on a single spawn too (`SpawnPaths.test_a_spawn_takes_one_lock_per_state_file_it_writes`). Folding `pending.json` into the route would take the fallback to two, and waits until `locks.json` shows it matters.
 
 ## State size
 
@@ -96,7 +88,7 @@ The strongest spawn is no longer written (`calls.strongest` reads it from the ro
 | File | Bytes after 1,000 calls | Bounded | What bounds it |
 | :- | -: | :- | :- |
 | `ledger.jsonl` | 798,174 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
-| `routes.json` | 206,970 | yes | Sessions written in the last day (`calls.KEPT_FOR`), at most the 200 most recently written (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
+| `routes.json` | 200,006 | yes | Sessions written in the last day (`calls.KEPT_FOR`), at most the 200 most recently written (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
 | `done.json` | 114,486 | yes | Same as `routes.json` |
 | `prompts.json` | 5,140 | yes | The 200 most recently written sessions |
 | `edits.json` | 3,120 | yes | Same |
@@ -105,6 +97,5 @@ The strongest spawn is no longer written (`calls.strongest` reads it from the ro
 | `launched.json` | 1,619 | yes | Same as `routes.json` |
 | `pending.json` | 816 | yes | The 200 most recently written sessions, 100 calls each |
 | `state.json` | 713 | yes | The plugin's options and one health entry per model |
-| `learned.json` | 144 | yes | One entry per level |
 
 The "Bounded" column comes from a run of the script. The script lowers three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them in two rounds, the second with twice the calls, once with one call per session (`max(40, calls // 5)` sessions, then twice as many: 200, then 400 at `--calls 1000`) and once with one long session (`max(50, calls // 5)` calls, then twice as many). A file is bounded when its second-round peak is at most 25% plus 256 bytes above its first. Removing each trim in turn, rerun 2026-11-24 with `--calls 1000`, proved the check: without the session cap all eight per-session files report unbounded, without the per-session call cap `routes.json` and `done.json` do, and without the ledger's halving `ledger.jsonl` does.

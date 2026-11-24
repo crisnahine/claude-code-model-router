@@ -30,7 +30,7 @@ SWAP = json.loads((FIXTURES / "agent-model-swap.json").read_text())
 FRAMING = json.loads((FIXTURES / "prompt-framing.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, ladder, learn, ledger, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
+from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, ladder, ledger, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
 from modelrouter import mod as modpath  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 from modelrouter.config import Level  # noqa: E402
@@ -157,14 +157,6 @@ class Sandbox(unittest.TestCase):
         """The agent call returned at once: the agent runs on in the background."""
         hooks.post_agent({**self.call(agent, prompt, **extra), "tool_response": {
             "resolvedModel": ran_as, "status": "async_launched", "agentId": agent_id}})
-
-    def spawned(self, kind: str = "subagent", earlier: str | None = None, user_named: bool = False, **facts):
-        """One spawn's decision as `learn.spawned` reads it; `earlier` is the model of the call's route before."""
-        decision = {"level": "lookup", "pick": "haiku", "model": "haiku", "was": None, "source": "router",
-                    "escalated_from": None, "repeat_of": None, **facts}
-        before = earlier and calls.Route(model=earlier, sent=None, level=cfg.Level.lookup, effort="low",
-                                         source="router", path="mod")
-        return learn.spawned(cfg.load(), decision, kind, before, user_named)
 
     def handback(self, message: str) -> str:
         """A copy of the handback transcript fixture with the delivered report replaced."""
@@ -633,26 +625,23 @@ class Store(Sandbox):
         with held(path, "other"), held(store.ledger_path()), mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
             self.assertEqual(store.try_update(path, lambda data: data.update(b=2)), ({"s1": mock.ANY, "b": 2}, "busy"))
             store.mutate_entry("sample", "s1", lambda entry: entry.update(n=2))
-            self.assertEqual(store.remove_state_file(path), "busy")
             store.append_ledger({"event": "spawn"})
             store.owner = "mine"
             store.update_entry("sample", "s1", n=3)
         self.assertLess(time.monotonic() - started, 2)
         self.assertEqual(path.read_bytes(), before)
         self.assertFalse(store.ledger_path().exists())
-        self.assertEqual(store.lock_counts()["sample.json"]["skipped"], 4)
+        self.assertEqual(store.lock_counts()["sample.json"]["skipped"], 3)
         self.assertEqual(store.lock_counts()["sample.json"]["other_session"], 1)
         self.assertEqual(store.lock_counts()["ledger.jsonl"]["skipped"], 1)
 
     def test_a_reset_while_another_process_holds_the_lock_says_so(self):
         self.data.mkdir(exist_ok=True)
-        with held(self.data / "state.json"), held(self.data / "learned.json"), \
-                mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02):
+        with held(self.data / "state.json"), mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02):
             out = io.StringIO()
             with redirect_stdout(out):
                 cli.main(["models", "--reset"])
         self.assertIn("another Model Router process held state.json", out.getvalue())
-        self.assertIn("another Model Router process held learned.json", out.getvalue())
 
     def test_state_files_are_written_compact(self):
         store.save_entry("sample", "s1", {"a": {"model": "haiku"}})
@@ -746,16 +735,11 @@ class Snapshot(Sandbox):
                                   "error": "API Error: 404 not_found_error: model: haiku"})
         self.assertIn("looks unavailable", out["hookSpecificOutput"]["additionalContext"])
 
-    def test_the_snapshot_picks_with_its_priority_usable_models_and_raises_read_once(self):
-        store.save_json(learn._path(), {"lookup": {"bump": 1}})
+    def test_the_snapshot_picks_with_its_priority_and_usable_models(self):
         self.options(priority="quality")
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
-        with mock.patch.object(learn, "raises", wraps=learn.raises) as raises:
-            picks = {level: snap.pick(level) for level in cfg.LEVELS}
-            self.assertIs(snap.raises, snap.raises)
-        self.assertEqual(raises.call_count, 1)
-        self.assertEqual(picks["lookup"], ladder.pick(snap.registry, "lookup", "quality", snap.usable, {"lookup": 1}))
-        self.assertEqual(picks["complex"], ladder.pick(snap.registry, "complex", "quality", snap.usable, {}))
+        for level in cfg.LEVELS:
+            self.assertEqual(snap.pick(level), ladder.pick(snap.registry, level, "quality", snap.usable), level)
 
     def test_a_field_is_read_on_first_use_and_then_kept(self):
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
@@ -1817,22 +1801,22 @@ class Router(Sandbox):
     def test_the_shipped_ladder_picks_at_balanced_priority(self):
         config = cfg.shipped()
         every = ["haiku", "sonnet", "opus", "fable"]
-        picks = [tuple(ladder.pick(config, level, "balanced", every, {})) for level in cfg.LEVELS]
+        picks = [tuple(ladder.pick(config, level, "balanced", every)) for level in cfg.LEVELS]
         self.assertEqual(picks, [("haiku", "medium"), ("sonnet", "medium"), ("opus", "high"),
                                  ("opus", "xhigh"), ("fable", "high")])
 
     def test_a_pick_weaker_than_the_levels_need_gets_one_more_effort_step(self):
         config = cfg.shipped()
-        pick = lambda level, usable: tuple(ladder.pick(config, level, "balanced", usable, {}))  # noqa: E731
+        pick = lambda level, usable: tuple(ladder.pick(config, level, "balanced", usable))  # noqa: E731
         self.assertEqual(pick("complex", ["haiku", "sonnet"]), ("sonnet", "xhigh"))
         self.assertEqual(pick("hardest", ["haiku", "sonnet"]), ("sonnet", "xhigh"))
         self.assertEqual(pick("frontier", ["haiku", "sonnet", "opus"]), ("opus", "xhigh"))
         self.assertEqual(pick("complex", ["haiku"]), ("haiku", "xhigh"))
-        self.assertEqual(ladder.pick(config, "complex", "balanced", [], {}), (None, "high"))
+        self.assertEqual(ladder.pick(config, "complex", "balanced", []), (None, "high"))
 
     def test_a_pick_at_or_above_the_levels_need_gets_no_extra_step(self):
         config = cfg.shipped()
-        pick = lambda level, usable, priority="balanced": tuple(ladder.pick(config, level, priority, usable, {}))  # noqa: E731
+        pick = lambda level, usable, priority="balanced": tuple(ladder.pick(config, level, priority, usable))  # noqa: E731
         self.assertEqual(pick("lookup", ["sonnet"]), ("sonnet", "medium"))  # stronger than needed
         self.assertEqual(pick("standard", ["sonnet", "opus"]), ("sonnet", "medium"))
         self.assertEqual(pick("complex", ["opus", "fable"]), ("opus", "high"))
@@ -1843,7 +1827,7 @@ class Router(Sandbox):
         config = cfg.shipped()
         for effort, want in (("medium", "high"), ("high", "xhigh"), ("xhigh", "xhigh"), ("max", "max")):
             levels = {**config.levels, Level.complex: LevelSpec(3, effort)}
-            pick = ladder.pick(dataclasses.replace(config, levels=levels), "complex", "balanced", ["sonnet"], {})
+            pick = ladder.pick(dataclasses.replace(config, levels=levels), "complex", "balanced", ["sonnet"])
             self.assertEqual(pick, ("sonnet", want), effort)
 
     def test_complex_without_opus_runs_on_sonnet_at_xhigh_and_a_redo_adds_effort(self):
@@ -1879,15 +1863,10 @@ class Router(Sandbox):
             self.assertEqual((d["source"], d["model"], d["effort"]), (source, "sonnet", "high"), name)
         self.assertEqual(self.decide("general-purpose", HARD)["effort"], "xhigh")
 
-    def test_quality_priority_and_a_learned_raise_take_complex_to_fable(self):
+    def test_quality_priority_takes_complex_to_fable(self):
         self.options(priority="quality")
         d = self.decide("general-purpose", HARD)
         self.assertEqual((d["level"], d["model"], d["effort"]), ("complex", "fable", "high"))
-        os.environ.pop("CLAUDE_PLUGIN_OPTION_PRIORITY")
-        for _ in range(learn.VOTES_NEEDED):
-            self.spawned(source="caller", level="complex", pick="opus", model="fable")
-        d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["model"], d["effort"]), ("fable", "high"))
 
     def test_agents_without_a_model_get_the_one_their_subtask_needs(self):
         self.agent("helper")
@@ -1944,10 +1923,6 @@ class Router(Sandbox):
         self.assertEqual((d["model"], d["source"], d["effort"]), ("opus", "pin", "medium"))
         d = decide(definition={"source": "project", "model": None}, earlier={"level": "lookup", "model": "haiku"})
         self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("standard", "sonnet", "lookup"))
-        d = decide(definition={"source": "project", "model": None}, raises={"lookup": 1})
-        self.assertEqual(d["model"], "sonnet")  # the learned raise arrives as a fact
-        with mock.patch.object(learn, "stats", side_effect=AssertionError("decide read learned.json")):
-            decide(definition={"source": "project", "model": None})
 
     def test_fork_is_never_touched(self):
         self.assertEqual(self.decide("fork", LOOKUP)["action"], "keep")
@@ -2384,14 +2359,13 @@ class RepeatGuard(Sandbox):
         self.assertIn("passed through", self.ledger()[-1]["reason"])
         self.assertIsNotNone(self.pre("general-purpose", "list the tests"))  # a different call is routed
 
-    def test_a_passed_through_call_is_routed_and_counted_with_no_source(self):
+    def test_a_passed_through_call_is_routed_with_no_source(self):
         key = calls.identify(self.call("general-purpose", LOOKUP)["tool_input"])[1]
         self.pre("general-purpose", LOOKUP)
         self.assertEqual(calls.route_of("s1", key).source, "router")
         self.next_message()
         self.pre("general-purpose", LOOKUP)
-        route = calls.route_of("s1", key)
-        self.assertEqual((route.source, route.counted), (None, None))
+        self.assertIsNone(calls.route_of("s1", key).source)
 
     def test_after_a_result_the_same_call_is_routed_again(self):
         self.pre("general-purpose", LOOKUP)
@@ -2404,8 +2378,6 @@ class RepeatGuard(Sandbox):
         again = self.decide("general-purpose", LOOKUP)
         self.assertEqual((again["level"], again["model"], again["effort"]), ("standard", "sonnet", "medium"))
         self.assertIn("one level above the lookup run", again["reason"])
-        self.pre("general-purpose", LOOKUP)
-        self.assertEqual(learn.stats()["lookup"]["votes"], 1)
 
     def test_a_run_an_api_error_cut_off_is_retried_at_its_level(self):
         # Sent again after an overload, the call is a retry, not a redo: the level didn't fail on quality.
@@ -2455,7 +2427,7 @@ class RepeatGuard(Sandbox):
                          ("complex", "opus", "high", "standard"))
         self.assertIn("one level above the standard run", again["reason"])
         self.pre("general-purpose", rewritten, description="redo: parser change")
-        self.assertEqual(learn.stats()["standard"]["votes"], 1)
+        self.assertEqual(self.ledger()[-1]["escalated_from"], "standard")
 
     def test_a_marked_redo_climbs_from_a_run_of_an_earlier_request(self):
         hooks.user_prompt({"session_id": "s1", "prompt": "fix the auth migration", "prompt_id": "p1"})
@@ -2529,9 +2501,27 @@ class RepeatGuard(Sandbox):
                 if marked[0] == plain[0] and plain[1] and marked[1]:
                     self.assertGreater(cfg.EFFORTS.index(marked[1]), cfg.EFFORTS.index(plain[1]))
 
-    def test_a_marked_redo_with_no_run_on_record_casts_no_vote(self):
-        self.pre("general-purpose", BUILD, description="Redo: second try")
-        self.assertEqual(learn.stats().get("standard", {}).get("votes", 0), 0)
+    def test_a_swapped_run_is_not_a_redo(self):
+        key = calls.identify({"subagent_type": "general-purpose", "prompt": LOOKUP})[1]
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", models_used=SWAP["swapped"]["modelsUsed"])
+        self.assertIsNone(calls.finished_run("s1", key))
+        again = self.decide("general-purpose", LOOKUP)
+        self.assertEqual((again["level"], again["escalated_from"]), ("lookup", None))
+
+    def test_a_redo_of_a_pinned_or_ruled_agent_climbs_a_level(self):
+        self.agent("pinned", "sonnet")
+        self.override({"agents": {"ruled": {"model": "sonnet"}}}, user=True)
+        for agent in ("pinned", "ruled"):
+            self.pre(agent, LOOKUP)
+            self.done(agent, LOOKUP, "claude-sonnet-5-5")
+            again = self.decide(agent, LOOKUP)
+            self.assertEqual((again["level"], again["escalated_from"]), ("standard", "lookup"), agent)
+
+    def test_a_spawn_identifies_its_call_once(self):
+        with mock.patch.object(calls, "identify", wraps=calls.identify) as identify:
+            self.pre("general-purpose", BUILD, model="haiku")
+        self.assertEqual(identify.call_count, 1)
 
     def test_a_redo_of_a_frontier_run_stays_on_the_top_rung(self):
         for expected in ("standard", "complex", "hardest", "frontier"):
@@ -2608,7 +2598,6 @@ class RepeatGuard(Sandbox):
             self.assertIsNone(self.pre("general-purpose", prompt, model="haiku", effort="low"))
         self.assertEqual(self.ledger()[-1]["source"], "caller")
         self.assertTrue(health.load().healthy("haiku"))
-        self.assertEqual(learn.stats()["lookup"]["votes"], 0)
 
     def test_a_model_that_never_runs_is_routed_around_after_two_refused_rewrites(self):
         for prompt in ("list the files under a", "list the files under b"):
@@ -2628,7 +2617,6 @@ class RepeatGuard(Sandbox):
                 self.assertIsNone(self.pre("general-purpose", LOOKUP, session_id=session_id))
             self.assertIn("passed through", self.ledger()[-1]["reason"])
         self.assertTrue(health.load().healthy("opus"))  # the rewrite never changed the model
-        self.assertEqual(learn.stats()["lookup"]["calls"], 2)  # a pass-through isn't a routed call
 
     def test_a_model_known_to_work_is_not_blamed(self):
         health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
@@ -2700,8 +2688,8 @@ class RepeatGuard(Sandbox):
 
 
 class Calls(Sandbox):
-    def route(self, tool_input: dict, model: str = "haiku", spawn_id: str | None = None, **fields) -> calls.Route | None:
-        """A spawn of this call was routed, as `spawn.record` writes it; returns the earlier route."""
+    def route(self, tool_input: dict, model: str = "haiku", spawn_id: str | None = None, **fields) -> None:
+        """A spawn of this call was routed, as `spawn.record` writes it."""
         fields = {"level": cfg.Level.lookup, "effort": "low", "source": "router", "path": "mod", "sent": None, **fields}
         return calls.routed("s1", calls.identify(tool_input)[1], calls.Route(model=model, **fields), spawn_id)
 
@@ -2762,28 +2750,14 @@ class Calls(Sandbox):
         self.came_back(call, launched=True, agent_id="a1")
         self.assertEqual((self.came_back(call, "stop", agent_id="a1").finished, finished()), (True, True))
 
-    def test_a_swap_takes_back_the_count_its_own_route_made(self):
+    def test_a_route_is_kept_per_spawn(self):
         call = {"prompt": LOOKUP}
-        self.route(call, counted=cfg.Level.lookup)
-        self.spawned()
-        self.assertEqual(learn.stats()["lookup"]["calls"], 1)
-        got = self.came_back(call, models_used=("claude-haiku-5-5", "claude-haiku-5"))
-        self.assertEqual((got.note, got.finished, learn.stats()["lookup"]["calls"]), (calls.SWAPPED, False, 0))
-        self.route(call, source="caller")  # a later run of the same call that counted nothing
-        self.came_back(call, models_used=("claude-haiku-5-5", "claude-haiku-5"))
-        self.assertEqual(learn.stats()["lookup"]["calls"], 0)
-
-    def test_a_route_is_kept_per_spawn_and_the_earlier_one_is_this_requests(self):
-        call = {"prompt": LOOKUP}
-        self.assertIsNone(self.route(call, spawn_id="t1", sent="claude-haiku-5-5"))
-        self.assertEqual(self.route(call, spawn_id="t2").model, "haiku")  # t1 stood earlier in this request
-        self.assertEqual(calls.route_of("s1", calls.identify(call)[1], "t1").sent, "claude-haiku-5-5")
-        self.assertIsNone(calls.route_of("s1", calls.identify(call)[1], "t2").sent)
-        self.assertIsNotNone(calls.route_of("s1", calls.identify(call)[1], "no-such-id"))  # the call's latest
-        request.begin("s1", prompt_id="p2", level="lookup", need="haiku", session_tier=None, named=None)
-        self.assertIsNone(self.route(call, spawn_id="t3", prompt_id="p2"))
-        self.assertIsNone(self.route({"prompt": "other"}, source="caller"))
-        self.assertIsNone(self.route({"prompt": "other"}))  # a caller's run is no run to be redone
+        key = calls.identify(call)[1]
+        self.route(call, spawn_id="t1", sent="claude-haiku-5-5")
+        self.route(call, spawn_id="t2")
+        self.assertEqual(calls.route_of("s1", key, "t1").sent, "claude-haiku-5-5")
+        self.assertIsNone(calls.route_of("s1", key, "t2").sent)
+        self.assertIsNotNone(calls.route_of("s1", key, "no-such-id"))  # the call's latest
 
     def test_a_sessions_calls_are_dropped_a_day_after_it_last_wrote_them(self):
         # Every spawn rewrites these files whole under a lock it waits 1 s for, so old sessions cost lost writes.
@@ -2976,13 +2950,11 @@ class Mod(Sandbox):
         self.done("general-purpose", BUILD, "claude-sonnet-5-5", description="Build step")
         self.assertEqual(stage(description="Build step"), plain)  # a subagent's finished run is no run of the stage
         self.assertEqual(stage(description="Redo: build step"), plain)
-        self.assertEqual(learn.stats().get("standard", {}).get("votes", 0), 0)
 
     def test_copies_of_one_brief_launched_in_the_background_all_run_at_its_level(self):
         for agent_id in ("a1", "a2", "a3"):
             self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku", agent_id)
             self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", agent_id)
-        self.assertEqual(learn.stats()["lookup"]["votes"], 0)
 
     def test_a_background_spawn_is_redone_one_level_up_only_after_it_stops(self):
         self.spawn("general-purpose", LOOKUP)
@@ -3711,174 +3683,16 @@ class LongPromptPricing(Sandbox):
         self.assertIsNone(self.cost(self.haiku(input_tokens=2), [self.haiku(input_tokens=1), stray]))
 
 
-class Feedback(Sandbox):
-    def setUp(self):
-        super().setUp()
-        self.session_on("claude-opus-5-5")
-
-    def raise_lookup(self):
-        for i in range(3):
-            self.pre("general-purpose", f"list the files under dir{i}")
-            self.pre("general-purpose", f"list the files under dir{i}", model="sonnet")
-
-    def test_a_swapped_run_is_not_a_redo_and_does_not_count_for_its_level(self):
-        key = calls.identify({"subagent_type": "general-purpose", "prompt": LOOKUP})[1]
-        self.pre("general-purpose", LOOKUP)
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", models_used=SWAP["swapped"]["modelsUsed"])
-        self.assertEqual(learn.stats()["lookup"]["calls"], 0)
-        self.assertIsNone(calls.finished_run("s1", key))
-        again = self.decide("general-purpose", LOOKUP)
-        self.assertEqual((again["level"], again["escalated_from"]), ("lookup", None))
-        self.pre("general-purpose", LOOKUP)
-        self.assertEqual(learn.stats()["lookup"]["votes"], 0)
-
-    def test_a_swapped_run_the_caller_chose_leaves_the_count_alone(self):
-        self.pre("general-purpose", LOOKUP)
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
-        self.assertEqual(learn.stats()["lookup"]["calls"], 1)
-        self.pre("general-purpose", LOOKUP, model="sonnet")
-        self.done("general-purpose", LOOKUP, "claude-sonnet-5-5", model="sonnet", models_used=SWAP["swapped"]["modelsUsed"])
-        self.assertEqual(learn.stats()["lookup"]["calls"], 1)
-
-    def test_a_swapped_run_with_no_count_to_take_back_leaves_zero(self):
-        self.pre("general-purpose", LOOKUP)
-        learn.reset()
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", models_used=SWAP["swapped"]["modelsUsed"])
-        self.assertEqual(learn.stats().get("lookup", {}).get("calls", 0), 0)
-
-    def test_a_plain_run_counts_for_its_level_and_finishes(self):
-        key = calls.identify({"subagent_type": "general-purpose", "prompt": LOOKUP})[1]
-        self.pre("general-purpose", LOOKUP)
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
-        self.assertEqual(learn.stats()["lookup"]["calls"], 1)
-        self.assertIsNotNone(calls.finished_run("s1", key))
-
-    def test_redoing_routed_calls_on_a_stronger_model_raises_the_level(self):
-        self.raise_lookup()
-        self.assertEqual(learn.raises()["lookup"], 1)
-        self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "sonnet")
-        self.assertIn("| lookup | sonnet (raised by feedback) |", self.out("policy"))
-        self.assertIn("cleared", self.out("models", "--reset"))
-        self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "haiku")
-
-    def test_a_complex_request_on_a_sonnet_session_is_told_to_hand_off_to_an_opus_agent(self):
-        self.session_on("claude-sonnet-5-5")
-        text = hooks.user_prompt({"session_id": "s1", "prompt": HARD})["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("about opus-level reasoning, and this conversation runs on sonnet", text)
-        self.assertIn("model-router:architect", text)
-        self.assertIn("model-router:architect", hooks.stop({"session_id": "s1"})["reason"])
-
-    def test_the_prompt_note_and_the_stop_gate_follow_a_raised_level(self):
-        self.options(verify_gate="true")
-        self.session_on("claude-sonnet-5-5")
-        for _ in range(learn.VOTES_NEEDED):
-            self.spawned(source="caller", level="complex", pick="opus", model="fable")
-        hooks.user_prompt({"session_id": "s1", "prompt": HARD})  # opus would do, but complex is raised
-        entry = request.load("s1")
-        self.assertEqual((entry.level, entry.need, entry.below(cfg.load(), "claude-sonnet-5-5")), ("complex", "fable", True))
-        self.assertIn("fable-level reasoning", hooks.stop({"session_id": "s1"})["reason"])
-        text = hooks.user_prompt({"session_id": "s1", "prompt": HARD})["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("about fable-level reasoning, and this conversation runs on sonnet", text)
-
-    def test_a_few_overrides_among_many_calls_change_nothing(self):
-        for i in range(40):
-            self.pre("general-purpose", f"list the files under dir{i}")
-        for i in range(6):
-            self.pre("general-purpose", f"list other things {i}", model="opus")
-        self.assertEqual(learn.raises()["lookup"], 0)
-
-    def test_naming_a_weaker_or_equal_model_is_not_a_vote(self):
-        for i in range(10):
-            self.pre("general-purpose", f"implement change {i}", model="haiku")
-            self.pre("general-purpose", f"implement other change {i}", model="sonnet")
-        self.assertEqual(learn.stats(), {})
-
-    def test_a_raise_is_undone_when_it_keeps_being_overruled_downwards(self):
-        self.raise_lookup()
-        for i in range(6):
-            self.pre("general-purpose", f"list the things in {i}", model="haiku")
-        self.assertEqual(learn.raises()["lookup"], 0)
-
-    def test_each_kind_of_spawn_casts_its_own_votes(self):
-        def votes(**facts) -> dict:
-            learn.reset()
-            self.spawned(**facts)
-            return {k: v for k, v in (learn.stats().get("lookup") or {}).items() if v}
-
-        self.assertEqual(votes(source="router"), {"calls": 1})
-        self.assertEqual(votes(source="pin", model="opus"), {})
-        self.assertEqual(votes(source="rule", model="opus"), {})
-        self.assertEqual(votes(source="caller", model="sonnet"), {"votes": 1})
-        self.assertEqual(votes(source="caller", model="sonnet", earlier="haiku"), {"votes": 2})
-        self.assertEqual(votes(source="caller", model="sonnet", earlier="opus"), {"votes": 1})
-        self.assertEqual(votes(source=None, model="opus"), {})
-        self.assertEqual(votes(source="router", repeat_of="haiku"), {})  # passed through untouched
-        learn.reset()
-        self.spawned(source="router", level="standard", pick="sonnet", model="sonnet", escalated_from="lookup")
-        self.assertEqual((learn.stats()["standard"]["calls"], learn.stats()["lookup"]["votes"]), (1, 1))
-
-    def test_a_redo_of_a_pinned_or_ruled_agent_casts_no_vote(self):
-        self.agent("pinned", "sonnet")
-        self.override({"agents": {"ruled": {"model": "sonnet"}}}, user=True)
-        for agent in ("pinned", "ruled"):
-            self.pre(agent, LOOKUP)
-            self.done(agent, LOOKUP, "claude-sonnet-5-5")
-            again = self.decide(agent, LOOKUP)
-            self.assertEqual((again["level"], again["escalated_from"]), ("standard", "lookup"), agent)
-            self.pre(agent, LOOKUP)
-        self.assertEqual(learn.stats(), {})
-        self.pre("general-purpose", LOOKUP)
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
-        self.pre("general-purpose", LOOKUP)
-        self.assertEqual(learn.stats()["lookup"]["votes"], 1)  # the router's own redo does
-
-    def test_a_workflow_stage_or_a_teammate_counts_for_no_level(self):
-        mod = lambda kind, i: modpath.spawn({  # noqa: E731
-            "session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5", "kind": kind,
-            "tool_input": {"subagent_type": "workflow-subagent", "prompt": f"list the files under dir{i}"}})
-        for i in range(100):
-            self.assertEqual(mod("workflow", i)["model"], "haiku")
-        mod("teammate", 0)
-        self.assertEqual(learn.stats(), {})
-        for i in range(learn.VOTES_NEEDED):
-            self.spawned(source="caller", model="sonnet")
-        self.assertEqual(learn.raises()["lookup"], 1)  # 6 votes still raise a level no workflow call inflated
-
-    def test_feedback_never_goes_below_what_ships(self):
-        for i in range(30):
-            self.pre("general-purpose", f"implement change {i}", model="haiku")
-        self.assertEqual(self.decide("general-purpose", BUILD)["model"], "sonnet")
-
-    def test_votes_from_calls_issued_at_once_are_all_counted(self):
-        code = ("import sys; sys.path.insert(0, sys.argv[1])\n"
-                "from modelrouter import config, learn, store\n"
-                "store.LOCK_WAIT_SECONDS = 60\n"
-                "decision = dict(source='router', level='lookup', pick='haiku', model='haiku', was=None,\n"
-                "                escalated_from=None, repeat_of=None)\n"
-                "for _ in range(10): learn.spawned(config.load(), decision, 'subagent', None, False)\n")
-        workers = [subprocess.Popen([sys.executable, "-c", code, str(SCRIPTS)], env={**os.environ})
-                   for _ in range(5)]
-        for worker in workers:
-            self.assertEqual(worker.wait(timeout=120), 0)
-        self.assertEqual(learn.stats()["lookup"]["calls"], 50)
-
-    def test_a_model_the_user_named_casts_no_votes(self):
-        hooks.user_prompt({"session_id": "s1", "prompt": "use opus to list the files in these six folders"})
-        for i in range(learn.VOTES_NEEDED):
-            self.pre("general-purpose", f"list the files under dir{i}", model="opus")
-        self.assertEqual(learn.raises()["lookup"], 0)
-
-    def test_a_spawn_identifies_its_call_once_and_reuses_the_raises(self):
-        with mock.patch.object(calls, "identify", wraps=calls.identify) as identify, \
-                mock.patch.object(learn, "raises", wraps=learn.raises) as raises:
-            self.pre("general-purpose", BUILD, model="haiku")
-        self.assertEqual(identify.call_count, 1)
-        self.assertEqual(raises.call_count, 1)
-
-
 class Hooks(Sandbox):
     def text(self, output: dict | None) -> str:
         return output["hookSpecificOutput"]["additionalContext"]
+
+    def test_a_complex_request_on_a_sonnet_session_is_told_to_hand_off_to_an_opus_agent(self):
+        self.session_on("claude-sonnet-5-5")
+        text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": HARD}))
+        self.assertIn("about opus-level reasoning, and this conversation runs on sonnet", text)
+        self.assertIn("model-router:architect", text)
+        self.assertIn("model-router:architect", hooks.stop({"session_id": "s1"})["reason"])
 
     def test_a_swapped_run_of_a_risk_brief_tells_claude(self):
         out = self.done("general-purpose", HARD, "claude-sonnet-5-5", models_used=SWAP["swapped"]["modelsUsed"])
@@ -4812,14 +4626,17 @@ class Reports(Sandbox):
 
 
 class StateFiles(Sandbox):
-    def learned(self) -> Path:
-        return store.data_dir() / "learned.json"
+    def sample(self) -> Path:
+        return store.data_dir() / "sample.json"
 
     def count_call(self) -> None:
         def change(data: dict) -> None:
             info = data.setdefault("lookup", {})
             info["calls"] = info.get("calls", 0) + 1
-        store.update_dict(self.learned(), change)
+        store.update_dict(self.sample(), change)
+
+    def read(self) -> dict:
+        return store.load_state_file(self.sample())
 
     def test_state_files_carry_a_schema_version_that_reads_never_see(self):
         store.update_state(lambda state: state.update(max_tier="opus"))
@@ -4830,21 +4647,21 @@ class StateFiles(Sandbox):
         self.assertEqual(sorted(store.load_state_file(self.data / "prompts.json")), ["s1"])
 
     def test_a_file_from_before_versioning_is_migrated_and_kept(self):
-        self.learned().write_text(json.dumps({"lookup": {"calls": 4, "votes": 1, "bump": 1}}))
-        self.assertEqual(learn.raises()["lookup"], 1)
+        self.sample().write_text(json.dumps({"lookup": {"calls": 4, "tag": 1}}))
+        self.assertEqual(self.read()["lookup"]["calls"], 4)
         self.count_call()
-        saved = json.loads(self.learned().read_text())
-        self.assertEqual((saved["schema"], saved["lookup"]["calls"], saved["lookup"]["bump"]), (store.SCHEMA, 5, 1))
+        saved = json.loads(self.sample().read_text())
+        self.assertEqual((saved["schema"], saved["lookup"]["calls"], saved["lookup"]["tag"]), (store.SCHEMA, 5, 1))
 
     def test_a_file_that_fails_to_parse_is_set_aside_before_it_is_replaced(self):
-        self.learned().write_text('{"lookup": {"calls": 4,')  # half-written
-        self.assertEqual(learn.raises()["lookup"], 0)  # routing goes on
+        self.sample().write_text('{"lookup": {"calls": 4,')  # half-written
+        self.assertEqual(self.read(), {})  # the hook goes on
         self.count_call()
-        aside = list(self.data.glob("learned.json.corrupt-*"))
+        aside = list(self.data.glob("sample.json.corrupt-*"))
         self.assertEqual(len(aside), 1)
-        self.assertRegex(aside[0].name, r"^learned\.json\.corrupt-\d{8}T\d{12}Z$")
+        self.assertRegex(aside[0].name, r"^sample\.json\.corrupt-\d{8}T\d{12}Z$")
         self.assertEqual(aside[0].read_text(), '{"lookup": {"calls": 4,')
-        self.assertEqual(learn.stats()["lookup"]["calls"], 1)
+        self.assertEqual(self.read()["lookup"]["calls"], 1)
         text = self.out("models")
         self.assertIn("Set aside because it could not be read", text)
         self.assertIn(str(aside[0]), text)
@@ -4856,28 +4673,28 @@ class StateFiles(Sandbox):
         self.assertEqual(store.load_state(), {"max_tier": "opus"})
 
     def test_a_file_from_a_newer_version_is_read_but_never_overwritten(self):
-        newer = json.dumps({"schema": store.SCHEMA + 1, "lookup": {"calls": 9, "bump": 1}})
-        self.learned().write_text(newer)
-        self.assertEqual(learn.raises()["lookup"], 1)
+        newer = json.dumps({"schema": store.SCHEMA + 1, "lookup": {"calls": 9}})
+        self.sample().write_text(newer)
+        self.assertEqual(self.read()["lookup"]["calls"], 9)
         self.count_call()
-        self.assertEqual(self.learned().read_text(), newer)
-        self.assertEqual(list(self.data.glob("learned.json.corrupt-*")), [])
-        self.assertIn(f"only read and never updated: {self.learned()}", self.out("models"))
+        self.assertEqual(self.sample().read_text(), newer)
+        self.assertEqual(list(self.data.glob("sample.json.corrupt-*")), [])
+        self.assertIn(f"only read and never updated: {self.sample()}", self.out("models"))
 
     def test_a_bad_schema_value_counts_as_unreadable(self):
         for value in (True, -1, "1", 1.0):
             with self.subTest(value=value):
-                self.learned().write_text(json.dumps({"schema": value, "lookup": {"calls": 4}}))
+                self.sample().write_text(json.dumps({"schema": value, "lookup": {"calls": 4}}))
                 self.count_call()
-                self.assertEqual(learn.stats(), {"lookup": {"calls": 1}})
-                for aside in self.data.glob("learned.json.corrupt-*"):
+                self.assertEqual(self.read(), {"lookup": {"calls": 1}})
+                for aside in self.data.glob("sample.json.corrupt-*"):
                     aside.unlink()
 
     def test_a_file_that_cant_be_set_aside_is_left_as_it_is(self):
-        self.learned().write_text("{oops")
+        self.sample().write_text("{oops")
         with mock.patch.object(store.os, "replace", side_effect=PermissionError("in use")):
             self.count_call()
-        self.assertEqual(self.learned().read_text(), "{oops")
+        self.assertEqual(self.sample().read_text(), "{oops")
 
     def test_every_older_version_has_a_migration_step(self):
         self.assertEqual(set(store.MIGRATIONS), set(range(store.SCHEMA)))
@@ -4893,7 +4710,7 @@ class StateFiles(Sandbox):
 class ResetCommand(Sandbox):
     """`models --reset` says what it cleared and what it had to leave."""
 
-    NEWER = {"schema": 99, "health": {"opus": {"fail": 2}}, "lookup": {"calls": 3, "bump": 1}}
+    NEWER = {"schema": 99, "health": {"opus": {"fail": 2}}}
 
     def setUp(self):
         super().setUp()
@@ -4902,45 +4719,34 @@ class ResetCommand(Sandbox):
     def reset(self) -> str:
         return self.out("models", "--reset").split("\n\n")[0]
 
-    def test_clears_both_when_it_can(self):
+    def test_clears_model_health_when_it_can(self):
         health.failed("opus", "404 model not found")
-        store.save_json(self.data / "learned.json", {"lookup": {"calls": 3, "bump": 1}})
-        self.assertEqual(self.reset(), "Learned availability cleared.\nFeedback cleared.")
+        self.assertEqual(self.reset(), "Learned availability cleared.")
         self.assertNotIn("health", store.load_state())
-        self.assertFalse((self.data / "learned.json").exists())
-        self.assertEqual(self.reset(), "No learned availability to clear.\nNo feedback to clear.")
+        self.assertEqual(self.reset(), "No learned availability to clear.")
 
-    def test_leaves_files_a_newer_release_wrote(self):
-        for name in ("state.json", "learned.json"):
-            (self.data / name).write_text(json.dumps(self.NEWER))
+    def test_leaves_a_file_a_newer_release_wrote(self):
+        (self.data / "state.json").write_text(json.dumps(self.NEWER))
         self.assertEqual(self.reset(),
-                         "Learned availability left as is: state.json was written by a newer Model Router release.\n"
-                         "Feedback left as is: learned.json was written by a newer Model Router release.")
-        for name in ("state.json", "learned.json"):
-            self.assertEqual(json.loads((self.data / name).read_text()), self.NEWER)
+                         "Learned availability left as is: state.json was written by a newer Model Router release.")
+        self.assertEqual(json.loads((self.data / "state.json").read_text()), self.NEWER)
 
-    def test_leaves_files_it_cannot_read(self):
-        for name in ("state.json", "learned.json"):
-            (self.data / name).mkdir()
-        self.assertEqual(self.reset(),
-                         "Learned availability left as is: state.json could not be read or written.\n"
-                         "Feedback left as is: learned.json could not be read or removed.")
-        self.assertTrue((self.data / "learned.json").is_dir())
+    def test_leaves_a_file_it_cannot_read(self):
+        (self.data / "state.json").mkdir()
+        self.assertEqual(self.reset(), "Learned availability left as is: state.json could not be read or written.")
+        self.assertTrue((self.data / "state.json").is_dir())
 
     def test_update_reports_whether_it_wrote(self):
-        path = self.data / "learned.json"
+        path = self.data / "sample.json"
         self.assertEqual(store.try_update(path, lambda data: data.update(a=1)), ({"a": 1}, "saved"))
         path.write_text(json.dumps({"schema": 99, "a": 1}))
         self.assertEqual(store.try_update(path, lambda data: data.update(a=2)), ({"a": 2}, "newer"))
         self.assertEqual(json.loads(path.read_text()), {"schema": 99, "a": 1})
 
-    def test_corrupt_files_are_set_aside_not_deleted(self):
-        for name in ("state.json", "learned.json"):
-            (self.data / name).write_text('{"half": ')
-        self.assertEqual(self.reset(), "No learned availability to clear.\nFeedback cleared.")
+    def test_a_corrupt_file_is_set_aside_not_deleted(self):
+        (self.data / "state.json").write_text('{"half": ')
+        self.assertEqual(self.reset(), "No learned availability to clear.")
         self.assertEqual(len(list(self.data.glob("state.json.corrupt-*"))), 1)
-        self.assertEqual(len(list(self.data.glob("learned.json.corrupt-*"))), 1)
-        self.assertFalse((self.data / "learned.json").exists())
 
 
 class SlashSkills(Sandbox):
@@ -5054,9 +4860,9 @@ class SlashSkills(Sandbox):
         request.begin("s1", prompt_id="p1", level="lookup", need="haiku", session_tier=None, named=None)
         reading = intake.Intake(False, True, Level.complex, (), command="hard")
         with held(self.data / "prompts.json", "other"), mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
-            self.assertFalse(request.raise_to("s1", reading, snap.registry, snap.usable, snap.raises))
+            self.assertFalse(request.raise_to("s1", reading, snap.registry, snap.usable))
         self.assertEqual(request.load("s1").level, "lookup")
-        self.assertTrue(request.raise_to("s1", reading, snap.registry, snap.usable, snap.raises))
+        self.assertTrue(request.raise_to("s1", reading, snap.registry, snap.usable))
         self.assertEqual(request.load("s1").level, "complex")
 
     def test_a_turn_only_raises_and_only_for_a_typed_command_of_the_person(self):
@@ -5328,11 +5134,6 @@ class ReadmeDiagrams(unittest.TestCase):
         for event in events:
             self.assertIn(event, words)
 
-    def test_the_redo_diagram_states_the_learning_thresholds(self):
-        text = self.text("redo-escalation.svg")
-        self.assertIn(f"{learn.VOTES_NEEDED} votes", text)
-        self.assertIn(f"{round(learn.SHARE_NEEDED * 100)}%", text)
-
     def test_the_ladder_diagram_matches_the_registry(self):
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
         by_strength = {m["strength"]: name for name, m in config["models"].items()}
@@ -5343,8 +5144,8 @@ class ReadmeDiagrams(unittest.TestCase):
 
     def test_the_ladder_note_says_where_a_ruled_out_model_moves_the_pick(self):
         config = cfg.shipped()
-        self.assertEqual(ladder.pick(config, "lookup", "balanced", ["sonnet", "opus", "fable"], {}).model, "sonnet")
-        self.assertEqual(ladder.pick(config, "complex", "balanced", ["haiku", "sonnet"], {}).model, "sonnet")
+        self.assertEqual(ladder.pick(config, "lookup", "balanced", ["sonnet", "opus", "fable"]).model, "sonnet")
+        self.assertEqual(ladder.pick(config, "complex", "balanced", ["haiku", "sonnet"]).model, "sonnet")
         text = self.text("ladder.svg")
         self.assertIn("the pick moves to the nearest usable model above it, or to the strongest one left", text)
         self.assertNotIn("never raised", text)
@@ -5387,6 +5188,17 @@ class MachineReadable(Sandbox):
             {"loop": "main", "model": "claude-opus-5-5", "turns": 1, "output_tokens": 1_000_000, "usd": 20.0},
             {"loop": "subagent", "model": "claude-new-9", "turns": 1, "output_tokens": 1_000_000, "usd": 0}]})
 
+    def test_usage_counts_redos_by_the_level_they_climbed_from(self):
+        self.session_on("claude-opus-5-5")
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
+        self.pre("general-purpose", LOOKUP)
+        self.pre("general-purpose", BUILD, description="Redo: parser change")
+        self.assertEqual(self.json_out("usage")["redos"], {"lookup": 1, "standard": 1})
+        text = self.out("usage")
+        self.assertIn("Redos by the level they climbed from: lookup x1, standard x1.", text)
+        self.assertIn("A level that keeps coming back can be raised under `levels` in ~/.claude/model-router.json.", text)
+
     def test_usage_json_sums_an_agents_turns_beside_its_final_request(self):
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5")  # totalTokens 1200, the final request only
@@ -5426,7 +5238,7 @@ class MachineReadable(Sandbox):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "opus", "fable"]}))
         store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga"]}})
         data = self.json_out("models")
-        self.assertEqual(data["schema"], "model-router.models/1")
+        self.assertEqual(data["schema"], "model-router.models/2")
         self.assertEqual((data["cap"], data["priority"], data["strongest_in_use"]), (None, "balanced", "opus"))
         rows = {m["model"]: m for m in data["models"]}
         self.assertEqual(list(rows), ["haiku", "sonnet", "opus", "fable"])
@@ -5437,15 +5249,10 @@ class MachineReadable(Sandbox):
         self.assertIn("ran as claude-opus-5-5 instead", rows["fable"]["detail"])
         self.assertEqual(rows["opus"]["status"], "not_used")
         self.assertEqual((data["doc_aliases"], data["not_in_registry"]), (["haiku", "saga"], ["saga"]))
-        self.assertEqual(data["levels"], [])
-        store.save_json(store.data_dir() / "learned.json", {"complex": {"calls": 4, "votes": 1, "bump": 1}})
-        self.assertEqual(self.json_out("models")["levels"],
-                         [{"level": "complex", "routed_calls": 4, "votes_too_low": 1, "raised": True}])
-        self.assertIn("| complex | 4 | 1 | yes |", self.out("models"))
         store.update_state(lambda state: state.update(max_tier="sonnet"))
         rows = {m["model"]: m for m in self.json_out("models")["models"]}
         self.assertEqual(rows["opus"]["status"], "above_cap")
-        self.assertEqual(json.loads(self.out("models", "--reset", "--json"))["schema"], "model-router.models/1")
+        self.assertEqual(json.loads(self.out("models", "--reset", "--json"))["schema"], "model-router.models/2")
         store.save_json(upstream.path(), {"cache": {"aliases": "saga"}})  # a corrupt cache lists nothing
         self.assertEqual(self.json_out("models")["not_in_registry"], [])
 
@@ -5497,14 +5304,14 @@ class MachineReadable(Sandbox):
     def test_models_json_names_state_files_set_aside_or_left_read_only(self):
         data = self.json_out("models")
         self.assertEqual((data["set_aside"], data["newer_files"]), ([], []))
-        learned = store.data_dir() / "learned.json"
-        learned.write_text('{"lookup": {"calls": 4,')
-        store.update_dict(learned, lambda data: None)
+        sample = store.data_dir() / "sample.json"
+        sample.write_text('{"lookup": {"calls": 4,')
+        store.update_dict(sample, lambda data: None)
         newer = store.data_dir() / "prompts.json"
         newer.write_text(json.dumps({"schema": store.SCHEMA + 1}))
         data = self.json_out("models")
         self.assertEqual(data["set_aside"], [str(p) for p in store.set_aside()])
-        self.assertRegex(data["set_aside"][0], r"learned\.json\.corrupt-")
+        self.assertRegex(data["set_aside"][0], r"sample\.json\.corrupt-")
         self.assertEqual(data["newer_files"], [str(newer)])
 
     def test_models_shows_lock_counts_per_state_file(self):
@@ -5536,7 +5343,6 @@ class JsonOutputs(Sandbox):
         health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "sonnet", "opus", "fable", "swift"]}))
         store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga", "swift"]}})
-        store.save_json(learn._path(), {"complex": {"calls": 4, "votes": 1, "bump": 1}, "lookup": {"calls": 2}})
         self.session_on("claude-opus-5-5")
         for agent, brief, ran in (("general-purpose", LOOKUP, "claude-haiku-5-5"), ("ruled", BUILD, "claude-sonnet-5-5"),
                                   ("slow", LOOKUP, "claude-opus-5-5"), ("general-purpose", HARD, "claude-opus-5-5")):
@@ -5573,14 +5379,14 @@ class OverheadBench(unittest.TestCase):
         for row in report["hooks"]:
             self.assertIn(row["phase"], ("cold", "warm"))
         files = {row["file"]: row for row in report["state"]}
-        for name in ("ledger.jsonl", "learned.json", "state.json"):
+        for name in ("ledger.jsonl", "state.json"):
             self.assertIn(name, files)
             self.assertIn("bytes_per_1000_calls", files[name])
             self.assertIs(files[name]["bounded"], True, name)
         locks = {row["path"]: row for row in report["locks"]}
         self.assertEqual({path: row["spawns"] > 0 for path, row in locks.items()}, {"fallback": True, "mod": True})
-        self.assertLessEqual(locks["mod"]["per_spawn"], 3.0)  # the ledger, the route and the votes
-        self.assertLessEqual(locks["fallback"]["per_spawn"], 4.0)  # and the rewrite waiting for its result
+        self.assertLessEqual(locks["mod"]["per_spawn"], 2.0)  # the ledger and the route
+        self.assertLessEqual(locks["fallback"]["per_spawn"], 3.0)  # and the rewrite waiting for its result
         for key in ("python", "platform", "claude_code"):
             self.assertIn(key, report["machine"])
 
@@ -5648,8 +5454,8 @@ class SecurityClaims(Sandbox):
         for priority in cfg.PRIORITIES:
             for level in Level:
                 with self.subTest(priority=priority, level=level):
-                    self.assertEqual(ladder.pick(config, level, priority, config.available(), {}),
-                                     ladder.pick(shipped, level, priority, shipped.available(), {}))
+                    self.assertEqual(ladder.pick(config, level, priority, config.available()),
+                                     ladder.pick(shipped, level, priority, shipped.available()))
         self.session_on("claude-opus-5-5")
         self.assertEqual(self.decide("general-purpose", HARD, model="gpt-mini")["model"], "gpt-mini")
 
@@ -5774,7 +5580,7 @@ class SpawnPaths(Sandbox):
                  ("Explore", HARD, {}), (None, "investigate why the checkout test is flaky", {}),
                  ("general-purpose", LOOKUP, {"model": "opus"}), ("general-purpose", HARD, {"effort": "low"}),
                  ("general-purpose", LOOKUP, {"model": "sonnet", "effort": "high"}),
-                 ("general-purpose", LOOKUP, {"name": "auditor"})]  # a named call: a teammate, which casts no votes
+                 ("general-purpose", LOOKUP, {"name": "auditor"})]  # a named call: a teammate
         self.options(CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1")
         for index, (agent, brief, extra) in enumerate(cases):
             with self.subTest(agent=agent, brief=brief, extra=extra):
@@ -5878,8 +5684,8 @@ class SpawnPaths(Sandbox):
 
     def test_a_spawn_takes_one_lock_per_state_file_it_writes(self):
         # A spawn that is the request's strongest so far still writes its route and that fact in one go.
-        for path, want in (("fallback", ["ledger.jsonl", "routes.json", "learned.json", "pending.json"]),
-                           ("mod", ["ledger.jsonl", "routes.json", "learned.json"])):
+        for path, want in (("fallback", ["ledger.jsonl", "routes.json", "pending.json"]),
+                           ("mod", ["ledger.jsonl", "routes.json"])):
             with self.subTest(path=path):
                 session = f"first-{path}"
                 hooks.user_prompt({"session_id": session, "prompt": HARD})
@@ -5887,27 +5693,12 @@ class SpawnPaths(Sandbox):
                 taken = self.locks_taken(lambda: self.spawn_again(path, session, HARD))
                 self.assertEqual(taken, want)
 
-    def test_a_redo_takes_one_lock_on_the_learned_file_for_its_count_and_its_vote(self):
+    def test_a_route_that_cant_be_written_still_notes_a_check(self):
         for path in ("fallback", "mod"):
             with self.subTest(path=path):
-                session = f"redo-{path}"
-                self.spawn_on(path, session, "general-purpose", LOOKUP)
-                self.done("general-purpose", LOOKUP, "claude-haiku-5-5", session_id=session)
-                self.advance(fallback.REFUSED_AFTER + 1)
-                before = learn.stats()
-                taken = self.locks_taken(lambda: self.spawn_again(path, session, LOOKUP))
-                self.assertEqual(taken.count("learned.json"), 1)
-                after = learn.stats()
-                self.assertEqual(after["standard"]["calls"], before.get("standard", {}).get("calls", 0) + 1)  # its count
-                self.assertEqual(after["lookup"]["votes"], before["lookup"].get("votes", 0) + 1)  # its vote
-
-    def test_a_route_that_cant_be_written_doesnt_cost_the_spawn_its_count(self):
-        for path in ("fallback", "mod"):
-            with self.subTest(path=path):
-                before = learn.stats().get("lookup", {}).get("calls", 0)
                 with mock.patch.object(calls, "routed", side_effect=OSError("disk full")):
-                    self.spawn_on(path, f"s-{path}", "general-purpose", LOOKUP)
-                self.assertEqual(learn.stats()["lookup"]["calls"], before + 1)
+                    self.spawn_on(path, f"s-{path}", "model-router:verifier", LOOKUP)
+                self.assertIn("verified_at", store.load_entry("edits", f"s-{path}"))
 
     def test_a_result_leaves_the_same_records_on_both_paths(self):
         for number, path in enumerate(("fallback", "mod")):
@@ -6094,11 +5885,11 @@ class ClockAndCleanup(Sandbox):
         self.assertEqual(calls.finished_run("s1", "k")["level"], "lookup")
 
     def test_only_the_newest_copies_of_an_unreadable_file_are_kept(self):
-        learned = store.data_dir() / "learned.json"
+        sample = store.data_dir() / "sample.json"
         for i in range(store.KEEP_SET_ASIDE + 3):
-            learned.write_text('{"broken": ' + str(i))
-            store.update_dict(learned, lambda data: data.update(ok=True))
-        copies = sorted(store.data_dir().glob("learned.json.corrupt-*"))
+            sample.write_text('{"broken": ' + str(i))
+            store.update_dict(sample, lambda data: data.update(ok=True))
+        copies = sorted(store.data_dir().glob("sample.json.corrupt-*"))
         self.assertEqual(len(copies), store.KEEP_SET_ASIDE)
         self.assertEqual(copies[-1].read_text(), '{"broken": ' + str(store.KEEP_SET_ASIDE + 2))
 
@@ -6107,13 +5898,13 @@ class ClockAndCleanup(Sandbox):
         tick = datetime.datetime(2026, 11, 23, 12, 0, 0, 0, tzinfo=datetime.timezone.utc)
         frozen = types.SimpleNamespace(timezone=datetime.timezone,
                                        datetime=types.SimpleNamespace(now=lambda tz=None: tick))
-        learned = store.data_dir() / "learned.json"
+        sample = store.data_dir() / "sample.json"
         with mock.patch.object(store, "_dt", frozen):
             for i in range(store.KEEP_SET_ASIDE + 3):
-                learned.write_text('{"broken": ' + str(i))
-                store.update_dict(learned, lambda data: data.update(ok=True))
-                self.assertNotIn("broken", learned.read_text(), i)  # saved, not left corrupt
-        copies = sorted(store.data_dir().glob("learned.json.corrupt-*"))
+                sample.write_text('{"broken": ' + str(i))
+                store.update_dict(sample, lambda data: data.update(ok=True))
+                self.assertNotIn("broken", sample.read_text(), i)  # saved, not left corrupt
+        copies = sorted(store.data_dir().glob("sample.json.corrupt-*"))
         self.assertEqual(len(copies), store.KEEP_SET_ASIDE)
         self.assertEqual([c.read_text() for c in copies],
                          ['{"broken": ' + str(i) for i in range(3, store.KEEP_SET_ASIDE + 3)])

@@ -44,7 +44,7 @@ ISOLATION = {"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_ME
 # tail, head and echo let a subagent pipe its test output; every part of a compound command must be allowed.
 TOOLS = ("Read", "Edit", "Write", "Glob", "Grep", "Bash(python3 *)", "Bash(python *)", "Bash(tail *)",
          "Bash(head *)", "Bash(echo *)")
-STATE_FILES = ("state.json", "learned.json")
+STATE_FILES = ("state.json",)
 PROMPT = ("Hand the task below to one subagent with the Agent tool and wait for its answer; don't do the work "
           "yourself. When it returns, reply with its final answer.\n\nTask: {brief}")
 
@@ -212,7 +212,7 @@ def can_start(spent: float, budget: float, max_total: float) -> bool:
 
 
 def plugin_data_dir(env: dict) -> Path:
-    """Where Claude Code keeps the --plugin-dir router's data (health, learned raises, the ledger):
+    """Where Claude Code keeps the --plugin-dir router's data (health, the ledger):
     <plugins root>/data/<id>, the id with anything but letters, digits, _ and - turned into -."""
     name = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"]
     home = Path(env.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")

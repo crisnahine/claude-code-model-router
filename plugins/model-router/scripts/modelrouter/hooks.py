@@ -99,7 +99,7 @@ def user_prompt(hook_input: dict) -> dict | None:
     if not seen.person:
         return None
     model = session.model(session_id, hook_input.get("transcript_path"))
-    started = request.start(session_id, seen, reg, model, snap.usable, snap.raises, priority=options.priority,
+    started = request.start(session_id, seen, reg, model, snap.usable, priority=options.priority,
                             prompt_id=hook_input.get("prompt_id"), named=request.named_model(reg, prompt))
     level, need, current, wanted = started.level, started.need, started.session_tier, started.named
     below = started.below(reg, model)

@@ -4,7 +4,7 @@
              post-edit, stop, model-switch, refresh-cache
   policy     the routing policy as it stands for this user and project
   models     what each registry model really runs as, and what is unavailable
-             (--reset forgets learned availability and feedback; --json prints model-router.models/1)
+             (--reset forgets learned availability; --json prints model-router.models/2)
   explain    what the router would make of a task: explain [--agent NAME] TEXT
   refresh    fetch upstream (--force) and show what changed; status shows the cache;
              ack marks it reviewed
@@ -19,7 +19,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import health, hooks, learn, report, settings, store, upstream
+from . import health, hooks, report, settings, store, upstream
 
 
 # Hook fields the handlers use as text: as file keys, paths, or things to match against.
@@ -53,17 +53,6 @@ def _reset_health() -> str:
     if status == "busy":
         return "Learned availability " + _BUSY.format("state.json")
     return "Learned availability left as is: state.json could not be read or written."
-
-
-def _reset_feedback() -> str:
-    status = learn.reset()
-    if status in ("removed", "missing"):
-        return "Feedback cleared." if status == "removed" else "No feedback to clear."
-    if status == "newer":
-        return "Feedback " + _NEWER.format("learned.json")
-    if status == "busy":
-        return "Feedback " + _BUSY.format("learned.json")
-    return "Feedback left as is: learned.json could not be read or removed."
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -113,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         print(report.policy(snap))
     elif args.cmd == "models":
         if args.reset:
-            cleared = f"{_reset_health()}\n{_reset_feedback()}\n"
+            cleared = f"{_reset_health()}\n"
             if not args.json:
                 print(cleared)
         print(json.dumps(report.models_data(snap), indent=2) if args.json

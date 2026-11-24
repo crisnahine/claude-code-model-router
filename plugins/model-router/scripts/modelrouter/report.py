@@ -2,13 +2,13 @@
 fall back to what the last SessionStart recorded."""
 from __future__ import annotations
 
-from . import intake, ladder, learn, ledger, router, settings, spawn, store, upstream
+from . import intake, ladder, ledger, router, settings, spawn, store, upstream
 from . import config as cfg
 from . import registry
 
 # The --json shapes. A new key keeps the version; removing or renaming one bumps it.
 USAGE_SCHEMA = "model-router.usage/1"
-MODELS_SCHEMA = "model-router.models/1"
+MODELS_SCHEMA = "model-router.models/2"
 
 
 def _strongest(reg: registry.Registry, usable: list[str]) -> str | None:
@@ -31,8 +31,7 @@ def policy(snap: settings.Snapshot) -> str:
              "| Subtask level | Model | Effort |", "| :- | :- | :- |"]
     for level in cfg.LEVELS:
         pick = snap.pick(level)
-        note = " (raised by feedback)" if snap.raises[level] else ""
-        lines.append(f"| {level} | {pick.model or 'left as it is'}{note} | {_effort(snap, pick) or 'as the agent or session sets it'} |")
+        lines.append(f"| {level} | {pick.model or 'left as it is'} | {_effort(snap, pick) or 'as the agent or session sets it'} |")
     lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
     for name in reg.by_strength():
         info = reg.models[name]
@@ -49,7 +48,7 @@ def policy(snap: settings.Snapshot) -> str:
 
 
 def models_data(snap: settings.Snapshot) -> dict:
-    """Each registry model's state here, in the `model-router.models/1` shape."""
+    """Each registry model's state here, in the `model-router.models/2` shape."""
     reg, options, table, usable = snap.registry, snap.options, snap.health, snap.usable
     limit = options.cap
     allowed = snap.allowed.permitted(reg)
@@ -68,10 +67,6 @@ def models_data(snap: settings.Snapshot) -> dict:
         else:
             status, detail = "not_used", "not used yet"
         rows.append({"model": name, "last_ran_as": table.last_ran_as(name), "status": status, "detail": detail})
-    learned = learn.stats()
-    levels = [{"level": level, "routed_calls": info.get("calls", 0), "votes_too_low": info.get("votes", 0),
-               "raised": bool(info.get("bump"))}
-              for level, info in ((lv, learned.get(lv)) for lv in cfg.LEVELS) if isinstance(info, dict)]
     aliases = (upstream.load().get("cache") or {}).get("aliases")
     aliases = aliases if isinstance(aliases, list) else []
     data = {
@@ -80,7 +75,6 @@ def models_data(snap: settings.Snapshot) -> dict:
         "strongest_in_use": _strongest(reg, usable),
         "priority": options.priority,
         "models": rows,
-        "levels": levels,
         "doc_aliases": aliases,
         "not_in_registry": [f for f in upstream.model_families(aliases) if f not in reg.models],
         "set_aside": [str(p) for p in store.set_aside()],
@@ -114,10 +108,6 @@ def models(snap: settings.Snapshot) -> str:
              f"Priority: **{data['priority']}**.",
              "", "| Model | Last ran as | Status |", "| :- | :- | :- |"]
     lines += [f"| {m['model']} | {m['last_ran_as'] or '-'} | {m['detail']} |" for m in data["models"]]
-    if data["levels"]:
-        lines += ["", "| Subtask level | Routed calls | Votes it was too low | Raised |", "| :- | -: | -: | :- |"]
-        lines += [f"| {lv['level']} | {lv['routed_calls']} | {lv['votes_too_low']} | "
-                  f"{'yes' if lv['raised'] else 'no'} |" for lv in data["levels"]]
     if data.get("config_problems"):
         lines += ["", "Left out of the override files, so the registry runs without them: "
                   + "; ".join(data["config_problems"]) + "."]
@@ -234,6 +224,7 @@ def usage_data(days: int, exact: bool = False) -> dict:
         name = str(agent or "?")
         return by_agent.setdefault(name, {"agent": name, "calls": 0, "routed": 0, "levels": {}, "ran_on": {}})
 
+    redos: dict[str, int] = {}
     for r in rows:
         if r.get("event") == "spawn":
             a = row(r.get("agent"))
@@ -241,6 +232,8 @@ def usage_data(days: int, exact: bool = False) -> dict:
             a["routed"] += r.get("action") == "rewrite"
             if r.get("level"):
                 a["levels"][r["level"]] = a["levels"].get(r["level"], 0) + 1
+            if r.get("escalated_from"):
+                redos[r["escalated_from"]] = redos.get(r["escalated_from"], 0) + 1
     by_model: dict[str, dict] = {}
     for r in rows:
         if r.get("event") == "result":
@@ -290,6 +283,7 @@ def usage_data(days: int, exact: bool = False) -> dict:
         "days": days,
         **({"since": since} if since else {}),
         "agents": sorted(by_agent.values(), key=lambda a: -a["calls"]),
+        **({"redos": redos} if redos else {}),
         "models": [by_model[m] for m in sorted(by_model)],
         "model_errors": sum(1 for r in rows if r.get("event") == "model_error"),
         "spend": {"total_usd": total, "rows": spend_rows, "unpriced": sorted(unpriced)},
@@ -308,6 +302,10 @@ def usage(days: int) -> str:
         levels = ", ".join(f"{level} x{n}" for level, n in a["levels"].items()) or "-"
         ran = ", ".join(f"{m} x{n}" for m, n in sorted(a["ran_on"].items())) or "-"
         lines.append(f"| {a['agent']} | {a['calls']} | {a['routed']} | {levels} | {ran} |")
+    if data.get("redos"):
+        redone = ", ".join(f"{level} x{n}" for level, n in data["redos"].items())
+        lines += ["", f"Redos by the level they climbed from: {redone}. A level that keeps coming back can be raised "
+                  "under `levels` in ~/.claude/model-router.json."]
     if data["models"]:
         lines += ["", "| Model | Agent runs | Final-request tokens | All subagent turns' tokens |", "| :- | -: | -: | -: |"]
         lines += [f"| {m['model']} | {m['runs']} | {m['tokens']:,} | "
