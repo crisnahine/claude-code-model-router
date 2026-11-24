@@ -1356,6 +1356,17 @@ class PluginRef(unittest.TestCase):
         plain, _ = run.command("x", next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
         self.assertEqual(plain[plain.index("--plugin-dir") + 1], "/p/model-router")
 
+    def test_the_exported_plugin_is_removed_when_the_bench_exits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, "TMPDIR": tmp, "TMP": tmp, "TEMP": tmp}
+            script = ("import sys, pathlib; sys.path.insert(0, sys.argv[1]); import run; "
+                      "p = pathlib.Path(run.plugin_dir_for({'plugin_ref': 'HEAD'}, {})); "
+                      "print((p / '.claude-plugin' / 'plugin.json').is_file())")
+            out = subprocess.run([sys.executable, "-c", script, str(ROOT / "bench")], env=env, capture_output=True,
+                                 text=True, check=True).stdout
+            self.assertEqual(out.strip(), "True")
+            self.assertEqual([p.name for p in Path(tmp).iterdir() if p.name.startswith("mrbench-plugin-")], [])
+
 
 class AgentCosts(unittest.TestCase):
     def test_a_router_run_records_its_spend_by_agent_type(self):
