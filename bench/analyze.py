@@ -692,6 +692,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
     unsaved = sum(1 for r in rows if _lacks(r, "sessions_saved"))
     borrowed = sum(1 for r in rows if r.get("plugin_state") is not None and _lacks(r, "plugin_data_own"))
     allowlisted = sum(1 for r in rows if r.get("schema", 1) < 3)
+    since = f"A raw line at row schema 3 or later ({len(rows) - allowlisted} of the {len(rows)} here)"
     saturated = sum(bool(row["quality"]["saturated"]) for row in summary)
     counted = sorted({r["task"] for r in rows})
     brief = {t["id"]: t for t in tasks}
@@ -775,31 +776,37 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "https://code.claude.com/docs/en/env-vars), so `~/.claude.json`, user settings, plugins and transcripts "
         "never come from the machine's own. It runs with `--output-format stream-json --verbose`, "
         "`--setting-sources project`, `--strict-mcp-config`, `--permission-mode dontAsk`, `--allowedTools` "
-        + ", ".join(f"`{t}`" for t in run.TOOLS) + ", and one `--settings` JSON that runs Bash in the OS sandbox "
+        + ", ".join(f"`{t}`" for t in run.TOOLS) + " (so the file tools read and edit only the work dir), and one "
+        "`--settings` JSON that runs Bash in the OS sandbox "
         "with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed`, `sandbox.allowUnsandboxedCommands: false` "
-        "and `sandbox.failIfUnavailable`, plus `sandbox.credentials` deny entries for credential folders, for the "
-        "bench's own checkout (whose tasks hold the reference answers) and for every secret variable in the "
-        "environment (https://code.claude.com/docs/en/sandboxing), and a `permissions.deny` rule `Read(//<checkout>/**)` "
-        "that keeps the file tools out of the checkout (https://code.claude.com/docs/en/permissions). "
+        "and `sandbox.failIfUnavailable`, plus `sandbox.credentials` deny entries for credential folders and for "
+        "every secret variable in the environment, and `sandbox.filesystem.denyRead` entries for every place known "
+        "to hold the reference answers or graded runs: this checkout, the main checkout and its git data, every "
+        "worktree, Claude Code's shared temp folder, the results folder, `--keep` and the folder that holds every "
+        "run's scratch copy, with `allowRead` for the run's own (https://code.claude.com/docs/en/sandboxing). "
+        "`CLAUDE_CODE_TMPDIR` is the run's scratch copy, so its sandboxed commands get a temp folder of their own. "
+        "`permissions.deny` rules `Read(//<path>/**)` and `Edit(//<path>/**)` keep the file tools out of the same "
+        "places (https://code.claude.com/docs/en/permissions). "
         "`CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` are set. Every inherited "
         "`CLAUDE_CODE_*`, `CLAUDECODE` and `CLAUDE_PLUGIN_*` variable is dropped except the provider switches "
         "(`CLAUDE_CODE_USE_*`) and `CLAUDE_CODE_OAUTH_TOKEN`, so `CLAUDE_CODE_SUBAGENT_MODEL`, "
         "`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and the effort variables are set only by a configuration; so are "
-        "`PWD` and `OLDPWD`. Managed settings still load from the machine. Each raw line lists the managed "
+        f"`PWD` and `OLDPWD`. Managed settings still load from the machine. {since} lists the managed "
         "settings files and the macOS plist it found in `managed_settings`, but server-managed settings, which "
         "claude.ai sends to an eligible login, and the Windows registry policy can't be seen that way, so an "
         "empty list doesn't prove no policy applied (https://code.claude.com/docs/en/managed-settings.md). Only a "
         "router configuration passes `--plugin-dir`, from a copy of `plugins/model-router` made once when the "
-        "batch starts, or for a `plugin_ref` an export of that commit; every router row records the hash of the "
-        "plugin it loaded in `plugin_hash`."
+        f"batch starts, or for a `plugin_ref` an export of that commit. {since} records the hash of the plugin it "
+        "loaded in `plugin_hash`, null with no plugin, and for a router run the options the plugin saved at start "
+        "in `plugin_options`; a run whose saved options differ from its configuration's is set aside."
         + (f" {allowlisted} run(s) here are below row schema 3: they ran with an exact list of `python3`, "
            "`python`, `tail`, `head` and `echo` command rules instead of the sandbox, which denied many test runs, "
            "and shared the machine's config folder." if allowlisted else ""),
         "- The router keeps learned state (model health, level raises and its ledger) in its plugin data folder, "
         "which for each run is inside that run's own config folder, so every router run starts from an empty one "
         "and its data goes when the scratch copy does. Each raw line records `plugin_data_own` and, for router "
-        "runs, hashes of the `state.json` and `learned.json` the run started from in `plugin_state`, and the count "
-        "of ledger rows with event `gate` in `gate_events`."
+        "runs, hashes of the `state.json` and `learned.json` the run started from in `plugin_state`. "
+        f"{since} also records the count of ledger rows with event `gate` in `gate_events`."
         + (f" {borrowed} router run(s) here borrowed the shared folder instead: the runner copied it before the "
            "run and put it back after, which also wiped what other sessions wrote there meanwhile." if borrowed else "")
         + (f" {predate} run(s) here predate this: their lines have no `plugin_state`, and their router runs "
@@ -809,22 +816,23 @@ def _page(results: Results, summary: list[dict]) -> dict:
            "`bench/` or the plugin had uncommitted changes." if predate else ""),
         "- Sessions are saved in the run's own config folder, as Claude Code saves them by default, so the router's "
         "Stop check can read the transcripts and see a test run, the subagents' included. They go with the scratch "
-        "copy, except that a run that failed or had a denied tool call keeps them under `bench/results/transcripts/` "
-        "for reading, its raw line naming the folder in `transcripts`."
+        "copy. From row schema 3, a run that failed or had a denied tool call keeps them in `transcripts/` beside "
+        "its results file, its raw line naming the folder in `transcripts`."
         + (f" {unsaved} run(s) here ran with `--no-session-persistence`, which saves no transcript, so the Stop "
            "check could never see a test run and asked for a verifier after every edit; their lines have no "
            "`sessions_saved`." if unsaved else ""),
         "- Cost is Claude Code's `total_cost_usd`, which includes subagents and is a client-side estimate at list "
-        "price, not a bill (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md). A run with no result (a "
-        "timeout or a crash) is priced from its saved transcripts at list price, each message once, or charged the "
-        "whole budget when they hold no usage; `cost_source` says which. Every run is capped with "
+        "price, not a bill (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md). From row schema 3, a run "
+        "with no result (a timeout or a crash) is priced from its saved transcripts at list price, each message "
+        "once, or charged the whole budget when they hold no usage or a model with no price; `cost_source` says "
+        "which. Every run is capped with "
         "`--max-budget-usd`, which a run can pass by up to the cost of one response plus anything that subagents "
         "still running at that moment spend before they stop "
         "(https://code.claude.com/docs/en/agent-sdk/agent-loop.md#budget-headroom). The runner starts a run only "
         "with room for twice its cap under the total, which is a margin, not a bound.",
         "- The prompt cache is shared across runs, so later runs of a configuration may read what earlier ones "
-        "wrote. The runner shuffles the run order with a seed every raw line records (`order_seed`), and every raw "
-        "line records its cache tokens.", "",
+        "wrote. From row schema 3 the runner shuffles the run order with a seed each raw line records "
+        "(`order_seed`). Every raw line records its cache tokens.", "",
         "## Task set", "",
         f"The tables count runs of these {len(counted)} tasks:", "",
         *[f"- `{t}` ({brief[t]['class']}): {brief[t]['brief']}" if t in brief else

@@ -195,6 +195,26 @@ class Analysis(unittest.TestCase):
         page = "\n".join(analyze._table(analyze.summarize(data, routers=frozenset({"plugin"}), draws=200)))
         self.assertNotIn("PASS", page)
         self.assertIn("WIN against `defaults`", page)
+        # 10 of 10 against 10 of 10 on one task can't show the margin, so it stays undecided.
+        even = rows("plugin", "lookup", [0.1] * 10, [True] * 10) + rows("defaults", "lookup", [0.5] * 10, [True] * 10)
+        undecided = analyze._table(analyze.summarize(even, routers=frozenset({"plugin"}), draws=200))
+        line = next(line for line in undecided if line.startswith("| lookup |"))
+        self.assertTrue(line.endswith("| no difference shown |"), line)
+        self.assertIn("lookup: no difference shown against `defaults`", "\n".join(undecided))
+        self.assertNotIn("PASS", "\n".join(undecided))
+
+    def test_the_setup_claims_new_row_fields_only_for_rows_that_carry_them(self):
+        real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl")
+                          .read_text().splitlines()[0])
+        old = [dict(real, config=c) for c in ("plugin", "defaults") for _ in range(3)]
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "a.jsonl").write_text("".join(json.dumps(r) + "\n" for r in old))
+            out = Path(tmp) / "page.md"
+            analyze.main([str(Path(tmp) / "a.jsonl"), "--out", str(out)])
+            setup = out.read_text(encoding="utf-8").split("## Setup")[1].split("## Task set")[0]
+        self.assertIn("A raw line at row schema 3 or later (0 of the 6 here) lists the managed settings", setup)
+        for claim in ("every router row records", "every raw line records (`order_seed`)", "Each raw line lists"):
+            self.assertNotIn(claim, setup)
 
     def test_tasks_are_paired_and_resampled_before_runs(self):
         # The router is cheaper on each task, though the tasks' costs differ ten times over: pairing keeps that apart.
@@ -2266,6 +2286,10 @@ line = {"type": "assistant", "message": {"id": "m1", "model": "claude-haiku-4-5"
 (folder / "s1.jsonl").write_text(json.dumps(line) + "\\n" + json.dumps(line) + "\\n")  # streamed lines repeat a message
 sub = dict(line, message=dict(line["message"], id="m2"))
 (folder / "s1" / "subagents" / "agent-a1.jsonl").write_text(json.dumps(sub) + "\\n")
+if os.environ.get("STUB_STATE"):  # what the router's SessionStart hook saves of its options
+    data = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "plugins" / "data" / "model-router-inline"
+    data.mkdir(parents=True, exist_ok=True)
+    (data / "state.json").write_text(os.environ["STUB_STATE"])
 events = [init,
           {"type": "assistant", "message": {"content": [
               {"type": "tool_use", "id": "t1", "name": "Agent", "input": {"subagent_type": "Explore", "prompt": "x"}},
@@ -2285,7 +2309,22 @@ print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "re
 '''
 
 
+# The result Claude Code writes when failIfUnavailable is on and the sandbox can't start
+# (https://code.claude.com/docs/en/agent-sdk/typescript, startup_failure_reason).
+STARTUP_FAILURE = {"type": "result", "subtype": "error_during_execution", "is_error": True, "num_turns": 0,
+                   "duration_ms": 0, "duration_api_ms": 0, "total_cost_usd": 0, "modelUsage": {}, "usage": {},
+                   "permission_denials": [], "errors": ["Sandbox required but unavailable"],
+                   "startup_failure_reason": "sandbox_required_unavailable"}
+
 NO_START_STUB = '''#!/usr/bin/env python3
+import json, sys
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+print(json.dumps(%r))
+sys.exit(1)
+''' % (STARTUP_FAILURE,)
+
+SILENT_STUB = '''#!/usr/bin/env python3
 import sys
 if "--version" in sys.argv:
     print("9.9.9 (stub)"); sys.exit(0)
@@ -2444,7 +2483,8 @@ class Harness(unittest.TestCase):
         self.assertNotEqual(run.freeze_plugin(source)[1], digest)
         loaded = json.dumps([{"name": "model-router", "path": "/p"}])
         code, rows, _ = self.main("--configs", "plugin", "plugin-nogate", "defaults", "--runs", "2", "--seed", "5",
-                                  env={"STUB_PLUGINS": loaded})
+                                  env={"STUB_PLUGINS": loaded, "STUB_STATE": json.dumps({"verify_gate": "false"})})
+        self.assertEqual(sorted({r["config"] for r in rows}), ["defaults", "plugin", "plugin-nogate"])
         self.assertEqual(len({r["plugin_hash"] for r in rows if r["config"] != "defaults"}), 1)
         self.assertTrue(next(r["plugin_hash"] for r in rows if r["config"] == "plugin"))
         self.assertEqual({r["plugin_hash"] for r in rows if r["config"] == "defaults"}, {None})
@@ -2460,26 +2500,126 @@ class Harness(unittest.TestCase):
         self.assertEqual(record(self.configs["plugin"]), "frozen")
         self.assertIsNone(record(self.configs["defaults"]))
 
-    def test_a_run_that_never_started_is_set_aside_and_three_in_a_row_stop_the_bench(self):
-        claude = stub(self.dir, NO_START_STUB)
-        out = self.dir / "never.jsonl"
+    def never_started(self, source, configs, runs="4"):
+        out = self.dir / f"never-{len(configs)}.jsonl"
         with unittest.mock.patch.dict("os.environ", AUTH), contextlib.redirect_stdout(io.StringIO()), \
                 contextlib.redirect_stderr(io.StringIO()) as err:
-            code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "4", "--max-total", "9",
-                             "--claude", *claude, "--out", str(out)])
+            code = run.main(["--tasks", "lookup-retry-limit", "--configs", *configs, "--runs", runs,
+                             "--max-total", "99", "--claude", *stub(self.dir, source), "--out", str(out)])
         limited = [json.loads(line) for line in (self.dir / "limited" / out.name).read_text().splitlines()]
-        self.assertEqual((code, out.exists()), (2, False))
+        return code, out.exists(), limited, err.getvalue()
+
+    def test_a_run_that_never_started_is_set_aside_and_three_in_a_row_stop_the_bench(self):
+        code, written, limited, err = self.never_started(NO_START_STUB, ["defaults", "haiku-high", "plugin", "pinned"])
+        self.assertEqual((code, written), (2, False))
         self.assertEqual([r["limited_reason"] for r in limited], ["no_start"] * 3)
-        self.assertIn("stopped: 3 runs in a row", err.getvalue())
+        self.assertEqual({r["startup_failure_reason"] for r in limited}, {"sandbox_required_unavailable"})
+        # The start never reached the API, so it costs nothing and the cap isn't charged.
+        self.assertEqual({(r["total_cost_usd"], r["cost_known"], r["cost_source"]) for r in limited},
+                         {(0, True, "result")})
+        self.assertIn("stopped: 3 runs in a row", err)
+        code, written, limited, err = self.never_started(SILENT_STUB, ["defaults"])
+        self.assertEqual((code, written, [r["limited_reason"] for r in limited]), (2, False, ["no_start"] * 3))
+
+    def test_a_documented_startup_failure_is_no_start_under_every_configuration(self):
+        for config in ("defaults", "haiku-high", "plugin", "pinned", "plugin-nogate"):
+            row = run.record(Recorder.task, self.configs[config], Recorder.options, run.mrconfig.shipped(),
+                             STARTUP_FAILURE, dict(Recorder.facts, init={}, exit_code=1))
+            self.assertEqual((run.set_aside(row), row["claude_started"], row["total_cost_usd"], row["cost_known"]),
+                             ("no_start", False, 0, True), config)
+        # Without the reason field (an older Claude Code), the same shape with no init event is still no start.
+        bare = {k: v for k, v in STARTUP_FAILURE.items() if k != "startup_failure_reason"}
+        row = run.record(Recorder.task, self.configs["defaults"], Recorder.options, run.mrconfig.shipped(), bare,
+                         dict(Recorder.facts, init={}, exit_code=1))
+        self.assertEqual(run.set_aside(row), "no_start")
+        started = run.record(Recorder.task, self.configs["defaults"], Recorder.options, run.mrconfig.shipped(), bare,
+                             dict(Recorder.facts, init={"type": "system", "subtype": "init"}, exit_code=1))
+        self.assertIsNone(run.set_aside(started))
+        self.assertFalse(started["cost_known"])
+
+    def settings_for(self, config="defaults", **options):
+        cmd, env = run.command("x", self.configs[config], {"claude": ["claude"], "model": "sonnet", "budget": 0.5,
+                                                           "plugin_dir": "/p", **options},
+                               {"PATH": "/bin", "PWD": str(run.ROOT), "OLDPWD": str(run.ROOT / "bench")})
+        return json.loads(cmd[cmd.index("--settings") + 1]), env, cmd
 
     def test_runs_cannot_read_the_repository(self):
-        options = {"claude": ["claude"], "model": "sonnet", "budget": 0.5, "plugin_dir": "/p"}
-        cmd, env = run.command("x", self.configs["defaults"], options,
-                               {"PATH": "/bin", "PWD": str(run.ROOT), "OLDPWD": str(run.ROOT / "bench")})
-        settings = json.loads(cmd[cmd.index("--settings") + 1])
-        self.assertIn({"path": str(run.ROOT), "mode": "deny"}, settings["sandbox"]["credentials"]["files"])
+        settings, env, _ = self.settings_for()
+        self.assertIn(str(run.ROOT), settings["sandbox"]["filesystem"]["denyRead"])
         self.assertIn(f"Read(//{run.ROOT.as_posix().lstrip('/')}/**)", settings["permissions"]["deny"])
+        self.assertIn(f"Edit(//{run.ROOT.as_posix().lstrip('/')}/**)", settings["permissions"]["deny"])
         self.assertEqual((env.get("PWD"), env.get("OLDPWD"), env["PATH"]), (None, None, "/bin"))
+
+    def test_runs_cannot_read_any_checkout_worktree_or_shared_temp_folder(self):
+        settings, _, cmd = self.settings_for()
+        denied = settings["sandbox"]["filesystem"]["denyRead"]
+        common = subprocess.run(["git", "-C", str(run.ROOT), "rev-parse", "--git-common-dir"], capture_output=True,
+                                text=True).stdout.strip()
+        git_dir = (run.ROOT / common).resolve()
+        worktrees = [line.split(" ", 1)[1] for line in subprocess.run(
+            ["git", "-C", str(run.ROOT), "worktree", "list", "--porcelain"], capture_output=True, text=True
+        ).stdout.splitlines() if line.startswith("worktree ")]
+        expected = [str(git_dir), str(git_dir.parent), *worktrees, str(run.RUNS)]
+        if hasattr(os, "getuid"):  # Claude Code's own temp folder, where other sessions leave copies of files
+            expected += [f"/tmp/claude-{os.getuid()}", str(Path(f"/tmp/claude-{os.getuid()}").resolve())]
+        for path in expected:
+            self.assertIn(path, denied)
+        rules = settings["permissions"]["deny"]
+        for path in (str(git_dir.parent), *worktrees):
+            self.assertIn(f"Read(//{path.lstrip('/')}/**)", rules)
+        # The file tools get no blanket approval: in dontAsk mode they then read and edit only the work dir.
+        tools = cmd[cmd.index("--allowedTools") + 1:]
+        self.assertFalse({"Read", "Edit", "Write", "Glob", "Grep"} & set(tools))
+        self.assertEqual(tools, list(run.TOOLS))
+
+    def test_a_run_reads_only_its_own_scratch_folder_and_has_a_temp_folder_of_its_own(self):
+        row, seen = self.one()
+        argv = seen["argv"]
+        settings = json.loads(argv[argv.index("--settings") + 1])
+        own = settings["sandbox"]["filesystem"]["allowRead"]
+        self.assertEqual(len(own), 1)
+        scratch = Path(own[0])
+        self.assertEqual(scratch.parent, run.RUNS)
+        self.assertEqual(Path(seen["env"]["CLAUDE_CODE_TMPDIR"]), scratch)
+        self.assertLess(len(str(scratch / f"claude-{os.getuid()}")) if hasattr(os, "getuid") else 0, 60)
+        self.assertIn(str(run.RUNS), settings["sandbox"]["filesystem"]["denyRead"])
+        self.assertFalse(scratch.exists())
+
+    def test_results_and_kept_runs_are_hidden_from_later_runs(self):
+        keep = self.dir / "keep"
+        code, rows, _ = self.main("--configs", "defaults", "--keep", str(keep))
+        argv = json.loads(self.seen.read_text())["argv"]
+        denied = json.loads(argv[argv.index("--settings") + 1])["sandbox"]["filesystem"]["denyRead"]
+        self.assertIn(str(self.dir.resolve()), denied)  # the results file's folder, its transcripts and limited/
+        self.assertIn(str(keep.resolve()), denied)
+
+    def test_only_valid_variable_names_go_into_the_credentials(self):
+        cmd, _ = run.command("x", self.configs["defaults"], {"claude": ["claude"], "model": "sonnet", "budget": 0.5},
+                             {"PATH": "/bin", "GH_TOKEN": "t", "BASH_FUNC_TOKEN%%": "() { :; }", "1_KEY": "x"})
+        names = [v["name"] for v in json.loads(cmd[cmd.index("--settings") + 1])["sandbox"]["credentials"]["envVars"]]
+        self.assertEqual(names, ["GH_TOKEN"])
+
+    def test_a_message_on_a_model_with_no_price_leaves_the_transcripts_unpriced(self):
+        folder = self.dir / "projects" / "run"
+        folder.mkdir(parents=True)
+        usage = {"input_tokens": 0, "output_tokens": 1000000}
+        lines = [{"type": "assistant", "message": {"id": "a", "model": "claude-haiku-4-5", "usage": usage}},
+                 {"type": "assistant", "message": {"id": "b", "model": "claude-unpriced-9-9", "usage": usage}}]
+        (folder / "s.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+        self.assertIsNone(run.transcript_cost(folder, run.mrconfig.shipped()))
+
+    def test_a_router_run_records_the_options_its_plugin_saw_and_is_set_aside_when_they_differ(self):
+        loaded = json.dumps([{"name": "model-router", "path": "/p"}])
+        took = json.dumps({"routing_mode": "auto", "max_tier": "", "verify_gate": "false"})
+        row, _ = self.one("plugin-nogate", env={"STUB_PLUGINS": loaded, "STUB_STATE": took})
+        self.assertEqual(row["plugin_options"], {"routing_mode": "auto", "max_tier": "", "verify_gate": "false"})
+        self.assertIsNone(run.set_aside(row))
+        ignored, _ = self.one("plugin-nogate", env={"STUB_PLUGINS": loaded, "STUB_STATE": took.replace("false", "true")})
+        self.assertEqual(run.set_aside(ignored), "options_not_applied")
+        unsaved, _ = self.one("plugin-nogate", env={"STUB_PLUGINS": loaded})
+        self.assertEqual(run.set_aside(unsaved), "options_not_applied")
+        self.assertIsNone(run.set_aside(self.one("plugin", env={"STUB_PLUGINS": loaded})[0]))
+        self.assertIsNone(self.one("defaults")[0]["plugin_options"])
 
     def test_pinned_names_its_agents_and_a_run_off_its_pins_is_set_aside(self):
         pinned = self.configs["pinned"]
@@ -2512,8 +2652,9 @@ class Harness(unittest.TestCase):
         self.assertEqual(self.one()[0]["agent_overrides"], 0)
 
     def test_kept_transcripts_are_never_committed(self):
-        res = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", "bench/results/transcripts/out/s/s1.jsonl"])
-        self.assertEqual(res.returncode, 0)
+        for path in ("bench/results/transcripts/out/s/s1.jsonl", "bench/results/pilot/transcripts/smoke/s/s1.jsonl"):
+            res = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", path])
+            self.assertEqual(res.returncode, 0, path)
 
     def test_every_row_records_the_seed_the_batch_and_the_arm(self):
         code, rows, _ = self.main("--configs", "defaults", "haiku-high", "--runs", "2", "--seed", "5",

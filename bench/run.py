@@ -32,6 +32,7 @@ sys.path.insert(0, str(PLUGIN / "scripts"))
 from modelrouter import config as mrconfig  # noqa: E402
 from modelrouter.registry import Registry  # noqa: E402
 from modelrouter.ledger import read as read_ledger  # noqa: E402
+from modelrouter.store import load_state_file  # noqa: E402
 ROW_SCHEMA = 3  # a row's schema says which harness wrote it; analyze reads a missing key as old only below this
 CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research")
 
@@ -42,7 +43,9 @@ CLEARED = ("CLAUDE_CODE_", "CLAUDECODE", "CLAUDE_PLUGIN_", "CLAUDE_PROJECT_DIR")
 KEPT = ("CLAUDE_CODE_USE_",)
 KEPT_EXACT = ("CLAUDE_CODE_OAUTH_TOKEN",)
 ISOLATION = {"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
-TOOLS = ("Read", "Edit", "Write", "Glob", "Grep", "Bash")
+# dontAsk lets the file tools read the work dir without a rule and denies the rest; Edit rules cover Write too
+# (https://code.claude.com/docs/en/permissions). A bare Read or Edit would approve them anywhere on the machine.
+TOOLS = ("Bash", "Edit(./**)")
 # Bash runs in the OS sandbox and is approved there without a prompt (https://code.claude.com/docs/en/sandboxing).
 SANDBOX = {"enabled": True, "autoAllowBashIfSandboxed": True, "allowUnsandboxedCommands": False, "failIfUnavailable": True}
 # The sandbox reads most of the machine by default and has no built-in credential list.
@@ -56,6 +59,12 @@ MANAGED_SETTINGS = ("/Library/Application Support/ClaudeCode/managed-settings.js
                     "C:\\Program Files\\ClaudeCode\\managed-settings.json", "C:\\Program Files\\ClaudeCode\\managed-settings.d")
 AUTH = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 STATE_FILES = ("state.json", "learned.json")
+PLUGIN_OPTIONS = ("routing_mode", "max_tier", "verify_gate")
+# Every run's scratch folder sits here, so one sandbox rule hides the others' work from it. Kept short: the
+# run's CLAUDE_CODE_TMPDIR is its scratch folder, and a long one falls back to the shared temp folder.
+RUNS = (Path("/tmp").resolve() / f"mrbench-{os.getuid()}" if hasattr(os, "getuid")
+        else Path(tempfile.gettempdir()) / "mrbench")
+VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # what sandbox.credentials.envVars accepts
 # The shell's directories can name the checkout, whose tasks hold the reference answers.
 DROPPED = ("PWD", "OLDPWD")
 PROMPTS = {
@@ -149,14 +158,48 @@ def _plugin_name() -> str:
     return json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"]
 
 
-def settings(config: dict, env: dict) -> dict:
-    """The one --settings JSON a run gets: the sandbox, credentials and the checkout kept from sandboxed commands,
-    the checkout kept from the file tools, and a router variant's plugin options."""
-    sandbox = {**SANDBOX, "credentials": {
-        "files": [{"path": path, "mode": "deny"} for path in (*CREDENTIAL_FILES, str(ROOT))],
-        "envVars": [{"name": name, "mode": "deny"} for name in sorted(env) if is_secret(name)]}}
-    # The sandbox doesn't cover Read, Grep or Glob; a Read deny rule does (https://code.claude.com/docs/en/permissions).
-    out: dict = {"sandbox": sandbox, "permissions": {"deny": [f"Read(//{ROOT.as_posix().lstrip('/')}/**)"]}}
+def _git_lines(*args: str) -> list[str]:
+    res = subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True)
+    return res.stdout.splitlines() if res.returncode == 0 else []
+
+
+def answer_paths(*extra: str | None) -> list[str]:
+    """Where this machine keeps the tasks' answers or graded runs: this checkout, the repository's git data and main
+    checkout, every worktree, Claude Code's shared temp folder (other sessions copy files there), and `extra`
+    (results and kept runs). Each path as given and resolved, so a symlink such as macOS's /tmp can't get round it."""
+    found = [ROOT]
+    common = _git_lines("rev-parse", "--git-common-dir")
+    if common:
+        git_dir = (ROOT / common[0]).resolve()
+        found += [git_dir, git_dir.parent if git_dir.name == ".git" else git_dir]
+    found += [Path(line[len("worktree "):]) for line in _git_lines("worktree", "list", "--porcelain")
+              if line.startswith("worktree ")]
+    if hasattr(os, "getuid"):
+        found.append(Path("/tmp") / f"claude-{os.getuid()}")
+    found += [Path(p) for p in extra if p]
+    return list(dict.fromkeys(str(q) for p in found for q in (p.absolute(), p.resolve())))
+
+
+def _under(path: str, folder: str) -> bool:
+    return Path(path) == Path(folder) or Path(folder) in Path(path).parents
+
+
+def settings(config: dict, env: dict, hidden: list[str] | None = None, own: str | None = None) -> dict:
+    """The one --settings JSON a run gets: credentials, the answers and other runs' scratch folders kept from
+    sandboxed commands, the answers kept from the file tools, and a router variant's plugin options."""
+    hidden = answer_paths() if hidden is None else hidden
+    sandbox = {**SANDBOX,
+               # The narrower allowRead re-opens the run's own folder under RUNS (https://code.claude.com/docs/en/sandboxing).
+               "filesystem": {"denyRead": [*hidden, str(RUNS)], "allowRead": [own] if own else []},
+               "credentials": {
+                   "files": [{"path": path, "mode": "deny"} for path in CREDENTIAL_FILES],
+                   "envVars": [{"name": name, "mode": "deny"} for name in sorted(env)
+                               if is_secret(name) and VAR_NAME.fullmatch(name)]}}
+    # The sandbox doesn't cover the file tools; deny rules do, except over the run's own folder, since no rule
+    # re-opens a denied path (https://code.claude.com/docs/en/permissions).
+    rules = [f"{tool}(//{path.lstrip('/')}/**)" for path in hidden if not (own and _under(own, path))
+             for tool in ("Read", "Edit")]
+    out: dict = {"sandbox": sandbox, "permissions": {"deny": rules}}
     if config.get("plugin_options"):
         # A --plugin-dir plugin's id is <name>@inline; project settings can't set plugin options.
         out["pluginConfigs"] = {f"{_plugin_name()}@inline": {"options": config["plugin_options"]}}
@@ -170,11 +213,15 @@ def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[l
     if options.get("config_dir"):
         # The run's own config folder: ~/.claude.json, settings, plugins and transcripts all live under it.
         env.update({"CLAUDE_CONFIG_DIR": options["config_dir"], "CLAUDE_CODE_PROJECT_DIR_NAME": "run"})
+    if options.get("scratch"):
+        # Else sandboxed commands get /tmp/claude-<uid>, which every session on the machine shares.
+        env["CLAUDE_CODE_TMPDIR"] = options["scratch"]
     env.update(config.get("env", {}))
     cmd = [*options["claude"], "-p", prompt, "--output-format", "stream-json", "--verbose",
            "--model", config.get("model", options["model"]),
            "--max-budget-usd", str(options["budget"]), "--setting-sources", "project", "--strict-mcp-config",
-           "--permission-mode", "dontAsk", "--settings", json.dumps(settings(config, env))]
+           "--permission-mode", "dontAsk",
+           "--settings", json.dumps(settings(config, env, options.get("hidden"), options.get("scratch")))]
     if config.get("plugin"):
         cmd += ["--plugin-dir", plugin_dir_for(config, options)]
     return cmd + list(config.get("args", [])) + ["--allowedTools", *TOOLS], env
@@ -338,7 +385,8 @@ def plugin_loaded(init: dict) -> bool:
 
 def transcript_cost(folder: Path, registry_config: Registry) -> float | None:
     """A run's spend at list price from its saved transcripts, main and subagents, each message once (streamed lines
-    repeat its usage); None when no transcript holds usage."""
+    repeat its usage); None when no transcript holds usage or a message's model has no price, so the budget
+    stands in rather than an understated sum."""
     if not folder.is_dir():
         return None
     messages = {}
@@ -362,7 +410,10 @@ def transcript_cost(folder: Path, registry_config: Registry) -> float | None:
         usage = message["usage"]
         tokens = {k: v for k, v in usage.items() if isinstance(v, (int, float))}
         tokens.update({k: v for k, v in (usage.get("cache_creation") or {}).items() if isinstance(v, (int, float))})
-        total += registry_config.cost(message.get("model") or "", tokens) or 0.0
+        cost = registry_config.cost(message.get("model") or "", tokens)
+        if cost is None and any(tokens.values()):  # a message with no tokens, like an error notice, costs nothing
+            return None
+        total += cost or 0.0
     return round(total, 6)
 
 
@@ -377,6 +428,21 @@ def ledger_rows(env: dict) -> list[dict] | None:
     except (OSError, ValueError):
         return None
     return read_ledger(path=path)
+
+
+def plugin_options(env: dict) -> dict:
+    """The options the router saved to its state.json at SessionStart, as it resolved them; {} with no state."""
+    state = load_state_file(plugin_data_dir(env) / "state.json")
+    return {k: state[k] for k in PLUGIN_OPTIONS if k in state}
+
+
+def options_applied(config: dict, seen: dict | None) -> bool | None:
+    """Whether every plugin option a configuration sets reached the plugin; None when it sets none."""
+    asked = config.get("plugin_options")
+    if not asked:
+        return None
+    text = lambda v: str(v).lower() if isinstance(v, bool) else str(v)  # noqa: E731  the state keeps strings
+    return all((seen or {}).get(k) == text(v) for k, v in asked.items())
 
 
 def agent_types(env: dict) -> dict[str, str]:
@@ -477,22 +543,31 @@ def final_answer(shipped: Path, work: Path, reply: str) -> dict:
     return {"reply": reply, "files": files, "removed": removed, "omitted": omitted}
 
 
+def runs_folder() -> Path:
+    """RUNS, made private to this user; on a shared /tmp another user could have made it first."""
+    RUNS.mkdir(mode=0o700, exist_ok=True)
+    if hasattr(os, "getuid") and RUNS.stat().st_uid != os.getuid():
+        raise RuntimeError(f"{RUNS} belongs to another user")
+    return RUNS
+
+
 def run_one(task: dict, config: dict, options: dict, registry_config: Registry) -> dict:
     # No task or configuration name: a brief that quotes its working directory would hand the router signal words.
-    scratch = Path(tempfile.mkdtemp(prefix="mrbench-"))
+    scratch = Path(tempfile.mkdtemp(dir=runs_folder()))
     work = scratch / "work"
     shutil.copytree(task["dir"] / "repo", work)
     if config.get("router_config"):  # a router variant, as the project's own model-router.json
         (work / ".claude").mkdir(exist_ok=True)
         (work / ".claude" / "model-router.json").write_text(json.dumps(config["router_config"]), encoding="utf-8")
     arm = options.get("arm", "delegate")
-    cmd, env = command(prompt(task, arm, config), config, {**options, "config_dir": str(scratch / "config")},
-                       dict(os.environ))
+    cmd, env = command(prompt(task, arm, config), config,
+                       {**options, "config_dir": str(scratch / "config"), "scratch": str(scratch)}, dict(os.environ))
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     plugin_state = state_hashes(plugin_data_dir(env)) if config.get("plugin") else None
     clock = time.monotonic()
     stdout, stderr, code, wall_ms, result, init, started_agents, overrides = "", "interrupted", None, None, {}, {}, {}, 0
     ledger, types, final, graded, kept, stopped, priced, transcripts = None, {}, None, None, None, None, None, None
+    seen_options = None
     # Once claude starts the run costs money: whatever stops it or the steps after it, its row is still built and its
     # scratch removed. With no result the row is priced from its transcripts, or charged the whole budget.
     try:
@@ -511,6 +586,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
         # Read before grading: the check also runs the code the run left, which could rewrite these files.
         ledger = ledger_rows(env) if config.get("plugin") else None
         types = agent_types(env) if config.get("plugin") else {}
+        seen_options = plugin_options(env) if config.get("plugin") else None
         final = final_answer(task["dir"] / "repo", work, answer)
         graded = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
         denied = bool(result.get("permission_denials"))
@@ -537,7 +613,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
                   "grade": graded._asdict(), "final_answer": final,
                   "plugin_state": plugin_state, "ledger": ledger, "agent_types": types,
                   "kept": kept and str(kept), "init": init, "agents_started": started_agents,
-                  "agent_overrides": overrides,
+                  "agent_overrides": overrides, "plugin_options": seen_options,
                   "transcript_cost": priced, "transcripts": transcripts and str(transcripts)})
     if stopped is not None:
         stopped.row = row  # main writes it before the bench stops
@@ -552,6 +628,18 @@ def _denial(d: dict) -> dict:
     return {"tool": d.get("tool_name"), "input": text[:200]}
 
 
+def never_started(init: dict, result: dict, exited: bool) -> bool:
+    """Whether Claude Code stopped before the session began. It writes an error_during_execution result with
+    `startup_failure_reason` for a known startup failure, the sandbox among them, and for others prints only to
+    stderr (https://code.claude.com/docs/en/agent-sdk/typescript); without an init event, an error result with
+    0 turns and no API status is one too. A run killed for a timeout or an interrupt may have spent, so it isn't."""
+    if result.get("startup_failure_reason"):
+        return True
+    return exited and not init and (not result or (result.get("subtype") == "error_during_execution"
+                                                   and result.get("num_turns") == 0
+                                                   and result.get("api_error_status") is None))
+
+
 def record(task: dict, config: dict, options: dict, registry_config: Registry, result: dict, facts: dict) -> dict:
     """The row for one run, from Claude Code's result line and what the runner saw around the process."""
     models = {name: {k: usage.get(k) for k in ("inputTokens", "outputTokens", "cacheReadInputTokens",
@@ -560,12 +648,15 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
     cost = result.get("total_cost_usd")
     ledger, code = facts["ledger"], facts["exit_code"]
     stderr = facts["stderr"][-300:] if code else ""
+    unstarted = never_started(facts.get("init") or {}, result, code is not None)
+    if unstarted:
+        cost = 0  # the start never reached the API
     refused = refusal({"is_error": result.get("is_error"), "exit_code": code, "stderr": stderr,
                        "api_error_status": result.get("api_error_status"), "answer": result.get("result"),
                        "subtype": result.get("subtype"), "total_cost_usd": cost})
     # A cost of 0 on error_during_execution "may be zeroed" (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md),
-    # except when the API refused the run: it never started, so nothing was spent.
-    known = isinstance(cost, (int, float)) and not (
+    # except when the API refused the run or it never started: nothing was spent.
+    known = unstarted or isinstance(cost, (int, float)) and not (
         result.get("subtype") == "error_during_execution" and cost == 0 and not refused)
     priced = facts.get("transcript_cost")
     source = "result" if known else "transcripts" if priced is not None else "budget"
@@ -582,8 +673,10 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
         "plugin_hash": loaded_hash(config, options), "managed_settings": options.get("managed"),
         "plugin_state": facts["plugin_state"],
-        "claude_started": bool(facts.get("init") or result),
+        "claude_started": not unstarted, "startup_failure_reason": result.get("startup_failure_reason"),
         "plugin_loaded": plugin_loaded(facts.get("init") or {}) if config.get("plugin") else None,
+        "plugin_options": facts.get("plugin_options"),
+        "options_applied": options_applied(config, facts.get("plugin_options")),
         "agent_costs": None if ledger is None else spend_by_agent(ledger, facts["agent_types"]),
         "routed": None if ledger is None else spawns(ledger),
         "gate_events": sum(r.get("event") == "gate" for r in ledger or []),
@@ -624,16 +717,20 @@ def _write(path: Path, row: dict) -> None:
 
 
 def set_aside(row: dict) -> str | None:
-    """Why a row stays out of the results: the API never got to the task, claude stopped before its stream began,
-    a router run's plugin didn't load, or a pinned run didn't use its pinned agents."""
-    return (refusal(row) or ("no_start" if row.get("claude_started") is False else None)
+    """Why a row stays out of the results: claude stopped before the session began (so no API call was made), the
+    API never got to the task, a router run's plugin didn't load or didn't get its options, or a pinned run didn't
+    use its pinned agents."""
+    return (("no_start" if row.get("claude_started") is False else None) or refusal(row)
             or ("plugin_not_loaded" if row.get("plugin_loaded") is False else None)
+            or ("options_not_applied" if row.get("options_applied") is False else None)
             or ("off_pin" if row.get("off_pin") else None))
 
 
 # Set-aside reasons a pause can't fix; this many in a row stop the bench.
-NO_RETRY = {"api_error": "API error before any spend", "no_start": "claude stopped before its stream began",
-            "plugin_not_loaded": "the plugin did not load", "off_pin": "the run didn't use its pinned agents"}
+NO_RETRY = {"api_error": "API error before any spend", "no_start": "claude stopped before the session began",
+            "plugin_not_loaded": "the plugin did not load",
+            "options_not_applied": "the plugin's state shows other options than the configuration set",
+            "off_pin": "the run didn't use its pinned agents"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -672,6 +769,8 @@ def main(argv: list[str] | None = None) -> int:
                "plugin_dir": frozen, "plugin_hash": digest, "claude_version": version, "commit": _git_head(),
                "dirty": _git_dirty(), "managed": managed_settings(), "seed": seed, "batch": batch,
                "keep": str(args.keep) if args.keep else None,
+               # Earlier rows and kept runs hold graded answers: the results folder holds transcripts/ and limited/.
+               "hidden": answer_paths(str(args.out.parent), args.keep and str(args.keep)),
                "transcripts": str(args.out.parent / "transcripts" / args.out.stem)}
     print(f"batch {batch}, seed {seed}", file=sys.stderr)
     args.out.parent.mkdir(parents=True, exist_ok=True)
