@@ -53,8 +53,9 @@ def parse_row(record, region_codes):
 
 
 def read_sales(path, regions):
-    """The kept sales in file order, and the counts. A row repeating the txn_id of an earlier kept row is a
-    duplicate and is dropped, whatever it holds; a rejected row's txn_id doesn't count as seen."""
+    """The kept sales in file order, and the counts. A row that passes every check but repeats the txn_id of an
+    earlier kept row is a duplicate and is dropped. A row that fails a check is rejected, even when its txn_id was
+    seen, and its txn_id doesn't count as seen."""
     region_codes = {r.code for r in regions}
     counts = Counts()
     sales = {}

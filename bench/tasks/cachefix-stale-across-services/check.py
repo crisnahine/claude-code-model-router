@@ -18,7 +18,7 @@ PRODUCTS = [
     {"sku": "C-3", "name": "Charlie", "category": "c2", "price": 3000, "units": 0},
     {"sku": "D-4", "name": "Delta", "category": "c2", "price": 4000, "units": 7},
 ]
-CATEGORIES = ["c1", "c2", "c3"]
+CATEGORIES = ["c1", "c2", "c3", "c4"]
 # Each scenario runs on a fresh shop with every page and listing cached; "untouched" names a sku and "quiet" a
 # category that no step changes.
 SCENARIOS = [
@@ -48,6 +48,8 @@ SCENARIOS = [
      "steps": [{"unit": [["price", "B-2", 9999], ["name", "B-2", "Nope"]], "fail": True}]},
     {"name": "restock then bulk reprice", "untouched": "C-3", "quiet": "c2",
      "steps": [{"restock": ["D-4", 3]}, {"reprice": {"A-1": 800, "D-4": 3900}}]},
+    {"name": "move twice", "untouched": "B-2", "quiet": "c4",
+     "steps": [{"unit": [["move", "A-1", "c2"], ["move", "A-1", "c3"]]}]},
 ]
 OPS = {"price": "price", "name": "name", "move": "category", "stock": "units"}
 

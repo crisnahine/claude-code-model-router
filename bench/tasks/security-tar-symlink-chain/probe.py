@@ -1,3 +1,5 @@
+import builtins
+import fcntl
 import hashlib
 import importlib
 import importlib.util
@@ -19,18 +21,28 @@ _spec.loader.exec_module(passcheck)
 sys.dont_write_bytecode = True
 passcheck.use_work(Path(sys.argv[1]))
 payload = json.load(sys.stdin)
-# event: (the positions of the paths it writes, the positions of its dir_fd arguments)
-WRITES = {"os.mkdir": ((0,), (2,)), "os.rmdir": ((0,), (1,)), "os.remove": ((0,), (1,)), "os.symlink": ((1,), (2,)),
-          "os.link": ((1,), (2, 3)), "os.rename": ((0, 1), (2, 3)), "os.chmod": ((0,), (2,)),
-          "os.chown": ((0,), (3,)), "os.utime": ((0,), (3,)), "os.truncate": ((0,), ()), "os.mkfifo": ((0,), (2,)),
-          "os.mknod": ((0,), (3,)), "shutil.rmtree": ((0,), (1,))}
+# event: [(the position of a path it writes, the position of the dir_fd that path is relative to, or None), ...]
+WRITES = {"os.mkdir": [(0, 2)], "os.rmdir": [(0, 1)], "os.remove": [(0, 1)], "os.symlink": [(1, 2)],
+          "os.link": [(1, 3)], "os.rename": [(0, 2), (1, 3)], "os.chmod": [(0, 2)], "os.chown": [(0, 3)],
+          "os.utime": [(0, 3)], "os.truncate": [(0, None)], "os.mkfifo": [(0, 2)], "os.mknod": [(0, 3)],
+          "shutil.rmtree": [(0, 1)]}
 FOLLOWED = {"os.chmod", "os.chown", "os.utime", "os.truncate"}
 OPEN_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
 
 
-def landing(path, follow):
+def fd_folder(fd):
+    """The path of the folder an open fd refers to."""
+    if hasattr(fcntl, "F_GETPATH"):
+        return os.fsdecode(fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024)).split(b"\0")[0])
+    return os.readlink(f"/proc/self/fd/{fd}")
+
+
+def landing(path, follow, dir_fd=None):
     """Where a write to path really lands, following the links already on disk."""
-    path = os.path.abspath(os.fsdecode(path))
+    path = os.fsdecode(path)
+    if dir_fd is not None and dir_fd >= 0 and not os.path.isabs(path):
+        path = os.path.join(fd_folder(dir_fd), path)
+    path = os.path.abspath(path)
     if follow:
         return os.path.realpath(path)
     return os.path.join(os.path.realpath(os.path.dirname(path)), os.path.basename(path))
@@ -38,8 +50,9 @@ def landing(path, follow):
 
 def watcher():
     """An audit hook that records each write the task code makes outside the folder it was given, even one it
-    removes again before it returns, and a function that sets that folder (None stops recording)."""
-    state = {"top": None, "seen": []}
+    removes again before it returns, and a function that sets that folder (None stops recording). It can't see
+    writes made by a child process."""
+    state = {"top": None, "seen": [], "dir_fd": None, "opener": False}
 
     def hook(event, args):
         top = state["top"]
@@ -55,25 +68,42 @@ def watcher():
 
     def landings(event, args):
         if event == "open":
-            path, _, flags = args
-            if isinstance(path, int) or not flags & OPEN_FLAGS:
+            path, mode, flags = args
+            # open() with an opener names the file before the opener's own os.open, which is the one checked.
+            if isinstance(path, int) or not flags & OPEN_FLAGS or (mode is not None and state["opener"]):
                 return []
-            return [landing(path, not flags & os.O_NOFOLLOW)]
-        if event in WRITES:
-            at, fds = WRITES[event]
-            # shortcut: a write relative to a dir_fd isn't checked; no extractor here works that way.
-            if any(n < len(args) and isinstance(args[n], int) and args[n] >= 0 for n in fds):
-                return []
-            if any(isinstance(args[n], int) for n in at):
-                return []
-            return [landing(args[n], event in FOLLOWED) for n in at]
-        return []
+            return [landing(path, not flags & os.O_NOFOLLOW, state["dir_fd"] if mode is None else None)]
+        out = []
+        for at, fd in WRITES.get(event, []):
+            if isinstance(args[at], int):
+                continue
+            dir_fd = args[fd] if fd is not None and fd < len(args) and isinstance(args[fd], int) else None
+            out.append(landing(args[at], event in FOLLOWED, dir_fd))
+        return out
+
+    real_os_open, real_io_open = os.open, io.open
+
+    # The audit event for os.open leaves out dir_fd, so the call itself records it.
+    def os_open(path, flags, mode=0o777, *, dir_fd=None):
+        state["dir_fd"] = dir_fd
+        try:
+            return real_os_open(path, flags, mode, dir_fd=dir_fd)
+        finally:
+            state["dir_fd"] = None
+
+    def io_open(file, *args, **kwargs):
+        state["opener"] = kwargs.get("opener", args[6] if len(args) > 6 else None) is not None
+        try:
+            return real_io_open(file, *args, **kwargs)
+        finally:
+            state["opener"] = False
 
     def watch(top):
         state["top"] = top and os.path.realpath(top)
         seen, state["seen"] = state["seen"], []
         return seen
 
+    os.open, io.open, builtins.open = os_open, io_open, io_open
     sys.addaudithook(hook)
     return watch
 
@@ -129,8 +159,7 @@ def run(case, scratch):
             importlib.import_module("archive.extract").safe_extract(tar, os.path.join(base, "dest"))
         elif case["via"] == "install":
             os.mkdir(os.path.join(base, "plugins"))
-            named = [json.loads(m[2])["name"] for m in case["members"] if m[:2] == ["file", "plugin.json"]]
-            watch(os.path.join(base, "plugins", *named[:1]))
+            watch(os.path.join(base, "plugins"))
             importlib.import_module("plugins.installer").install_bundle(tar, os.path.join(base, "plugins"))
         else:
             watch(os.path.join(base, "restored"))

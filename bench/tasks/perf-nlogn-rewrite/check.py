@@ -1,7 +1,7 @@
 """Pass when reports.render, run in a child, prints byte for byte what the shipped code prints on awkward inputs
-(ties, regions with no sales, spellings that casefold together, decomposed accents, half cents, reused ids),
-builds the report for 20,000 rows in a few seconds, keeps test_report.py passing unchanged, and builds the right
-report for 200,000 rows, with every awkward row above spread through them, in at most 10 seconds."""
+(ties, regions with no sales, spellings that casefold together, decomposed accents, half cents, reused ids, quoted
+fields), builds the report for 20,000 rows in a few seconds, keeps test_report.py passing unchanged, and builds the
+right report for 200,000 rows, with every awkward row above spread through them, in at most 10 seconds."""
 import csv
 import datetime
 import hashlib
@@ -27,7 +27,9 @@ REGIONS = "code,name\nN,North\nQ,Åland\nE,East\nI,Île-de-France\nS,South\nZ,Em
 
 
 def sales(*rows):
-    return HEADER + "".join(",".join(row) + "\n" for row in rows)
+    out = io.StringIO()
+    csv.writer(out, lineterminator="\n").writerows(rows)
+    return HEADER + out.getvalue()
 
 
 def row(n, customer, amount, region="N", product="oak lamp", date="2024-05-01"):
@@ -53,14 +55,23 @@ HAND = [
     ("a rejected row's id used again", REGIONS, sales(
         ["T1", "2024-05-01", "N", "Ana", "oak lamp", "n/a"], ["T1", "2024-05-02", "N", "Bo", "oak lamp", "9.00"],
         ["T2", "2024-02-30", "N", "Cy", "oak lamp", "1.00"], ["T2", "2024-05-03", "E", "Dee", "oak lamp", "2.00"])),
+    ("a kept id used again by a rejected row", REGIONS, sales(
+        row(1, "Ana", "5.00"), row(1, "Bo", "n/a"), row(2, "Cy", "3.00"), row(2, "Dee", "3.00", date="2024-02-30"),
+        row(3, "Eli", "1.00"), row(3, "Fay", "1.00", region="X"), row(4, "Gus", "2.00"), row(4, "", "2.00"))),
+    # csv.reader and splitting each line on commas read these differently.
+    ("quoted fields", REGIONS, HEADER + 'T1,2024-05-01,N,"Lima, Ana",oak lamp,3.00\n'
+     'T2,2024-05-01,N,"Bo ""the"" Cat","lamp, oak",4.00\nT3,2024-05-02,E,"Cy",oak lamp,"5.00"\n'
+     'T4,2024-05-02,E,"Dee\nRuiz",oak lamp,6.00\r\nT5,2024-05-03,S," Eli ",oak lamp,1.00\n'),
     ("a duplicate with a different amount", REGIONS, sales(
         row(1, "Ana", "5.00"), row(1, "Ana", "500.00"), row(2, "Bo", "6.00"), row(2, "Bo", "6.00", "E"))),
     ("no rows at all", REGIONS, HEADER),
 ]
 
 CUSTOMERS = ["Straße", "STRASSE", "strasse", "José", "José", "  Ana   Lima ", "ana lima", "ANA LIMA", "Zoë",
-             "zoë", "İlker", "ilker", "ﬁona", "Fiona", "Øyvind", "Ægir", "李雷", "Émile", "émile", "Bo", "bo", "Cy"]
-PRODUCTS = ["oak lamp", "Oak Lamp", "OAK  LAMP", "mug", "Mug", "Ölkanne", "ölkanne", "pan", "rug", "café mug"]
+             "zoë", "İlker", "ilker", "ﬁona", "Fiona", "Øyvind", "Ægir", "李雷", "Émile", "émile", "Bo", "bo", "Cy",
+             "Lima, Ana", "lima, ana", 'Bo "the" Cat', "Dee\nRuiz"]
+PRODUCTS = ["oak lamp", "Oak Lamp", "OAK  LAMP", "mug", "Mug", "Ölkanne", "ölkanne", "pan", "rug", "café mug",
+            "lamp, oak", 'the "big" mug']
 AMOUNTS = ["5.00", "5", "10.00", "0.50", "-2.50", "2.5", "0.01", "-0.01", "0.00", "05.00", "-0", "12.34"]
 BAD_AMOUNTS = ["1,000", "1.234", "+5", ".5", "5.", "1e3", "", "five", "-", "1 000"]
 DATES = ["2024-05-01", "2024-05-31", "2024-02-29", "2024-05-15"]

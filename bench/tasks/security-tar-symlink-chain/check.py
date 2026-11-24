@@ -1,7 +1,8 @@
 """Pass when test_extract.py, unchanged, passes and, run in a child, safe_extract and both of its callers refuse
 every symlink chain below before writing anything (each one escapes the shipped checks), while normal archives
 with links still extract exactly as they are. An audit hook in the probe sees every write, so one made outside the
-folder and removed again before the call returns still fails."""
+folder (the destination, or the plugins folder for an install) and removed again before the call returns still
+fails."""
 import hashlib
 import importlib.util
 import json
@@ -43,6 +44,21 @@ CHAINS = [
     # No link here points at a folder holding it, and pwn.txt lands in the folder holding the destination.
     ("a link made through another link", "extract", SIDESTEP),
     ("a backup with a link made through another link", "restore", [("file", "MANIFEST.json", NO_MANIFEST)] + SIDESTEP),
+    # A link's target can run through links that themselves need following.
+    ("a chain through two links", "extract",
+     [("link", "a", "."), ("link", "b", "a"), ("link", "c", "b/.."), ("file", "c/pwn.txt", "owned\n")]),
+    ("a link through two links", "extract", [("link", "a", "."), ("link", "b", "a"), ("link", "c", "b/..")]),
+    ("a link through three links", "extract",
+     [("link", "a", "."), ("link", "b", "a"), ("link", "c", "b"), ("link", "d", "c/..")]),
+    ("a plugin bundle with a chain out of the plugins folder", "install",
+     [("file", "plugin.json", EVIL), ("file", "main.py", ""), ("link", "x/y/z", "../.."), ("link", "x/y/z/w", "../.."),
+      ("file", "w/pwn.txt", "owned\n")]),
+    # A folder beside the destination whose name starts with the destination's.
+    ("a link to a folder that shares the prefix", "extract",
+     [("link", "x", "../destiny"), ("dir", "x/sub"), ("file", "x/sub/pwn.txt", "owned\n")]),
+    ("a backup with a link to a folder that shares the prefix", "restore",
+     [("file", "MANIFEST.json", NO_MANIFEST), ("link", "x", "../restoredx"), ("dir", "x/sub"),
+      ("file", "x/sub/pwn.txt", "owned\n")]),
 ]
 DEPLOY = [("link", "config", "current/app.conf"), ("link", "current", "releases/v2"), ("dir", "empty"),
           ("link", "latest.log", "logs/2024-06.log"), ("dir", "logs"), ("dir", "notes"), ("dir", "releases"),

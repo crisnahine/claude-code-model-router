@@ -1,0 +1,1 @@
+a link to a folder that shares the prefix: extracted instead of being refused

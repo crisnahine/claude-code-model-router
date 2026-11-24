@@ -1,8 +1,9 @@
 """Pass when test_migrate.py, unchanged, passes and ledger.migrate_v3.migrate, run in a child on a generated export
-that holds every v2 quirk many times over (revisions out of file order, repeated revisions, legacy kind codes,
-timestamps without an offset, null and foreign currencies, every currency money.py gives other than two decimals,
-amounts written without their trailing zeros), writes exactly the v3 file the formats describe and returns its
-record count, and migrates an export of 80,000 lines in a few seconds."""
+that holds every v2 quirk many times over (revisions out of file order, repeated revisions, edits that move an
+entry, legacy kind codes, timestamps without an offset or at a negative half-hour one, null and foreign currencies,
+every currency money.py gives other than two decimals, amounts written without their trailing zeros), writes
+exactly the v3 file the formats describe and returns its record count, and migrates an export of 80,000 lines in a
+few seconds."""
 import datetime
 import importlib.util
 import json
@@ -19,7 +20,7 @@ _spec.loader.exec_module(passcheck)
 HERE = Path(__file__).resolve().parent
 ACCOUNTS = {"acc-ny": ("USD", "-05:00"), "acc-ber": ("EUR", "+01:00"), "acc-tok": ("JPY", "+09:00"),
             "acc-kwi": ("KWD", "+03:00"), "acc-del": ("INR", "+05:30"), "acc-sp": ("BRL", "-03:00"),
-            "acc-lon": ("GBP", "+00:00"), "acc-seo": ("KRW", "+09:00")}
+            "acc-lon": ("GBP", "+00:00"), "acc-seo": ("KRW", "+09:00"), "acc-stj": ("CAD", "-03:30")}
 # Every currency ledger/money.py lists, so a table copied from FORMAT_V3's two examples is off by 100 or 1000.
 PLACES = {"JPY": 0, "KRW": 0, "CLP": 0, "KWD": 3, "BHD": 3, "OMR": 3}
 FOREIGN = sorted({c for c, _ in ACCOUNTS.values()} | set(PLACES))
@@ -55,7 +56,7 @@ def entry(rng, n, account):
     if rng.random() < 0.25:
         stamp = local.strftime("%Y-%m-%dT%H:%M:%S")
     else:
-        zone = rng.choice([utc, utc, "+00:00", "+02:00", "-08:00", "Z"])
+        zone = rng.choice([utc, utc, "+00:00", "+02:00", "-08:00", "-09:30", "Z"])
         stamp = local.strftime("%Y-%m-%dT%H:%M:%S") + zone
     return {"id": f"t-{n}", "rev": 1, "account": account,
             "kind": LEGACY[kind] if kind in LEGACY and rng.random() < 0.3 else kind,
@@ -64,7 +65,18 @@ def entry(rng, n, account):
 
 
 def edited(rng, record, rev):
+    """A later revision. Some move the entry to another time, kind or account, so the revisions of one id don't
+    sort next to each other."""
     new = dict(record, rev=rev, memo=f"{record['memo']} (edit {rev})".strip())
+    if rng.random() < 0.4:
+        moved = datetime.datetime.strptime(new["ts"][:19], "%Y-%m-%dT%H:%M:%S")
+        moved += datetime.timedelta(hours=rng.choice([-50, -7, 3, 26, 75]))
+        new["ts"] = moved.strftime("%Y-%m-%dT%H:%M:%S") + new["ts"][19:]
+    if rng.random() < 0.2:
+        new["kind"] = rng.choice(["credit", "debit", "fee", "refund", "chargeback"])
+    if rng.random() < 0.15:
+        new["currency"] = new["currency"] or ACCOUNTS[new["account"]][0]
+        new["account"] = rng.choice(sorted(ACCOUNTS))
     if rng.random() < 0.5:
         currency = new["currency"] or ACCOUNTS[new["account"]][0]
         new["amount"] = amount_text(rng, currency)

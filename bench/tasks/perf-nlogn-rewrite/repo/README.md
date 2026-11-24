@@ -17,13 +17,14 @@ From Python: `reports.render(sales_path, regions_path)` returns the report as on
 ## Inputs
 
 `sales.csv` is the point-of-sale export: a header line `txn_id,date,region,customer,product,amount`, then one
-line per sale. Fields are trimmed. A row is rejected, counted and left out when it has the wrong number of fields,
-an empty txn_id, customer or product, a date that isn't a real `YYYY-MM-DD` day, a region code the regions file
-doesn't list, or an amount that isn't a plain decimal with at most two places (`12`, `12.5` and `-3.75` are
+row per sale in standard CSV quoting. Fields are trimmed. A row is rejected, counted and left out when it has the
+wrong number of fields, an empty txn_id, customer or product, a date that isn't a real `YYYY-MM-DD` day, a region
+code the regions file doesn't list, or an amount that isn't a plain decimal with at most two places (`12`, `12.5` and `-3.75` are
 fine; `1e3`, `.5`, `+2` and `1,000` are not). Negative amounts are refunds.
 
 The tills retry a sale when the network drops, so the same txn_id can come again. The first kept row with a
-txn_id counts; later rows with it are duplicates, whatever they hold. A rejected row doesn't claim its txn_id.
+txn_id counts. A later row with it is a duplicate only if it would have been kept; one that fails a check is
+rejected like any other. A rejected row doesn't claim its txn_id.
 
 `regions.csv` lists the regions as `code,name`, in the order the report prints them.
 
