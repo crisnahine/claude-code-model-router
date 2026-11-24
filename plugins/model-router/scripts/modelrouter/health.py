@@ -13,6 +13,11 @@ from . import store
 OUTAGE = 86400
 # The hooks page calls the error text display text, so only the API's error type identifiers count, never its wording.
 MODEL_ERROR = re.compile(r"\b(?:not_found_error|model_not_found|claude_code_version_too_old)\b")
+# How Claude Code shows a provider's 403 or 401, which is also how it refuses a model ID the account hasn't enabled
+# (https://code.claude.com/docs/en/errors.md). It strikes only a full ID the router chose, never an alias.
+REFUSED = re.compile(r"\b(?:AWS|Google Cloud|Microsoft Foundry) authentication failed\b")
+# Claude Code's unknown-agent-type error echoes the type and every agent's name, and comes before any model request.
+UNKNOWN_AGENT = "not found. Available agents:"
 
 
 class Health:
@@ -62,7 +67,14 @@ def load() -> Health:
 
 
 def is_model_error(error: object, interrupted: object = False) -> bool:
-    return not interrupted and bool(MODEL_ERROR.search(str(error or "")))
+    text = str(error or "")
+    return not interrupted and UNKNOWN_AGENT not in text and bool(MODEL_ERROR.search(text))
+
+
+def is_refusal(error: object) -> bool:
+    """A model error, or the provider refusing the request, as a sent full ID can be refused."""
+    text = str(error or "")
+    return is_model_error(text) or UNKNOWN_AGENT not in text and bool(REFUSED.search(text))
 
 
 def _edit(name: str, change: Callable[[dict], Any]) -> dict:

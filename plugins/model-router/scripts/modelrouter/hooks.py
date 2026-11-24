@@ -210,7 +210,8 @@ def model_switch(hook_input: dict) -> dict | None:
 
 
 HANDLERS = {
-    "mod-start": mod.start, "mod-spawn": mod.spawn, "mod-usage": mod.usage,
+    # A spawn left as it is still answers OK, so an empty answer means the runtime didn't run.
+    "mod-start": mod.start, "mod-spawn": lambda hook_input: mod.spawn(hook_input) or mod.OK, "mod-usage": mod.usage,
     "session-start": session_start, "user-prompt": user_prompt, "pre-agent": pre_agent,
     "post-agent": post_agent, "agent-failed": agent_failed, "agent-stopped": agent_stopped,
     "post-edit": post_edit, "stop": stop,

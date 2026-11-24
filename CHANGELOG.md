@@ -75,6 +75,11 @@ This release changes who picks a subagent's model. Claude now names the model an
 - Hook input is read as bytes, so its decoding no longer follows the system's locale.
 - `/model-router:models json`, or any word other than `reset`, shows the table instead of an argument error.
 - A bench run with `plugin_ref` no longer leaves an exported copy of the plugin in the system's temp folder.
+- On Bedrock and Google Cloud's Agent Platform, a newest model ID the account hasn't enabled now falls back to the alias after one failure. Claude Code shows that refusal as "AWS authentication failed" or "Google Cloud authentication failed", which the router didn't count before, so every Sonnet and Haiku subagent kept failing.
+- An Agent call for an unknown agent type no longer strikes a model when the type Claude wrote or an agent's name in Claude Code's error looks like an API error type, such as `not_found_error`.
+- Setting effort no longer swaps an exact model an agent names, such as `claude-opus-5-5` or `sonnet[1m]`, for the family's alias. On Foundry, Bedrock and Agent Platform that alias runs an older model, and the alias drops the 1M context window.
+- When the plugin's runtime fails on a call the mod already took over, a model the call names above `max_tier` is still lowered to it. A runtime that answers nothing hands later calls back to the fallback.
+- Two agents started at once no longer mark every settings source as slow, so a `deniedModels` change reaches the next agent instead of the one after it.
 
 ### Added
 

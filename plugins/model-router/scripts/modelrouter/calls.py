@@ -217,19 +217,21 @@ def _wait_or_finish(session_id: str | None, outcome: Outcome, route: Route, fini
 
 def _failed(session_id: str | None, outcome: Outcome, route: Route | None, asked: str | None,
             guessed: bool) -> Returned:
-    if guessed or not asked or not health.is_model_error(outcome.error, outcome.interrupted):
+    if guessed or not asked or outcome.interrupted:
+        return Returned(asked, route, False)
+    sent = route.sent if route and route.model == asked and not route.version else None
+    if sent and sent.lower() != asked and health.is_refusal(outcome.error):
+        # The path sent a full ID in place of the alias and the provider refused it: the ID is routed around,
+        # and the alias runs until it is tried again.
+        health.failed(sent, outcome.error, newest=True)
+        ledger.model_error(session_id, outcome.agent, sent)
+        return Returned(asked, route, False, ID_FAILED)
+    if not health.is_model_error(outcome.error):
         return Returned(asked, route, False)
     if route and route.version:
         # The caller or the agent chose this exact model, so its failure says nothing of the family.
         ledger.model_error(session_id, outcome.agent, route.version)
         return Returned(asked, route, False)
-    sent = route.sent if route and route.model == asked else None
-    if sent and sent.lower() != asked:
-        # The path sent the family's newest ID and the provider refused it: the ID is routed around,
-        # and the alias runs until it is tried again.
-        health.failed(sent, outcome.error, newest=True)
-        ledger.model_error(session_id, outcome.agent, sent)
-        return Returned(asked, route, False, ID_FAILED)
     fails = health.failed(asked, outcome.error)
     ledger.model_error(session_id, outcome.agent, asked)
     return Returned(asked, route, False, ROUTED_AROUND if fails >= 2 else MODEL_FAILED)

@@ -50,7 +50,7 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}, 
       run: async (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) => {
         const command = argv[2] ?? ''
         calls.push({ command, argv, stdin: JSON.parse(init.stdin), env: init.env })
-        const reply = replies[command] ?? (command === 'mod-spawn' ? { stdout: '' } : RAN)
+        const reply = replies[command] ?? RAN
         return { exitCode: reply.exitCode ?? 0, stdout: reply.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
       },
     },
@@ -174,6 +174,19 @@ test("a source still out after two seconds isn't waited on again, and its late a
   } finally {
     mock.timers.reset()
   }
+})
+
+test("spawns that start together don't mark each other's settings reads as slow", async () => {
+  let policy = { deniedModels: ['fable'] }
+  const mod = load()
+  mod.$.settings.read = async ({ source }: { source: string }) => {
+    await new Promise(resolve => setTimeout(resolve, 20))
+    return source === 'policy' ? policy : {}
+  }
+  await Promise.all([mod.spawn(spawnEvent({ tool_use_id: 'tu1' })), mod.spawn(spawnEvent({ tool_use_id: 'tu2' }))])
+  policy = { deniedModels: ['opus'] }
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu3' }))
+  assert.deepEqual(mod.calls.at(-1)!.stdin.settings.policy, { deniedModels: ['opus'] })
 })
 
 test('a clock that throws or hands back no cancel leaves the settings out and runs next once', async () => {
@@ -350,6 +363,30 @@ test('an Agent call is marked for the fallback only while the runtime answers', 
   await mod.complete(completeEvent({ agentId: 'a1', usage: TURN }))
   await mod.toolCall(agentCall('toolu_4'))
   assert.deepEqual(mod.writes.map(([path]) => path), ['/tmp/x/mod-calls/toolu_1', '/tmp/x/mod-calls/toolu_4'])
+})
+
+test('a spawn the runtime answers with nothing stops the marks, since a keep still answers ok', async () => {
+  const replies: Record<string, Reply> = {}
+  const mod = load(replies)
+  await mod.sessionStart({ source: 'startup' })
+  await mod.toolCall(agentCall('toolu_1'))
+  await mod.spawn(spawnEvent({ tool_use_id: 'toolu_1' }))
+  await mod.toolCall(agentCall('toolu_2'))
+  replies['mod-spawn'] = { stdout: '' } // a handler that raised: cli.py prints nothing and exits 0
+  await mod.spawn(spawnEvent({ tool_use_id: 'toolu_2' }))
+  await mod.toolCall(agentCall('toolu_3'))
+  assert.deepEqual(mod.writes.map(([path]) => path), ['/tmp/x/mod-calls/toolu_1', '/tmp/x/mod-calls/toolu_2'])
+})
+
+test('a call whose spawn round trip fails still runs within max_tier, and one the cap allows runs as named', async () => {
+  const mod = load({ 'mod-spawn': { exitCode: 1, stdout: '' } }, { max_tier: 'sonnet' })
+  const seen: unknown[] = []
+  const next = (x: any) => { seen.push(x.model); return { agentId: 'a1' } }
+  for (const model of ['opus', 'claude-fable-5-5', 'haiku', undefined]) await mod.spawn(spawnEvent({ model }), next)
+  assert.deepEqual(seen, ['sonnet', 'sonnet', 'haiku', undefined])
+  const uncapped = load({ 'mod-spawn': { exitCode: 1, stdout: '' } })
+  await uncapped.spawn(spawnEvent({ model: 'opus' }), next)
+  assert.equal(seen.at(-1), 'opus')
 })
 
 test('with no Python the launcher answers nothing, so no call is marked', async () => {

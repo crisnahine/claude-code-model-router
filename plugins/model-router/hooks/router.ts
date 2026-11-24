@@ -9,6 +9,8 @@ const SETTINGS_MS = 2000
 const SOURCES: readonly SettingsSource[] = ['policy', 'user', 'project', 'local', 'flag']
 const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides', 'maxEffortLevel', 'modelSettings']
 const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
+// The max_tier ladder, weakest first, for a call the runtime didn't answer.
+const TIERS: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable']
 // The id names a file the fallback looks up, so only a plain one is marked (scripts/modelrouter/mod.py routes).
 const PLAIN_ID = /^[A-Za-z0-9_-]{1,128}$/
 
@@ -27,8 +29,8 @@ function optionEnv(options: PluginOptions): Record<string, string> {
   return env
 }
 
-// The runtime's answer (mod-start and mod-usage answer { ok: true }), null for none, or undefined when the round
-// trip failed. Never throws: a hook that already called next(e) must not reach its .catch and call it again.
+// The runtime's answer (every command answers at least { ok: true }), null when no Python ran, or undefined when
+// the round trip failed. Never throws: a hook that already called next(e) must not reach its .catch and call it again.
 async function ask($: EngineInterface, options: Record<string, string>, command: string, payload: object): Promise<Pick | undefined> {
   try {
     const env = { ...(await $.process.hookEnv()), ...options }
@@ -79,8 +81,11 @@ type Reads = { latest: Layers; out: Set<SettingsSource>; slow: Set<SettingsSourc
 // goes with a later command. Never throws, like ask.
 async function modelSettings($: EngineInterface, reads: Reads): Promise<Layers | undefined> {
   try {
+    // Only this call's own reads can turn out slow: one a concurrent call started may be milliseconds old.
+    const pending = new Set<SettingsSource>()
     const waited = SOURCES.filter(source => !reads.out.has(source)).map(source => {
       reads.out.add(source)
+      pending.add(source)
       const read = (async () => {
         try {
           const found = (await $.settings.read({ source })) as Record<string, unknown>
@@ -90,6 +95,7 @@ async function modelSettings($: EngineInterface, reads: Reads): Promise<Layers |
           delete reads.latest[source]
         } finally {
           reads.out.delete(source)
+          pending.delete(source)
         }
       })()
       return reads.slow.has(source) ? undefined : read
@@ -97,7 +103,7 @@ async function modelSettings($: EngineInterface, reads: Reads): Promise<Layers |
     let timer: { cancel: () => void } | undefined
     await Promise.race([Promise.all(waited), new Promise<void>(resolve => { timer = $.clock.after(SETTINGS_MS, resolve) })])
     timer?.cancel()
-    for (const source of reads.out) reads.slow.add(source)
+    for (const source of pending) reads.slow.add(source)
     return Object.keys(reads.latest).length ? { ...reads.latest } : undefined
   } catch {
     return undefined
@@ -121,6 +127,13 @@ async function agentUsage($: EngineInterface, id: string): Promise<object | unde
   }
 }
 
+// The user's cap on a model the call names, for a call that neither path routed. Only the family is known here.
+function capped(model: string | undefined, maxTier: string | undefined): string | undefined {
+  const cap = TIERS.indexOf(maxTier ?? '')
+  const named = TIERS.findIndex(tier => model?.toLowerCase().includes(tier))
+  return cap >= 0 && named > cap ? TIERS[cap] : undefined
+}
+
 function remember<V>(map: Map<string, V>, key: string, value: V): void {
   map.set(key, value)
   if (map.size > KEPT) map.delete(map.keys().next().value as string)
@@ -128,12 +141,11 @@ function remember<V>(map: Map<string, V>, key: string, value: V): void {
 
 export const register: Register = (on, options) => {
   const opts = optionEnv(options)
-  // Whether the runtime answers. Only an answer turns it on, since the launcher answers nothing when no Python runs,
-  // and a failed round trip turns it off. While it's off, the fallback routes each Agent call.
+  // Whether the runtime answers. Only an answer turns it on, and none, or a failed round trip, turns it off. While
+  // it's off, the fallback routes each Agent call.
   let answering = false
   const heard = (reply: Pick | undefined): Pick | undefined => {
-    if (reply === undefined) answering = false
-    else if (reply) answering = true
+    answering = !!reply
     return reply
   }
   // Each Agent call this mod heard, by tool_use_id: whether it marked the call or left it to the fallback.
@@ -188,12 +200,14 @@ export const register: Register = (on, options) => {
         ...(effort ? { effort } : {}),
       },
     }))
+    // Without an answer neither path routed this call, so only the cap can still be held.
+    const model = pick ? pick.model : capped(e.model, opts.CLAUDE_PLUGIN_OPTION_MAX_TIER)
     const mine: Want | null = pick?.effort ? { effort: pick.effort, raiseOnly: !!e.workflow } : null
     const efforts = inFlight.get(e.prompt) ?? []
     efforts.push(mine)
     inFlight.set(e.prompt, efforts)
     try {
-      const started = await next(pick?.model ? { ...e, model: pick.model } : e)
+      const started = await next(model ? { ...e, model } : e)
       if (mine && started.agentId) remember(agentEffort, started.agentId, mine)
       if (started.agentId && e.workflow && e.subagentType) remember(agentType, started.agentId, e.subagentType)
       return started
