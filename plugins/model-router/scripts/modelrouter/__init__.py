@@ -12,7 +12,6 @@
     ledger     one append per row kind, the turn Spend rule, and reading the rows
     spawn      the one procedure both paths run for a spawn: facts, decision, ledger, records
     gates      the check before a turn ends
-    upstream   Claude Code releases, docs and model aliases
     report     the tables the skills print
     hooks      one handler per hook event
     cli        the command line

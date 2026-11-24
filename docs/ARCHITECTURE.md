@@ -54,7 +54,6 @@ The mod comes first for three reasons. It reaches teammates and workflow stages,
 | `agents` | An agent's definition: the project, the user folder, this plugin, another installed plugin, or a built-in |
 | `session` | The model the conversation runs on |
 | `gates` | The check before a turn ends |
-| `upstream` | Releases, the docs index, aliases and model status against what was last reviewed |
 | `settings` | Options, environment facts, and the `Snapshot` each hook call builds once. A read writes nothing; a spawn writes what reads noticed (`Snapshot.settle`) |
 | `allowlist` | The models `availableModels` and `deniedModels` leave open, and each model's `maxEffortLevel` cap |
 | `ledger` | One writer per row kind, the turn cost rule (`turn_cost`), and reading rows |
@@ -176,7 +175,6 @@ The check doesn't run when routing isn't `auto`, on a stop a hook already contin
 | :- | :- | :- |
 | The models that exist | `config/models.json`, plus the user's and a project's additions | They are the candidates |
 | New versions of a model | Nothing to discover: routing uses aliases, and Claude Code moves each to the newest version. Where a provider's alias lags (`older_aliases`, from https://code.claude.com/docs/en/model-config.md), the mod sends the newest ID from `newest` | Picked up the day Claude Code ships them; on a lagging provider, when a release updates `newest` |
-| A setup running behind the newest version | The session's model and what each alias resolved to, against the newest active version in the model status data | Named at session start |
 | The models you allow | The `max_tier` option | Stronger ones are never picked, and pins and explicit choices are lowered |
 | The models your organization allows | `availableModels`, `deniedModels` and `availableModelsMatch`, read as Claude Code reads them, from the settings layers the mod sends, else the settings files; the managed files always apply as a floor ([Guide](GUIDE.md#organization-allowlists)) | Blocked ones are not picked. When they leave no registry model open, the call is left as it is and the ledger says why |
 | The model a name resolves to | `resolvedModel` in the `Agent` result, and the model on each turn's usage | Shown in `/model-router:models` and `/model-router:usage` |
@@ -184,25 +182,21 @@ The check doesn't run when routing isn't `auto`, on a stop a hook already contin
 | A model that is silently replaced | The routed or named model against `resolvedModel`, twice, except under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` | Same |
 | A model name the `Agent` tool rejects | A rewrite to it comes back without having run, twice | Same |
 | A level routed too low | A redo of a call | The redo runs one level up. `/model-router:usage` counts redos by level, and you raise a level in your own `model-router.json` |
-| A new or removed model alias | The docs' model alias table, daily | Reported by `/model-router:refresh`, and at session start for a new alias; the repo's daily workflow opens an issue |
-| A model being deprecated or retired | The platform's "Model status" table, and the Models API with an API key, daily | Reported the same way: at session start with its retirement date for a model routed calls ran on, and by `/model-router:refresh` with its replacement |
-| A Claude Code release, or a change to a docs page this plugin relies on | Changelog RSS and `llms.txt`, daily | Reported the same way |
+| A new or removed model alias | The docs' model alias table, in the repository's daily CI check (`tools/upstream_check.py`) | An issue for the maintainer, and a registry fix in a plugin release |
+| A model being deprecated or retired | The platform's "Model status" table, in the same check | The same. Claude Code itself warns at startup about a retiring model it runs ([model config](https://code.claude.com/docs/en/model-config.md)) |
+| A Claude Code release, or a change to a docs page this plugin relies on | The changelog page, `llms.txt` for pages added or removed, and the full text of each page the plugin is built on, in the same check | The same |
 | A model with no price | A turn's usage names a model the `prices` table lacks | Listed by `/model-router:usage` |
 
-A new model family is reported but not routed to until it has a strength rating, since a guess could send it work it is too weak or too costly for.
+A new model family isn't routed to until a release gives it a strength rating, since a guess could send it work it is too weak or too costly for.
 
-With `ANTHROPIC_API_KEY` set, `ANTHROPIC_BASE_URL` unset and none of `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` on, the daily check also reads the Models API (`GET /v1/models`): its `line`, `lifecycle` and `retires_at` take precedence over the public page, and a new `line` is reported as a new family. The key goes to `api.anthropic.com` alone, with no redirect followed. A subscription login gives hooks no key.
-
-An empty changelog or docs index (an outage page), a body cut short of its `Content-Length`, or a fetch past its limits (10 seconds for a body, 25 for the whole fetch) counts as a failed fetch: the last cache stays, and the repo's daily workflow fails instead of opening an issue. Claude Code doesn't time out an async hook ([hooks docs](https://code.claude.com/docs/en/hooks.md#run-hooks-in-the-background)), so these limits end a stuck refresh. After a failure, session starts wait an hour, doubling with each failure in a row up to a day; a success resets the wait, and `/model-router:refresh` always tries. [Security](SECURITY.md#network) has the hosts and limits.
+The plugin itself makes no network call, so the check runs only in CI, and a fix reaches users as a plugin update. A page that comes back empty or cut short, or a request past 30 seconds, fails the CI job instead of being written to the baseline. [Security](SECURITY.md#network) has the details.
 
 ## Hook flow
 
 The mod's events are in the table under [Two control paths](#two-control-paths-one-router). The settings hooks:
 
 ```text
-SessionStart ─┬─ session-start   records options and the session model; explains routing
-              └─ refresh-cache   (async) refreshes the upstream cache if older than 24 h,
-                                 waiting 1 h to a day after a failed fetch
+SessionStart ─ session-start     records the session model; explains routing
 UserPromptSubmit ─ user-prompt   records the request; notes a model the user may be asking for
 PostModelSwitch ─ model-switch   records the session's new model
 PreToolUse (Agent) ─ pre-agent      fallback: fallback.route, returns updatedInput; stands down for a marked call
@@ -213,7 +207,7 @@ PostToolUse (Edit|Write|NotebookEdit) ─ post-edit   notes that a project file 
 Stop ─ stop                      the check before a turn ends
 ```
 
-`SubagentStop` matches `.`, which an empty `agent_type` doesn't, so Claude Code's internal agents (prompt suggestions, `/btw`) start no Python in a session run without `--agent` (https://code.claude.com/docs/en/hooks.md#subagentstop). Every hook but `refresh-cache` is synchronous.
+`SubagentStop` matches `.`, which an empty `agent_type` doesn't, so Claude Code's internal agents (prompt suggestions, `/btw`) start no Python in a session run without `--agent` (https://code.claude.com/docs/en/hooks.md#subagentstop). Every hook is synchronous.
 
 `cli.py` catches whatever a handler raises and exits 0, and every mod hook has a `.catch` that passes the event on unchanged. The launcher exits 0 when Python is missing and turns any other hook failure into exit 1, since exit 2 would block the tool call, the prompt or the stop (https://code.claude.com/docs/en/hooks.md#exit-code-2-behavior-per-event). A bug here can cost routing, never block a session.
 
@@ -223,8 +217,7 @@ In `${CLAUDE_PLUGIN_DATA}` (without it, `~/.claude/plugins/data/model-router-loc
 
 | File | Contents |
 | :- | :- |
-| `state.json` | Every plugin option as SessionStart recorded it, for skill commands, which run without them; and model health |
-| `upstream.json` | The upstream cache and what was last reviewed |
+| `state.json` | Model health |
 | `allowlist.json` | Per session: each settings source's allowlist keys and `maxEffortLevel` caps, as the mod's hooks last sent them. A source whose read failed keeps its last set, else its file is read |
 | `locks.json` | Per state file: lock waits, waits on another session's lock, skipped writes, stale locks broken, and when the last happened |
 | `mod-calls/` | One empty file per `Agent` call the mod routes when the agent spawns, named by its `tool_use_id`: the mod's `tool.call` hook writes it, the fallback's `PreToolUse` removes it, and `mod-start` removes any older than a day |
@@ -245,26 +238,26 @@ A spawn in flight when a session upgrades has no route, so its result finishes n
 
 Writes are atomic, and state files are compact JSON. Each read-modify-write takes a lock file, because agents started in one message run their hooks at the same moment. A busy lock is retried from 1 ms, doubling to 10 ms between tries, for at most one second (`store.LOCK_WAIT_SECONDS`). If it is still held, the write is skipped and counted, and the hook goes on with what it read: a write without the lock could drop another hook's update, and a hook must never hang a session. A lock file older than ten seconds was left by a dead process, so it is removed and counted. The lock file names the session that took it, so a wait on another session's lock can be told apart. `locks.json` is written without a lock, after the state lock is let go, so two hooks at once can lose a count but never state. A spawn takes two locks on the mod path and three on the fallback ([Performance](PERFORMANCE.md#state-locks-a-spawn-takes)).
 
-The per-session files are shared by every session, so one session can wait on another's lock. One file per session would end that wait. It stays unbuilt until `locks.json` shows such waits matter, and would have to read through to the shared files without migrating them, so an older release still works. A `learned.json` left by a release that had the learning loop, and a `mod.json` left by one that marked whole sessions for the fallback, stay in the data folder and are never read.
+The per-session files are shared by every session, so one session can wait on another's lock. One file per session would end that wait. It stays unbuilt until `locks.json` shows such waits matter, and would have to read through to the shared files without migrating them, so an older release still works. A `learned.json` left by a release that had the learning loop, a `mod.json` left by one that marked whole sessions for the fallback, and an `upstream.json` left by one that fetched the docs stay in the data folder and are never read, as do the options an older release saved in `state.json`.
 
 Each JSON state file carries a top-level `schema`, which reads strip. `store.MIGRATIONS` brings an older version up one step at a time; a file with no version is version 0. A file from a newer release is read but never written or removed, `/model-router:models` names it, and `models --reset` leaves it and says so. A file that fails to parse, isn't a JSON object, or has a `schema` that isn't a whole number of 0 or more is moved aside as `<name>.corrupt-<UTC timestamp>` before the next write, routing carries on with that state empty, and `/model-router:models` lists it. Three copies per file are kept. A file that can't be read or moved aside is left as it is and not written. Your settings and `model-router.json` files are only read. The ledger has no version: a line that doesn't parse is skipped.
 
-Nothing about your work leaves the machine. The only network access is the daily fetch from `code.claude.com` and `platform.claude.com`, and from `api.anthropic.com` when `ANTHROPIC_API_KEY` is set, `ANTHROPIC_BASE_URL` is unset and none of `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` is on.
+Nothing about your work leaves the machine, and the plugin makes no network call.
 
 ## Trust
 
-The user's `~/.claude/model-router.json` is trusted in full. A repository's `.claude/model-router.json` only raises. It can turn routing down to `advise` or `off`, add models, and raise any level's `needs` and `effort`, so a cloned repository can make its subagents cost more. It can't lower anything:
+The user's `~/.claude/model-router.json` is trusted in full. A repository's `.claude/model-router.json` only raises. It can add models, and raise any level's `needs` and `effort`, so a cloned repository can make its subagents cost more. It can't lower anything:
 
 - A `needs` or `effort` below the shipped value, or the user's, is dropped (`config._raises_only`).
 - Its agent rules only raise: `level` is a floor, `model` applies only when it isn't weaker than what the call would run on without it (`Rule.suggested`, checked in `router.decide`), and `route: false` is ignored. So it can't lower an agent whose own file pins a stronger model.
-- It can't switch routing on, set prices, or re-rank a model that ships or the user defined. A name it adds that sits inside one of those names, or contains one, is dropped, and its names match a model ID last (`Registry.family`), so `claude` can't claim the shipped IDs.
+- It can't set the routing mode, which only `/config` does, set prices, or re-rank a model that ships or the user defined. A name it adds that sits inside one of those names, or contains one, is dropped, and its names match a model ID last (`Registry.family`), so `claude` can't claim the shipped IDs.
 - Models it adds (`Model.project`) are never the router's pick (`Registry.select`), the stand-in `Registry.clamp` gives a named model that can't run, or the next model up for a redo `maxEffortLevel` holds, and are ignored while the user has a cap. One runs only when a call or the user's own rule names it.
 
 In every file, a non-finite `needs` (`NaN`, `Infinity`, which `json` accepts) or a key of the wrong type is dropped. `config.build` lists what it dropped (`Registry.problems`) and what it held back from the project (`Registry.held`, plus rule models a spawn found weaker, kept as the spawn row's `held`); `/model-router:models` and `models --json` (`config_problems`, `held_back`) show both. The user's `max_tier` still caps every model (`Registry.available`, `Registry.clamp`), while the effort a project set stays. Override files are only read. [Security](SECURITY.md#who-can-influence-routing) maps every source of influence to its limits.
 
 ## Machine-readable output
 
-`models --json` and `usage --json` (and the two skills with `--json`) print one JSON object, built from the same data as the tables, so the two can't disagree. `status --json` prints the upstream changes the daily check found and carries no schema key.
+`models --json` and `usage --json` print one JSON object, built from the same data as the tables, so the two can't disagree. The skills show the tables; scripts call the CLI with `--json`.
 
 The top-level `schema` key is `<shape>/<version>`. A new key keeps the version, so readers ignore keys they don't know. Removing or renaming a key, or changing what one means, bumps it. The constants are `USAGE_SCHEMA` and `MODELS_SCHEMA` in `report.py`.
 
@@ -280,13 +273,12 @@ The top-level `schema` key is `<shape>/<version>`. A new key keeps the version, 
 | `model_errors` | Agent calls that failed with a model error |
 | `spend` | `total_usd`, `rows` (most spend first: `loop` as `main` or `subagent`, `model`, `turns`, `output_tokens`, `usd` at list price) and `unpriced` (models with no price, counted as 0) |
 
-`model-router.models/2` (version 1 also had `levels`, the learned raises, now removed):
+`model-router.models/3` (version 1 also had `levels`, the learned raises, and version 2 `doc_aliases` and `not_in_registry`, the model aliases in the docs):
 
 | Key | Contents |
 | :- | :- |
 | `cap`, `strongest_in_use`, `priority` | The cap (`null` for none), the strongest usable model the shipped registry or your own file ranks (a repository's model only when nothing else is usable; `null` if none) and the priority |
 | `models` | One entry per registry model, weakest first: `model`, `last_ran_as` (`null` if never reported), `status` and `detail` (the table's text). `status` is `working`, `not_used`, `above_cap`, `project_model_under_cap`, `not_permitted` or `routed_around` |
-| `doc_aliases`, `not_in_registry` | Model aliases in the current docs, and the families among them the registry lacks |
 | `set_aside`, `newer_files` | Paths of state files set aside as unreadable, and of state files a newer release wrote, which are only read (see State) |
 | `newer_config` | Paths of `model-router.json` overrides written for a newer release, of which only the settings this release understands apply (see Compatibility) |
 | `config_problems`, `held_back` | Only when non-empty. Keys an override file had wrong, as sentences; and what a project's file asked for that wasn't applied, as `kind`, `name` and `reason`, with rule models spawns held in the last 7 days (see Trust) |
@@ -306,9 +298,9 @@ Every shape a setup or a script depends on carries a version, so a release can c
 
 A breaking change makes an existing file, option or reader behave differently: removing or renaming a key or an option, changing a key's type or meaning, or accepting fewer values. Adding an optional key, option or value isn't one. A breaking change to the override shape bumps `CONFIG_SCHEMA`, and `config.py` reads every older version into the new one, so old overrides keep working. Dropping an old version is a breaking change of the plugin: it needs a new major version and a CHANGELOG entry.
 
-A project's file may no longer lower a level, and its agent rules only raise. A file that relied on either still loads, and the part that lowered is dropped and listed. That narrows what the shape accepts without changing it, so `CONFIG_SCHEMA` stays 1.
+A project's file may no longer lower a level, and its agent rules only raise. A file that relied on either still loads, and the part that lowered is dropped and listed. The same holds for `routing_mode`, which only the `/config` option sets: a file's is dropped and listed. That narrows what the shape accepts without changing it, so `CONFIG_SCHEMA` stays 1.
 
-An override written for a newer release is read as far as this release understands it, and `/model-router:models` names the file. Refusing it would be worse: a newer file that sets `routing_mode: off` would turn routing back on. A state file from a newer release is read but never written, because writing it would drop what this release can't see.
+An override written for a newer release is read as far as this release understands it, and `/model-router:models` names the file. Refusing it would be worse: every setting this release does understand would be lost. A state file from a newer release is read but never written, because writing it would drop what this release can't see.
 
 Plugin options have no version key, since `userConfig` has Claude Code's shape (https://code.claude.com/docs/en/plugins/manifest-reference.md#user-configuration). They follow the plugin's version: within a major version an option is never removed or renamed, and its accepted values only grow.
 

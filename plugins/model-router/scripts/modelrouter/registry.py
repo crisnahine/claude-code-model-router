@@ -70,7 +70,6 @@ class Registry:
     older_aliases: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     crew: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     rules: Mapping[str, Rule] = field(default_factory=dict)
-    routing_mode: str | None = None  # the weakest mode the override files set
     problems: tuple[str, ...] = ()  # keys an override file had wrong and the registry dropped
     held: tuple[Held, ...] = ()
     newer: tuple[Path, ...] = ()  # override files written for a newer release, read as far as understood

@@ -15,16 +15,6 @@
               "session-start"
             ],
             "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "sh",
-            "args": [
-              "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh",
-              "refresh-cache"
-            ],
-            "timeout": 30,
-            "async": true
           }
         ]
       }

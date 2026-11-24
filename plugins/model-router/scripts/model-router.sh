@@ -17,7 +17,7 @@ case "$cmd" in
   --data-dir=*) cmd=${2-} ;;
 esac
 case "$cmd" in
-  session-start|user-prompt|post-edit|agent-failed|agent-stopped|stop|pre-agent|post-agent|model-switch|refresh-cache|mod-start|mod-spawn|mod-usage)
+  session-start|user-prompt|post-edit|agent-failed|agent-stopped|stop|pre-agent|post-agent|model-switch|mod-start|mod-spawn|mod-usage)
     hook=1 ;;
 esac
 for py in python3 python; do

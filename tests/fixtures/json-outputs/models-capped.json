@@ -1,5 +1,5 @@
 {
-  "schema": "model-router.models/2",
+  "schema": "model-router.models/3",
   "cap": "sonnet",
   "strongest_in_use": "sonnet",
   "priority": "balanced",
@@ -41,12 +41,6 @@
       "detail": "above your cap"
     }
   ],
-  "doc_aliases": [
-    "haiku",
-    "saga",
-    "swift"
-  ],
-  "not_in_registry": [],
   "set_aside": [],
   "newer_files": [],
   "newer_config": [],

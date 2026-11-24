@@ -13,9 +13,9 @@ python3 bench/overhead.py --runs 30 --calls 1000        # tables
 python3 bench/overhead.py --runs 30 --calls 1000 --json # the same as JSON
 ```
 
-It uses throwaway folders and turns the daily check off, so it never touches your plugin state or the network.
+It uses throwaway folders, so it never touches your plugin state.
 
-Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330. The `user-prompt` row was rerun on 2026-11-25 on Claude Code 2.1.331, after the router stopped sizing up the request and its record kept only the prompt id, and the state size table the same day, after `mod.json` went.
+Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330. The `user-prompt` row was rerun on 2026-11-25 on Claude Code 2.1.331, after the router stopped sizing up the request and its record kept only the prompt id, and the state size table the same day, after `mod.json` went and the options stopped being saved in `state.json`.
 
 ## Settings hooks
 
@@ -35,11 +35,11 @@ Wall milliseconds per call over 30 runs, from a `--runs 30 --calls 200` run (its
 | `stop` | Stop | 179 | 197 | 54 | 77 |
 | `model-switch` | PostModelSwitch | 184 | 218 | 55 | 68 |
 
-`refresh-cache` isn't timed: it is async and it fetches. Every hook stays far under its `hooks.json` timeout (5 seconds for `user-prompt`, 10 for the other timed ones). Warm p95 moves by 10 to 40 ms between runs, so read it as a range. Starting `sh` and one interpreter with no router code takes 43 ms (p50) and 48 ms (p95), the floor under every hook; the router adds about 11 to 17 ms.
+Every hook stays far under its `hooks.json` timeout (5 seconds for `user-prompt`, 10 for the other timed ones). Warm p95 moves by 10 to 40 ms between runs, so read it as a range. Starting `sh` and one interpreter with no router code takes 43 ms (p50) and 48 ms (p95), the floor under every hook; the router adds about 11 to 17 ms.
 
 ### What changed the numbers
 
-The first measurement had warm hooks at 88 to 94 ms (p50), now 54 to 60. Two changes cut 30 to 40 ms from each. `model-router.py` checks its own version and exits 87 when it is too old, so a working run starts Python once (only a failed run pays for a version probe; the floor used to drift between 45 and 79 ms at p50). And `urllib.request` and `xml.etree`, about 20 ms of imports, load only for the daily fetch and the changelog parser; a test fails if the hook path imports them. Cold fell 80 to 100 ms too (it was 264 to 276 ms at p50), mostly because the bench's empty cache no longer compiles `urllib`, `http.client`, `email` and `xml`, so a real first hook gains less.
+The first measurement had warm hooks at 88 to 94 ms (p50), now 54 to 60. Two changes cut 30 to 40 ms from each. `model-router.py` checks its own version and exits 87 when it is too old, so a working run starts Python once (only a failed run pays for a version probe; the floor used to drift between 45 and 79 ms at p50). And `urllib.request` and `xml.etree`, about 20 ms of imports, left the hook path; the plugin imports neither now, and a test fails if the hook path does. Cold fell 80 to 100 ms too (it was 264 to 276 ms at p50), mostly because the bench's empty cache no longer compiles `urllib`, `http.client`, `email` and `xml`, so a real first hook gains less.
 
 ## Mod path
 
@@ -93,7 +93,7 @@ Before is the code that also wrote each spawn's count and votes to `learned.json
 | `sessions.json` | 2,915 | yes | Same |
 | `launched.json` | 1,612 | yes | Same as `routes.json` |
 | `pending.json` | 810 | yes | The 200 most recently written sessions, 100 calls each |
-| `state.json` | 664 | yes | The plugin's options and one health entry per model |
+| `state.json` | 539 | yes | One health entry per model |
 
 The simulation calls the runtime directly, so it writes no `mod-calls/` marks. Each mark is an empty file that the call's `PreToolUse` hook removes, and `mod-start` clears any left for over a day.
 

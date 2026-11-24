@@ -19,7 +19,7 @@ Checked 2026-11-24 for 0.1.2 on Claude Code 2.1.330 and 2.1.331; the evals and t
 | The precedence order and the cap honored in every case | PASS | `Router` tests; the cap holds even when a lowering rewrite didn't take (S10.3) |
 | Redo escalation that never loops and never lowers quality | PASS | `RepeatGuard` tests; a run cut off by an API error is retried, not escalated (S10.4, S12.33) |
 | Availability tracking that routes around a model that doesn't work here | PASS | `Registry` and `Router` tests (S10.5) |
-| The daily upstream check, failing quietly offline | PASS | `Upstream` tests for a failed fetch, an empty feed, and a fetch that runs past its deadline (S10.6) |
+| The daily upstream check, run in CI only, failing on a bad feed instead of writing it | PASS | `test_upstream_check` tests for an empty feed, a body cut short and a request past its deadline; the plugin makes no network call (S10.6) |
 | A spend ledger that matches list prices | PARTIAL | One-hour cache writes, unpriced models and Haiku's long-prompt rate per request are tested. Fast mode requests are logged at standard rates, because Claude Code doesn't say which ran fast (S10.7, S4.8) |
 | Fail-open behaviour proven by tests | PASS | Garbage payloads to every handler; every mod hook falls back to `next(e)` (S10.8) |
 | Automated tests on Linux, macOS and Windows, oldest and newest Python | PASS | CI on the 0.1.2 release merge `9e247d3` (run 45361583123): Python 3.9 and 3.13 on all three, 710 tests each, and the mod's Node tests on all three, 30 of 30 (S10.9) |

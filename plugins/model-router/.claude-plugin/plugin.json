@@ -2,7 +2,7 @@
   "name": "model-router",
   "displayName": "Model Router",
   "version": "0.1.2",
-  "description": "Claude Code model router: a Claude Code plugin for autonomous multi-model orchestration. Automatic Claude model routing that sets the right model and reasoning effort for every subagent, teammate and workflow agent, from any plugin, skill or agent, by task complexity, quality, speed and cost. It starts cheap, escalates work that comes back for a redo, tracks new and retiring models, and checks the work before a turn ends.",
+  "description": "Claude Code model router: a Claude Code plugin for autonomous multi-model orchestration. Automatic Claude model routing that sets the right model and reasoning effort for every subagent, teammate and workflow agent, from any plugin, skill or agent, by task complexity, quality, speed and cost. It starts cheap, escalates work that comes back for a redo, and checks the work before a turn ends.",
   "author": {
     "name": "Cris",
     "url": "https://github.com/crisnahine"
@@ -22,13 +22,6 @@
   ],
   "engines": {
     "claude-code": ">=2.1.329"
-  },
-  "network": {
-    "hosts": [
-      "code.claude.com",
-      "platform.claude.com",
-      "api.anthropic.com"
-    ]
   },
   "userConfig": {
     "routing_mode": {
@@ -75,12 +68,6 @@
         "respect",
         "override"
       ]
-    },
-    "update_check": {
-      "type": "boolean",
-      "title": "Check for Claude Code updates",
-      "description": "Once a day, fetch the Claude Code changelog, the docs index and the model deprecations page from code.claude.com and platform.claude.com, and, with an Anthropic API key in the environment and no gateway, the account's model list from api.anthropic.com. Mention changes that affect this plugin, including models it routes to that are retiring.",
-      "default": true
     },
     "verify_gate": {
       "type": "boolean",

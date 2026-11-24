@@ -22,18 +22,20 @@ plugins/model-router/
                                PostToolUse, PostToolUseFailure, PostModelSwitch, SubagentStop and Stop hooks
   scripts/modelrouter/         the runtime, standard library only
   agents/                      the seven role agents
-  skills/                      ship, route, models, usage, refresh
+  skills/                      route, models, usage
+.claude/skills/                refresh and deliver, maintainer skills for this repository (not shipped)
   evals/                       routing evals
 tests/                         unit tests, run on Linux, macOS and Windows; tests/mod holds the mod's tests
-compat/baseline.json           the Claude Code version, docs index, model aliases and model status last reviewed
+compat/baseline.json           the Claude Code version, docs pages, model aliases and model status last reviewed
 docs/                          the pages indexed in docs/README.md, docs/research and docs/assets (BRAND.md)
 tools/                         traceability.py counts docs/TRACEABILITY.md rows; docs_assets.py writes the docs' generated files;
-                               docs_pages.py is the page index and page heads; plugin_version.py is CI's version check
+                               docs_pages.py is the page index and page heads; plugin_version.py is CI's version check;
+                               upstream_check.py is the daily upstream check
 bench/                         the benchmark: pinned tasks and their pass checks, configurations, runner and analysis (not shipped)
 site/                          the project site, sitemap, robots.txt and llms.txt; a workflow deploys it to GitHub Pages from main
 ```
 
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the design and the reasons behind it. A daily GitHub workflow compares live Claude Code releases, docs, model aliases and model status with `compat/baseline.json` and opens an issue when something this plugin is built on changes.
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) describes the design and the reasons behind it. A daily GitHub workflow runs `tools/upstream_check.py`, which compares live Claude Code releases, docs pages, model aliases and model status with `compat/baseline.json` and opens an issue when something this plugin is built on changes. `/refresh` in this repository reviews the changes, and `python3 tools/upstream_check.py --baseline compat/baseline.json --write` marks them reviewed.
 
 ## Gates
 

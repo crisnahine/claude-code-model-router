@@ -38,7 +38,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Registry**: the one value `config.load` builds per hook call or command from the shipped `config/models.json` and the override files (`registry.Registry`). It holds the models (the plugin's, the user's or the project's) with their relative strength, speed and cost, the levels with their `needs` and effort, aliases, list prices, agent rules, and the keys it dropped or held back. Its methods say which models are usable and pick between them (`available`, `select`, `clamp`, `family`, `price`, `cost`). A level's `needs` is finite and never lower than the level below it.
 
-**Override file**: `~/.claude/model-router.json` or a project's `.claude/model-router.json`, merged over the registry. The user's file is trusted in full. A project's only raises: it can turn routing down but never on, raise a level's `needs` or `effort` but never lower it, and can't switch routing off for an agent or re-rank a shipped or user-defined model. A key of the wrong type, such as a `needs` that isn't a finite number, is dropped from every file. `/model-router:models` lists what was dropped or held back. An override file is only read, never set aside.
+**Override file**: `~/.claude/model-router.json` or a project's `.claude/model-router.json`, merged over the registry. The user's file is trusted in full. `routing_mode` is set only by the `/config` option, never by either file. A project's only raises: it can raise a level's `needs` or `effort` but never lower it, and can't switch routing off for an agent or re-rank a shipped or user-defined model. A key of the wrong type, such as a `needs` that isn't a finite number, is dropped from every file. `/model-router:models` lists what was dropped or held back. An override file is only read, never set aside.
 
 **Agent rule**: what an override file says about one agent: a `model`, a `level` or `route: false` (`registry.Rule`). From the user's file it decides in full. From a project's file the `level` is a floor and the `model` a suggestion that applies only when it isn't weaker than what the call would run on without it: the pick, the agent's pin, `CLAUDE_CODE_SUBAGENT_MODEL` or the inherited model.
 
@@ -56,7 +56,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Priority**: what the ladder favors (`priority`). `balanced` takes the cheapest model strong enough for the level, `quality` goes one step stronger, and `fast` goes one step lighter and takes the quickest model that qualifies.
 
-**Routing mode**: `auto` sets each call's model and effort, `advise` only logs the level each call reads as, and `off` does nothing (`routing_mode`). When the option and the override files disagree, the most cautious one wins.
+**Routing mode**: `auto` sets each call's model and effort, `advise` only logs the level each call reads as, and `off` does nothing (`routing_mode`). Only the `/config` option sets it.
 
 **Allowlist** (`allowlist.py`): the `availableModels` and `deniedModels` settings, read the way Claude Code reads them, from the layers the mod sends or from the settings files. Blocked models are not picked. When they leave no registry model open, the call is left as it is. The same layers carry `maxEffortLevel`, the cap every effort the router sets is held to.
 
@@ -86,7 +86,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Skipped write**: a state write a hook drops because another process held the file's lock past one second. The hook loses its own update rather than write without the lock and drop the other process's. Skipped writes, lock waits and stale locks broken are counted per file in `locks.json` and shown by `/model-router:models`.
 
-**Upstream**: the public feeds the plugin compares against what was last reviewed: Claude Code releases, the docs index, model aliases and model status.
+**Upstream**: the public pages the repository's daily check compares with what was last reviewed (`compat/baseline.json`): Claude Code releases, the docs pages the plugin is built on, model aliases and model status. The plugin itself reads none of them.
 
 **Baseline**: a way of running Claude Code without the router that the benchmark compares it against, such as its defaults or every subagent forced onto one model. The docs name each by role: `router`, and the baselines `defaults` (no plugin, no forced model), `best` (the lowest cost per solved task over all runs) and `strongest` (the strongest forced one), besides each baseline's own id.
 

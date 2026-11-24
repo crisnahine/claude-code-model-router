@@ -39,7 +39,6 @@ MODEL_ERROR = "model claude-fable-5-2 is not available on this account"  # match
 
 # Hook input per settings hook command, from the documented fields
 # (https://code.claude.com/docs/en/hooks.md); hook_input() adds the common ones.
-# refresh-cache is left out: it is async, so nothing waits on it, and it fetches.
 HOOK_INPUTS = {
     "session-start": {"hook_event_name": "SessionStart", "source": "startup", "model": SESSION_MODEL},
     "user-prompt": {"hook_event_name": "UserPromptSubmit", "prompt": BRIEFS[2]},
@@ -115,7 +114,6 @@ class Sandbox:
                if not k.startswith(("CLAUDE_", "ANTHROPIC_")) and k != "PYTHONDONTWRITEBYTECODE"}
         env.update({"CLAUDE_PLUGIN_DATA": str(self.root / "data"), "CLAUDE_CONFIG_DIR": str(self.root / "home"),
                     "CLAUDE_PROJECT_DIR": str(self.root / "project"), "CLAUDE_PLUGIN_ROOT": str(PLUGIN),
-                    "CLAUDE_PLUGIN_OPTION_UPDATE_CHECK": "false",
                     "PYTHONPYCACHEPREFIX": str(self.root / "pycache")})
         return env
 

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import calls, fallback, gates, health, intake, ledger, mod, profile, request, session, settings, upstream
+from . import calls, fallback, gates, health, intake, ledger, mod, profile, request, session, settings
 from . import config as cfg
 from .registry import Registry
 
@@ -19,11 +19,9 @@ def _context(event: str, text: str) -> dict:
 def session_start(hook_input: dict) -> dict | None:
     snap = settings.Snapshot(hook_input)
     options = snap.options
-    settings.record(options)
     session.record(hook_input.get("session_id"), hook_input.get("model"))
     parts = []
     mode = options.mode
-    name = cfg.PLUGIN_NAME
     if mode == "auto":
         # Only what Claude must act on: every word here is in context for the whole session.
         name_model = ("" if options.force else ", and name `model` only when the user did or when what was read shows "
@@ -53,28 +51,6 @@ def session_start(hook_input: dict) -> dict | None:
             "Model Router is in advise mode: it logs the level it reads for each agent call and changes no call. "
             "Agents keep the model their definition sets, which a model passed on a call would override."
         )
-    if options.update_check:
-        changes = upstream.pending()
-        running = [hook_input.get("model")] + snap.health.seen_running()
-        for model_id, latest in upstream.behind(running):
-            parts.append(
-                f"{model_id} is running here and {latest} is the newest of its family. A model setting that names a "
-                "full version stays on it; the alias (opus, sonnet, haiku, fable) follows new versions once Claude "
-                "Code is updated. Worth telling the user once.")
-        if changes and changes["new_model_families"]:
-            parts.append("New Claude model alias in the docs that isn't in Model Router's registry yet: "
-                         + ", ".join(changes["new_model_families"]) + f". /{name}:refresh reviews it; "
-                         "worth telling the user once.")
-        if changes and changes.get("deprecated_in_use"):
-            parts.append("Models this setup routes to are deprecated or retiring: " + "; ".join(
-                f"{m['model']} retires {m['retires']}" for m in changes["deprecated_in_use"])
-                + ". The model aliases move on by themselves; a pinned full ID doesn't. Worth telling the user once.")
-        if upstream.has_pending(changes):
-            parts.append(
-                f"Upstream: {len(changes['new_releases'])} Claude Code release(s) and "
-                f"{len(changes['watched_pages_touched'])} plugin-relevant docs page change(s) since the last "
-                f"review. /{name}:refresh reviews them; worth mentioning to the user once."
-            )
     return _context("SessionStart", " ".join(parts)) if parts else None
 
 
@@ -219,17 +195,10 @@ def model_switch(hook_input: dict) -> dict | None:
     return None
 
 
-def refresh_cache(hook_input: dict) -> dict | None:
-    options = settings.resolve()
-    if options.update_check:
-        upstream.refresh(options, force=False)
-    return None
-
-
 HANDLERS = {
     "mod-start": mod.start, "mod-spawn": mod.spawn, "mod-usage": mod.usage,
     "session-start": session_start, "user-prompt": user_prompt, "pre-agent": pre_agent,
     "post-agent": post_agent, "agent-failed": agent_failed, "agent-stopped": agent_stopped,
     "post-edit": post_edit, "stop": stop,
-    "model-switch": model_switch, "refresh-cache": refresh_cache,
+    "model-switch": model_switch,
 }

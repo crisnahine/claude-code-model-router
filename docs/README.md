@@ -86,7 +86,7 @@ Where each delivery item lives. Checked 2026-11-22.
 | 13 | Comparison against the baselines | [BENCHMARKS.md](BENCHMARKS.md) |
 | 14 | Release checklist and changelog | [RELEASING.md](../RELEASING.md), [CHANGELOG.md](../CHANGELOG.md) |
 
-Also kept: [TRACEABILITY.md](TRACEABILITY.md) (one row per requirement, counted by `python3 tools/traceability.py`), [CONTRIBUTING.md](../CONTRIBUTING.md) (gates, commit rules and where to work) and [compat/baseline.json](../compat/baseline.json) (the Claude Code version, docs index, model aliases and model status last reviewed).
+Also kept: [TRACEABILITY.md](TRACEABILITY.md) (one row per requirement, counted by `python3 tools/traceability.py`), [CONTRIBUTING.md](../CONTRIBUTING.md) (gates, commit rules and where to work) and [compat/baseline.json](../compat/baseline.json) (the Claude Code version, docs pages, model aliases and model status last reviewed).
 
 ## Outside tools and sources
 

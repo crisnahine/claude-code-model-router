@@ -1,15 +1,15 @@
-"""Command line: hook commands read hook JSON on stdin; the rest serve skills and CI.
+"""Command line: hook commands read hook JSON on stdin; the rest serve skills and scripts.
 
   hooks      session-start, user-prompt, pre-agent, post-agent, agent-failed, agent-stopped,
-             post-edit, stop, model-switch, refresh-cache
+             post-edit, stop, model-switch
   policy     the routing policy as it stands for this user and project
   models     what each registry model really runs as, and what is unavailable
-             (--reset forgets learned availability; --json prints model-router.models/2)
+             (reset forgets learned availability; --json prints model-router.models/3)
   explain    what the router would make of a task: explain [--agent NAME] TEXT
-  refresh    fetch upstream (--force) and show what changed; status shows the cache;
-             ack marks it reviewed
   usage      the ledger by agent and model: usage [DAYS] [--json for model-router.usage/1]
-  upstream-check --baseline FILE [--write]   CI: compare live upstream with a baseline
+
+policy, models and explain take the plugin's options as flags, such as --max-tier=sonnet:
+skills pass them as ${user_config.KEY}, since the Bash tool doesn't carry CLAUDE_PLUGIN_OPTION_<KEY>.
 """
 from __future__ import annotations
 
@@ -17,9 +17,8 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
 
-from . import health, hooks, report, settings, store, upstream
+from . import health, hooks, report, settings, store
 
 
 # Hook fields the handlers use as text: as file keys, paths, or things to match against.
@@ -58,27 +57,30 @@ def _reset_health() -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="model-router")
     parser.add_argument("--data-dir", help="plugin data directory; skills pass ${CLAUDE_PLUGIN_DATA}")
+    options = argparse.ArgumentParser(add_help=False)
+    for key in settings.OPTIONS:
+        options.add_argument("--" + key.replace("_", "-"), dest=key)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in (*hooks.HANDLERS, "policy", "ack"):
+    for name in hooks.HANDLERS:
         sub.add_parser(name)
-    p = sub.add_parser("models")
+    sub.add_parser("policy", parents=[options])
+    p = sub.add_parser("models", parents=[options])
+    p.add_argument("action", nargs="*")  # the skill passes whatever the user typed; only reset counts
     p.add_argument("--reset", action="store_true")
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("explain")
+    p = sub.add_parser("explain", parents=[options])
     p.add_argument("--agent")
     p.add_argument("text", nargs="*")
-    sub.add_parser("refresh").add_argument("--force", action="store_true")
-    sub.add_parser("status").add_argument("--json", action="store_true")
     p = sub.add_parser("usage")
     p.add_argument("days", nargs="?", default="7")
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("upstream-check")
-    p.add_argument("--baseline", required=True)
-    p.add_argument("--write", action="store_true", help="overwrite the baseline with live data")
-    p.add_argument("--json-out")
     args = parser.parse_args(argv)
     if args.data_dir and "${" not in args.data_dir:
         os.environ["CLAUDE_PLUGIN_DATA"] = args.data_dir
+    for key in settings.OPTIONS:
+        value = getattr(args, key, None)
+        if value and "${" not in value:  # an unsubstituted ${user_config.KEY} leaves the option at its default
+            os.environ[f"CLAUDE_PLUGIN_OPTION_{key.upper()}"] = value
 
     if args.cmd in hooks.HANDLERS:
         try:
@@ -96,12 +98,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"model-router {args.cmd}: {exc}", file=sys.stderr)
         return 0
 
-    snap = settings.Snapshot(None, recorded=True)
-    options = snap.options
+    snap = settings.Snapshot(None)
     if args.cmd == "policy":
         print(report.policy(snap))
     elif args.cmd == "models":
-        if args.reset:
+        if args.reset or "reset" in args.action:
             cleared = f"{_reset_health()}\n"
             if not args.json:
                 print(cleared)
@@ -109,43 +110,7 @@ def main(argv: list[str] | None = None) -> int:
               else report.models(snap))
     elif args.cmd == "explain":
         print(report.explain(snap, " ".join(args.text), args.agent))
-    elif args.cmd == "refresh":
-        try:
-            data = upstream.refresh(options, force=args.force)
-        except Exception as exc:  # noqa: BLE001 - offline or blocked: say so and show what is on disk
-            print(f"Couldn't reach the Claude Code docs ({exc}); showing the last check.")
-            print(report.status(upstream.pending()))
-            return 0  # Claude Code fails a skill's ! line on a non-zero exit, so the skill would never load
-        print(report.status(upstream.pending(data)))
-    elif args.cmd == "status":
-        changes = upstream.pending()
-        print(json.dumps(changes, indent=2) if args.json else report.status(changes))
-    elif args.cmd == "ack":
-        acked = upstream.ack()
-        if acked is None:
-            print("Nothing cached yet; run refresh first.")
-            return 1
-        version, status = acked
-        if status != "saved":
-            left = {"newer": _NEWER, "busy": _BUSY}.get(status, "left as is: {} could not be read or written.")
-            print("Review mark " + left.format("upstream.json"))
-            return 1
-        print(f"Marked Claude Code {version} and the current docs index as reviewed.")
     elif args.cmd == "usage":
         days = int(args.days) if str(args.days).isdigit() and int(args.days) > 0 else 7  # ledger.read(0) is everything
         print(json.dumps(report.usage_data(days), indent=2) if args.json else report.usage(days))
-    elif args.cmd == "upstream-check":
-        baseline_path = Path(args.baseline)
-        live = upstream.fetch(options)
-        if args.write:
-            baseline = upstream.snapshot(live)
-            store.save_json(baseline_path, baseline)
-            print(f"Baseline written for Claude Code {baseline['claude_code_version']} "
-                  f"({len(live['pages'])} docs pages).")
-            return 0
-        changes = upstream.diff(store.load_dict(baseline_path), live)
-        if args.json_out:
-            Path(args.json_out).write_text(json.dumps({**changes, "pending": upstream.has_pending(changes)},
-                                                      indent=2), encoding="utf-8")
-        print(report.status(changes))
     return 0

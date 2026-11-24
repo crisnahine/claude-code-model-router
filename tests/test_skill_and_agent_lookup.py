@@ -1,25 +1,10 @@
-"""Regression tests for the refresh command and plugin agent lookup."""
+"""Regression tests for plugin agent lookup."""
 from __future__ import annotations
 
-import io
 import json
-import urllib.error
-from contextlib import redirect_stdout
-from unittest import mock
 
-from test_model_router import PLUGIN, Sandbox
-from modelrouter import agents, cli, store, upstream
-
-
-class RefreshOffline(Sandbox):
-    def test_refresh_offline_exits_zero_so_the_skill_loads_and_reads_the_notice(self):
-        store.save_json(upstream.path(), {"cache": {"fetched_at": 1, "releases": []}})
-        with mock.patch.object(upstream, "http_get", side_effect=urllib.error.URLError("offline")), \
-                redirect_stdout(io.StringIO()) as buf:
-            self.assertEqual(cli.main(["refresh", "--force"]), 0)
-        self.assertTrue(buf.getvalue().startswith("Couldn't reach the Claude Code docs"))
-        skill = (PLUGIN / "skills" / "refresh" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn('starts with "Couldn\'t reach the Claude Code docs"', skill)
+from test_model_router import Sandbox
+from modelrouter import agents
 
 
 class ManifestAgents(Sandbox):

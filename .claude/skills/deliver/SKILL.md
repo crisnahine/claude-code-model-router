@@ -1,11 +1,11 @@
 ---
-name: ship
+name: deliver
 description: Takes a task from request to reviewed, verified change with multi-model orchestration. Each step's agent is routed by its brief, so plans and reviews start no lower than complex and checks stay cheap; it loops on failures and stops before anything irreversible.
 argument-hint: "[task, issue URL or issue number]"
 disable-model-invocation: true
 ---
 
-# Ship: plan, build, verify, review
+# Deliver: plan, build, verify, review
 
 Task: $ARGUMENTS
 

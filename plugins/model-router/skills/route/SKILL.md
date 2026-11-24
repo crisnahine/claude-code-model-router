@@ -3,7 +3,7 @@ name: route
 description: Explains which model Model Router gives a task and why, and how to split the work. Use when the user asks which model should do something, why an agent ran on a model, or whether it's routed right.
 argument-hint: "[task description]"
 allowed-tools:
-  - Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" policy)
+  - Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" policy *)
   - Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" explain *)
 ---
 
@@ -15,7 +15,7 @@ $ARGUMENTS
 
 ## Current policy
 
-!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" policy`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" policy --routing-mode='${user_config.routing_mode}' --priority='${user_config.priority}' --max-tier='${user_config.max_tier}' --agent-pins='${user_config.agent_pins}' --verify-gate='${user_config.verify_gate}'`
 
 ## What the router does on its own
 
@@ -23,7 +23,7 @@ Every subagent, teammate and workflow agent gets its model and reasoning effort 
 
 To see what the router makes of a piece of work, run:
 
-`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" explain <the brief>`
+`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" explain --routing-mode='${user_config.routing_mode}' --priority='${user_config.priority}' --max-tier='${user_config.max_tier}' --agent-pins='${user_config.agent_pins}' --verify-gate='${user_config.verify_gate}' <the brief>`
 
 Add `--agent <name>` before the brief to see it for a specific agent.
 
