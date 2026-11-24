@@ -63,24 +63,24 @@ Every page about Model Router, the Claude Code plugin that routes each agent to 
 
 ## Delivery items
 
-Where each delivery item lives, and whether it exists yet. Checked 2026-11-22.
+Where each delivery item lives. Checked 2026-11-22.
 
-| # | Item | Where | Exists |
-| -: | :- | :- | :- |
-| 1 | Source code and architecture | [ARCHITECTURE.md](ARCHITECTURE.md), [GLOSSARY.md](../GLOSSARY.md) | Yes |
-| 2 | Capabilities and commands | [README.md](../README.md) "Commands", "Configuration", [GUIDE.md](GUIDE.md) | Yes |
-| 3 | Primary-source research | [research/model-control.md](research/model-control.md), [research/quality-first-routing.md](research/quality-first-routing.md) | Yes |
-| 4 | Supported Claude Code versions, surfaces, platforms and providers | [README.md](../README.md) "Compatibility", [GUIDE.md](GUIDE.md) "Compatibility", [ARCHITECTURE.md](ARCHITECTURE.md) "Verified live" | Yes |
-| 5 | Install and usage | [README.md](../README.md) "Install the Claude Code plugin" | Yes |
-| 6 | Automated test results | [TEST_RESULTS.md](TEST_RESULTS.md) | Yes |
-| 7 | Security assessment | [SECURITY.md](SECURITY.md) | Yes |
-| 8 | Reproducible cost and quality results, with raw data | [BENCHMARKS.md](BENCHMARKS.md), raw data under [bench/results/](../bench/results/) | Yes |
-| 9 | Hook latency and state-size measurements | [PERFORMANCE.md](PERFORMANCE.md) | Yes |
-| 10 | Remaining defects and incomplete requirements | [RELEASE_READINESS.md](RELEASE_READINESS.md) "Remaining defects and incomplete requirements" | Yes |
-| 11 | Release-readiness assessment | [RELEASE_READINESS.md](RELEASE_READINESS.md) | Yes |
-| 12 | Roadmap | [ROADMAP.md](ROADMAP.md) "Next" | Yes |
-| 13 | Comparison against the baselines | [BENCHMARKS.md](BENCHMARKS.md) | Yes |
-| 14 | Release checklist and changelog | [RELEASING.md](../RELEASING.md), [CHANGELOG.md](../CHANGELOG.md) | Yes |
+| # | Item | Where |
+| -: | :- | :- |
+| 1 | Source code and architecture | [ARCHITECTURE.md](ARCHITECTURE.md), [GLOSSARY.md](../GLOSSARY.md) |
+| 2 | Capabilities and commands | [README.md](../README.md) "Commands", "Configuration", [GUIDE.md](GUIDE.md) |
+| 3 | Primary-source research | [research/model-control.md](research/model-control.md), [research/quality-first-routing.md](research/quality-first-routing.md) |
+| 4 | Supported Claude Code versions, surfaces, platforms and providers | [README.md](../README.md) "Compatibility", [GUIDE.md](GUIDE.md) "Compatibility", [ARCHITECTURE.md](ARCHITECTURE.md) "Verified live" |
+| 5 | Install and usage | [README.md](../README.md) "Install the Claude Code plugin" |
+| 6 | Automated test results | [TEST_RESULTS.md](TEST_RESULTS.md) |
+| 7 | Security assessment | [SECURITY.md](SECURITY.md) |
+| 8 | Reproducible cost and quality results, with raw data | [BENCHMARKS.md](BENCHMARKS.md), raw data under [bench/results/](../bench/results/) |
+| 9 | Hook latency and state-size measurements | [PERFORMANCE.md](PERFORMANCE.md) |
+| 10 | Remaining defects and incomplete requirements | [RELEASE_READINESS.md](RELEASE_READINESS.md) "Remaining defects and incomplete requirements" |
+| 11 | Release-readiness assessment | [RELEASE_READINESS.md](RELEASE_READINESS.md) |
+| 12 | Roadmap | [ROADMAP.md](ROADMAP.md) "Next" |
+| 13 | Comparison against the baselines | [BENCHMARKS.md](BENCHMARKS.md) |
+| 14 | Release checklist and changelog | [RELEASING.md](../RELEASING.md), [CHANGELOG.md](../CHANGELOG.md) |
 
 Also kept: [TRACEABILITY.md](TRACEABILITY.md) (one row per requirement, counted by `python3 tools/traceability.py`), [CONTRIBUTING.md](../CONTRIBUTING.md) (gates, commit rules and where to work) and [compat/baseline.json](../compat/baseline.json) (the Claude Code version, docs index, model aliases and model status last reviewed).
 

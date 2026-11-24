@@ -29,7 +29,7 @@ Add `--agent <name>` before the brief to see it for a specific agent.
 
 ## How to split the work
 
-Judge the task on these signals. The router reads the same ones from each brief's wording.
+Judge the task on these signals. The router reads them from each brief's wording, and also performance or capacity limits the brief asks it to design against.
 
 | Signal | Low | High |
 | :- | :- | :- |
@@ -37,7 +37,7 @@ Judge the task on these signals. The router reads the same ones from each brief'
 | Scope | One file or function | Several modules, services or repositories |
 | Risk | Easy to revert, covered by tests | Security, data, money, public API, migrations |
 
-A brief that fixes or hunts a defect routes at complex or above, however small the fix.
+A brief that fixes or hunts a defect routes at complex or above, however small the fix, except for search and check agents, which stop at standard.
 
 - Don't delegate what takes you one or two tool calls.
 - Split into independent pieces and start them in one message so they run in parallel, when they don't touch the same files.

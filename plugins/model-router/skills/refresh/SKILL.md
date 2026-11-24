@@ -28,4 +28,4 @@ allowed-tools:
 
 ## If the current project is the Model Router plugin's own repository
 
-When `plugins/model-router/.claude-plugin/plugin.json` exists in the working directory, offer to apply the recommended changes on a new branch: update the files, run `python3 -m unittest discover -s tests` and `claude plugin validate --strict plugins/model-router`, update `compat/baseline.json` with `python3 plugins/model-router/scripts/model-router.py upstream-check --baseline compat/baseline.json --write`, and add a `CHANGELOG.md` entry. Do not push without the user's go-ahead.
+When `plugins/model-router/.claude-plugin/plugin.json` exists in the working directory, offer to apply the recommended changes on a new branch: update the files, run the gates in `CONTRIBUTING.md`, update `compat/baseline.json` with `python3 plugins/model-router/scripts/model-router.py upstream-check --baseline compat/baseline.json --write`, and add a `CHANGELOG.md` entry. Do not push without the user's go-ahead.
