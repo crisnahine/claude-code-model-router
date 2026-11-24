@@ -1199,7 +1199,8 @@ class SuiteCoverage(unittest.TestCase):
     def test_every_task_class_has_two_tasks(self):
         tasks = run.load_tasks()
         for cls in run.CLASSES:
-            self.assertGreaterEqual(sum(t["class"] == cls for t in tasks), 2, cls)
+            least = 1 if cls in ("document", "operations") else 2  # one task each so far
+            self.assertGreaterEqual(sum(t["class"] == cls for t in tasks), least, cls)
 
     def test_work_dir_code_cannot_exit_the_check_with_success(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1888,7 +1889,7 @@ class HardTier(unittest.TestCase):
                 "security-prefix-check", "rootcause-cached-rates", "design-event-partitions",
                 "research-yanked-release"}
         tasks = {t["id"]: t for t in run.load_tasks()}
-        self.assertEqual({tasks[t]["class"] for t in hard}, set(run.CLASSES))
+        self.assertEqual({tasks[t]["class"] for t in hard}, set(run.CLASSES) - {"document", "analysis", "operations"})
 
 
 class ProbeHelper(unittest.TestCase):
@@ -2159,6 +2160,46 @@ class QualityTier(unittest.TestCase):
             took = time.monotonic() - start
         self.assertFalse(verdict)
         self.assertLess(took, 40)
+
+
+WORK_TASKS = {"legal-services-agreement": ("document", "TERMS.json"),
+              "finance-ledger-reconcile": ("analysis", "MISMATCHES.json"),
+              "finance-runway-forecast": ("analysis", "RUNWAY.json"),
+              "research-study-synthesis": ("research", "SYNTHESIS.json"),
+              "ops-inbox-triage": ("operations", "TRIAGE.json")}
+
+
+class WorkTasks(unittest.TestCase):
+    """The tasks of work that isn't code: an answer file a check grades, built around traps a careless pass falls into."""
+
+    def test_each_work_task_has_its_class_and_names_its_answer_file(self):
+        tasks = {t["id"]: t for t in run.load_tasks()}
+        for task_id, (cls, answer) in WORK_TASKS.items():
+            with self.subTest(task=task_id):
+                task = tasks[task_id]
+                self.assertEqual((task["class"], task["revision"]), (cls, 1))
+                self.assertIn(answer, task["brief"])
+                self.assertTrue((task["dir"] / "solution" / answer).is_file())
+                self.assertFalse(list((task["dir"] / "repo").rglob(answer)))
+
+    def test_each_work_task_has_two_wrong_answers_that_fail_for_a_stated_reason(self):
+        tasks = {t["id"]: t for t in run.load_tasks()}
+        for task_id in WORK_TASKS:
+            with self.subTest(task=task_id):
+                wrong = overlay_dirs(tasks[task_id], "wrong")
+                self.assertGreaterEqual(len(wrong), 2)
+                self.assertTrue(all((w / "expect.txt").is_file() for w in wrong))
+
+    def test_the_work_tasks_ship_the_documents_and_data_their_briefs_describe(self):
+        tasks = {t["id"]: t["dir"] / "repo" for t in run.load_tasks()}
+        for name in ("bank.csv", "gl.csv"):
+            rows = (tasks["finance-ledger-reconcile"] / name).read_text(encoding="utf-8").splitlines()
+            self.assertTrue(380 <= len(rows) - 1 <= 420, name)
+        self.assertEqual(len(list((tasks["research-study-synthesis"] / "studies").glob("*.md"))), 10)
+        self.assertEqual(len(list((tasks["ops-inbox-triage"] / "inbox").glob("*.txt"))), 30)
+        words = len((tasks["legal-services-agreement"] / "Services-Agreement.md").read_text(encoding="utf-8").split())
+        self.assertGreater(words, 3500)  # about eight pages
+
 
 if __name__ == "__main__":
     unittest.main()

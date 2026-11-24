@@ -1,0 +1,1 @@
+excluded is {'S05': 'different_outcome'}, expected

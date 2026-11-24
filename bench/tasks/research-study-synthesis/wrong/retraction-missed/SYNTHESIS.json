@@ -1,0 +1,15 @@
+{
+  "supporting": [
+    "S01",
+    "S02",
+    "S04",
+    "S06",
+    "S08",
+    "S09",
+    "S10"
+  ],
+  "excluded": {
+    "S05": "different_outcome"
+  },
+  "direction": "benefit"
+}

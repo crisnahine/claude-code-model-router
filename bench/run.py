@@ -32,7 +32,8 @@ from modelrouter import config as mrconfig  # noqa: E402
 from modelrouter.registry import Registry  # noqa: E402
 from modelrouter.ledger import read as read_ledger  # noqa: E402
 ROW_SCHEMA = 2  # a row's schema says which harness wrote it; analyze reads a missing key as old only below this
-CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research")
+CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research",
+           "document", "analysis", "operations")
 
 # Every run starts from the same environment: nothing a parent Claude Code session, its plugins or the shell's
 # subagent and effort settings put there, except the provider switches and token auth. A configuration adds its

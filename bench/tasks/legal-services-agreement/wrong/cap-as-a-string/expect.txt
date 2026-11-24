@@ -1,0 +1,1 @@
+liability_cap_usd is 'USD 1,800,000', expected 1800000
