@@ -38,6 +38,10 @@ def model_error(session_id: str | None, agent: object, model: str) -> None:
     store.append_ledger({"event": "model_error", "session": session_id, "agent": agent, "model": model})
 
 
+def gate(session_id: str | None, kind: str) -> None:
+    store.append_ledger({"event": "gate", "session": session_id, "kind": kind})
+
+
 def _tokens(usage: dict) -> dict:
     tokens = {k: int(usage.get(k) or 0) for k in
               ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}

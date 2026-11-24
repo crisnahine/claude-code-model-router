@@ -6,7 +6,7 @@ call, and a call redone after a weak result runs one level higher."""
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from .config import PLUGIN_NAME, Level
 
@@ -131,11 +131,10 @@ def _named_for(name: str, pattern: str, lead: str | None = None) -> bool:
 @dataclass(frozen=True)
 class Role:
     """What an agent is for, which no brief changes: a heavy role is raised to its floor, a light one held to
-    its cap, and a `checker` reports on finished work."""
+    its cap."""
     kind: str | None = None
     floor: Level | None = None
     cap: Level | None = None
-    checker: bool = False
 
 
 ARCHITECT, REVIEWER, DEEP_SOLVER = "architect", "reviewer", "deep-solver"
@@ -149,7 +148,6 @@ ROLES = {
     "light": Role("light", cap=Level.standard),
 }
 _KIND_NAMES = {"heavy": (_HEAVY_NAME, None), "light": (_LIGHT_NAME, _LIGHT_LEAD)}
-_CHECKERS = ("verifier", "reviewer")
 
 
 def role(agent_type: object) -> Role:
@@ -160,7 +158,7 @@ def role(agent_type: object) -> Role:
         short = name.split(":")[-1].lower()
         found = next((ROLES[kind] for kind, (pattern, lead) in _KIND_NAMES.items()
                       if _named_for(short, pattern, lead)), Role())
-    return replace(found, checker=True) if name.endswith(_CHECKERS) else found
+    return found
 
 
 LONG_BRIEF = 4000

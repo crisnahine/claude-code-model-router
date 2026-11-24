@@ -3308,6 +3308,7 @@ class Ledger(Sandbox):
         ledger.spawn("s1", "mod", decision, "d" * 200, kind="subagent")
         ledger.result("s1", "general-purpose", "haiku", "claude-haiku-5-5", "completed", 1200)
         ledger.model_error("s1", "deep", "fable")
+        ledger.gate("s1", "verify")
         ledger.usage(cfg.load(), "s1", "a1", {"model": "claude-opus-5-5", "input_tokens": 1_000_000,
                      "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}, None)
         rows = ledger.read()
@@ -3316,6 +3317,7 @@ class Ledger(Sandbox):
              "escalated_from", "reason", "description", "kind"],
             ["ts", "event", "session", "agent", "asked", "resolved_model", "status", "total_tokens"],
             ["ts", "event", "session", "agent", "model"],
+            ["ts", "event", "session", "kind"],
             ["ts", "event", "session", "agent_id", "model", "input_tokens", "output_tokens", "cache_read_input_tokens",
              "cache_creation_input_tokens", "cost_usd"]])
         self.assertEqual((len(rows[0]["description"]), rows[-1]["cost_usd"]), (120, 4.0))
@@ -3541,8 +3543,10 @@ class Hooks(Sandbox):
         # Text framed as an out-of-band command can trip Claude's prompt-injection defenses (hooks.md, additionalContext).
         self.options(max_tier="opus", verify_gate="true")
         hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": "src/app.py"}})
+        transcript = Path(self.tmp.name) / "main.jsonl"
+        transcript.touch()
         notes = [self.text(hooks.session_start({"session_id": "s1", "model": "claude-haiku-5-5"})),
-                 hooks.stop({"session_id": "s1"})["reason"],
+                 self.text(hooks.stop({"session_id": "s1", "transcript_path": str(transcript)})),
                  self.text(hooks.user_prompt({"session_id": "s1", "prompt": "use haiku to refactor auth"})),
                  self.text(hooks.user_prompt({"session_id": "s1", "prompt": "use fable to refactor auth"}))]
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
@@ -3586,11 +3590,17 @@ class Hooks(Sandbox):
 
 
 class GatesDefault(Sandbox):
-    """verify_gate, the test-run check, is on."""
+    """verify_gate, the check before a turn ends, is on."""
 
     def edited(self) -> None:
         self.session_on("claude-opus-5-5")
         hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": "src/app.py"}})
+
+    def stop(self) -> dict | None:
+        """Stop with a transcript that can be read and shows no check."""
+        transcript = Path(self.tmp.name) / "main.jsonl"
+        transcript.touch()
+        return hooks.stop({"session_id": "s1", "transcript_path": str(transcript)})
 
     def test_the_default(self):
         self.assertTrue(settings.resolve().verify_gate)
@@ -3598,24 +3608,41 @@ class GatesDefault(Sandbox):
     def test_a_hard_request_with_no_edit_ends_its_turn(self):
         self.session_on("claude-haiku-5-5")
         hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
-        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+        self.assertIsNone(self.stop())
 
-    def test_the_test_run_check_runs_by_default_and_can_be_turned_off(self):
+    def test_the_check_asks_by_default_and_can_be_turned_off(self):
         self.edited()
-        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
+        self.assertIn("model-router:verifier", json.dumps(self.stop()))
         self.options(verify_gate="false")
-        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+        self.advance(1)
+        self.edited()
+        self.assertIsNone(self.stop())
 
-    def test_every_falsy_form_turns_the_test_run_check_off(self):
+    def test_every_falsy_form_turns_the_check_off(self):
         for form in ("false", "False", "0", "no", "off"):
             with self.subTest(form=form):
                 self.options(verify_gate=form)
                 self.edited()
-                self.assertIsNone(hooks.stop({"session_id": "s1"}))
+                self.assertIsNone(self.stop())
 
-    def test_the_test_run_check_names_the_reviewer_with_a_saved_diff(self):
+    def test_the_ask_is_guidance_for_any_kind_of_work_and_names_no_reviewer(self):
+        # hooks.md#stop-decision-control: additionalContext keeps the turn going as feedback, not a hook error.
         self.edited()
-        self.assertIn("model-router:reviewer, given the path of a saved diff", hooks.stop({"session_id": "s1"})["reason"])
+        out = self.stop()
+        self.assertEqual(list(out), ["hookSpecificOutput"])
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "Stop")
+        ask = out["hookSpecificOutput"]["additionalContext"]
+        for words in ("tests, build or linter", "model-router:verifier", "a recompute or a diff against known values",
+                      "a reread against the request and its sources", "waits on the user", "one line saying so"):
+            self.assertIn(words, ask)
+        self.assertNotIn("reviewer", ask)
+
+    def test_each_ask_writes_one_gate_row(self):
+        self.edited()
+        self.stop()
+        self.assertIsNone(self.stop())
+        gates_asked = [r for r in self.ledger() if r["event"] == "gate"]
+        self.assertEqual([(r["session"], r["kind"]) for r in gates_asked], [("s1", "verify")])
 
 
 class Gates(Sandbox):
@@ -3632,29 +3659,46 @@ class Gates(Sandbox):
     def edit(self, path="src/app.py"):
         hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": path}})
 
-    def test_asks_once_when_code_changed_and_nothing_checked_it(self):
-        self.edit()
-        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
-        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+    def stop(self, **extra) -> dict | None:
+        """Stop with a readable transcript, where only `ls` ran unless `extra` says otherwise."""
+        if "transcript_path" not in extra:
+            extra["transcript_path"] = self.transcript("ls")
+        return hooks.stop({"session_id": "s1", **extra})
 
-    def test_never_blocks_while_already_continuing_or_when_switched_off(self):
+    def ask(self, **extra) -> str:
+        return self.stop(**extra)["hookSpecificOutput"]["additionalContext"]
+
+    def test_asks_once_when_work_changed_and_nothing_checked_it(self):
         self.edit()
-        self.assertIsNone(hooks.stop({"session_id": "s1", "stop_hook_active": True}))
+        self.assertIn("model-router:verifier", self.ask())
+        self.assertIsNone(self.stop())
+
+    def test_never_asks_while_already_continuing_or_when_switched_off(self):
+        self.edit()
+        self.assertIsNone(self.stop(stop_hook_active=True))
         self.options(verify_gate="false")
-        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+        self.assertIsNone(self.stop())
         self.options(verify_gate="true", routing_mode="advise")
-        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+        self.assertIsNone(self.stop())
+
+    def test_no_ask_when_the_transcript_cant_be_read(self):
+        # Under --no-session-persistence no transcript is saved, so a check that ran can't be seen.
+        self.edit()
+        for transcript in ({"transcript_path": None}, {"transcript_path": str(Path(self.tmp.name) / "gone.jsonl")},
+                           {"transcript_path": self.tmp.name}):
+            self.assertIsNone(self.stop(**transcript), transcript)
+        self.assertIn("model-router:verifier", self.ask())
 
     def test_edits_outside_the_project_dont_count(self):
         outside = Path(self.tmp.name) / "cache" / "findings.json"
         hooks.post_edit({"session_id": "s1", "cwd": str(self.project), "tool_input": {"file_path": str(outside)}})
-        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+        self.assertIsNone(self.stop())
         sub = self.project / "pkg"
         sub.mkdir()
         hooks.post_edit({"session_id": "s1", "cwd": str(sub), "tool_input": {"file_path": "../../cache/findings.json"}})
-        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+        self.assertIsNone(self.stop())
         hooks.post_edit({"session_id": "s1", "cwd": str(sub), "tool_input": {"file_path": "../src/app.py"}})
-        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
+        self.assertIn("model-router:verifier", self.ask())
 
     def test_a_symlinked_cwd_matches_the_real_path(self):
         link = Path(self.tmp.name) / "link"
@@ -3665,45 +3709,47 @@ class Gates(Sandbox):
         with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": str(link)}):
             hooks.post_edit({"session_id": "s1", "cwd": str(link),
                              "tool_input": {"file_path": str(self.project / "src" / "app.py")}})
-        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
+        self.assertIn("model-router:verifier", self.ask())
 
     def test_an_edit_beside_a_moved_cwd_still_counts(self):
         sub = self.project / "pkg"
         sub.mkdir()
         hooks.post_edit({"session_id": "s1", "cwd": str(sub),
                          "tool_input": {"file_path": str(self.project / "lib" / "util.py")}})
-        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
+        self.assertIn("model-router:verifier", self.ask())
 
-    def test_docs_only_edits_dont_count(self):
-        self.edit("README.md")
-        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+    def test_an_edit_to_any_project_file_counts(self):
+        # A memo or a table of figures is work too.
+        for path in ("memo.md", "notes.txt", "figures.csv", "FINDING.json"):
+            self.advance(1)
+            self.edit(path)
+            self.assertIn("a reread against the request", self.ask(), path)
 
-    def test_a_checker_agent_or_a_test_command_satisfies_it(self):
+    def test_starting_a_checker_is_not_a_check_and_a_test_command_is(self):
         self.edit()
         self.pre("model-router:verifier", "run the tests")
-        self.assertIsNone(hooks.stop({"session_id": "s1"}))
+        self.assertIn("model-router:verifier", self.ask())
+        self.advance(1)
         self.edit()
-        self.assertIsNone(hooks.stop({"session_id": "s1", "background_tasks": [{"agent_type": "acme:reviewer"}]}))
-        self.assertIsNone(hooks.stop({"session_id": "s1", "transcript_path": self.transcript("npm run test")}))
+        self.assertIsNone(self.stop(transcript_path=self.transcript("npm run test")))
 
-    def test_a_workflow_or_agent_still_running_holds_the_gates_and_keeps_the_ask(self):
-        # A workflow runs in the background, so the main turn can end mid-run; its edits aren't done yet.
+    def test_background_work_still_running_holds_the_check_and_keeps_the_ask(self):
+        # The turn is paused, not done: a workflow, agent, shell or teammate can still change the work.
         self.edit()
-        for task in ({"type": "workflow", "name": "audit"}, {"type": "subagent", "agent_type": "acme:implementer"}):
-            self.assertIsNone(hooks.stop({"session_id": "s1", "background_tasks": [task]}))
-        shell = {"type": "shell", "command": "npm run dev"}
-        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1", "background_tasks": [shell]})["reason"])
+        for task in ({"type": "workflow", "name": "audit"}, {"type": "subagent", "agent_type": "acme:implementer"},
+                     {"type": "shell", "command": "npm run dev"}, {"type": "teammate"}):
+            self.assertIsNone(self.stop(background_tasks=[task]), task)
+        self.assertIn("model-router:verifier", self.ask())
 
     def test_an_old_test_command_doesnt_count(self):
         self.edit()
-        out = hooks.stop({"session_id": "s1", "transcript_path": self.transcript("pytest", "2001-01-01T00:00:00Z")})
-        self.assertIsNotNone(out)
+        self.assertIsNotNone(self.stop(transcript_path=self.transcript("pytest", "2001-01-01T00:00:00Z")))
 
     def test_a_test_command_in_the_same_message_as_the_edit_counts(self):
         self.edit()
         edited = store.load_entry("edits", "s1")["edited_at"]
         stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(edited - 2))
-        self.assertIsNone(hooks.stop({"session_id": "s1", "transcript_path": self.transcript("pytest", stamp)}))
+        self.assertIsNone(self.stop(transcript_path=self.transcript("pytest", stamp)))
 
     def test_check_command_patterns(self):
         for command in ("pytest -q", "npm test", "pnpm run lint", "cargo test", "go vet ./...", "tsc --noEmit",
@@ -3716,19 +3762,31 @@ class Gates(Sandbox):
                         "timeout 200 uv run --python 3.9 python -m unittest discover -s tests",
                         "xargs bundle exec rspec < f", 'PATH="$HOME/.cargo/bin:$PATH" cargo clippy --workspace',
                         "$P -m pytest -q", "sudo -E make check", "uv pip install -e . && pytest",
-                        "rspec spec 2>&1 | grep -c failures"):
+                        "rspec spec 2>&1 | grep -c failures",
+                        "python manage.py test", "bin/rails test", "rails test test/models", "bundle exec rake test",
+                        "php artisan test", "node --test", "bazel test //...", "sbt test", "zig test src/main.zig",
+                        "zig build test", "pnpm -r test", "pnpm --filter web test", "python -I _scratch_check.py",
+                        "./run_tests.sh", "bash scripts/check.sh", "node test/links.spec.mjs", "python3 test_pages.py",
+                        "python tests.py", "npm run type-check", "npm t", "flutter test", "black --check .",
+                        "prettier --check ."):
             self.assertTrue(gates.is_check(command), command)
         for command in ("ls -la", "git status", "cat test.txt", "pip install pytest", "npm install --save-dev jest eslint",
                         "which pytest", "grep -rn ruff pyproject.toml", "cat jest.config.js", "brew install golangci-lint",
                         "git commit -m 'Run mypy in CI'", "git commit -m 'Run make test in CI'",
                         "tail -50 rspec.log", "command -v pytest",
-                        "uv tool install ruff", "yarn add -D vitest", "CI=1 sudo pip3 install tox"):
+                        "uv tool install ruff", "yarn add -D vitest", "CI=1 sudo pip3 install tox",
+                        "vim pytest.ini", "code jest.config.js", "cp jest.config.js /tmp/", "cd node_modules/jest",
+                        "cat > tests/test_a.py <<'EOF'\nimport pytest\nfrom unittest import mock\nEOF",
+                        "npm run build", "cargo build --release", "go build ./...", "python3 gen_checksums.py",
+                        "python3 make_testdata.py", "bash ./install-test-deps.sh", "python checkout.py",
+                        "python3 checkpoint_convert.py", "node specials.js", "python testimonials.py",
+                        "python3 spectrum.py", "bash checkout.sh", "./checkin.sh", "python3 specs_to_json.py",
+                        "python -c 'import pytest'", "pytest --collect-only -q", "black ."):
             self.assertFalse(gates.is_check(command), command)
 
     def test_installing_a_test_tool_after_an_edit_still_asks(self):
         self.edit()
-        out = hooks.stop({"session_id": "s1", "transcript_path": self.transcript("pip install pytest")})
-        self.assertIn("model-router:verifier", out["reason"])
+        self.assertIn("model-router:verifier", self.ask(transcript_path=self.transcript("pip install pytest")))
 
 
 class SubagentChecks(Sandbox):
@@ -5082,13 +5140,6 @@ class SpawnPaths(Sandbox):
                 taken = self.locks_taken(lambda: self.spawn_again(path, session, HARD))
                 self.assertEqual(taken, want)
 
-    def test_a_route_that_cant_be_written_still_notes_a_check(self):
-        for path in ("fallback", "mod"):
-            with self.subTest(path=path):
-                with mock.patch.object(calls, "routed", side_effect=OSError("disk full")):
-                    self.spawn_on(path, f"s-{path}", "model-router:verifier", LOOKUP)
-                self.assertIn("verified_at", store.load_entry("edits", f"s-{path}"))
-
     def test_a_result_leaves_the_same_records_on_both_paths(self):
         for number, path in enumerate(("fallback", "mod")):
             self.spawn_on(path, f"s{number}", "general-purpose", LOOKUP)
@@ -5415,14 +5466,14 @@ class Roles(unittest.TestCase):
     def test_the_table_carries_what_each_of_our_agents_is(self):
         role = profile.role
         self.assertEqual(role("model-router:architect"), profile.Role("heavy", floor="complex"))
-        self.assertEqual(role("model-router:reviewer"), profile.Role("heavy", floor="complex", checker=True))
+        self.assertEqual(role("model-router:reviewer"), profile.Role("heavy", floor="complex"))
         self.assertEqual(role("model-router:deep-solver"), profile.Role("heavy", floor="hardest"))
-        self.assertEqual(role("model-router:verifier"), profile.Role("light", cap="standard", checker=True))
+        self.assertEqual(role("model-router:verifier"), profile.Role("light", cap="standard"))
         self.assertEqual(role("model-router:implementer"), profile.Role())
 
     def test_another_plugins_agent_is_only_a_kind(self):
         self.assertEqual(profile.role("acme:deep-solver"), profile.Role("heavy", floor="complex"))
-        self.assertEqual(profile.role("acme:code-reviewer"), profile.Role("heavy", floor="complex", checker=True))
+        self.assertEqual(profile.role("acme:code-reviewer"), profile.Role("heavy", floor="complex"))
         self.assertEqual(profile.role("scout"), profile.Role("light", cap="standard"))
 
     def test_a_name_that_only_contains_a_role_word_has_no_role(self):

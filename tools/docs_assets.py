@@ -964,10 +964,10 @@ def diagram_stop_checks() -> str:
     arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
     out.append(f'<path d="M460 138V176M455 171L460 176L465 171" {arrow}/>')
     x, name = 255, "verify_gate"
-    when = ["code in the project changed, and no test, lint,", "type-check or build ran after the last edit,",
-            "and no verifier or reviewer is still running."]
-    then = ["Asks once for a test run (the verifier)", "before the turn ends. It is the failure signal",
-            "the router reruns on. Turn it off in /config."]
+    when = ["a file in the project was edited, and no", "check command ran after the last edit, and",
+            "the transcript can be read."]
+    then = ["Asks once for the work's own check: tests", "for code, a recompute for figures, a reread",
+            "for a document. Turn it off in /config."]
     out.append(card(x, 182, 410, 252, rx=12))
     out.append(text(x + 20, 212, name, "mono ink b", 14))
     p, _ = pill(x + 26 + width_of(name, 14, True), 194, "on by default", cls="r1", tcls="tag", size=11.5, h=24, pad=10)
@@ -977,8 +977,8 @@ def diagram_stop_checks() -> str:
     out.append(f'<path d="M{x + 20} 336H{x + 390}" class="ln" stroke-width="1"/>')
     out.append(text(x + 20, 360, "Then", "mut b", 12))
     out.append(lines(x + 62, 360, then, "ink", 13, 19))
-    out.append(text(32, 464, "A workflow or a background subagent still running holds the check, since the turn "
-                    "is paused, not done.", "mut", 13))
+    out.append(text(32, 464, "A workflow, subagent, shell or teammate still running holds the check, since the "
+                    "turn is paused, not done.", "mut", 13))
     out.append('<circle cx="0" cy="0" r="6" class="rt sa"/>')
     stops = [(0, "transform:translate(460px,138px);opacity:0"), (8, "transform:translate(460px,138px);opacity:1"),
              (28, "transform:translate(460px,182px);opacity:1"), (44, "transform:translate(460px,182px);opacity:0"),
@@ -986,7 +986,7 @@ def diagram_stop_checks() -> str:
     css = ".sa{opacity:0;animation:sa 5s linear infinite}" + keyframes("sa", stops)
     title = "The check before a turn ends: verify_gate"
     label = ("When Claude is about to end a turn, the Stop hook runs one check. verify_gate, on by default, asks "
-             "once for a test run when code changed and nothing checked it.")
+             "once for the work's own check when project files changed and nothing checked them.")
     return svg(w, h, title, label, "".join(out), css)
 
 

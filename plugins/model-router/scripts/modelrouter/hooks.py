@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import calls, fallback, gates, health, intake, mod, profile, request, session, settings, upstream
+from . import calls, fallback, gates, health, intake, ledger, mod, profile, request, session, settings, upstream
 from . import config as cfg
 from .registry import Registry
 
@@ -207,8 +207,11 @@ def post_edit(hook_input: dict) -> dict | None:
 
 def stop(hook_input: dict) -> dict | None:
     snap = settings.Snapshot(hook_input)
-    reason = gates.before_stop(hook_input, snap.options)
-    return {"decision": "block", "reason": reason} if reason else None
+    ask = gates.before_stop(hook_input, snap.options)
+    if not ask:
+        return None
+    ledger.gate(hook_input.get("session_id"), "verify")
+    return _context("Stop", ask)
 
 
 def model_switch(hook_input: dict) -> dict | None:
