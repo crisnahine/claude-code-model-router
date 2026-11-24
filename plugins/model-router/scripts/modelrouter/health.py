@@ -11,9 +11,11 @@ from . import store
 
 # How long a model is routed around after each run of trouble: 1 day, then 3, then 7.
 OUTAGE_DAYS = (1, 3, 7)
+# "model" only as a word of its own: an unknown agent's error quotes names like data-modeler.
 MODEL_ERROR = re.compile(
-    r"model.{0,80}(?:not[ _]found|not available|unavailable|does not exist|not supported|no access|"
-    r"not allowed|invalid|permission)|(?:not_found_error|invalid model|unknown model).{0,80}", re.I | re.S)
+    r"(?<![\w:-])model(?![\w-]).{0,80}(?:not[ _]found|not available|unavailable|does not exist|not supported|"
+    r"no access|not allowed|invalid|permission)|(?:not_found_error|(?:invalid|unknown) model(?![\w-])).{0,80}",
+    re.I | re.S)
 REFUSED = "a call rewritten to this model came back without having run"
 
 
