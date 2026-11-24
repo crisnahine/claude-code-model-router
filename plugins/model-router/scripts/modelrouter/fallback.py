@@ -6,7 +6,6 @@ from __future__ import annotations
 from . import ladder, settings, spawn, store
 from . import config as cfg
 from . import router
-from .registry import Registry
 
 # shortcut: a refused call re-issued within this many seconds is rewritten again; key on a message id if hooks get one
 REFUSED_AFTER = 5
@@ -17,7 +16,7 @@ def route(hook_input: dict, snap: settings.Snapshot) -> dict | None:
     one deny that holds the user's cap."""
     spawned = spawn.decide(hook_input, snap)
     session_id, decision = hook_input.get("session_id"), spawned.decision
-    _guard(session_id, spawned.key, decision, snap.registry, snap.options)
+    _guard(session_id, spawned)
     spawn.record(spawned, "fallback")
     if decision["action"] == "rewrite":
         # A rewrite auto mode denies after review gets no result, so it stays pending and
@@ -58,13 +57,13 @@ def refused(session_id: str | None, key: str) -> dict | None:
     return rewrite
 
 
-def _guard(session_id: str | None, key: str, decision: router.Decision, reg: Registry,
-           options: settings.Settings) -> None:
+def _guard(session_id: str | None, spawned: spawn.Spawn) -> None:
     """We rewrote this very call before and no result came back: the rewrite wasn't
     accepted, or something else stopped the call. Rewriting it again could loop."""
+    decision, reg, options = spawned.decision, spawned.snap.registry, spawned.snap.options
     if decision["action"] != "rewrite":
         return
-    earlier = refused(session_id, key)
+    earlier = refused(session_id, spawned.key)
     if earlier is None:
         return
     # This copy runs no climb, and the first copy's row already names it.
@@ -76,7 +75,8 @@ def _guard(session_id: str | None, key: str, decision: router.Decision, reg: Reg
             f"{untouched}. Re-issue it with model: \"{decision['model']}\"."))
         return
     # The route records what runs untouched, so a later redo climbs from that, not from the refused rewrite.
-    decision.update(action="keep", model=None, effort=None, level=ladder.rung(reg, untouched),
+    ran_at = spawn._runs_at(None, untouched, spawned.facts, spawned.snap)
+    decision.update(action="keep", model=None, effort=None, level=ladder.rung(reg, untouched, ran_at),
                     repeat_of=earlier.get("model"), reason=(
                         "this call was rewritten once and came back without having run, so it is passed through "
                         "unchanged"))

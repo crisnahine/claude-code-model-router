@@ -75,14 +75,14 @@ This release changes who picks a subagent's model. Claude now names the model an
 - Hook input is read as bytes, so its decoding no longer follows the system's locale.
 - `/model-router:models json`, or any word other than `reset`, shows the table instead of an argument error.
 - A bench run with `plugin_ref` no longer leaves an exported copy of the plugin in the system's temp folder.
-- A command counts as a check only when a check tool is the command it runs, past wrappers such as `sudo`, `npx`, `uv run` or `docker exec`. A commit message or PR body written through a heredoc, a quoted message, `python -m pip install`, `man pytest`, `rm`, and `pytest --version`, `--help` or `--co` no longer count, so the ask before a turn ends still comes. `cargo fmt --check`, `yarn workspace web test`, `npx turbo run test`, `make -C sub test` and a shell script given a test file now count.
+- A command counts as a check only when a check tool is the command it runs, past wrappers such as `sudo`, `npx`, `uv run`, `docker exec`, `cross-env`, `nix develop -c` or `op run --`. A commit message or PR body written through a heredoc, a quoted message, `python -m pip install`, `man pytest`, `rm`, `pytest --version`, `--help`, `--co` or `--fixtures`, `tsc --init` and `make -n test` no longer count, so the ask before a turn ends still comes. `cargo fmt --check`, `yarn workspace web test`, `npx turbo run test`, `nx run web:test`, `make -C sub test` and a shell script given a test file now count.
 - A check command that was refused, denied by a hook or never started no longer counts as a check that ran.
 - The check before a turn ends waits for every background task, such as a monitor, a cloud session or an MCP task, so it no longer spends its one ask while the turn is only paused.
 - Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, a model error no longer brings a note asking Claude to re-issue the call on another model, since the pin runs it on the same one.
 - The session-start note no longer says the router fills in effort under `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT`. Under `CLAUDE_CODE_EFFORT_LEVEL` it says an effort on a call has no effect, and under `max_tier` it says a call that names no model stays within the cap.
-- The notice for `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` says the pin covers only a workflow agent whose script names no model.
-- Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, the session-start note names the pinned model only when it is a short plain name, so text a repository's settings put in that variable doesn't reach Claude as the plugin's own words.
-- A call the refused-rewrite guard passes through is recorded at the model and effort it runs at, so a later redo climbs from that run and doesn't skip a step.
+- The notice for `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` and `/model-router:models` say the pin covers only a workflow agent whose script names no model.
+- Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, the session-start note names the pinned model only when it is a short plain name, and so does `/model-router:models` for `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`, so text a repository's settings put in those variables doesn't reach Claude as the plugin's own words.
+- A call the refused-rewrite guard passes through is recorded at the model, effort and level it runs at, so a later redo climbs from that run and doesn't skip a step.
 
 ### Added
 

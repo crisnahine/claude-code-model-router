@@ -28,18 +28,26 @@ _PACKAGE_MANAGERS = {"npm", "pnpm", "yarn", "bun"}
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 # The short flag that takes inline code, last in a cluster as in `ruby -pe`, and its long forms.
 _INLINE = {"python": ("c", ()), "node": ("ep", ("--eval", "--print")), "ruby": ("e", ()), "php": ("r", ())}
-_ONLY_PRINTS = {"--version", "--help", "-h", "--collect-only", "--co", "--list", "--listTests", "--list-tests"}
+_ONLY_PRINTS = {"--version", "--help", "-h", "--collect-only", "--co", "--list", "--listTests", "--list-tests",
+                "--fixtures", "--markers", "--showConfig", "--init", "--install-types", "--auto-gen-config",
+                "--dry-run", "--just-print", "--recon"}
 # Each wrapper's own arguments before the command it runs: a container or service, a time limit.
 _WRAPPERS = {**dict.fromkeys(("sudo", "env", "time", "nice", "nohup", "stdbuf", "xargs", "npx", "pnpx", "bunx",
                               "uvx", "nyc", "c8", "if", "then", "else", "elif", "do", "while", "until", "!", "{",
+                              "command", "exec", "eval", "watch", "xvfb-run", "cross-env", "caffeinate", "unbuffer",
+                              "chronic", "ionice", "arch", "elixir -S", "devbox run",
                               "uv run", "uv tool run", "pipx run", "poetry run", "pipenv run", "pdm run", "hatch run",
                               "rye run", "conda run", "mamba run", "pixi run", "bundle exec", "rbenv exec",
                               "asdf exec"), 0),
              **dict.fromkeys(("timeout", "rvm", "nvm exec", "mise exec", "mise x", "docker exec", "docker run",
                               "docker compose run", "docker compose exec", "docker-compose run", "docker-compose exec",
-                              "podman exec", "podman run", "kubectl exec"), 1)}
+                              "podman exec", "podman run", "kubectl exec", "direnv exec", "nix develop", "nix shell",
+                              "flock", "script"), 1),
+             **dict.fromkeys(("command -v", "command -V"), None)}  # these only say where a command is
+# The flag whose value is a whole command line, read as `sh -c` reads one.
+_LINE_FLAGS = {"nix-shell": ("--run", "--command"), "env": ("-S", "--split-string")}
 _COMMANDS = (_RUNNERS | set(_SUBCOMMAND) | _TASK_FIRST | _TASK_ANY | _PACKAGE_MANAGERS | _SHELLS | set(_INLINE)
-             | {key.split()[0] for key in (*_WRAPPERS, *_FORMATTERS)} | {"coverage"})
+             | set(_LINE_FLAGS) | {key.split()[0] for key in (*_WRAPPERS, *_FORMATTERS)} | {"coverage"})
 _PYTHON = re.compile(r"python[\d.]*")
 _VARIABLE = re.compile(r"\$\{?\w+\}?")  # "$PY -m pytest": a variable that holds the interpreter
 _ASSIGN = re.compile(r"[A-Za-z_]\w*\+?=")
@@ -144,27 +152,78 @@ def _without_heredocs(command: str) -> str:
         return command
     kept: list[str] = []
     waiting: list[tuple[str, str]] = []
+    open_: list[str] = []
     for line in command.split("\n"):
         if waiting:
             dash, delimiter = waiting[0]
-            if (line.lstrip("\t") if dash else line).rstrip("\r") == delimiter:
-                waiting.pop(0)
-            continue
+            line = (line.lstrip("\t") if dash else line).rstrip("\r")
+            # Inside `$(...)` the closing parenthesis can follow the delimiter, and the command goes on after it.
+            if line != delimiter and not ("(" in open_ and line.startswith(delimiter + ")")):
+                continue
+            waiting.pop(0)
+            line = line[len(delimiter):]
+            if waiting or not line:
+                continue
         kept.append(line)
+        opened = _heredocs(line, open_)
         if not any(_base(words[j]) in _SHELLS for words in _parts(line)
                    for j in [_unwrap(words, _find(words, 0, 0, _known))] if j < len(words)):
-            waiting = [(m.group(1), m.group(3)) for m in _HEREDOC.finditer(line)]
+            waiting = opened
     return "\n".join(kept)
+
+
+def _heredocs(line: str, open_: list[str]) -> list[tuple[str, str]]:
+    """The heredocs a line opens as (dash, delimiter): a `<<` outside quotes, comments and arithmetic. `open_` holds
+    the quotes and parentheses still open, carried from line to line."""
+    found: list[tuple[str, str]] = []
+    j = 0
+    while j < len(line):
+        c, top = line[j], open_[-1] if open_ else ""
+        if top == "'":
+            if c == "'":
+                open_.pop()
+        elif c == "\\":
+            j += 1
+        elif top == '"' and c == '"':
+            open_.pop()
+        elif line.startswith("$((", j) or (top != '"' and line.startswith("((", j)):
+            open_.append("((")
+            j += 2 if c == "$" else 1
+        elif line.startswith("$(", j):
+            open_.append("(")
+            j += 1
+        elif top == "((":
+            if line.startswith("))", j):
+                open_.pop()
+                j += 1
+        elif top == '"':
+            pass
+        elif c in "'\"(":
+            open_.append(c)
+        elif c == ")" and top == "(":
+            open_.pop()
+        elif c == "#" and (j == 0 or line[j - 1] in " \t;&|()"):
+            break
+        elif m := _HEREDOC.match(line, j):
+            found.append((m.group(1), m.group(3)))
+            j = m.end()
+            continue
+        j += 1
+    return found
 
 
 def _base(word: str) -> str:
     return word.rsplit("/", 1)[-1]
 
 
+def _named(word: str) -> bool:
+    """A check tool, a wrapper or an interpreter, by its name."""
+    return _base(word) in _COMMANDS or bool(_PYTHON.fullmatch(_base(word)))
+
+
 def _known(word: str) -> bool:
     """A word that names a command this module reads: a check tool, a wrapper, an interpreter or a check script."""
-    return (_base(word) in _COMMANDS or bool(_PYTHON.fullmatch(_base(word)) or _VARIABLE.fullmatch(word)
-                                             or _SCRIPT.fullmatch(word)))
+    return _named(word) or bool(_VARIABLE.fullmatch(word) or _SCRIPT.fullmatch(word))
 
 
 def _find(words: list[str], i: int, positionals: int, wanted) -> int:
@@ -191,8 +250,18 @@ def _unwrap(words: list[str], i: int) -> int:
         name, rest = _base(words[i]), words[i + 1:i + 3]
         key = next((k for k in (" ".join([name, *rest]), " ".join([name, *rest[:1]]), name) if k in _WRAPPERS), None)
         if key is None:
+            # `op run -- pytest`: a command this module doesn't know runs the one named after its `--`.
+            k = words.index("--", i + 1) if not _known(words[i]) and "--" in words[i + 1:] else len(words)
+            if k + 1 < len(words) and _named(words[k + 1]):
+                i = k + 1
+                continue
             return i
-        i = _find(words, i + key.count(" ") + 1, _WRAPPERS[key], _known)
+        if _WRAPPERS[key] is None:
+            return len(words)
+        command = _find(words, i + key.count(" ") + 1, _WRAPPERS[key], _known)
+        if any(w in _LINE_FLAGS.get(key, ()) for w in words[i + 1:command]):
+            return i
+        i = command
     return i
 
 
@@ -203,6 +272,9 @@ def _runs_check(words: list[str], i: int) -> bool:
         name = _base(word)
         pair = " ".join([name, *words[i + 1:i + 2]])
         python = bool(_PYTHON.fullmatch(name) or _VARIABLE.fullmatch(word)) or pair == "coverage run"
+        if name in _LINE_FLAGS:
+            k = next((k for k in range(i + 1, len(words)) if words[k] in _LINE_FLAGS[name]), len(words))
+            return k + 1 < len(words) and is_check(words[k + 1])
         if name in _SHELLS:
             for k in range(i + 1, len(words)):
                 flag = words[k]
@@ -249,8 +321,12 @@ def _runs_check(words: list[str], i: int) -> bool:
             k = _find(words, i + 1, 0, _TASK.fullmatch)
             return k < len(words) and bool(_TASK.fullmatch(words[k]))
         if name in _TASK_ANY:
-            # Gradle's build task runs its check task; any other bare build only compiles.
-            return any(_TASK.fullmatch(w) or (w == "build" and name.startswith("gradle")) for w in rest)
+            if name.endswith("make") and "-n" in rest:  # make's dry run
+                return False
+            # A task may carry its project, as in `gradle :app:test` or `nx run web:lint`. Gradle's build task runs
+            # its check task; any other bare build only compiles.
+            return any(_TASK.fullmatch(w) or _TASK.fullmatch(task := w.rsplit(":", 1)[-1])
+                       or (task == "build" and name.startswith("gradle")) for w in rest)
         return _script_runs_check(words, i)
     return False
 

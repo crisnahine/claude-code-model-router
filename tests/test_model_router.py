@@ -4116,7 +4116,8 @@ class MachineReadable(Sandbox):
         self.assertIsNone(self.json_out("models")["workflow_model"])
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="claude-opus-5-5")
         self.assertEqual(self.json_out("models")["workflow_model"], "claude-opus-5-5")
-        self.assertIn("pins every workflow agent to claude-opus-5-5, so Model Router sets only their effort", self.out("models"))
+        self.assertIn("pins every workflow agent whose script names no model to claude-opus-5-5, so Model Router sets "
+                      "only their effort", self.out("models"))
         note = hooks.session_start({"session_id": "s1"})["systemMessage"]
         self.assertIn("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on claude-opus-5-5", note)
         self.assertIn("so the router sets only their effort", note)
