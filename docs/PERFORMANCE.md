@@ -1,6 +1,4 @@
 <!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
-<p align="center"><img src="assets/banner-performance.svg" width="880" alt="Performance: What does the router cost in time and disk?"></p>
-
 <p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="research/caller-levels-and-redo.md">Redo research</a> &nbsp;&middot;&nbsp; Next: <a href="SECURITY.md">Security</a></p>
 <!-- End of page head. -->
 

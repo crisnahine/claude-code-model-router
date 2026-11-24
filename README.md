@@ -1,13 +1,6 @@
 # Claude Code Model Router: the right Claude model for every subagent
 
 <p align="center">
-  <picture>
-    <source media="(max-width: 600px)" srcset="docs/assets/headline-phone.svg">
-    <img src="docs/assets/headline.svg" width="100%" alt="Stop paying for the wrong model. Four agent calls that would all run on the session's model run on Haiku, Sonnet, Opus and Fable instead, each at the effort its brief needs.">
-  </picture>
-</p>
-
-<p align="center">
   <a href="CHANGELOG.md"><img src="docs/assets/badge-version.svg" height="28" alt="version 0.1.2"></a>
   <a href="#install-the-claude-code-plugin"><img src="docs/assets/badge-claude-code.svg" height="28" alt="Claude Code 2.1.329 or later"></a>
   <a href="#install-the-claude-code-plugin"><img src="docs/assets/badge-python.svg" height="28" alt="Python 3.9 or later"></a>
@@ -52,7 +45,7 @@ Model Router uses only the extension points Claude Code documents (the plugin ma
 - It starts low and re-runs failures one level higher, modeled on Anthropic's finding that low effort with failures re-run at high costs less than running every task at high ([cost and intelligence](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence#re-run-failures-at-higher-effort)).
 - Its hooks fail open: a bug never blocks a tool call, a spawn or a session ([exit codes](https://code.claude.com/docs/en/hooks.md#exit-code-output)).
 
-The saving comes from Claude Code's own advice to put simple subagents on Haiku ([best practices](https://code.claude.com/docs/en/best-practices.md#know-what-subagents-cost)), applied to every call. The banner above shows each model's price per million input tokens. [Built on the docs](docs/CLAUDE_CODE_DOCS.md) lists every rule, its doc page and its test, and where the plugin goes past the docs.
+The saving comes from Claude Code's own advice to put simple subagents on Haiku ([best practices](https://code.claude.com/docs/en/best-practices.md#know-what-subagents-cost)), applied to every call. [Built on the docs](docs/CLAUDE_CODE_DOCS.md) lists every rule, its doc page and its test, and where the plugin goes past the docs.
 
 ## Install the Claude Code plugin
 
@@ -91,13 +84,6 @@ Nothing has to be set: the six options in `/config` under the plugin start at th
 4. Later, `/model-router:usage` shows what ran where and what it cost, and `/model-router:models` shows the models in use and anything capped, unavailable or routed around. To change how it routes, see [Configuration](#configuration).
 
 ## How it works: picking a subagent model
-
-<p align="center">
-  <picture>
-    <source media="(max-width: 600px)" srcset="docs/assets/hero-phone.svg">
-    <img src="docs/assets/hero.svg" width="100%" alt="Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level to complex, Opus at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.">
-  </picture>
-</p>
 
 Each subtask is scored from its own brief: risk (security, data, migrations, public APIs), scope (several modules or services), load, ambiguity (design, root cause), whether it changes something or only reads, and what the agent's name says it is for. That gives one of five levels:
 

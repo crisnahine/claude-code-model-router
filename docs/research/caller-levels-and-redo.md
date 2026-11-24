@@ -1,6 +1,4 @@
 <!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
-<p align="center"><img src="../assets/banner-research-redo.svg" width="880" alt="Redo research: Who names a call&#x27;s level, and what marks a redo?"></p>
-
 <p align="center"><a href="../../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="../README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="quality-first-routing.md">Quality research</a> &nbsp;&middot;&nbsp; Next: <a href="../PERFORMANCE.md">Performance</a></p>
 <!-- End of page head. -->
 

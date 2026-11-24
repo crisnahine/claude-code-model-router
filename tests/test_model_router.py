@@ -368,10 +368,8 @@ class Shipped(unittest.TestCase):
 
     def test_the_marketplace_names_the_product_model_router(self):
         market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
-        for text in (market["description"], market["plugins"][0]["description"]):
-            self.assertIn("Model Router, a plugin for Claude Code", text)
-            self.assertNotIn("Claude Code Model Router", text)
-            self.assertNotIn("Claude Code model router", text)
+        self.assertIn("Model Router, a plugin for Claude Code", market["description"])
+        self.assertNotIn("Claude Code Model Router", market["description"])
 
     def test_ci_tests_the_oldest_python_the_launcher_accepts(self):
         entry = (SCRIPTS / "model-router.py").read_text(encoding="utf-8")
@@ -386,14 +384,13 @@ class Shipped(unittest.TestCase):
         config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
         self.assertEqual(set(upstream.model_families(baseline["aliases"])), set(config["models"]))
 
-    def test_readme_and_description_keep_their_search_phrases(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    def test_the_plugin_has_one_short_description(self):
+        # /plugin shows the marketplace entry's description over plugin.json's, so the entry sets none.
+        market = json.loads((ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8"))
         description = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["description"]
-        self.assertTrue(readme.startswith("# Claude Code Model Router"))
-        for phrase in ("Claude Code plugin", "multi-model orchestration", "autonomous", "Claude model routing"):
-            self.assertIn(phrase, readme)
-        for phrase in ("Claude Code model router", "Claude model routing", "multi-model orchestration"):
-            self.assertIn(phrase, description)
+        self.assertNotIn("description", market["plugins"][0])
+        self.assertLessEqual(description.count(". ") + 1, 2, description)
+        self.assertLessEqual(len(description.split()), 40, description)
 
     def test_nothing_still_carries_the_old_name(self):
         old = re.compile("orchestr" + "ator", re.I)
@@ -4129,16 +4126,6 @@ class Reports(Sandbox):
             self.assertIn(f"Level: **{d['level']}**", text)
             self.assertIn(f"Model: **{d['model'] or 'left as it is'}**, effort: {d['effort'] or 'unchanged'}.", text)
             self.assertIn(f"Why: {d['reason']}.", text)
-
-    def test_the_readme_banner_shows_each_brief_on_the_level_explain_gives(self):
-        sys.path.insert(0, str(ROOT / "tools"))
-        import docs_assets
-        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
-        for brief, level in docs_assets.CALLS:
-            _, model, effort = docs_assets.RUNG[level]
-            text = report.explain(snap, brief)
-            self.assertIn(f"Level: **{level}**", text, brief)
-            self.assertIn(f"Model: **{model.lower()}**, effort: {effort}.", text, brief)
 
     def test_explain_reads_a_find_that_hunts_a_defect_as_complex_and_a_find_that_looks_up_as_lookup(self):
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})

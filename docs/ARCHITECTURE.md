@@ -1,6 +1,4 @@
 <!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
-<p align="center"><img src="assets/banner-architecture.svg" width="880" alt="Architecture: How do two paths share one router?"></p>
-
 <p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Next: <a href="../GLOSSARY.md">Glossary</a></p>
 <!-- End of page head. -->
 
@@ -132,7 +130,7 @@ Some details of how the rules apply:
 
 ### Redo escalation
 
-![Redo escalation: a call routed at standard comes back, and the same call issued again runs at complex.](assets/redo-escalation.svg)
+![Redo escalation: a call routed at standard comes back, and the call Claude marks with "Redo:" runs at complex.](assets/redo-escalation.svg)
 
 Every spawn that isn't denied writes a route (`routes`, per session): its level, model, effort and who chose it. When a result comes back, one rule set (`calls.returned`) reads that route, whichever path wrote it. A result finishes the call when it isn't a background launch, didn't swap models and wasn't cut off by an API error, and the call is then kept with its level (`done`) when the router, a pin or a rule chose the model, or the router rewrote the call. A background agent's call returns at launch, so it waits under the agent's id (`launched`) and finishes when the agent stops with an answer: a closing message, or a report handed back through `SubagentHandback` (https://code.claude.com/docs/en/hooks.md#subagentstop). So copies of one brief started together all run at the brief's own level. `post-agent` runs before Claude's next step, so a redo always finds the record.
 
