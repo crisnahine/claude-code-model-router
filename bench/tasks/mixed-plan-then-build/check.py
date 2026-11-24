@@ -5,7 +5,9 @@ passes on the work but fails on the code as shipped and on each broken build in 
 work calls the gateway, even if it then rolls back, as a real card stays charged. A mutant wraps the work's own
 handle_post, so the test is judged on the requests it sends, not on the names it imports. Requests run one at a
 time, so a build that looks the key up, charges and then stores it with no lock passes, though two requests with one
-key at the same moment would both charge."""
+key at the same moment would both charge. A request that dies right after its first commit, as a host
+can, is retried once on the other host and may be charged once in all, so a build that stores the key in a commit of
+its own after the payment's fails."""
 import importlib.util
 import re
 import shutil
@@ -28,9 +30,11 @@ def request(customer, cents, key=None):
     return {"headers": {"Idempotency-Key": key} if key else {}, "body": {"customer_id": customer, "cents": cents}}
 
 
-def step(host, db, action, req=None):
+def step(host, db, action, req=None, strict=True):
     got = passcheck.probe(host / "work", HERE / "probe.py",
                           {"action": action, "db": db, "request": req, "host": str(host)})
+    if not strict:
+        return got
     if not isinstance(got, dict):
         passcheck.finish(False, f"the {action} step gave no answer (a hang, a crash or a response that isn't JSON)")
     if got["error"]:
@@ -63,6 +67,14 @@ def behaviour(work, tmp):
     counts = step(b, db, "count")
     if counts != [4, 4]:
         return f"{counts[0]} charges and {counts[1]} payments, expected 4 of each"
+    # The process dies right after its first commit, as a host can; whatever the retry answers, one charge at most.
+    db = str(Path(tmp) / "crash.db")
+    step(a, db, "init")
+    step(a, db, "crash", request(1, 500, "k-3"), strict=False)
+    step(b, db, "post", request(1, 500, "k-3"), strict=False)
+    charges = step(b, db, "count")[0]
+    if charges > 1:
+        return f"a retry after the request died at its first commit was charged again ({charges} charges)"
     return None
 
 
@@ -81,7 +93,7 @@ with tempfile.TemporaryDirectory() as tmp:
     wrong = behaviour(work, tmp)
 if wrong:
     passcheck.finish(False, wrong)
-design = passcheck.answer(work, "DESIGN.json")
+design = passcheck.answer(work, "DESIGN.json", "utf-8-sig")
 choice = design.get("choice")
 if set(design) != {"choice", "reasons"} or not passcheck.reasons(design) or not isinstance(choice, str):
     passcheck.finish(False, 'DESIGN.json must be {"choice": "<A or B>", "reasons": ["..."]}')

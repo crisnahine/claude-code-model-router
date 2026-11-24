@@ -2262,7 +2262,9 @@ class DelegationTasks(unittest.TestCase):
                "space-before-the-colon", "type-in-brackets", "hashes-left-on-lines", "removal-called-a-deprecation",
                "removal-described-as-a-new-rule", "coupon-fix-described-as-a-feature",
                "removal-described-as-a-narrower-change", "a-feature-removed-from-the-endpoint", "v2-named-as-removed",
-               "404-and-500-backwards", "history-page-slower"}
+               "404-and-500-backwards", "history-page-slower", "removed-in-2.3.0", "v2-removed-too",
+               "removed-from-the-docs", "500-rather-than-404", "404-no-longer-returned", "history-no-longer-fast",
+               "coupon-total-lost", "tax-line-wrong", "csv-export-gone", "krona-no-longer-picked"}
 
     def test_the_visible_changelog_check_agrees_with_the_grade_on_shape_and_says_why(self):
         task = self.task("redo-failing-check")
@@ -2303,7 +2305,7 @@ from api.payments import handle_post
 path = os.path.join(tempfile.mkdtemp(), "shop.db"); db.init(path); conn = db.connect(path)
 conn.execute("INSERT INTO customers (id, email) VALUES (1, 'ana@example.com')"); conn.commit()
 got = [handle_post(conn, {"headers": {"Idempotency-Key": "k"}, "body": {"customer_id": 1, "cents": c}}) for c in (5, 5, 7)]
-print(json.dumps([got, conn.execute("SELECT COUNT(*) FROM gateway_log").fetchone()[0]]))
+print(json.dumps([got, *(conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("gateway_log", "payments"))]))
 """
 
     def test_each_mutant_breaks_the_feature_without_breaking_the_work(self):
@@ -2313,7 +2315,8 @@ print(json.dumps([got, conn.execute("SELECT COUNT(*) FROM gateway_log").fetchone
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         names = list(module.MUTANTS)
-        self.assertEqual(names, ["ignores-the-key", "no-body-check", "charges-the-retry", "charges-every-repeat"])
+        self.assertEqual(names, ["ignores-the-key", "no-body-check", "charges-the-retry", "charges-every-repeat",
+                                 "charges-without-a-payment"])
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp) / "work"
             build_work(task, None, work)
@@ -2322,11 +2325,13 @@ print(json.dumps([got, conn.execute("SELECT COUNT(*) FROM gateway_log").fetchone
                 res = subprocess.run([sys.executable, "-I", "-c", self.SCENARIO, str(work), str(mutants), name],
                                      cwd=work, capture_output=True, text=True, timeout=60)
                 self.assertEqual(res.returncode, 0, res.stderr)
-                (first, retry, reused), charges = json.loads(res.stdout)
-                outcomes[name] = (first[0], retry == first, reused[0], charges)
-        self.assertEqual(outcomes, {"": (201, True, 409, 1), "ignores-the-key": (201, False, 201, 3),
-                                    "no-body-check": (201, True, 201, 1), "charges-the-retry": (201, False, 409, 2),
-                                    "charges-every-repeat": (201, True, 409, 3)})
+                (first, retry, reused), charges, payments = json.loads(res.stdout)
+                outcomes[name] = (first[0], retry == first, reused[0], charges, payments)
+        self.assertEqual(outcomes, {"": (201, True, 409, 1, 1), "ignores-the-key": (201, False, 201, 3, 3),
+                                    "no-body-check": (201, True, 201, 1, 1),
+                                    "charges-the-retry": (201, False, 409, 2, 2),
+                                    "charges-every-repeat": (201, True, 409, 3, 3),
+                                    "charges-without-a-payment": (201, True, 409, 3, 1)})
         self.assertFalse((task["dir"] / "mutants").exists())
 
     def test_the_fanout_ini_decoy_is_wrong_read_as_retries_or_as_attempts(self):

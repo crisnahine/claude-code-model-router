@@ -26,7 +26,19 @@ try:
         conn = sqlite3.connect(payload["db"])
         conn.executemany("INSERT INTO customers (id, email) VALUES (?, ?)", [(1, "ana@example.com"), (2, "ben@example.com")])
         conn.commit()
-    elif payload["action"] == "post":
+    elif payload["action"] in ("post", "crash"):
+        if payload["action"] == "crash":
+            class Crash(sqlite3.Connection):
+                def commit(self):
+                    super().commit()
+                    os.write(1, ("\n" + json.dumps(out) + "\n").encode())
+                    os._exit(0)
+
+            def crashing(*args, _connect=sqlite3.connect, **kwargs):
+                kwargs.setdefault("factory", Crash)
+                return _connect(*args, **kwargs)
+
+            sqlite3.connect = crashing
         gateway = importlib.import_module("payments.gateway")
         real_charge = gateway.charge
 

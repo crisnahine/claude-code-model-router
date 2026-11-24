@@ -31,7 +31,7 @@ for key, want in (("page_size", 100), ("webhook_attempts", 4)):
     if type(data[key]) is not int or data[key] != want:
         passcheck.finish(False, f"{key} is {data[key]!r}, expected {want}")
 where = data["refund_email"]
-m = re.fullmatch(r"\s*`?(.+?):(\w+)(?:\(\))?`?\s*", where) if isinstance(where, str) else None
+m = re.fullmatch(r"\s*`?(.+?)::?(\w+)(?:\(\))?`?\s*", where) if isinstance(where, str) else None
 path = m.group(1).replace("\\", "/") if m else ""
 if m and "/" not in path and not path.endswith(".py"):
     path = path.replace(".", "/") + ".py"  # a dotted module path

@@ -5,7 +5,8 @@ import copy
 MUTANTS = {"ignores-the-key": "ignores the Idempotency-Key header and charges every retry",
            "no-body-check": "replays a reused key without comparing the body",
            "charges-the-retry": "charges a retry again and answers it as a new payment",
-           "charges-every-repeat": "charges a repeated key again but sends back the right response"}
+           "charges-every-repeat": "charges a repeated key again but sends back the right response",
+           "charges-without-a-payment": "charges a repeated key again without recording a payment"}
 # Runs a work dir's test module with one mutant installed: argv is work dir, test module, this file, mutant name.
 LAUNCHER = ("import sys, unittest, importlib.util; sys.path.append(sys.argv[1]); "
             "spec = importlib.util.spec_from_file_location('_mutant', sys.argv[3]); "
@@ -70,5 +71,15 @@ def install(name):
             ignores_the_key(conn, request)
         return remember(slot, request, real(conn, request))
 
+    def charges_without_a_payment(conn, request):
+        # Looked up at call time on the shipped gateway module, so a test that patches its charge sees the call.
+        slot = _slot(conn, request)
+        if slot in first:
+            import payments.gateway
+            payments.gateway.charge(conn, first[slot]["cents"])
+            conn.commit()
+        return remember(slot, request, real(conn, request))
+
     api.handle_post = {"ignores-the-key": ignores_the_key, "no-body-check": no_body_check,
-                       "charges-the-retry": charges_the_retry, "charges-every-repeat": charges_every_repeat}[name]
+                       "charges-the-retry": charges_the_retry, "charges-every-repeat": charges_every_repeat,
+                       "charges-without-a-payment": charges_without_a_payment}[name]
