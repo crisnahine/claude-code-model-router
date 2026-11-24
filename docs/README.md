@@ -63,7 +63,7 @@ Every page about Model Router, the Claude Code plugin that routes each agent to 
 
 ## Delivery items
 
-Every delivery item the project keeps, where it lives, and whether it exists yet. Checked 2026-11-22.
+Where each delivery item lives, and whether it exists yet. Checked 2026-11-22.
 
 | # | Item | Where | Exists |
 | -: | :- | :- | :- |
@@ -71,7 +71,7 @@ Every delivery item the project keeps, where it lives, and whether it exists yet
 | 2 | Capabilities and commands | [README.md](../README.md) "Commands", "Configuration", [GUIDE.md](GUIDE.md) | Yes |
 | 3 | Primary-source research | [research/model-control.md](research/model-control.md), [research/quality-first-routing.md](research/quality-first-routing.md) | Yes |
 | 4 | Supported Claude Code versions, surfaces, platforms and providers | [README.md](../README.md) "Compatibility", [GUIDE.md](GUIDE.md) "Compatibility", [ARCHITECTURE.md](ARCHITECTURE.md) "Verified live" | Yes |
-| 5 | Install and usage | [README.md](../README.md) "Install" | Yes |
+| 5 | Install and usage | [README.md](../README.md) "Install the Claude Code plugin" | Yes |
 | 6 | Automated test results | [TEST_RESULTS.md](TEST_RESULTS.md) | Yes |
 | 7 | Security assessment | [SECURITY.md](SECURITY.md) | Yes |
 | 8 | Reproducible cost and quality results, with raw data | [BENCHMARKS.md](BENCHMARKS.md), raw data under [bench/results/](../bench/results/) | Yes |
@@ -82,15 +82,11 @@ Every delivery item the project keeps, where it lives, and whether it exists yet
 | 13 | Comparison against the baselines | [BENCHMARKS.md](BENCHMARKS.md) | Yes |
 | 14 | Release checklist and changelog | [RELEASING.md](../RELEASING.md), [CHANGELOG.md](../CHANGELOG.md) | Yes |
 
-Also kept:
-
-- [TRACEABILITY.md](TRACEABILITY.md): one row per requirement with its implementation, source, verification, evidence and status. `python3 tools/traceability.py` counts it.
-- [CONTRIBUTING.md](../CONTRIBUTING.md): gates, commit rules and where to work.
-- [compat/baseline.json](../compat/baseline.json): the Claude Code version, docs index, model aliases and model status last reviewed.
+Also kept: [TRACEABILITY.md](TRACEABILITY.md) (one row per requirement, counted by `python3 tools/traceability.py`), [CONTRIBUTING.md](../CONTRIBUTING.md) (gates, commit rules and where to work) and [compat/baseline.json](../compat/baseline.json) (the Claude Code version, docs index, model aliases and model status last reviewed).
 
 ## Outside tools and sources
 
-Every outside project, library, benchmark and tool these docs name, with its primary source. Checked 2026-11-22: each page loaded, or, for npm packages, `npm view` returned the version. Claude Code and Claude API claims cite code.claude.com and platform.claude.com where they are made.
+Every outside project, library, benchmark and tool these docs name, with its primary source. Checked 2026-11-22: each page loaded, or, for npm packages, `npm view` returned the version. Claude Code and Claude API claims cite code.claude.com and platform.claude.com where made.
 
 | Name | Used for | Primary source |
 | :- | :- | :- |
