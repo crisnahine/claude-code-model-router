@@ -15,6 +15,8 @@ PAGES = [
      "research", 2),
     ("docs/research/quality-first-routing.md", "research-quality", "Quality research",
      "What can the router save without losing quality?", "research", 2),
+    ("docs/research/caller-levels-and-redo.md", "research-redo", "Redo research",
+     "Who names a call's level, and what marks a redo?", "research", 2),
     ("docs/PERFORMANCE.md", "performance", "Performance", "What does the router cost in time and disk?",
      "performance", 2),
     ("docs/SECURITY.md", "security", "Security", "What reaches the network, and who can steer it?", "security", 2),

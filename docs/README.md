@@ -29,8 +29,12 @@ Every page about Model Router, the Claude Code plugin that routes each agent to 
 <td width="50%" valign="top"><img src="assets/icon-research-quality.svg" width="20" height="20" alt=""> <a href="research/quality-first-routing.md"><b>Quality research</b></a><br>What can the router save without losing quality?</td>
 </tr>
 <tr>
+<td width="50%" valign="top"><img src="assets/icon-research-redo.svg" width="20" height="20" alt=""> <a href="research/caller-levels-and-redo.md"><b>Redo research</b></a><br>Who names a call's level, and what marks a redo?</td>
 <td width="50%" valign="top"><img src="assets/icon-performance.svg" width="20" height="20" alt=""> <a href="PERFORMANCE.md"><b>Performance</b></a><br>What does the router cost in time and disk?</td>
+</tr>
+<tr>
 <td width="50%" valign="top"><img src="assets/icon-security.svg" width="20" height="20" alt=""> <a href="SECURITY.md"><b>Security</b></a><br>What reaches the network, and who can steer it?</td>
+<td width="50%"></td>
 </tr>
 <tr><th colspan="2" align="left">Evidence<br><sub>What was measured and tested, and what is still open.</sub></th></tr>
 <tr>
