@@ -58,13 +58,20 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
         return found
     task = calls.task(tool_input)
     earlier = calls.last_run(hook_input.get("session_id"), task) if task else None
+    earlier = _inherited(earlier, hook_input) if earlier else None
     named = _unmarked_run(found, snap)
     if earlier and _asks_more(reg, named, earlier):
         return replace(found, redoes=Level.parse(earlier.get("level")))  # the caller picked a stronger lever itself
     # Claude names a model on every call, the redo included, so the same one named again must not repeat the run.
     if earlier:
         return replace(found, earlier=earlier)
-    return replace(found, earlier=named, on_record=False) if named["level"] else found
+    return replace(found, earlier=_inherited(named, hook_input), on_record=False) if named["level"] else found
+
+
+def _inherited(run: dict, hook_input: dict) -> dict:
+    """A nested run with no effort on record ran at its parent's, which no hook input carries, so a redo
+    can't climb one effort step from it: it moves to the next stronger model instead."""
+    return {**run, "inherited": True} if hook_input.get("agent_id") and run.get("effort") not in EFFORTS else run
 
 
 def _asks_more(reg: Registry, named: dict, earlier: dict) -> bool:
@@ -101,14 +108,15 @@ def decide(hook_input: dict, snap: settings.Snapshot) -> Spawn:
 
 
 def record(spawned: Spawn, via: str, newest: str | None = None) -> None:
-    """Write the spawn's ledger row and, unless it is denied, its route. `via` is "mod" or "fallback";
-    `newest` is the full ID the mod sends in place of the decided alias."""
+    """Write the spawn's ledger row and, unless it is denied or a workflow stage, its route. `via` is "mod" or
+    "fallback"; `newest` is the full ID the mod sends in place of the decided alias."""
     hook_input, decision = spawned.hook_input, spawned.decision
     session_id = hook_input.get("session_id")
     spawned.snap.settle()
     ledger.spawn(session_id, via, decision, kind=(hook_input.get("kind") or "subagent") if via == "mod" else None,
                  on_record=spawned.facts.on_record)
-    if decision["action"] != "deny":
+    # A stage has no Agent result to read its route, and a fan-out of them would push running calls' routes out.
+    if decision["action"] != "deny" and not spawned.facts.workflow:
         try:
             _record(spawned, via, newest)
         except OSError:

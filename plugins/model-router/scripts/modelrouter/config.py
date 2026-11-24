@@ -352,6 +352,7 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
     return Registry(
         models=models,
         levels=_levels(_merge(shipped_levels, project_levels), problems),
+        trusted_levels=_levels(shipped_levels, []),
         aliases=aliases,
         prices=dict(base.get("prices") or {}),
         newest={k: v for k, v in (base.get("newest") or {}).items() if not k.startswith("$") and isinstance(v, str)},

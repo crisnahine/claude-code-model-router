@@ -64,6 +64,7 @@ class Held:
 class Registry:
     models: Mapping[str, Model]
     levels: Mapping[Level, LevelSpec]  # in level order; `needs` never falls as the level rises
+    trusted_levels: Mapping[Level, LevelSpec] = field(default_factory=dict)  # the levels without a project's file
     aliases: Mapping[str, str] = field(default_factory=dict)
     prices: Mapping[str, Any] = field(default_factory=dict)  # the shipped list prices, which the benchmark reads
     newest: Mapping[str, str] = field(default_factory=dict)
@@ -92,8 +93,8 @@ class Registry:
         m = self.aliases.get(m, m)
         if m in self.models:
             return m
-        # A project's own names match last, so they can't capture the IDs of a vouched-for model.
-        for name in sorted(self.models, key=lambda n: (self.models[n].project, -len(n))):
+        # A project's own names match only exactly, so they can't capture an ID outside the registry.
+        for name in sorted((n for n in self.models if self.models[n].trusted), key=len, reverse=True):
             if name in m:
                 return name
         return None

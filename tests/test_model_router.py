@@ -1652,8 +1652,8 @@ class Router(Sandbox):
         self.assertIn("a project rule names haiku for worker, weaker than the parent's model opus", held["held"])
         self.assertIn(held["held"], held["reason"])
         self.session_on("claude-haiku-5-5")
-        same = self.decide("worker", LOOKUP)  # not weaker than the parent's haiku
-        self.assertEqual((same["source"], same["model"], same["held"]), ("rule", "haiku", None))
+        same = self.decide("worker", LOOKUP)  # the parent's haiku: it runs there anyway
+        self.assertEqual((same["action"], same["source"], same["model"], same["held"]), ("keep", None, None, None))
         self.override({"agents": {"worker": {"model": "fable"}}})
         raised = self.decide("worker", LOOKUP)
         self.assertEqual((raised["source"], raised["model"], raised["held"]), ("rule", "fable", None))
@@ -1679,8 +1679,8 @@ class Router(Sandbox):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         stronger = self.decide("deep", LOOKUP)  # fable is above the pin: a raise applies
         self.assertEqual((stronger["source"], stronger["model"], stronger["held"]), ("rule", "fable", None))
-        equal = self.decide("plain", LOOKUP)
-        self.assertEqual((equal["source"], equal["model"], equal["held"]), ("rule", "sonnet", None))
+        equal = self.decide("plain", LOOKUP)  # it runs on that default anyway
+        self.assertEqual((equal["action"], equal["source"], equal["model"], equal["held"]), ("keep", None, None, None))
         self.override({"agents": {"deep": {"model": "haiku"}}}, user=True)  # the user's own rule still lowers
         self.assertEqual(self.decide("deep", LOOKUP)["model"], "haiku")
 
@@ -2954,7 +2954,7 @@ class NewestOnProviders(Sandbox):
         self.assertEqual(snap.lagging, frozenset({"opus", "sonnet", "haiku"}))  # no newest ID is sent
         self.assertEqual([snap.pick(level).model for level in (Level.lookup, Level.standard, Level.complex)],
                          ["sonnet", "opus", "fable"])
-        self.override({"agents": {"general-purpose": {"level": "lookup"}}})
+        self.override({"agents": {"general-purpose": {"level": "lookup"}}}, user=True)
         out = self.decide("general-purpose", LOOKUP)
         self.assertEqual(out["model"], "sonnet")
         self.assertIn("haiku's alias runs an older model here", out["reason"])
@@ -2963,7 +2963,7 @@ class NewestOnProviders(Sandbox):
         os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)}, sends_ids=False)
         self.assertEqual((snap.lagging, snap.pick(Level.lookup).model), (frozenset({"sonnet", "haiku"}), "sonnet"))
-        self.override({"agents": {"general-purpose": {"level": "lookup"}}})
+        self.override({"agents": {"general-purpose": {"level": "lookup"}}}, user=True)
         self.assertEqual(self.pre("general-purpose", LOOKUP)["updatedInput"]["model"], "sonnet")
 
     def test_the_routers_own_pick_passes_over_a_family_that_would_run_an_older_model(self):
@@ -2972,7 +2972,7 @@ class NewestOnProviders(Sandbox):
         self.assertEqual(snap().pick(Level.lookup).model, "haiku")  # its newest ID is sent
         health.failed("claude-haiku-5-5", "API Error: 404 not_found_error", newest=True)
         self.assertEqual((snap().lagging, snap().pick(Level.lookup).model), (frozenset({"haiku"}), "sonnet"))
-        self.override({"agents": {"general-purpose": {"level": "lookup"}}})
+        self.override({"agents": {"general-purpose": {"level": "lookup"}}}, user=True)
         self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "sonnet")  # a rule's floor is a pick too
         self.assertEqual(self.model(LOOKUP), "haiku")  # a model the caller names is kept
         os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "claude-haiku-4-5"  # the user chose the version
