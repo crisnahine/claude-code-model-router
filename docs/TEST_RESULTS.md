@@ -29,7 +29,7 @@ Counts come from each job's log (`gh run view --job <id> --log`), times from its
 
 ## Local
 
-Run 2026-11-25 on macOS (Darwin 27.2.0), on `d6f9d0a` with `v02-bench` (`f19bf85`) merged, before that merge was committed.
+Run 2026-11-25 on macOS (Darwin 27.2.0), on the tree committed as `e8cb503`, the merge of `v02-bench` (`f19bf85`) into `d6f9d0a`, and again with the 0.3.0 release edits on top, which change only docs. The times are from the first run.
 
 | Gate | Command | Result |
 | :- | :- | :- |

@@ -6,7 +6,16 @@
 
 ## 0.3.0 - 2026-11-25
 
-Update with `claude plugin update model-router@claude-code-model-router`. This release changes who picks a subagent's model. Claude now names the model and effort on each Agent call, from a table in the session-start note, and Model Router keeps them within your cap. A call that names neither runs on its agent's own model, on `CLAUDE_CODE_SUBAGENT_MODEL` when that is set, or on the conversation's, as Claude Code runs it, where 0.1.2 picked a level from the brief. Five options are gone (`priority`, `agent_pins`, `main_effort`, `update_check` and `strong_agent_gate`), and a saved `routing_mode` of `advise` now reads as `off`: set `auto` in `/config` to route. Calls that name `model-router:deep-solver` or `model-router:docs-researcher`, and scripts that read `models --json` or `usage --json`, need changes (see Removed). `learned.json`, `upstream.json`, `mod.json` and `prompts.json` in the plugin's data folder are no longer read or written, and can be deleted. This release has not been benchmarked: every stored benchmark row measured an older design, and on the six harder pilot tasks that older router cost more than no router.
+This release changes who picks a subagent's model. Claude now names the model and effort on each Agent call, from a table in the session-start note, and Model Router keeps them within your cap. A call that names neither runs on its agent's own model, on `CLAUDE_CODE_SUBAGENT_MODEL` when that is set, or on the conversation's, as Claude Code runs it, where 0.1.2 picked a level from the brief. This release has not been benchmarked: every stored benchmark row measured an older design, and on the six harder pilot tasks that older router cost more than no router. There is no 0.2.0 release: an early commit on `main` carried that version, and a version is never reused.
+
+### Upgrading from 0.1.2
+
+- Update with `claude plugin update model-router@claude-code-model-router`.
+- The options `priority`, `agent_pins`, `main_effort`, `update_check` and `strong_agent_gate` are gone, and a value saved for one of them is ignored. `priority: quality` and `agent_pins: override` have no stand-in: name the model on the call, or set the agent's `model` or `level` in your own `model-router.json`.
+- A saved `routing_mode` of `advise` now reads as `off`. Set `auto` in `/config` to route. A `routing_mode` in a `model-router.json` file is dropped, so set it in `/config` too.
+- `models --json` is now `model-router.models/3` and `usage --json` is `model-router.usage/2`. A script that reads either must accept the new `schema` and do without the keys listed under Removed.
+- The skills `/model-router:ship` and `/model-router:refresh` are no longer in the plugin, and the agents `model-router:deep-solver` and `model-router:docs-researcher` are gone. A rule, a `CLAUDE.md` line or a script that names one needs another target.
+- `learned.json`, `upstream.json`, `mod.json` and `prompts.json` in the plugin's data folder are no longer read or written, and can be deleted, as can leftover `.json.lock` files.
 
 ### Changed
 
@@ -76,6 +85,18 @@ Update with `claude plugin update model-router@claude-code-model-router`. This r
 - Evals for a contract summary and for a design question that names no agent, graded on the agent and model Claude picks. The lookup and review evals grade the model Claude names, and the redo eval marks its redo.
 - CI fails a plugin change whose version `main` has carried or a `v*` tag holds (`tools/plugin_version.py`). `validate` runs on 2.1.329, 2.1.331 and the latest release, a daily job validates and type-checks the mod on the newest release, and the eval also runs weekly on it.
 - [The architecture review](docs/research/architecture-review.md): the 24 design decisions checked against the docs, each with its verdict, what changed in the code and its research note.
+
+### Benchmark
+
+Nothing here ships in the plugin. The harness is rebuilt so that a verdict can stand, and no run has used it yet.
+
+- Each run gets its own Claude Code config folder (`CLAUDE_CONFIG_DIR`) and needs `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` or a provider switch. Bash runs in the OS sandbox with no network, writes stay in the work dir, and the sandbox and permission rules hide every copy of the answers: this checkout, its worktrees, the results and kept runs. A check grades a throwaway copy of the work.
+- `run.py` reads `stream-json`, copies and hashes the plugin once per batch, shuffles the run order with a recorded `--seed`, records the `--batch`, and has two prompt arms, `delegate` and `direct`. A run that never started, a router run whose plugin didn't load or didn't get its options, and a `pinned` run off its pins are set aside, never counted as failed tasks.
+- Each row lists its Agent calls with the model and effort each call named and the model it ran on, and the page counts how often Claude named one. New rows are schema 3.
+- New configurations: `plugin-nogate` (`verify_gate` off), `pinned` (three inline agents, each on a fixed model and effort), every subagent on Haiku, Sonnet or Opus at `low`, `medium` or `high`, and the whole session on one model and effort. `opusplan` is now `sonnet-via-opusplan`, since a headless run stays on Sonnet, and its stored rows map to the new id.
+- Five tasks of work that isn't code: a services agreement (`document`), a ledger reconciliation and a runway forecast (`analysis`), a study synthesis (`research`) and an inbox triage (`operations`). That makes 35 tasks in 11 classes. None of the five has a run yet.
+- The verdict rules: against each baseline the router gets WIN, LOSE, no difference shown or no verdict, on each class row and on an `all tasks` row, from runs paired by task and resampled by task, then by run. WIN needs a cost per solved task lower beyond noise, a pass rate shown no more than 10 points below the baseline's, and at least the baseline's share of runs solved. LOSE is a pass rate behind beyond noise, or a higher cost beyond noise without a pass rate shown 10 points ahead. There is no verdict when the two ran in different batches, either has rows below schema 3, or Bash was denied in more than a quarter of either's runs.
+- Every stored row is below schema 3, so it sits in its own "Before the sandbox" tables with no verdict or rank. Their router rows measured the older design that scored the brief.
 
 ## 0.1.2 - 2026-11-24
 
