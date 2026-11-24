@@ -11,18 +11,22 @@ from . import config as cfg
 from .settings import Settings
 
 # A script named for a check: test_api.py, _scratch_check.py, run_tests.sh, cart.spec.js.
-_SCRIPT = r"(?:\S*/)?(?:(?:test|check|spec)[\w.-]*|[\w.-]*[_.-](?:tests?|check|spec))\.(?:py|[cm]?js|ts|rb|sh)\b"
+_SCRIPT = (r"(?:\S*/)?(?:(?:tests?|checks?|spec)(?:[_.-][\w.-]*)?|[\w.-]*[_.-](?:tests?|check|spec))"
+           r"\.(?:py|[cm]?js|ts|rb|sh)\b")
 CHECK_COMMAND = re.compile(
     r"\b(?:pytest|unittest|tox|nox|jest|vitest|mocha|playwright|cypress|rspec|phpunit|ctest|tsc|mypy|pyright|"
     r"ruff|eslint|flake8|pylint|clippy|golangci-lint|rubocop)\b|"
-    r"\b(?:npm|pnpm|yarn|bun)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+(?:run\s+)?(?:test|lint|typecheck|check)\b|"
+    r"\b(?:npm|pnpm|yarn|bun)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+(?:(?:run\s+)?(?:test|lint|type-?check|check)\b|t(?!\S))|"
     r"\b(?:cargo|go|dotnet|mvn|gradle|gradlew|make|just|swift|mix|deno)\s+\S*\s*(?:test|check|vet|lint|verify)\b|"
     # Gradle's build task runs its check task; any other bare build only compiles.
     r"\bgradlew?\s+build\b|"
-    r"\b(?:manage\.py|rails|artisan|bazel|sbt|zig(?:\s+build)?)\s+test\b|\brake\s+(?:test|spec)\b|\bnode\s+--test\b|"
+    r"\b(?:black|prettier|isort)\s(?:[^\n]*\s)?--check\b|"
+    r"\b(?:manage\.py|rails|artisan|bazel|sbt|flutter|zig(?:\s+build)?)\s+test\b|\brake\s+(?:test|spec)\b|"
+    r"\bnode\s+--test\b|"
     rf"\b(?:python3?|node|ruby|bash|sh)\s+(?:-\S+\s+)*{_SCRIPT}|(?:^|\s)\./{_SCRIPT}")
 # A command part led by one of these only installs, finds, reads, opens, copies or mentions a tool, as in
-# "pip install pytest", "vim pytest.ini" or "git commit -m 'Run mypy'", or is a heredoc line ("import pytest").
+# "pip install pytest", "vim pytest.ini", "python -c 'import pytest'" or "git commit -m 'Run mypy'", is a
+# heredoc line ("import pytest"), or only lists tests ("pytest --collect-only").
 # Separators inside quotes still split the command.
 _PARTS = re.compile(r"&&|\|\||[;|\n]")
 _LEAD = re.compile(r"[\s({`$]*(?:(?:\w+=\S*|sudo)\s+)*")
@@ -30,7 +34,7 @@ _MENTION = re.compile(
     r"(?:pip3?|pipx|brew|apt(?:-get)?|which|type|whereis|command\s+-[vV]|e?grep|rg|ag|cat|less|more|head|tail|sed|"
     r"awk|echo|printf|git|ls|find|wc|open|vim?|nvim|nano|emacs|code|cp|mv|cd|touch|mkdir|ln|chmod|import|from|"
     r"(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|ci|remove|uninstall|view|info|ls)|"
-    r"uv\s+(?:pip|add|tool\s+install))(?:\s|$)")
+    r"uv\s+(?:pip|add|tool\s+install)|(?:\S*/)?python[\d.]*\s+-c|[^\n]*\s--collect-only)(?:\s|$)")
 # A message's tool_use rows are stamped before its Edit's PostToolUse records the edit.
 _SAME_MESSAGE_SLACK = 5
 

@@ -3608,6 +3608,7 @@ class GatesDefault(Sandbox):
         self.edited()
         self.assertIn("model-router:verifier", json.dumps(self.stop()))
         self.options(verify_gate="false")
+        self.advance(1)
         self.edited()
         self.assertIsNone(self.stop())
 
@@ -3759,7 +3760,9 @@ class Gates(Sandbox):
                         "python manage.py test", "bin/rails test", "rails test test/models", "bundle exec rake test",
                         "php artisan test", "node --test", "bazel test //...", "sbt test", "zig test src/main.zig",
                         "zig build test", "pnpm -r test", "pnpm --filter web test", "python -I _scratch_check.py",
-                        "./run_tests.sh", "bash scripts/check.sh", "node test/links.spec.mjs", "python3 test_pages.py"):
+                        "./run_tests.sh", "bash scripts/check.sh", "node test/links.spec.mjs", "python3 test_pages.py",
+                        "python tests.py", "npm run type-check", "npm t", "flutter test", "black --check .",
+                        "prettier --check ."):
             self.assertTrue(gates.is_check(command), command)
         for command in ("ls -la", "git status", "cat test.txt", "pip install pytest", "npm install --save-dev jest eslint",
                         "which pytest", "grep -rn ruff pyproject.toml", "cat jest.config.js", "brew install golangci-lint",
@@ -3769,7 +3772,10 @@ class Gates(Sandbox):
                         "vim pytest.ini", "code jest.config.js", "cp jest.config.js /tmp/", "cd node_modules/jest",
                         "cat > tests/test_a.py <<'EOF'\nimport pytest\nfrom unittest import mock\nEOF",
                         "npm run build", "cargo build --release", "go build ./...", "python3 gen_checksums.py",
-                        "python3 make_testdata.py", "bash ./install-test-deps.sh"):
+                        "python3 make_testdata.py", "bash ./install-test-deps.sh", "python checkout.py",
+                        "python3 checkpoint_convert.py", "node specials.js", "python testimonials.py",
+                        "python3 spectrum.py", "bash checkout.sh", "./checkin.sh", "python3 specs_to_json.py",
+                        "python -c 'import pytest'", "pytest --collect-only -q", "black ."):
             self.assertFalse(gates.is_check(command), command)
 
     def test_installing_a_test_tool_after_an_edit_still_asks(self):
@@ -5454,14 +5460,14 @@ class Roles(unittest.TestCase):
     def test_the_table_carries_what_each_of_our_agents_is(self):
         role = profile.role
         self.assertEqual(role("model-router:architect"), profile.Role("heavy", floor="complex"))
-        self.assertEqual(role("model-router:reviewer"), profile.Role("heavy", floor="complex", checker=True))
+        self.assertEqual(role("model-router:reviewer"), profile.Role("heavy", floor="complex"))
         self.assertEqual(role("model-router:deep-solver"), profile.Role("heavy", floor="hardest"))
-        self.assertEqual(role("model-router:verifier"), profile.Role("light", cap="standard", checker=True))
+        self.assertEqual(role("model-router:verifier"), profile.Role("light", cap="standard"))
         self.assertEqual(role("model-router:implementer"), profile.Role())
 
     def test_another_plugins_agent_is_only_a_kind(self):
         self.assertEqual(profile.role("acme:deep-solver"), profile.Role("heavy", floor="complex"))
-        self.assertEqual(profile.role("acme:code-reviewer"), profile.Role("heavy", floor="complex", checker=True))
+        self.assertEqual(profile.role("acme:code-reviewer"), profile.Role("heavy", floor="complex"))
         self.assertEqual(profile.role("scout"), profile.Role("light", cap="standard"))
 
     def test_a_name_that_only_contains_a_role_word_has_no_role(self):
