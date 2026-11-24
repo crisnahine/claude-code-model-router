@@ -3,7 +3,7 @@ and the router's decision, writing nothing), then record (the ledger row, the ro
 votes it carries). A path may adjust the decision between them."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from . import agents, calls, gates, learn, ledger, profile, request, router, session, settings
 from . import config as cfg
@@ -51,12 +51,28 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     effort = hook_input.get("effort")
     level = hook_input.get("session_effort") or (effort.get("level") if isinstance(effort, dict) else None)
     session_effort = level if not hook_input.get("agent_id") and level in EFFORTS else None
-    session_id, marked = hook_input.get("session_id"), calls.marked_redo(tool_input)
-    earlier = calls.finished_run(session_id, key) or (calls.last_run(session_id, agent) if marked else None)
-    return router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable,
-                        definition=definition, parent=parent, earlier=earlier, marked=marked, raises=snap.raises,
-                        floor=floor, teammate=teammate, workflow=hook_input.get("kind") == "workflow",
-                        session_effort=session_effort, effort_caps=caps)
+    session_id, workflow = hook_input.get("session_id"), hook_input.get("kind") == "workflow"
+    # A workflow stage is never redone: its script decides what runs again, and a fan-out needs one model and effort.
+    marked = not workflow and calls.marked_redo(tool_input)
+    earlier = None if workflow else calls.finished_run(session_id, key)
+    task = calls.task(tool_input)
+    if marked and earlier is None and task:
+        earlier = calls.last_run(session_id, task)
+    found = router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable,
+                         definition=definition, parent=parent, earlier=earlier, marked=marked, raises=snap.raises,
+                         floor=floor, teammate=teammate, workflow=workflow,
+                         session_effort=session_effort, effort_caps=caps)
+    if marked and earlier is None:
+        found = replace(found, earlier=_unmarked_run(found, snap), on_record=False)
+    return found
+
+
+def _unmarked_run(found: router.Facts, snap: settings.Snapshot) -> dict:
+    """What the call would run at without its mark. A marked redo with no finished run on record redoes that
+    run, so a cap, a pin or the session's floor can't leave it on the same model and effort."""
+    plain = router.decide(replace(found, marked=False), snap.registry, snap.options)
+    effort = router.runs_at(plain["effort"], found.tool_input, found.definition, snap.options, found.teammate)
+    return {"level": plain["level"], "model": plain["model"] or plain["was"], "effort": effort}
 
 
 def decide(hook_input: dict, snap: settings.Snapshot) -> Spawn:
@@ -104,6 +120,8 @@ def _record(spawned: Spawn, via: str, newest: str | None) -> None:
     except OSError:
         pass
     user_named = source == "caller" and decision["was"] == current.named
-    learn.spawned(reg, decision, kind, earlier, user_named, spawned.facts.raises)
+    # A redo with no run on record can't say its first level was too low: nothing is known to have run there.
+    cast = decision if facts.on_record else {**decision, "escalated_from": None}
+    learn.spawned(reg, cast, kind, earlier, user_named, spawned.facts.raises)
     if gates.is_checker(decision["agent"]):
         gates.note_check(session_id)

@@ -28,9 +28,9 @@ def session_start(hook_input: dict) -> dict | None:
         # Only what Claude must act on: every word here is in context for the whole session.
         parts.append(
             "Model Router sets each subagent's, teammate's and workflow agent's model and effort from its brief. "
-            "Calls omit `effort` unless the user named one, and name `model` only when the user did or when the "
-            "code already read shows the task harder or easier than its brief reads. "
-            "A redo of a weak result starts its `description` with \"Redo:\" and runs one level higher."
+            "Calls omit `effort` unless the user named one, and name `model` only when the user did or when what "
+            "was read shows the task harder or easier than its brief. "
+            "A redo of a weak result keeps its `description` with \"Redo:\" in front, and runs one level higher."
         )
         if options.force:
             pinned = options.subagent_model or "one model"
@@ -39,6 +39,11 @@ def session_start(hook_input: dict) -> dict | None:
                 "their effort. Without it in the user's settings, the router would put each subtask on the "
                 "cheapest model strong enough for it. Worth telling the user once."
             )
+        elif options.subagent_model and options.pins != "override":
+            parts.append(
+                f"CLAUDE_CODE_SUBAGENT_MODEL sets the model of every agent without its own to {options.subagent_model}, "
+                "so Model Router leaves those calls as they are and sets only the effort of agents that name their "
+                "own model. Worth telling the user once.")
         if options.workflow_model:
             parts.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model}, "
                          "so the router sets only their effort. Worth telling the user once.")
@@ -130,7 +135,7 @@ def _outcome(kind: str, hook_input: dict, reg: Registry, **fields: Any) -> calls
     tool_input = cfg.tool_input(hook_input)
     agent, key = calls.identify(tool_input)
     spawn_id = hook_input.get("tool_use_id")
-    return calls.Outcome(kind, key=key, agent=agent, named=reg.family(tool_input.get("model")),
+    return calls.Outcome(kind, key=key, agent=agent, task=calls.task(tool_input), named=reg.family(tool_input.get("model")),
                          spawn_id=spawn_id if isinstance(spawn_id, str) and spawn_id else None, **fields)
 
 

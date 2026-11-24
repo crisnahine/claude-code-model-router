@@ -45,6 +45,7 @@ class Facts:
     parent: str | None = None  # the model an agent without one inherits, when known
     earlier: dict | None = None  # the finished run a redo climbs from: this call's, or for a marked redo its agent's
     marked: bool = False  # calls.marked_redo: the description says the call redoes a weak result
+    on_record: bool = True  # False when `earlier` is what a marked redo's own brief would run at, not a finished run
     raises: dict = field(default_factory=dict)  # learn.raises: the learned raise of each level
     floor: Level | None = None  # the request's level, for a hand-off to a strong role agent
     teammate: bool = False  # an agent-team teammate, which CLAUDE_CODE_SUBAGENT_EFFORT doesn't reach
@@ -90,9 +91,10 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         above = done_level.up()
         if above and level < above:
             level, out["escalated_from"] = above, done_level
-    elif facts.marked and not tool_input.get("model") and level.up():
-        # Marked a redo with no finished run to climb from: the brief's own level is the one that fell short.
-        level, out["escalated_from"] = level.up(), level
+        elif not above and level < done_level:
+            level = done_level  # a redo of a top-rung run stays there and asks for more effort
+        elif facts.marked and level > done_level:
+            out["escalated_from"] = done_level  # the rewritten brief already reads above the run it redoes
     pick, pick_effort = ladder.pick(reg, level, settings.priority, usable, facts.raises)
     level_effort = ladder.effort(reg, level, settings.priority)
     out.update(level=level, signals=profile["signals"], pick=pick)
@@ -112,11 +114,12 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     decided = _effort_decided(tool_input, definition, settings, facts.teammate)
     if settings.force:
         effort = None if decided or tool_input.get("model") else level_effort
-        return _pinned(out, "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "subagent", env_default or facts.parent, level, effort, facts)
+        return _pinned(out, "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "subagent", env_default or facts.parent, level, effort,
+                       facts, reg, done if redo else None)
     if facts.workflow and settings.workflow_model and not tool_input.get("model"):
         # This pin wins over the model a mod sets, so it is kept like the one above.
         return _pinned(out, "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "workflow agent", reg.family(settings.workflow_model),
-                       level, None if decided else level_effort, facts)
+                       level, None if decided else level_effort, facts, reg, None)
 
     override = settings.pins == "override"
     basis = None  # what the call would run on, and in which words, when no rule names a model
@@ -133,12 +136,11 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         why = "CLAUDE_CODE_SUBAGENT_MODEL sets the model for agents without one"
     else:
         target, source, why, basis = pick, "router", f"{level} subtask", "the pick"
-        if out.get("escalated_from") and redo:
-            why += f", one level above the {out['escalated_from']} run that came back before"
-        elif out.get("escalated_from"):
-            why += f", marked a redo, so one level above the {out['escalated_from']} its brief reads as"
-        elif redo:
-            why += ", redone with more effort than the run that came back before"
+        if redo:
+            came = "run that came back before" if facts.on_record else "run its brief alone gets, as it is marked a redo"
+            steps = "one level above" if done_level and level.rank - done_level.rank == 1 else "above"
+            why += (f", {steps} the {out['escalated_from']} {came}" if out.get("escalated_from")
+                    else f", redone with more effort than the {came}")
 
     rule_model = reg.family(rule.model)
     if not requested and not rule_model and reg.family(rule.suggested):
@@ -175,8 +177,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     effort, held = capped(effort, facts.effort_caps.get(final))
     stronger = next((n for n in usable if reg.models[n].trusted and reg.stronger(n, final)), None)
     runs = runs_at(effort, tool_input, definition, settings, facts.teammate)
-    if (redo and source == "router" and stronger and runs is not None
-            and (final, runs) == (done.get("model"), done.get("effort"))):
+    if redo and source == "router" and stronger and (final, runs) == (done.get("model"), done.get("effort")):
         # The redo would repeat the run it replaces: quality comes first, so it takes the next model up.
         cause = f"maxEffortLevel holds {final} at {runs}" if held else f"{final} would run at {runs} again"
         why += f"; {cause}, the same as the run that came back before, so it goes to {stronger}"
@@ -192,10 +193,13 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
 
 
 def _pinned(out: Decision, pin: str, scope: str, pinned: str | None, level: Level, effort: str | None,
-            facts: Facts) -> Decision:
-    """The user pinned the model, so effort is the one lever left, and on a pinned strong model the one on cost."""
+            facts: Facts, reg: Registry, earlier: dict | None) -> Decision:
+    """The user pinned the model, so effort is the one lever left, and on a pinned strong model the one on cost.
+    `earlier` is the run a redo replaces: on the same pinned model it asks for more effort than that run."""
     out.update(was=pinned, reason=f"{pin} pins every {scope}'s model")
     if effort:
+        if earlier:
+            effort = _above_earlier(reg, effort, pinned, earlier)
         effort, floor = _session_floor(effort, pinned, facts)
         effort, held = capped(effort, facts.effort_caps.get(pinned or ""))
         out.update(action="rewrite", effort=effort, source="router",
