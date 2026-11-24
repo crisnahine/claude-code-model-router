@@ -89,7 +89,9 @@ def resolve(reg: Registry | None = None, recorded: bool = False) -> Settings:
         effort_level=env("CLAUDE_CODE_EFFORT_LEVEL"),
         agent_teams=truthy(env("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS")),
         cloud=next((c for c in CLOUDS if truthy(env(f"CLAUDE_CODE_USE_{c.upper()}"))), None),
-        provider=_provider({p for p in PROVIDERS if truthy(env(f"CLAUDE_CODE_USE_{p.upper()}"))}),
+        # A host that manages the provider ignores these switches in settings files, and its alias table isn't documented.
+        provider=None if truthy(env("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"))
+        else _provider({p for p in PROVIDERS if truthy(env(f"CLAUDE_CODE_USE_{p.upper()}"))}),
         api_key=env("ANTHROPIC_API_KEY"),
         base_url=bool(env("ANTHROPIC_BASE_URL")),
     )
@@ -113,11 +115,20 @@ class Snapshot:
 
     @cached_property
     def allowed(self) -> allowlist.Allowlist:
-        return allowlist.read(self.session_id, self.project, (self.hook_input or {}).get("settings"))
+        return allowlist.read(self.session_id, (self.hook_input or {}).get("settings"), self.options.provider)
+
+    @cached_property
+    def lagging(self) -> frozenset[str]:
+        """Families whose alias runs an older model here and whose newest ID can't be sent in its place,
+        unless the user pinned the family's model. The router's own picks pass over them."""
+        reg, provider = self.registry, self.options.provider
+        return frozenset(n for n in reg.older_aliases.get(provider or "", {})
+                         if not os.environ.get(f"ANTHROPIC_DEFAULT_{n.upper()}_MODEL")
+                         and reg.newest_id(n, provider, self.allowed, self.health) is None)
 
     def pick(self, level: Level) -> ladder.Pick:
         """The ladder's pick for `level` among this setup's usable models."""
-        return ladder.pick(self.registry, level, self.usable)
+        return ladder.pick(self.registry, level, [n for n in self.usable if n not in self.lagging] or self.usable)
 
     def settle(self) -> None:
         """Write what reads only noticed: an outage the health table found too long. Dry runs skip it."""

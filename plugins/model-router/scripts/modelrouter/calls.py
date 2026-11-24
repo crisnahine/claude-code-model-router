@@ -215,9 +215,13 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
             _wait_or_finish(session_id, outcome, route, finished)
     except OSError:
         pass
+    # A fallback call left as it is runs on the parent's model, which the router only guessed from the transcript.
+    guessed = (route is not None and route.path == "fallback" and not route.rewrote
+               and not outcome.named and route.source != "pin")
     try:
-        health.ran(asked, outcome.ran_as, outcome.ran_family, outcome.forced, swapped=swapped,
-                   untouched=route.was if route and route.path == "mod" else None)
+        if not guessed or outcome.ran_family == asked:
+            health.ran(asked, outcome.ran_as, outcome.ran_family, outcome.forced, swapped=swapped,
+                       untouched=route.was if route and route.path == "mod" else None)
     except OSError:
         pass
     ledger.result(session_id, outcome.agent, asked, outcome.ran_as, CUT_OFF if outcome.cut_off else outcome.status,

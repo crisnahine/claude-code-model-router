@@ -169,8 +169,8 @@ def agent_failed(hook_input: dict) -> dict | None:
         return None
     return _context("PostToolUseFailure", (
         f"The '{asked}' model looks unavailable here. This agent call re-issued with model: "
-        f"\"{reg.clamp(asked, usable)}\" runs on the nearest usable one."
-        + (" Model Router will route around it for now." if returned.note == calls.ROUTED_AROUND else "")))
+        f"\"{reg.clamp(asked, usable)}\" runs on a usable model."
+        + (" Model Router will route around it for up to a day." if returned.note == calls.ROUTED_AROUND else "")))
 
 
 def agent_stopped(hook_input: dict) -> dict | None:

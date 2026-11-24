@@ -82,16 +82,12 @@ class Sandbox(unittest.TestCase):
         for name in list(os.environ):
             if name.startswith(("CLAUDE_PLUGIN_OPTION_", "CLAUDE_CODE_SUBAGENT_", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "CLAUDE_CODE_USE_", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "DISABLE_PROMPT_CACHING", "ANTHROPIC_")):
                 del os.environ[name]
-        self.managed = self.home / "managed-settings.json"
-        self.managed_root = mock.patch.object(allowlist, "MANAGED_ROOT", self.home)
-        self.managed_root.start()
         self.clock = time.time()
         store.set_clock(lambda: self.clock)
 
     def tearDown(self):
         store.set_clock(None)
         store.owner = None
-        self.managed_root.stop()
         self.patch.stop()
         self.tmp.cleanup()
 
@@ -710,11 +706,11 @@ class Registry(Sandbox):
         self.assertEqual(self.config.available(cap="sonnet")[-1], "sonnet")
         self.assertEqual(self.config.available()[-1], "fable")
 
-    def test_clamp_never_raises_above_what_was_asked(self):
-        self.assertEqual(self.config.clamp("fable", ["haiku", "sonnet"]), "sonnet")
+    def test_clamp_steps_up_and_steps_down_only_when_nothing_stronger_is_left(self):
         self.assertEqual(self.config.clamp("opus", ["haiku", "opus"]), "opus")
-        # Nothing at or below it is usable: the weakest usable is the least bad.
+        self.assertEqual(self.config.clamp("sonnet", ["haiku", "opus", "fable"]), "opus")
         self.assertEqual(self.config.clamp("haiku", ["sonnet", "opus"]), "sonnet")
+        self.assertEqual(self.config.clamp("fable", ["haiku", "sonnet"]), "sonnet")  # a cap, or all stronger ones out
 
     def test_project_can_add_a_model_but_not_rerank_or_slip_under_the_cap(self):
         self.override({"models": {"saga": {"strength": 0.5, "cost": 9}, "fable": {"strength": 0}}})
@@ -845,7 +841,7 @@ class Registry(Sandbox):
 
 
 class Allowlist(Sandbox):
-    """availableModels and deniedModels, from the settings layers the mod sends or the files."""
+    """availableModels and deniedModels, from the settings layers the mod sends."""
 
     def setUp(self):
         super().setUp()
@@ -883,102 +879,12 @@ class Allowlist(Sandbox):
     def test_junk_engine_layers_count_as_unset(self):
         sent = {"policy": {"deniedModels": [1, None]}, "user": "x", "project": {"availableModels": "opus"},
                 "bogus": {"a": 1}}
-        self.assertEqual(allowlist.read("s1", self.project, sent).permitted(self.config), set(self.config.models))
+        self.assertEqual(allowlist.read("s1", sent).permitted(self.config), set(self.config.models))
         self.assertIsNone(allowlist.remember("s1", "not an object"))
 
     def test_only_the_four_keys_are_stored(self):
         modpath.start({"session_id": "s1", "settings": {"policy": {"availableModels": ["opus"], "env": {"TOKEN": "x"}}}})
         self.assertNotIn("TOKEN", (self.data / "allowlist.json").read_text(encoding="utf-8"))
-
-    def test_managed_drop_ins_merge_in_name_order(self):
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
-        drop_ins = self.home / "managed-settings.d"
-        drop_ins.mkdir()
-        (drop_ins / "20-models.json").write_text(json.dumps({"availableModels": ["sonnet", "opus"],
-                                                              "deniedModels": ["opus"]}))
-        (drop_ins / ".30-hidden.json").write_text(json.dumps({"availableModels": ["fable"]}))
-        (drop_ins / "40-notes.txt").write_text(json.dumps({"availableModels": ["fable"]}))
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), {"sonnet"})
-        self.managed.write_text(json.dumps({"availableModels": ["fable"]}))
-        (drop_ins / "10-more.json").write_text(json.dumps({"availableModels": ["sonnet"]}))
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), {"sonnet", "fable"})
-        for path in (self.managed, drop_ins / "10-more.json", drop_ins / "20-models.json"):
-            path.unlink()
-        (drop_ins / "50-empty.json").write_text(json.dumps({"availableModels": []}))
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
-        (drop_ins / "60-a.json").write_text(json.dumps({"availableModelsMatch": "exact"}))
-        self.assertTrue(allowlist.read(None, self.project).exact)
-        (drop_ins / "70-b.json").write_text(json.dumps({"availableModelsMatch": "prefix"}))
-        self.assertFalse(allowlist.read(None, self.project).exact)
-
-    def test_the_local_settings_file_counts(self):
-        (self.project / ".claude").mkdir()
-        (self.project / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["haiku"]}))
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), {"haiku"})
-
-    @unittest.skipIf(os.name == "nt", "on Windows the local file stays beside settings.json")
-    def test_the_local_file_is_read_at_the_repository_root(self):
-        (self.project / ".git").mkdir()
-        sub = self.project / "pkg" / ".claude"
-        sub.mkdir(parents=True)
-        (self.project / ".claude").mkdir()
-        (self.project / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["opus"]}))
-        (self.project / ".claude" / "settings.json").write_text(json.dumps({"availableModels": ["fable"]}))
-        (sub / "settings.local.json").write_text(json.dumps({"availableModels": ["haiku"]}))  # the root's wins
-        (sub / "settings.json").write_text(json.dumps({"availableModels": ["sonnet"]}))  # read where the session is
-        os.environ["CLAUDE_PROJECT_DIR"] = str(self.project / "pkg")  # the session started in pkg
-        self.assertEqual(allowlist.read(None, self.project / "pkg").permitted(self.config), {"sonnet", "opus"})
-
-    @unittest.skipIf(os.name == "nt", "on Windows the local file stays beside settings.json")
-    def test_a_worktree_reads_the_local_file_at_the_main_checkout(self):
-        (self.project / ".git" / "worktrees" / "w").mkdir(parents=True)
-        (self.project / ".git" / "worktrees" / "w" / "commondir").write_text("../..\n")
-        tree = Path(self.tmp.name) / "w"
-        tree.mkdir()
-        (tree / ".git").write_text(f"gitdir: {self.project / '.git' / 'worktrees' / 'w'}\n")
-        (self.project / ".claude").mkdir()
-        (self.project / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["opus"]}))
-        self.assertEqual(allowlist.read(None, tree).permitted(self.config), {"opus"})
-
-    @unittest.skipIf(os.name == "nt", "on Windows the local file stays beside settings.json")
-    def test_the_local_file_stays_beside_settings_json_when_the_root_cannot_be_trusted(self):
-        (self.project / ".git").mkdir()
-        (self.project / ".claude").mkdir()
-        (self.project / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["opus"]}))
-        sub = self.project / "pkg"
-        (sub / ".claude").mkdir(parents=True)
-        (sub / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["haiku"]}))
-        self.assertEqual(allowlist.read(None, sub).permitted(self.config), {"opus"})
-        with mock.patch.object(os, "getuid", return_value=os.getuid() + 1):
-            self.assertEqual(allowlist.read(None, sub).permitted(self.config), {"haiku"})  # not owned by this user
-        with mock.patch.object(Path, "home", return_value=self.project):
-            self.assertEqual(allowlist.read(None, sub).permitted(self.config), {"haiku"})  # a root that is the home folder
-
-    def test_the_windows_managed_folder_ignores_ProgramFiles(self):
-        with mock.patch.dict(os.environ, {"ProgramFiles": r"D:\Planted"}), mock.patch.object(allowlist, "MANAGED_ROOT", None):
-            self.assertEqual(allowlist.managed_root("win32"), Path(r"C:\Program Files\ClaudeCode"))
-            self.assertEqual(allowlist.managed_root("darwin"), Path("/Library/Application Support/ClaudeCode"))
-            self.assertEqual(allowlist.managed_root("linux"), Path("/etc/claude-code"))
-
-    def test_a_blanked_engine_policy_never_hides_the_managed_files(self):
-        self.managed.write_text(json.dumps({"deniedModels": ["opus"], "availableModels": ["sonnet", "opus", "haiku"]}))
-        modpath.start({"session_id": "s1", "settings": {"policy": {}, "user": {}}})  # another mod answered {}
-        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet", "haiku"})
-        modpath.start({"session_id": "s1"})  # a later read failed: the stored layers stand, the files still apply
-        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet", "haiku"})
-        self.assertEqual(allowlist.read(None, self.project, {"policy": {}}).permitted(self.config), {"sonnet", "haiku"})
-
-    def test_the_engine_policy_and_the_managed_files_both_have_to_permit(self):
-        self.managed.write_text(json.dumps({"availableModels": ["opus", "haiku"], "deniedModels": ["haiku"]}))
-        sent = {"policy": {"availableModels": ["claude-opus-5-5", "sonnet"], "deniedModels": ["fable"]}}
-        self.assertEqual(allowlist.read(None, self.project, sent).permitted(self.config), {"opus"})
-        self.assertFalse(allowlist.read(None, self.project, {"policy": {"availableModels": ["haiku"]}}).permitted(self.config))
-        self.assertFalse(allowlist.read(None, self.project, {"policy": {"availableModels": ["haiku"]}}).permits_id(self.config, "opus", "claude-opus-5-5"))
-        self.assertFalse(allowlist.read(None, self.project, {"policy": {}}).exact)
-        self.managed.write_text(json.dumps({"availableModelsMatch": "exact"}))
-        self.assertTrue(allowlist.read(None, self.project, {"policy": {"availableModelsMatch": "prefix"}}).exact)
-        self.managed.write_text(json.dumps({"modelOverrides": {"claude-opus-5-5": "arn:x"}}))
-        self.assertTrue(allowlist.read(None, self.project, {"policy": {}}).overrides)
 
     def test_deny_entries_match_after_trimming_and_by_family_name(self):
         every = {"haiku", "sonnet", "opus", "fable"}
@@ -1010,14 +916,12 @@ class Allowlist(Sandbox):
         self.assertFalse(permits(["opus", "us.anthropic.claude-opus"], "opus", "claude-opus-5-5"))
         # The family keeps a permitted version, which its alias moves to, so it stays routable.
         self.assertEqual(self.permitted(policy={"availableModels": pinned}), {"sonnet"})
-        managed = allowlist.from_layers({}, floor={"availableModels": pinned})
-        self.assertFalse(managed.permits_id(self.config, "sonnet", "claude-sonnet-5-5"))
 
     def test_max_effort_level_caps_each_family_at_the_lowest_source(self):
         # settings-reference.md, maxEffortLevel: the lowest of any scope applies; a modelSettings entry replaces
         # that source's top-level cap for the model; "max" sets none.
-        def caps(floor=None, **layers):
-            found = allowlist.from_layers(layers, floor=floor)
+        def caps(**layers):
+            found = allowlist.from_layers(layers)
             return {n: found.effort_cap(self.config, n) for n in ("haiku", "sonnet", "opus", "fable")}
 
         self.assertEqual(caps(), dict.fromkeys(("haiku", "sonnet", "opus", "fable")))
@@ -1027,40 +931,8 @@ class Allowlist(Sandbox):
                                                           "sonnet": {"maxEffortLevel": "medium"}, "x": "junk"}}
         self.assertEqual(caps(user=own), {"haiku": "low", "sonnet": "medium", "opus": None, "fable": "low"})
         self.assertEqual(caps(user=own, policy={"maxEffortLevel": "high"})["opus"], "high")
-        self.assertEqual(caps(floor={"maxEffortLevel": "medium"}, user={"maxEffortLevel": "max"})["fable"], "medium")
+        self.assertEqual(caps(policy={"maxEffortLevel": "medium"}, user={"maxEffortLevel": "max"})["fable"], "medium")
         self.assertEqual(caps(user={"maxEffortLevel": "turbo", "modelSettings": ["opus"]})["opus"], None)
-        (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "medium"}))
-        self.assertEqual(allowlist.read(None, self.project).effort_cap(self.config, "opus"), "medium")
-        drop_ins = self.home / "managed-settings.d"
-        drop_ins.mkdir()
-        (drop_ins / "10-a.json").write_text(json.dumps({"modelSettings": {"haiku": {"maxEffortLevel": "low"}}}))
-        (drop_ins / "20-b.json").write_text(json.dumps({"modelSettings": {"opus": {"maxEffortLevel": "low"}}}))
-        read = allowlist.read(None, self.project)
-        self.assertEqual([read.effort_cap(self.config, n) for n in ("haiku", "opus", "sonnet")], ["low", "low", "medium"])
-
-    def test_a_managed_file_that_is_there_but_unreadable_permits_no_models(self):
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(self.config.models))  # absent
-        drop_ins = self.home / "managed-settings.d"
-        drop_ins.mkdir()
-        (drop_ins / "50-bad.json").write_text("{not json")
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
-        (drop_ins / "50-bad.json").write_text("[]")
-        self.assertEqual(allowlist.read(None, self.project, {"policy": {}}).permitted(self.config), set())  # the floor holds
-        (drop_ins / "50-bad.json").write_text("   {\"availableModels\": ")  # content that stops short
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
-
-    def test_an_empty_or_blank_managed_file_and_a_folder_in_the_drop_ins_are_no_policy(self):
-        everything = set(self.config.models)
-        drop_ins = self.home / "managed-settings.d"
-        drop_ins.mkdir()
-        for text in ("", " \n\t "):
-            self.managed.write_text(text)
-            (drop_ins / "50-blank.json").write_text(text)
-            self.assertEqual(allowlist.read(None, self.project).permitted(self.config), everything, repr(text))
-        (drop_ins / "60-folder.json").mkdir()
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), everything)
-        (drop_ins / "70-real.json").write_text(json.dumps({"deniedModels": ["opus"]}))
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), everything - {"opus"})
 
     def test_a_deny_list_over_the_cap_leaves_no_model_open_while_an_allow_list_is_only_cut(self):
         for denied in (["opus"] + ["x"] * allowlist.MAX_ENTRIES, ["opus", "y" * (allowlist.MAX_CHARS + 1)]):
@@ -1069,25 +941,13 @@ class Allowlist(Sandbox):
                          set(self.config.models))  # exactly at the cap is fine
         self.assertEqual(self.permitted(user={"deniedModels": ["x"] * 300}), set(self.config.models))  # not policy: ignored
         self.assertEqual(self.permitted(user={"availableModels": ["z" * 300, "haiku"] + ["q"] * 300}), {"haiku"})
-        self.managed.write_text(json.dumps({"deniedModels": ["opus"] + ["x"] * allowlist.MAX_ENTRIES}))
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
-        self.assertEqual(allowlist.read(None, self.project, {"policy": {}}).permitted(self.config), set())
-        self.assertEqual(allowlist.read("s1", self.project, {"policy": {"deniedModels": ["x"] * 300}}).permitted(self.config), set())
-
-    def test_a_failed_policy_read_never_leaves_the_users_lists_standing(self):
-        self.managed.write_text(json.dumps({"availableModels": ["sonnet"]}))
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["opus"]}))
-        modpath.start({"session_id": "s1", "settings": {"user": {"availableModels": ["opus"]}}})  # policy omitted
-        found = allowlist.read("s1", self.project)
-        self.assertEqual((found.permitted(self.config), found.source), ({"sonnet"}, "engine"))
-        modpath.start({"session_id": "s2", "settings": {"policy": {"availableModels": ["haiku"]}}})  # the others omitted
-        self.assertEqual(allowlist.read("s2", self.project).permitted(self.config), set())  # haiku and sonnet share nothing
+        self.assertEqual(allowlist.read("s1", {"policy": {"deniedModels": ["x"] * 300}}).permitted(self.config), set())
 
     def test_a_spawn_in_a_session_the_start_hook_never_saw_remembers_the_layers(self):
         # After /clear the session id is new and session.start doesn't fire, so a spawn is the first to send them.
         modpath.spawn({"session_id": "s2", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                        "tool_input": {"prompt": LOOKUP}, "settings": {"policy": {"availableModels": ["opus"]}}})
-        self.assertEqual(allowlist.read("s2", self.project).permitted(self.config), {"opus"})
+        self.assertEqual(allowlist.read("s2").permitted(self.config), {"opus"})
 
     def test_lists_are_capped_and_overrides_are_stored_as_a_flag(self):
         sent = {"user": {"availableModels": ["x" * 500] + ["opus"] * 300, "modelOverrides": {"a": {"b": [1] * 50}}},
@@ -1105,48 +965,16 @@ class Allowlist(Sandbox):
 
     def test_reading_the_sent_layers_stores_nothing_until_the_mod_hook_remembers_them(self):
         sent = {"policy": {"availableModels": ["opus"]}}
-        found = allowlist.read("s1", self.project, sent)
+        found = allowlist.read("s1", sent)
         self.assertEqual(found.permitted(self.config), {"opus"})
         self.assertFalse((self.data / "allowlist.json").exists())
         modpath.spawn({"session_id": "s1", "cwd": str(self.project), "settings": sent, "kind": "subagent",
                          "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}})
-        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"opus"})
-
-    @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
-    def test_a_settings_file_that_is_not_a_small_regular_file_is_ignored(self):
-        os.symlink("/dev/zero", self.home / "settings.json")
-        (self.project / ".claude").mkdir()
-        (self.project / ".claude" / "settings.json").write_text(json.dumps({"availableModels": ["haiku"], "pad": "x" * allowlist.MAX_BYTES}))
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(self.config.models))
-        real = self.project / "real.json"
-        real.write_text(json.dumps({"availableModels": ["haiku"]}))
-        (self.home / "settings.json").unlink()
-        os.symlink(real, self.home / "settings.json")  # a symlink to a regular file is how dotfile managers work
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), {"haiku"})
-
-    @unittest.skipIf(os.name == "nt", "on Windows the local file stays beside settings.json")
-    def test_a_crafted_git_file_does_not_move_the_local_file(self):
-        other = Path(self.tmp.name) / "other"
-        (other / ".git").mkdir(parents=True)
-        (other / ".claude").mkdir()
-        (other / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["opus"]}))
-        (other / "stuff" / "w").mkdir(parents=True)
-        (other / "stuff" / "w" / "commondir").write_text("../../.git\n")  # not under a worktrees folder
-        tree = Path(self.tmp.name) / "tree"
-        tree.mkdir()
-        (tree / ".git").write_text(f"gitdir: {other / 'stuff' / 'w'}\n")
-        self.assertEqual(allowlist.read(None, tree).permitted(self.config), set(self.config.models))
-        (other / "elsewhere" / ".git").mkdir(parents=True)
-        (other / "elsewhere" / ".claude").mkdir()
-        (other / "elsewhere" / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["opus"]}))
-        (other / ".git" / "worktrees" / "w").mkdir(parents=True)
-        (other / ".git" / "worktrees" / "w" / "commondir").write_text("../../../elsewhere/.git\n")  # not the checkout's own .git
-        (tree / ".git").write_text(f"gitdir: {other / '.git' / 'worktrees' / 'w'}\n")
-        self.assertEqual(allowlist.read(None, tree).permitted(self.config), set(self.config.models))
+        self.assertEqual(allowlist.read("s1").permitted(self.config), {"opus"})
 
     def test_nothing_left_prints_no_none_in_the_reports(self):
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["some-other-model"]}))
-        snap = settings.Snapshot()
+        modpath.start({"session_id": "s1", "settings": {"user": {"availableModels": ["some-other-model"]}}})
+        snap = settings.Snapshot()  # a skill command: no session id, so the latest session's layers
         self.assertNotIn("None", report.policy(snap))
         self.assertIn("left as it is", report.policy(snap))
         text = report.explain(snap, LOOKUP)
@@ -1156,25 +984,18 @@ class Allowlist(Sandbox):
         self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARD}))
 
     def test_a_later_payload_without_policy_keeps_the_stored_policy(self):
-        policy = {"availableModels": ["sonnet"]}  # server-managed: no managed file exists
+        policy = {"availableModels": ["sonnet"]}
         modpath.start({"session_id": "s1", "settings": {"policy": policy, "user": {"availableModels": ["opus"]}}})
         later = {"user": {"availableModels": ["opus"]}, "project": {}, "local": {}, "flag": {}}  # the policy read failed
         modpath.start({"session_id": "s1", "settings": later})
-        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet"})
+        self.assertEqual(allowlist.read("s1").permitted(self.config), {"sonnet"})
         modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                          "tool_input": {"prompt": LOOKUP}, "settings": later})
         self.assertEqual(store.load_entry("allowlist", "s1")["layers"]["policy"], policy)
-        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet"})
+        self.assertEqual(allowlist.read("s1").permitted(self.config), {"sonnet"})
         self.assertEqual(self.ledger()[-1]["model"], "sonnet")
         newer = {"policy": {"availableModels": ["haiku"]}}  # a policy that is sent again replaces the stored one
-        self.assertEqual(allowlist.read("s1", self.project, newer).permitted(self.config), {"haiku"})
-
-    def test_a_deeply_nested_settings_file_is_unreadable_not_a_crash(self):
-        deep = "[" * 400000
-        (self.home / "settings.json").write_text(deep)
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set(self.config.models))
-        self.managed.write_text(deep)
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
+        self.assertEqual(allowlist.read("s1", newer).permitted(self.config), {"haiku"})
 
     def test_a_malformed_policy_list_permits_nothing_while_a_soft_one_is_unset(self):
         everything = set(self.config.models)
@@ -1182,28 +1003,43 @@ class Allowlist(Sandbox):
             for junk in ("opus", None, 5, {"a": 1}):
                 self.assertEqual(self.permitted(policy={key: junk}), set(), (key, junk))
                 self.assertEqual(self.permitted(user={key: junk}, project={key: junk}), everything, (key, junk))
-        self.managed.write_text(json.dumps({"deniedModels": "opus"}))
-        self.assertEqual(allowlist.read(None, self.project).permitted(self.config), set())
-        self.assertEqual(allowlist.read(None, self.project, {"policy": {}}).permitted(self.config), set())
 
-    def test_engine_layers_win_over_files_for_the_whole_session(self):
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
+    def test_the_engine_layers_hold_for_the_whole_session(self):
         modpath.start({"session_id": "s1", "settings": {"policy": {"availableModels": ["sonnet"]}}})
-        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet"})
+        self.assertEqual(allowlist.read("s1").permitted(self.config), {"sonnet"})
         self.assertEqual(self.decide("general-purpose", LOOKUP, model="haiku")["model"], "sonnet")  # a later hook of the session
 
-    def test_a_failed_engine_read_falls_back_to_files(self):
+    def test_with_no_engine_read_no_list_applies_and_settings_files_are_never_read(self):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
+        (self.project / ".claude").mkdir()
+        (self.project / ".claude" / "settings.local.json").write_text(json.dumps({"availableModels": ["haiku"]}))
         modpath.start({"session_id": "s1"})
-        self.assertEqual(allowlist.read("s1", self.project).source, "files")
+        self.assertEqual(allowlist.read("s1").permitted(self.config), set(self.config.models))
         modpath.start({"session_id": "s1", "settings": {"policy": {"availableModels": ["opus"]}}})
         modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                          "tool_input": {"prompt": LOOKUP}})  # this read failed: the latest set stands
-        self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"opus"})
+        self.assertEqual(allowlist.read("s1").permitted(self.config), {"opus"})
+
+    def test_a_blocked_alias_counts_only_where_it_moves_or_a_permitted_version_runs(self):
+        # model-config.md: the alias moves to the newest permitted version on the Anthropic API and Claude Platform on AWS only.
+        def permitted(provider, overrides=False, **policy):
+            layers = {"policy": policy, **({"user": {"modelOverrides": {"a": "b"}}} if overrides else {})}
+            return allowlist.from_layers(layers, provider).permitted(self.config)
+
+        every = set(self.config.models)
+        newest_only = {"availableModels": ["claude-opus-5-5", "sonnet", "haiku", "fable"]}
+        for provider in (None, "anthropic_aws", "bedrock"):  # Foundry's opus alias runs Opus 4.6
+            self.assertEqual(permitted(provider, **newest_only), every, provider)
+        self.assertEqual(permitted("foundry", **newest_only), every)  # the mod sends claude-opus-5-5
+        self.assertEqual(permitted("foundry", overrides=True, **newest_only), every - {"opus"})
+        old_and_new = {"deniedModels": ["claude-haiku-4-5", "claude-haiku-5-5"]}
+        self.assertEqual(permitted(None, **old_and_new), every)
+        self.assertEqual(permitted("vertex", **old_and_new), every - {"haiku"})
+        self.assertEqual(permitted("vertex", deniedModels=["claude-haiku-4"]), every)  # the newest still runs
 
     def test_nothing_left_leaves_the_call_as_it_is(self):
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["some-other-model"]}))
-        self.assertEqual(self.config.available(allowed=allowlist.read(None, self.project)), [])
+        modpath.start({"session_id": "s1", "settings": {"user": {"availableModels": ["some-other-model"]}}})
+        self.assertEqual(self.config.available(allowed=allowlist.read("s1")), [])
         self.session_on("claude-opus-5-5")
         self.assertIsNone(self.pre("general-purpose", LOOKUP))
         row = self.ledger()[-1]
@@ -1437,13 +1273,15 @@ class Router(Sandbox):
         d = self.decide("general-purpose", LOOKUP, model="fable")
         self.assertEqual((d["action"], d["model"], d["effort"]), ("rewrite", "sonnet", "xhigh"))
 
-    def test_a_named_model_that_is_routed_around_goes_to_the_nearest_usable_one_below_it(self):
-        self.route_around("opus", "fable")
+    def test_a_named_model_that_is_routed_around_goes_up_and_down_only_when_nothing_stronger_is_left(self):
+        self.route_around("opus")
+        self.assertEqual(self.decide("general-purpose", HARD, model="opus")["model"], "fable")
+        self.route_around("fable")
         d = self.decide("general-purpose", HARD, model="opus")
         self.assertEqual((d["model"], d["effort"]), ("sonnet", "xhigh"))
         self.route_around("sonnet")
         self.agent("pinned", "opus")
-        self.assertEqual(self.decide("pinned", LOOKUP)["model"], "haiku")  # a named model is only ever lowered
+        self.assertEqual(self.decide("pinned", LOOKUP)["model"], "haiku")
 
     def test_a_pin_a_rule_and_a_call_the_cap_lowers_all_get_the_extra_step(self):
         self.options(max_tier="sonnet")
@@ -2108,14 +1946,14 @@ class RepeatGuard(Sandbox):
         self.assertEqual(self.ledger()[-1]["source"], "caller")
         self.assertTrue(health.load().healthy("haiku"))
 
-    def test_a_model_that_never_runs_is_routed_around_after_two_refused_rewrites(self):
+    def test_refused_rewrites_never_count_against_the_model(self):
+        # Auto mode denies the changed input, not the model (hooks.md, PreToolUse updatedInput in auto mode).
         for prompt in ("list the files under a", "list the files under b"):
             self.pre("general-purpose", prompt, model="haiku")
             self.next_message()
-            self.pre("general-purpose", prompt, model="haiku")
-        self.assertFalse(health.load().healthy("haiku"))
-        self.assertEqual(self.decide("general-purpose", "list the files under c", model="haiku")["model"], "sonnet")
-        self.assertIn(health.REFUSED, self.out("models"))
+            self.assertIsNone(self.pre("general-purpose", prompt, model="haiku"))
+        self.assertIsNone(store.load_state().get("health"))
+        self.assertEqual(self.decide("general-purpose", "list the files under c", model="haiku")["model"], "haiku")
 
     def test_a_refused_effort_only_rewrite_under_force_passes_through(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", max_tier="sonnet")
@@ -2544,13 +2382,14 @@ class Mod(Sandbox):
         self.assertIn("effort held to medium by maxEffortLevel", self.ledger()[-1]["reason"])
         self.assertEqual(self.spawn("general-purpose", LOOKUP, model="haiku")["effort"], "medium")  # at the cap: no reason
         self.assertNotIn("maxEffortLevel", self.ledger()[-1]["reason"])
-        # Without the mod, the settings files say it.
-        (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "low"}))
+        # The settings hooks read the layers the mod last sent for the session, and skill commands the latest session's.
+        self.advance(1)
+        modpath.start({"session_id": "s2", "settings": {"user": {"maxEffortLevel": "low"}}})
         out = self.pre("general-purpose", HARD, session_id="s2", model="opus")
         self.assertEqual(out["updatedInput"]["effort"], "low")
         self.assertIn("effort held to low by maxEffortLevel", out["additionalContext"])
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
-        self.assertEqual(self.pre("general-purpose", HARD, session_id="s3")["updatedInput"]["effort"], "low")
+        self.assertEqual(self.pre("general-purpose", HARD, session_id="s2")["updatedInput"]["effort"], "low")
         route = self.out("explain", HARD)
         self.assertIn("effort: low (the call is changed).", route)
         self.assertIn("effort held to low by maxEffortLevel", route.split("Why:", 1)[1].splitlines()[0])
@@ -2625,6 +2464,21 @@ class Mod(Sandbox):
             self.done("general-purpose", brief, "claude-sonnet-5-5", model="opus", effort="high")
         self.assertEqual(health.load().why_routed_around("opus"), "ran as claude-sonnet-5-5 instead")
 
+    def test_a_fallback_call_left_on_a_guessed_parent_model_is_no_substitution(self):
+        # The parent's model comes from the transcript on this path, and the conversation may have moved on.
+        self.session_on("claude-opus-5-5")
+        for number in range(2):
+            brief = f"{HARD} {number}"
+            self.assertIsNone(self.pre("general-purpose", brief))
+            self.done("general-purpose", brief, "claude-sonnet-5-5")
+        self.assertTrue(health.load().healthy("opus"))
+        self.agent("rev", "opus", extra="effort: high\n")  # a pin the router keeps is no guess
+        for number in range(2):
+            brief = f"{HARD} rev {number}"
+            self.assertIsNone(self.pre("rev", brief))
+            self.done("rev", brief, "claude-sonnet-5-5")
+        self.assertEqual(health.load().why_routed_around("opus"), "ran as claude-sonnet-5-5 instead")
+
     def test_a_result_reads_no_agent_files(self):
         self.agent("rev", "opus")
         self.spawn("rev", LOOKUP)
@@ -2657,7 +2511,7 @@ class Health(Sandbox):
         for text in ERRORS["other"]:
             self.assertFalse(health.is_model_error(text), text)
 
-    def test_two_model_errors_route_a_model_around_and_outages_grow(self):
+    def test_two_model_errors_route_a_model_around_for_a_day_and_never_longer(self):
         with self.at(0):
             self.assertEqual(health.failed("fable", "404 model not found"), 1)
             self.assertTrue(health.load().healthy("fable"))
@@ -2668,10 +2522,22 @@ class Health(Sandbox):
         with self.at(1.1):
             self.assertTrue(health.load().healthy("fable"))
             health.failed("fable", "404 model not found")  # after an outage one failure is enough
-        with self.at(1.1 + 2.9):
+        with self.at(1.1 + 0.9):
             self.assertFalse(health.load().healthy("fable"))
-        with self.at(1.1 + 3.1):
-            self.assertTrue(health.load().healthy("fable"))
+        with self.at(1.1 + 1.1):
+            self.assertTrue(health.load().healthy("fable"))  # the same day again, never three
+
+    def test_the_reason_is_the_cause_that_routed_the_model_around(self):
+        health.ran("opus", "claude-sonnet-5-5", "sonnet", forced=False)  # one substitution, under the threshold
+        health.failed("opus", "API Error: 404 not_found_error: model: claude-opus-5-5")
+        health.failed("opus", "API Error: 404 not_found_error: model: claude-opus-5-5")
+        self.assertEqual(health.load().why_routed_around("opus"), "API Error: 404 not_found_error: model: claude-opus-5-5")
+        health.failed("fable", "404 model not found")
+        health.ran("fable", "claude-opus-5-5", "opus", forced=False)
+        health.ran("fable", "claude-opus-5-5", "opus", forced=False)
+        self.assertEqual(health.load().why_routed_around("fable"), "ran as claude-opus-5-5 instead")
+        health.failed("fable", "a later error")  # a failure during the outage keeps its cause
+        self.assertEqual(health.load().why_routed_around("fable"), "ran as claude-opus-5-5 instead")
 
     def test_parallel_failures_during_an_outage_never_stack_it(self):
         with self.at(0):
@@ -2681,7 +2547,6 @@ class Health(Sandbox):
                 health.ran("opus", "claude-sonnet-5-5", "sonnet", forced=False)
         with self.at(1.1):
             self.assertEqual([health.load().healthy("fable"), health.load().healthy("opus")], [True, True])
-        self.assertEqual(store.load_state()["health"]["fable"]["outages"], 1)
 
     def test_a_run_as_asked_clears_trouble_and_names_the_model(self):
         health.failed("opus", "model not found")
@@ -2716,16 +2581,7 @@ class Health(Sandbox):
         health.failed("claude-haiku-5-5", "404 not_found_error", newest=True)
         self.assertFalse(health.load().healthy("claude-haiku-5-5"))
 
-    def test_a_refused_rewrite_counts_only_against_a_model_never_seen_running(self):
-        health.refused("haiku")
-        health.refused("haiku")
-        self.assertEqual(health.load().why_routed_around("haiku"), health.REFUSED)
-        health.ran("sonnet", "claude-sonnet-5-5", "sonnet", forced=False)
-        health.refused("sonnet")
-        health.refused("sonnet")
-        self.assertTrue(health.load().healthy("sonnet"))
-
-    def test_an_outage_lasts_no_longer_than_its_days_after_the_clock_moves_back(self):
+    def test_an_outage_lasts_no_longer_than_a_day_after_the_clock_moves_back(self):
         with self.at(19):  # recorded before a 19-day jump back
             health.failed("opus", "model not found")
             health.failed("opus", "model not found")
@@ -2733,7 +2589,7 @@ class Health(Sandbox):
             seen = health.load()
             self.assertFalse(seen.healthy("opus"))
             seen.settle()
-        with self.at(health.OUTAGE_DAYS[0] + 0.01):
+        with self.at(health.OUTAGE / 86400 + 0.01):
             self.assertTrue(health.load().healthy("opus"))
 
     def test_an_ordinary_read_writes_nothing(self):
@@ -2761,11 +2617,11 @@ class Health(Sandbox):
         self.assertEqual(store.state_path().read_bytes(), cleared)  # the cleared record wins over the stale read
 
     def test_a_junk_record_reads_as_healthy(self):
-        store.update_state(lambda s: s.update(health={"opus": {"unavailable_until": "soon", "outages": -3},
+        store.update_state(lambda s: s.update(health={"opus": {"unavailable_until": "soon", "fail": -3},
                                                       "sonnet": "x", "haiku": {"last_model": 5},
-                                                      "fable": {"unavailable_until": float("nan"), "outages": float("inf")},
-                                                      "saga": {"unavailable_until": float("inf"), "outages": float("nan")},
-                                                      "huge": {"unavailable_until": 10 ** 400, "outages": 10 ** 400}}))
+                                                      "fable": {"unavailable_until": float("nan"), "fail": float("inf")},
+                                                      "saga": {"unavailable_until": float("inf"), "fail": float("nan")},
+                                                      "huge": {"unavailable_until": 10 ** 400, "fail": 10 ** 400}}))
         seen = health.load()
         self.assertEqual([seen.healthy(n) for n in ("opus", "sonnet", "haiku", "fable", "saga", "huge")], [True] * 6)
         self.assertEqual(seen.seen_running(), [])
@@ -2775,7 +2631,7 @@ class Health(Sandbox):
         health.failed("opus", "model not found")
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         record = store.load_state()["health"]
-        self.assertEqual(set(record["opus"]), {"fail", "last_error", "outages", "unavailable_until"})
+        self.assertEqual(set(record["opus"]), {"fail", "last_error", "unavailable_until", "why"})
         self.assertEqual(set(record["fable"]), {"substituted", "substituted_by"})
 
     def test_forget_says_whether_it_removed_a_record(self):
@@ -2827,6 +2683,10 @@ class NewestOnProviders(Sandbox):
     def test_the_shipped_ids_belong_to_their_families_and_are_priced(self):
         config = cfg.shipped()
         self.assertEqual({p: tuple(f) for p, f in config.older_aliases.items()}, self.LAGS)
+        for provider, runs in config.older_aliases.items():
+            for family, model_id in runs.items():  # the version the alias runs there, older than the newest
+                self.assertEqual(config.family(model_id), family, provider)
+                self.assertNotEqual(model_id, config.newest[family], provider)
         for family, model_id in config.newest.items():
             self.assertEqual((config.family(model_id), model_id), (family, self.NEWEST[family]))
             self.assertIsNotNone(config.price(model_id))
@@ -2838,13 +2698,13 @@ class NewestOnProviders(Sandbox):
         del os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"]
         for managed, want in (({"availableModels": ["haiku", "sonnet", "opus"]}, "claude-haiku-5-5"),
                               ({"availableModels": ["claude-haiku-5", "sonnet"]}, "claude-haiku-5-5"),
-                              ({"availableModels": ["claude-haiku-5", "sonnet"], "availableModelsMatch": "exact"}, "haiku"),
+                              # Bedrock's haiku alias runs Haiku 4.5, which the exact list rules out too: the next family up.
+                              ({"availableModels": ["claude-haiku-5", "sonnet"], "availableModelsMatch": "exact"}, "claude-sonnet-5-5"),
                               ({"availableModels": ["claude-haiku-4-5", "sonnet", "opus"]}, "haiku"),
                               ({"deniedModels": ["claude-haiku-5-5"]}, "haiku")):
-            self.managed.write_text(json.dumps(managed))
+            modpath.start({"session_id": "s1", "settings": {"policy": managed}})
             self.assertEqual(self.model(LOOKUP), want, managed)
-        self.managed.unlink()
-        (self.home / "settings.json").write_text(json.dumps({"modelOverrides": {"claude-haiku-4-5": "arn:aws:x"}}))
+        modpath.start({"session_id": "s1", "settings": {"policy": {}, "user": {"modelOverrides": {"claude-haiku-4-5": "arn:aws:x"}}}})
         self.assertEqual(self.model(LOOKUP), "haiku")
 
     def test_a_version_the_caller_or_the_agent_names_is_left_alone(self):
@@ -2887,6 +2747,23 @@ class NewestOnProviders(Sandbox):
             hooks.agent_failed({**hook_input, "error": "API Error: 404 not_found_error: model: claude-haiku-5-5"})
         self.assertEqual([health.load().healthy("haiku"), health.load().healthy("claude-haiku-5-5")], [True, False])
 
+    def test_a_host_managed_provider_sends_only_aliases(self):
+        os.environ.update(CLAUDE_CODE_USE_BEDROCK="1", CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST="1")
+        self.assertIsNone(settings.resolve().provider)
+        self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "sonnet"))
+
+    def test_the_routers_own_pick_passes_over_a_family_that_would_run_an_older_model(self):
+        os.environ["CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD"] = "1"  # only haiku's alias lags here
+        snap = lambda: settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})  # noqa: E731
+        self.assertEqual(snap().pick(Level.lookup).model, "haiku")  # its newest ID is sent
+        health.failed("claude-haiku-5-5", "API Error: 404 not_found_error", newest=True)
+        self.assertEqual((snap().lagging, snap().pick(Level.lookup).model), (frozenset({"haiku"}), "sonnet"))
+        self.override({"agents": {"general-purpose": {"level": "lookup"}}})
+        self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "sonnet")  # a rule's floor is a pick too
+        self.assertEqual(self.model(LOOKUP), "haiku")  # a model the caller names is kept
+        os.environ["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = "claude-haiku-4-5"  # the user chose the version
+        self.assertEqual(snap().pick(Level.lookup).model, "haiku")
+
     def test_the_agent_call_fallback_sends_only_aliases(self):
         os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
         hook_input = {"session_id": "s9", "cwd": str(self.project),
@@ -2912,8 +2789,7 @@ class ModPayloads(Sandbox):
 
     def test_start_stores_the_settings_layers(self):
         modpath.start(self.payloads["mod-start"])
-        found = allowlist.read("s1", self.project)
-        self.assertEqual((found.permitted(cfg.shipped()), found.source), ({"haiku", "sonnet"}, "engine"))
+        self.assertEqual(allowlist.read("s1").permitted(cfg.shipped()), {"haiku", "sonnet"})
 
     def test_spawn_reads_every_field(self):
         payload = self.payloads["mod-spawn"]
@@ -3153,7 +3029,7 @@ class Hooks(Sandbox):
         self.assertEqual(request.load("s1").prompt_id, "p2")
 
     def test_a_named_model_the_allowlist_rules_out_is_not_promised(self):
-        self.managed.write_text(json.dumps({"availableModels": ["sonnet", "haiku"]}))
+        modpath.start({"session_id": "s1", "settings": {"policy": {"availableModels": ["sonnet", "haiku"]}}})
         prompt = "use opus to review the auth module"
         text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": prompt}))
         self.assertIn('model: "opus" runs on sonnet, since opus isn\'t available here', text)
@@ -3169,7 +3045,7 @@ class Hooks(Sandbox):
         self.assertEqual(self.decide("general-purpose", prompt, model="opus")["model"], "haiku")
         # No registry model left: Claude Code's allowlist decides, so the router promises nothing.
         self.options(max_tier="")
-        self.managed.write_text(json.dumps({"availableModels": ["claude-3-x"]}))
+        modpath.start({"session_id": "s1", "settings": {"policy": {"availableModels": ["claude-3-x"]}}})
         self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": prompt, "prompt_id": "p2"}))
         self.assertEqual(request.load("s1").prompt_id, "p2")
 
@@ -3757,7 +3633,7 @@ class Reports(Sandbox):
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "opus", "fable"]}))
+        modpath.start({"session_id": "s1", "settings": {"user": {"availableModels": ["haiku", "opus", "fable"]}}})
         store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga"]}})
         text = self.out("models")
         self.assertIn("ran as claude-opus-5-5 instead", text)
@@ -4250,7 +4126,7 @@ class MachineReadable(Sandbox):
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "opus", "fable"]}))
+        modpath.start({"session_id": "s1", "settings": {"user": {"availableModels": ["haiku", "opus", "fable"]}}})
         store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga"]}})
         data = self.json_out("models")
         self.assertEqual(data["schema"], "model-router.models/3")
@@ -4356,7 +4232,7 @@ class JsonOutputs(Sandbox):
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
-        (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "sonnet", "opus", "fable", "swift"]}))
+        modpath.start({"session_id": "s1", "settings": {"user": {"availableModels": ["haiku", "sonnet", "opus", "fable", "swift"]}}})
         store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga", "swift"]}})
         self.session_on("claude-opus-5-5")
         for agent, brief, ran in (("general-purpose", LOOKUP, "claude-haiku-5-5"), ("ruled", BUILD, "claude-sonnet-5-5"),
@@ -4474,8 +4350,10 @@ class SecurityClaims(Sandbox):
         self.session_on("claude-opus-5-5")
         for name in ("opus", "haiku", "opus", "haiku"):
             health.failed(name, "model not found")
-        self.assertEqual(self.decide("general-purpose", HARD, model="opus")["model"], "sonnet")
+        self.assertEqual(self.decide("general-purpose", HARD, model="opus")["model"], "fable")
         self.assertEqual(self.decide("general-purpose", LOOKUP, model="haiku")["model"], "sonnet")
+        self.route_around("fable")
+        self.assertEqual(self.decide("general-purpose", HARD, model="opus")["model"], "sonnet")  # nothing stronger left
 
     def test_a_redo_the_effort_cap_holds_never_moves_to_a_project_model(self):
         self.override({"models": {"saga": {"strength": 3.5}, "titan": {"strength": 5}}})

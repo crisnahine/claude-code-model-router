@@ -3,8 +3,8 @@
 `config.load` builds one Registry per hook call from config/models.json and the override
 files, and every step reads that value. Nothing here names a model: the list comes from the
 files, narrowed by what this setup shows: the user's cap, the availableModels and
-deniedModels settings, and models that have been failing, silently running as something
-else, or not accepted on agent calls."""
+deniedModels settings, and models that have been failing or silently running as something
+else."""
 from __future__ import annotations
 
 import os
@@ -67,7 +67,7 @@ class Registry:
     aliases: Mapping[str, str] = field(default_factory=dict)
     prices: Mapping[str, Any] = field(default_factory=dict)
     newest: Mapping[str, str] = field(default_factory=dict)
-    older_aliases: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    older_aliases: Mapping[str, Mapping[str, str]] = field(default_factory=dict)  # provider: family: the ID its alias runs
     rules: Mapping[str, Rule] = field(default_factory=dict)
     routing_mode: str | None = None  # the weakest mode the override files set
     problems: tuple[str, ...] = ()  # keys an override file had wrong and the registry dropped
@@ -130,13 +130,14 @@ class Registry:
         return [n for n in names if table.healthy(n)] or names
 
     def clamp(self, name: str, usable: list[str]) -> str:
-        """The usable model closest to `name` without exceeding it, else the weakest usable. The
-        stand-in is never a model a repository added, whose rank is only that repository's claim."""
+        """`name` if usable, else the next stronger usable model, else the strongest usable one: a step down
+        only when the cap or availability leaves nothing stronger. The stand-in is never a model a
+        repository added, whose rank is only that repository's claim."""
         if name in usable or not usable:
             return name
         trusted = [n for n in usable if self.models[n].trusted] or usable
-        lower = [n for n in trusted if self.strength(n) <= self.strength(name)]
-        return lower[-1] if lower else trusted[0]
+        higher = [n for n in trusted if self.strength(n) > self.strength(name)]
+        return higher[0] if higher else trusted[-1]
 
     def select(self, needs: float, usable: list[str]) -> str | None:
         """The cheapest usable model strong enough for `needs`, else the strongest usable. A model a

@@ -47,6 +47,7 @@ class Facts:
     workflow: bool = False  # a workflow agent, which CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins
     session_effort: str | None = None  # the main conversation's level, for a call made from it
     effort_caps: Mapping[str, str] = field(default_factory=dict)  # maxEffortLevel per registry model, where set
+    lagging: frozenset = frozenset()  # Snapshot.lagging: families the router's own picks pass over
 
 
 def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
@@ -76,6 +77,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if not usable:
         out["reason"] = "availableModels and deniedModels leave no registry model open here, so the call is left as it is"
         return out
+    picks = [n for n in usable if n not in facts.lagging] or usable
     rule = reg.rules.get(agent) or Rule()
     if rule.route is False:
         out["reason"] = "a rule in model-router.json leaves this agent alone"
@@ -118,7 +120,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         return _pinned(out, "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "workflow agent", model, level, effort, facts, reg, None)
 
     floor = rule.level or rule.floor
-    target, source, why = None, None, ""
+    target, source, why, chosen = None, None, "", False  # chosen: the router picked the model, nobody named it
     if requested:
         target, source, why = requested, "caller", "the call names a model"
     elif reg.family(rule.model):
@@ -155,17 +157,17 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         # Nothing names a model, so Claude Code's own order applies: the parent's model.
         runs_on = out["was"]
         if redo:
-            level, source = climb(level), "router"
-            target = ladder.pick(reg, level, usable).model
+            level, source, chosen = climb(level), "router", True
+            target = ladder.pick(reg, level, picks).model
             came = "run that came back before" if facts.on_record else "run it would get unmarked, as it is marked a redo"
             steps = "one level above" if level.rank - done_level.rank == 1 else "above"
             why = f"{level} subtask" + (f", {steps} the {out['escalated_from']} {came}" if out["escalated_from"]
                                         else f", redone with more effort than the {came}")
         elif floor and (level is None or level < floor):
-            level, target, source = floor, ladder.model_for(reg, floor), "rule"
+            level, target, source, chosen = floor, ladder.model_for(reg, floor), "rule", True
             why = f"a rule in model-router.json raises this agent to {floor}"
         elif facts.teammate and runs_on and reg.strength(runs_on) < reg.levels[Level.standard].needs:
-            level, target, source = Level.standard, ladder.model_for(reg, Level.standard), "router"
+            level, target, source, chosen = Level.standard, ladder.model_for(reg, Level.standard), "router", True
             why = f"a teammate starts no lower than {target}, since its model is fixed for all its tasks"
         elif runs_on and reg.clamp(runs_on, usable) != runs_on:
             target, source, why = runs_on, "router", f"the call names no model and would run on the parent's {runs_on}"
@@ -175,16 +177,17 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
             return out
     else:
         if floor and level < floor:
-            level, target = floor, ladder.model_for(reg, floor)
+            level, target, chosen = floor, ladder.model_for(reg, floor), True
             why += f"; a rule in model-router.json raises it to {floor}"
         level = climb(level)
 
     named = tool_input.get("model") if source == "caller" else own_model if source == "pin" else None
-    final = reg.clamp(target, usable)
+    final = reg.clamp(target, picks if chosen else usable)
     # The caller's exact ID only survives a cap that keeps its family.
     out["version"] = named if isinstance(named, str) and named.lower() != final and reg.family(named) == final else None
     if final != target:
-        why += f"; {target} is over the cap or unavailable here"
+        why += (f"; {target}'s alias runs an older model here" if target in usable
+                else f"; {target} is over the cap or unavailable here")
     # Effort is set whenever nobody chose it: on current models it is the cheaper lever for quality.
     effort = None if decided else ladder.effort_on(reg, level, final)
     if redo and not decided:

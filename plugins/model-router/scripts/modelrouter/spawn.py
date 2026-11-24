@@ -58,7 +58,7 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     found = router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable,
                          definition=definition, parent=parent, earlier=earlier, marked=marked,
                          teammate=teammate, workflow=workflow,
-                         session_effort=session_effort, effort_caps=caps)
+                         session_effort=session_effort, effort_caps=caps, lagging=snap.lagging)
     if marked and earlier is None:
         found = replace(found, earlier=_unmarked_run(found, snap), on_record=False)
     return found
