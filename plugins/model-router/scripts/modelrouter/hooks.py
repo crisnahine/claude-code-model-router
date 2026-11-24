@@ -104,7 +104,7 @@ def user_prompt(hook_input: dict) -> dict | None:
 
 
 def pre_agent(hook_input: dict) -> dict | None:
-    if mod.active(hook_input.get("session_id")):
+    if mod.routes(hook_input.get("tool_use_id")):
         return None  # the plugin's mod routes this call when it spawns
     return fallback.route(hook_input, settings.Snapshot(hook_input))
 
@@ -224,7 +224,7 @@ def refresh_cache(hook_input: dict) -> dict | None:
 
 
 HANDLERS = {
-    "mod-start": mod.start, "mod-spawn": mod.spawn, "mod-turn": mod.start, "mod-usage": mod.usage,
+    "mod-start": mod.start, "mod-spawn": mod.spawn, "mod-usage": mod.usage,
     "session-start": session_start, "user-prompt": user_prompt, "pre-agent": pre_agent,
     "post-agent": post_agent, "agent-failed": agent_failed, "agent-stopped": agent_stopped,
     "post-edit": post_edit, "stop": stop,

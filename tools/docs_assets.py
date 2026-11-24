@@ -846,8 +846,8 @@ def diagram_two_paths() -> str:
     out.append(card(498, 244, 370, 72, rx=10))
     out.append('<rect x="499" y="256" width="4" height="48" rx="2" class="r4"/>')
     out.append(lines(516, 266, ["Fallback: PreToolUse rewrites the Agent call where",
-                                "mods don't load, and stands down once the mod has",
-                                "announced itself for the session (mod-start)."], "mut", 12.5, 18))
+                                "mods don't load, and stands down for each call",
+                                "the mod's tool.call hook marked."], "mut", 12.5, 18))
     arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
     out.append(f'<path d="M237 188V216M232 211L237 216L242 211" {arrow}/>')
     out.append(f'<path d="M237 330V366H410V398M405 393L410 398L415 393" {arrow}/>')

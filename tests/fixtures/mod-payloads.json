@@ -40,21 +40,6 @@
       "flag": {}
     }
   },
-  "mod-turn": {
-    "session_id": "s1",
-    "settings": {
-      "policy": {},
-      "user": {
-        "availableModels": [
-          "haiku",
-          "sonnet"
-        ]
-      },
-      "project": {},
-      "local": {},
-      "flag": {}
-    }
-  },
   "mod-usage": {
     "session_id": "s1",
     "agent_id": "a1",

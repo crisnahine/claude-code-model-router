@@ -418,6 +418,16 @@ class Shipped(unittest.TestCase):
         stop = [h for g in data["hooks"]["SubagentStop"] for h in g["hooks"] if h["args"][1] == "agent-stopped"]
         self.assertEqual([h.get("async", False) for h in stop], [False])
 
+    def test_agent_hooks_match_the_agent_tool_and_skip_internal_agents(self):
+        events = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+        for event, command in (("PreToolUse", "pre-agent"), ("PostToolUse", "post-agent"),
+                               ("PostToolUseFailure", "agent-failed")):
+            groups = [g for g in events[event] if any(h["args"][1] == command for h in g["hooks"])]
+            self.assertEqual([g["matcher"] for g in groups], ["Agent"], event)
+        # A matcher that can't match "" skips internal agents, whose agent_type is empty without --agent.
+        self.assertEqual([g.get("matcher") for g in events["SubagentStop"]], ["."])
+        self.assertIsNone(re.search(events["SubagentStop"][0]["matcher"], ""))
+
 
 
 class SkillGrants(unittest.TestCase):
@@ -1091,8 +1101,10 @@ class Allowlist(Sandbox):
         modpath.start({"session_id": "s2", "settings": {"policy": {"availableModels": ["haiku"]}}})  # the others omitted
         self.assertEqual(allowlist.read("s2", self.project).permitted(self.config), set())  # haiku and sonnet share nothing
 
-    def test_a_turn_remembers_the_layers_too(self):
-        hooks.HANDLERS["mod-turn"]({"session_id": "s2", "settings": {"policy": {"availableModels": ["opus"]}}})
+    def test_a_spawn_in_a_session_the_start_hook_never_saw_remembers_the_layers(self):
+        # After /clear the session id is new and session.start doesn't fire, so a spawn is the first to send them.
+        modpath.spawn({"session_id": "s2", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                       "tool_input": {"prompt": LOOKUP}, "settings": {"policy": {"availableModels": ["opus"]}}})
         self.assertEqual(allowlist.read("s2", self.project).permitted(self.config), {"opus"})
 
     def test_lists_are_capped_and_overrides_are_stored_as_a_flag(self):
@@ -1165,7 +1177,7 @@ class Allowlist(Sandbox):
         policy = {"availableModels": ["sonnet"]}  # server-managed: no managed file exists
         modpath.start({"session_id": "s1", "settings": {"policy": policy, "user": {"availableModels": ["opus"]}}})
         later = {"user": {"availableModels": ["opus"]}, "project": {}, "local": {}, "flag": {}}  # the policy read failed
-        hooks.HANDLERS["mod-turn"]({"session_id": "s1", "settings": later})
+        modpath.start({"session_id": "s1", "settings": later})
         self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet"})
         modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                          "tool_input": {"prompt": LOOKUP}, "settings": later})
@@ -2732,13 +2744,51 @@ class Mod(Sandbox):
         self.assertIsNone(self.spawn("general-purpose", BUILD, model="sonnet", effort="high"))
         self.assertEqual(self.ledger()[-1]["via"], "mod")
 
-    def test_the_settings_hook_stands_down_once_the_mod_is_running(self):
+    def mark(self, tool_use_id: str) -> Path:
+        """What the mod's tool.call hook writes for an Agent call it routes when the agent spawns."""
+        path = self.data / "mod-calls" / tool_use_id
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("")
+        return path
+
+    def pre_call(self, prompt: str, tool_use_id: str | None, session_id: str = "s1") -> dict | None:
+        return hooks.pre_agent({**self.call("general-purpose", prompt, session_id=session_id),
+                                **({"tool_use_id": tool_use_id} if tool_use_id else {})})
+
+    def test_the_settings_hook_stands_down_only_for_a_call_the_mod_marked(self):
         self.session_on("claude-opus-5-5")
-        self.assertIsNotNone(self.pre("general-purpose", LOOKUP))
         modpath.start({"session_id": "s1"})
+        self.assertIsNotNone(self.pre_call(LOOKUP, "toolu_1"))  # the mod announced the session, but not this call
+        marked = self.mark("toolu_2")
         count = len(self.ledger())
-        self.assertIsNone(self.pre("general-purpose", "list the tests"))
+        self.assertIsNone(self.pre_call("list the tests", "toolu_2"))
         self.assertEqual(len(self.ledger()), count)
+        self.assertFalse(marked.exists())  # a mark answers its one call
+        self.assertIsNotNone(self.pre_call("list the docs", "toolu_2"))
+        self.assertIsNotNone(self.pre_call("list the specs", None))
+
+    def test_after_a_clear_a_call_the_mod_marked_still_stands_the_fallback_down(self):
+        # session.start doesn't fire after /clear, so nothing announced the new session id.
+        self.mark("toolu_9")
+        self.assertIsNone(self.pre_call(LOOKUP, "toolu_9", session_id="s2"))
+        self.assertEqual(self.ledger(), [])
+
+    def test_only_a_plain_tool_use_id_is_looked_up(self):
+        outside = self.data / "x"
+        outside.parent.mkdir(parents=True, exist_ok=True)
+        outside.write_text("")
+        for bad in ("../x", "a/b", "..", "", None, 5, "x" * 300):
+            self.assertFalse(modpath.routes(bad), bad)
+        self.assertTrue(outside.exists())
+
+    def test_marks_older_than_a_day_are_cleared_when_a_session_starts(self):
+        old, fresh = self.mark("toolu_old"), self.mark("toolu_new")
+        stamp = time.time() - modpath.MARK_KEPT - 60
+        os.utime(old, (stamp, stamp))
+        modpath.start({"session_id": "s1"})
+        self.assertEqual((old.exists(), fresh.exists()), (False, True))
+        shutil.rmtree(self.data / "mod-calls")
+        modpath.start({"session_id": "s1"})  # no marks folder yet
 
     def test_a_spawn_redone_after_its_result_runs_one_level_up(self):
         self.spawn("general-purpose", LOOKUP)
@@ -2811,13 +2861,6 @@ class Mod(Sandbox):
         with mock.patch.object(session, "handed_back", side_effect=ValueError("boom")):
             self.stopped("a1", answer="", transcript=self.handback("src/a.py"))
         self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku")
-
-    def test_turns_and_spawns_keep_the_mod_marked_after_a_clear(self):
-        self.assertFalse(modpath.active("s2"))
-        self.assertIsNone(hooks.HANDLERS["mod-turn"]({"session_id": "s2", "text": LOOKUP}))
-        self.assertTrue(modpath.active("s2"))
-        modpath.spawn({"session_id": "s3", "parent_model": "claude-opus-5-5", "tool_input": {"prompt": LOOKUP}})
-        self.assertTrue(modpath.active("s3"))
 
     def test_a_pinned_agent_redone_gets_more_effort(self):
         self.agent("pinned", "opus")
@@ -3206,9 +3249,10 @@ class ModPayloads(Sandbox):
     def test_each_command_has_a_handler(self):
         self.assertEqual(set(self.payloads), {name for name in hooks.HANDLERS if name.startswith("mod-")})
 
-    def test_start_marks_the_session(self):
+    def test_start_stores_the_settings_layers(self):
         modpath.start(self.payloads["mod-start"])
-        self.assertTrue(modpath.active("s1"))
+        found = allowlist.read("s1", self.project)
+        self.assertEqual((found.permitted(cfg.shipped()), found.source), ({"haiku", "sonnet"}, "engine"))
 
     def test_spawn_reads_every_field(self):
         payload = self.payloads["mod-spawn"]
@@ -3222,7 +3266,6 @@ class ModPayloads(Sandbox):
         row = self.ledger()[-1]
         self.assertEqual((row["event"], row["via"], row["kind"], row["agent"], row["model"]),
                          ("spawn", "mod", "subagent", "general-purpose", "haiku"))
-        self.assertTrue(modpath.active("s1"))
 
     def test_siblings_keep_their_sent_ids_when_the_same_call_is_issued_again(self):
         os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
@@ -3237,10 +3280,6 @@ class ModPayloads(Sandbox):
         hooks.agent_failed({**copies[1], "error": refused})
         self.assertEqual([r["model"] for r in self.ledger() if r["event"] == "model_error"], ["claude-haiku-5-5"] * 2)
         self.assertTrue(health.load().healthy("haiku"))
-
-    def test_a_turn_marks_the_session_and_sets_nothing(self):
-        self.assertIsNone(hooks.HANDLERS["mod-turn"](self.payloads["mod-turn"]))
-        self.assertTrue(modpath.active("s1"))
 
     def test_usage_is_logged_for_its_agent(self):
         modpath.usage(self.payloads["mod-usage"])
@@ -5199,7 +5238,7 @@ class ModApiTypes(unittest.TestCase):
         types = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(encoding="utf-8"), flags=re.S)  # docs hold braces
         router = (PLUGIN / "hooks" / "router.ts").read_text(encoding="utf-8")
         blocks = re.split(r"\n  on\('", router)[1:]
-        self.assertGreaterEqual(len(blocks), 7)
+        self.assertGreaterEqual(len(blocks), 6)
         for block in blocks:
             event = block.split("'", 1)[0]
             with self.subTest(event=event):

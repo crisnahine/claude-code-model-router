@@ -42,7 +42,7 @@ Short names used for sources below:
 
 ## Answer table
 
-"Settings hook" means a `hooks/hooks.json` command hook. "Mod" means a JavaScript hooks module in the same plugin (`modules` key), available from v2.1.287 `[mods-overview]`. The plugin ships both: the mod (`hooks/router.ts`) routes, and the `PreToolUse` settings hook is a fallback that stands down once the mod has announced itself in a session (`hooks.pre_agent`, `mod.active`).
+"Settings hook" means a `hooks/hooks.json` command hook. "Mod" means a JavaScript hooks module in the same plugin (`modules` key), available from v2.1.287 `[mods-overview]`. The plugin ships both: the mod (`hooks/router.ts`) routes, and the `PreToolUse` settings hook is a fallback that stands down for each `Agent` call the mod's `tool.call` hook marked (`hooks.pre_agent`, `mod.routes`).
 
 | Unit of work | Can a plugin set model / effort? | Mechanism | Source |
 | :- | :- | :- | :- |
@@ -219,7 +219,7 @@ Written 2026-11-22 as a to-do list. Each item now says what the plugin does.
 
 - **The main conversation is reachable through `turn.step`.** The mod no longer touches the main loop's effort, since the `main_effort` option was removed with the request profile. It never switches the main model. Model switching mid-conversation re-reads the whole context uncached, so hard parts go to subagents instead.
 - **Effort is the cheap knob.** On Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1+, with an API key or subscription, changing effort keeps the cache; on Bedrock, Agent Platform and apps gateways it doesn't. The router sets effort on the agents it routes, never on the main loop.
-- **Subagents, teammates and workflow agents are reachable.** `agent.spawn` routes all three, and `effort` works for teammates from 2.1.329. Forks aren't routed (they inherit). A mod outranks any other plugin's settings hook, so the router is a mod, and its settings hook stands down when the mod is active. `hooks.post_agent` records the result's `resolvedModel` in the ledger.
+- **Subagents, teammates and workflow agents are reachable.** `agent.spawn` routes all three, and `effort` works for teammates from 2.1.329. Forks aren't routed (they inherit). A mod outranks any other plugin's settings hook, so the router is a mod, and its settings hook stands down for each call the mod marked. `hooks.post_agent` records the result's `resolvedModel` in the ledger.
 - **Keep model names to the four aliases on the Agent tool.** `best`, `opusplan`, `[1m]` and full IDs are rejected there; only `agent.spawn` or a definition's `model` can carry a full ID, and the mod sends one on providers whose alias lags. `compat/baseline.json` lists `best`, `opus[1m]`, `sonnet[1m]`, `opusplan` and `default` as aliases, valid for `/model` only.
 - **Set Sonnet's effort explicitly.** Claude Code runs Sonnet 5.5 at `medium`, about 7 points below `high` on coding. `levels.standard.effort` in `config/models.json` is `medium`, so a routed Sonnet subagent's effort is set and doesn't fall to the session level. Fix and hunt briefs profile at `complex`, which runs Opus at `high`.
 - **Opus before Fable on the ladder for coding.** Opus 5.5 at `medium` matched Fable 5.1 at about a fifth of the cost; Opus 5.5 at `high` (95.5%) nearly matched Fable 5.2 at `high` (96.3%) at under a quarter of the cost. `config/models.json` gives `needs: 4` to `frontier` alone; `priority: quality` and a redo of a `hardest` call also reach Fable. `complex` is Opus at `high`, `hardest` Opus at `xhigh`.

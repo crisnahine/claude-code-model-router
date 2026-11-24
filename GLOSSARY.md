@@ -12,7 +12,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Spawn**: the moment a call starts an agent. The mod sees it as the engine's `agent.spawn` event, the fallback as a `PreToolUse` hook on the `Agent` tool.
 
-**Path**: how a call reaches the router. The **mod path** runs in `hooks/router.ts` on engine events and calls `mod.py`. The **fallback path** (`fallback.py`) rewrites the `Agent` tool call and stands down when the mod runs.
+**Path**: how a call reaches the router. The **mod path** runs in `hooks/router.ts` on engine events and calls `mod.py`. The **fallback path** (`fallback.py`) rewrites the `Agent` tool call and stands down for a call the mod's `tool.call` hook marked.
 
 **Documented extension point**: a part of Claude Code that its docs describe for plugins: the plugin manifest, hooks, the mods API, skills and subagents. Model Router uses only these. [Built on the docs](docs/CLAUDE_CODE_DOCS.md) lists each docs rule it follows and where it goes past them.
 

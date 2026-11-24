@@ -16,20 +16,22 @@ The aim is the lowest cost per finished task at a high quality bar. Every subtas
 
 ![Two control paths, one router: Claude Code engine events reach the mod, hooks/router.ts, and the settings hooks in hooks/hooks.json are the fallback and do the bookkeeping. Both run sh model-router.sh, which calls one Python runtime that decides every spawn.](assets/two-paths.svg)
 
-The mod (`hooks/router.ts`, loaded from `hooks/hooks.json` under `modules`) is the primary path. It hooks six engine events and asks the Python runtime through four `mod-*` commands, each payload with `session_id`:
+The mod (`hooks/router.ts`, loaded from `hooks/hooks.json` under `modules`) is the primary path. It hooks six engine events and asks the Python runtime through three `mod-*` commands, each payload with `session_id`:
 
 | Event | Command and payload keys | What the mod does |
 | :- | :- | :- |
-| `tool.call` (`Agent`) | none | Keeps the `effort` Claude put on the call, by `tool_use_id`, since `agent.spawn` has no effort field. |
-| `session.start` | `mod-start`: `settings` | Marks the session as routed by the mod and sends the settings layers it read. |
+| `tool.call` (`Agent`) | none | Keeps the `effort` Claude put on the call, by `tool_use_id`, since `agent.spawn` has no effort field. While the runtime's last round trip worked, it marks the call for the fallback before passing it on (see below). |
+| `session.start` | `mod-start`: `settings` | Sends the settings layers it read, which the runtime keeps for the session's later hooks, and clears marks older than a day. |
 | `agent.spawn` | `mod-spawn`: `settings`, `cwd`, `parent_agent_id`, `parent_model`, `session_effort`, `kind`, `tool_use_id`, `tool_input` | Fires for every subagent, teammate and workflow agent before its model resolves, and passes the pick on as `model`. `parentModel` is the parent's exact effective model. `kind` is `subagent`, `teammate` or `workflow`. `tool_use_id` is left out for a workflow's agents, which share one. Forks and resumed runs are left alone. |
-| `turn.start` | `mod-turn`: `settings` | For the main loop, marks the session as routed by the mod again, since `session.start` doesn't fire after `/clear`, and sends the settings layers. An agent turn that starts before the spawn hook has the agent's id is matched by its prompt, and takes the effort its waiting spawns got, only while they all got the same one. |
-| `turn.step` | none | Applies the agent's routed effort to each model request. Remembers the main loop's effort as `session_effort`, and keeps each request's usage. |
+| `turn.start` | none | An agent turn that starts before the spawn hook has the agent's id is matched by its prompt, and takes the effort its waiting spawns got, only while they all got the same one. A main-loop turn is passed on untouched. |
+| `turn.step` | none | Applies the agent's routed effort to each model request. A workflow agent's is applied only when it is above the request's own, since a script can set a stage's `effort` and the spawn event doesn't carry it. Remembers the main loop's effort as `session_effort`, and keeps each request's usage. |
 | `turn.complete` | `mod-usage`: `agent_id`, `subagent_type` (workflow agents), `usage`, `requests` | Writes the turn's usage and cost to the ledger. Each request is priced on its own, because Haiku 5.5 bills a prompt over 100,000 tokens at a higher rate (https://platform.claude.com/docs/en/about-claude/pricing.md, Long context pricing). A turn without its requests is priced at the base rate. |
 
 The mod runs the launcher the settings hooks use, through `$.process.run` with the plugin's hook environment and an 8-second timeout, so there is one decision procedure and one state store. A `mod-spawn` round trip takes about 58 ms warm and 187 ms cold (p50), almost all of it starting Python ([Performance](PERFORMANCE.md#mod-path)).
 
-The settings hooks do every job the mod doesn't: the session-start note, the request's record, availability tracking from each `Agent` result, redo bookkeeping, and the check before a turn ends. `PreToolUse` on `Agent` is the fallback path: it rewrites the call's `model` and `effort` with `updatedInput`, and stands down once any mod command has marked the session (`mod.active`), so a call is never routed twice. It covers Claude Code versions without mods and organizations that don't load user mods.
+The settings hooks do every job the mod doesn't: the session-start note, the request's record, availability tracking from each `Agent` result, redo bookkeeping, and the check before a turn ends. `PreToolUse` on `Agent` is the fallback path: it rewrites the call's `model` and `effort` with `updatedInput`. Plugin `PreToolUse` hooks run after the last mod calls `next` (https://code.claude.com/docs/en/plugins/mods/events.md#where-settings-hooks-run-in-the-order), so the mod's `tool.call` hook can mark a call first: it writes an empty file named for the call's `tool_use_id` under `mod-calls/` in the data folder. The fallback stands down only for a call with that mark, and removes it (`mod.routes`), so a marked call is routed once, at its spawn. The mod marks a call only while its last runtime round trip worked, so a call made while the mod is unloaded, or while its runtime calls fail or are refused, is routed by the fallback. It covers Claude Code versions without mods, organizations that don't load user mods, and a mod unloaded mid-session.
+
+After `/clear` the session id is new and `session.start` doesn't fire again, so the settings hooks read the settings files for that session until its first spawn sends the layers.
 
 The mod comes first for three reasons. It reaches teammates and workflow stages, which the `Agent` call doesn't carry. It sets the model after auto mode reviewed the call, so auto mode's "input changed after review" denial doesn't apply. And it can set effort on each request, the only lever a forced subagent model leaves.
 
@@ -44,7 +46,7 @@ The mod comes first for three reasons. It reaches teammates and workflow stages,
 | `spawn` | The procedure both paths call: `decide`, then `record` |
 | `router` | The order of authority: one decision from the facts it is given alone |
 | `fallback` | The `Agent` call path's rewrite, its waiting record, the refused-rewrite guard and the one deny |
-| `mod` | The mod path's commands and `active` |
+| `mod` | The mod path's commands, and `routes`, which tells the fallback a call is the mod's |
 | `intake` | Whether a prompt is the person's request or a message Claude Code delivered |
 | `request` | The current request's `prompt_id`, and the model a prompt names (`named_model`) |
 | `calls` | A `Route` per spawn, and the one rule set for what comes back (`returned`) |
@@ -203,13 +205,15 @@ SessionStart ─┬─ session-start   records options and the session model; ex
                                  waiting 1 h to a day after a failed fetch
 UserPromptSubmit ─ user-prompt   records the request; notes a model the user may be asking for
 PostModelSwitch ─ model-switch   records the session's new model
-PreToolUse (Agent|Task) ─ pre-agent      fallback: fallback.route, returns updatedInput
-PostToolUse (Agent|Task) ─ post-agent    the model that ran; a finished result is kept for redos
-SubagentStop ─ agent-stopped    a background agent's result or handback is back; counts its checks
-PostToolUseFailure (Agent|Task) ─ agent-failed   counts model errors
+PreToolUse (Agent) ─ pre-agent      fallback: fallback.route, returns updatedInput; stands down for a marked call
+PostToolUse (Agent) ─ post-agent    the model that ran; a finished result is kept for redos
+SubagentStop (.) ─ agent-stopped    a background agent's result or handback is back; counts its checks
+PostToolUseFailure (Agent) ─ agent-failed   counts model errors
 PostToolUse (Edit|Write|NotebookEdit) ─ post-edit   notes that code changed
 Stop ─ stop                      the check before a turn ends
 ```
+
+`SubagentStop` matches `.`, which an empty `agent_type` doesn't, so Claude Code's internal agents (prompt suggestions, `/btw`) start no Python in a session run without `--agent` (https://code.claude.com/docs/en/hooks.md#subagentstop). Every hook but `refresh-cache` is synchronous.
 
 `cli.py` catches whatever a handler raises and exits 0, and every mod hook has a `.catch` that passes the event on unchanged. The launcher exits 0 when Python is missing and turns any other hook failure into exit 1, since exit 2 would block the tool call, the prompt or the stop (https://code.claude.com/docs/en/hooks.md#exit-code-2-behavior-per-event). A bug here can cost routing, never block a session.
 
@@ -223,7 +227,8 @@ In `${CLAUDE_PLUGIN_DATA}` (without it, `~/.claude/plugins/data/model-router-loc
 | `upstream.json` | The upstream cache and what was last reviewed |
 | `allowlist.json` | Per session: each settings source's allowlist keys and `maxEffortLevel` caps, as the mod's hooks last sent them. A source whose read failed keeps its last set, else its file is read |
 | `locks.json` | Per state file: lock waits, waits on another session's lock, skipped writes, stale locks broken, and when the last happened |
-| `sessions.json`, `prompts.json`, `routes.json`, `edits.json`, `pending.json`, `launched.json`, `done.json`, `mod.json` | Per session: its model, the request's record, each spawn's route, edit and check times, rewrites waiting for a result, background agents still running, finished calls for redos, and whether the mod is running. Each file keeps the 200 most recently written sessions, and each session's per-call records keep the 100 newest. `routes`, `launched` and `done` also drop a session a day after its last write (`calls.KEPT_FOR`), since every spawn rewrites them whole under one lock |
+| `mod-calls/` | One empty file per `Agent` call the mod routes when the agent spawns, named by its `tool_use_id`: the mod's `tool.call` hook writes it, the fallback's `PreToolUse` removes it, and `mod-start` removes any older than a day |
+| `sessions.json`, `prompts.json`, `routes.json`, `edits.json`, `pending.json`, `launched.json`, `done.json` | Per session: its model, the request's record, each spawn's route, edit and check times, rewrites waiting for a result, background agents still running, and finished calls for redos. Each file keeps the 200 most recently written sessions, and each session's per-call records keep the 100 newest. `routes`, `launched` and `done` also drop a session a day after its last write (`calls.KEPT_FOR`), since every spawn rewrites them whole under one lock |
 | `ledger.jsonl` | One JSON line per event, below. Over 4 MB, its older half is dropped |
 
 Every ledger row has `ts`, `event` and `session`:
@@ -239,7 +244,7 @@ A spawn in flight when a session upgrades has no route, so its result finishes n
 
 Writes are atomic, and state files are compact JSON. Each read-modify-write takes a lock file, because agents started in one message run their hooks at the same moment. A busy lock is retried from 1 ms, doubling to 10 ms between tries, for at most one second (`store.LOCK_WAIT_SECONDS`). If it is still held, the write is skipped and counted, and the hook goes on with what it read: a write without the lock could drop another hook's update, and a hook must never hang a session. A lock file older than ten seconds was left by a dead process, so it is removed and counted. The lock file names the session that took it, so a wait on another session's lock can be told apart. `locks.json` is written without a lock, after the state lock is let go, so two hooks at once can lose a count but never state. A spawn takes two locks on the mod path and three on the fallback ([Performance](PERFORMANCE.md#state-locks-a-spawn-takes)).
 
-The per-session files are shared by every session, so one session can wait on another's lock. One file per session would end that wait. It stays unbuilt until `locks.json` shows such waits matter, and would have to read through to the shared files without migrating them, so an older release still works. A `learned.json` left by a release that had the learning loop stays in the data folder and is never read.
+The per-session files are shared by every session, so one session can wait on another's lock. One file per session would end that wait. It stays unbuilt until `locks.json` shows such waits matter, and would have to read through to the shared files without migrating them, so an older release still works. A `learned.json` left by a release that had the learning loop, and a `mod.json` left by one that marked whole sessions for the fallback, stay in the data folder and are never read.
 
 Each JSON state file carries a top-level `schema`, which reads strip. `store.MIGRATIONS` brings an older version up one step at a time; a file with no version is version 0. A file from a newer release is read but never written or removed, `/model-router:models` names it, and `models --reset` leaves it and says so. A file that fails to parse, isn't a JSON object, or has a `schema` that isn't a whole number of 0 or more is moved aside as `<name>.corrupt-<UTC timestamp>` before the next write, routing carries on with that state empty, and `/model-router:models` lists it. Three copies per file are kept. A file that can't be read or moved aside is left as it is and not written. Your settings and `model-router.json` files are only read. The ledger has no version: a line that doesn't parse is skipped.
 

@@ -15,7 +15,7 @@ python3 bench/overhead.py --runs 30 --calls 1000 --json # the same as JSON
 
 It uses throwaway folders and turns the daily check off, so it never touches your plugin state or the network.
 
-Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330. The `user-prompt` and `mod-turn` rows and the `prompts.json` row were rerun on 2026-11-25 on Claude Code 2.1.331, after the router stopped sizing up the request and its record kept only the prompt id.
+Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330. The `user-prompt` row and the `prompts.json` row were rerun on 2026-11-25 on Claude Code 2.1.331, after the router stopped sizing up the request and its record kept only the prompt id.
 
 ## Settings hooks
 
@@ -49,10 +49,9 @@ The mod (`hooks/router.ts`) asks the runtime through the same launcher, one run 
 | :- | :- | -: | -: | -: | -: |
 | `mod-start` | `session.start`, once per process | 183 | 197 | 54 | 64 |
 | `mod-spawn` | `agent.spawn`, before each agent starts | 187 | 197 | 58 | 70 |
-| `mod-turn` | `turn.start`, before each main-loop prompt runs | 187 | 210 | 56 | 58 |
 | `mod-usage` | `turn.complete`, after the turn, before the handler returns | 182 | 194 | 54 | 56 |
 
-In process, loading the config, gathering the facts and running `router.decide` take 0.26 ms (p50) and 0.29 ms (p95). The mod's own handlers, timed in Node with the runtime's answer returned at once, take 0.001 to 0.004 ms (p50) and at most 0.005 ms (p95) for `agent.spawn`, `turn.start` and `turn.step`, so almost all of the time is starting Python. Not timed: before `mod-start`, `mod-spawn` and `mod-turn` the mod reads the five settings sources, waiting at most 2 seconds (`SETTINGS_MS` in `hooks/router.ts`).
+In process, loading the config, gathering the facts and running `router.decide` take 0.26 ms (p50) and 0.29 ms (p95). The mod's own handlers, timed in Node with the runtime's answer returned at once, take 0.001 to 0.004 ms (p50) and at most 0.005 ms (p95) for `agent.spawn`, `turn.start` and `turn.step`, so almost all of the time is starting Python. Not timed: before `mod-start` and `mod-spawn` the mod reads the five settings sources, waiting at most 2 seconds (`SETTINGS_MS` in `hooks/router.ts`), and its `tool.call` hook writes one empty mark file per `Agent` call. `turn.start` starts no Python.
 
 ## Context the plugin adds
 

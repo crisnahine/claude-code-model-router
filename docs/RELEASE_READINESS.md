@@ -47,7 +47,7 @@ None.
 - Whether the Mythos models become a routable family. They are priced in the registry, so their spend is logged, but no level routes to them. Row S2.15.
 - A live install check: installing from the marketplace into a scratch config folder and running one routed call. A scratch config folder has its own login, so the run needs the maintainer's login or an API key. Row S6.1.
 - Requirement against design: the requirements say the router never blocks a spawn. On the fallback path, a repeated call whose untouched model would break the user's cap is denied, with the model to use (`docs/ARCHITECTURE.md`, "Rewrites that don't take"). Either the requirements make an exception for the cap or the design changes. Row S2.25.
-- The mod's one decision: at `turn.start`, a subagent's first request takes an in-flight effort only when every spawn of that brief got the same. The requirements say the mod holds no routing logic. Rows S5.2, S13.2.
+- The mod's own decisions: at `turn.start`, a subagent's first request takes an in-flight effort only when every spawn of that brief got the same; at `turn.step`, a workflow agent's effort is only raised; and `tool.call` marks an `Agent` call for the fallback only while the runtime answers. The requirements say the mod holds no routing logic. Rows S5.2, S13.2.
 
 ### Blocked
 

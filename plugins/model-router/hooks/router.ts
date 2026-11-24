@@ -8,8 +8,14 @@ const KEPT = 500
 const SETTINGS_MS = 2000
 const SOURCES: readonly SettingsSource[] = ['policy', 'user', 'project', 'local', 'flag']
 const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides', 'maxEffortLevel', 'modelSettings']
+const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
+// The id names a file the fallback looks up, so only a plain one is marked (scripts/modelrouter/mod.py routes).
+const PLAIN_ID = /^[A-Za-z0-9_-]{1,128}$/
 
 type Pick = { model?: string; effort?: ModelEffort } | null
+// The effort a routed agent steps at. A workflow script can set a stage's effort, which agent.spawn doesn't carry,
+// so a workflow agent's is only ever raised.
+type Want = { effort: ModelEffort; raiseOnly: boolean }
 
 // Settings hooks get the plugin's options as CLAUDE_PLUGIN_OPTION_* variables; a mod gets
 // them in register(), so they are passed on the same way.
@@ -21,8 +27,9 @@ function optionEnv(options: PluginOptions): Record<string, string> {
   return env
 }
 
-// Never throws: a hook that already called next(e) must not reach its .catch and call it again.
-async function ask($: EngineInterface, options: Record<string, string>, command: string, payload: object): Promise<Pick> {
+// The runtime's answer, null for none, or undefined when the round trip failed. Never throws: a hook that
+// already called next(e) must not reach its .catch and call it again.
+async function ask($: EngineInterface, options: Record<string, string>, command: string, payload: object): Promise<Pick | undefined> {
   try {
     const env = { ...(await $.process.hookEnv()), ...options }
     const run = await $.process.run(['sh', `${$.plugin.root}/scripts/model-router.sh`, command], {
@@ -30,11 +37,26 @@ async function ask($: EngineInterface, options: Record<string, string>, command:
       env,
       timeoutMs: 8000,
     })
-    if (run.exitCode !== 0 || !run.stdout.trim()) return null
-    return JSON.parse(run.stdout) as Pick
+    if (run.exitCode !== 0) return undefined
+    return run.stdout.trim() ? JSON.parse(run.stdout) as Pick : null
   } catch {
-    return null
+    return undefined
   }
+}
+
+// Tells the fallback's PreToolUse hook, which runs after this one, that agent.spawn routes this call. Never throws.
+async function mark($: EngineInterface, toolUseId: string): Promise<void> {
+  try {
+    const data = (await $.process.hookEnv()).CLAUDE_PLUGIN_DATA
+    if (data) await $.fs.write(`${data}/mod-calls/${toolUseId}`, '')
+  } catch {
+    // unmarked: the fallback routes the call too
+  }
+}
+
+function raises(want: string, current: string): boolean {
+  const from = EFFORTS.indexOf(current)
+  return from >= 0 && EFFORTS.indexOf(want) > from
 }
 
 // modelSettings can hold more per model than the effort cap, and the runtime reads only the cap.
@@ -75,7 +97,9 @@ function remember<V>(map: Map<string, V>, key: string, value: V): void {
 
 export const register: Register = (on, options) => {
   const opts = optionEnv(options)
-  const agentEffort = new Map<string, ModelEffort>()
+  // Whether the runtime's last round trip worked. Until one has, and after one fails, the fallback routes.
+  let answering = false
+  const agentEffort = new Map<string, Want>()
   // The type of each workflow agent this mod started, so its usage can name it: it has no Agent result.
   const agentType = new Map<string, string>()
   // The main conversation's level, from its latest request: an agent on its model runs at it unless told otherwise.
@@ -85,19 +109,20 @@ export const register: Register = (on, options) => {
   // A subagent's first request can go out before its spawn hook has the agent's id. The spawns of each prompt
   // between their pick and next() returning, with the effort each got (null for none): the first request takes
   // that effort only while every one of them got the same, so it never runs at another spawn's.
-  const inFlight = new Map<string, (ModelEffort | null)[]>()
+  const inFlight = new Map<string, (Want | null)[]>()
   // Each request's usage by turn: Haiku 5.5 bills a long prompt per request, not per turn.
   const turnRequests = new Map<string, TurnUsage[]>()
 
-  on('tool.call', { tool: 'Agent' }, ($, e, next) => {
+  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     if (e.tool_use_id && typeof e.effort === 'string') remember(callerEffort, e.tool_use_id, e.effort)
+    if (answering && typeof e.tool_use_id === 'string' && PLAIN_ID.test(e.tool_use_id)) await mark($, e.tool_use_id)
     return next(e)
   }).catch(($, e, next) => next(e))
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     const layers = await modelSettings($)
-    await ask($, opts, 'mod-start', { ...(layers ? { settings: layers } : {}) })
+    answering = (await ask($, opts, 'mod-start', { ...(layers ? { settings: layers } : {}) })) !== undefined
     return started
   }).catch(($, e, next) => next(e))
 
@@ -121,13 +146,14 @@ export const register: Register = (on, options) => {
         ...(effort ? { effort } : {}),
       },
     })
-    const mine = pick?.effort ?? null
+    answering = pick !== undefined
+    const mine: Want | null = pick?.effort ? { effort: pick.effort, raiseOnly: !!e.workflow } : null
     const efforts = inFlight.get(e.prompt) ?? []
     efforts.push(mine)
     inFlight.set(e.prompt, efforts)
     try {
       const started = await next(pick?.model ? { ...e, model: pick.model } : e)
-      if (pick?.effort && started.agentId) remember(agentEffort, started.agentId, pick.effort)
+      if (mine && started.agentId) remember(agentEffort, started.agentId, mine)
       if (started.agentId && e.workflow && e.subagentType) remember(agentType, started.agentId, e.subagentType)
       return started
     } finally {
@@ -136,14 +162,12 @@ export const register: Register = (on, options) => {
     }
   }).catch(($, e, next) => next(e))
 
-  on('turn.start', async ($, e, next) => {
-    if (e.agentId === undefined) {
-      // session.start never fires after /clear, so each main-loop turn marks the mod as running.
-      const layers = await modelSettings($)
-      await ask($, opts, 'mod-turn', { ...(layers ? { settings: layers } : {}) })
-    } else if (!agentEffort.has(e.agentId)) {
-      const [effort, ...others] = inFlight.get(e.text) ?? []
-      if (effort && others.every((other) => other === effort)) remember(agentEffort, e.agentId, effort)
+  on('turn.start', ($, e, next) => {
+    if (e.agentId !== undefined && !agentEffort.has(e.agentId)) {
+      const [want, ...others] = inFlight.get(e.text) ?? []
+      if (want && others.every((other) => other?.effort === want.effort && other.raiseOnly === want.raiseOnly)) {
+        remember(agentEffort, e.agentId, want)
+      }
     }
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -153,8 +177,9 @@ export const register: Register = (on, options) => {
     if (e.agentId === undefined && current !== undefined) sessionEffort = current
     // A subagent runs at the effort its subtask was given.
     const want = e.agentId !== undefined ? agentEffort.get(e.agentId) : undefined
-    const apply = want !== undefined && current !== undefined && want !== current
-    const result = yield* next(apply ? { ...e, effort: want } : e)
+    const apply = want !== undefined && current !== undefined
+      && (want.raiseOnly ? raises(want.effort, current) : want.effort !== current)
+    const result = yield* next(apply ? { ...e, effort: want.effort } : e)
     if (result?.usage) {
       const requests = turnRequests.get(e.turnId)
       if (requests) requests.push(result.usage)
@@ -171,9 +196,9 @@ export const register: Register = (on, options) => {
     turnRequests.delete(e.turnId)
     const type = e.agentId !== undefined ? agentType.get(e.agentId) : undefined
     if (e.usage) {
-      await ask($, opts, 'mod-usage', {
+      answering = (await ask($, opts, 'mod-usage', {
         agent_id: e.agentId, ...(type ? { subagent_type: type } : {}), usage: e.usage, ...(requests ? { requests } : {}),
-      })
+      })) !== undefined
     }
     return done
   }).catch(($, e, next) => next(e))

@@ -63,7 +63,7 @@ The async `SessionStart` hook fetches once a day after a success (`upstream.refr
 
 ## The mod
 
-`hooks/router.ts` holds no routing logic. It runs `sh <plugin root>/scripts/model-router.sh <command>` with an argument array, so no shell parses the input, and sends the event as JSON on stdin with an 8-second timeout (`ask`). `ask()` never throws, and every hook has a `.catch` that passes the event on unchanged. Its in-memory maps keep at most 500 entries (`KEPT`). It never blocks or rewrites a prompt.
+`hooks/router.ts` holds no routing logic. It runs `sh <plugin root>/scripts/model-router.sh <command>` with an argument array, so no shell parses the input, and sends the event as JSON on stdin with an 8-second timeout (`ask`). `ask()` never throws, and every hook has a `.catch` that passes the event on unchanged. Its in-memory maps keep at most 500 entries (`KEPT`). It never blocks or rewrites a prompt. Its one file write is an empty mark under `mod-calls/` in `CLAUDE_PLUGIN_DATA` for each `Agent` call, named by the call's `tool_use_id`, and only when that id is 1 to 128 letters, digits, `_` or `-` (`PLAIN_ID`), so it can't name a path outside that folder. The fallback checks the same pattern before it removes a mark (`mod.routes`).
 
 ## Skills
 
