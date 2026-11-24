@@ -10,9 +10,9 @@ How to use, configure and run Model Router, and how it behaves on your setup. Th
 
 ## Commands
 
-The five commands and their arguments are in the [README](../README.md#commands). Type `/model-router:ship` in full: where Claude Code has its own `/ship`, the bare `/ship` runs that command, which can commit, push and open a pull request with no confirmation prompt ([ship command](https://code.claude.com/docs/en/ship-command.md)). A plugin skill always loads under its `plugin:skill` name, so both stay available ([skills](https://code.claude.com/docs/en/skills.md#resolve-skills-that-share-a-name)).
+The three commands and their arguments are in the [README](../README.md#commands).
 
-With `--json`, `models` and `usage` print one JSON object instead of the tables. Its `schema` key names the shape and version, `model-router.models/2` and `model-router.usage/1`. A new key keeps the version; a key removed, renamed or changed in meaning bumps it. Scripts can run the commands without Claude: `sh <plugin>/scripts/model-router.sh --data-dir <plugin data dir> usage 30 --json`. The shapes are in [ARCHITECTURE.md](ARCHITECTURE.md#machine-readable-output).
+Scripts can run the commands without Claude: `sh <plugin>/scripts/model-router.sh --data-dir <plugin data dir> usage 30 --json`. With `--json`, `models` and `usage` print one JSON object instead of the tables. Its `schema` key names the shape and version, `model-router.models/3` and `model-router.usage/1`. A new key keeps the version; a key removed, renamed or changed in meaning bumps it. `policy`, `models` and `explain` take the options as flags, such as `--max-tier=sonnet`, because only hooks get them from Claude Code; the skills pass them that way. The shapes are in [ARCHITECTURE.md](ARCHITECTURE.md#machine-readable-output).
 
 ## Role agents
 
@@ -21,8 +21,6 @@ The plugin ships seven agents for work that no better-fitting agent covers: `mod
 The scout, verifier and docs-researcher name Haiku at medium effort in their own definitions, so they stay cheap even when the router isn't routing (`routing_mode` at `advise` or `off`, no Python, hooks off). The other four name no model or effort, so the router routes each by its brief. The architect and reviewer start no lower than complex because of their names, and the deep-solver no lower than hardest, so a frontier brief can still take it to the strongest model. With the router not routing, those four run on `CLAUDE_CODE_SUBAGENT_MODEL` if it's set, else on the conversation's model ([sub-agents](https://code.claude.com/docs/en/sub-agents.md#choose-a-model)).
 
 The architect, reviewer, scout, verifier and docs-researcher have no Write or Edit tool, so none should get a task whose result is a file; their descriptions tell Claude when each is the right tool.
-
-`/model-router:ship <task or issue>` runs a loop with them: understand, plan, build, verify, review, fix, and commit on a branch. A task of a few edits skips the plan and the build agent. It stops before pushing, merging or deploying.
 
 ## Configuration
 
@@ -34,7 +32,6 @@ Options, in `/config` under the plugin:
 | `priority` | `balanced` | `balanced`: the cheapest model strong enough. `quality`: one step stronger. `fast`: one step lighter, and the quickest that qualifies. Fast sets no effort above `low`, so a lookup runs at Claude Code's own default for Haiku, `medium` ([effort](https://code.claude.com/docs/en/model-config.md#adjust-effort-level)) |
 | `max_tier` | none | The strongest model subagents may run on: `haiku`, `sonnet`, `opus` or `fable`. Anything stronger is lowered to it |
 | `agent_pins` | `respect` | `respect` keeps the model an agent names for itself. `override` routes those agents by task too |
-| `update_check` | on | The daily check of the changelog, docs index, model list and deprecations |
 | `verify_gate` | on | Asks for a test run before a turn ends when code changed and nothing checked it. It is the failure signal the router needs to start cheap and rerun what fails ([cost and intelligence](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence)), at the price of a turn and sometimes an agent |
 
 On plans where Fable bills to usage credits, a frontier subtask sent to Fable bills there too. A background or teammate session may have nobody to answer the consent prompt, so Claude Code ends the turn when its `dialogExpiry` deadline passes, and `claude -p` or an Agent SDK host with no prompt bills without asking ([Fable and usage credits](https://code.claude.com/docs/en/model-config.md#fable-and-usage-credits)). Set `max_tier` to `opus` where that matters.
@@ -43,7 +40,6 @@ Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours
 
 ```json
 {
-  "routing_mode": "advise",
   "agents": {
     "general-purpose": { "level": "standard" },
     "my-agent": { "model": "opus" },
@@ -54,9 +50,9 @@ Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours
 }
 ```
 
-Your own file is trusted in full. A project's file only raises. It can turn routing down to `advise` or `off`, add models, and raise any level's model and effort. Its rule for an agent is a floor and a suggestion: the rule's `level` can lift a call above the level its brief earns, and its `model` applies only when it isn't weaker than what the call would run on without it (the router's pick, the agent's own `model`, `CLAUDE_CODE_SUBAGENT_MODEL` or the inherited model), and never when it names a model the project's own file added. So a cloned repository can make its subagents cost more, never run weaker. To bound what it can spend, set `max_tier`: it caps the model, and the effort the project set stays.
+The routing mode is set in `/config` only, so a `routing_mode` in either file is dropped. Your own file is trusted in full. A project's file only raises. It can add models, and raise any level's model and effort. Its rule for an agent is a floor and a suggestion: the rule's `level` can lift a call above the level its brief earns, and its `model` applies only when it isn't weaker than what the call would run on without it (the router's pick, the agent's own `model`, `CLAUDE_CODE_SUBAGENT_MODEL` or the inherited model), and never when it names a model the project's own file added. So a cloned repository can make its subagents cost more, never run weaker. To bound what it can spend, set `max_tier`: it caps the model, and the effort the project set stays.
 
-A project's file can't do the rest. Its `route: false` is ignored, as is any lowering of a level (below the shipped value, or below yours when your file sets one). It can't turn routing on for someone who switched it off, re-rank a model that ships with the plugin or that you defined, set prices, or get any model past your cap. A level's `needs` never falls below the level under it, so raising one level lifts the ones above.
+A project's file can't do the rest. Its `route: false` is ignored, as is any lowering of a level (below the shipped value, or below yours when your file sets one). It can't re-rank a model that ships with the plugin or that you defined, set prices, or get any model past your cap. A level's `needs` never falls below the level under it, so raising one level lifts the ones above.
 
 A `needs` that isn't a finite number, or any other key of the wrong type, is dropped from every file without an error. `/model-router:models` lists what was dropped, what a project's file asked for that wasn't applied, and any file written for a newer release (it still loads, applying what this release understands). A file may carry `"schema": 1`; without it, it is read as version 1. Older shapes keep working after an update ([ARCHITECTURE.md](ARCHITECTURE.md#compatibility)).
 
@@ -157,7 +153,7 @@ So on those providers the mod starts routed work for those families on the newes
 
 ### Versions
 
-Needs Claude Code 2.1.329 or later. The manifest's `network` field needs 2.1.328 ([manifest reference](https://code.claude.com/docs/en/plugins/manifest-reference.md)), 2.1.329 fixed the Agent tool's `effort` parameter being ignored for named teammates ([changelog](https://code.claude.com/docs/en/changelog), 2.1.329), and the mod reads its hook environment with `$.process.hookEnv()`, added in 2.1.326 ([mods reference](https://code.claude.com/docs/en/plugins/mods/reference.md)). That one floor covers the older versions the plugin's features name, such as mods (2.1.287) and per-call effort (2.1.292).
+Needs Claude Code 2.1.329 or later. 2.1.329 fixed the Agent tool's `effort` parameter being ignored for named teammates ([changelog](https://code.claude.com/docs/en/changelog), 2.1.329), and the mod reads its hook environment with `$.process.hookEnv()`, added in 2.1.326 ([mods reference](https://code.claude.com/docs/en/plugins/mods/reference.md)). That one floor covers the older versions the plugin's features name, such as mods (2.1.287) and per-call effort (2.1.292).
 
 Tested live on 2.1.330 (subagents, workflow agents, teammates, the spend log) and, for workflows under ultracode and the workflow model pin, on 2.1.331. What each run covered is in [verified live](ARCHITECTURE.md#verified-live).
 

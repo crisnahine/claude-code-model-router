@@ -56,7 +56,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Priority**: what the ladder favors (`priority`). `balanced` takes the cheapest model strong enough for the level, `quality` goes one step stronger, and `fast` goes one step lighter and takes the quickest model that qualifies.
 
-**Routing mode**: `auto` sets each call's model and effort, `advise` only logs the level each call reads as, and `off` does nothing (`routing_mode`). When the option and the override files disagree, the most cautious one wins.
+**Routing mode**: `auto` sets each call's model and effort, `advise` only logs the level each call reads as, and `off` does nothing (`routing_mode`). Only the `/config` option sets it.
 
 **Allowlist** (`allowlist.py`): the `availableModels` and `deniedModels` settings, read the way Claude Code reads them, from the layers the mod sends or from the settings files. Blocked models are not picked. When they leave no registry model open, the call is left as it is. The same layers carry `maxEffortLevel`, the cap every effort the router sets is held to.
 
@@ -86,7 +86,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Skipped write**: a state write a hook drops because another process held the file's lock past one second. The hook loses its own update rather than write without the lock and drop the other process's. Skipped writes, lock waits and stale locks broken are counted per file in `locks.json` and shown by `/model-router:models`.
 
-**Upstream**: the public feeds the plugin compares against what was last reviewed: Claude Code releases, the docs index, model aliases and model status.
+**Upstream**: the public pages the repository's daily check compares with what was last reviewed (`compat/baseline.json`): Claude Code releases, the docs pages the plugin is built on, model aliases and model status. The plugin itself reads none of them.
 
 **Baseline**: a way of running Claude Code without the router that the benchmark compares it against, such as its defaults or every subagent forced onto one model. The docs name each by role: `router`, and the baselines `defaults` (no plugin, no forced model), `best` (the lowest cost per solved task over all runs) and `strongest` (the strongest forced one), besides each baseline's own id.
 

@@ -64,17 +64,16 @@ Last checked against the live docs on 2026-11-24, on Claude Code 2.1.330 and 2.1
 
 | The docs say | Model Router | Checked by |
 | :- | :- | :- |
-| `engines`, `network` and `userConfig` are manifest fields ([manifest](https://code.claude.com/docs/en/plugins/manifest-reference.md#fields)) | Requires Claude Code 2.1.329 or later, names the hosts it reads, and offers its options in `/config` | `claude plugin validate --strict` (S9.3) |
-| Options reach hooks as `CLAUDE_PLUGIN_OPTION_<KEY>`, and `${CLAUDE_PLUGIN_DATA}` is kept across updates ([user configuration](https://code.claude.com/docs/en/plugins/manifest-reference.md#user-configuration)) | Reads its options there and keeps its state in its data folder | Node test "plugin options reach the CLI env" (S2.8) |
+| `engines` and `userConfig` are manifest fields, and `network` names the hosts a plugin reaches ([manifest](https://code.claude.com/docs/en/plugins/manifest-reference.md#fields)) | Requires Claude Code 2.1.329 or later and offers its options in `/config`. It reaches no host, so it sets no `network` | `claude plugin validate --strict` (S9.3) |
+| Options reach hooks as `CLAUDE_PLUGIN_OPTION_<KEY>` and skill content as `${user_config.KEY}`, and `${CLAUDE_PLUGIN_DATA}` is kept across updates ([user configuration](https://code.claude.com/docs/en/plugins/manifest-reference.md#reference-a-saved-value)) | Hooks read the options there, the `models` skill passes them to the CLI as flags, and its state stays in its data folder | Node test "plugin options reach the CLI env" (S2.8) |
 | `plugin validate --strict` treats warnings as errors, and `plugin eval` runs live cases ([CLI reference](https://code.claude.com/docs/en/plugins/cli-reference.md#plugin-validate)) | CI runs `validate` on every change and `eval` as a manual job | S9.3, S9.4 |
 
 ## Skills and agents
 
 | The docs say | Model Router | Checked by |
 | :- | :- | :- |
-| Put a skill's key use first in its `description`, and `allowed-tools` grants tools without asking, it doesn't restrict them ([skills](https://code.claude.com/docs/en/skills.md#frontmatter-reference)) | Each skill's description opens with its use, and its Bash grants cover only the plugin's own commands, plus `date +%F` for refresh | `test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files` |
+| Put a skill's key use first in its `description`, and `allowed-tools` grants tools without asking, it doesn't restrict them ([skills](https://code.claude.com/docs/en/skills.md#frontmatter-reference)) | Each skill's description opens with its use, and its Bash grants cover only the plugin's own commands | `test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files` |
 | An agent needs only `name` and `description`, and `tools` limits what it can use ([frontmatter](https://code.claude.com/docs/en/sub-agents.md#supported-frontmatter-fields)) | Seven role agents. The architect, reviewer, scout, verifier and docs-researcher list their `tools`; the implementer and deep-solver keep all of them | `test_read_only_role_agents_say_they_write_nothing` |
-| A plugin skill loads as `/plugin-name:skill-name` beside any other skill of that name, and a skill of yours named `ship`, `ship-local` or `steward` doesn't load where Claude Code's own `/ship` is available ([skills](https://code.claude.com/docs/en/skills.md#resolve-skills-that-share-a-name)) | The pipeline is `/model-router:ship`, and the README and the guide say to type it in full, since the bare `/ship` runs Claude Code's command | Not checked live |
 
 ## Permissions
 
@@ -99,7 +98,7 @@ Last checked against the live docs on 2026-11-24, on Claude Code 2.1.330 and 2.1
 
 ## Staying current
 
-The plugin rereads the docs every day: at session start, at most once in 24 hours, it fetches the Claude Code changelog, the docs index (`llms.txt`), the model configuration page and the model deprecations page, plus the Models API when `ANTHROPIC_API_KEY` is set, `ANTHROPIC_BASE_URL` is unset and none of the Bedrock, Vertex or Foundry switches is on (`scripts/modelrouter/upstream.py`), and it flags changes to the pages it is built on. `/model-router:refresh` shows what changed that affects routing, and CI runs the same check every day (`.github/workflows/upstream-watch.yml`). Its `docs-researcher` agent checks a feature against the current docs and changelog, not memory.
+A daily CI job rereads the docs (`.github/workflows/upstream-watch.yml`, which runs `tools/upstream_check.py`). It reads the Claude Code changelog page, the docs index (`llms.txt`) for pages added or removed, the full text of each page the plugin is built on and of the platform pages the registry's prices and efforts come from, the model alias table and the model deprecations page, and opens an issue when any of it changed since `compat/baseline.json`. The repository's own `/refresh` skill has the `docs-researcher` agent review those changes. The plugin itself fetches nothing; a fix reaches users as a plugin update. The `docs-researcher` agent checks a feature against the current docs and changelog, not memory.
 
 ## Where it goes past the docs
 

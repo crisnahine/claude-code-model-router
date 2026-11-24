@@ -1,5 +1,5 @@
 {
-  "schema": "model-router.models/2",
+  "schema": "model-router.models/3",
   "cap": null,
   "strongest_in_use": "opus",
   "priority": "balanced",
@@ -41,12 +41,6 @@
       "detail": "routed around until retried (ran as claude-opus-5-5 instead)"
     }
   ],
-  "doc_aliases": [
-    "haiku",
-    "saga",
-    "swift"
-  ],
-  "not_in_registry": [],
   "set_aside": [],
   "newer_files": [],
   "newer_config": [],

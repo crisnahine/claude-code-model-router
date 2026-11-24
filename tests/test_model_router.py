@@ -29,7 +29,7 @@ SWAP = json.loads((FIXTURES / "agent-model-swap.json").read_text())
 FRAMING = json.loads((FIXTURES / "prompt-framing.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, ladder, ledger, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
+from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, ladder, ledger, profile, registry, report, request, router, session, settings, spawn, store  # noqa: E402
 from modelrouter import mod as modpath  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 from modelrouter.config import Level  # noqa: E402
@@ -195,11 +195,14 @@ class Shipped(unittest.TestCase):
 
     def test_the_boolean_option_defaults_in_plugin_json_match_settings(self):
         fields = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["userConfig"]
-        for name in ("update_check", "verify_gate"):
-            self.assertEqual(fields[name]["default"], getattr(settings.Settings(), name), name)
+        self.assertEqual(fields["verify_gate"]["default"], settings.Settings().verify_gate)
+
+    def test_the_cli_takes_every_option_plugin_json_declares(self):
+        fields = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["userConfig"]
+        self.assertEqual(set(settings.OPTIONS), set(fields))
 
     def test_the_claude_code_floor_is_the_version_the_manifest_and_teammate_effort_need(self):
-        # `network` needs v2.1.328 (plugins/manifest-reference.md); v2.1.329 fixed `effort` for named teammates.
+        # v2.1.329 fixed `effort` for named teammates.
         manifest = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["engines"]["claude-code"], ">=2.1.329")
         for path in (ROOT / "README.md", PLUGIN / "README.md", ROOT / "docs" / "FAQ.md", ROOT / "docs" / "GUIDE.md",
@@ -279,13 +282,13 @@ class Shipped(unittest.TestCase):
 
     def test_skills_have_descriptions_and_use_the_launcher(self):
         skills = list((PLUGIN / "skills").glob("*/SKILL.md"))
-        self.assertEqual({p.parent.name for p in skills}, {"ship", "route", "models", "usage", "refresh"})
-        commands = set(hooks.HANDLERS) | {"policy", "models", "explain", "refresh", "status", "ack", "usage"}
+        self.assertEqual({p.parent.name for p in skills}, {"route", "models", "usage"})
+        commands = set(hooks.HANDLERS) | {"policy", "models", "explain", "usage"}
         for path in skills:
             self.assertTrue(frontmatter(path).get("description"), path)
             # Third person ("Shows ..."): the description is injected into the system prompt.
             self.assertRegex(frontmatter(path)["description"], r"^[A-Z][a-z]+s\b", path)
-            text = path.read_text(encoding="utf-8").split("own repository")[0]
+            text = path.read_text(encoding="utf-8")
             self.assertNotIn("model-router.py", text, path)
             for used in re.findall(r'model-router\.sh" --data-dir "\$\{CLAUDE_PLUGIN_DATA\}" ([a-z-]+)', text):
                 self.assertIn(used, commands, path)
@@ -310,7 +313,7 @@ class Shipped(unittest.TestCase):
 
     def test_the_docs_researcher_brief_carries_todays_date(self):
         # Haiku 5.5 grounds its answers in recent search results when it is given the date with a search tool.
-        refresh = (PLUGIN / "skills" / "refresh" / "SKILL.md").read_text(encoding="utf-8")
+        refresh = (ROOT / ".claude" / "skills" / "refresh" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("starting the brief with today's date: !`date +%F`", refresh)
         self.assertIn("\n  - Bash(date +%F)\n", refresh)  # the `!` line runs under the skill's own allowed-tools
         body = (PLUGIN / "agents" / "docs-researcher.md").read_text(encoding="utf-8").split("---", 2)[2]
@@ -381,11 +384,6 @@ class Shipped(unittest.TestCase):
         self.assertEqual(min(matrix, key=lambda v: tuple(map(int, v.split(".")))), floor)
         self.assertIn(f"Python {floor} or later", (ROOT / "README.md").read_text(encoding="utf-8"))
 
-    def test_shipped_baseline_lists_the_registry_models(self):
-        baseline = json.loads((ROOT / "compat" / "baseline.json").read_text(encoding="utf-8"))
-        config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
-        self.assertEqual(set(upstream.model_families(baseline["aliases"])), set(config["models"]))
-
     def test_readme_and_description_keep_their_search_phrases(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         description = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["description"]
@@ -437,7 +435,7 @@ class SkillGrants(unittest.TestCase):
 
     LAUNCHER = 'sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh"'
     PREFIX = LAUNCHER + ' --data-dir "${CLAUDE_PLUGIN_DATA}"'
-    SKILLS = ("route", "models", "usage", "refresh")
+    SKILLS = ("route", "models", "usage")
 
     def rules(self, text: str) -> list[str]:
         block = re.search(r"^allowed-tools:(.*?)(?=^\S|^---)", text, re.M | re.S)
@@ -454,23 +452,31 @@ class SkillGrants(unittest.TestCase):
         return False
 
     def test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files(self):
-        writes = [f"{self.PREFIX} upstream-check --baseline /tmp/x --write",
-                  f"{self.PREFIX} upstream-check --baseline /tmp/x --json-out /tmp/y",
-                  f"{self.LAUNCHER} upstream-check --baseline /tmp/x --write"]
         for name in self.SKILLS:
             text = (PLUGIN / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
             rules = self.rules(text)
             runs = re.findall(r"`(%s[^`]*)`" % re.escape(self.LAUNCHER), text)
             self.assertTrue(runs, name)
             for command in runs:
-                command = command.replace("<the brief>", "list the files").replace("$ARGUMENTS", "30 --json")
+                command = command.replace("<the brief>", "list the files").replace("$ARGUMENTS", "30")
                 self.assertTrue(self.allowed(rules, command), f"{name} can't run: {command}")
-            for command in writes:
-                self.assertFalse(self.allowed(rules, command), f"{name} pre-approves: {command}")
             if name != "models":
-                self.assertFalse(self.allowed(rules, f"{self.PREFIX} models --reset"), name)
-            if name != "refresh":
-                self.assertFalse(self.allowed(rules, f"{self.PREFIX} ack"), name)
+                for reset in ("reset", "--reset"):
+                    self.assertFalse(self.allowed(rules, f"{self.PREFIX} models {reset}"), name)
+
+    # The skills whose commands read the options. Each passes every one, as ${user_config.KEY} after the
+    # subcommand (https://code.claude.com/docs/en/plugins/manifest-reference.md#reference-a-saved-value).
+    OPTION_SKILLS = ("models",)
+
+    def test_each_skill_command_that_reads_the_options_passes_them_all(self):
+        flags = [f'--{key.replace("_", "-")}="${{user_config.{key}}}"' for key in settings.OPTIONS]
+        for name in self.OPTION_SKILLS:
+            text = (PLUGIN / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+            runs = re.findall(r"!`%s ([a-z-]+) ([^`]*)`" % re.escape(self.PREFIX), text)
+            self.assertTrue(runs, name)
+            for command, rest in runs:
+                self.assertIn(command, ("policy", "models", "explain"), name)
+                self.assertEqual(rest.split()[:len(flags)], flags, name)
 
 
 class Intake(Sandbox):
@@ -649,10 +655,8 @@ class Snapshot(Sandbox):
         self.override({"models": {"saga": {"strength": 1.5}}}, user=True)
         self.override({"models": {"swift": {"strength": 1.6}}})
         for cap in (None, "sonnet"):
-            if cap:
-                store.update_state(lambda state: state.update(max_tier=cap))
             with mock.patch.object(store, "load_dict", wraps=store.load_dict) as read:
-                self.out("models", "--json")
+                self.out("models", "--json", *(["--max-tier", cap] if cap else []))
             files = [c.args[0].name for c in read.call_args_list if c.args[0].name == cfg.OVERRIDE_FILE]
             self.assertEqual(files, [cfg.OVERRIDE_FILE] * 2, cap)
 
@@ -1242,44 +1246,35 @@ class Options(Sandbox):
             self.options(routing_mode=value)
             self.assertEqual(self.mode(), expected)
 
-    def test_files_can_weaken_but_not_strengthen_the_mode(self):
+    def test_only_the_option_sets_the_mode(self):
         self.override({"routing_mode": "off"})
-        self.assertEqual(self.mode(), "off")
-        self.override({"routing_mode": "auto"})
         self.override({"routing_mode": "advise"}, user=True)
-        self.assertEqual(self.mode(), "advise")
+        self.assertEqual(self.mode(), "auto")
+        self.assertEqual(len([p for p in cfg.load().problems if "routing_mode is set only in /config" in p]), 2)
         self.options(routing_mode="off")
         self.assertEqual(self.mode(), "off")
 
     def test_environment_facts(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="yes",
                      CLAUDE_CODE_USE_VERTEX="1", max_tier="nonsense", verify_gate="false")
-        os.environ.update(ANTHROPIC_API_KEY="sk-test", ANTHROPIC_BASE_URL="https://gateway.example")
         s = settings.resolve(cfg.load())
         self.assertEqual((s.subagent_model, s.force, s.cloud, s.cap, s.verify_gate),
                          ("opus", True, "vertex", None, False))
-        self.assertEqual((s.api_key, s.base_url), ("sk-test", True))
-        self.assertNotIn("sk-test", repr(s))
 
-    def test_skill_commands_read_options_recorded_at_session_start(self):
-        values = {"max_tier": "haiku", "priority": "quality", "agent_pins": "override", "routing_mode": "advise",
-                  "update_check": "off", "verify_gate": "false"}
-        self.options(**values)
+    def test_skill_commands_read_the_options_from_their_flags(self):
+        self.options(max_tier="opus")
         hooks.session_start({"session_id": "s1"})
-        for name in values:
-            del os.environ[f"CLAUDE_PLUGIN_OPTION_{name.upper()}"]
-        config = cfg.load()
-        self.assertEqual(settings.resolve(config), settings.Settings())
-        self.assertEqual(settings.resolve(config, recorded=True), settings.Settings(
-            mode="advise", routing_mode="advise", priority="quality", cap="haiku", pins="override",
-            update_check=False, verify_gate=False))
-        self.assertIn("Cap: **haiku**", self.out("policy"))
+        self.assertNotIn("max_tier", store.load_state())
+        flags = ["--routing-mode=off", "--priority=quality", "--max-tier=haiku", "--agent-pins=override",
+                 "--verify-gate=false"]
+        self.out("models", *flags)
+        self.assertEqual(settings.resolve(cfg.load()), settings.Settings(
+            mode="off", priority="quality", cap="haiku", pins="override", verify_gate=False))
+        self.assertIn("Routing: **off**. Priority: **quality**. Cap: **haiku**", self.out("policy", *flags))
 
-    def test_policy_shows_the_routing_mode_the_user_set(self):
-        self.options(routing_mode="off")
-        hooks.session_start({"session_id": "s1"})
-        del os.environ["CLAUDE_PLUGIN_OPTION_ROUTING_MODE"]
-        self.assertIn("Routing: **off**", self.out("policy"))
+    def test_an_option_left_unsubstituted_keeps_its_default(self):
+        self.assertIn("Routing: **auto**. Priority: **balanced**. Cap: **none**", self.out(
+            "policy", "--routing-mode=${user_config.routing_mode}", "--priority=", "--max-tier=${user_config.max_tier}"))
 
 
 class ConfigSchema(Sandbox):
@@ -1308,11 +1303,11 @@ class ConfigSchema(Sandbox):
         self.assertEqual(config.newer, ())
 
     def test_an_override_from_a_newer_release_is_read_as_far_as_it_is_understood_and_named(self):
-        self.override({"schema": cfg.CONFIG_SCHEMA + 1, "routing_mode": "off",
+        self.override({"schema": cfg.CONFIG_SCHEMA + 1,
                        "levels": {"complex": {"effort": "xhigh"}}, "a_future_key": {"x": 1}}, user=True)
         self.override({"schema": cfg.CONFIG_SCHEMA + 1, "agents": {"my-agent": {"level": "lookup"}}})
         config = cfg.load()
-        self.assertEqual((config.routing_mode, config.levels[Level.complex].effort), ("off", "xhigh"))
+        self.assertEqual(config.levels[Level.complex].effort, "xhigh")
         self.assertEqual(config.rules["my-agent"].floor, Level.lookup)
         newer = [str(self.home / "model-router.json"), str(self.project / ".claude" / "model-router.json")]
         self.assertEqual([str(p) for p in config.newer], newer)
@@ -2191,8 +2186,6 @@ class Router(Sandbox):
                     json.dumps({"tool_input": {"model": 5, "subagent_type": ["a"], "prompt": {"a": 1}}}),
                     json.dumps({"session_id": 7, "cwd": 3, "prompt": 9, "transcript_path": [], "model": {}}))
         for command in hooks.HANDLERS:
-            if command == "refresh-cache":
-                continue  # needs the network
             for payload in payloads:
                 res = subprocess.run([sys.executable, str(SCRIPT), command], input=payload, capture_output=True,
                                      text=True, env={**os.environ})
@@ -3440,20 +3433,9 @@ class Hooks(Sandbox):
         self.assertLessEqual(sum(map(len, agents)), 930)
         self.assertLessEqual(sum(map(len, skills)), 200)
 
-    def test_session_start_is_silent_when_off_and_nothing_is_pending(self):
+    def test_session_start_is_silent_when_off(self):
         self.options(routing_mode="off")
         self.assertIsNone(hooks.session_start({"session_id": "s1"}))
-
-    def test_session_start_mentions_pending_upstream_and_new_models(self):
-        store.save_json(upstream.path(), {
-            "reviewed": {"claude_code_version": "2.0.0", "pages": {}, "aliases": ["haiku"]},
-            "cache": {"releases": [{"version": "2.1.0", "date": "", "link": ""}], "pages": {},
-                      "aliases": ["haiku", "sonnet", "opus", "fable", "saga"]}})
-        text = self.text(hooks.session_start({"session_id": "s1"}))
-        self.assertIn("saga", text)
-        self.assertIn("1 Claude Code release(s)", text)
-        self.options(update_check="false")
-        self.assertNotIn("saga", self.text(hooks.session_start({"session_id": "s1"})))
 
     def test_machine_written_turns_dont_reset_the_request(self):
         hooks.user_prompt({"session_id": "s1", "prompt": HARD, "prompt_id": "p1"})
@@ -3754,348 +3736,10 @@ class SubagentChecks(Sandbox):
         self.assertIn("model-router:verifier", json.dumps(stopped))
 
 
-class Upstream(Sandbox):
-    TABLE = ("| Model alias | Behavior |\n| --- | --- |\n| **`default`** | x |\n| **`best`** | x |\n"
-             "| **`fable`** | x |\n| **`sonnet`** | x |\n| **`opus`** | x |\n| **`haiku`** | x |\n"
-             "| **`sonnet[1m]`** | x |\n| **`opusplan`** | x |\n| **`saga`** | x |\n")
-
-    def fake(self, url: str) -> str:
-        if url.endswith(".xml"):
-            return (FIXTURES / "changelog-rss.xml").read_text(encoding="utf-8")
-        return self.TABLE if "model-config" in url else (FIXTURES / "llms.txt").read_text(encoding="utf-8")
-
-    def test_parse_fixtures(self):
-        releases = upstream.parse_rss((FIXTURES / "changelog-rss.xml").read_text(encoding="utf-8"))
-        self.assertTrue(releases and releases[0]["version"])
-        pages = upstream.parse_llms_index((FIXTURES / "llms.txt").read_text(encoding="utf-8"))
-        self.assertTrue(any(url.endswith("hooks.md") for url in pages))
-        life = upstream.parse_deprecations((FIXTURES / "model-deprecations.md").read_text(encoding="utf-8"))
-        self.assertEqual(life["claude-opus-5-5"]["state"], "Active")
-        self.assertEqual(life["claude-sonnet-4-5-20250929"],
-                         {"state": "Deprecated", "deprecated": "September 30, 2026", "retires": "November 30, 2026",
-                          "replacement": "claude-sonnet-5-5"})
-
-    def test_retiring_models_are_flagged_when_new_or_in_use(self):
-        old = {"lifecycle": {"claude-sonnet-4-5-20250929": {"state": "Active"}, "claude-opus-5-5": {"state": "Active"}}}
-        new = {"lifecycle": {"claude-sonnet-4-5-20250929": {"state": "Deprecated", "retires": "November 30, 2026"},
-                             "claude-opus-5-5": {"state": "Active"}}}
-        changes = upstream.diff(old, new, in_use=["claude-sonnet-4-5-20250929", "claude-opus-5-5[1m]"])
-        self.assertEqual([m["model"] for m in changes["newly_deprecated"]], ["claude-sonnet-4-5-20250929"])
-        self.assertEqual([m["model"] for m in changes["deprecated_in_use"]], ["claude-sonnet-4-5-20250929"])
-        # a retirement covers the undated ID too
-        undated = upstream.diff(old, new, in_use=["claude-sonnet-4-5"])
-        self.assertEqual([m["model"] for m in undated["deprecated_in_use"]], ["claude-sonnet-4-5-20250929"])
-        self.assertTrue(upstream.has_pending(changes))
-        self.assertIn("retires November 30, 2026", report.status(changes))
-        self.assertEqual(upstream.diff({}, new)["newly_deprecated"], [])  # a first review floods nothing
-        in_use_only = upstream.diff(new, new, in_use=["claude-sonnet-4-5-20250929"])
-        self.assertFalse(upstream.has_pending(in_use_only))  # said at session start on its own line
-
-    def test_the_pages_routing_rests_on_are_watched(self):
-        # The effort order, the cache rules, fast mode, the advisor and headless runs all decide what the router may do.
-        base = "https://code.claude.com/docs/en/"
-        pages = ["env-vars", "prompt-caching", "fast-mode", "advisor", "headless", "best-practices", "workflows"]
-        live = {"pages": {base + p + ".md": "b" for p in pages}}
-        changes = upstream.diff({"pages": {base + p + ".md": "a" for p in pages}}, live)
-        self.assertEqual(changes["watched_pages_touched"], sorted(base + p + ".md" for p in pages))
-
-    def test_aliases_and_families(self):
-        aliases = upstream.parse_model_aliases(self.TABLE)
-        self.assertIn("sonnet[1m]", aliases)
-        self.assertEqual(upstream.model_families(aliases), ["fable", "haiku", "opus", "saga", "sonnet"])
-
-    def test_diff_flags_releases_watched_pages_and_model_changes(self):
-        base = "https://code.claude.com/docs/en/"
-        reviewed = {"claude_code_version": "2.1.100", "pages": {base + "hooks.md": "a", base + "voice.md": "a"},
-                    "aliases": ["haiku", "sonnet", "opus", "fable"]}
-        live = {"releases": [{"version": "2.1.101"}, {"version": "2.1.99"}],
-                "pages": {base + "hooks.md": "b", base + "voice.md": "a", base + "plugins/new.md": "a"},
-                "aliases": upstream.parse_model_aliases(self.TABLE)}
-        changes = upstream.diff(reviewed, live)
-        self.assertEqual([r["version"] for r in changes["new_releases"]], ["2.1.101"])
-        self.assertEqual(changes["watched_pages_touched"], [base + "hooks.md", base + "plugins/new.md"])
-        self.assertEqual(changes["new_model_families"], ["saga"])
-        self.assertEqual(changes["removed_model_families"], [])
-        self.assertTrue(upstream.has_pending(upstream.diff(reviewed, {"aliases": live["aliases"]})))
-        self.assertEqual(upstream.diff({}, {"aliases": ["haiku", "sonnet", "opus"]})["removed_model_families"], ["fable"])
-        self.assertEqual(upstream.diff({}, {"aliases": []})["removed_model_families"], [])
-        self.assertGreater(upstream.version_key("2.1.330"), upstream.version_key("2.1.99"))
-
-    def test_first_refresh_marks_the_present_as_reviewed_then_ack(self):
-        with mock.patch.object(upstream, "http_get", side_effect=self.fake):
-            data = upstream.refresh(settings.Settings(), force=True)
-        self.assertFalse(upstream.has_pending(upstream.pending(data)))
-        data["reviewed"]["claude_code_version"] = "2.0.0"
-        store.save_json(upstream.path(), data)
-        self.assertTrue(upstream.has_pending(upstream.pending()))
-        self.assertIn("as reviewed", self.out("ack"))
-        self.assertFalse(upstream.has_pending(upstream.pending()))
-
-    def test_ack_says_so_when_the_review_mark_was_not_written(self):
-        store.save_json(upstream.path(), {"schema": 99, "cache": {"claude_code_version": "2.1.330"}})
-        self.assertEqual(self.out("ack"), "Review mark left as is: upstream.json was written by a newer Model Router release.\n")
-        store.save_json(upstream.path(), {"cache": {"claude_code_version": "2.1.330"}})
-        with held(upstream.path(), "other"), mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
-            self.assertEqual(cli.main(["ack"]), 1)
-        self.assertNotIn("reviewed", json.loads(upstream.path().read_text()))
-
-    def test_cache_ttl_skips_the_network(self):
-        store.save_json(upstream.path(), {"cache": {"fetched_at": 10**12}})
-        with mock.patch.object(upstream, "http_get", side_effect=AssertionError("network used")):
-            upstream.refresh(settings.Settings(), force=False)
-
-    def test_models_api_is_read_only_with_a_direct_api_key(self):
-        reply = json.dumps({"data": [
-            {"id": "claude-opus-5-5", "line": "opus", "lifecycle": "active", "retires_at": None},
-            {"id": "claude-sonnet-4-5-20250929", "line": "sonnet", "lifecycle": "deprecated",
-             "retires_at": "2026-11-30T00:00:00Z"},
-            {"id": "claude-mythos-5-2", "line": "mythos", "lifecycle": "active", "retires_at": None}]})
-        calls = []
-
-        def fake_get(url, headers=None):
-            calls.append((url, headers))
-            return reply
-
-        keyed = settings.Settings(api_key="sk-test")
-        with mock.patch.object(upstream, "http_get", side_effect=fake_get):
-            self.assertEqual(upstream.api_models(settings.Settings()), {})  # no key, no request
-            for between in ({"base_url": True}, {"cloud": "bedrock"}):  # either would get the key
-                self.assertEqual(upstream.api_models(settings.Settings(api_key="sk-test", **between)), {})
-            models = upstream.api_models(keyed)
-        self.assertEqual(len(calls), 1)
-        self.assertTrue(calls[0][0].startswith("https://api.anthropic.com/v1/models"))
-        self.assertEqual(calls[0][1]["Authorization"], "Bearer sk-test")
-        self.assertEqual(models["claude-sonnet-4-5-20250929"]["retires_at"], "2026-11-30")
-        live = {"api_models": models, "lifecycle": {}}
-        changes = upstream.diff({"lifecycle": {"claude-sonnet-4-5-20250929": {"state": "Active"}}}, live,
-                                in_use=["claude-sonnet-4-5-20250929"])
-        self.assertEqual(changes["new_model_families"], ["mythos"])
-        self.assertEqual(changes["deprecated_in_use"][0]["retires"], "2026-11-30")
-        self.assertEqual(upstream.diff(upstream.snapshot(live), live)["new_model_families"], [])
-
-    def test_a_version_older_than_its_familys_newest_is_named_at_session_start(self):
-        life = upstream.parse_deprecations((FIXTURES / "model-deprecations.md").read_text(encoding="utf-8"))
-        store.save_json(upstream.path(), {"cache": {"lifecycle": life, "releases": []}, "reviewed": {}})
-        self.assertEqual(upstream.version_of("claude-haiku-4-5-20251001[1m]"), ("haiku", (4, 5)))
-        self.assertIsNone(upstream.version_of("claude-3-haiku-20240307"))
-        newest = upstream.newest_versions()
-        self.assertEqual((newest["opus"], newest["sonnet"], newest["fable"]),
-                         ("claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2"))
-        self.assertEqual(upstream.behind(["claude-opus-5[1m]", "claude-opus-5-5", "opus", None]),
-                         [("claude-opus-5", "claude-opus-5-5")])
-        def note(model: str) -> str:
-            out = hooks.session_start({"session_id": "s1", "model": model}) or {}
-            return (out.get("hookSpecificOutput") or {}).get("additionalContext", "")
-        self.assertIn("claude-opus-4-7 is running here and claude-opus-5-5 is the newest of its family",
-                      note("claude-opus-4-7"))
-        self.assertNotIn("newest of its family", note("opus"))
-
-    def test_a_dated_or_bracketed_id_is_the_same_model_but_a_newer_version_is_not(self):
-        self.assertFalse(upstream._same_model("claude-fable-5", "claude-fable-5-2"))
-        self.assertTrue(upstream._same_model("claude-sonnet-4-5-20250929", "claude-sonnet-4-5"))
-        self.assertTrue(upstream._same_model("claude-sonnet-4-5", "claude-sonnet-4-5-20250929[1m]"))
-
-    def test_a_date_is_not_a_minor_version(self):
-        self.assertEqual(upstream.version_of("claude-opus-4-20250514"), ("opus", (4,)))
-        self.assertEqual(upstream.version_of("claude-opus-4-1-20250805"), ("opus", (4, 1)))
-
-    def test_an_empty_feed_is_an_error_not_data(self):
-        store.save_json(upstream.path(), {"cache": {"fetched_at": 1, "aliases": ["haiku"]}})
-        out = Path(self.tmp.name) / "changes.json"
-        for feed in ("rss.xml", "llms.txt"):
-            def fake(url, headers=None, feed=feed):
-                return "<html>Down for maintenance</html>" if url.endswith(feed) else self.fake(url)
-
-            with mock.patch.object(upstream, "http_get", side_effect=fake):
-                with self.assertRaises(ValueError):
-                    upstream.refresh(settings.Settings(), force=True)
-                with self.assertRaises(ValueError):
-                    self.out("upstream-check", "--baseline", str(out.with_name("baseline.json")),
-                             "--json-out", str(out))
-            self.assertFalse(out.exists())
-        with mock.patch.object(upstream, "http_get", side_effect=lambda url, headers=None: (
-                "<rss><channel></channel></rss>" if url.endswith(".xml") else self.fake(url))):
-            with self.assertRaises(ValueError):
-                upstream.fetch(settings.Settings())
-        self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
-
-    def test_upstream_check_writes_whether_anything_is_pending(self):
-        baseline, out = Path(self.tmp.name) / "baseline.json", Path(self.tmp.name) / "changes.json"
-        with mock.patch.object(upstream, "http_get", side_effect=self.fake):
-            self.out("upstream-check", "--baseline", str(baseline), "--write")
-            self.out("upstream-check", "--baseline", str(baseline), "--json-out", str(out))
-            self.assertIs(json.loads(out.read_text())["pending"], False)
-            store.save_json(baseline, {**store.load_dict(baseline), "claude_code_version": "2.0.0"})
-            self.out("upstream-check", "--baseline", str(baseline), "--json-out", str(out))
-            self.assertIs(json.loads(out.read_text())["pending"], True)
-
-    def test_the_api_key_never_follows_a_redirect(self):
-        import http.server
-        import threading
-        import urllib.error
-        seen = []
-
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
-                seen.append((self.path, self.headers.get("Authorization")))
-                if self.path == "/start":
-                    self.send_response(302)
-                    self.send_header("Location", "/landed")
-                    self.end_headers()
-                else:
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(b"ok")
-
-            def log_message(self, *args):
-                pass
-
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        base = f"http://127.0.0.1:{server.server_address[1]}"
-        try:
-            with self.assertRaises(urllib.error.HTTPError):
-                upstream.http_get(base + "/start", {"Authorization": "Bearer sk-test"})
-            self.assertEqual(seen, [("/start", "Bearer sk-test")])
-            self.assertEqual(upstream.http_get(base + "/start"), "ok")  # docs pages may still move
-        finally:
-            server.shutdown()
-            server.server_close()
-
-    def dripping_server(self, bodies: dict, delay: float, raw: dict | None = None):
-        """Serves each path's body one byte at a time, `delay` seconds apart. A `raw` path
-        drips its bytes with no status line or headers of the server's own."""
-        import http.server
-        import threading
-
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_GET(self):
-                if self.path not in (raw or {}):
-                    self.send_response(200)
-                    self.end_headers()
-                try:
-                    for byte in (raw or {}).get(self.path) or bodies.get(self.path, b"x" * 1000):
-                        self.wfile.write(bytes([byte]))
-                        self.wfile.flush()
-                        time.sleep(delay)
-                except OSError:
-                    pass  # the client gave up
-
-            def log_message(self, *args):
-                pass
-
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        self.addCleanup(server.server_close)
-        self.addCleanup(server.shutdown)
-        return f"http://127.0.0.1:{server.server_address[1]}"
-
-    def test_a_request_that_keeps_dripping_stops_at_its_deadline(self):
-        base = self.dripping_server({}, delay=0.05)
-        started = time.monotonic()
-        with mock.patch.object(upstream, "HTTP_TIMEOUT", 0.5), self.assertRaises(OSError):
-            upstream.http_get(base + "/slow")
-        self.assertLess(time.monotonic() - started, 2)
-
-    def test_the_whole_fetch_stops_at_its_budget(self):
-        # The left-over worker's one request fails at its own 5 s deadline, so it never moves on
-        # to the real URLs once the patch is gone.
-        base = self.dripping_server({}, delay=0.02)
-        started = time.monotonic()
-        with mock.patch.multiple(upstream, FETCH_BUDGET=0.7, HTTP_TIMEOUT=5, CHANGELOG_RSS=base + "/rss"), \
-                self.assertRaises(OSError):
-            upstream.fetch(settings.Settings())
-        self.assertLess(time.monotonic() - started, 2)
-
-    def test_the_budget_covers_a_dripped_status_line_too(self):
-        # Headers that never end: the left-over worker fails when the server hangs up.
-        base = self.dripping_server({}, delay=0.05, raw={"/rss": b"HTTP/1.0 200 OK\r\nX-Pad: " + b"x" * 200})
-        started = time.monotonic()
-        with mock.patch.multiple(upstream, FETCH_BUDGET=0.7, HTTP_TIMEOUT=5, CHANGELOG_RSS=base + "/rss"), \
-                self.assertRaises(OSError):
-            upstream.fetch(settings.Settings())
-        self.assertLess(time.monotonic() - started, 2)
-
-    def test_a_body_cut_short_is_a_failed_request(self):
-        import http.client
-        base = self.dripping_server({}, delay=0, raw={"/cut": b"HTTP/1.0 200 OK\r\nContent-Length: 100\r\n\r\n"
-                                                              + b"x" * 10})
-        with self.assertRaises(http.client.IncompleteRead):
-            upstream.http_get(base + "/cut")
-
-    def test_a_failed_fetch_leaves_the_cache_alone(self):
-        store.save_json(upstream.path(), {"cache": {"fetched_at": 1, "aliases": ["haiku"]}})
-        with mock.patch.object(upstream, "http_get", side_effect=OSError("offline")):
-            with self.assertRaises(OSError):
-                upstream.refresh(settings.Settings(), force=True)
-        self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
-
-    def test_refresh_offline_says_so_in_one_line_and_shows_the_last_check(self):
-        import urllib.error
-        store.save_json(upstream.path(), {"reviewed": {"claude_code_version": "2.1.330"},
-                                          "cache": {"fetched_at": 1, "releases": [{"version": "2.1.331"}]}})
-        offline = urllib.error.URLError("[Errno 8] nodename nor servname provided, or not known")
-        with mock.patch.object(upstream, "http_get", side_effect=offline), \
-                redirect_stdout(io.StringIO()) as buf:
-            self.assertEqual(cli.main(["refresh", "--force"]), 0)
-        first, rest = buf.getvalue().split("\n", 1)
-        self.assertEqual(first, "Couldn't reach the Claude Code docs (<urlopen error [Errno 8] nodename nor servname "
-                                "provided, or not known>); showing the last check.")
-        self.assertIn("Last reviewed Claude Code version: 2.1.330", rest)
-        self.assertIn("- 2.1.331", rest)
-
-
-class RefreshBackoff(Sandbox):
-    """A failed daily fetch waits before the next try: an hour, doubling to a day."""
-
-    def refresh(self, at: float, fails: bool):
-        effect = OSError("offline") if fails else None
-        result = {"releases": [], "pages": {}, "aliases": ["haiku"], "fetched_at": int(at)}
-        with self.clock_at(at), \
-                mock.patch.object(upstream, "fetch", side_effect=effect, return_value=result) as fetch:
-            try:
-                upstream.refresh(settings.Settings(), force=False)
-            except OSError:
-                pass
-        return fetch.call_count
-
-    def test_a_failure_waits_doubling_up_to_a_day_and_a_success_resets(self):
-        t = 1_000_000.0
-        self.assertEqual(self.refresh(t, fails=True), 1)
-        self.assertEqual(self.refresh(t + 1800, fails=True), 0)  # inside the first hour
-        self.assertEqual(self.refresh(t + 3601, fails=True), 1)  # second failure: two hours
-        self.assertEqual(self.refresh(t + 3601 + 7000, fails=True), 0)
-        self.assertEqual(self.refresh(t + 3601 + 7201, fails=False), 1)
-        self.assertNotIn("failed", upstream.load())
-        store.update_dict(upstream.path(), lambda data: data["cache"].update(fetched_at=0))
-        self.assertEqual(self.refresh(t + 20_000, fails=True), 1)  # the window starts over at an hour
-        self.assertEqual(self.refresh(t + 20_000 + 3601, fails=True), 1)
-        store.update_dict(upstream.path(), lambda data: data["failed"].update(count=40))
-        self.assertEqual(self.refresh(t + 20_000 + 3601 + 86_401, fails=True), 1)  # capped at a day
-
-    def test_a_failure_keeps_the_old_cache_and_a_forced_refresh_still_runs(self):
-        store.save_json(upstream.path(), {"cache": {"aliases": ["haiku"], "fetched_at": 0}})
-        self.refresh(1_000_000.0, fails=True)
-        self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
-        with mock.patch.object(upstream, "fetch", side_effect=OSError("offline")) as fetch:
-            with self.assertRaises(OSError):
-                upstream.refresh(settings.Settings(), force=True)
-        self.assertEqual(fetch.call_count, 1)
-
-    def test_a_corrupt_record_never_blocks_a_fetch(self):
-        for record in ("junk", {"at": "soon", "count": 1}, {"at": 10**15, "count": 1}, {"at": 999_000, "count": -3},
-                       {"at": 1, "count": float("inf")}, {"at": float("-inf"), "count": 1},
-                       {"at": float("nan"), "count": 2}):
-            with self.subTest(record=record):
-                store.save_json(upstream.path(), {"failed": record})
-                self.assertEqual(self.refresh(1_000_000.0, fails=False), 1)
-
-
 class Reports(Sandbox):
     def test_policy_shows_levels_cap_and_the_crew(self):
         self.assertIn("| complex | opus | high |", self.out("policy"))
-        store.update_state(lambda state: state.update(max_tier="sonnet", priority="quality"))
-        text = self.out("policy")
+        text = self.out("policy", "--max-tier", "sonnet", "--priority", "quality")
         self.assertIn("Cap: **sonnet**", text)
         self.assertIn("fable (not in use)", text)
         self.assertIn("| model-router:deep-solver | routed by brief | Research-grade, open-ended tasks with no known approach |",
@@ -4108,12 +3752,10 @@ class Reports(Sandbox):
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "opus", "fable"]}))
-        store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga"]}})
         text = self.out("models")
         self.assertIn("ran as claude-opus-5-5 instead", text)
         self.assertIn("| haiku | claude-haiku-5-5 | working |", text)
         self.assertIn("| sonnet | - | not permitted", text)
-        self.assertIn("Not in the registry yet, so not routed to: saga", text)
 
     def test_explain(self):
         self.assertIn("**complex**", self.out("explain", *HARD.split()))
@@ -4223,8 +3865,10 @@ class Reports(Sandbox):
     def test_data_dir_flag(self):
         other = Path(self.tmp.name) / "other"
         other.mkdir()
-        store.save_json(other / "state.json", {"max_tier": "haiku"})
-        self.assertIn("Cap: **haiku**", self.out("--data-dir", str(other), "policy"))
+        with mock.patch.dict(os.environ, {"CLAUDE_PLUGIN_DATA": str(other)}):
+            self.route_around("opus")
+        self.assertNotIn("| opus | - | routed around", self.out("models"))
+        self.assertIn("| opus | - | routed around", self.out("--data-dir", str(other), "models"))
 
 
 class StateFiles(Sandbox):
@@ -4619,9 +4263,8 @@ class MachineReadable(Sandbox):
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "opus", "fable"]}))
-        store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga"]}})
         data = self.json_out("models")
-        self.assertEqual(data["schema"], "model-router.models/2")
+        self.assertEqual(data["schema"], "model-router.models/3")
         self.assertEqual((data["cap"], data["priority"], data["strongest_in_use"]), (None, "balanced", "opus"))
         rows = {m["model"]: m for m in data["models"]}
         self.assertEqual(list(rows), ["haiku", "sonnet", "opus", "fable"])
@@ -4631,13 +4274,10 @@ class MachineReadable(Sandbox):
         self.assertEqual(rows["fable"]["status"], "routed_around")
         self.assertIn("ran as claude-opus-5-5 instead", rows["fable"]["detail"])
         self.assertEqual(rows["opus"]["status"], "not_used")
-        self.assertEqual((data["doc_aliases"], data["not_in_registry"]), (["haiku", "saga"], ["saga"]))
-        store.update_state(lambda state: state.update(max_tier="sonnet"))
-        rows = {m["model"]: m for m in self.json_out("models")["models"]}
+        rows = {m["model"]: m for m in self.json_out("models", "--max-tier=sonnet")["models"]}
         self.assertEqual(rows["opus"]["status"], "above_cap")
-        self.assertEqual(json.loads(self.out("models", "--reset", "--json"))["schema"], "model-router.models/2")
-        store.save_json(upstream.path(), {"cache": {"aliases": "saga"}})  # a corrupt cache lists nothing
-        self.assertEqual(self.json_out("models")["not_in_registry"], [])
+        for reset in ("--reset", "reset"):
+            self.assertEqual(json.loads(self.out("models", reset, "--json"))["schema"], "model-router.models/3")
 
     def test_a_workflow_model_pin_keeps_its_model_and_the_router_sets_only_effort(self):
         # The pin wins over the model a mod sets for a workflow agent, so the router keeps it and sets effort only.
@@ -4725,7 +4365,6 @@ class JsonOutputs(Sandbox):
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "sonnet", "opus", "fable", "swift"]}))
-        store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga", "swift"]}})
         self.session_on("claude-opus-5-5")
         for agent, brief, ran in (("general-purpose", LOOKUP, "claude-haiku-5-5"), ("ruled", BUILD, "claude-sonnet-5-5"),
                                   ("slow", LOOKUP, "claude-opus-5-5"), ("general-purpose", HARD, "claude-opus-5-5")):
@@ -4738,9 +4377,8 @@ class JsonOutputs(Sandbox):
 
     def test_the_models_and_usage_outputs_are_the_recorded_bytes(self):
         self.recorded()
-        got = {"models": self.out("models", "--json"), "usage": self.out("usage", "--json")}
-        store.update_state(lambda state: state.update(max_tier="sonnet"))
-        got["models-capped"] = self.out("models", "--json")
+        got = {"models": self.out("models", "--json"), "usage": self.out("usage", "--json"),
+               "models-capped": self.out("models", "--json", "--max-tier=sonnet")}
         for name, text in got.items():
             self.assertEqual(text, (self.DIR / f"{name}.json").read_text(encoding="utf-8"), name)
 
@@ -4755,7 +4393,7 @@ class OverheadBench(unittest.TestCase):
         hooks_json = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))["hooks"]
         commands = {h["args"][-1] for groups in hooks_json.values() for group in groups for h in group["hooks"]}
         timed = {row["command"] for row in report["hooks"]}
-        self.assertEqual(timed, commands - {"refresh-cache"})  # async, and it would use the network
+        self.assertEqual(timed, commands)
         for row in [report["floor"], *report["hooks"], *report["mod"]]:
             for key in ("p50_ms", "p95_ms", "runs"):
                 self.assertIn(key, row, row)
@@ -4804,23 +4442,16 @@ import timeit  # noqa: E402
 class SecurityClaims(Sandbox):
     """Each claim in docs/SECURITY.md's assessment, rerun on every change (S8.3)."""
 
-    def test_a_repository_file_keeps_only_routing_mode_models_levels_and_agents(self):
+    def test_a_repository_file_keeps_only_models_levels_and_agents(self):
         cleaned = cfg._clean({"routing_mode": "advise", "models": {"saga": {"strength": 1}},
                               "levels": {"lookup": {"effort": "low"}}, "agents": {"x": {"level": "lookup"}},
                               "prices": {"claude-saga-1": {"input": 1}}, "newest": {"opus": "claude-x"},
                               "older_aliases": {"bedrock": ["opus"]}, "crew": {"x": {}}, "main": {}}, cfg.PROJECT_FILE, [])
-        self.assertEqual(set(cleaned), {"routing_mode", "models", "levels", "agents"})
+        self.assertEqual(set(cleaned), {"models", "levels", "agents"})
         self.override({"prices": {"claude-opus-5-5": {"output": 0}}, "newest": {"opus": "claude-evil-1"}})
         config = cfg.load()
         self.assertEqual(config.newest, {k: v for k, v in cfg.base_config()["newest"].items() if k[0] != "$"})
         self.assertEqual(config.prices["claude-opus-5-5"], cfg.base_config()["prices"]["claude-opus-5-5"])
-
-    def test_the_weakest_routing_mode_wins(self):
-        for user, project, want in (("auto", "off", "off"), ("off", "auto", "off"), ("advise", "auto", "advise")):
-            with self.subTest(user=user, project=project):
-                self.override({"routing_mode": user}, user=True)
-                self.override({"routing_mode": project})
-                self.assertEqual(settings.resolve(cfg.load()).mode, want)
 
     def test_a_project_model_cannot_take_a_trusted_name_or_count_under_a_cap(self):
         self.override({"models": {"opus-fast": {"strength": 9}, "pus": {"strength": 9}, "saga": {"strength": 0.1}}})
@@ -4870,7 +4501,7 @@ class SecurityClaims(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": HARD, "cwd": str(self.project)})
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
-        for argv in (("policy",), ("models",), ("usage",), ("status",), ("explain", HARD)):
+        for argv in (("policy",), ("models",), ("usage",), ("explain", HARD)):
             self.out(*argv)
         after = {p: p.stat().st_mtime_ns for root in outside for p in root.rglob("*")}
         self.assertEqual(after, before)
@@ -4885,27 +4516,15 @@ class SecurityClaims(Sandbox):
             decision = ((out or {}).get("hookSpecificOutput") or {}).get("permissionDecision")
             self.assertIn(decision, (None, "deny"))
 
-    def test_only_upstream_opens_connections(self):
-        for path in (SCRIPTS / "modelrouter").glob("*.py"):
+    def test_nothing_shipped_opens_a_connection(self):
+        for path in PLUGIN.rglob("*.py"):
             text = path.read_text(encoding="utf-8")
-            if path.name != "upstream.py":
-                self.assertIsNone(re.search(r"^\s*(?:import|from)\s+(?:urllib|http|socket|ssl)\b", text, re.M), path)
-        hosts = set(re.findall(r"https://([^/\"']+)/", (SCRIPTS / "modelrouter" / "upstream.py").read_text()))
-        self.assertLessEqual(hosts, {"code.claude.com", "platform.claude.com", "api.anthropic.com"})
+            self.assertIsNone(re.search(r"^\s*(?:import|from)\s+(?:urllib|http|socket|ssl)\b", text, re.M), path)
+        self.assertNotRegex((PLUGIN / "hooks" / "router.ts").read_text(encoding="utf-8"), r"\$\.http\b|\bfetch\(")
+        self.assertNotIn("network", json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")))
 
-    def test_the_api_key_stays_out_of_repr_and_state(self):
-        os.environ["ANTHROPIC_API_KEY"] = "sk-secret-123"
-        options = settings.resolve(cfg.load())
-        self.assertNotIn("sk-secret-123", repr(options))
-        settings.record(options)
-        hooks.session_start({"session_id": "s1", "source": "startup", "cwd": str(self.project)})
-        for path in self.data.rglob("*"):
-            if path.is_file():
-                self.assertNotIn("sk-secret-123", path.read_text(encoding="utf-8", errors="replace"), path)
-
-    def test_the_redirect_guard_and_skill_grants_have_their_own_tests(self):
-        names = {name for cls in (Upstream, SkillGrants) for name in dir(cls) if name.startswith("test_")}
-        self.assertIn("test_the_api_key_never_follows_a_redirect", names)
+    def test_the_skill_grants_have_their_own_test(self):
+        names = {name for name in dir(SkillGrants) if name.startswith("test_")}
         self.assertIn("test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files", names)
 
 

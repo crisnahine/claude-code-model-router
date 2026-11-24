@@ -38,7 +38,7 @@ The benchmark can't tell yet. In the run of the routing code at commit <!-- benc
 
 ## How do I turn Model Router off, or turn parts of it off?
 
-Set the plugin's `routing_mode` option to `off` in `/config`, and the router changes nothing and only keeps its ledger; `advise` logs the level each call reads as without changing any call. `verify_gate` (on) switches the check before a turn ends, and `update_check` (on) the daily fetch. To leave one agent alone, set `"route": false` for it under `agents` in `~/.claude/model-router.json`; a project's file can't ([README](../README.md#configuration)).
+Set the plugin's `routing_mode` option to `off` in `/config`, and the router changes nothing and only keeps its ledger; `advise` logs the level each call reads as without changing any call. `verify_gate` (on) switches the check before a turn ends. To leave one agent alone, set `"route": false` for it under `agents` in `~/.claude/model-router.json`; a project's file can't ([README](../README.md#configuration)).
 
 ## Can I cap the strongest model, or force one model?
 
@@ -58,7 +58,7 @@ Yes, through the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Cod
 
 ## What does Model Router store on my machine, and what leaves it?
 
-It keeps its state in its own plugin data directory and sends no prompt, brief, path or code anywhere. The ledger keeps the first 120 characters of each agent call's description, plus levels, reasons, model names, token counts and list-price cost; a repeated call is recognized by a hash. The only network traffic is the daily update check of the Claude Code changelog, docs index and model pages (`code.claude.com`, `platform.claude.com`), plus `api.anthropic.com` for your account's model list when `ANTHROPIC_API_KEY` is set, `ANTHROPIC_BASE_URL` is unset and none of `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` is on. Turning `update_check` off stops it ([SECURITY.md](SECURITY.md)).
+It keeps its state in its own plugin data directory and sends no prompt, brief, path or code anywhere. The ledger keeps the first 120 characters of each agent call's description, plus levels, reasons, model names, token counts and list-price cost; a repeated call is recognized by a hash. It makes no network call: new Claude Code releases, docs changes and model retirements are checked in this repository's CI, and fixes reach you as plugin updates ([SECURITY.md](SECURITY.md#network)).
 
 ## Does it work with other plugins, skills and agents?
 

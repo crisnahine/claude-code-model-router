@@ -155,10 +155,8 @@ def _clean(override: Any, source: str, problems: list[str]) -> dict:
         problems.append(f"{source}: {where} {why}, dropped")
 
     out: dict = {}
-    if parse_mode(override.get("routing_mode")):
-        out["routing_mode"] = parse_mode(override.get("routing_mode"))
-    elif override.get("routing_mode") is not None:
-        bad("routing_mode", "is not off, advise or auto")
+    if "routing_mode" in override:
+        bad("routing_mode", "is set only in /config")
     models = override.get("models")
     if isinstance(models, dict):
         out["models"] = {}
@@ -259,8 +257,8 @@ def _raises_only(project: dict, shipped: dict, held: list[Held]) -> None:
 
 
 def _newer(file: dict) -> bool:
-    """An override file written for a newer release. It is still read, as far as _clean understands it:
-    refusing it would drop its `routing_mode: off` and turn routing back on."""
+    """An override file written for a newer release. It is still read, as far as _clean understands it,
+    so the settings this release knows still apply."""
     version = file.get("schema")
     return isinstance(version, int) and not isinstance(version, bool) and version > CONFIG_SCHEMA
 
@@ -344,7 +342,6 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
             held.append(Held("model", name, "its name overlaps a shipped or your own model's, so it is ignored"))
         else:
             added[name] = spec
-    file_modes = [m for m in (mine.get("routing_mode"), theirs.get("routing_mode")) if m]
     shipped_levels = _merge(base.get("levels") or {}, mine.get("levels") or {})
     project_levels = theirs.get("levels") or {}
     _raises_only(project_levels, shipped_levels, held)
@@ -366,7 +363,6 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
                        if not k.startswith("$") and isinstance(v, list)},
         crew=dict(base.get("crew") or {}),
         rules=_rules(base.get("agents") or {}, mine.get("agents") or {}, theirs.get("agents") or {}, held),
-        routing_mode=min(file_modes, key=MODES.index) if file_modes else None,
         problems=tuple(problems),
         held=tuple(held),
     )

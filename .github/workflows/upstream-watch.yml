@@ -1,10 +1,12 @@
 name: Upstream watch
 
-# Checks the Claude Code changelog and docs index against compat/baseline.json
-# and keeps one open issue listing what changed, so nothing is missed between
-# reviews. It never edits the plugin itself: a person (or /model-router:refresh
-# run inside this repo) reviews the changes and updates the baseline in a PR.
-# An empty changelog or docs index fails the job instead of opening an issue.
+# Checks the Claude Code changelog, the docs index, the full text of the docs
+# pages the plugin is built on, the model aliases and the model status table
+# against compat/baseline.json, and keeps one open issue listing what changed,
+# so nothing is missed between reviews. It never edits the plugin itself: a
+# person (or /refresh run inside this repo) reviews the changes and updates the
+# baseline in a PR. A page that fails to load, or parses as empty, fails the
+# job instead of opening an issue.
 
 on:
   schedule:
@@ -18,6 +20,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -25,7 +28,7 @@ jobs:
           python-version: "3.12"
       - name: Compare upstream with baseline
         run: |
-          python plugins/model-router/scripts/model-router.py upstream-check \
+          python tools/upstream_check.py \
             --baseline compat/baseline.json --json-out changes.json > report.md
           cat report.md
       - name: Open or update the review issue
@@ -42,8 +45,8 @@ jobs:
             cat report.md
             echo '~~~~'
             echo
-            echo "To review: open this repo in Claude Code with the plugin enabled and run \`/model-router:refresh\`, or update the plugin by hand, then refresh the baseline with"
-            echo "\`python3 plugins/model-router/scripts/model-router.py upstream-check --baseline compat/baseline.json --write\` in the same PR."
+            echo "To review: open this repo in Claude Code and run \`/refresh\`, or update the plugin by hand, then refresh the baseline with"
+            echo "\`python3 tools/upstream_check.py --baseline compat/baseline.json --write\` in the same PR."
           } > body.md
           number=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
           if [ -n "$number" ]; then

@@ -41,7 +41,7 @@ Without it, a subagent that names no model runs on its conversation's model ([Cl
 - Sets the model and effort of every subagent, teammate and workflow agent as it starts. The agent the caller chose stays the same.
 - Runs a call one level higher when Claude redoes a weak result, and `/model-router:usage` counts the redos per level.
 - Asks once, before a turn ends, for a test run when code changed unchecked.
-- Logs what each turn cost at list price in `/model-router:usage`, and checks the Claude Code changelog, docs and model retirements once a day.
+- Logs what each turn cost at list price in `/model-router:usage`, and makes no network call of its own.
 
 ## Built on the Claude Code docs
 
@@ -66,7 +66,7 @@ In a session this opens the plugin in the `/plugin` panel, where you pick a scop
 
 Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. Without Python its hooks do nothing and its skills say why.
 
-Nothing has to be set: the six options in `/config` under the plugin start at their defaults ([options](docs/GUIDE.md#configuration)), and Claude model routing is on from the first session. To try it from a clone, run `claude --plugin-dir ./plugins/model-router`.
+Nothing has to be set: the five options in `/config` under the plugin start at their defaults ([options](docs/GUIDE.md#configuration)), and Claude model routing is on from the first session. To try it from a clone, run `claude --plugin-dir ./plugins/model-router`.
 
 ## Quick start
 
@@ -123,19 +123,15 @@ The run measured the routing code at <!-- bench:opus.commit_code -->`780ee86`<!-
 
 | Command | What it does |
 | :- | :- |
-| `/model-router:ship <task or issue>` | Plans, builds, verifies, reviews and commits a change on a branch, and stops before pushing, merging or deploying |
 | `/model-router:route <task>` | Explains which model a task would get and why, and how to split it |
-| `/model-router:models [reset] [--json]` | Lists the models in use, what each runs as, and what is capped, unavailable or routed around. `reset` clears learned availability |
-| `/model-router:usage [days] [--json]` | Shows what ran where and what it cost at list price, over `days` (default 7) |
-| `/model-router:refresh` | Reviews new Claude Code releases, docs changes and model retirements |
+| `/model-router:models [reset]` | Lists the models in use, what each runs as, and what is capped, unavailable or routed around. `reset` clears learned availability |
+| `/model-router:usage [days]` | Shows what ran where and what it cost at list price, over `days` (default 7) |
 
-Type `/model-router:ship` in full. Where Claude Code has its own `/ship`, the bare `/ship` runs that command instead, and it can commit, push and open a pull request with no confirmation prompt ([Claude Code docs](https://code.claude.com/docs/en/ship-command.md)).
-
-The plugin also ships seven role agents for work no better-fitting agent covers: `model-router:scout`, `verifier`, `docs-researcher`, `implementer`, `architect`, `reviewer` and `deep-solver` ([what each is for](docs/GUIDE.md#role-agents)). `--json` output shapes are in the [guide](docs/GUIDE.md#commands).
+The plugin also ships seven role agents for work no better-fitting agent covers: `model-router:scout`, `verifier`, `docs-researcher`, `implementer`, `architect`, `reviewer` and `deep-solver` ([what each is for](docs/GUIDE.md#role-agents)). Scripts can print the models and usage tables as JSON; the shapes are in the [guide](docs/GUIDE.md#commands).
 
 ## Configuration
 
-Six options in `/config` under the plugin, each with a working default: `routing_mode` (`auto`; `advise` only logs each call's level, `off` only keeps the ledger), `priority` (`balanced`; or `quality`, `fast`), `max_tier` (none), `agent_pins` (`respect`; or `override`), `update_check` (on) and `verify_gate` (on). What each option does is in the [guide](docs/GUIDE.md#configuration).
+Five options in `/config` under the plugin, each with a working default: `routing_mode` (`auto`; `advise` only logs each call's level, `off` only keeps the ledger), `priority` (`balanced`; or `quality`, `fast`), `max_tier` (none), `agent_pins` (`respect`; or `override`) and `verify_gate` (on). What each option does is in the [guide](docs/GUIDE.md#configuration).
 
 Rules and extra models go in `~/.claude/model-router.json` (yours, applies everywhere) or `.claude/model-router.json` (a project's). A project's file only raises: a cloned repository can make its subagents cost more, never run weaker, and it can't get a model past your `max_tier`. The file's shape, every key and the trust rules are in the [guide](docs/GUIDE.md#configuration).
 
@@ -161,11 +157,11 @@ Rules and extra models go in `~/.claude/model-router.json` (yours, applies every
 <a id="security"></a>
 ## Privacy and security
 
-Model Router runs on your machine with your user permissions, as every plugin's hooks and mods do ([plugin security](https://code.claude.com/docs/en/plugins/security.md)). It reads each agent brief to pick a level, keeps its state in its own data directory, and sends no prompt or code anywhere. Its only network traffic is the daily update check to `code.claude.com` and `platform.claude.com`, plus `api.anthropic.com` for your account's model list when `ANTHROPIC_API_KEY` is set, `ANTHROPIC_BASE_URL` is unset and none of `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` is on. Turn `update_check` off to stop it; `/model-router:refresh` still fetches when you run it. To see every hook, agent and skill it installs before you install it, run `claude --plugin-dir ./plugins/model-router plugin details model-router` from a clone. [SECURITY.md](docs/SECURITY.md) has the threat model, what is stored and how to report a problem (there is no private channel yet, so never put details in a public issue).
+Model Router runs on your machine with your user permissions, as every plugin's hooks and mods do ([plugin security](https://code.claude.com/docs/en/plugins/security.md)). It reads each agent brief to pick a level, keeps its state in its own data directory, and sends no prompt or code anywhere. It makes no network call: the check of new Claude Code releases, docs and model retirements runs in this repository's CI, and what it finds reaches you as a plugin update. To see every hook, agent and skill it installs before you install it, run `claude --plugin-dir ./plugins/model-router plugin details model-router` from a clone. [SECURITY.md](docs/SECURITY.md) has the threat model, what is stored and how to report a problem (there is no private channel yet, so never put details in a public issue).
 
 ## Update and uninstall
 
-- Update: run `claude plugin update model-router@claude-code-model-router`, or choose **Update now** on the **Installed** tab of `/plugin`. Auto-update is off by default for third-party marketplaces like this one ([Claude Code docs](https://code.claude.com/docs/en/plugins/install.md)).
+- Update: run `claude plugin update model-router@claude-code-model-router`, or choose **Update now** on the **Installed** tab of `/plugin`. Auto-update is off by default for third-party marketplaces like this one. To turn it on, run `/plugin`, open the **Marketplaces** tab, select `claude-code-model-router` and turn on auto-update ([Claude Code docs](https://code.claude.com/docs/en/plugins/install.md)). Registry and model fixes ship as plugin updates, so `claude plugin update` gets one now.
 - Pause it: set `routing_mode` to `off` in `/config`.
 - Remove it: `claude plugin uninstall model-router@claude-code-model-router`, or `/plugin uninstall model-router` in a session. Removing the last install also deletes the plugin's data directory, with its ledger and what it learned, unless you pass `--keep-data`. Your own `model-router.json` files stay.
 

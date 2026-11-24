@@ -1,14 +1,13 @@
-"""The tables the skills print. Skills run through the Bash tool, so the settings passed in
-fall back to what the last SessionStart recorded."""
+"""The tables the skill commands print."""
 from __future__ import annotations
 
-from . import ladder, ledger, router, settings, spawn, store, upstream
+from . import ladder, ledger, router, settings, spawn, store
 from . import config as cfg
 from . import registry
 
 # The --json shapes. A new key keeps the version; removing or renaming one bumps it.
 USAGE_SCHEMA = "model-router.usage/1"
-MODELS_SCHEMA = "model-router.models/2"
+MODELS_SCHEMA = "model-router.models/3"
 
 
 def _strongest(reg: registry.Registry, usable: list[str]) -> str | None:
@@ -48,7 +47,7 @@ def policy(snap: settings.Snapshot) -> str:
 
 
 def models_data(snap: settings.Snapshot) -> dict:
-    """Each registry model's state here, in the `model-router.models/2` shape."""
+    """Each registry model's state here, in the `model-router.models/3` shape."""
     reg, options, table, usable = snap.registry, snap.options, snap.health, snap.usable
     limit = options.cap
     allowed = snap.allowed.permitted(reg)
@@ -67,16 +66,12 @@ def models_data(snap: settings.Snapshot) -> dict:
         else:
             status, detail = "not_used", "not used yet"
         rows.append({"model": name, "last_ran_as": table.last_ran_as(name), "status": status, "detail": detail})
-    aliases = (upstream.load().get("cache") or {}).get("aliases")
-    aliases = aliases if isinstance(aliases, list) else []
     data = {
         "schema": MODELS_SCHEMA,
         "cap": limit or None,
         "strongest_in_use": _strongest(reg, usable),
         "priority": options.priority,
         "models": rows,
-        "doc_aliases": aliases,
-        "not_in_registry": [f for f in upstream.model_families(aliases) if f not in reg.models],
         "set_aside": [str(p) for p in store.set_aside()],
         "newer_files": [str(p) for p in store.newer_files()],
         "newer_config": [str(p) for p in reg.newer],
@@ -118,10 +113,6 @@ def models(snap: settings.Snapshot) -> str:
     if data["workflow_model"]:
         lines += ["", f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins every workflow agent to {data['workflow_model']}, "
                   "so Model Router sets only their effort. /model-router:usage shows the model each one ran on."]
-    if data["doc_aliases"]:
-        lines += ["", "Model aliases in the current Claude Code docs: " + ", ".join(data["doc_aliases"]) + "."]
-        if data["not_in_registry"]:
-            lines.append("Not in the registry yet, so not routed to: " + ", ".join(data["not_in_registry"]) + ".")
     if data["set_aside"]:
         lines += ["", "Set aside because it could not be read, so that state started fresh: "
                   + ", ".join(data["set_aside"]) + ". Look at them, then delete them."]
@@ -172,37 +163,6 @@ def explain(snap: settings.Snapshot, text: str, agent: str | None = None) -> str
            f"Model: **{decision['model'] or 'left as it is'}**, effort: {decision['effort'] or 'unchanged'}.",
            f"Why: {decision['reason']}.",
            f"Priority {options.priority}; models in use: {', '.join(usable) or 'none: availableModels and deniedModels leave no registry model open'}."]
-    return "\n".join(out)
-
-
-def status(changes: dict | None) -> str:
-    if changes is None:
-        return f"No upstream data cached yet. Run `/{cfg.PLUGIN_NAME}:refresh`."
-    out = [f"Last reviewed Claude Code version: {changes['reviewed_version']}"]
-    if changes["new_releases"]:
-        out.append(f"\nNew releases since then ({len(changes['new_releases'])}):")
-        out += [f"- {r.get('version')} ({r.get('date', '')}): {r.get('link', '')}" for r in changes["new_releases"]]
-    else:
-        out.append("No new releases.")
-    for label, key in (("Docs pages added", "pages_added"), ("Docs pages removed", "pages_removed"),
-                       ("Docs pages whose summary changed", "pages_changed")):
-        if changes[key]:
-            out.append(f"\n{label} ({len(changes[key])}):")
-            out += [f"- {u}" for u in changes[key][:25]]
-    if changes.get("new_model_families"):
-        out.append("\nNew model aliases in the docs, not in the registry yet: "
-                   + ", ".join(changes["new_model_families"]))
-    if changes.get("removed_model_families"):
-        out.append("\nRegistry models the docs no longer list: " + ", ".join(changes["removed_model_families"]))
-    for label, key in (("Models routed calls ran on that are deprecated or retired", "deprecated_in_use"),
-                       ("Models deprecated or retired since the last review", "newly_deprecated")):
-        if changes.get(key):
-            out.append(f"\n{label}:")
-            out += [f"- {m['model']}: {m['state']}, retires {m['retires']}"
-                    + (f", replacement {m['replacement']}" if m.get("replacement") else "") for m in changes[key]]
-    if changes["watched_pages_touched"]:
-        out.append("\nHigh impact (pages this plugin is built on):")
-        out += [f"- {u}" for u in changes["watched_pages_touched"]]
     return "\n".join(out)
 
 
