@@ -16,7 +16,6 @@ KEEP_ENTRIES = 200
 KEEP_SET_ASIDE = 3  # copies of an unreadable state file kept for a person to look at
 LOCK_WAIT_SECONDS = 1.0
 LOCK_POLL_MAX = 0.01  # the longest sleep between tries, so a waiter isn't starved by newcomers
-LOCK_STALE_SECONDS = 10.0
 KEPT_RECORDS = 100  # calls kept per record file
 # The version written into every state file. MIGRATIONS[n] turns a version-n file into
 # version n + 1. A file with no version is version 0, which already has today's shape.
@@ -28,8 +27,8 @@ _clock: Callable[[], float] | None = None
 
 
 def now() -> float:
-    """The wall-clock time stamped into state and compared with it. Lock waits and stale-lock
-    checks read the real clocks, so a frozen clock never stalls a lock."""
+    """The wall-clock time stamped into state and compared with it. Lock waits read the
+    real clock, so a frozen clock never stalls a lock."""
     return (_clock or time.time)()
 
 
@@ -99,7 +98,7 @@ class Busy(OSError):
 
 
 def lock_counts() -> dict:
-    """Lock waits, waits on another session's lock, skipped writes and stale locks broken, per file."""
+    """Lock waits, waits on another session's lock and skipped writes, per file."""
     return _read_state(data_dir() / "locks.json")[0]
 
 
@@ -128,64 +127,72 @@ def locked(path: Path) -> Iterator[None]:
     issued together run their hooks at the same moment, and each would otherwise
     overwrite what the other just recorded. A lock still held after LOCK_WAIT_SECONDS
     raises Busy, so the caller skips its write: a hook must never hang a session, and
-    a write without the lock could drop another hook's update."""
+    a write without the lock could drop another hook's update. The lock is the OS's, on a
+    file that stays on disk, so a process that dies lets go of it at once."""
     lock = path.with_name(path.name + ".lock")
     deadline = time.monotonic() + LOCK_WAIT_SECONDS
     delay = 0.001
-    handle = None
     events: list[str] = []
     holder = ""
-    while True:
-        try:
-            handle = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            break
-        except FileExistsError:
-            try:
-                # The lock file's mtime is the filesystem's real time, not the state clock.
-                if time.time() - lock.stat().st_mtime > LOCK_STALE_SECONDS:
-                    lock.unlink()  # left behind by a process that died
-                    events.append("broken")
-                    continue
-            except OSError:
-                pass
-        except PermissionError:
-            # Windows reports a lock file that is mid-deletion this way, so wait for it
-            # there. Anywhere else the directory isn't writable and waiting won't help.
-            if os.name != "nt":
-                raise
-        if "waits" not in events:
-            events.append("waits")
-        if owner and not holder:
-            try:
-                holder = lock.read_text(encoding="utf-8")  # empty until the holder writes its name
-            except OSError:
-                pass
-            if holder and holder != owner:
-                events.append("other_session")
-        if time.monotonic() >= deadline:
-            events[events.index("waits")] = "skipped"
-            _count(path, *events)
-            raise Busy(f"{lock.name} is held by another process")
-        time.sleep(delay)
-        delay = min(delay * 2, LOCK_POLL_MAX)
-    if owner:
-        with contextlib.suppress(OSError):
-            os.write(handle, owner.encode("utf-8"))
+    handle = os.open(str(lock), os.O_CREAT | os.O_RDWR)
     try:
-        yield
-    finally:
-        if handle is not None:
-            os.close(handle)
-            for _ in range(20):
+        while True:
+            try:
+                _try_lock(handle)
+                break
+            except OSError:
+                pass
+            if "waits" not in events:
+                events.append("waits")
+            if owner and not holder:
                 try:
-                    lock.unlink()
-                    break
-                except PermissionError:  # Windows: something has the lock file open
-                    time.sleep(0.01)
+                    # Byte 0 is the locked byte, which Windows won't let a waiter read.
+                    with open(lock, "rb") as fh:
+                        fh.seek(1)
+                        holder = fh.read().decode("utf-8", "replace")  # empty until the holder writes its name
                 except OSError:
-                    break
-        if events:
-            _count(path, *events)
+                    pass
+                if holder and holder != owner:
+                    events.append("other_session")
+            if time.monotonic() >= deadline:
+                events[events.index("waits")] = "skipped"
+                _count(path, *events)
+                raise Busy(f"{lock.name} is held by another process")
+            time.sleep(delay)
+            delay = min(delay * 2, LOCK_POLL_MAX)
+        with contextlib.suppress(OSError):
+            os.ftruncate(handle, 0)  # a shorter name would leave the last holder's tail
+            if owner:
+                os.write(handle, b" " + owner.encode("utf-8"))
+        try:
+            yield
+        finally:
+            with contextlib.suppress(OSError):
+                _unlock(handle)
+            if events:
+                _count(path, *events)
+    finally:
+        os.close(handle)
+
+
+if os.name == "nt":
+    import msvcrt
+
+    def _try_lock(handle: int) -> None:
+        os.lseek(handle, 0, os.SEEK_SET)
+        msvcrt.locking(handle, msvcrt.LK_NBLCK, 1)
+
+    def _unlock(handle: int) -> None:
+        os.lseek(handle, 0, os.SEEK_SET)
+        msvcrt.locking(handle, msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+
+    def _try_lock(handle: int) -> None:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _unlock(handle: int) -> None:
+        fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def _read_state(path: Path) -> tuple[dict, str]:
