@@ -290,6 +290,9 @@ class Shipped(unittest.TestCase):
             front = frontmatter(path)
             if front.get("tools") and not re.search(r"\b(?:Edit|Write|NotebookEdit)\b", front["tools"]):
                 self.assertRegex(front["description"], r"(?i)writes nothing|can't write files|doesn't fix code", path.name)
+            if re.search(r"(?i)writes nothing", front["description"]):
+                # An agent with Bash can still change files through it (sub-agents docs).
+                self.assertNotRegex(front.get("tools") or "Bash", r"\bBash\b", path.name)
 
     def test_the_verifier_reports_a_check_that_never_ran_as_not_run(self):
         body = (PLUGIN / "agents" / "verifier.md").read_text(encoding="utf-8").split("---", 2)[2]
@@ -1409,11 +1412,12 @@ class Router(Sandbox):
         self.assertEqual(pick("frontier", ["haiku", "sonnet", "opus"]), ("opus", "xhigh"))
         self.assertEqual(ladder.pick(config, "complex", []), (None, "high"))
 
-    def test_haikus_extra_effort_step_stops_at_high(self):
+    def test_no_effort_the_router_sets_on_haiku_goes_past_high(self):
         config = cfg.shipped()
         self.assertEqual(tuple(ladder.pick(config, "complex", ["haiku"])), ("haiku", "high"))
         self.assertEqual(tuple(ladder.pick(config, "standard", ["haiku"])), ("haiku", "high"))
-        self.assertEqual(ladder.effort_on(config, Level.hardest, "haiku"), "xhigh")  # the level's own effort
+        self.assertEqual(ladder.effort_on(config, Level.hardest, "haiku"), "high")  # the level's own effort too
+        self.assertEqual(ladder.effort_on(config, Level.hardest, "sonnet"), "xhigh")
 
     def test_a_pick_at_or_above_the_levels_need_gets_no_extra_step(self):
         config = cfg.shipped()
@@ -1801,7 +1805,7 @@ class Router(Sandbox):
         usable = ["haiku", "sonnet", "opus"]
         again = self.facts(parent="opus", earlier=earlier, usable=usable)
         self.assertEqual((again["level"], again["model"], again["effort"]), ("hardest", "opus", "xhigh"))
-        self.assertIn("no stronger model is usable, so opus runs one effort step up", again["reason"])
+        self.assertIn("no stronger model is usable, so it runs one effort step up", again["reason"])
         held = self.facts(parent="opus", earlier=earlier, effort_caps={"opus": "high"}, usable=usable)
         self.assertEqual((held["model"], held["effort"]), ("opus", "high"))  # nothing more to give
         self.assertIn("effort held to high by maxEffortLevel", held["reason"])
@@ -1906,7 +1910,8 @@ class RepeatGuard(Sandbox):
             self.done("general-purpose", BUILD, f"claude-{d['model']}-5-5", description="Redo: parser change")
         spawns = [r for r in self.ledger() if r["event"] == "spawn"]
         self.assertIn("(sonnet at high): the next stronger model, opus", spawns[2]["reason"])
-        self.assertIn("(fable at max): no stronger model is usable, so fable runs one effort step up", spawns[-1]["reason"])
+        self.assertIn("(fable at xhigh): no stronger model is usable, so it runs one effort step up", spawns[-2]["reason"])
+        self.assertIn("(fable at max): no stronger model is usable, and fable gets no more effort", spawns[-1]["reason"])
 
     def test_a_rewritten_brief_marked_redo_climbs_from_the_run_it_redoes(self):
         self.session_on("claude-sonnet-5-5")
@@ -1922,11 +1927,9 @@ class RepeatGuard(Sandbox):
         self.pre("general-purpose", rewritten, description="redo: parser change")
         self.assertEqual(self.ledger()[-1]["escalated_from"], "standard")
 
-    def test_a_marked_redo_climbs_from_a_run_of_an_earlier_request(self):
-        hooks.user_prompt({"session_id": "s1", "prompt": "fix the auth migration", "prompt_id": "p1"})
+    def test_a_marked_redo_climbs_only_from_a_run_inside_the_window(self):
         self.pre("general-purpose", HARD, description="Second try")
         self.done("general-purpose", HARD, "claude-opus-5-5", description="Second try")
-        hooks.user_prompt({"session_id": "s1", "prompt": "that dropped rows, try again", "prompt_id": "p2"})
         again = self.decide("general-purpose", BUILD, description="Redo: second try")
         self.assertEqual((again["level"], again["model"], again["effort"], again["escalated_from"]),
                          ("frontier", "fable", "high", "complex"))
@@ -2056,6 +2059,39 @@ class RepeatGuard(Sandbox):
             self.pre("general-purpose", BUILD, model="haiku")
         self.assertEqual(identify.call_count, 1)
 
+    def test_a_haiku_redo_never_runs_past_high(self):
+        self.options(max_tier="haiku")
+        self.pre("general-purpose", LOOKUP, description="List src")
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", description="List src")
+        for want in ("high", "high"):
+            d = self.decide("general-purpose", LOOKUP, description="Redo: list src")
+            self.assertEqual((d["model"], d["effort"]), ("haiku", want))
+            self.pre("general-purpose", LOOKUP, description="Redo: list src")
+            self.done("general-purpose", LOOKUP, "claude-haiku-5-5", description="Redo: list src")
+        self.assertIn("no stronger model is usable, and haiku gets no more effort", d["reason"])
+        self.options(max_tier="", CLAUDE_CODE_SUBAGENT_MODEL="haiku", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+        forced = self.decide("general-purpose", LOOKUP, description="Redo: list src")
+        self.assertEqual(forced["effort"], "high")
+        self.assertIn("a redo of the lookup run, and haiku gets no more effort", forced["reason"])
+
+    def test_a_redo_climbs_past_the_subagent_model_default(self):
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
+        self.assertEqual(self.decide("general-purpose", BUILD, description="Parser change")["action"], "keep")
+        self.pre("general-purpose", BUILD, description="Parser change")
+        self.done("general-purpose", BUILD, "claude-sonnet-5-5", description="Parser change")
+        again = self.decide("general-purpose", BUILD, description="Redo: parser change")
+        self.assertEqual((again["action"], again["model"], again["effort"], again["escalated_from"]),
+                         ("rewrite", "sonnet", "high", "standard"))
+
+    def test_a_redo_the_cap_moves_off_its_model_says_so(self):
+        self.pre("general-purpose", HARD, model="opus", description="Second try")
+        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", description="Second try")
+        self.options(max_tier="sonnet")
+        again = self.decide("general-purpose", HARD, description="Redo: second try")
+        self.assertEqual((again["model"], again["effort"]), ("sonnet", "xhigh"))
+        self.assertIn("no stronger model is usable, so it runs one effort step up; opus is over the cap or unavailable here",
+                      again["reason"])
+
     def test_a_redo_on_a_forced_model_asks_for_one_more_effort_step(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         first = self.decide("general-purpose", LOOKUP, description="List src")
@@ -2064,8 +2100,8 @@ class RepeatGuard(Sandbox):
         again = self.decide("general-purpose", LOOKUP, description="Redo: list src")
         self.assertEqual((first["effort"], again["level"], again["model"], again["effort"], again["escalated_from"]),
                          ("high", "hardest", None, "xhigh", "complex"))
-        self.assertIn("pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE, so only effort is set; a redo of the complex run",
-                      again["reason"])
+        self.assertIn("pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE, so only effort is set; a redo of the complex run, "
+                      "one effort step up", again["reason"])
 
     def test_a_redo_held_under_the_cap_on_its_model_takes_more_effort_up_to_max(self):
         self.options(max_tier="opus")
@@ -2158,7 +2194,9 @@ class RepeatGuard(Sandbox):
         # The session runs on opus, so the call left untouched would inherit opus.
         self.options(max_tier="sonnet")
         out = self.pre("general-purpose", LOOKUP)
-        self.assertEqual((out["updatedInput"]["model"], out["updatedInput"]["effort"]), ("sonnet", "xhigh"))
+        # The parent's model was nobody's level for the work, so Sonnet runs at its own, with no extra step.
+        self.assertEqual((out["updatedInput"]["model"], out["updatedInput"]["effort"]), ("sonnet", "medium"))
+        self.assertEqual(self.ledger()[-1]["level"], "standard")
         self.assertIn("would run on the parent's opus", self.ledger()[-1]["reason"])
         self.next_message()
         again = self.pre("general-purpose", LOOKUP)
@@ -3187,8 +3225,8 @@ class Hooks(Sandbox):
         self.session_on("claude-haiku-5-5")
         with mock.patch.object(session, "model", side_effect=AssertionError("reads no session model")), \
                 mock.patch.object(agents, "installed_roots", side_effect=AssertionError("reads no skill file")):
-            self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST, "prompt_id": "p1"}))
-            self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": "/acme:go 482", "prompt_id": "p2"}))
+            self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST}))
+            self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": "/acme:go 482"}))
 
     def test_the_notes_state_facts_and_give_no_commands(self):
         # Text framed as an out-of-band command can trip Claude's prompt-injection defenses (hooks.md, additionalContext).
@@ -4144,15 +4182,14 @@ class ReadmeDiagrams(unittest.TestCase):
         self.assertIn("the pick moves to the nearest usable model above it, or to the strongest one left", text)
         self.assertNotIn("never raised", text)
 
-    def test_the_redo_note_names_each_step_of_the_ladder(self):
-        levels = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))["levels"]
-        steps = list(zip(levels, list(levels)[1:]))
-        stronger = [a for a, b in steps if levels[b]["needs"] > levels[a]["needs"]]
+    def test_the_redo_diagram_raises_effort_before_model_on_the_shipped_ladder(self):
+        # RepeatGuard.test_a_redo_raises_effort_below_high_and_moves_model_from_high runs the same climb.
+        config = cfg.shipped()
+        at = lambda level: f"{level}, {ladder.model_for(config, level)}, {ladder.effort(config, level)}"  # noqa: E731
         text = self.text("redo-escalation.svg").lower()
-        self.assertIn(f"{', '.join(stronger[:-1])} and {stronger[-1]} move to a stronger model", text)
-        for a, b in steps:
-            if levels[b]["needs"] == levels[a]["needs"]:
-                self.assertIn(f"{a} stays on", text)
+        self.assertEqual(ladder.effort(config, Level.standard), "medium")
+        for shown in (at(Level.standard), f"{ladder.model_for(config, Level.standard)}, high", at(Level.complex)):
+            self.assertIn(shown, text)
 
 
 class MachineReadable(Sandbox):
@@ -4207,7 +4244,8 @@ class MachineReadable(Sandbox):
             self.pre("general-purpose", prompt, description=f"Redo: {prompt}")
         spawns = [r for r in self.ledger() if r.get("event") == "spawn"]
         self.assertEqual([(r["action"], r["escalated_from"]) for r in spawns[2::3]], [("keep", None), ("deny", None)])
-        self.assertEqual(self.json_out("usage")["redos"], {"complex": 2})
+        # Under the cap the parent's Opus gives way to Sonnet at its own level, so that run was standard.
+        self.assertEqual(self.json_out("usage")["redos"], {"complex": 1, "standard": 1})
 
     def test_a_marked_redo_with_no_run_on_record_is_not_counted(self):
         # The level it climbs from is where the call would run unmarked, and nothing shows that ran.

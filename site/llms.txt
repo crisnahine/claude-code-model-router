@@ -13,7 +13,7 @@ Facts, each with its source:
 ## Docs
 
 - [Site](https://crisnahine.github.io/claude-code-model-router/): the project page
-- [Video](https://crisnahine.github.io/claude-code-model-router/assets/video.mp4): 22 seconds on four agent calls being routed and a redo climbing one level
+- [Video](https://crisnahine.github.io/claude-code-model-router/assets/video.mp4): 22 seconds on four agent calls being routed and a redo moving a call up the ladder
 - [README](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/README.md): what it does, install, options, compatibility
 - [Questions](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/FAQ.md): short answers to common questions
 - [Guide](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/GUIDE.md): commands, every option, who decides the model, workflows and ultracode, limits, providers, update and uninstall

@@ -93,12 +93,16 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         model = env_default or facts.parent
         level = ladder.rung(reg, model, named_effort)
         effort = None if decided or tool_input.get("model") or not level else ladder.effort(reg, level)
+        step = ""
         if redo:
             # The model is pinned, so effort is the one lever a redo has.
-            effort = _one_step(_ran_at(reg, done, done_level)) if free else None
+            before = _ran_at(reg, done, done_level)
+            effort = ladder.at_most(reg, model, _one_step(before)) if free else None
             level, out["escalated_from"] = ladder.rung(reg, model, effort) or done_level, done_level
+            step = f"; a redo of the {done_level} run, " + (
+                "one effort step up" if _above(effort, before) else f"and {model} gets no more effort")
         out["level"] = level
-        return _pinned(out, "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "subagent", model, level, effort, facts)
+        return _pinned(out, "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "subagent", model, level, effort, facts, step)
     if facts.workflow and settings.workflow_model and not tool_input.get("model"):
         # This pin wins over the model a mod sets, so it is kept like the one above.
         model = reg.family(settings.workflow_model)
@@ -134,7 +138,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
             why = f"the agent names a model outside the registry ({own_model})"
         elif pinned:
             target, source, why = pinned, "pin", "the agent names its own model"
-        elif env_default:
+        elif env_default and not redo:
             why = "CLAUDE_CODE_SUBAGENT_MODEL sets the model for agents without one"
     level = ladder.rung(reg, target or out["was"], named_effort)
     if target is None and why:
@@ -152,6 +156,8 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
             level, target, source = Level.standard, ladder.model_for(reg, Level.standard), "router"
             why = f"a teammate starts no lower than {target}, since its model is fixed for all its tasks"
         elif runs_on and reg.clamp(runs_on, usable) != runs_on:
+            # The parent's model was nobody's choice for this work, so the model the cap leaves runs at its own level.
+            level = ladder.rung(reg, reg.clamp(runs_on, usable), named_effort)
             target, source, why = runs_on, "router", f"the call names no model and would run on the parent's {runs_on}"
         else:
             out.update(level=level, reason="no model is named for this call, so it runs on "
@@ -181,10 +187,11 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
 def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Level, free: bool, held: str) -> Decision:
     """A marked redo that names no model or effort climbs from the run it redoes: one effort step up on the
     same model while that run's effort was below high, else the next stronger usable model at its own rung's
-    effort, else one more effort step, at most max. The agent's own model and effort don't hold it back."""
+    effort, else one more effort step, at most max or the model's `effort_stops_at`. The agent's own model and
+    effort, a rule's model and CLAUDE_CODE_SUBAGENT_MODEL don't hold it back."""
     ran, before = reg.family(done.get("model")), _ran_at(reg, done, done_level)
-    up = _one_step(before)
-    gains = free and up is not None and EFFORTS.index(capped(up, facts.effort_caps.get(ran))[0]) > EFFORTS.index(before)
+    up = ladder.at_most(reg, ran, _one_step(before))
+    gains = free and _above(capped(up, facts.effort_caps.get(ran))[0], before)
     stronger = next((n for n in facts.usable if reg.models[n].trusted and reg.stronger(n, ran)), None)
     if gains and EFFORTS.index(before) < EFFORTS.index("high"):
         model, effort, how = ran, up, f"one effort step up on {ran}"
@@ -192,14 +199,16 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
         model, effort, how = stronger, ladder.effort(reg, ladder.rung(reg, stronger)), f"the next stronger model, {stronger}"
     else:
         model, effort = ran, up
-        how = "no stronger model is usable" + (f", so {ran} runs one effort step up" if free else "")
+        how = "no stronger model is usable" + (", so it runs one effort step up" if gains
+                                               else f", and {ran} gets no more effort" if free else "")
     final = reg.clamp(model, facts.usable)
-    effort, floor_note = _session_floor(effort if free else None, final, facts)
+    clamp_note = f"; {model} is over the cap or unavailable here" if final != model else ""
+    effort, floor_note = _session_floor(ladder.at_most(reg, final, effort) if free else None, final, facts)
     effort, capped_note = capped(effort, facts.effort_caps.get(final))
     came = "the run that came back before" if facts.on_record else "the run it would get unmarked"
     out.update(model=final, source="router", level=ladder.rung(reg, final, effort), escalated_from=done_level,
                reason=f"a redo of {came} ({ran} at {before or 'its default effort'}): {how}"
-               + ("" if free else ", at the effort the environment sets") + floor_note + capped_note + held)
+               + ("" if free else ", at the effort the environment sets") + clamp_note + floor_note + capped_note + held)
     if final == out["was"] and not effort:
         return out
     out.update(action="rewrite", effort=effort)
@@ -207,13 +216,12 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
 
 
 def _pinned(out: Decision, pin: str, scope: str, pinned: str | None, level: Level | None, effort: str | None,
-            facts: Facts) -> Decision:
+            facts: Facts, redo: str = "") -> Decision:
     """The user pinned the model, so effort is the one lever left, and on a pinned strong model the one on cost."""
     out.update(was=pinned, reason=f"{pin} pins every {scope}'s model")
     if effort:
         effort, floor = _session_floor(effort, pinned, facts)
         effort, held = capped(effort, facts.effort_caps.get(pinned or ""))
-        redo = f"; a redo of the {out['escalated_from']} run, one effort step up" if out["escalated_from"] else ""
         out.update(action="rewrite", effort=effort, source="router",
                    reason=f"{level} subtask; the model is pinned by {pin}, so only effort is set{redo}{floor}{held}")
     return out
@@ -242,6 +250,10 @@ def _ran_at(reg: Registry, done: dict, level: Level) -> str | None:
 
 def _one_step(effort: str | None) -> str | None:
     return EFFORTS[min(EFFORTS.index(effort) + 1, len(EFFORTS) - 1)] if effort in EFFORTS else None
+
+
+def _above(effort: str | None, than: str | None) -> bool:
+    return effort in EFFORTS and than in EFFORTS and EFFORTS.index(effort) > EFFORTS.index(than)
 
 
 def runs_at(effort: str | None, tool_input: dict, definition: dict | None, settings: Settings,

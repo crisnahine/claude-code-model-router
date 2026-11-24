@@ -192,10 +192,9 @@ class DocsAssets(unittest.TestCase):
             self.assertNotIn("<!-- bench:", block)
             self.assertIn("$9.999", block)
 
-    def test_the_banner_figures_come_from_the_research(self):
+    def test_any_banner_figure_comes_from_the_research(self):
         research = (ROOT / "docs" / "research" / "model-control.md").read_text(encoding="utf-8")
         figures = [f for _, body in docs_assets.PROOFS for f in re.findall(r"\$\d+(?:\.\d+)?|\d+(?:\.\d+)?%", body)]
-        self.assertTrue(figures)
         for figure in figures:
             self.assertIn(figure, research)
 

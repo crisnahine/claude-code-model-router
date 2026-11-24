@@ -381,12 +381,13 @@ def check_ladder_against_registry(config: dict):
         raise SystemExit(f"LADDER differs from config/models.json: {shipped}")
 
 
-BRIEF = '"Implement parse_duration exactly as its docstring specifies"'
+BRIEF = '"Review the auth change for security holes"'
 
 
 def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,), model_at=0.47,
                  tag_gap=76, effort_right=104):
-    """Five rungs, a call routed at standard that comes back and climbs to complex."""
+    """Five rungs, a call that ran at complex, at high effort, and that Claude marks for a redo, which moves it to
+    frontier."""
     row_h = 60 * s
     chip_h = (16 + 20 * len(brief_lines)) * s
     top = y + 52 * s + chip_h + 44 * s
@@ -402,7 +403,7 @@ def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,),
     out.append(text(x + 24 * s, y + 38 * s, "One agent call", "ink b", round(15 * s)))
     out.append(f'<g class="{prefix}brief">' + card(x + 24 * s, y + 52 * s, w - 48 * s, chip_h, rx=round(10 * s), cls="faint", sw=0)
                + lines(x + 38 * s, y + 52 * s + 28 * s, brief_lines, "mono ink", round(12.5 * s), round(20 * s)) + "</g>")
-    band_y = ys["complex"] - 22 * s
+    band_y = ys["frontier"] - 22 * s
     out.append(f'<rect x="{x + 12 * s:g}" y="{band_y:g}" width="{w - 24 * s:g}" height="{44 * s:g}" rx="{10 * s:g}" '
                f'class="rtsoft {prefix}band"/>')
     out.append(f'<path d="M{rail_l:g} {top - 22 * s:g}V{ys["lookup"] + 24 * s:g}M{rail_r:g} {top - 22 * s:g}'
@@ -415,8 +416,8 @@ def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,),
         out.append(text(col_model, yy + 5 * s, model, "ink", round(15 * s)))
         p, _ = pill(col_effort, yy - 12 * s, effort, size=round(12.5 * s), h=round(24 * s), pad=10 * s)
         out.append(p)
-    # the redo tag on the standard row and the solved tag on the complex row
-    sy, cy = ys["standard"], ys["complex"]
+    # the redo tag on the complex row and the solved tag on the frontier row, two rows up
+    sy, cy = ys["complex"], ys["frontier"]
     tag_x = max(col_model + tag_gap * s, col_model + model_w + 12 * s)
     redo, _ = pill(tag_x, sy - 12 * s, "redo", cls="rt", tcls="tag", size=round(12 * s), h=round(24 * s), pad=10 * s)
     out.append(f'<g class="{prefix}redo">{redo}</g>')
@@ -438,11 +439,11 @@ def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,),
         css += (f".{prefix}token{{animation:{prefix}t 10s ease-in-out infinite}}"
                 + keyframes(f"{prefix}t", [(0, f"transform:translate(0px,{d_top:g}px);opacity:0"),
                                            (6, f"transform:translate(0px,{d_top:g}px);opacity:1"),
-                                           (18, up(1)), (44, up(1)), (54, up(0)), (92, up(0) + ";opacity:1"),
+                                           (18, up(2)), (44, up(2)), (54, up(0)), (92, up(0) + ";opacity:1"),
                                            (100, up(0) + ";opacity:0")])
                 + f".{prefix}band{{animation:{prefix}b 10s ease-in-out infinite}}"
-                + keyframes(f"{prefix}b", [(0, up(1) + ";opacity:0"), (14, up(1) + ";opacity:0"),
-                                           (20, up(1) + ";opacity:1"), (44, up(1)), (54, up(0)),
+                + keyframes(f"{prefix}b", [(0, up(2) + ";opacity:0"), (14, up(2) + ";opacity:0"),
+                                           (20, up(2) + ";opacity:1"), (44, up(2)), (54, up(0)),
                                            (92, up(0) + ";opacity:1"), (100, up(0) + ";opacity:0")])
                 + f".{prefix}brief{{animation:{prefix}f 10s ease-in-out infinite}}"
                 + keyframes(f"{prefix}f", [(0, "opacity:0"), (5, "opacity:1"), (92, "opacity:1"), (100, "opacity:0")])
@@ -456,9 +457,11 @@ def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,),
 
 
 HERO_TITLE = "Model Router: every Claude Code agent on the cheapest model that should do the job"
-HERO_LABEL = ("Model Router, a Claude Code plugin. An agent call to implement a function runs on Sonnet at medium "
-              "effort, the standard level. Its result comes back for a redo, so the same call climbs one level "
-              "to complex, Opus at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on "
+HERO_LABEL = ("Model Router, a Claude Code plugin. An agent call to review an auth change runs on Opus at high "
+              "effort, the complex level. Its result falls short, so Claude marks a redo and names no model on it. "
+              "A redo raises effort "
+              "before it changes model, and this run was already at high, so it moves to the next stronger model, "
+              "frontier on Fable at high, and is solved. The ladder runs lookup on Haiku at medium, standard on "
               "Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.")
 
 
@@ -466,14 +469,14 @@ def hero(phone=False) -> str:
     if phone:
         w = 600
         panel, css, ph = ladder_panel(24, 470, w - 48, 1.3, prefix="p",
-                                      brief_lines=('"Implement parse_duration', 'exactly as its docstring', 'specifies"'),
+                                      brief_lines=('"Review the auth change', 'for security holes"'),
                                       model_at=0.465, tag_gap=62, effort_right=80)
         h = round(470 + ph + 40)
         body = [frame(w, h, 24), wordmark_body(32, 44, 0.86),
                 text(34, 156, "CLAUDE CODE PLUGIN", "mono rt b", 15, extra=' letter-spacing="2"')]
         body += [text(32, 206 + i * 44, s, "ink b", 35) for i, s in
                  enumerate(["Every agent on the cheapest", "model and effort that should", "do the job."])]
-        body.append(lines(32, 372, ["When the work comes back for a redo,", "the same call runs one level higher."],
+        body.append(lines(32, 372, ["When Claude marks a redo, effort", "goes up first, then the model."],
                           "mut", 22, 32))
         body.append(panel)
         return svg(w, h, HERO_TITLE, HERO_LABEL, "".join(body), css)
@@ -483,7 +486,7 @@ def hero(phone=False) -> str:
             text(58, 186, "CLAUDE CODE PLUGIN", "mono rt b", 14, extra=' letter-spacing="2"')]
     body += [text(56, 236 + i * 46, s, "ink b", 37) for i, s in
              enumerate(["Every agent on the cheapest", "model and effort that", "should do the job."])]
-    body.append(lines(57, 384, ["When the work comes back for a redo, the", "same call runs one level higher."], "mut", 19, 28))
+    body.append(lines(57, 384, ["When Claude marks a redo, effort goes up", "first, then the model."], "mut", 19, 28))
     chips_x = 57
     for label in ("subagents", "agent-team teammates", "workflow stages"):
         p, pw = pill(chips_x, 432, label, size=13, h=28, pad=12)
@@ -499,19 +502,20 @@ HEADLINE_EYEBROW = "ATTENTION, CLAUDE CODE USERS"
 HEADLINE = ("Stop paying for", "the wrong model.")
 HEADLINE_SUB = ("A subagent that names no model runs on your session's model, so easy work pays strong-model prices. "
                 "Claude names the model and effort each call needs, Model Router holds it to your cap, and a call "
-                "moves up a level when its work comes back.")
+                "Claude marks as a redo gets more effort, then a stronger model.")
 PROOF_EYEBROW = "BUILT BY THE BOOK"
 PROOFS = [
     ("Follows Claude's best practices",
      "Haiku for simple work, as Claude Code's best practices advise, so a strong model does only the work that "
      "needs it."),
-    ("Modeled on Anthropic's result",
-     "Anthropic found that starting low and re-running failures higher solved about 97% at $0.17 a task, against "
-     "95.3% at $0.29 all at high."),
+    ("Effort before model",
+     "A call Claude marks as a redo runs one effort step higher first, and moves to a stronger model once it ran "
+     "at high."),
     ("Built on the Claude Code docs",
      "Documented hooks, mods and settings only, checked against the changelog every day. Every hook fails open."),
     ("Your choices come first",
-     "A model you name, an agent's own model and CLAUDE_CODE_SUBAGENT_MODEL stay, inside your max_tier."),
+     "A model you name, an agent's own model and CLAUDE_CODE_SUBAGENT_MODEL stay, inside your max_tier, until "
+     "Claude marks a redo."),
 ]
 HEADLINE_TITLE = "Model Router: stop paying for the wrong model"
 # One brief per model, as Claude would name it.
@@ -587,7 +591,7 @@ def call_card(x, y, w, where):
     routed.insert(0, f'<rect x="{x + 10:g}" y="{box_y:g}" width="{w - 20:g}" height="{box_h:g}" rx="14" '
                      'class="rtsoft"/>')
     out.append('<g class="won">' + "".join(routed) + "</g>")
-    redo = "A call sent back for a redo climbs one level."
+    redo = "A redo Claude marks gets more effort first."
     out.append(text(x + pad, box_y + box_h + 34, redo, "mut", 14))
     room(f"{where}: call card redo line", x + pad + width_of(redo, 14), right)
     h = box_y + box_h + 56 - y
@@ -724,7 +728,7 @@ def diagram_ladder() -> str:
         room("ladder.svg: subtask", 590 + width_of(sub, 12.5), 900)
         room("ladder.svg: level", 180 + width_of(lv, 15, bold=True), 290 - 5 - 6)
         room("ladder.svg: model", 300 + width_of(model, 15), 392 - 8)
-    # the call and its redo tag, which climb one rung on each redo
+    # the call and its redo tag, which move up a model once the call's effort reached high
     cy = ys["complex"]
     out.append(f'<g class="lcall"><circle cx="124" cy="{cy}" r="13" class="halo" fill="none" stroke-width="5"/>'
                f'<circle cx="124" cy="{cy}" r="11" class="rt"/>'
@@ -734,16 +738,15 @@ def diagram_ladder() -> str:
     out.append(text(32, 432, "A model named on a call stands for its lowest level. When the cap, "
                     "availableModels, deniedModels or failures", "mut", 13))
     out.append(text(32, 452, "rule a model out, the pick moves to the nearest usable model above it, or to the "
-                    "strongest one left. A redo runs one level higher.", "mut", 13))
+                    "strongest one left. A redo adds effort first.", "mut", 13))
     out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh (high on "
                     "Haiku), which makes up part of the loss.", "mut", 13))
     at = lambda lv: f"transform:translate(0px,{ys[lv] - cy}px)"  # noqa: E731
-    stops = [(0, at("lookup") + ";opacity:0"), (4, at("lookup") + ";opacity:1"), (18, at("lookup")),
-             (24, at("standard")), (40, at("standard")), (46, at("complex")), (62, at("complex")),
-             (68, at("hardest")), (84, at("hardest")), (90, at("frontier")), (96, at("frontier") + ";opacity:1"),
-             (100, at("frontier") + ";opacity:0")]
+    stops = [(0, at("lookup") + ";opacity:0"), (4, at("lookup") + ";opacity:1"), (22, at("lookup")),
+             (28, at("standard")), (50, at("standard")), (56, at("complex")), (78, at("complex")),
+             (84, at("frontier")), (96, at("frontier") + ";opacity:1"), (100, at("frontier") + ";opacity:0")]
     pulse = [(0, "opacity:0")]
-    for a, b in ((16, 26), (38, 48), (60, 70), (82, 92)):
+    for a, b in ((20, 30), (48, 58), (76, 86)):
         pulse += [(a, "opacity:0"), (a + 2, "opacity:1"), (b, "opacity:1"), (b + 2, "opacity:0")]
     css = (".lcall,.lband{animation:lc 12s ease-in-out infinite}" + keyframes("lc", stops)
            + ".lredo{animation:lr 12s linear infinite}" + keyframes("lr", pulse + [(100, "opacity:0")])
@@ -751,7 +754,8 @@ def diagram_ladder() -> str:
     title = "The ladder: five levels to a model and an effort"
     label = ("Lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on Opus at high, hardest "
              "on Opus at xhigh, and frontier on Fable at high. A model named on a call stands for its lowest level. "
-             "A call climbs one rung each time it comes back for a redo. When the cap, the availableModels or "
+             "A call Claude marks as a redo runs one effort step higher on its model while it ran below high, and "
+             "after that on the next stronger model: Haiku, Sonnet, Opus, then Fable. When the cap, the availableModels or "
              "deniedModels settings, or failures rule a model out, the pick moves to the nearest usable model above "
              "it, or to the strongest one left, and a pick weaker than its level needs gets one more effort step, up "
              "to xhigh, or high on Haiku.")
@@ -761,12 +765,12 @@ def diagram_ladder() -> str:
 def diagram_redo() -> str:
     w, h = 920, 336
     out = [frame(w, h), text(32, 42, "Redo escalation", "ink b", 17),
-           text(32, 66, "The same call, issued again in the same request after its result came back.", "mut", 13.5)]
+           text(32, 66, "A call Claude marks as a redo climbs from the run it redoes.", "mut", 13.5)]
     steps = [
-        ("1. Agent call", ["Routed at its level:"], "standard, Sonnet, medium", 2),
-        ("2. Result comes back", ["Recorded as finished,", "with the level it ran at."], None, 0),
-        ("3. Same call again", ["In the same request:", "the answer fell short."], None, -1),
-        ("4. One level higher", ["Up a model, or up effort:"], "complex, Opus, high", 3),
+        ("1. Agent call", ["Runs at its level:"], "standard, Sonnet, medium", 2),
+        ("2. Claude marks it", ["The result fell short:", 'description "Redo: ..."'], None, -1),
+        ("3. Effort first", ["Below high, the same", "model, one step up:"], "Sonnet, high", 2),
+        ("4. Then the model", ["From high, the next", "stronger model:"], "complex, Opus, high", 3),
     ]
     cw, gap, top = 196, 28, 92
     for k, (head, body, code, accent) in enumerate(steps):
@@ -791,10 +795,10 @@ def diagram_redo() -> str:
     last = 32 + 3 * (cw + gap) + cw / 2
     out.append(f'<g class="rtok"><circle cx="{last}" cy="{track}" r="11" class="halo" fill="none" stroke-width="5"/>'
                f'<circle cx="{last}" cy="{track}" r="9" class="rt"/></g>')
-    note = ["One level up the ladder: lookup, standard and hardest move to a stronger model; complex stays on Opus",
-            "at more effort, and a frontier redo runs at one step more effort. Not a redo: copies of one brief started",
-            "together. Never escalated: a call that names its own model. A background agent's call counts as finished",
-            "when the agent stops with an answer."]
+    note = ["The next model runs at its own level's effort; with no stronger usable model, one more effort step, at",
+            "most max. Not a redo: the same call sent again unmarked. Run as named: a redo that names its own model or",
+            "effort. Never redone: a workflow stage. A background agent's call counts as finished when the agent stops",
+            "with an answer."]
     out.append(lines(32, 264, note, "mut", 13, 20))
     xs = [32 + k * (cw + gap) + cw / 2 - last for k in range(4)]
     at = lambda k: f"transform:translate({xs[k]:g}px,0px)"  # noqa: E731
@@ -802,10 +806,11 @@ def diagram_redo() -> str:
            + keyframes("rt", [(0, at(0) + ";opacity:0"), (4, at(0) + ";opacity:1"), (14, at(0)), (22, at(1)),
                               (32, at(1)), (40, at(2)), (50, at(2)), (58, at(3)), (92, at(3) + ";opacity:1"),
                               (100, at(3) + ";opacity:0")]))
-    title = "Redo escalation: the same call again runs one level higher"
-    label = ("A call is routed at its level, for example standard on Sonnet at medium effort. Its result comes back "
-             "and the call is recorded as finished. If Claude issues the same call again in the same request, it "
-             "runs one level higher, complex on Opus at high.")
+    title = "Redo escalation: effort first, then the model"
+    label = ("A call runs at its level, for example standard on Sonnet at medium effort. When its result falls short, "
+             "Claude marks a redo by starting the call's description with Redo. Below high effort, the redo runs the "
+             "same model one effort step up, Sonnet at high. From high, the next redo runs the next stronger model at "
+             "its own level's effort, complex on Opus at high.")
     return svg(w, h, title, label, "".join(out), css)
 
 
@@ -1000,11 +1005,11 @@ def social_preview() -> str:
             + text(74, 232, "CLAUDE CODE PLUGIN", "mono rt b", 18, extra=' letter-spacing="2.4"')
             + "".join(text(72, 300 + i * 56, s, "ink b", 46) for i, s in
                       enumerate(["Every agent on the", "cheapest model that", "should do the job."]))
-            + lines(73, 488, ["For subagents, teammates and workflow", "agents. A call sent again climbs a level."], "mut", 24, 36)
+            + lines(73, 488, ["For subagents, teammates and workflow", "agents. A redo gets more effort first."], "mut", 24, 36)
             + text(74, 590, "github.com/crisnahine/claude-code-model-router", "mono mut", 18)
             + panel)
     label = ("Model Router, a Claude Code plugin: every agent on the cheapest model that should do the job, and a "
-             "call Claude sends again climbs one level.")
+             "call Claude marks as a redo gets more effort, then a stronger model.")
     return svg(w, h, "Model Router social preview", label, body, theme="dark")
 
 
@@ -1258,8 +1263,8 @@ abstract: >-
   Model Router (model-router) is a Claude Code plugin that holds the Claude
   model and reasoning effort Claude names for every agent Claude Code starts
   (subagents, agent-team teammates and workflow stages) to the user's limits,
-  sets the effort nobody named, and runs a call one level higher when its work
-  comes back for a redo.
+  sets the effort nobody named, and runs a call Claude marks as a redo with
+  more effort or on a stronger model.
 authors:
   - given-names: Cris
     family-names: Nahine

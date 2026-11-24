@@ -3,7 +3,8 @@
 A level's `needs` is a strength, and its model is the cheapest one at or above it. A model stands
 for its lowest rung, or for the rung its named effort reaches. A model weaker than a level needs (the
 cap, the allowlist or model health left nothing at or above it) gets one more effort step there,
-which makes up part of the loss, up to the model's `step_stops_at` or else xhigh."""
+which makes up part of the loss, up to xhigh. No effort the router sets goes past a model's
+`effort_stops_at`."""
 from __future__ import annotations
 
 from typing import NamedTuple
@@ -45,10 +46,15 @@ def effort_on(reg: Registry, level: Level, model: str | None) -> str | None:
     """The effort `level` gets on `model`: its own, and one step more on a model weaker than it needs."""
     value = effort(reg, level)
     if model and value in EFFORTS and reg.strength(model) < reg.levels[level].needs:
-        top = (reg.models[model].step_stops_at if model in reg.models else None) or "xhigh"
         step = EFFORTS.index(value)
-        value = EFFORTS[step + 1] if step < EFFORTS.index(top) else value
-    return value
+        value = EFFORTS[step + 1] if step < EFFORTS.index("xhigh") else value
+    return at_most(reg, model, value)
+
+
+def at_most(reg: Registry, model: str | None, value: str | None) -> str | None:
+    """`value`, held to the most effort the router gives `model` (its `effort_stops_at`)."""
+    top = reg.models[model].effort_stops_at if model in reg.models else None
+    return top if value in EFFORTS and top in EFFORTS and EFFORTS.index(value) > EFFORTS.index(top) else value
 
 
 def pick(reg: Registry, level: Level, usable: list[str]) -> Pick:

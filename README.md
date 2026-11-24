@@ -32,7 +32,7 @@
 Without it, a subagent that names no model runs on its conversation's model ([Claude Code docs](https://code.claude.com/docs/en/sub-agents.md#choose-a-model)), so on an Opus session a file listing runs on Opus too. One model for every agent, set with `CLAUDE_CODE_SUBAGENT_MODEL`, puts lookups on an expensive model or hard design work on a weak one. Model Router does autonomous multi-model orchestration instead: Claude, which has read the work, names the model and effort each call needs, and the plugin holds that to your cap and the models that work here.
 
 <p align="center">
-  <a href="https://crisnahine.github.io/claude-code-model-router/assets/video.mp4"><img src="docs/assets/video-play.jpg" width="720" alt="Play the 22-second video: four agent calls that would all run on Opus get Haiku, Sonnet, Opus and Fable instead, and a call sent back for a redo climbs one level."></a><br>
+  <a href="https://crisnahine.github.io/claude-code-model-router/assets/video.mp4"><img src="docs/assets/video-play.jpg" width="720" alt="Play the 22-second video: four agent calls that would all run on Opus get Haiku, Sonnet, Opus and Fable instead, and a redo moves a call up the ladder."></a><br>
   <sub><a href="https://crisnahine.github.io/claude-code-model-router/assets/video.mp4"><b>Watch it in 22 seconds</b></a>, with sound. Music: Sascha Ende, ende.app (CC BY 4.0).</sub>
 </p>
 
@@ -47,7 +47,7 @@ Without it, a subagent that names no model runs on its conversation's model ([Cl
 
 Model Router uses only the extension points Claude Code documents (the plugin manifest, hooks, the mods API, skills and subagents), and follows its rules on subagent models, the prompt cache and failing hooks:
 
-- It keeps the docs' subagent model order: a model on the call, the agent's own model, `CLAUDE_CODE_SUBAGENT_MODEL`, then the parent's model ([sub-agents](https://code.claude.com/docs/en/sub-agents.md#choose-a-model)). It only lowers a model to your cap, raises one to a rule's level, and fills in the effort.
+- It keeps the docs' subagent model order: a model on the call, the agent's own model, `CLAUDE_CODE_SUBAGENT_MODEL`, then the parent's model ([sub-agents](https://code.claude.com/docs/en/sub-agents.md#choose-a-model)). It lowers a model to your cap, raises one to a rule's level and fills in the effort, and picks a model only to start a teammate on a weak parent on Sonnet and to climb a call Claude marks as a redo.
 - It never switches the main conversation's model, because a switch re-reads the history with no cache hits ([prompt caching](https://code.claude.com/docs/en/prompt-caching.md#switching-models)).
 - Its hooks fail open: a bug never blocks a tool call, a spawn or a session ([exit codes](https://code.claude.com/docs/en/hooks.md#exit-code-output)).
 
@@ -79,7 +79,7 @@ Nothing has to be set: the four options in `/config` under the plugin start at t
 <p align="center">
   <picture>
     <source media="(max-width: 600px)" srcset="docs/assets/hero-phone.svg">
-    <img src="docs/assets/hero.svg" width="100%" alt="Model Router, a Claude Code plugin. An agent call to implement a function runs on Sonnet at medium effort, the standard level. Its result comes back for a redo, so the same call climbs one level to complex, Opus at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.">
+    <img src="docs/assets/hero.svg" width="100%" alt="Model Router, a Claude Code plugin. An agent call to review an auth change runs on Opus at high effort, the complex level. Its result falls short, so Claude marks a redo and names no model on it. A redo raises effort before it changes model, and this run was already at high, so it moves to the next stronger model, frontier on Fable at high, and is solved. The ladder runs lookup on Haiku at medium, standard on Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.">
   </picture>
 </p>
 
@@ -95,7 +95,7 @@ Claude names the model on each agent call, and its effort when the work needs a 
 
 A model named with `xhigh` or `max` stands for hardest. A call that names no model runs on its parent's model, as Claude Code decides, unless that model is over your cap. Claude marks a redo by starting the call's `description` with "Redo:", when a check failed or the result fell short, so a rewritten brief still counts. A redo that names its own model or effort runs as named. One that names neither climbs from the run it redoes: one effort step up on the same model while that run was below `high`, else the next stronger model at its own level's effort, else one more effort step. The trigger is Claude's judgment, and no benchmark run has shown a redo yet.
 
-<a id="who-decides-the-model"></a><a id="the-checks-before-a-turn-ends"></a>Your choices come first. Inside your `max_tier` cap, a model named on the call, a per-agent rule or the agent's own `model` field decides the model, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and `CLAUDE_CODE_SUBAGENT_MODEL` leave the model as you set it ([who decides the model](docs/GUIDE.md#who-decides-the-model)). The [checks before a turn ends](docs/GUIDE.md#the-checks-before-a-turn-ends) are in the guide, and the full design in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+<a id="who-decides-the-model"></a><a id="the-checks-before-a-turn-ends"></a>Your choices come first. Inside your `max_tier` cap, a model named on the call, a per-agent rule or the agent's own `model` field decides the model, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and `CLAUDE_CODE_SUBAGENT_MODEL` leave the model as you set it ([who decides the model](docs/GUIDE.md#who-decides-the-model)). A call Claude marks "Redo:" with no model or effort of its own climbs past a rule's model, an agent's own model and effort, and `CLAUDE_CODE_SUBAGENT_MODEL`, staying inside `max_tier`. The [checks before a turn ends](docs/GUIDE.md#the-checks-before-a-turn-ends) are in the guide, and the full design in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Benchmarks
 
@@ -145,7 +145,7 @@ Rules and extra models go in `~/.claude/model-router.json` (yours, applies every
 <a id="security"></a>
 ## Privacy and security
 
-Model Router runs on your machine with your user permissions, as every plugin's hooks and mods do ([plugin security](https://code.claude.com/docs/en/plugins/security.md)). It reads the model and effort on each agent call, never its brief, keeps its state in its own data directory, and sends no prompt or code anywhere. Its only network traffic is the daily update check to `code.claude.com` and `platform.claude.com`, plus `api.anthropic.com` for your account's model list when `ANTHROPIC_API_KEY` is set, `ANTHROPIC_BASE_URL` is unset and none of `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` is on. Turn `update_check` off to stop it; `/model-router:refresh` still fetches when you run it. To see every hook, agent and skill it installs before you install it, run `claude --plugin-dir ./plugins/model-router plugin details model-router` from a clone. [SECURITY.md](docs/SECURITY.md) has the threat model, what is stored and how to report a problem (there is no private channel yet, so never put details in a public issue).
+Model Router runs on your machine with your user permissions, as every plugin's hooks and mods do ([plugin security](https://code.claude.com/docs/en/plugins/security.md)). It reads the model and effort on each agent call and never scores its brief: it keeps only a hash of it to spot a repeated call. It keeps its state in its own data directory, and sends no prompt or code anywhere. Its only network traffic is the daily update check to `code.claude.com` and `platform.claude.com`, plus `api.anthropic.com` for your account's model list when `ANTHROPIC_API_KEY` is set, `ANTHROPIC_BASE_URL` is unset and none of `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` is on. Turn `update_check` off to stop it; `/model-router:refresh` still fetches when you run it. To see every hook, agent and skill it installs before you install it, run `claude --plugin-dir ./plugins/model-router plugin details model-router` from a clone. [SECURITY.md](docs/SECURITY.md) has the threat model, what is stored and how to report a problem (there is no private channel yet, so never put details in a public issue).
 
 ## Update and uninstall
 

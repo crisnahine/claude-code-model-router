@@ -27,7 +27,7 @@ class Model:
     cost: float | None = None
     use_for: str = ""
     project: bool = False  # added by a project's override file, so its rank is only that file's claim
-    step_stops_at: str | None = None  # the most effort ladder.effort_on's extra step gives this model
+    effort_stops_at: str | None = None  # the most effort the router sets on this model
 
     @property
     def trusted(self) -> bool:
@@ -42,8 +42,8 @@ class LevelSpec:
 
 @dataclass(frozen=True)
 class Rule:
-    """What an override file says about one agent. The user's file sets `model`, `level` and `route` in
-    full. A project's file only raises: its `level` becomes `floor`, its `model` becomes `suggested` and
+    """What an override file says about one agent. The user's file sets `model` and `route` in full, and
+    its `level` is a floor. A project's file only raises: its `level` becomes `floor`, its `model` becomes `suggested` and
     applies only when it isn't weaker than what the call would run on without it, and its `route` is held back."""
     model: str | None = None
     level: Level | None = None

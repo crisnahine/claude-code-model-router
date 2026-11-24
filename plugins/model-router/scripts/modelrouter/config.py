@@ -275,9 +275,9 @@ def _models(raw: dict, added: set, base: dict, problems: list[str]) -> dict[str,
             if name not in base:
                 problems.append(f"models.{name} has no strength, so it is left out")
             continue
-        use_for, stops = spec.get("use_for"), spec.get("step_stops_at")
+        use_for, stops = spec.get("use_for"), spec.get("effort_stops_at")
         found[name] = Model(name, spec["strength"], _optional(spec, "cost"), use_for if isinstance(use_for, str) else "",
-                            project=name in added, step_stops_at=stops if stops in EFFORTS else None)
+                            project=name in added, effort_stops_at=stops if stops in EFFORTS else None)
     return found
 
 

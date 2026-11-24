@@ -22,7 +22,7 @@ It doesn't pick from the work: Claude, which has read the work, names the model 
 
 ## What happens when the cheap model gets it wrong?
 
-A call Claude marks as a redo, by starting its `description` with "Redo:", climbs from the run it redoes. Claude marks one when a check failed or the result fell short, so the trigger is its judgment. A redo that names its own model or effort runs as named. Otherwise a run below `high` effort is redone one effort step up on the same model, and one at `high` or above on the next stronger usable model at that model's own level's effort: Sonnet at medium redoes on Sonnet at high, then on Opus at high. With no stronger model it takes one more effort step, up to `max`. The same call sent again unmarked is a new call, since a check run again after a fix is no redo. A redo never changes later calls. `/model-router:usage` counts redos by level, and a level that keeps coming back can be raised in your own `~/.claude/model-router.json` ([ARCHITECTURE.md](ARCHITECTURE.md#redo-escalation)).
+A call Claude marks as a redo, by starting its `description` with "Redo:", climbs from the run it redoes. Claude marks one when a check failed or the result fell short, so the trigger is its judgment. A redo that names its own model or effort runs as named. Otherwise a run below `high` effort is redone one effort step up on the same model, and one at `high` or above on the next stronger usable model at that model's own level's effort: Sonnet at medium redoes on Sonnet at high, then on Opus at high. With no stronger model it takes one more effort step, up to `max`, or `high` on Haiku. The same call sent again unmarked is a new call, since a check run again after a fix is no redo. A redo never changes later calls. `/model-router:usage` counts redos by level, and a level that keeps coming back can be raised in your own `~/.claude/model-router.json` ([ARCHITECTURE.md](ARCHITECTURE.md#redo-escalation)).
 
 ## What does Model Router cost?
 
@@ -42,11 +42,11 @@ Set the plugin's `routing_mode` option to `off` in `/config`, and the router cha
 
 ## Can I cap the strongest model, or force one model?
 
-Yes: `max_tier` caps the strongest model subagents may run on, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` pins every subagent to one model. With the cap at `sonnet`, any model above Sonnet is lowered to it, whether a caller, a rule, the agent or the parent's model named it. A model the cap leaves weaker than its level needs gets one more effort step, up to `xhigh`, or `high` on Haiku. With the force variable set, the router only sets effort, and a pinned strong model costs far more on small jobs: Opus 5.5's list price is 40 times Haiku 5.5's per token ([guide](GUIDE.md#who-decides-the-model)).
+Yes: `max_tier` caps the strongest model subagents may run on, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` pins every subagent to one model. With the cap at `sonnet`, any model above Sonnet is lowered to it, whether a caller, a rule, the agent or the parent's model named it. A model the cap leaves weaker than its level needs gets one more effort step, up to `xhigh`, or `high` on Haiku. A call left on the parent's model runs at the level of the model the cap leaves. With the force variable set, the router only sets effort, and a pinned strong model costs far more on small jobs: Opus 5.5's list price is 40 times Haiku 5.5's per token ([guide](GUIDE.md#who-decides-the-model)).
 
 ## How is this different from setting one model for every agent?
 
-`CLAUDE_CODE_SUBAGENT_MODEL` gives every agent without its own model the same model, while with Model Router Claude names the model each call needs. One model for everything puts lookups on an expensive model or hard design work on a weak one. While the variable is set, a call that names no model runs on it and the router leaves it alone ([ARCHITECTURE.md](ARCHITECTURE.md#the-decision)).
+`CLAUDE_CODE_SUBAGENT_MODEL` gives every agent without its own model the same model, while with Model Router Claude names the model each call needs. One model for everything puts lookups on an expensive model or hard design work on a weak one. While the variable is set, a call that names no model runs on it and the router leaves it alone, unless Claude marks it as a redo ([ARCHITECTURE.md](ARCHITECTURE.md#the-decision)).
 
 ## Does it change the main conversation's model?
 

@@ -21,7 +21,7 @@ plugins/model-router/
   hooks/hooks.json             loads the mod, and the SessionStart, UserPromptSubmit, PreToolUse,
                                PostToolUse, PostToolUseFailure, PostModelSwitch, SubagentStop and Stop hooks
   scripts/modelrouter/         the runtime, standard library only
-  agents/                      the seven role agents
+  agents/                      the five role agents
   skills/                      ship, route, models, usage, refresh
   evals/                       routing evals
 tests/                         unit tests, run on Linux, macOS and Windows; tests/mod holds the mod's tests
