@@ -1,8 +1,9 @@
 """Pass when POST /payments replays a repeated key without a second charge and refuses a reused one, with requests
 taking turns between two copies of the work dir (two hosts, each with its own temp and home folder) on one database;
-DESIGN.json picks the option that keeps no state in a worker; the shipped tests still pass; and test_idempotency.py
-passes on the work but fails on the code as shipped and on each broken build in mutants.py. A charge counts when the
-work calls the gateway, even if it then rolls back, as a real card stays charged. A mutant wraps the work's own
+DESIGN.json picks the option that keeps no state in a worker (its reasons need only be non-empty text; what they
+argue is not graded); the shipped tests still pass; and test_idempotency.py passes on the work but fails on the code
+as shipped and on each broken build in mutants.py. A charge counts when the work calls the gateway, even if it then
+rolls back, as a real card stays charged. A mutant wraps the work's own
 handle_post, so the test is judged on the requests it sends, not on the names it imports. Requests run one at a
 time, so a build that looks the key up, charges and then stores it with no lock passes, though two requests with one
 key at the same moment would both charge. A request that dies right after its first commit, as a host
@@ -97,7 +98,7 @@ design = passcheck.answer(work, "DESIGN.json", "utf-8-sig")
 choice = design.get("choice")
 if set(design) != {"choice", "reasons"} or not passcheck.reasons(design) or not isinstance(choice, str):
     passcheck.finish(False, 'DESIGN.json must be {"choice": "<A or B>", "reasons": ["..."]}')
-if choice.strip().upper() != "B":
+if re.sub(r"^option\s+", "", choice.strip(), flags=re.I).upper() != "B":
     passcheck.finish(False, f"DESIGN.json picks {choice!r}, expected B")
 if not passcheck.tests_pass(work, HERE / "repo", "test_payments.py"):
     passcheck.finish(False, "test_payments.py was changed or no longer passes")

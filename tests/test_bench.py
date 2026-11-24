@@ -2259,12 +2259,8 @@ class DelegationTasks(unittest.TestCase):
 
     # The grade also reads what each line says; the visible check reads only a line's place and its PR number.
     WORDING = {"text-swapped-between-lines", "commit-subjects-pasted", "commit-lines-with-hashes",
-               "space-before-the-colon", "type-in-brackets", "hashes-left-on-lines", "removal-called-a-deprecation",
-               "removal-described-as-a-new-rule", "coupon-fix-described-as-a-feature",
-               "removal-described-as-a-narrower-change", "a-feature-removed-from-the-endpoint", "v2-named-as-removed",
-               "404-and-500-backwards", "history-page-slower", "removed-in-2.3.0", "v2-removed-too",
-               "removed-from-the-docs", "500-rather-than-404", "404-no-longer-returned", "history-no-longer-fast",
-               "coupon-total-lost", "tax-line-wrong", "csv-export-gone", "krona-no-longer-picked"}
+               "space-before-the-colon", "type-in-brackets", "hashes-left-on-lines",
+               "removal-described-as-a-new-rule", "removal-described-as-a-narrower-change"}
 
     def test_the_visible_changelog_check_agrees_with_the_grade_on_shape_and_says_why(self):
         task = self.task("redo-failing-check")

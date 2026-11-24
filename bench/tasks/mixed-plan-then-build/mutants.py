@@ -72,11 +72,12 @@ def install(name):
         return remember(slot, request, real(conn, request))
 
     def charges_without_a_payment(conn, request):
-        # Looked up at call time on the shipped gateway module, so a test that patches its charge sees the call.
+        # Charged through the work's own path, so a mock wherever the work looks the gateway up sees it.
         slot = _slot(conn, request)
         if slot in first:
-            import payments.gateway
-            payments.gateway.charge(conn, first[slot]["cents"])
+            before = conn.execute("SELECT COALESCE(MAX(rowid), 0) FROM payments").fetchone()[0]
+            ignores_the_key(conn, request)
+            conn.execute("DELETE FROM payments WHERE rowid > ?", (before,))
             conn.commit()
         return remember(slot, request, real(conn, request))
 

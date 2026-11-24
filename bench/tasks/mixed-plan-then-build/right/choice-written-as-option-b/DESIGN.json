@@ -1,0 +1,7 @@
+{
+  "choice": "Option B",
+  "reasons": [
+    "The API runs as several worker processes and a retry usually lands on another one, so a key kept in one process's memory is never seen by the retry; docs/ARCHITECTURE.md says nothing a later request reads may live in a worker.",
+    "Keeping the key in payments puts it in the same row and commit as the charge it guards."
+  ]
+}
