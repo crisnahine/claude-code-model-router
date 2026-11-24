@@ -40,9 +40,8 @@ def session_start(hook_input: dict) -> dict | None:
                 "cheapest model strong enough for it. Worth telling the user once."
             )
         if options.workflow_model:
-            parts.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model}. "
-                         "Model Router still sets a workflow agent's model, and the docs don't say which of the two "
-                         "wins. Worth telling the user once.")
+            parts.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model}, "
+                         "so the router sets only their effort. Worth telling the user once.")
     elif mode == "advise":
         parts.append(
             "Model Router is in advise mode: it estimates the model each request needs and changes no call. "
@@ -156,7 +155,8 @@ def post_agent(hook_input: dict) -> dict | None:
     outcome = _outcome("result", hook_input, snap.registry, ran_as=ran_as, ran_family=snap.registry.family(ran_as),
                        forced=snap.options.force, status=response.get("status"), tokens=response.get("totalTokens"),
                        launched=launched, agent_id=agent_id if launched and isinstance(agent_id, str) else None,
-                       models_used=() if launched else tuple(calls.models_used(response)))
+                       models_used=() if launched else tuple(calls.models_used(response)),
+                       cut_off=not launched and calls.cut_off(response))
     _settled(session_id, outcome.key)
     returned = calls.returned(session_id, outcome)
     if returned.note != calls.SWAPPED:

@@ -2,8 +2,8 @@
 
 <p align="center">
   <picture>
-    <source media="(max-width: 600px)" srcset="docs/assets/hero-phone.svg">
-    <img src="docs/assets/hero.svg" width="100%" alt="Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level to complex, Opus at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.">
+    <source media="(max-width: 600px)" srcset="docs/assets/headline-phone.svg">
+    <img src="docs/assets/headline.svg" width="100%" alt="Stop paying for the wrong model. Four agent calls that would all run on the session's model run on Haiku, Sonnet, Opus and Fable instead, each at the effort its brief needs.">
   </picture>
 </p>
 
@@ -19,8 +19,9 @@
   <a href="#install-the-claude-code-plugin"><b>Install</b></a> &nbsp;&middot;&nbsp;
   <a href="#quick-start"><b>Quick start</b></a> &nbsp;&middot;&nbsp;
   <a href="#how-it-works-picking-a-subagent-model"><b>How it works</b></a> &nbsp;&middot;&nbsp;
+  <a href="#built-on-the-claude-code-docs"><b>By the docs</b></a> &nbsp;&middot;&nbsp;
   <a href="#configuration"><b>Options</b></a> &nbsp;&middot;&nbsp;
-  <a href="#does-it-reduce-claude-code-cost-the-measured-result"><b>Results</b></a> &nbsp;&middot;&nbsp;
+  <a href="#benchmarks"><b>Benchmarks</b></a> &nbsp;&middot;&nbsp;
   <a href="docs/FAQ.md"><b>Questions</b></a> &nbsp;&middot;&nbsp;
   <a href="docs/README.md"><b>Docs</b></a>
 </p>
@@ -37,6 +38,20 @@ Without it, a subagent that names no model runs on the same model as the convers
 - Logs what each turn cost at list price, main conversation and subagents apart, in `/model-router:usage`.
 - Asks once, before a turn ends, for a stronger agent's check when a weak session model answered a hard request alone.
 - Checks the Claude Code changelog, docs and model retirements once a day and reports what affects routing.
+
+## Built on the Claude Code docs
+
+Model Router uses only the extension points Claude Code documents (the plugin manifest, hooks, the mods API, skills and subagents), and follows the rules the docs set on subagent models, the prompt cache and failing hooks:
+
+- It keeps the subagent model order the docs give. A model on the call, the agent's own model and `CLAUDE_CODE_SUBAGENT_MODEL` come first, and the router fills in only what none of them set ([sub-agents](https://code.claude.com/docs/en/sub-agents.md#choose-a-model)).
+- It never switches the main conversation's model, because a switch re-reads the whole history with no cache hits ([prompt caching](https://code.claude.com/docs/en/prompt-caching.md#switching-models)). It can raise that turn's effort instead (`main_effort`, off by default), and only where the cache survives.
+- It starts low and re-runs what comes back one level higher, modeled on Anthropic's finding that starting low and re-running failures at higher effort is the cheapest way to a high pass rate ([cost and intelligence](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence#re-run-failures-at-higher-effort)).
+- Its hooks fail open the way the hooks docs describe: a bug exits without blocking a tool call, a spawn or a session ([exit codes](https://code.claude.com/docs/en/hooks.md#exit-code-output)).
+- It reads the changelog, the docs index and the model deprecations every day, and reports what affects routing.
+
+That is where the saving comes from. Claude Code's best practices say to put a subagent whose work is simple on Haiku ([best practices](https://code.claude.com/docs/en/best-practices.md#know-what-subagents-cost)), and Model Router does that for every call, so a file listing stops paying for the model a security review needs. The banner above lists each model's price per million input tokens, read from the plugin's registry.
+
+[Built on the docs](docs/CLAUDE_CODE_DOCS.md) lists every rule, the doc page that states it and the test that checks it, and the few places the plugin goes past the docs.
 
 ## Install the Claude Code plugin
 
@@ -78,6 +93,13 @@ To change how it routes, open `/config` and find the plugin's options ([Configur
 
 ## How it works: picking a subagent model
 
+<p align="center">
+  <picture>
+    <source media="(max-width: 600px)" srcset="docs/assets/hero-phone.svg">
+    <img src="docs/assets/hero.svg" width="100%" alt="Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level to complex, Opus at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.">
+  </picture>
+</p>
+
 Each subtask is scored from its own brief: risk (security, data, migrations, public APIs), scope (several modules or services), load, ambiguity (design, a choice between approaches, root cause), whether it changes something or only reads, and what the agent's name says it is for. The result is one of five levels:
 
 | Level | Typical subtask | Model (balanced) | Effort |
@@ -88,30 +110,21 @@ Each subtask is scored from its own brief: risk (security, data, migrations, pub
 | hardest | Ambiguous, multi-system and risky at once | Opus | xhigh |
 | frontier | All of that, with no known approach: research, open-ended investigation | Fable | high |
 
-A call Claude re-issues after its result came back runs one level higher: a stronger model, or more effort on the same one. Starting low and re-running what fails follows Anthropic's own measurement: low effort with failures re-run at high solved about 97% of a coding benchmark for $0.17 a task, against 95.3% for $0.29 with every task at high ([research](docs/research/model-control.md), Q7).
+A call Claude re-issues after its result came back runs one level higher: a stronger model, or more effort on the same one. Starting low and re-running what fails is modeled on Anthropic's own measurement, which re-ran failures at higher effort on the same model: low effort with failures re-run at high solved about 97% of a coding benchmark for $0.17 a task, against 95.3% for $0.29 with every task at high ([research](docs/research/model-control.md), Q7).
 
 <a id="who-decides-the-model"></a><a id="the-checks-before-a-turn-ends"></a>Your choices come first. Inside your `max_tier` cap, a model named on the call, a per-agent rule or the agent's own `model` field wins over the router's pick. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and `CLAUDE_CODE_SUBAGENT_MODEL` leave the model as you set it ([who decides the model](docs/GUIDE.md#who-decides-the-model)). The checks before a turn ends are in the [guide](docs/GUIDE.md#the-checks-before-a-turn-ends), and the full design is in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Does it reduce Claude Code cost? The measured result
+## Benchmarks
 
-<p align="center">
-  <picture>
-    <source media="(max-width: 600px)" srcset="docs/assets/benchmark-phone.svg">
-    <img src="docs/assets/benchmark.svg" width="100%" alt="Cost per solved task by task class, from docs/BENCHMARKS.md, 5 or 10 runs per class and configuration. On an Opus 5.5 session the router cost less than Claude Code's defaults in 5 classes, for example bugfix $0.0989 against $0.1277, but more than the cheapest baseline in 6 of 8 (FAIL): opusplan, which runs Sonnet throughout when headless, in 4 classes, and every subagent on Haiku in root cause and research, for example bugfix $0.0989 against $0.0600 for opusplan. On a Sonnet session the router is cheapest in 0 of 8 classes (PASS) and costs more than the best baseline in 6 (FAIL), from 7% more in root cause to 63% more in design. A class with too few runs is PARTIAL.">
-  </picture>
-</p>
+On an Opus 5.5 session the router solved <!-- bench:opus.solved.router -->70 of 70<!-- /bench --> benchmark runs, as many as Claude Code's defaults, for <!-- bench:opus.pooled.router -->$0.121<!-- /bench --> per solved task against the defaults' <!-- bench:opus.pooled.defaults -->$0.151<!-- /bench -->. It isn't the cheapest setup on these tasks. They are easy enough that every subagent on Haiku at `high` effort also solved <!-- bench:opus.solved.haiku-high -->70 of 70<!-- /bench -->, for <!-- bench:opus.pooled.haiku-high -->$0.075<!-- /bench -->. On a Sonnet session the router cost more per solved task than the cheapest other setup in <!-- bench:sonnet.status.FAIL -->6<!-- /bench --> of <!-- bench:sonnet.classes -->8<!-- /bench --> task classes.
 
-On an Opus 5.5 session, the default model for every account type but Microsoft Foundry ([model configuration](https://code.claude.com/docs/en/model-config.md)), the router cost less per solved task than Claude Code's defaults in <!-- bench:opus.below.defaults -->5<!-- /bench --> of <!-- bench:opus.classes -->8<!-- /bench --> task classes, <!-- bench:opus.less.defaults.min -->18<!-- /bench --> to <!-- bench:opus.less.defaults.max -->32<!-- /bench -->% less, with <!-- bench:opus.solved.defaults -->70 of 70<!-- /bench --> runs solved for both, and was level in <!-- bench:opus.level.defaults -->design<!-- /bench -->: <!-- bench:opus.pooled.router -->$0.121<!-- /bench --> per solved task against <!-- bench:opus.pooled.defaults -->$0.151<!-- /bench --> over all <!-- bench:opus.runs.router -->70<!-- /bench --> runs. In every class with 10 runs it also beat every subagent on Fable, at either effort, outside the noise, and every subagent on Opus and the advisor in all but <!-- bench:opus.level.defaults -->design<!-- /bench -->, where they are level. It isn't the cheapest there. Every subagent on Haiku at `high` effort solved <!-- bench:opus.solved.haiku-high -->70 of 70<!-- /bench --> for <!-- bench:opus.pooled.haiku-high -->$0.075<!-- /bench -->, and `opusplan`, which runs Sonnet throughout in a headless run, solved <!-- bench:opus.solved.opusplan -->69 of 70<!-- /bench --> for <!-- bench:opus.pooled.opusplan -->$0.069<!-- /bench -->, so <!-- bench:opus.status.FAIL -->6<!-- /bench --> of <!-- bench:opus.classes -->8<!-- /bench --> Opus rows are FAIL against the best baseline, by <!-- bench:opus.behind.min -->60<!-- /bench -->% to <!-- bench:opus.behind.max -->144<!-- /bench -->% per solved task, <!-- bench:opus.status.PASS -->0<!-- /bench --> are PASS and <!-- bench:opus.status.PARTIAL -->2<!-- /bench --> are PARTIAL for lack of runs.
-
-On a Sonnet session the router is behind. <!-- bench:sonnet.status.PASS -->0<!-- /bench --> of <!-- bench:sonnet.classes -->8<!-- /bench --> rows are PASS, <!-- bench:sonnet.status.PARTIAL -->2<!-- /bench --> are PARTIAL for lack of runs, and in the <!-- bench:sonnet.status.FAIL -->6<!-- /bench --> that are FAIL it costs <!-- bench:sonnet.behind.min -->7<!-- /bench --> to <!-- bench:sonnet.behind.max -->63<!-- /bench -->% more per solved task than the best baseline, at a pass rate no lower beyond noise (FAIL). On these tasks the cheapest models already solve nearly every run, so the router's Sonnet and Opus picks for harder subtasks cost more without a pass-rate gain to show. [Release readiness](docs/RELEASE_READINESS.md) says why, and the [roadmap](docs/ROADMAP.md) says what comes next: a harder task tier.
-
-The router ran the routing code at commit <!-- bench:opus.commit_code -->`780ee86`<!-- /bench -->, <!-- bench:per_cell -->5 or 10<!-- /bench --> runs per class and configuration, beside every baseline on the same Claude Code version and tasks. That run had `verify_gate` off and ran complex on Sonnet; the verify gate is now on by default and complex now runs on Opus at `high` and hardest at `xhigh`, so these figures don't describe the current defaults. [BENCHMARKS.md](docs/BENCHMARKS.md) has every table, the raw data and the commands to rerun it.
+The run measured the routing code at <!-- bench:opus.commit_code -->`780ee86`<!-- /bench -->, before complex moved to Opus and the verify gate was turned on, so it doesn't price today's defaults. Next is a run on a harder task set, where Haiku should miss ([roadmap](docs/ROADMAP.md)). [BENCHMARKS.md](docs/BENCHMARKS.md) has every table, the raw data and the commands to rerun it.
 
 ## Commands
 
 | Command | What it does |
 | :- | :- |
-| `/model-router:ship <task>` | Plans, builds, verifies, reviews and commits a change on a branch, and stops before pushing, merging or deploying |
+| `/model-router:ship <task or issue>` | Plans, builds, verifies, reviews and commits a change on a branch, and stops before pushing, merging or deploying |
 | `/model-router:route <task>` | Explains which model a task would get and why, and how to split it |
 | `/model-router:models [reset] [--json]` | Lists the models in use, what each runs as, what is capped or unavailable, and what was learned. `reset` clears it |
 | `/model-router:usage [days] [--json]` | Shows what ran where, and what it cost at list price: agents, levels, models, tokens and dollars |
@@ -149,13 +162,13 @@ Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours
 }
 ```
 
-A project's file only raises: it can raise any level's model and effort and set a floor for an agent, so a repository you clone can make its subagents cost more, never run weaker. It can't get any model past your `max_tier`. Every key, the trust rules and the file's version are in the [guide](docs/GUIDE.md#configuration).
+A project's file only raises: it can raise any level's model and effort and set a floor for an agent, so a repository you clone can make its subagents cost more, never run weaker. It can't switch routing off for an agent (`"route": false` works only in your own file), and it can't get any model past your `max_tier`. Every key, the trust rules and the file's version are in the [guide](docs/GUIDE.md#configuration).
 
 ## What it can't do
 
 - It doesn't switch the main conversation's model, because a switch re-reads the whole conversation uncached. It can raise that turn's effort instead (`main_effort`, off by default).
 - It reads the brief's wording and the agent's name, never the code, so a level is an estimate. Claude can overrule it on any call, and a redo moves it up.
-- The profile reads English wording. A brief mostly in another language starts at standard.
+- The profile reads English wording. A brief in another script, or mostly in a common European language, starts at standard. A very short one may not be told apart and can still score lookup.
 - It leaves forks alone, and agents whose definition it can't read, such as one defined on the command line.
 - It routes a new model family only once the registry has an entry for it. New versions inside a family need nothing.
 - It does nothing when hooks are switched off (`disableAllHooks`, `allowManagedHooksOnly`). Spend figures are list prices; your bill is in `/usage` and `/cost`.
@@ -164,16 +177,17 @@ A project's file only raises: it can raise any level's model and effort and set 
 
 ## Compatibility
 
-- Other plugins, skills and agents: their agents are routed too. The router never changes which agent runs and never refuses a call to steer it. Another plugin's hook that denies or asks about a call still applies.
+- Other plugins, skills and agents: their agents are routed too. The router never changes which agent runs. It refuses a call only to hold your `max_tier` cap, when a lowered model didn't take ([details](docs/GUIDE.md#refused-rewrites)). Another plugin's hook that denies or asks about a call still applies.
+- Workflows and ultracode: every workflow agent is routed by its brief, a model the script names is kept, and on the session's own model a stage never runs below the session's effort, such as `xhigh` under ultracode ([details](docs/GUIDE.md#workflows-and-ultracode)).
 - Permissions: the plugin never approves a tool call. Your permission rules and auto mode review every spawn as they would without it.
-- Amazon Bedrock, Google Cloud's Agent Platform (Vertex AI) and Microsoft Foundry: routing uses the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves for your provider. Where an alias resolves to an older model, the mod sends the family's newest model ID, and falls back to the alias if the provider refuses it ([details](docs/GUIDE.md#third-party-providers)).
-- Versions and status: Claude Code 2.1.329 or later. Tested live on 2.1.330 on macOS, and the unit tests also run on Linux and Windows in CI. Version 0.1.0; what is still open is in [release readiness](docs/RELEASE_READINESS.md).
+- Amazon Bedrock, Google Cloud's Agent Platform (Vertex AI) and Microsoft Foundry: routing uses the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves for your provider. Where an alias resolves to an older model, the mod sends the family's newest model ID, and falls back to the alias if the provider refuses it ([details](docs/GUIDE.md#third-party-providers)). These providers aren't tested live yet.
+- Versions and status: Claude Code 2.1.329 or later. Tested live on 2.1.330 and 2.1.331 on macOS, ultracode included, and the unit tests also run on Linux and Windows in CI. Version 0.1.0; what is still open is in [release readiness](docs/RELEASE_READINESS.md).
 - Failure: every hook and mod hook fails open. A bug can cost routing, but it can't block a tool call, a spawn or a session.
 
 <a id="security"></a>
 ## Privacy and security
 
-Model Router runs on your machine with your user permissions, as every plugin's hooks and mods do ([Claude Code: plugin security](https://code.claude.com/docs/en/plugins/security.md)): settings hooks through `sh` and Python, and a mod, `hooks/router.ts`. It reads each request and agent brief there to pick a level, keeps its state in its own data directory, and sends no prompt or code anywhere. Its only network traffic is the daily update check to `code.claude.com` and `platform.claude.com`, plus `api.anthropic.com` for your account's model list when an Anthropic API key is set. Turn `update_check` off to stop it. To see every hook, agent and skill it installs before you install it, run `claude --plugin-dir ./plugins/model-router plugin details model-router` from a clone. [docs/SECURITY.md](docs/SECURITY.md) has the threat model, what is stored and the API key path. To report a problem, read its "Reporting a problem" section first: there is no private channel yet, so never put details in a public issue.
+Model Router runs on your machine with your user permissions, as every plugin's hooks and mods do ([Claude Code: plugin security](https://code.claude.com/docs/en/plugins/security.md)): settings hooks through `sh` and Python, and a mod, `hooks/router.ts`. It reads each request and agent brief there to pick a level, keeps its state in its own data directory, and sends no prompt or code anywhere. Its only network traffic is the daily update check to `code.claude.com` and `platform.claude.com`, plus `api.anthropic.com` for your account's model list when an Anthropic API key is set. Turn `update_check` off to stop the daily check; `/model-router:refresh` still fetches when you run it. To see every hook, agent and skill it installs before you install it, run `claude --plugin-dir ./plugins/model-router plugin details model-router` from a clone. [docs/SECURITY.md](docs/SECURITY.md) has the threat model, what is stored and the API key path. To report a problem, read its "Reporting a problem" section first: there is no private channel yet, so never put details in a public issue.
 
 ## Update and uninstall
 
@@ -183,12 +197,13 @@ Model Router runs on your machine with your user permissions, as every plugin's 
 
 ## Documentation
 
-[docs/FAQ.md](docs/FAQ.md) answers the questions people ask first, each in its first sentence: what Model Router is, how it picks a model, what it costs, whether quality drops, how to turn parts of it off, Bedrock, Vertex and Foundry, what it stores on your machine, and how it differs from setting one model for every agent.
+[docs/FAQ.md](docs/FAQ.md) answers the questions people ask first, each in its first sentence: what Model Router is, whether it follows the Claude Code docs, how it picks a model, what it costs, whether quality drops, how to turn parts of it off, Bedrock, Vertex and Foundry, what it stores on your machine, and how it differs from setting one model for every agent.
 
 | Page | Answers |
 | :- | :- |
 | [Guide](docs/GUIDE.md) | How do I configure it for my setup? |
 | [Architecture](docs/ARCHITECTURE.md) | How do two paths share one router? |
+| [Built on the docs](docs/CLAUDE_CODE_DOCS.md) | Which Claude Code docs does it follow, and where? |
 | [Benchmarks](docs/BENCHMARKS.md) | What does a solved task cost, with and without it? |
 | [Security](docs/SECURITY.md) | What reaches the network, and who can steer it? |
 | [Performance](docs/PERFORMANCE.md) | What does the router cost in time and disk? |

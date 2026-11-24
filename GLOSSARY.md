@@ -14,6 +14,12 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Path**: how a call reaches the router. The **mod path** runs in `hooks/router.ts` on engine events and calls `mod.py`. The **fallback path** (`fallback.py`) rewrites the `Agent` tool call and stands down when the mod runs.
 
+**Documented extension point**: a part of Claude Code that its docs describe for plugins: the plugin manifest, hooks, the mods API, skills and subagents. Model Router uses only these, and [Built on the docs](docs/CLAUDE_CODE_DOCS.md) lists each docs rule it follows and where it goes past them.
+
+**Session floor**: the lowest effort the router sets on the session's own model for a call the main conversation starts: the session's level, since a subagent, teammate or workflow agent there would run at it without the router (`router._session_floor`).
+
+**Cut-off run**: a run whose whole answer is an API error, such as an overload. It isn't a finished run, so the same call sent again is retried at its level, not redone one level up (`calls.cut_off`).
+
 **Adapter**: what one path adds around the shared spawn procedure (`spawn.decide`, `spawn.record`). It reads its path's event into the procedure's facts and turns the decision into what its path can apply: `mod.py` answers the mod with a model, an effort and a reason, and `fallback.py` rewrites the `Agent` call's input. An adapter holds no rule for what a decision is, so the same call gets the same route from either.
 
 **Route**: where one spawn went, written for every spawn that isn't denied, on either path (`calls.Route`): the model it runs on, the model it would have run on untouched (`was`: the parent's, or the agent's pin), the name or full ID the path sent, the level, the effort, who chose the model (`router`, a `pin`, a `rule` or the `caller`), the path, the level it counted toward, and the request. A spawn's route is kept under its own id where the path has one (the Agent call's `tool_use_id`, which the mod sends for every agent but a workflow's, since a workflow's agents share one), else under the call, so a call issued again can't overwrite what an earlier copy sent. The strongest model a spawn of the current request ran on is read from these (`calls.strongest`), not stored.

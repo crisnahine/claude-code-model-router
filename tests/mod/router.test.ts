@@ -196,6 +196,17 @@ test('a routed agent steps at the pick effort', async () => {
   assert.equal((await mod.step(stepEvent({ agentId: 'a1', effort: 'high' }))).effort, 'low')
 })
 
+test("the main loop's effort reaches mod-spawn, and the agent steps at the effort the CLI decided", async () => {
+  const mod = load({ 'mod-spawn': { stdout: JSON.stringify({ model: 'opus', effort: 'xhigh', reason: 'complex subtask' }) } })
+  await mod.step(stepEvent({ effort: 'xhigh' })) // the main loop, as under --effort ultracode
+  await mod.spawn(spawnEvent())
+  assert.equal(mod.calls.find(c => c.command === 'mod-spawn')!.stdin.session_effort, 'xhigh')
+  assert.equal((await mod.step(stepEvent({ turnId: 'ta1', agentId: 'a1', effort: 'medium' }))).effort, 'xhigh')
+  const fresh = load({ 'mod-spawn': PICK })
+  await fresh.spawn(spawnEvent())
+  assert.equal(fresh.calls.find(c => c.command === 'mod-spawn')!.stdin.session_effort, undefined)
+})
+
 test('an agent stepping before its spawn resolves still gets the pick effort', async () => {
   const mod = load({ 'mod-spawn': PICK })
   let sent: any
@@ -442,6 +453,17 @@ test('every hook falls back to next(e) when it throws', async () => {
     }
     assert.equal(seen, e)
   }
+})
+
+test("a workflow agent's usage names its type, and a subagent's doesn't", async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  const usage = payloads['mod-usage'].usage
+  await mod.spawn(spawnEvent({ subagentType: 'workflow-subagent', workflow: { runId: 'wf_1', agentIndex: 1 } }), (x: object) => ({ ...x, agentId: 'w1' }))
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu2' }), (x: object) => ({ ...x, agentId: 's1' }))
+  await mod.complete(completeEvent({ turnId: 'tw', agentId: 'w1', usage }))
+  await mod.complete(completeEvent({ turnId: 'ts', agentId: 's1', usage }))
+  const sent = mod.calls.filter(c => c.command === 'mod-usage').map(c => c.stdin.subagent_type)
+  assert.deepEqual(sent, ['workflow-subagent', undefined])
 })
 
 test('each payload the mod sends matches its fixture', async () => {

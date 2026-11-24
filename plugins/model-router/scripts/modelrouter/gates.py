@@ -163,8 +163,14 @@ def unverified_edit(hook_input: dict) -> str | None:
     )
 
 
+def still_running(hook_input: dict) -> bool:
+    """A workflow or subagent still in flight (hooks.md#stop-input) means the turn is paused, not done."""
+    return any(isinstance(task, dict) and task.get("type") in ("workflow", "subagent")
+               for task in hook_input.get("background_tasks") or [])
+
+
 def before_stop(hook_input: dict, reg: Registry, settings: Settings) -> str | None:
-    if hook_input.get("stop_hook_active") or settings.mode != "auto":
+    if hook_input.get("stop_hook_active") or settings.mode != "auto" or still_running(hook_input):
         return None
     return ((escalation(reg, hook_input) if settings.strong_agent_gate else None)
             or (unverified_edit(hook_input) if settings.verify_gate else None))

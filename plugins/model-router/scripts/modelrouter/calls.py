@@ -28,6 +28,7 @@ MAX_SWAPPED = 5
 
 # What a returned outcome says Claude should be told about.
 SWAPPED = "swapped"  # the run changed models mid-run
+CUT_OFF = "cut_off"  # the run ended on an API error, not an answer
 ID_FAILED = "id-failed"  # the full model ID the mod sent was refused
 MODEL_FAILED = "model-failed"  # a model error struck the model
 ROUTED_AROUND = "routed-around"  # ... and it is now routed around
@@ -87,6 +88,7 @@ class Outcome:
     error: str = ""
     interrupted: bool = False
     answered: bool = True
+    cut_off: bool = False  # the run ended on an API error, not an answer
 
 
 @dataclass(frozen=True)
@@ -105,6 +107,17 @@ def identify(tool_input: dict) -> tuple[str, str]:
     agent = agent if isinstance(agent, str) and agent else "general-purpose"
     text = agent + "\0" + str(tool_input.get("prompt") or "")
     return agent, hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+API_ERROR = re.compile(r"API Error: \d{3}\b")
+
+
+def cut_off(response: dict) -> bool:
+    """The run's whole answer is an API error, such as an overload: sending it again is a retry, not a redo."""
+    content = response.get("content")
+    blocks = content if isinstance(content, list) else []
+    text = "".join(b["text"] for b in blocks if isinstance(b, dict) and isinstance(b.get("text"), str)).strip()
+    return bool(API_ERROR.match(text))
 
 
 def models_used(response: object) -> list[str]:
@@ -207,7 +220,7 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
     if outcome.kind == "failure":
         return _failed(session_id, outcome, route, asked)
     swapped = bool(outcome.models_used)
-    finished = not outcome.launched and not swapped
+    finished = not outcome.launched and not swapped and not outcome.cut_off
     try:
         if route and route.redoable and (finished or (outcome.launched and outcome.agent_id)):
             _wait_or_finish(session_id, outcome, route, finished)
@@ -218,8 +231,8 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
                    untouched=route.was if route and route.path == "mod" else None)
     except OSError:
         pass
-    ledger.result(session_id, outcome.agent, asked, outcome.ran_as, outcome.status, outcome.tokens,
-                  models_used=list(outcome.models_used) or None)
+    ledger.result(session_id, outcome.agent, asked, outcome.ran_as, CUT_OFF if outcome.cut_off else outcome.status,
+                  outcome.tokens, models_used=list(outcome.models_used) or None)
     if swapped:
         learn.swapped(route)
     return Returned(asked, route, finished, SWAPPED if swapped else None)

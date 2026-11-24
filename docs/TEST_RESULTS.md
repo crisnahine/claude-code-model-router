@@ -34,18 +34,18 @@ Run 2026-11-23 on macOS (Darwin 27.2.0), on `deepen-modules` after the merge of 
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` (`python3` is the system `/usr/bin/python3` here) | 698 tests OK, run 2026-11-24 on `9f86780` |
-| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 698 tests OK, run 2026-11-24 on `9f86780` |
-| Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 28 of 28 pass, run 2026-11-24 on `9f86780` |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` (`python3` is the system `/usr/bin/python3` here) | 710 tests OK, run 2026-11-24 on the commit that records it |
+| Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 710 tests OK, run 2026-11-24 on the commit that records it |
+| Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 30 of 30 pass, run 2026-11-24 on the commit that records it |
 | Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
 | Docs assets | `python3 tools/docs_assets.py --check` | Every generated asset, page head and site block matches the script |
 | Benchmarks page | `python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check` | The committed page matches the results |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
-| Plugin evals, Claude Code 2.1.330 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78; run 2026-11-23 on `9b27510` |
+| Plugin evals, Claude Code 2.1.331 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78; run 2026-11-24 on Claude Code 2.1.331 |
 
-The 698 local tests are 514 in `tests/test_model_router.py`, 145 in `tests/test_bench.py`, 8 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 28 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 268 briefs over-routed (0.7%), budget 2%; 4 known under-routes" on each of the interpreters run. CI's run on `8ec8eec` had 180.
+The 710 local tests are 524 in `tests/test_model_router.py`, 145 in `tests/test_bench.py`, 8 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 30 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 268 briefs over-routed (0.7%), budget 2%; 4 known under-routes" on each of the interpreters run. CI's run on `8ec8eec` had 180.
 
 Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live").
 
@@ -53,28 +53,24 @@ Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verifi
 
 ### Routing cases
 
-The table below was recorded before Haiku work moved to medium effort. The trace carries no effort, so its pass counts still hold, but the cases' `expected_outcome` lines now say `effort medium`.
-
-Run 2026-11-23 on Claude Code 2.1.330, on `9b27510`, on the three cases now in `plugins/model-router/evals/`, from a `git archive` export of that commit:
+Run 2026-11-24 on Claude Code 2.1.331, on the working tree of the commit that records it (`338dc7e` plus this change), on the three cases in `plugins/model-router/evals/`:
 
 ```bash
 CLAUDE_CODE_PLUGIN_CACHE_DIR=<scratch>/plugins claude plugin eval plugins/model-router --trust-plugin \
   --ablation with-without --runs 3 -j 2 --max-cost-usd 2 --no-publish --output-dir <scratch>/out --json <scratch>/result.json
 ```
 
-The export is needed because the CLI refuses a plugin folder whose git directory registers more linked worktrees than it can screen, and this repository's checkout has many. The three eval briefs profile the same at `9b27510` and at `780ee86` (lookup and complex), so the result holds for the release tip.
+It ran from the checkout itself, which now registers no linked worktrees. Earlier runs used a `git archive` export, since the CLI refuses a plugin folder whose git directory registers more linked worktrees than it can screen.
 
 Same clean environment as below. Each case tells Claude to make one `Agent` call with an exact brief and no model, and a `regex` grader reads the run's trace for the `resolvedModel` Claude Code reports on that call's result. Without the router, a subagent with no model runs on the session's model, so the no-plugin arm fails by design. No `--allow-tools` grant is needed: routing runs in the plugin's hooks and mod, which start their own processes, not through the Bash tool.
 
 | Case | Session | Grader | With the plugin | Without | Cost with / without (3 runs each) |
 | :- | :- | :- | -: | -: | -: |
-| `route-lookup-subagent` | Sonnet | `ran-on-haiku` | 1.0, 3 of 3 | 0, 0 of 3 | $0.106 / $0.139 |
-| `route-review-subagent` | Haiku | `ran-on-sonnet` | 1.0, 3 of 3 | 0, 0 of 3 | $0.039 / $0.007 |
+| `route-lookup-subagent` | Sonnet | `ran-on-haiku` | 1.0, 3 of 3 | 0, 0 of 3 | $0.102 / $0.126 |
+| `route-review-subagent` | Haiku | `ran-on-opus` | 1.0, 3 of 3 | 0, 0 of 3 | $0.095 / $0.008 |
 | `route-redo-escalates` | Haiku | `called-twice`, `first-ran-on-haiku`, `redo-ran-on-sonnet` | 1.0, 3 of 3 | 0.67, 0 of 3 | $0.048 / $0.013 |
 
-The table was recorded before complex moved to Opus, and then to `high`: `route-review-subagent` now expects Opus at `high` (`ran-on-opus`) and its live result has not been rerun.
-
-Total $0.352 (no LLM grader, so no judge cost), 70 seconds, not partial. Every with-plugin run passed every grader and no without-plugin run passed, so the suite's mean delta is 0.78 (the redo case's delta is 0.33, since without the plugin the call is still made twice). The trace carries each subagent's model but not its effort, and the spend log lives in the plugin's data folder, which a grader can't read (https://code.claude.com/docs/en/plugin-evals.md#what-a-grader-can-look-at), so effort and spend rows are covered by the unit tests and the live runs in `docs/ARCHITECTURE.md`, not here.
+Total $0.392 (no LLM grader, so no judge cost), 99 seconds, not partial. Every with-plugin run passed every grader and no without-plugin run passed, so the suite's mean delta is 0.78 (the redo case's delta is 0.33, since without the plugin the call is still made twice). The trace carries each subagent's model but not its effort, and the spend log lives in the plugin's data folder, which a grader can't read (https://code.claude.com/docs/en/plugin-evals.md#what-a-grader-can-look-at), so effort and spend rows are covered by the unit tests and the live runs in `docs/ARCHITECTURE.md`, not here.
 
 ### The first run, on the cases these replaced
 

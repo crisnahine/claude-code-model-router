@@ -240,6 +240,8 @@ ICONS = {
               '<path d="M6.5 7.7v8.6M17.5 9.7c0 4.3-5.5 3.6-9.5 7.2"/>',
     "plug": '<path d="M9 3.5v4.5M15 3.5v4.5"/><path d="M6 8h12v3.5a6 6 0 0 1-12 0z"/><path d="M12 17.5v3"/>',
     "brand": '<circle cx="8" cy="9" r="4.5"/><circle cx="16" cy="9" r="4.5"/><circle cx="12" cy="15.5" r="4.5"/>',
+    "docs": '<path d="M4.5 18.5V5.5a2 2 0 0 1 2-2h13v14h-13a2 2 0 0 0-2 2 2 2 0 0 0 2 2h13"/>'
+            '<path d="M9 10.2l2.2 2.2 4.3-4.6"/>',
     "tag": '<path d="M3.5 12.2V4.5a1 1 0 0 1 1-1h7.7l8.6 8.6a1.4 1.4 0 0 1 0 2l-6.7 6.7a1.4 1.4 0 0 1-2 0z"/>'
            '<circle cx="8.2" cy="8.2" r="1.6"/>',
 }
@@ -489,6 +491,210 @@ def hero(phone=False) -> str:
         chips_x += pw + 10
     body.append(panel)
     return svg(w, h, HERO_TITLE, HERO_LABEL, "".join(body), css)
+
+
+# ---------------------------------------------------------------- the headline at the top of the README
+
+HEADLINE_EYEBROW = "ATTENTION, CLAUDE CODE USERS"
+HEADLINE = ("Stop paying for", "the wrong model.")
+HEADLINE_SUB = ("A subagent that names no model runs on your session's model, so easy work pays strong-model prices. "
+                "Model Router gives every call the model and effort its own brief needs, and moves a call up a level "
+                "when its work comes back.")
+PROOF_EYEBROW = "BUILT BY THE BOOK"
+PROOFS = [
+    ("Follows Claude's best practices",
+     "Haiku for simple work, as Claude Code's best practices advise, so a strong model does only the work that "
+     "needs it."),
+    ("Modeled on Anthropic's result",
+     "Anthropic found that starting low and re-running failures higher solved about 97% at $0.17 a task, against "
+     "95.3% at $0.29 all at high."),
+    ("Built on the Claude Code docs",
+     "Documented hooks, mods and settings only, checked against the changelog every day. Every hook fails open."),
+    ("Your choices come first",
+     "A model you name, an agent's own model and CLAUDE_CODE_SUBAGENT_MODEL stay, inside your max_tier."),
+]
+HEADLINE_TITLE = "Model Router: stop paying for the wrong model"
+# One brief per model. A test checks that `explain` puts each one on its level.
+CALLS = [("List the files under src", "lookup"), ("Write tests for the slugify helper", "standard"),
+         ("Review the auth change for security holes", "complex"),
+         ("Investigate open-ended data loss across services", "frontier")]
+RUNG = {level: (i + 1, model, effort) for i, (level, model, effort, *_) in enumerate(LADDER)}
+PROOF_DROP, PROOF_LINE = 27, 22  # a proof's title to its first body line, and its body line step
+
+
+@dataclasses.dataclass(frozen=True)
+class Fit:
+    """The sizes the headline uses at one width."""
+    w: int
+    margin: int
+    mark_y: int
+    mark_scale: float
+    eyebrow: float
+    head: float
+    sub: float
+    text_right: float  # where the left column's text has to end
+    price: float
+    cols: int  # proof columns
+
+
+DESKTOP = Fit(w=1200, margin=64, mark_y=48, mark_scale=0.8, eyebrow=15, head=56, sub=20, text_right=650, price=17, cols=2)
+PHONE = Fit(w=600, margin=32, mark_y=40, mark_scale=0.75, eyebrow=14, head=46, sub=19, text_right=568, price=15, cols=1)
+
+
+def headline_label() -> str:
+    models = [RUNG[level][1] for _, level in CALLS]
+    return (f"{' '.join(HEADLINE)} Four agent calls that would all run on the session's model run on "
+            f"{', '.join(models[:-1])} and {models[-1]} instead, each at the effort its brief needs.")
+
+
+def dot(cx, cy, cls, r=5.5):
+    return f'<circle cx="{cx:g}" cy="{cy:g}" r="{r:g}" class="{cls}"/>'
+
+
+def check_icon(x, y):
+    return (f'<g transform="translate({x:g} {y:g})"><circle cx="12" cy="12" r="12" class="faint"/>'
+            '<path d="M7.2 12.4l3.2 3.2 6.4-6.8" fill="none" class="inks" stroke-width="2.4" '
+            'stroke-linecap="round" stroke-linejoin="round"/></g>')
+
+
+def call_card(x, y, w, where):
+    """Four calls: one model for all of them without the router, and each on its own rung with it."""
+    pad, right = 24, x + w - 24
+    out = [text(x + pad, y + 38, "Four agent calls", "ink b", 15),
+           text(x + pad, y + 74, "WITHOUT MODEL ROUTER", "mono mut b", 11.5, extra=' letter-spacing="1.4"')]
+    session_y = y + 104
+    same = "All four run on your session's model."
+    out.append(dot(x + pad + 6, session_y - 5.5, "mut") + text(x + pad + 20, session_y, same, "mut", 15))
+    room(f"{where}: call card session line", x + pad + 20 + width_of(same, 15), right)
+    box_y = session_y + 24
+    line_y = box_y + 30
+    routed = [text(x + pad, line_y, "WITH MODEL ROUTER", "mono rt b", 11.5, extra=' letter-spacing="1.4"')]
+    for brief, level in CALLS:
+        rung, model, effort = RUNG[level]
+        quoted = f'"{brief}"'
+        line_y += 31
+        routed.append(text(x + pad, line_y, quoted, "mono ink", 12.5))
+        room(f"{where}: call card brief", x + pad + width_of(quoted, 12.5, True), right)
+        line_y += 33
+        routed.append(dot(x + pad + 6, line_y - 6.5, f"r{rung}") + text(x + pad + 20, line_y, model, "ink b", 18))
+        pill_x = x + pad + 36 + width_of(model, 18, bold=True)
+        for label in (level, effort):
+            chip, chip_w = pill(pill_x, line_y - 18.5, label, size=12.5, h=26, pad=11)
+            routed.append(chip)
+            pill_x += chip_w + 8
+        room(f"{where}: call card pills", pill_x, right)
+    box_h = line_y - box_y + 24
+    routed.insert(0, f'<rect x="{x + 10:g}" y="{box_y:g}" width="{w - 20:g}" height="{box_h:g}" rx="14" '
+                     'class="rtsoft"/>')
+    out.append('<g class="won">' + "".join(routed) + "</g>")
+    redo = "A call sent back for a redo climbs one level."
+    out.append(text(x + pad, box_y + box_h + 34, redo, "mut", 14))
+    room(f"{where}: call card redo line", x + pad + width_of(redo, 14), right)
+    h = box_y + box_h + 56 - y
+    return card(x, y, w, h, rx=18) + "".join(out), h
+
+
+def newest_prices(prices: dict) -> list:
+    """(rung, model, input price per million tokens) for the newest priced version of each model the calls use."""
+    out = []
+    for _, level in CALLS:
+        rung, model, _ = RUNG[level]
+        keys = [k for k in prices if re.fullmatch(rf"claude-{model.lower()}-\d+(-\d+)?", k)]
+        newest = max(keys, key=lambda k: [int(n) for n in k.split("-")[2:]])
+        out.append((rung, model, prices[newest]["input"]))
+    return out
+
+
+def price_row(x, y, prices: dict, size, where, limit):
+    """The list price of each model the calls run on, from the registry."""
+    gap = size * 1.4
+    out = [text(x, y, "API LIST PRICE, PER MILLION INPUT TOKENS", "mono mut b", round(size * 0.77),
+                extra=' letter-spacing="1.4"')]
+    chip_x, chip_y = x, y + size * 2.1
+    for rung, model, usd in newest_prices(prices):
+        price = f"${usd:.2f}" if usd < 1 else f"${usd:g}"
+        # One text element, so the price follows the name at the width the font really gives it.
+        out.append(dot(chip_x + 5, chip_y - size * 0.36, f"r{rung}", 5)
+                   + f'<text x="{chip_x + 16:g}" y="{chip_y:g}" font-size="{size:g}"><tspan class="ink b">'
+                   f'{esc(model)}</tspan><tspan class="mono mut" dx="{size * 0.5:g}">{esc(price)}</tspan></text>')
+        chip_x += 16 + width_of(model, size, bold=True) + size * 0.5 + width_of(price, size, True) + gap
+    room(f"{where}: price row", chip_x - gap, limit)
+    return "".join(out)
+
+
+def proof_block(x, y, w, title, body, cls, where):
+    rows = wrap(body, 14.5, w - 40)
+    room(f"{where}: proof title {title}", x + 40 + width_of(title, 17, bold=True), x + w)
+    return (f'<g class="{cls}">' + check_icon(x, y - 18) + text(x + 40, y, title, "ink b", 17)
+            + lines(x + 40, y + PROOF_DROP, rows, "mut", 14.5, PROOF_LINE) + "</g>"), len(rows)
+
+
+def proof_section(x, y, w, cols, where):
+    """A rule, the eyebrow and the proofs in rows of `cols`. Returns the SVG and the y below the last row."""
+    out = [f'<path d="M{x:g} {y:g}H{x + w:g}" class="ln" stroke-width="1"/>',
+           text(x, y + 40, PROOF_EYEBROW, "mono rt b", 13, extra=' letter-spacing="1.8"')]
+    y += 88
+    gap = 48
+    col_w = (w - (cols - 1) * gap) / cols
+    for start in range(0, len(PROOFS), cols):
+        tallest = 0
+        for k, (title, body) in enumerate(PROOFS[start:start + cols]):
+            block, n = proof_block(x + k * (col_w + gap), y, col_w, title, body, f"p{start + k + 1}", where)
+            out.append(block)
+            tallest = max(tallest, n)
+        y += PROOF_DROP + tallest * PROOF_LINE + 32
+    return "".join(out), y
+
+
+def headline_text(fit: Fit, prices: dict, where):
+    """The mark, eyebrow, headline, paragraph and price row. Returns the SVG and the y below the price row."""
+    m, scale = fit.margin, fit.mark_scale
+    eyebrow_x = m + 64 * scale + 16
+    out = [mark_body(m, fit.mark_y, scale),
+           text(eyebrow_x, fit.mark_y + 32 * scale + fit.eyebrow * 0.36, HEADLINE_EYEBROW, "mono rt b", fit.eyebrow,
+                extra=' letter-spacing="1.8"')]
+    room(f"{where}: eyebrow", eyebrow_x + width_of(HEADLINE_EYEBROW, fit.eyebrow, True) + 1.8 * len(HEADLINE_EYEBROW),
+         fit.text_right)
+    y = fit.mark_y + 64 * scale + 20 + fit.head * 0.9
+    out.append('<g class="a1">' + "".join(text(m - 2, y + i * fit.head * 1.1, line, "ink b", fit.head)
+                                          for i, line in enumerate(HEADLINE)) + "</g>")
+    for line in HEADLINE:
+        room(f"{where}: headline", m + width_of(line, fit.head, bold=True), fit.text_right)
+    y += (len(HEADLINE) - 1) * fit.head * 1.1 + fit.head * 0.55 + fit.sub * 1.4
+    sub, step = wrap(HEADLINE_SUB, fit.sub, fit.text_right - m), fit.sub * 1.55
+    prices_y = y + (len(sub) - 1) * step + fit.sub * 2.6
+    out.append('<g class="a2">' + lines(m, y, sub, "mut", fit.sub, step)
+               + price_row(m, prices_y, prices, fit.price, where, fit.text_right) + "</g>")
+    return "".join(out), prices_y + fit.price * 2.1
+
+
+HEADLINE_CSS = (
+    ".a1,.a2,.a3,.p1,.p2,.p3,.p4{animation:rise .7s ease-out both}"
+    ".a1{animation-delay:.05s}.a2{animation-delay:.25s}.a3{animation-delay:.45s}"
+    ".p1{animation-delay:1.8s}.p2{animation-delay:2s}.p3{animation-delay:2.2s}.p4{animation-delay:2.4s}"
+    ".won{animation:fade .6s ease-out 1.2s both}"
+    + keyframes("rise", [(0, "opacity:0;transform:translateY(12px)"), (100, "opacity:1;transform:none")])
+    + keyframes("fade", [(0, "opacity:0"), (100, "opacity:1")]))
+
+
+def headline(prices: dict, phone=False) -> str:
+    """A direct-response headline for the top of the README: the problem, the fix shown on four calls, and the
+    proof. Fixed dark, like the social preview, so it reads as one banner above the light page."""
+    fit, where = (PHONE, "headline-phone.svg") if phone else (DESKTOP, "headline.svg")
+    m, w = fit.margin, fit.w
+    top, text_bottom = headline_text(fit, prices, where)
+    if phone:  # the card goes under the text
+        call, call_h = call_card(m, text_bottom + 40, w - 2 * m, where)
+        bottom = text_bottom + 40 + call_h
+    else:  # the card goes beside it
+        card_w = 456
+        call, call_h = call_card(w - m - card_w, fit.mark_y, card_w, where)
+        bottom = max(text_bottom, fit.mark_y + call_h)
+    proofs, h = proof_section(m, bottom + 52, w - 2 * m, fit.cols, where)
+    body = (f'<rect width="{w}" height="{h:.0f}" rx="24" class="bg"/>'
+            f'<rect x="0.5" y="0.5" width="{w - 1}" height="{h - 1:.0f}" rx="24" fill="none" class="ln" '
+            f'stroke-width="1"/>{top}<g class="a3">{call}</g>{proofs}')
+    return svg(w, round(h), HEADLINE_TITLE, headline_label(), body, HEADLINE_CSS, theme="dark")
 
 
 # ---------------------------------------------------------------- diagrams
@@ -1093,9 +1299,15 @@ def with_figures(path: str, text: str, figures: dict) -> str:
     return BENCH_SPAN.sub(one, text)
 
 
+def img_alt(page: str, name: str, alt: str) -> str:
+    """The alt text of every <img> that shows the named asset, set to the asset's own label."""
+    if '"' in alt:
+        raise SystemExit(f"{name}: its label can't carry a double quote")
+    return re.sub(rf'({re.escape(name)}"[^>]*? alt=")[^"]*"', lambda m: m.group(1) + esc(alt) + '"', page)
+
+
 def bench_alt(page: str, figures: dict) -> str:
-    alt = fill(BENCH_ALT, figures, "benchmark figure alt text")
-    return re.sub(r'(benchmark\.svg"[^>]*? alt=")[^"]*"', lambda m: m.group(1) + alt + '"', page)
+    return img_alt(page, "benchmark.svg", fill(BENCH_ALT, figures, "benchmark figure alt text"))
 
 
 # ---------------------------------------------------------------- the site
@@ -1276,6 +1488,8 @@ def build(snap: Snapshot) -> dict:
     assets.update(badge_assets(v))
     assets["hero.svg"] = hero()
     assets["hero-phone.svg"] = hero(phone=True)
+    assets["headline.svg"] = headline(snap.ladder["prices"])
+    assets["headline-phone.svg"] = headline(snap.ladder["prices"], phone=True)
     assets["ladder.svg"] = diagram_ladder()
     assets["redo-escalation.svg"] = diagram_redo()
     assets["two-paths.svg"] = diagram_two_paths()
@@ -1294,7 +1508,7 @@ def build(snap: Snapshot) -> dict:
             if path == "docs/README.md":
                 files[path] = with_cards(files[path], snap.pages)
     readme = badge_alt(snap.texts["README.md"], v)
-    files["README.md"] = bench_alt(readme, figures)
+    files["README.md"] = img_alt(bench_alt(readme, figures), "headline.svg", headline_label())
     for path in FIGURE_PAGES:
         if path in files:
             files[path] = with_figures(path, files[path], figures)

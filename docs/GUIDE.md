@@ -41,6 +41,8 @@ Options, in `/config` under the plugin:
 | `verify_gate` | on | Asks for a test run before a turn ends when code changed and nothing checked it. It is the failure signal the router needs to start cheap and rerun what fails ([cost and intelligence](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence)), at the price of a turn and sometimes an agent. `false` turns it off |
 | `strong_agent_gate` | on | Asks for a stronger agent's check before a turn ends when a weak session model answered a hard request alone. It rarely fires on a strong session model |
 
+On plans where Fable bills to usage credits, a frontier subtask the router sends to Fable bills there too. In a background session or a teammate's session nobody may answer the consent prompt, so Claude Code ends the turn when its `dialogExpiry` deadline passes, and in `claude -p` or an Agent SDK host that shows no prompt it bills without asking ([Fable and usage credits](https://code.claude.com/docs/en/model-config.md#fable-and-usage-credits)). Set `max_tier` to `opus` where that matters.
+
 Rules and extra models go in a JSON file. `~/.claude/model-router.json` is yours and applies everywhere. `.claude/model-router.json` belongs to a project. Both have the same shape:
 
 ```json
@@ -75,7 +77,19 @@ In order, strongest first:
 
 Under steps 1 and 5 your environment has decided, so the model is left as it is: with `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` the router sets only effort, and with `CLAUDE_CODE_SUBAGENT_MODEL` it leaves the call alone, unless `agent_pins` is `override`. Under steps 2, 3, 4 and 6, whatever wins then has to be usable: inside your cap, allowed by your settings and known to work. If it isn't, the strongest usable model below it runs, or the weakest usable one when none is below it. Effort is left alone when the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` already sets it. `CLAUDE_CODE_SUBAGENT_EFFORT` doesn't apply to agent-team teammates (Claude Code ignores it for them), so for a teammate the router still sets the effort. Every effort the router sets, for an agent or a main-loop turn, is held to `maxEffortLevel` when a settings source sets one, and the ledger reason and `/model-router:route` say when it was: the lowest cap of any source applies, a source's `modelSettings` entry for a model replaces its own top-level cap for that model, and `max` sets none (https://code.claude.com/docs/en/settings-reference.md#maxeffortlevel). Claude Code applies the cap itself before each request, so the router only reports what will run.
 
-`CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` runs every workflow agent on one model while other subagents keep theirs (https://code.claude.com/docs/en/changelog, 2.1.296). The env-vars page doesn't list it, and nothing says whether it wins over the model a mod sets on `agent.spawn`, so the router doesn't change how it routes workflow agents when it is set: the session-start note and `/model-router:models` name it as a pin on workflow agents, and `/model-router:usage` shows the model each one ran on.
+`CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` runs every workflow agent on one model while other subagents keep theirs (https://code.claude.com/docs/en/changelog, 2.1.296). The env-vars page doesn't list it or say whether it wins over the model a mod sets on `agent.spawn`. In a live run on Claude Code 2.1.331 it did: the agent ran on the pinned model after the mod had set another. So when it is set, the router leaves a workflow agent's model alone and sets only its effort, as it does under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`. The session-start note and `/model-router:models` name the pin, and `/model-router:usage` shows the model each workflow agent ran on.
+
+## Workflows and ultracode
+
+Ultracode is a Claude Code setting that has Claude run substantive tasks as dynamic workflows, at whatever effort level the session runs at ([workflows](https://code.claude.com/docs/en/workflows.md#let-claude-decide-with-ultracode)). Turning it on with `/effort` or the `ultracode` setting keeps that level, and `claude --effort ultracode` also sets it to `xhigh` ([model configuration](https://code.claude.com/docs/en/model-config.md#adjust-effort-level)).
+
+Every workflow agent that starts goes through the router at `agent.spawn`, like a subagent, so a stage with no agent file of its own is routed by its brief. Claude Code picks a workflow agent's model in the subagent order, and a model the script names for a stage counts as the model on the call ([workflows](https://code.claude.com/docs/en/workflows.md#cost)), so the router keeps it, inside your `max_tier`. With `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` set, the pin wins and the router sets only effort (see [Who decides the model](#who-decides-the-model)).
+
+A routed stage runs at its level's effort, with one exception: on the session's own model it never runs below the session's level, such as `xhigh` under ultracode, since that is what Claude Code would run it at there ([model configuration](https://code.claude.com/docs/en/model-config.md#effort-level-of-subagents-and-teammates)). On a lighter model the session's level doesn't apply, so a lookup stage on Haiku runs at `medium`. The same rule holds for any subagent or teammate the main conversation starts, on either path and under a pinned model too, and the ledger records the effort it runs at, so a redo still asks for more than the run before. An agent file's own `effort`, `CLAUDE_CODE_SUBAGENT_EFFORT` and `CLAUDE_CODE_EFFORT_LEVEL` keep the router out of effort, and `maxEffortLevel` still caps it.
+
+A script can also pass an `effort` to `agent()`. The spawn event carries no effort, so on a stage that names no model the router can't see it and sets its own. Name the model as well and the router leaves both alone.
+
+Stages whose briefs land on the same level get the same model and effort, which a fan-out needs for its agents to share a prompt cache ([fan-out](https://code.claude.com/docs/en/workflows.md#prompt-caching-in-a-fan-out)). A stage never reaches the `Agent` tool's result hook, so it is never redone one level up and doesn't vote to raise a level; `/model-router:usage` reads the model it ran on from its usage rows. While a workflow or a background subagent is still running, the checks before a turn ends wait, since the turn is paused rather than done. Routing, redo, a script-named model, the workflow pin and the verify gate were run live under `--effort ultracode` on Claude Code 2.1.331 ([verified live](ARCHITECTURE.md#verified-live)).
 
 ## The checks before a turn ends
 
@@ -105,7 +119,7 @@ These limits come from what Claude Code lets a plugin do, or from choices made t
 
 ### Other plugins
 
-The router never changes which agent runs and never refuses a call to steer it, so it has nothing to conflict over. Another plugin's hook that denies or asks about a call still applies. Another plugin's mod that sets a spawn's model runs in its own order with this one, and the model that ran is what the ledger records.
+The router never changes which agent runs and refuses a call only to hold your cap ([refused rewrites](#refused-rewrites)), so it has nothing to conflict over. Another plugin's hook that denies or asks about a call still applies. Another plugin's mod that sets a spawn's model runs in its own order with this one, and the model that ran is what the ledger records.
 
 ### Permission modes
 

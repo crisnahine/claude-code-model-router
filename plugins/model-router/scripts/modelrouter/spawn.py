@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from . import agents, calls, gates, learn, ledger, profile, request, router, session, settings
 from . import config as cfg
-from .config import Level
+from .config import EFFORTS, Level
 
 
 @dataclass
@@ -46,10 +46,16 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     named = isinstance(name, str) and bool(name.strip()) and not tool_input.get("isolation") and not hook_input.get("agent_id")
     teammate = hook_input.get("kind") == "teammate" or named
     caps = {n: c for n in reg.models for c in [snap.allowed.effort_cap(reg, n)] if c}
+    # The main conversation's level: the mod reads it from the main loop's requests, a hook gets it as `effort`.
+    # A nested call runs at its parent's effort instead, so it gets none.
+    effort = hook_input.get("effort")
+    level = hook_input.get("session_effort") or (effort.get("level") if isinstance(effort, dict) else None)
+    session_effort = level if not hook_input.get("agent_id") and level in EFFORTS else None
     return router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable,
                         definition=definition, parent=parent,
                         earlier=calls.finished_run(hook_input.get("session_id"), key), raises=snap.raises,
-                        floor=floor, teammate=teammate, effort_caps=caps)
+                        floor=floor, teammate=teammate, workflow=hook_input.get("kind") == "workflow",
+                        session_effort=session_effort, effort_caps=caps)
 
 
 def decide(hook_input: dict, snap: settings.Snapshot) -> Spawn:

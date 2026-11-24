@@ -47,6 +47,8 @@ class Facts:
     raises: dict = field(default_factory=dict)  # learn.raises: the learned raise of each level
     floor: Level | None = None  # the request's level, for a hand-off to a strong role agent
     teammate: bool = False  # an agent-team teammate, which CLAUDE_CODE_SUBAGENT_EFFORT doesn't reach
+    workflow: bool = False  # a workflow agent, which CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins
+    session_effort: str | None = None  # the main conversation's level, for a call made from it
     effort_caps: Mapping[str, str] = field(default_factory=dict)  # maxEffortLevel per registry model, where set
 
 
@@ -103,17 +105,14 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if tool_input.get("model") and not requested:
         out.update(was=None, reason=f"the call names a model outside the registry ({tool_input['model']})")
         return out
+    decided = _effort_decided(tool_input, definition, settings, facts.teammate)
     if settings.force:
-        # The user pinned every subagent's model. Effort is still free to set, and on a
-        # pinned strong model it is the only lever left on cost.
-        out.update(was=env_default or facts.parent,
-                   reason="CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent's model")
-        effort = None if _effort_decided(tool_input, definition, settings, facts.teammate) else level_effort
-        if effort and not tool_input.get("model"):
-            effort, held = capped(effort, facts.effort_caps.get(out["was"] or ""))
-            out.update(action="rewrite", effort=effort, source="router",
-                       reason=f"{level} subtask; the model is pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE, so only effort is set{held}")
-        return out
+        effort = None if decided or tool_input.get("model") else level_effort
+        return _pinned(out, "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "subagent", env_default or facts.parent, level, effort, facts)
+    if facts.workflow and settings.workflow_model and not tool_input.get("model"):
+        # This pin wins over the model a mod sets, so it is kept like the one above.
+        return _pinned(out, "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "workflow agent", reg.family(settings.workflow_model),
+                       level, None if decided else level_effort, facts)
 
     override = settings.pins == "override"
     basis = None  # what the call would run on, and in which words, when no rule names a model
@@ -160,13 +159,13 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if final != target:
         why += f"; {target} is over the cap or unavailable here"
     effort = None
-    decided = _effort_decided(tool_input, definition, settings, facts.teammate)
     # Effort is set whenever nobody chose it, a pinned agent included: the pin is about
     # the model, and on current models effort is the cheaper lever for quality.
     if source in LEVEL_SOURCES and not decided:
         effort = pick_effort if source == "router" else level_effort
     if redo and not decided:
         effort = _above_earlier(reg, effort, final, done)
+    effort, floor = _session_floor(effort, final, facts)
     effort, held = capped(effort, facts.effort_caps.get(final))
     stronger = next((n for n in usable if reg.models[n].trusted and reg.stronger(n, final)), None)
     runs = runs_at(effort, tool_input, definition, settings, facts.teammate)
@@ -177,12 +176,34 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         why += f"; {cause}, the same as the run that came back before, so it goes to {stronger}"
         final = stronger
         if not decided:
-            effort, held = capped(ladder.effort_on(reg, level, settings.priority, final), facts.effort_caps.get(final))
-    out.update(model=final, source=source, reason=why + held + (f"; {out['held']}" if out["held"] else ""))
+            effort, floor = _session_floor(ladder.effort_on(reg, level, settings.priority, final), final, facts)
+            effort, held = capped(effort, facts.effort_caps.get(final))
+    out.update(model=final, source=source, reason=why + floor + held + (f"; {out['held']}" if out["held"] else ""))
     if final == out["was"] and not effort:
         return out  # it would run on this model anyway
     out.update(action="rewrite", effort=effort)
     return out
+
+
+def _pinned(out: Decision, pin: str, scope: str, pinned: str | None, level: Level, effort: str | None,
+            facts: Facts) -> Decision:
+    """The user pinned the model, so effort is the one lever left, and on a pinned strong model the one on cost."""
+    out.update(was=pinned, reason=f"{pin} pins every {scope}'s model")
+    if effort:
+        effort, floor = _session_floor(effort, pinned, facts)
+        effort, held = capped(effort, facts.effort_caps.get(pinned or ""))
+        out.update(action="rewrite", effort=effort, source="router",
+                   reason=f"{level} subtask; the model is pinned by {pin}, so only effort is set{floor}{held}")
+    return out
+
+
+def _session_floor(effort: str | None, model: str | None, facts: Facts) -> tuple[str | None, str]:
+    """On the session's own model an agent runs at the session's level unless told otherwise, so the router never sets less there."""
+    floor = facts.session_effort
+    if (effort in EFFORTS and floor in EFFORTS and model and model == facts.parent
+            and EFFORTS.index(floor) > EFFORTS.index(effort)):
+        return floor, f"; at least the session's {floor} on its own model"
+    return effort, ""
 
 
 def capped(effort: str | None, cap: str | None) -> tuple[str | None, str]:

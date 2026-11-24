@@ -18,6 +18,8 @@ PAGES = [
     ("docs/PERFORMANCE.md", "performance", "Performance", "What does the router cost in time and disk?",
      "performance", 2),
     ("docs/SECURITY.md", "security", "Security", "What reaches the network, and who can steer it?", "security", 2),
+    ("docs/CLAUDE_CODE_DOCS.md", "claude-code-docs", "Built on the docs",
+     "Which Claude Code docs does it follow, and where?", "docs", 3),
     ("docs/BENCHMARKS.md", "benchmarks", "Benchmarks", "What does a solved task cost, with and without it?",
      "benchmarks", 3),
     ("docs/TEST_RESULTS.md", "test-results", "Test results", "What ran last, and what passed?", "tests", 3),

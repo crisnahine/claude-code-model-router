@@ -126,9 +126,8 @@ def models(snap: settings.Snapshot) -> str:
                   "(a project's file can raise, never lower):"]
         lines += [f"- {h['kind']} {h['name']}: {h['reason']}" for h in data["held_back"]]
     if data["workflow_model"]:
-        lines += ["", f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins every workflow agent to {data['workflow_model']}. "
-                  "Model Router still sets a workflow agent's model, and the docs don't say which of the two wins; "
-                  "/model-router:usage shows the model each one ran on."]
+        lines += ["", f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins every workflow agent to {data['workflow_model']}, "
+                  "so Model Router sets only their effort. /model-router:usage shows the model each one ran on."]
     if data["doc_aliases"]:
         lines += ["", "Model aliases in the current Claude Code docs: " + ", ".join(data["doc_aliases"]) + "."]
         if data["not_in_registry"]:
@@ -252,6 +251,14 @@ def usage_data(days: int, exact: bool = False) -> dict:
             m["runs"] += 1
             # totalTokens is the run's final request only (https://code.claude.com/docs/en/hooks.md).
             m["tokens"] += r.get("total_tokens") if isinstance(r.get("total_tokens"), int) else 0
+    # A workflow agent has no result row, so its first usage row, which names its type, says what it ran on.
+    first_model: dict[tuple[str, str], str] = {}
+    for r in rows:
+        if r.get("event") == "usage" and r.get("agent") and r.get("agent_id"):
+            first_model.setdefault((str(r["agent"]), str(r["agent_id"])), str(r.get("model")))
+    for (agent, _), model in first_model.items():
+        a = row(agent)
+        a["ran_on"][model] = a["ran_on"].get(model, 0) + 1
     for r in rows:
         m = by_model.get(str(r.get("model"))) if r.get("event") == "usage" and r.get("agent_id") else None
         if m is not None:

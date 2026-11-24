@@ -177,5 +177,6 @@ def usage(hook_input: dict) -> None:
     """One ledger row per turn, its cost the sum of its requests, each priced on its own."""
     found = hook_input.get("usage")
     if isinstance(found, dict) and isinstance(found.get("model"), str):
+        stage = hook_input.get("subagent_type")
         ledger.usage(settings.Snapshot(hook_input).registry, hook_input.get("session_id"), hook_input.get("agent_id"),
-                     found, hook_input.get("requests"))
+                     found, hook_input.get("requests"), stage if isinstance(stage, str) and stage else None)

@@ -65,11 +65,12 @@ def turn_cost(reg: Registry, usage: dict, requests: object) -> float | None:
     return None if None in costs else round(sum(costs), 6)
 
 
-def usage(reg: Registry, session_id: str | None, agent_id: object, usage: object, requests: object) -> None:
+def usage(reg: Registry, session_id: str | None, agent_id: object, usage: object, requests: object,
+          agent: str | None = None) -> None:
     if not _usage(usage):
         return
     store.append_ledger({"event": "usage", "session": session_id, "agent_id": agent_id, "model": usage["model"],
-                         **_tokens(usage), "cost_usd": turn_cost(reg, usage, requests)})
+                         **_tokens(usage), "cost_usd": turn_cost(reg, usage, requests), **({"agent": agent} if agent else {})})
 
 
 def read(days: int | None = None, path: Path | None = None) -> list[dict]:

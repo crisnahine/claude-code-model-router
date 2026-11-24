@@ -12,6 +12,10 @@ Short answers about Model Router, the Claude Code plugin with the id `model-rout
 
 Model Router is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts, and moves a call one level up when its work comes back for a redo. It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages. The agent the caller chose, its prompt and its tools stay as they were. It is Apache-2.0 licensed and needs Claude Code 2.1.329 or later and Python 3.9 or later ([README](../README.md#install-the-claude-code-plugin)).
 
+## Does Model Router follow the Claude Code docs?
+
+Yes. It uses only the extension points Claude Code documents (the plugin manifest, hooks, the mods API, skills and subagents), and follows the docs' rules on subagent models, effort settings, the prompt cache and failing hooks. It keeps the subagent model order the docs give, never switches the main conversation's model because a switch re-reads the context with no cache hits, and checks the changelog and docs every day. [Built on the docs](CLAUDE_CODE_DOCS.md) lists each rule with its doc page and the test that checks it, and the places the plugin goes past the docs or does something other than they advise.
+
 ## How does Model Router pick a model for a subagent?
 
 Model Router reads the subagent's brief and the agent's name, gives the call one of five levels, and runs it on the cheapest usable model and effort for that level. The levels are lookup (Haiku at medium effort), standard (Sonnet at medium), complex (Opus at high), hardest (Opus at xhigh) and frontier (Fable at high). The brief is scored for risk, scope, load and ambiguity, and for whether the call changes something or only reads. A model you or the caller named still wins: the order is `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, a model named on the call, a per-agent rule, the agent's own `model` field, `CLAUDE_CODE_SUBAGENT_MODEL`, and only then the router's pick ([ARCHITECTURE.md](ARCHITECTURE.md#the-decision)).
@@ -59,6 +63,10 @@ Model Router keeps its state in its own plugin data directory and sends no promp
 ## Does it work with other plugins, skills and agents?
 
 Yes, Model Router routes agents from any plugin, skill or agent, and it never changes which agent runs or refuses a call to steer it. Another plugin's hook that denies or asks about a call still applies. An agent whose definition names its own model keeps it unless you set `agent_pins` to `override` ([README](../README.md#compatibility)).
+
+## Does Model Router work with workflows and ultracode?
+
+Yes. Every workflow agent is routed by its brief like a subagent, a model the workflow script names is kept, and on the session's own model a stage never runs below the session's effort, such as `xhigh` under ultracode. It was checked live under `claude --effort ultracode`: four stages ran on Haiku, Sonnet, Opus and Fable as routed, a redo climbed one level, and the verify gate asked once ([guide](GUIDE.md#workflows-and-ultracode)).
 
 ## Does it approve tool calls or get around my permissions?
 

@@ -34,12 +34,16 @@ Every page about Model Router, the Claude Code plugin that routes each agent to 
 </tr>
 <tr><th colspan="2" align="left">Evidence<br><sub>What was measured and tested, and what is still open.</sub></th></tr>
 <tr>
+<td width="50%" valign="top"><img src="assets/icon-claude-code-docs.svg" width="20" height="20" alt=""> <a href="CLAUDE_CODE_DOCS.md"><b>Built on the docs</b></a><br>Which Claude Code docs does it follow, and where?</td>
 <td width="50%" valign="top"><img src="assets/icon-benchmarks.svg" width="20" height="20" alt=""> <a href="BENCHMARKS.md"><b>Benchmarks</b></a><br>What does a solved task cost, with and without it?</td>
-<td width="50%" valign="top"><img src="assets/icon-test-results.svg" width="20" height="20" alt=""> <a href="TEST_RESULTS.md"><b>Test results</b></a><br>What ran last, and what passed?</td>
 </tr>
 <tr>
+<td width="50%" valign="top"><img src="assets/icon-test-results.svg" width="20" height="20" alt=""> <a href="TEST_RESULTS.md"><b>Test results</b></a><br>What ran last, and what passed?</td>
 <td width="50%" valign="top"><img src="assets/icon-traceability.svg" width="20" height="20" alt=""> <a href="TRACEABILITY.md"><b>Traceability</b></a><br>Where is each requirement, and is it met?</td>
+</tr>
+<tr>
 <td width="50%" valign="top"><img src="assets/icon-release-readiness.svg" width="20" height="20" alt=""> <a href="RELEASE_READINESS.md"><b>Release readiness</b></a><br>Is this release ready, and what is still open?</td>
+<td width="50%"></td>
 </tr>
 <tr><th colspan="2" align="left">The project<br><sub>What comes next, what changed, and how to take part.</sub></th></tr>
 <tr>

@@ -92,6 +92,10 @@ function remember<V>(map: Map<string, V>, key: string, value: V): void {
 export const register: Register = (on, options) => {
   const opts = optionEnv(options)
   const agentEffort = new Map<string, ModelEffort>()
+  // The type of each workflow agent this mod started, so its usage can name it: it has no Agent result.
+  const agentType = new Map<string, string>()
+  // The main conversation's level, from its latest request: an agent on its model runs at it unless told otherwise.
+  let sessionEffort: string | undefined
   const turnEffort = new Map<string, ModelEffort>()
   // agent.spawn carries no effort: an effort the caller put on the Agent call is read here.
   const callerEffort = new Map<string, ModelEffort>()
@@ -123,6 +127,7 @@ export const register: Register = (on, options) => {
       cwd: e.cwd,
       parent_agent_id: e.parentAgentId,
       parent_model: e.parentModel,
+      ...(sessionEffort ? { session_effort: sessionEffort } : {}),
       kind: e.workflow ? 'workflow' : e.isTeammate ? 'teammate' : 'subagent',
       // A workflow's id is shared by all of its agents, so it can't tell one route from another.
       ...(e.tool_use_id && !e.workflow ? { tool_use_id: e.tool_use_id } : {}),
@@ -141,6 +146,7 @@ export const register: Register = (on, options) => {
     try {
       const started = await next(pick?.model ? { ...e, model: pick.model } : e)
       if (pick?.effort && started.agentId) remember(agentEffort, started.agentId, pick.effort)
+      if (started.agentId && e.workflow && e.subagentType) remember(agentType, started.agentId, e.subagentType)
       return started
     } finally {
       efforts.splice(efforts.indexOf(mine), 1)
@@ -200,6 +206,7 @@ export const register: Register = (on, options) => {
 
   on('turn.step', async function* ($, e, next) {
     const current = typeof e.effort === 'string' ? e.effort : undefined
+    if (e.agentId === undefined && current !== undefined) sessionEffort = current
     // A subagent runs at the effort its subtask was given; the main loop's turn effort
     // only ever raises what the session already asks for.
     const want = e.agentId !== undefined ? agentEffort.get(e.agentId) : turnEffort.get(e.turnId)
@@ -221,7 +228,12 @@ export const register: Register = (on, options) => {
     const requests = turnRequests.get(e.turnId)
     turnRequests.delete(e.turnId)
     if (e.agentId === undefined) turnEffort.delete(e.turnId)
-    if (e.usage) await ask($, opts, 'mod-usage', { agent_id: e.agentId, usage: e.usage, ...(requests ? { requests } : {}) })
+    const type = e.agentId !== undefined ? agentType.get(e.agentId) : undefined
+    if (e.usage) {
+      await ask($, opts, 'mod-usage', {
+        agent_id: e.agentId, ...(type ? { subagent_type: type } : {}), usage: e.usage, ...(requests ? { requests } : {}),
+      })
+    }
     return done
   }).catch(($, e, next) => next(e))
 }

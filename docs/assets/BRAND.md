@@ -13,7 +13,7 @@ How Model Router looks, and how to make a new page, banner or diagram that fits.
 Model Router starts each agent on the cheapest rung of a ladder of models and climbs one rung when the work comes back. The visual language comes from that:
 
 - The mark is a ladder of five rungs, one per level, colored from the cheapest (lookup, at the bottom) to the strongest (frontier, at the top). An amber route enters on one rung and steps up to the next.
-- Amber always means the call: the route, the moving token in a diagram, a redo tag. Nothing else is amber.
+- Amber means the call: the route, the moving token in a diagram, a redo tag, and the row or label of a routed call. Its one other use is the eyebrow, the small capital label above a title. Nothing else is amber.
 - The five rung colors always mean the five levels, in the same order.
 
 | File | Use |
@@ -22,6 +22,7 @@ Model Router starts each agent on the cheapest rung of a ladder of models and cl
 | `logo.svg` | Mark and wordmark, following the viewer's light or dark setting. |
 | `logo-light.svg`, `logo-dark.svg` | Mark and wordmark fixed for a light or a dark background. |
 | `social-preview.svg`, `social-preview.png` | The 1280 x 640 card for link previews. |
+| `headline.svg`, `headline-phone.svg` | The README's opening banner, fixed dark like the social preview so it reads as one block above the light page. Its briefs are checked against `explain` and its prices come from the registry. |
 
 The wordmark is drawn with strokes, so it needs no font. Write the product name as "Model Router" in prose and `model-router` for the plugin id. Give the mark clear space of at least a quarter of its width.
 
@@ -35,7 +36,7 @@ The wordmark is drawn with strokes, so it needs no font. Write the product name 
 | `faint` | `#E7EDF5` | `#1A263A` | Chips, pills, empty meter segments |
 | `ink` | `#0C1524` | `#E7EDF6` | Text and icons |
 | `muted` | `#4A5871` | `#9BA9BD` | Secondary text, arrows |
-| `route` | `#A65200` | `#FFB23E` | The call: route, token, redo tag |
+| `route` | `#A65200` | `#FFB23E` | The call: route, token, redo tag, a routed call's row or label; and the eyebrow |
 | `routesoft` | `#FFF1DE` | `#33260F` | The row a call is on |
 | rung 1, lookup | `#0E8C6F` | `#38D3A8` | Haiku, medium |
 | rung 2, standard | `#0A78B8` | `#45B4F2` | Sonnet, medium |
@@ -61,7 +62,7 @@ The wordmark is drawn with strokes, so it needs no font. Write the product name 
 ## Rules for every SVG
 
 - A `<title>`, `role="img"` and an `aria-label` that says what the picture shows, in one or two plain sentences. The `<img>` that shows it carries the same alt text.
-- Light and dark through `@media (prefers-color-scheme: dark)` inside the file, with colors as classes. CSS variables render black in some viewers.
+- Light and dark through `@media (prefers-color-scheme: dark)` inside the file, with colors as classes, except the files the table above fixes to one theme. CSS variables render black in some viewers.
 - Self-contained: no script, no external font, image or stylesheet.
 - Valid XML and under 40 KB. `--check` enforces all of this.
 - Numbers in a diagram come from the code or the docs. The benchmark chart takes its numbers from `bench/analyze.py` each time the script runs.

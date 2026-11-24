@@ -227,7 +227,7 @@ class Shipped(unittest.TestCase):
     def test_the_costly_role_agents_say_when_not_to_use_them(self):
         # Claude delegates from descriptions, so these limits keep the costliest agents for the work they're for.
         # With no note on the request, this is all Claude reads before handing it a task that writes a file.
-        for name, limit in (("architect", "Can't write files, so not for a task that must make one, or a clear change."),
+        for name, limit in (("architect", "Writes nothing, so not for a task that must make a file, or a clear change."),
                             ("reviewer", "A small, tested change doesn't need one."),
                             ("deep-solver", "Not for ordinary hard coding.")):
             self.assertIn(limit, frontmatter(PLUGIN / "agents" / f"{name}.md")["description"], name)
@@ -2116,6 +2116,58 @@ class Router(Sandbox):
         self.assertEqual(mod("teammate")["effort"], "high")
         self.assertIsNone(mod("subagent"))
 
+    def test_an_agent_on_the_sessions_own_model_runs_at_least_at_the_sessions_effort(self):
+        # Claude Code runs a subagent on the main conversation's model at the session's level (sub-agents docs),
+        # such as xhigh under --effort ultracode, so the router never sets one below it there.
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+
+        def run(prompt, session_effort, earlier=None):
+            facts = router.Facts(agent="general-purpose", tool_input={"subagent_type": "general-purpose", "prompt": prompt},
+                                 usable=snap.usable, definition=agents.find("general-purpose", self.project),
+                                 parent="opus", session_effort=session_effort, earlier=earlier)
+            return router.decide(facts, snap.registry, snap.options)
+
+        hard = run(HARD, "xhigh")
+        self.assertEqual((hard["model"], hard["effort"]), ("opus", "xhigh"))
+        self.assertIn("at least the session's xhigh", hard["reason"])
+        self.assertEqual(run(HARD, None)["effort"], "high")
+        self.assertEqual(run(HARD, "low")["effort"], "high")  # it only raises
+        self.assertEqual(run(LOOKUP, "xhigh")["effort"], "medium")  # on another model the session's level doesn't apply
+        redo = run(HARD, "xhigh", earlier={"level": "complex", "model": "opus", "effort": "xhigh"})
+        self.assertNotEqual((redo["model"], redo["effort"]), ("opus", "xhigh"))  # a redo still asks for more
+
+    def test_a_pinned_model_on_the_sessions_own_model_gets_the_sessions_effort_too(self):
+        def run(**facts):
+            snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+            found = router.Facts(agent="general-purpose", tool_input={"subagent_type": "general-purpose", "prompt": LOOKUP},
+                                 usable=snap.usable, definition=agents.find("general-purpose", self.project),
+                                 parent="opus", session_effort="xhigh", **facts)
+            return router.decide(found, snap.registry, snap.options)
+
+        self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="opus")
+        pinned = run(workflow=True)
+        self.assertEqual((pinned["model"], pinned["was"], pinned["effort"]), (None, "opus", "xhigh"))
+        self.assertIn("at least the session's xhigh", pinned["reason"])
+        self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="haiku")
+        self.assertEqual(run(workflow=True)["effort"], "medium")  # a pin on another model keeps the level's effort
+        self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="", CLAUDE_CODE_SUBAGENT_MODEL="opus",
+                     CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+        forced = run()
+        self.assertEqual((forced["was"], forced["effort"]), ("opus", "xhigh"))
+
+    def test_the_sessions_effort_counts_only_for_a_call_from_the_main_conversation(self):
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        tool = {"subagent_type": "general-purpose", "prompt": HARD}
+
+        def effort(**extra):
+            return spawn.facts({"session_id": "s1", "tool_input": tool, **extra}, snap).session_effort
+
+        self.assertEqual(effort(effort={"level": "xhigh"}), "xhigh")  # the hook input's level, on the fallback
+        self.assertEqual(effort(session_effort="max"), "max")  # the main loop's, from the mod
+        self.assertIsNone(effort(agent_id="a1", effort={"level": "xhigh"}))  # a nested call takes its parent's
+        self.assertIsNone(effort(effort={"level": "auto"}))
+        self.assertIsNone(effort())
+
     def test_the_users_environment_settings_win(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         self.assertEqual(self.decide("general-purpose", LOOKUP)["action"], "keep")
@@ -2343,6 +2395,19 @@ class RepeatGuard(Sandbox):
         self.assertIn("one level above the lookup run", again["reason"])
         self.pre("general-purpose", LOOKUP)
         self.assertEqual(learn.stats()["lookup"]["votes"], 1)
+
+    def test_a_run_an_api_error_cut_off_is_retried_at_its_level(self):
+        # Sent again after an overload, the call is a retry, not a redo: the level didn't fail on quality.
+        self.pre("general-purpose", LOOKUP)
+        cut = {"resolvedModel": "claude-haiku-5-5", "status": "completed", "totalTokens": 40,
+               "content": [{"type": "text", "text": "API Error: 529 {\"type\":\"overloaded_error\"}"}]}
+        hooks.post_agent({**self.call("general-purpose", LOOKUP, model="haiku", effort="low"), "tool_response": cut})
+        again = self.decide("general-purpose", LOOKUP)
+        self.assertEqual((again["level"], again["model"], again["escalated_from"]), ("lookup", "haiku", None))
+        self.assertEqual([r["status"] for r in ledger.read() if r.get("event") == "result"], ["cut_off"])
+        answer = dict(cut, content=[{"type": "text", "text": "The API Error: 529 handler retries twice."}])
+        hooks.post_agent({**self.call("general-purpose", LOOKUP, model="haiku", effort="low"), "tool_response": answer})
+        self.assertEqual(self.decide("general-purpose", LOOKUP)["escalated_from"], "lookup")  # a real answer finishes it
 
     def test_a_standard_redo_moves_to_opus_at_high(self):
         self.pre("general-purpose", BUILD)
@@ -3864,6 +3929,11 @@ class GatesDefault(Sandbox):
         self.hard_on_weak_session()
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
 
+    def test_the_stronger_agent_check_waits_for_a_running_workflow(self):
+        self.hard_on_weak_session()
+        self.assertIsNone(hooks.stop({"session_id": "s1", "background_tasks": [{"type": "workflow", "name": "plan"}]}))
+        self.assertIn("model-router:architect", hooks.stop({"session_id": "s1"})["reason"])
+
     def test_the_test_run_check_runs_by_default_and_can_be_turned_off(self):
         self.edited()
         self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1"})["reason"])
@@ -4008,6 +4078,14 @@ class Gates(Sandbox):
         self.assertIsNone(hooks.stop({"session_id": "s1", "background_tasks": [{"agent_type": "acme:reviewer"}]}))
         self.assertIsNone(hooks.stop({"session_id": "s1", "transcript_path": self.transcript("npm run test")}))
 
+    def test_a_workflow_or_agent_still_running_holds_the_gates_and_keeps_the_ask(self):
+        # A workflow runs in the background, so the main turn can end mid-run; its edits aren't done yet.
+        self.edit()
+        for task in ({"type": "workflow", "name": "audit"}, {"type": "subagent", "agent_type": "acme:implementer"}):
+            self.assertIsNone(hooks.stop({"session_id": "s1", "background_tasks": [task]}))
+        shell = {"type": "shell", "command": "npm run dev"}
+        self.assertIn("model-router:verifier", hooks.stop({"session_id": "s1", "background_tasks": [shell]})["reason"])
+
     def test_an_old_test_command_doesnt_count(self):
         self.edit()
         out = hooks.stop({"session_id": "s1", "transcript_path": self.transcript("pytest", "2001-01-01T00:00:00Z")})
@@ -4142,6 +4220,14 @@ class Upstream(Sandbox):
         self.assertEqual(upstream.diff({}, new)["newly_deprecated"], [])  # a first review floods nothing
         in_use_only = upstream.diff(new, new, in_use=["claude-sonnet-4-5-20250929"])
         self.assertFalse(upstream.has_pending(in_use_only))  # said at session start on its own line
+
+    def test_the_pages_routing_rests_on_are_watched(self):
+        # The effort order, the cache rules, fast mode, the advisor and headless runs all decide what the router may do.
+        base = "https://code.claude.com/docs/en/"
+        pages = ["env-vars", "prompt-caching", "fast-mode", "advisor", "headless", "best-practices", "workflows"]
+        live = {"pages": {base + p + ".md": "b" for p in pages}}
+        changes = upstream.diff({"pages": {base + p + ".md": "a" for p in pages}}, live)
+        self.assertEqual(changes["watched_pages_touched"], sorted(base + p + ".md" for p in pages))
 
     def test_aliases_and_families(self):
         aliases = upstream.parse_model_aliases(self.TABLE)
@@ -4460,6 +4546,16 @@ class Reports(Sandbox):
             self.assertIn(f"Level: **{d['level']}**", text)
             self.assertIn(f"Model: **{d['model'] or 'left as it is'}**, effort: {d['effort'] or 'unchanged'}.", text)
             self.assertIn(f"Why: {d['reason']}.", text)
+
+    def test_the_readme_banner_shows_each_brief_on_the_level_explain_gives(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        import docs_assets
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        for brief, level in docs_assets.CALLS:
+            _, model, effort = docs_assets.RUNG[level]
+            text = report.explain(snap, brief)
+            self.assertIn(f"Level: **{level}**", text, brief)
+            self.assertIn(f"Model: **{model.lower()}**, effort: {effort}.", text, brief)
 
     def test_explain_reads_a_find_that_hunts_a_defect_as_complex_and_a_find_that_looks_up_as_lookup(self):
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
@@ -5173,17 +5269,50 @@ class MachineReadable(Sandbox):
         store.save_json(upstream.path(), {"cache": {"aliases": "saga"}})  # a corrupt cache lists nothing
         self.assertEqual(self.json_out("models")["not_in_registry"], [])
 
-    def test_a_workflow_model_pin_is_reported_and_routing_is_unchanged(self):
-        hook_input = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
-                      "kind": "workflow", "tool_input": {"subagent_type": "stage", "prompt": LOOKUP}}
-        before = modpath.spawn(hook_input)
+    def test_a_workflow_model_pin_keeps_its_model_and_the_router_sets_only_effort(self):
+        # The pin wins over the model a mod sets for a workflow agent, so the router keeps it and sets effort only.
+        stage = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                 "kind": "workflow", "tool_input": {"subagent_type": "stage", "prompt": LOOKUP}}
+        sub = dict(stage, kind="subagent", tool_input={"subagent_type": "general-purpose", "prompt": LOOKUP})
+        self.assertEqual(modpath.spawn(stage)["model"], "haiku")
+        routed = modpath.spawn(sub)
         self.assertIsNone(self.json_out("models")["workflow_model"])
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="claude-opus-5-5")
         self.assertEqual(self.json_out("models")["workflow_model"], "claude-opus-5-5")
-        self.assertIn("pins every workflow agent to claude-opus-5-5", self.out("models"))
+        self.assertIn("pins every workflow agent to claude-opus-5-5, so Model Router sets only their effort", self.out("models"))
         note = hooks.session_start({"session_id": "s1"})["hookSpecificOutput"]["additionalContext"]
         self.assertIn("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on claude-opus-5-5", note)
-        self.assertEqual(modpath.spawn(hook_input), before)
+        self.assertIn("so the router sets only their effort", note)
+        pick = modpath.spawn(stage)
+        self.assertEqual((pick["model"], pick["effort"]), (None, "medium"))
+        self.assertIn("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", pick["reason"])
+        row = [r for r in ledger.read() if r.get("event") == "spawn"][-1]
+        self.assertEqual((row["model"], row["was"], row["effort"]), ("opus", "opus", "medium"))
+        self.assertEqual(modpath.spawn(sub), routed)
+        named = dict(stage, tool_input=dict(stage["tool_input"], model="sonnet"))
+        self.assertIsNone(modpath.spawn(named))  # a model the script names is kept, as before
+
+    def test_usage_shows_the_model_a_workflow_agent_ran_on(self):
+        # A workflow agent never reaches the Agent tool's PostToolUse, so only its usage rows say what it ran on.
+        modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                       "kind": "workflow", "tool_input": {"subagent_type": "workflow-subagent", "prompt": LOOKUP}})
+        used = {"model": "claude-haiku-5-5", "input_tokens": 10, "output_tokens": 5,
+                "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+        for _ in range(2):  # two turns of one agent are one run
+            modpath.usage({"session_id": "s1", "agent_id": "w1", "subagent_type": "workflow-subagent", "usage": used})
+        modpath.usage({"session_id": "s1", "agent_id": "w2", "usage": used})  # a subagent: its result row counts
+        agent = next(a for a in report.usage_data(1)["agents"] if a["agent"] == "workflow-subagent")
+        self.assertEqual(agent["ran_on"], {"claude-haiku-5-5": 1})
+        self.assertIn("claude-haiku-5-5 x1", report.usage(1))
+
+    def test_a_workflow_stage_and_a_subagent_of_one_type_both_show_what_they_ran_on(self):
+        self.pre("general-purpose", LOOKUP)
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
+        used = {"model": "claude-sonnet-5-5", "input_tokens": 10, "output_tokens": 5,
+                "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
+        modpath.usage({"session_id": "s1", "agent_id": "w1", "subagent_type": "general-purpose", "usage": used})
+        agent = next(a for a in report.usage_data(1)["agents"] if a["agent"] == "general-purpose")
+        self.assertEqual(agent["ran_on"], {"claude-haiku-5-5": 1, "claude-sonnet-5-5": 1})
 
     def test_models_json_names_state_files_set_aside_or_left_read_only(self):
         data = self.json_out("models")

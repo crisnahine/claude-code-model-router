@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import dataclasses
+import html
 import io
 import re
 import sys
@@ -200,9 +201,8 @@ class DocsAssets(unittest.TestCase):
 
     def test_the_figure_alt_text_follows_the_figures(self):
         files = self.patched_build()
-        for path in ("README.md", "site/index.html"):
-            alt = re.search(r'benchmark\.svg"[^>]*? alt="([^"]*)"', files[path]).group(1)
-            self.assertIn("bugfix $9.9999 against", alt, path)
+        alt = re.search(r'benchmark\.svg"[^>]*? alt="([^"]*)"', files["site/index.html"]).group(1)
+        self.assertIn("bugfix $9.9999 against", alt)
 
     def test_no_figure_span_sits_inside_backticks(self):
         for path in (*docs_assets.FIGURE_PAGES, "site/index.html"):
@@ -215,6 +215,17 @@ class DocsAssets(unittest.TestCase):
             block = page.split(marks[0], 1)[1].split(marks[1], 1)[0]
             self.assertNotIn("<!-- bench:", block)
             self.assertIn("$9.999", block)
+
+    def test_the_banner_figures_come_from_the_research(self):
+        research = (ROOT / "docs" / "research" / "model-control.md").read_text(encoding="utf-8")
+        figures = [f for _, body in docs_assets.PROOFS for f in re.findall(r"\$\d+(?:\.\d+)?|\d+(?:\.\d+)?%", body)]
+        self.assertTrue(figures)
+        for figure in figures:
+            self.assertIn(figure, research)
+
+    def test_the_banner_alt_text_is_its_label(self):
+        alt = re.search(r'headline\.svg"[^>]*? alt="([^"]*)"', self.build()["README.md"]).group(1)
+        self.assertEqual(html.unescape(alt), docs_assets.headline_label())
 
     def test_the_version_badge_alt_text_follows_the_plugin_version(self):
         files = self.build(version="9.8.7", released="2030-01-01")

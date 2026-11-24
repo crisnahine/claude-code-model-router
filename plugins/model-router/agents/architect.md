@@ -1,6 +1,6 @@
 ---
 name: architect
-description: "Read-only: plans cross-module or system design, an unclear root cause, a security, data or performance choice. Can't write files, so not for a task that must make one, or a clear change."
+description: "Plans cross-module or system design, an unclear root cause, a security, data or performance choice. Writes nothing, so not for a task that must make a file, or a clear change."
 tools: Read, Grep, Glob, Bash, WebFetch
 color: purple
 ---

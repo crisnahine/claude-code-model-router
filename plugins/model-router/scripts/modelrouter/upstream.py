@@ -26,7 +26,8 @@ HTTP_TIMEOUT = 10  # per request: each socket wait, and the body's download as a
 FETCH_BUDGET = 25
 # Docs pages that describe the surfaces this plugin is built on.
 WATCHED_PAGES = ("plugins", "sub-agents", "hooks", "skills", "model-config", "workflows",
-                 "plugin-evals", "mcp", "settings", "agent-teams", "costs", "permission-modes")
+                 "plugin-evals", "mcp", "settings", "agent-teams", "costs", "permission-modes",
+                 "env-vars", "prompt-caching", "fast-mode", "advisor", "headless", "best-practices")
 # Aliases that select a mode or a context size rather than a model family of their own.
 NON_FAMILY_ALIASES = {"default", "best", "opusplan"}
 
