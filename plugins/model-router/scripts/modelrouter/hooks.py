@@ -20,26 +20,40 @@ def _rules(options: settings.Settings) -> str:
     """The level rule for Claude, written as facts: the Agent tool sets `effort` only when instructions ask."""
     redo = ("A redo after a failed check or a gap in the report keeps its `description` with \"Redo:\" in front "
             "and runs {above}.")
+    # CLAUDE_CODE_EFFORT_LEVEL wins over a call's effort (sub-agents.md), and either variable keeps a redo's effort.
+    fixed = ("CLAUDE_CODE_EFFORT_LEVEL sets every subagent's effort, so an `effort` on a call has no effect."
+             if options.effort_level else "")
     if options.force:
         # Claude can't pass a model under FORCE (sub-agents.md), so only the effort half applies.
-        return (f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE runs every subagent on {options.subagent_model or 'one model'}, so a "
-                "`model` on an Agent call has no effect. Model Router keeps the `effort` a call names, by the work: "
-                "medium for finding, reading, listing and everyday work to a clear brief; high for work that is hard "
-                "to check, high-stakes, ambiguous or broad, such as a bug's cause, a design, a review, a contract or "
-                "financial figures. " + redo.format(above="one effort step higher"))
+        model = options.subagent_model if cfg._PLAIN_NAME.fullmatch(options.subagent_model or "") else "one model"
+        lead = (f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE runs every subagent on {model}, so a `model` on an Agent call has "
+                "no effect.")
+        if fixed:
+            return f"{lead} {fixed}"
+        return (lead + " Model Router keeps the `effort` a call names, by the work: medium for finding, reading, "
+                "listing and everyday work to a clear brief; high for work that is hard to check, high-stakes, "
+                "ambiguous or broad, such as a bug's cause, a design, a review, a contract or financial figures."
+                + ("" if options.subagent_effort else " " + redo.format(above="one effort step higher")))
     if options.subagent_model:
-        neither = "its agent's own model or CLAUDE_CODE_SUBAGENT_MODEL"
+        # The cap doesn't lower CLAUDE_CODE_SUBAGENT_MODEL, only a model the agent names.
+        neither = f"its agent's own model{', capped,' if options.cap else ''} or CLAUDE_CODE_SUBAGENT_MODEL"
     else:
-        neither = "its agent's own model or the conversation's"
-    return ("Model Router keeps the `model` and `effort` an Agent call names, within the user's cap, and fills in "
-            "`effort` when a call names only a model. Calls name both by the work:\n"
-            "- haiku at medium: finding, reading and listing\n"
-            "- sonnet at medium: everyday work to a clear brief\n"
-            "- opus at high: work that is hard to check, high-stakes, ambiguous or broad, such as a bug's cause, "
-            "a design, a review, a contract or financial figures\n"
-            "- fable at high: open-ended research\n"
-            f"A call that names neither runs on {neither}. " + redo.format(
-                above="above the run it redoes, effort before model"))
+        neither = f"its agent's own model or the conversation's{', within the cap' if options.cap else ''}"
+    if fixed:
+        lead, medium, high = (f"Model Router keeps the `model` an Agent call names, within the user's cap. {fixed} "
+                              "Calls name a model by the work:\n"), "", ""
+    else:
+        fills = "" if options.subagent_effort else ", and fills in `effort` when a call names only a model"
+        lead, medium, high = (f"Model Router keeps the `model` and `effort` an Agent call names, within the user's "
+                              f"cap{fills}. Calls name both by the work:\n"), " at medium", " at high"
+    above = ("on a stronger model than the run it redoes" if fixed or options.subagent_effort
+             else "above the run it redoes, effort before model")
+    return (lead + f"- haiku{medium}: finding, reading and listing\n"
+            f"- sonnet{medium}: everyday work to a clear brief\n"
+            f"- opus{high}: work that is hard to check, high-stakes, ambiguous or broad (a bug's cause, a design, "
+            "a review, a contract or financial figures)\n"
+            f"- fable{high}: open-ended research\n"
+            f"A call that names neither runs on {neither}. " + redo.format(above=above))
 
 
 def session_start(hook_input: dict) -> dict | None:
@@ -64,8 +78,8 @@ def session_start(hook_input: dict) -> dict | None:
                 f"its agent's own model or {options.subagent_model}. Model Router keeps the model a call names, within "
                 "your cap.")
         if options.workflow_model:
-            notices.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model}, "
-                           "so the router sets only their effort.")
+            notices.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model} "
+                           "when its script names no model, so the router sets only their effort.")
     out = _context("SessionStart", note) if note else {}
     if notices and opens:
         out["systemMessage"] = "Model Router: " + " ".join(notices)
@@ -157,8 +171,8 @@ def agent_failed(hook_input: dict) -> dict | None:
         return _context("PostToolUseFailure", (
             f"{returned.route.sent} isn't available here. The '{returned.asked}' alias runs from now on, as Claude Code "
             "resolves it for this provider; the same agent call re-issued unchanged uses it."))
-    if returned.note not in (calls.MODEL_FAILED, calls.ROUTED_AROUND) or not returned.asked:
-        return None
+    if snap.options.force or returned.note not in (calls.MODEL_FAILED, calls.ROUTED_AROUND) or not returned.asked:
+        return None  # under FORCE neither a named model nor a route-around moves the call
     asked = returned.asked
     # snap.health may predate the strike just written, so the list reads the table again.
     usable = [n for n in reg.available(snap.options.cap, allowed=snap.allowed, table=health.load(),

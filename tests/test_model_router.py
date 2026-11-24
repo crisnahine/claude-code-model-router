@@ -3135,7 +3135,8 @@ class Hooks(Sandbox):
                      "- fable at high: open-ended research"):
             self.assertIn(line, text)
         self.assertIn("a contract or financial figures", text)  # any kind of work, not only code
-        self.assertIn("A call that names neither runs on its agent's own model or the conversation's.", text)
+        self.assertIn("A call that names neither runs on its agent's own model or the conversation's, within the cap.",
+                      text)
         self.assertIn('A redo after a failed check or a gap in the report keeps its `description` with "Redo:" in front '
                       "and runs above the run it redoes, effort before model.", text)
         self.assertNotIn("from its brief", text)
@@ -4115,7 +4116,8 @@ class MachineReadable(Sandbox):
         self.assertIsNone(self.json_out("models")["workflow_model"])
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="claude-opus-5-5")
         self.assertEqual(self.json_out("models")["workflow_model"], "claude-opus-5-5")
-        self.assertIn("pins every workflow agent to claude-opus-5-5, so Model Router sets only their effort", self.out("models"))
+        self.assertIn("pins every workflow agent whose script names no model to claude-opus-5-5, so Model Router sets "
+                      "only their effort", self.out("models"))
         note = hooks.session_start({"session_id": "s1"})["systemMessage"]
         self.assertIn("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on claude-opus-5-5", note)
         self.assertIn("so the router sets only their effort", note)
