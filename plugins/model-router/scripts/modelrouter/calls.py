@@ -182,8 +182,13 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
         return _stopped(session_id, outcome)
     route = route_of(session_id, outcome.key, outcome.spawn_id)
     asked = route.model if route and route.model else outcome.named
+    # A fallback call left as it is runs on the parent's model, which the router only guessed from the transcript.
+    # The fallback path sends no full ID, so its route records `sent` only for a call it rewrote, and a rewrite
+    # of effort alone is the router's, under a model the user pinned.
+    guessed = (route is not None and route.path == "fallback" and route.sent is None
+               and not outcome.named and route.source not in ("pin", "router"))
     if outcome.kind == "failure":
-        return _failed(session_id, outcome, route, asked)
+        return _failed(session_id, outcome, route, asked, guessed)
     swapped = bool(outcome.models_used)
     finished = not outcome.launched and not swapped
     try:
@@ -192,8 +197,9 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
     except OSError:
         pass
     try:
-        health.ran(asked, outcome.ran_as, outcome.ran_family, outcome.forced, swapped=swapped,
-                   untouched=route.was if route and route.path == "mod" else None)
+        if not guessed or outcome.ran_family == asked:
+            health.ran(asked, outcome.ran_as, outcome.ran_family, outcome.forced, swapped=swapped,
+                       untouched=route.was if route and route.path == "mod" else None)
     except OSError:
         pass
     ledger.result(session_id, outcome.agent, asked, outcome.ran_as, outcome.status,
@@ -209,8 +215,9 @@ def _wait_or_finish(session_id: str | None, outcome: Outcome, route: Route, fini
         _mutate("launched", session_id, lambda waiting: store.keep(waiting, outcome.agent_id, run))
 
 
-def _failed(session_id: str | None, outcome: Outcome, route: Route | None, asked: str | None) -> Returned:
-    if not asked or not health.is_model_error(outcome.error, outcome.interrupted):
+def _failed(session_id: str | None, outcome: Outcome, route: Route | None, asked: str | None,
+            guessed: bool) -> Returned:
+    if guessed or not asked or not health.is_model_error(outcome.error, outcome.interrupted):
         return Returned(asked, route, False)
     if route and route.version:
         # The caller or the agent chose this exact model, so its failure says nothing of the family.

@@ -3,7 +3,7 @@ the rewrite waiting for its result, the refused-rewrite guard and the one deny. 
 for the call is `calls.py`'s, the same on both paths."""
 from __future__ import annotations
 
-from . import health, settings, spawn, store
+from . import settings, spawn, store
 from . import config as cfg
 from . import router
 from .registry import Registry
@@ -77,13 +77,8 @@ def _guard(session_id: str | None, key: str, decision: router.Decision, reg: Reg
         return
     decision.update(action="keep", model=None, repeat_of=earlier.get("model"), reason=(
         "this call was rewritten once and came back without having run, so it is passed through unchanged"))
-    if not changed:  # an effort-only rewrite: no model to blame, and no repeat_of when `was` is unknown
+    if not changed:  # an effort-only rewrite: no repeat_of when `was` is unknown
         decision["source"] = None
-        return
-    try:
-        health.refused(decision["repeat_of"])
-    except OSError:
-        pass
 
 
 def _rewritten_input(tool_input: dict, decision: router.Decision) -> dict:

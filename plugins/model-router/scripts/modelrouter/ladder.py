@@ -57,7 +57,8 @@ def at_most(reg: Registry, model: str | None, value: str | None) -> str | None:
     return top if value in EFFORTS and top in EFFORTS and EFFORTS.index(value) > EFFORTS.index(top) else value
 
 
-def pick(reg: Registry, level: Level, usable: list[str]) -> Pick:
-    """The cheapest usable model for `level`, and the effort it runs that level at."""
-    model = reg.select(reg.levels[level].needs, usable)
+def pick(reg: Registry, level: Level, usable: list[str], lagging: frozenset = frozenset()) -> Pick:
+    """The cheapest usable model for `level`, one family up when its alias is in `lagging`, and the
+    effort it runs that level at."""
+    model = reg.past_lag(reg.select(reg.levels[level].needs, usable), usable, lagging)
     return Pick(model, effort_on(reg, level, model))

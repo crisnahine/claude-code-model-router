@@ -110,6 +110,7 @@ Rules and extra models go in `~/.claude/model-router.json` (yours, applies every
 - It doesn't change the main conversation's model or effort, because a model switch re-reads the conversation uncached. For a hard request, type `ultrathink` or use `/effort`.
 - It never picks a model from the work itself: Claude names one, or the agent's definition does. A call that names none stays on its parent's model.
 - It leaves forks alone, and agents whose definition it can't read, such as one defined on the command line.
+- It doesn't retry a call that fails on a model error. Set `fallbackModel` (or `--fallback-model`) for that. After a model error the router suggests a usable model to re-issue the call on, and after two it routes around that model for a day.
 - It routes a new model family only once the registry has an entry for it, and does nothing when hooks are switched off.
 - Its dollar figures are Claude Code's estimate, not your bill, and on a subscription usage inside the plan isn't billed in dollars. The main conversation's cost is in `/usage`.
 

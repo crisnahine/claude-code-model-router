@@ -46,6 +46,7 @@ class Facts:
     workflow: bool = False  # a workflow agent, which CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins
     session_effort: str | None = None  # the main conversation's level, for a call made from it
     effort_caps: Mapping[str, str] = field(default_factory=dict)  # maxEffortLevel per registry model, where set
+    lagging: frozenset = frozenset()  # Snapshot.lagging: the router's own pick moves one family up from these
 
 
 def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
@@ -111,7 +112,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         return _pinned(out, "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "workflow agent", model, level, effort, facts)
 
     floor = rule.level or rule.floor
-    target, source, why = None, None, ""
+    target, source, why, chosen = None, None, "", False  # chosen: the router picked the model, nobody named it
     if requested:
         target, source, why = requested, "caller", "the call names a model"
     elif reg.family(rule.model):
@@ -150,10 +151,10 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         # Nothing names a model, so Claude Code's own order applies: the parent's model.
         runs_on = out["was"]
         if floor and (level is None or level < floor):
-            level, target, source = floor, ladder.model_for(reg, floor), "rule"
+            level, target, source, chosen = floor, ladder.model_for(reg, floor), "rule", True
             why = f"a rule in model-router.json raises this agent to {floor}"
         elif facts.teammate and runs_on and reg.strength(runs_on) < reg.levels[Level.standard].needs:
-            level, target, source = Level.standard, ladder.model_for(reg, Level.standard), "router"
+            level, target, source, chosen = Level.standard, ladder.model_for(reg, Level.standard), "router", True
             why = f"a teammate starts no lower than {target}, since its model is fixed for all its tasks"
         elif runs_on and reg.clamp(runs_on, usable) != runs_on:
             # The parent's model was nobody's choice for this work, so the model the cap leaves runs at its own level.
@@ -164,15 +165,18 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
                        + (f"the parent's model, {runs_on}" if runs_on else "Claude Code's own choice") + held)
             return out
     elif floor and level < floor:
-        level, target = floor, ladder.model_for(reg, floor)
+        level, target, chosen = floor, ladder.model_for(reg, floor), True
         why += f"; a rule in model-router.json raises it to {floor}"
 
     named = tool_input.get("model") if source == "caller" else own_model if source == "pin" else None
-    final = reg.clamp(target, usable)
+    clamped = reg.clamp(target, usable)
+    final = reg.past_lag(clamped, usable, facts.lagging) if chosen else clamped
     # The caller's exact ID only survives a cap that keeps its family.
     out["version"] = named if isinstance(named, str) and named.lower() != final and reg.family(named) == final else None
-    if final != target:
+    if clamped != target:
         why += f"; {target} is over the cap or unavailable here"
+    if final != clamped:
+        why += f"; {clamped}'s alias runs an older model here"
     # Effort is set whenever nobody chose it: on current models it is the cheaper lever for quality.
     effort = None if decided else ladder.effort_on(reg, level, final)
     effort, floor_note = _session_floor(effort, final, facts)
@@ -203,6 +207,11 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
                                                else f", and {ran} gets no more effort" if free else "")
     final = reg.clamp(model, facts.usable)
     clamp_note = f"; {model} is over the cap or unavailable here" if final != model else ""
+    if model != ran and reg.past_lag(final, facts.usable, facts.lagging) != final:
+        # The next model is the router's own pick, so it passes over a family whose alias runs an older model.
+        clamp_note += f"; {final}'s alias runs an older model here"
+        final = reg.past_lag(final, facts.usable, facts.lagging)
+        effort = ladder.effort(reg, ladder.rung(reg, final))
     effort, floor_note = _session_floor(ladder.at_most(reg, final, effort) if free else None, final, facts)
     effort, capped_note = capped(effort, facts.effort_caps.get(final))
     came = "the run that came back before" if facts.on_record else "the run it would get unmarked"

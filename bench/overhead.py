@@ -35,7 +35,7 @@ MODEL_IDS = {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus":
 SESSION_MODEL = "claude-opus-5-5"
 USAGE = {"model": "claude-sonnet-5-5", "input_tokens": 12000, "output_tokens": 800,
          "cache_read_input_tokens": 40000, "cache_creation_input_tokens": 2000}
-MODEL_ERROR = "model claude-fable-5-2 is not available on this account"  # matches health.MODEL_ERROR
+MODEL_ERROR = "API Error: 404 not_found_error: model: claude-fable-5-2"  # matches health.MODEL_ERROR
 
 # Hook input per settings hook command, from the documented fields
 # (https://code.claude.com/docs/en/hooks.md); hook_input() adds the common ones.

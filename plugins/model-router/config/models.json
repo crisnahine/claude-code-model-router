@@ -34,12 +34,12 @@
     "haiku": "claude-haiku-5-5"
   },
   "older_aliases": {
-    "$comment": "Per provider, the families whose alias resolves to an older model than newest names (the alias table in https://code.claude.com/docs/en/model-config.md). The mod sends the newest ID for these instead of the alias.",
-    "anthropic_aws": ["sonnet", "haiku"],
-    "anthropic_google_cloud": ["haiku"],
-    "bedrock": ["sonnet", "haiku"],
-    "vertex": ["sonnet", "haiku"],
-    "foundry": ["opus", "sonnet", "haiku"]
+    "$comment": "Per provider, each family whose alias resolves to an older model than newest names, and the ID of that model (the alias table in https://code.claude.com/docs/en/model-config.md). The mod sends the newest ID for these instead of the alias.",
+    "anthropic_aws": {"sonnet": "claude-sonnet-4-6", "haiku": "claude-haiku-4-5"},
+    "anthropic_google_cloud": {"haiku": "claude-haiku-4-5"},
+    "bedrock": {"sonnet": "claude-sonnet-4-5", "haiku": "claude-haiku-4-5"},
+    "vertex": {"sonnet": "claude-sonnet-4-5", "haiku": "claude-haiku-4-5"},
+    "foundry": {"opus": "claude-opus-4-6", "sonnet": "claude-sonnet-4-5", "haiku": "claude-haiku-4-5"}
   },
   "levels": {
     "lookup": {

@@ -19,6 +19,7 @@ CLOUDS = ("bedrock", "vertex", "foundry")
 PROVIDERS = (*CLOUDS, "anthropic_aws", "anthropic_google_cloud", "mantle")
 # The userConfig keys in plugin.json.
 OPTIONS = ("routing_mode", "max_tier", "verify_gate")
+UNKNOWN = "unknown"  # a provider whose aliases aren't documented: only aliases are sent, and none counts as moving
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,7 @@ class Settings:
     effort_level: str | None = None  # CLAUDE_CODE_EFFORT_LEVEL
     agent_teams: bool = False  # CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
     cloud: str | None = None  # bedrock, vertex or foundry, from CLAUDE_CODE_USE_<NAME>
-    provider: str | None = None  # the one provider the CLAUDE_CODE_USE_<NAME> switches select, if clear
+    provider: str | None = None  # the provider the CLAUDE_CODE_USE_<NAME> switches select: None is the Anthropic API
 
 
 def truthy(value: str | None) -> bool:
@@ -47,14 +48,16 @@ def _on(value: str | None) -> bool:
 def _provider(on: set) -> str | None:
     """Bedrock and Foundry win over Claude Platform on AWS, and Claude Models on Google Cloud
     over Agent Platform (claude-platform-on-aws.md, claude-models-on-google-cloud-anthropic-managed.md).
-    Mantle, or any other mix, has no documented alias table, so it counts as unknown."""
-    if "mantle" in on:
+    Mantle, or any other mix, has no documented alias table, so it is UNKNOWN."""
+    if not on:
         return None
+    if "mantle" in on:
+        return UNKNOWN
     if on & {"bedrock", "foundry"}:
         on = on - {"anthropic_aws"}
     if "anthropic_google_cloud" in on:
         on = on - {"vertex"}
-    return next(iter(on)) if len(on) == 1 else None
+    return next(iter(on)) if len(on) == 1 else UNKNOWN
 
 
 def resolve(reg: Registry | None = None) -> Settings:
@@ -79,7 +82,9 @@ def resolve(reg: Registry | None = None) -> Settings:
         effort_level=env("CLAUDE_CODE_EFFORT_LEVEL"),
         agent_teams=truthy(env("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS")),
         cloud=next((c for c in CLOUDS if truthy(env(f"CLAUDE_CODE_USE_{c.upper()}"))), None),
-        provider=_provider({p for p in PROVIDERS if truthy(env(f"CLAUDE_CODE_USE_{p.upper()}"))}),
+        # A host that manages the provider ignores these switches in settings files, and its alias table isn't documented.
+        provider=UNKNOWN if env("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST")
+        else _provider({p for p in PROVIDERS if truthy(env(f"CLAUDE_CODE_USE_{p.upper()}"))}),
     )
 
 
@@ -88,12 +93,13 @@ class Snapshot:
     registry and options are read at once; the rest on first use, so a hook that never asks
     for the allowlist or the health table never reads them."""
 
-    def __init__(self, hook_input: dict | None = None) -> None:
+    def __init__(self, hook_input: dict | None = None, sends_ids: bool = True) -> None:
         self.hook_input = hook_input
         self.session_id = (hook_input or {}).get("session_id")
         self.registry = cfg.load(hook_input)
         self.options = resolve(self.registry)
         self.project: Path = cfg.project_dir(hook_input)
+        self.sends_ids = sends_ids  # False on the Agent call fallback, whose `model` takes only an alias
 
     @cached_property
     def health(self) -> health.Health:
@@ -101,11 +107,25 @@ class Snapshot:
 
     @cached_property
     def allowed(self) -> allowlist.Allowlist:
-        return allowlist.read(self.session_id, self.project, (self.hook_input or {}).get("settings"))
+        return allowlist.read(self.session_id, (self.hook_input or {}).get("settings"), self.options.provider)
+
+    @cached_property
+    def sendable(self) -> frozenset[str]:
+        """Families whose alias runs an older model here and whose newest ID this path sends in its place."""
+        reg, provider = self.registry, self.options.provider
+        return frozenset(n for n in reg.older_aliases.get(provider or "", {})
+                         if self.sends_ids and reg.newest_id(n, provider, self.allowed, self.health))
+
+    @cached_property
+    def lagging(self) -> frozenset[str]:
+        """Families whose alias runs an older model here with no newest ID sent in its place, unless the
+        user pinned the family's model. The router's own pick moves one family up from them."""
+        return frozenset(n for n in self.registry.older_aliases.get(self.options.provider or "", {})
+                         if n not in self.sendable and not os.environ.get(f"ANTHROPIC_DEFAULT_{n.upper()}_MODEL"))
 
     def pick(self, level: Level) -> ladder.Pick:
         """The ladder's pick for `level` among this setup's usable models."""
-        return ladder.pick(self.registry, level, self.usable)
+        return ladder.pick(self.registry, level, self.usable, self.lagging)
 
     def settle(self) -> None:
         """Write what reads only noticed: an outage the health table found too long. Dry runs skip it."""
@@ -117,4 +137,4 @@ class Snapshot:
 
     @cached_property
     def usable(self) -> list[str]:
-        return self.registry.available(self.options.cap, allowed=self.allowed, table=self.health)
+        return self.registry.available(self.options.cap, allowed=self.allowed, table=self.health, sendable=self.sendable)

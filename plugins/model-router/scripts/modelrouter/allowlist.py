@@ -1,37 +1,26 @@
 """Which registry models availableModels and deniedModels leave open, and the effort cap
 maxEffortLevel sets for each.
 
-The mod reads each settings source from the engine and sends the keys that matter;
-without the mod, or for a source whose read failed, the settings files are read at their
-documented paths. Where the engine sent no policy, the managed files can only narrow what it
-reports. The rules live here, in `from_layers`."""
+The mod reads each settings source from the engine and sends the keys that matter. Without
+those layers no list applies here: Claude Code enforces the lists on every subagent model and
+falls back instead of failing (https://code.claude.com/docs/en/sub-agents.md). The rules live
+here, in `from_layers`."""
 from __future__ import annotations
 
-import json
-import os
 import re
-import stat
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 
 from . import store
-from .config import EFFORTS
+from .config import EFFORTS, project_dir
 from .registry import Registry
 
 SOURCES = ("policy", "user", "project", "local", "flag")
 KEYS = ("availableModels", "deniedModels", "availableModelsMatch", "modelOverrides", "maxEffortLevel", "modelSettings")
-# https://code.claude.com/docs/en/managed-settings.md. Fixed per OS: a trusted repository's
-# `env` block reaches hook processes, so no environment variable may move this.
-MANAGED_ROOTS = {"darwin": "/Library/Application Support/ClaudeCode", "win32": r"C:\Program Files\ClaudeCode"}
-MANAGED_ROOT: Path | None = None  # tests only
+# Where a blocked family alias moves to the newest permitted version (https://code.claude.com/docs/en/model-config.md).
+# None is the Anthropic API.
+SUBSTITUTING = (None, "anthropic_aws")
 MAX_ENTRIES = 200
 MAX_CHARS = 200
-MAX_BYTES = 1 << 20
-
-
-def managed_root(platform: str = sys.platform) -> Path:
-    return MANAGED_ROOT or Path(MANAGED_ROOTS.get(platform, "/etc/claude-code"))
 
 
 def _entries(raw: list) -> list[str]:
@@ -91,8 +80,8 @@ def _layers(raw: object) -> dict[str, dict]:
 
 def _blocked_family(reg: Registry, entry: str) -> str | None:
     """The registry model a deny entry blocks whole: one that names the family with no version.
-    A version, or a context variant such as sonnet[1m], blocks that model only: Claude Code
-    moves the alias to the newest permitted version, so the alias stays usable."""
+    A version, or a context variant such as sonnet[1m], blocks that model only. Where the alias
+    doesn't move to the newest permitted version, `Allowlist.permitted` checks the version it runs."""
     e = entry.strip().lower()
     if e in ("best", "opusplan", "default") or "[" in e:
         return None
@@ -122,37 +111,41 @@ class Allowlist:
     deny: tuple[str, ...] | None
     exact: bool  # availableModelsMatch is "exact"
     overrides: bool  # some source sets modelOverrides
-    source: str  # "engine" or "files"
-    floor_allow: tuple[str, ...] | None = None  # the managed files' list, which must permit too
     effort_caps: tuple[dict, ...] = ()  # each source's maxEffortLevel and modelSettings caps
+    provider: str | None = None  # settings.provider: whether a blocked alias moves to a permitted version
 
-    def permitted(self, reg: Registry) -> set[str]:
+    def permitted(self, reg: Registry, sendable: frozenset = frozenset()) -> set[str]:
         """Registry models the lists leave open. An allow entry matches its family, so
-        claude-opus-4-6 permits opus. A deny entry blocks a family only when it names the family."""
+        claude-opus-4-6 permits opus. A deny entry blocks a family only when it names the family.
+        On a provider whose alias doesn't move, a family also needs the version its alias runs to be
+        permitted, unless it is in `sendable` (`Snapshot.sendable`): its newest ID is sent instead."""
         names = set(reg.models)
-        for entries in (self.allow, self.floor_allow):
-            if entries is not None:
-                found = {reg.family(e) for e in _effective(reg, entries)}
-                names = {n for n in names if n in found}
+        if self.allow is not None:
+            found = {reg.family(e) for e in _effective(reg, self.allow)}
+            names = {n for n in names if n in found}
         if self.deny is not None:
             blocked = {_blocked_family(reg, e) for e in self.deny} - {None}
             # A project's model that resolves to a blocked family, such as `best`, goes with it.
             names = {n for n in names if reg.family(n) not in blocked}
-        return names
+        if self.provider in SUBSTITUTING:
+            return names
+        runs = reg.older_aliases.get(self.provider or "") or {}
+        return {n for n in names if n not in reg.newest or n in sendable
+                or self._lists_permit(reg, n, runs.get(n, reg.newest[n]))}
 
-    def permits_id(self, reg: Registry, name: str, model_id: str) -> bool:
-        """Whether the full ID of family `name` may run: not ruled out by the lists or by
-        modelOverrides, which Claude Code applies to the ID itself."""
+    def _lists_permit(self, reg: Registry, name: str, model_id: str) -> bool:
         def names(entries: tuple[str, ...], prefix: bool) -> bool:
             return any(e.lower() in (name, model_id) or prefix and model_id.startswith(e.lower() + "-")
                        for e in entries)
 
-        for entries in (self.allow, self.floor_allow):
-            if entries is not None and not names(_effective(reg, entries), not self.exact):
-                return False
-        if self.deny is not None and names(self.deny, True):
+        if self.allow is not None and not names(_effective(reg, self.allow), not self.exact):
             return False
-        return not self.overrides
+        return self.deny is None or not names(self.deny, True)
+
+    def permits_id(self, reg: Registry, name: str, model_id: str) -> bool:
+        """Whether the full ID of family `name` may run: not ruled out by the lists or by
+        modelOverrides, which Claude Code applies to the ID itself."""
+        return self._lists_permit(reg, name, model_id) and not self.overrides
 
     def effort_cap(self, reg: Registry, name: str | None) -> str | None:
         """The highest effort `name`'s family may run at, or None for no cap. The lowest cap of any
@@ -170,30 +163,26 @@ class Allowlist:
         return min(found, key=EFFORTS.index) if found else None
 
 
-def from_layers(layers: dict, source: str = "engine", floor: dict | None = None) -> Allowlist:
+def from_layers(layers: dict, provider: str | None = None) -> Allowlist:
     """availableModels as Claude Code applies it: a policy list applies alone, otherwise the
     user, project, local and flag lists are concatenated. deniedModels and
-    availableModelsMatch count only in policy. `floor` is the policy the managed files hold: its
-    deny entries add to the engine's, its allow list must permit too, and either one saying
-    "exact" makes matching exact. A stricter answer is the safe one."""
+    availableModelsMatch count only in policy."""
     cleaned = _layers(layers)
     layers = {s: cleaned.get(s, {}) for s in SOURCES}
-    policy, floor = layers["policy"], _layer(floor, True)
-    if policy.get("unreadable") or floor.get("unreadable"):
-        policy, floor = {"availableModels": []}, {"availableModels": []}  # a policy we can't trust leaves nothing open
-    allow = policy.get("availableModels", floor.get("availableModels"))
+    policy = layers["policy"]
+    if policy.get("unreadable"):
+        policy = {"availableModels": []}  # a policy we can't trust leaves nothing open
+    allow = policy.get("availableModels")
     if allow is None:
         lists = [layers[s]["availableModels"] for s in SOURCES[1:] if "availableModels" in layers[s]]
         allow = sum(lists, []) if lists else None
-    denies = [d for d in (policy.get("deniedModels"), floor.get("deniedModels")) if d is not None]
-    deny = tuple(dict.fromkeys(sum(denies, []))) if denies else None
-    held = floor.get("availableModels")
-    return Allowlist(allow=None if allow is None else tuple(allow), deny=deny,
-                     exact="exact" in (policy.get("availableModelsMatch"), floor.get("availableModelsMatch")),
-                     overrides=any(layer.get("modelOverrides") for layer in [*layers.values(), floor]),
-                     source=source, floor_allow=None if held is None else tuple(held),
-                     effort_caps=tuple(layer for layer in [*layers.values(), floor]
-                                       if "maxEffortLevel" in layer or "modelSettings" in layer))
+    deny = policy.get("deniedModels")
+    return Allowlist(allow=None if allow is None else tuple(allow), deny=None if deny is None else tuple(deny),
+                     exact=policy.get("availableModelsMatch") == "exact",
+                     overrides=any(layer.get("modelOverrides") for layer in layers.values()),
+                     effort_caps=tuple(layer for layer in layers.values()
+                                       if "maxEffortLevel" in layer or "modelSettings" in layer),
+                     provider=provider)
 
 
 def remember(session_id: str | None, sent: object) -> dict[str, dict] | None:
@@ -204,7 +193,7 @@ def remember(session_id: str | None, sent: object) -> dict[str, dict] | None:
         return None
     try:
         if session_id and layers != stored:
-            store.save_entry("allowlist", session_id, {"layers": layers})
+            store.save_entry("allowlist", session_id, {"layers": layers, "project": str(project_dir())})
     except Exception:
         pass  # these layers still answer this call
     return layers
@@ -223,126 +212,22 @@ def _sent(session_id: str | None, sent: object) -> tuple[dict[str, dict] | None,
     return ({**stored, **_layers(sent)} if isinstance(sent, dict) else None), stored  # a source left out keeps what it last sent
 
 
-def read(session_id: str | None, project: Path, sent: object = None) -> Allowlist:
-    """Each source from the layers sent now, else the latest the session sent, else its
-    settings file. Without an engine policy the managed files apply as a floor. Reading stores
-    nothing: the mod's own hooks call `remember`."""
+def _latest() -> dict[str, dict]:
+    """The layers the most recent session in this project sent, else the most recent session's.
+    shortcut: a skill command has no session id, so with no session of its project on record it reads
+    another project's; pass skill commands the session id if that misleads a report."""
+    try:
+        entries = [e for e in store.load_state_file(store.data_dir() / "allowlist.json", durable=False).values() if isinstance(e, dict)]
+        here = [e for e in entries if e.get("project") == str(project_dir())]
+        return _layers(max(here or entries, key=lambda e: store.stamp(e.get("_at")), default={}).get("layers"))
+    except Exception:
+        return {}
+
+
+def read(session_id: str | None, sent: object = None, provider: str | None = None) -> Allowlist:
+    """Each source from the layers sent now, else the latest the session sent. With none, no list
+    applies. Reading stores nothing: the mod's own hooks call `remember`."""
     layers, stored = _sent(session_id, sent)
-    if layers is None:
-        layers = stored
-    files = file_layers(project)
-    merged = {s: layers[s] if s in layers else files[s] for s in SOURCES}
-    floor = files["policy"]
-    if "policy" in layers:
-        # Under first-wins Claude Code can skip these files, and its answer is what runs. maxEffortLevel is read
-        # from every admin source, but a policyHelper's output replaces them all, so a reported cap stands alone
-        # (https://code.claude.com/docs/en/managed-settings.md).
-        own_cap = "maxEffortLevel" in layers["policy"]
-        floor = {k: v for k, v in floor.items() if k == "maxEffortLevel" and not own_cap}
-    return from_layers(merged, "engine" if layers else "files", floor=floor)
-
-
-def file_layers(project: Path) -> dict[str, dict]:
-    """The settings files as the sources they stand for. The flag source and the managed
-    tiers that have no file (server-managed, MDM, registry) can't be seen from here. The shared file is
-    read from the session's primary working directory, CLAUDE_PROJECT_DIR, which stays put through cd."""
-    shared = Path(os.environ.get("CLAUDE_PROJECT_DIR") or project) / ".claude" / "settings.json"
-    return {"policy": _policy(), "user": _file(store.claude_home() / "settings.json"),
-            "project": _file(shared), "local": _local(project), "flag": {}}
-
-
-def _load(path: Path) -> tuple[dict, bool]:
-    """A settings file's object and whether it could be read. A file that isn't there, or is empty
-    or blank, reads as empty. One that is there but isn't a small regular file holding a JSON object doesn't:
-    a symlink to a device or a pipe must not hang the hook."""
-    try:
-        if not stat.S_ISREG(path.stat().st_mode):
-            return {}, False
-        with path.open("rb") as handle:
-            raw = handle.read(MAX_BYTES + 1)
-        if not raw.strip():
-            return {}, True  # an empty file holds no setting
-        value = json.loads(raw.decode("utf-8")) if len(raw) <= MAX_BYTES else None
-    except (FileNotFoundError, NotADirectoryError):
-        return {}, True
-    except (OSError, ValueError, RecursionError):
-        return {}, False
-    return (value, True) if isinstance(value, dict) else ({}, False)
-
-
-def _file(path: Path) -> dict:
-    return _layer(_load(path)[0])
-
-
-def _policy() -> dict:
-    """managed-settings.json, then each non-hidden managed-settings.d/*.json in name order:
-    lists combine, a later single value replaces an earlier one. A file that is there but
-    can't be read leaves no model open: reading it as no policy would drop a deny. Folders are
-    skipped, since Claude Code reads files."""
-    main = managed_root() / "managed-settings.json"
-    readable = True
-    try:
-        drop_ins = sorted(p for p in (main.parent / "managed-settings.d").iterdir()
-                          if p.suffix == ".json" and not p.name.startswith(".") and not p.is_dir())
-    except (FileNotFoundError, NotADirectoryError):
-        drop_ins = []
-    except OSError:
-        drop_ins, readable = [], False
-    merged: dict = {}
-    for path in [main, *drop_ins]:
-        data, ok = _load(path)
-        readable = readable and ok
-        for key, value in _layer(data, True).items():
-            if isinstance(value, list):
-                value = merged.get(key, []) + [e for e in value if e not in merged.get(key, [])]
-            elif isinstance(value, bool):
-                value = merged.get(key, False) or value
-            elif isinstance(value, dict):
-                value = {**merged.get(key, {}), **value}
-            merged[key] = value
-    return merged if readable else {**merged, "unreadable": True}
-
-
-def _local(project: Path) -> dict:
-    """settings.local.json at the repository root, over the session folder's own."""
-    own = _file(project / ".claude" / "settings.local.json")
-    root = _repository_root(project)
-    if root is None:
-        return own
-    return {**own, **_file(root / ".claude" / "settings.local.json")}
-
-
-def _first_line(path: Path) -> str:
-    if not path.is_file():
-        raise OSError(path)
-    with path.open("r", encoding="utf-8") as handle:
-        return handle.readline(4096).strip()
-
-
-def _repository_root(project: Path) -> Path | None:
-    """Where Claude Code keeps the local file in a git repository, or None to read it beside
-    settings.json (https://code.claude.com/docs/en/settings.md). A worktree's root is the main
-    checkout's, found only through the layout git itself writes: a `.git` file naming
-    <main>/.git/worktrees/<name>, whose commondir leads back to <main>/.git. None also on
-    Windows, for the home folder, and for a root, `.git` or `.claude` that another user owns:
-    those are what a planted repository could point at."""
-    if os.name == "nt":
-        return None
-    try:
-        for folder in (project, *project.parents):
-            git = folder / ".git"
-            if git.is_dir():
-                root = folder
-            elif git.is_file():
-                gitdir = (folder / _first_line(git).removeprefix("gitdir:").strip()).resolve()
-                common = (gitdir / _first_line(gitdir / "commondir")).resolve()
-                if gitdir.parent.name != "worktrees" or common != gitdir.parent.parent or common.name != ".git":
-                    return None
-                root = common.parent
-            else:
-                continue
-            owned = all(os.stat(p).st_uid == os.getuid() for p in (root, root / ".git", root / ".claude"))
-            return root if owned and root.resolve() != Path.home().resolve() else None
-    except (OSError, ValueError, RuntimeError):
-        return None
-    return None
+    if layers is None and not session_id:
+        stored = _latest()
+    return from_layers(stored if layers is None else layers, provider)

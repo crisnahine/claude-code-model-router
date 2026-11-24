@@ -56,7 +56,8 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     task = calls.task(tool_input) if redo else None
     found = router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable, definition=definition,
                          parent=parent, earlier=calls.last_run(hook_input.get("session_id"), task) if task else None,
-                         teammate=teammate, workflow=workflow, session_effort=session_effort, effort_caps=caps)
+                         teammate=teammate, workflow=workflow, session_effort=session_effort, effort_caps=caps,
+                         lagging=snap.lagging)
     unmarked = _unmarked_run(found, snap) if redo and found.earlier is None else None
     return replace(found, earlier=unmarked, on_record=False) if unmarked and unmarked["level"] else found
 

@@ -355,8 +355,8 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
         aliases=aliases,
         prices=dict(base.get("prices") or {}),
         newest={k: v for k, v in (base.get("newest") or {}).items() if not k.startswith("$") and isinstance(v, str)},
-        older_aliases={k: tuple(v) for k, v in (base.get("older_aliases") or {}).items()
-                       if not k.startswith("$") and isinstance(v, list)},
+        older_aliases={k: dict(v) for k, v in (base.get("older_aliases") or {}).items()
+                       if not k.startswith("$") and isinstance(v, dict)},
         rules=_rules(base.get("agents") or {}, mine.get("agents") or {}, theirs.get("agents") or {}, held),
         problems=tuple(problems),
         held=tuple(held),

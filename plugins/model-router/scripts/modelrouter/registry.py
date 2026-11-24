@@ -3,8 +3,8 @@
 `config.load` builds one Registry per hook call from config/models.json and the override
 files, and every step reads that value. Nothing here names a model: the list comes from the
 files, narrowed by what this setup shows: the user's cap, the availableModels and
-deniedModels settings, and models that have been failing, silently running as something
-else, or not accepted on agent calls."""
+deniedModels settings, and models that have been failing or silently running as something
+else."""
 from __future__ import annotations
 
 import os
@@ -67,7 +67,7 @@ class Registry:
     aliases: Mapping[str, str] = field(default_factory=dict)
     prices: Mapping[str, Any] = field(default_factory=dict)  # the shipped list prices, which the benchmark reads
     newest: Mapping[str, str] = field(default_factory=dict)
-    older_aliases: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    older_aliases: Mapping[str, Mapping[str, str]] = field(default_factory=dict)  # provider: family: the ID its alias runs
     rules: Mapping[str, Rule] = field(default_factory=dict)
     problems: tuple[str, ...] = ()  # keys an override file had wrong and the registry dropped
     held: tuple[Held, ...] = ()
@@ -112,10 +112,10 @@ class Registry:
         return model_id if allowed.permits_id(self, name, model_id) and table.healthy(model_id) else None
 
     def available(self, cap: str | None = None, *, allowed: allowlist.Allowlist | None = None,
-                  table: health.Health | None = None) -> list[str]:
+                  table: health.Health | None = None, sendable: frozenset = frozenset()) -> list[str]:
         """Usable models, weakest first: inside the cap, permitted by `allowed` (none: no
-        allowlist filter), and healthy. The health filter is dropped rather than leave nothing
-        to route to; the allowlist's is not."""
+        allowlist filter; `sendable` as in `Allowlist.permitted`), and healthy. The health filter
+        is dropped rather than leave nothing to route to; the allowlist's is not."""
         names = self.by_strength()
         if cap:
             # Under a cap, only models whose strength the user vouches for count: a model a
@@ -123,19 +123,27 @@ class Registry:
             vouched = [n for n in names if self.models[n].trusted] or names
             names = [n for n in names if n in vouched and self.strength(n) <= self.strength(cap)]
         if allowed is not None:
-            permitted = allowed.permitted(self)
+            permitted = allowed.permitted(self, sendable)
             names = [n for n in names if n in permitted]
         table = table or health.load()
         return [n for n in names if table.healthy(n)] or names
 
     def clamp(self, name: str, usable: list[str]) -> str:
-        """The usable model closest to `name` without exceeding it, else the weakest usable. The
-        stand-in is never a model a repository added, whose rank is only that repository's claim."""
+        """`name` if usable, else the next stronger usable model, else the strongest usable one: a step down
+        only when the cap or availability leaves nothing stronger. The stand-in is never a model a
+        repository added, whose rank is only that repository's claim."""
         if name in usable or not usable:
             return name
         trusted = [n for n in usable if self.models[n].trusted] or usable
-        lower = [n for n in trusted if self.strength(n) <= self.strength(name)]
-        return lower[-1] if lower else trusted[0]
+        higher = [n for n in trusted if self.strength(n) > self.strength(name)]
+        return higher[0] if higher else trusted[-1]
+
+    def past_lag(self, name: str | None, usable: list[str], lagging: frozenset) -> str | None:
+        """`name`, or the next stronger usable model when `name`'s alias runs an older version here
+        (`Snapshot.lagging`): one family up at most, whether or not that one lags too."""
+        if name not in lagging:
+            return name
+        return next((n for n in self.by_strength(usable) if self.models[n].trusted and self.stronger(n, name)), name)
 
     def select(self, needs: float, usable: list[str]) -> str | None:
         """The cheapest usable model strong enough for `needs`, else the strongest usable. A model a
