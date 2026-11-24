@@ -1,6 +1,7 @@
 """The model the conversation itself runs on, which subagents inherit by default."""
 from __future__ import annotations
 
+import datetime as _dt
 import json
 import os
 from typing import Iterator
@@ -54,11 +55,12 @@ def handed_back(transcript_path: object) -> bool:
     return False
 
 
-def from_transcript(transcript_path: object) -> str | None:
-    """The model of the newest main-thread assistant message, read from the file's tail."""
+def from_transcript(transcript_path: object) -> tuple[str | None, float | None]:
+    """The model of the newest main-thread assistant message, read from the file's tail, and
+    when it was written (None when its timestamp doesn't parse)."""
     tail = transcript_tail(transcript_path, 512 * 1024)
     if tail is None:
-        return None
+        return None, None
     for line in reversed(tail.splitlines()):
         if '"assistant"' not in line or '"model"' not in line:
             continue
@@ -71,11 +73,21 @@ def from_transcript(transcript_path: object) -> str | None:
         message = row.get("message")
         model = message.get("model") if isinstance(message, dict) else None
         if isinstance(model, str) and model and not model.startswith("<"):
-            return model
-    return None
+            try:
+                at = _dt.datetime.fromisoformat(str(row.get("timestamp", "")).replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                at = None
+            return model, at
+    return None, None
 
 
 def model(session_id: str | None, transcript_path: object = None) -> str | None:
-    """Best effort: what the transcript shows, else what SessionStart or PostModelSwitch
-    recorded. SessionStart doesn't always carry `model`."""
-    return from_transcript(transcript_path) or store.load_entry("sessions", session_id).get("model")
+    """Best effort: the newer of the transcript's last main-thread reply and what SessionStart or
+    PostModelSwitch recorded, so a /model switch counts before the new model replies. A reply with
+    no readable time wins. SessionStart doesn't always carry `model`."""
+    seen, at = from_transcript(transcript_path)
+    entry = store.load_entry("sessions", session_id)
+    recorded = entry.get("model")
+    if recorded and (not seen or (at is not None and store.stamp(entry.get("_at")) > at)):
+        return recorded
+    return seen or recorded

@@ -35,6 +35,7 @@ class Settings:
     subagent_effort: str | None = None  # CLAUDE_CODE_SUBAGENT_EFFORT
     workflow_model: str | None = None  # CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL, which pins every workflow agent's model
     effort_level: str | None = None  # CLAUDE_CODE_EFFORT_LEVEL
+    agent_teams: bool = False  # CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
     cloud: str | None = None  # bedrock, vertex or foundry, from CLAUDE_CODE_USE_<NAME>
     provider: str | None = None  # the one provider the CLAUDE_CODE_USE_<NAME> switches select, if clear
     api_key: str | None = field(default=None, repr=False)  # ANTHROPIC_API_KEY
@@ -105,6 +106,7 @@ def resolve(reg: Registry | None = None, recorded: bool = False) -> Settings:
         subagent_effort=env("CLAUDE_CODE_SUBAGENT_EFFORT"),
         workflow_model=env("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL"),
         effort_level=env("CLAUDE_CODE_EFFORT_LEVEL"),
+        agent_teams=truthy(env("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS")),
         cloud=next((c for c in CLOUDS if truthy(env(f"CLAUDE_CODE_USE_{c.upper()}"))), None),
         provider=_provider({p for p in PROVIDERS if truthy(env(f"CLAUDE_CODE_USE_{p.upper()}"))}),
         api_key=env("ANTHROPIC_API_KEY"),

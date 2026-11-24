@@ -71,7 +71,7 @@ class Sandbox(unittest.TestCase):
         self.patch = mock.patch.dict(os.environ, self.env)
         self.patch.start()
         for name in list(os.environ):
-            if name.startswith(("CLAUDE_PLUGIN_OPTION_", "CLAUDE_CODE_SUBAGENT_", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_USE_", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "DISABLE_PROMPT_CACHING", "ANTHROPIC_")):
+            if name.startswith(("CLAUDE_PLUGIN_OPTION_", "CLAUDE_CODE_SUBAGENT_", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "CLAUDE_CODE_USE_", "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS", "DISABLE_PROMPT_CACHING", "ANTHROPIC_")):
                 del os.environ[name]
         self.managed = self.home / "managed-settings.json"
         self.managed_root = mock.patch.object(allowlist, "MANAGED_ROOT", self.home)
@@ -2107,7 +2107,8 @@ class Router(Sandbox):
     def test_the_subagent_effort_variable_does_not_reach_a_teammate(self):
         self.options(CLAUDE_CODE_SUBAGENT_EFFORT="low")
         self.assertEqual(self.decide("general-purpose", HARD)["action"], "keep")
-        # The fallback knows a teammate by its named Agent call, the mod by the spawn's kind.
+        # The fallback knows a teammate by its named Agent call with agent teams on, the mod by the spawn's kind.
+        self.options(CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1")
         out = self.pre("general-purpose", HARD, name="auditor")
         self.assertEqual((out["updatedInput"]["effort"], out["updatedInput"]["name"]), ("high", "auditor"))
         for kept in ({"isolation": "worktree"}, {"effort": "low"}):
@@ -5778,6 +5779,7 @@ class SpawnPaths(Sandbox):
                  ("general-purpose", LOOKUP, {"model": "opus"}), ("general-purpose", HARD, {"effort": "low"}),
                  ("general-purpose", LOOKUP, {"model": "sonnet", "effort": "high"}),
                  ("general-purpose", LOOKUP, {"name": "auditor"})]  # a named call: a teammate, which casts no votes
+        self.options(CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1")
         for index, (agent, brief, extra) in enumerate(cases):
             with self.subTest(agent=agent, brief=brief, extra=extra):
                 call = self.call(agent, brief, tool_use_id=f"t{index}", **extra)

@@ -41,10 +41,10 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     # agents start no lower than the request's level; a redo still climbs from there.
     floor = request.load(hook_input.get("session_id")).floor if profile.role(agent).strong else None
     # The mod says so. On the fallback, a named call from the main conversation without `isolation` launches
-    # as a teammate when agent teams are on (sub-agents.md, Subagent names); that is the one hook-visible sign.
+    # as a teammate only when agent teams are on (agent-teams.md); under -p it never does, which a hook can't see.
     name = tool_input.get("name")
     named = isinstance(name, str) and bool(name.strip()) and not tool_input.get("isolation") and not hook_input.get("agent_id")
-    teammate = hook_input.get("kind") == "teammate" or named
+    teammate = hook_input.get("kind") == "teammate" or (named and snap.options.agent_teams)
     caps = {n: c for n in reg.models for c in [snap.allowed.effort_cap(reg, n)] if c}
     # The main conversation's level: the mod reads it from the main loop's requests, a hook gets it as `effort`.
     # A nested call runs at its parent's effort instead, so it gets none.
