@@ -75,13 +75,21 @@ def _receives(body: str, frontmatter: str, count: int) -> bool:
     return any(re.search(rf"(?<!\\)\${re.escape(name)}\b", body) for name in names)
 
 
-def profile_skill(args: object, body: object, rendered: bool) -> dict:
+def _placeholder(raw: str) -> bool:
+    """Whether a raw skill file has a placeholder for its first argument."""
+    raw = raw.lstrip("\ufeff")
+    front = _FRONTMATTER.match(raw)
+    return _receives(raw[front.end():] if front else raw, front.group(1) if front else "", 1)
+
+
+def profile_skill(args: object, body: object, rendered: bool, raw: object = None) -> dict:
     """A typed skill's profile. A skill whose content takes its arguments (a $ARGUMENTS, $1 or named
     placeholder) and is given a task in them runs that task, so the arguments alone set the level: its own
-    instructions, a pipeline's say, are the same on every use. Arguments that only name a target leave the
-    task to the body, at most complex. A skill that takes no placeholder, or is typed with no arguments, is
-    its body: the higher of the arguments' level and the body's opening counts. `rendered` is the engine's expansion, where a skill that takes no
-    placeholder gets the arguments appended as "ARGUMENTS: ..."; otherwise body is the raw file."""
+    instructions, a pipeline's say, are the same on every use. Arguments that only name a target, or none, leave
+    the task to such a body, at most complex. A skill that takes no placeholder is its body: the higher of the
+    arguments' level and the body's opening counts. `rendered` is the engine's expansion, where a skill that takes no
+    placeholder gets the arguments appended as "ARGUMENTS: ..."; otherwise body is the raw file. With no arguments
+    the expansion can't show a placeholder, so `raw`, the skill's file when found, shows it."""
     args = args.strip() if isinstance(args, str) else ""
     body = (body if isinstance(body, str) else "").lstrip("\ufeff")
     body = re.sub(r"\A\s*Base directory for this skill: [^\n]*\n", "", body)
@@ -91,10 +99,10 @@ def profile_skill(args: object, body: object, rendered: bool) -> dict:
         # The engine appends the trailer last, so only its last occurrence counts, and any trailer at all
         # means no placeholder took them: an unexpected format errs toward the higher level.
         head, trailer, _ = body.rpartition("\nARGUMENTS: ")
-        takes_args = bool(args) and not trailer
+        takes_args = not trailer if args else isinstance(raw, str) and _placeholder(raw)
         body = head if trailer else body
     else:
-        takes_args = bool(args) and _receives(body, front.group(1) if front else "", len(args.split()))
+        takes_args = _receives(body, front.group(1) if front else "", len(args.split()) or 1)
     if takes_args and asks_for_work(args):
         return profile_prompt(args)
     parts = [profile_prompt(text) for text in (args, body[:SKILL_BODY_CHARS])]
@@ -117,23 +125,30 @@ def _read_skill(paths: list[Path]) -> str | None:
     return None
 
 
+def _skill_file(plugin: str | None, name: str, project: Path) -> str | None:
+    """A typed skill's raw file: under .claude for a project or user skill, under the plugin's install folder for
+    a plugin's, found from the install record alone, since a walk of the plugins folder is too slow for every
+    typed line."""
+    if plugin:
+        roots = [cfg.PLUGIN_ROOT] if plugin == cfg.PLUGIN_NAME else agents.installed_roots(plugin)
+        return _read_skill([root / "skills" / name / "SKILL.md" for root in roots])
+    project, home = project / ".claude", store.claude_home()
+    return _read_skill([project / "skills" / name / "SKILL.md", home / "skills" / name / "SKILL.md",
+                        project / "commands" / f"{name}.md", home / "commands" / f"{name}.md"])
+
+
 def _typed_skill(prompt: str, project: Path) -> dict | None:
     """The profile behind "/name args" when name is a project or user skill or command on disk, or
-    "/plugin:name args". UserPromptSubmit sees only the typed line, so it reads the body from the file: under
-    .claude for a project or user skill, under the plugin's install folder for a plugin's, found from the install
-    record alone, since a walk of the plugins folder is too slow for every typed line. A plugin's skill it can't
-    find is profiled by its arguments alone, which the mod's reading of the rendered body can raise."""
+    "/plugin:name args". UserPromptSubmit sees only the typed line, so it reads the body from the file. A
+    plugin's skill it can't find is profiled by its arguments alone, which the mod's reading of the rendered
+    body can raise."""
     match = re.match(r"/(?:([A-Za-z0-9_.-]+):)?([A-Za-z0-9_.-]+)(?:\s+(.*))?\Z", prompt.strip(), re.S)
     if not match:
         return None
     plugin, name, args = match.group(1), match.group(2), match.group(3) or ""
+    body = _skill_file(plugin, name, project)
     if plugin:
-        roots = [cfg.PLUGIN_ROOT] if plugin == cfg.PLUGIN_NAME else agents.installed_roots(plugin)
-        body = _read_skill([root / "skills" / name / "SKILL.md" for root in roots])
         return profile_skill(args, body or "", rendered=False)
-    project, home = project / ".claude", store.claude_home()
-    body = _read_skill([project / "skills" / name / "SKILL.md", home / "skills" / name / "SKILL.md",
-                        project / "commands" / f"{name}.md", home / "commands" / f"{name}.md"])
     return None if body is None else profile_skill(args, body, rendered=False)
 
 
@@ -156,9 +171,10 @@ def from_prompt(prompt: object, project: Path) -> Intake:
     return Intake(delivered, True, result["level"], tuple(result["signals"]))
 
 
-def from_turn(text: object, command: object, origin: object) -> Intake:
+def from_turn(text: object, command: object, origin: object, project: Path | None = None) -> Intake:
     """The mod's turn.start path. The command's name, args and rendered body come from the engine alone;
-    the text only shows whether the command's own line opens this turn."""
+    the text only shows whether the command's own line opens this turn. A command typed with no arguments is
+    also read from its file in `project`, to see whether it is a template."""
     text = text if isinstance(text, str) else ""
     name = command.get("name") if isinstance(command, dict) else None
     if not (name is not None and text.lstrip().startswith("<command-") and f"<command-name>/{name}</command-name>" in text):
@@ -166,5 +182,12 @@ def from_turn(text: object, command: object, origin: object) -> Intake:
     delivered = is_delivered(text)
     if not ((command is not None or is_user_prompt(text)) and str(origin) not in MACHINE_ORIGINS):
         return Intake(delivered, False, None, ())
-    result = profile_skill(command.get("args"), command.get("body"), rendered=True) if command else profile_prompt(text)
+    if not command:
+        result = profile_prompt(text)
+    else:
+        raw = None
+        if project is not None and not (isinstance(command.get("args"), str) and command["args"].strip()):
+            plugin, _, leaf = str(name).rpartition(":")
+            raw = _skill_file(plugin or None, leaf, project)
+        result = profile_skill(command.get("args"), command.get("body"), rendered=True, raw=raw)
     return Intake(delivered, True, result["level"], tuple(result["signals"]), command.get("name") if command else None)

@@ -160,7 +160,8 @@ def turn(hook_input: dict) -> dict | None:
     _heard(hook_input)
     snap = settings.Snapshot(hook_input)
     reg, options = snap.registry, snap.options
-    seen = intake.from_turn(hook_input.get("text"), hook_input.get("command"), hook_input.get("origin"))
+    seen = intake.from_turn(hook_input.get("text"), hook_input.get("command"), hook_input.get("origin"),
+                           snap.project)
     if options.mode != "off" and seen.person and seen.command:
         # The level is the request's, which the floor and the Stop check read, whatever the effort switches say.
         try:

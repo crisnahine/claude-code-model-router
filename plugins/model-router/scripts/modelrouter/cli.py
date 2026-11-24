@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as exc:  # noqa: BLE001 - offline or blocked: say so and show what is on disk
             print(f"Couldn't reach the Claude Code docs ({exc}); showing the last check.")
             print(report.status(upstream.pending()))
-            return 1
+            return 0  # Claude Code fails a skill's ! line on a non-zero exit, so the skill would never load
         print(report.status(upstream.pending(data)))
     elif args.cmd == "status":
         changes = upstream.pending()
