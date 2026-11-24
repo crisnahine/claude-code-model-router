@@ -102,4 +102,4 @@ def _note(decision: router.Decision) -> str:
     else:
         what = f"effort to {decision['effort']}"
     return (f"Model Router set this agent's {what} ({decision['reason']}). "
-            "The same call re-issued after a weak result runs one level higher.")
+            "A redo of a weak result starts its `description` with \"Redo:\" and runs one level higher.")

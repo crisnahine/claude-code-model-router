@@ -109,6 +109,16 @@ def identify(tool_input: dict) -> tuple[str, str]:
     return agent, hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
 
 
+_REDO_MARK = re.compile(r"\s*redo:", re.IGNORECASE)
+_AGENT = "agent:"  # a done record under this prefix is an agent's latest finished run, not a call's
+
+
+def marked_redo(tool_input: dict) -> bool:
+    """Claude rewrites a brief it sends again, so it marks the redo where the text stays its own:
+    a `description` that starts with "Redo:"."""
+    return bool(_REDO_MARK.match(str(tool_input.get("description") or "")))
+
+
 API_ERROR = re.compile(r"API Error: \d{3}\b")
 
 
@@ -241,10 +251,16 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
 def _wait_or_finish(session_id: str | None, outcome: Outcome, route: Route, finished: bool) -> None:
     if finished:
         run = {**route.run, "prompt_id": request.load(session_id).prompt_id}
-        _mutate("done", session_id, lambda done: store.keep(done, outcome.key, run))
+        _mutate("done", session_id, lambda done: _keep_done(done, outcome.key, outcome.agent, run))
     else:
-        run = {**route.run, "prompt_id": request.load(session_id).prompt_id, "key": outcome.key}
+        run = {**route.run, "prompt_id": request.load(session_id).prompt_id, "key": outcome.key, "agent": outcome.agent}
         _mutate("launched", session_id, lambda waiting: store.keep(waiting, outcome.agent_id, run))
+
+
+def _keep_done(done: dict, key: str, agent: object, run: dict) -> None:
+    store.keep(done, key, run)
+    if isinstance(agent, str) and agent:
+        store.keep(done, _AGENT + agent, run)
 
 
 def _failed(session_id: str | None, outcome: Outcome, route: Route | None, asked: str | None) -> Returned:
@@ -278,8 +294,17 @@ def _stopped(session_id: str | None, outcome: Outcome) -> Returned:
     finished = outcome.answered and Level.parse(run.get("level")) is not None and isinstance(run.get("key"), str)
     if finished:
         done = {k: run.get(k) for k in ("level", "model", "effort", "prompt_id")}
-        _mutate("done", session_id, lambda records: store.keep(records, run["key"], done))
+        _mutate("done", session_id, lambda records: _keep_done(records, run["key"], run.get("agent"), done))
     return Returned(run.get("model") if isinstance(run.get("model"), str) else None, None, finished)
+
+
+def last_run(session_id: str | None, agent: str) -> dict | None:
+    """This agent's latest finished run in the session, within REDO_WINDOW: what a marked redo climbs from.
+    The request doesn't matter here, since a redo often follows the user turning the result down."""
+    run = store.load_entry("done", session_id).get(_AGENT + agent)
+    if not isinstance(run, dict) or Level.parse(run.get("level")) is None:
+        return None
+    return run if 0 <= store.now() - store.stamp(run.get("at")) < REDO_WINDOW else None
 
 
 def finished_run(session_id: str | None, key: str) -> dict | None:

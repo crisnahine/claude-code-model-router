@@ -22,7 +22,7 @@ Model Router reads the subagent's brief and the agent's name, gives the call one
 
 ## What happens when the cheap model gets it wrong?
 
-When Claude issues the same call again in the same request after its result came back, that call runs one level higher. Lookup, standard and hardest move to a stronger model, complex moves to hardest (Opus at more effort), and a frontier redo runs at one more step of effort. A run that ended on an API error, such as an overload, counts as a retry, not a redo. Each redo is also a vote that the first level was too low: at least 6 votes that are also at least 30% of a level's calls raise that level for later calls ([ARCHITECTURE.md](ARCHITECTURE.md#redo-escalation)).
+When Claude redoes a weak result, the call runs one level higher. Claude marks the redo by starting the call's `description` with "Redo:", so a rewritten brief climbs too, and the same call issued again unchanged in the same request also counts. Lookup, standard and hardest move to a stronger model, complex moves to hardest (Opus at more effort), and a frontier redo runs at one more step of effort. A run that ended on an API error, such as an overload, counts as a retry, not a redo. Each redo is also a vote that the first level was too low: at least 6 votes that are also at least 30% of a level's calls raise that level for later calls ([ARCHITECTURE.md](ARCHITECTURE.md#redo-escalation)).
 
 ## What does Model Router cost?
 

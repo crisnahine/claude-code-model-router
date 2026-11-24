@@ -39,7 +39,7 @@ Without it, a subagent that names no model runs on its conversation's model ([Cl
 ## What it does
 
 - Sets the model and effort of every subagent, teammate and workflow agent as it starts. The agent the caller chose stays the same.
-- Runs a call one level higher when Claude re-issues it after its result came back, and raises a level that keeps needing redos.
+- Runs a call one level higher when Claude redoes a weak result, and raises a level that keeps needing redos.
 - Asks once, before a turn ends, for a test run when code changed unchecked, and for a stronger agent's check when a weak session model answered a hard request alone.
 - Logs what each turn cost at list price in `/model-router:usage`, and checks the Claude Code changelog, docs and model retirements once a day.
 
@@ -109,7 +109,7 @@ Each subtask is scored from its own brief: risk (security, data, migrations, pub
 | hardest | Ambiguous, multi-system and risky at once | Opus | xhigh |
 | frontier | All of that, with no known approach: research, open-ended investigation | Fable | high |
 
-A call Claude re-issues after its result came back runs one level higher: a stronger model, or more effort on the same one. Anthropic measured low effort with failures re-run at high at about 97% solved for $0.17 a task on a coding benchmark, against 95.3% for $0.29 with every task at high ([research](docs/research/model-control.md), Q7).
+A redo of a weak result runs one level higher: a stronger model, or more effort on the same one. Claude marks the redo in the call's `description`, so a rewritten brief still climbs. Anthropic measured low effort with failures re-run at high at about 97% solved for $0.17 a task on a coding benchmark, against 95.3% for $0.29 with every task at high ([research](docs/research/model-control.md), Q7).
 
 <a id="who-decides-the-model"></a><a id="the-checks-before-a-turn-ends"></a>Your choices come first. Inside your `max_tier` cap, a model named on the call, a per-agent rule or the agent's own `model` field wins over the router's pick, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and `CLAUDE_CODE_SUBAGENT_MODEL` leave the model as you set it ([who decides the model](docs/GUIDE.md#who-decides-the-model)). The [checks before a turn ends](docs/GUIDE.md#the-checks-before-a-turn-ends) are in the guide, and the full design in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

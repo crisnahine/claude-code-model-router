@@ -1907,6 +1907,7 @@ class Router(Sandbox):
                                                "model": "haiku", "effort": "medium"})
         self.assertNotIn("permissionDecision", out)
         self.assertIn("haiku at medium effort", out["additionalContext"])
+        self.assertIn('starts its `description` with "Redo:"', out["additionalContext"])
         self.assertEqual(self.ledger()[-1]["via"], "fallback")
 
     def test_no_output_when_the_model_would_be_the_same(self):
@@ -2432,6 +2433,52 @@ class RepeatGuard(Sandbox):
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
         self.assertEqual(self.decide("general-purpose", LOOKUP)["level"], "standard")
+
+    def test_a_rewritten_brief_marked_redo_runs_one_level_above_the_agents_last_run(self):
+        self.pre("general-purpose", BUILD)
+        self.done("general-purpose", BUILD, "claude-sonnet-5-5", model="sonnet", effort="medium")
+        rewritten = "implement the parser change, this time keeping quoted fields whole"
+        unmarked = self.decide("general-purpose", rewritten, description="Parser change")
+        self.assertEqual((unmarked["level"], unmarked["escalated_from"]), ("standard", None))  # a new call
+        again = self.decide("general-purpose", rewritten, description="Redo: parser change")
+        self.assertEqual((again["level"], again["model"], again["effort"], again["escalated_from"]),
+                         ("complex", "opus", "high", "standard"))
+        self.assertIn("one level above the standard run", again["reason"])
+        self.pre("general-purpose", rewritten, description="redo: parser change")
+        self.assertEqual(learn.stats()["standard"]["votes"], 1)
+
+    def test_a_marked_redo_climbs_from_a_run_of_an_earlier_request(self):
+        hooks.user_prompt({"session_id": "s1", "prompt": "fix the auth migration", "prompt_id": "p1"})
+        self.pre("general-purpose", HARD)
+        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="high")
+        hooks.user_prompt({"session_id": "s1", "prompt": "that dropped rows, try again", "prompt_id": "p2"})
+        again = self.decide("general-purpose", BUILD, description="Redo: second try")
+        self.assertEqual((again["level"], again["effort"], again["escalated_from"]), ("hardest", "xhigh", "complex"))
+        with self.clock_at(self.clock + calls.REDO_WINDOW + 1):
+            late = self.decide("general-purpose", BUILD, description="Redo: second try")
+        self.assertEqual((late["level"], late["escalated_from"]), ("complex", "standard"))  # too old to climb from
+
+    def test_a_marked_redo_with_no_run_on_record_goes_one_level_above_its_brief(self):
+        again = self.decide("general-purpose", BUILD, description="Redo: parser change")
+        self.assertEqual((again["level"], again["model"], again["escalated_from"]), ("complex", "opus", "standard"))
+        self.assertIn("marked a redo", again["reason"])
+
+    def test_a_background_run_is_climbed_from_only_after_it_stops(self):
+        self.pre("general-purpose", HARD)
+        self.launched("general-purpose", HARD, "claude-opus-5-5", "a1", model="opus", effort="high")
+        running = self.decide("general-purpose", BUILD, description="Redo: second try")
+        self.assertEqual((running["level"], running["escalated_from"]), ("complex", "standard"))
+        self.stopped("a1")
+        again = self.decide("general-purpose", BUILD, description="Redo: second try")
+        self.assertEqual((again["level"], again["escalated_from"]), ("hardest", "complex"))
+
+    def test_only_a_description_that_starts_with_the_mark_is_a_redo(self):
+        for description in ("Redo the header layout", "Parser redo: second try", None):
+            extra = {"description": description} if description else {}
+            d = self.decide("general-purpose", BUILD, **extra)
+            self.assertEqual((d["level"], d["escalated_from"]), ("standard", None), description)
+        named = self.decide("general-purpose", BUILD, description="Redo: parser change", model="haiku")
+        self.assertEqual((named["source"], named["model"], named["escalated_from"]), ("caller", "haiku", None))
 
     def test_a_redo_held_on_the_same_model_by_the_cap_gets_more_effort(self):
         self.options(max_tier="opus")
@@ -3774,8 +3821,10 @@ class Hooks(Sandbox):
         self.assertIn("Model Router sets", text)
         self.assertNotIn("strongest model in use", text)  # changes nothing Claude does; /model-router:route says it
         self.assertNotIn("model-router:deep-solver", text)  # the Agent tool lists the role agents already
-        self.assertIn("Agent calls here omit `model` and `effort` unless the user named one", text)
-        self.assertIn("re-issued unchanged", text)
+        self.assertIn("omit `effort` unless the user named one", text)
+        self.assertIn("name `model` only when the user did or when the code already read shows", text)
+        self.assertIn('starts its `description` with "Redo:"', text)
+        self.assertNotIn("re-issued unchanged", text)  # Claude rewrites a brief it sends again
         self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", text)
         self.assertEqual(session.model("s1"), "claude-sonnet-5-5")
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")

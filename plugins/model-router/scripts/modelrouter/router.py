@@ -43,7 +43,8 @@ class Facts:
     usable: list  # registry.available for this project and cap
     definition: dict | None = None  # agents.find, or the engine's stand-in for its own agents
     parent: str | None = None  # the model an agent without one inherits, when known
-    earlier: dict | None = None  # calls.finished_run: this call's finished run in this request
+    earlier: dict | None = None  # the finished run a redo climbs from: this call's, or for a marked redo its agent's
+    marked: bool = False  # calls.marked_redo: the description says the call redoes a weak result
     raises: dict = field(default_factory=dict)  # learn.raises: the learned raise of each level
     floor: Level | None = None  # the request's level, for a hand-off to a strong role agent
     teammate: bool = False  # an agent-team teammate, which CLAUDE_CODE_SUBAGENT_EFFORT doesn't reach
@@ -89,6 +90,9 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         above = done_level.up()
         if above and level < above:
             level, out["escalated_from"] = above, done_level
+    elif facts.marked and not tool_input.get("model") and level.up():
+        # Marked a redo with no finished run to climb from: the brief's own level is the one that fell short.
+        level, out["escalated_from"] = level.up(), level
     pick, pick_effort = ladder.pick(reg, level, settings.priority, usable, facts.raises)
     level_effort = ladder.effort(reg, level, settings.priority)
     out.update(level=level, signals=profile["signals"], pick=pick)
@@ -129,8 +133,10 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         why = "CLAUDE_CODE_SUBAGENT_MODEL sets the model for agents without one"
     else:
         target, source, why, basis = pick, "router", f"{level} subtask", "the pick"
-        if out.get("escalated_from"):
+        if out.get("escalated_from") and redo:
             why += f", one level above the {out['escalated_from']} run that came back before"
+        elif out.get("escalated_from"):
+            why += f", marked a redo, so one level above the {out['escalated_from']} its brief reads as"
         elif redo:
             why += ", redone with more effort than the run that came back before"
 

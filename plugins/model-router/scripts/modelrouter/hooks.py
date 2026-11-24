@@ -28,9 +28,9 @@ def session_start(hook_input: dict) -> dict | None:
         # Only what Claude must act on: every word here is in context for the whole session.
         parts.append(
             "Model Router sets each subagent's, teammate's and workflow agent's model and effort from its brief. "
-            "Agent calls here omit `model` and `effort` unless the user named one; either overrides the router. "
-            "A brief naming what makes it hard (security, several modules, an unclear cause) routes higher. "
-            "A weak result's call, re-issued unchanged, runs one level higher."
+            "Calls omit `effort` unless the user named one, and name `model` only when the user did or when the "
+            "code already read shows the task harder or easier than its brief reads. "
+            "A redo of a weak result starts its `description` with \"Redo:\" and runs one level higher."
         )
         if options.force:
             pinned = options.subagent_model or "one model"
