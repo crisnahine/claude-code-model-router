@@ -237,9 +237,11 @@ def read(session_id: str | None, project: Path, sent: object = None) -> Allowlis
 
 def file_layers(project: Path) -> dict[str, dict]:
     """The settings files as the sources they stand for. The flag source and the managed
-    tiers that have no file (server-managed, MDM, registry) can't be seen from here."""
+    tiers that have no file (server-managed, MDM, registry) can't be seen from here. The shared file is
+    read from the session's primary working directory, CLAUDE_PROJECT_DIR, which stays put through cd."""
+    shared = Path(os.environ.get("CLAUDE_PROJECT_DIR") or project) / ".claude" / "settings.json"
     return {"policy": _policy(), "user": _file(store.claude_home() / "settings.json"),
-            "project": _file(project / ".claude" / "settings.json"), "local": _local(project), "flag": {}}
+            "project": _file(shared), "local": _local(project), "flag": {}}
 
 
 def _load(path: Path) -> tuple[dict, bool]:

@@ -87,6 +87,39 @@ def project_dir(hook_input: dict | None = None) -> Path:
     return Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
 
 
+def _up_to_root(start: Path) -> list[Path]:
+    """`start` and each folder above it up to the repository root (the first one holding .git),
+    nearest first. Only `start` outside a repository, or when that root is the home folder or
+    another user's root, .git or .claude: those are what a planted repository could point at."""
+    chain: list[Path] = []
+    try:
+        home = Path.home().resolve()
+        for folder in (start, *start.parents):
+            if folder.resolve() == home:
+                break
+            chain.append(folder)
+            if (folder / ".git").exists():
+                owned = not hasattr(os, "getuid") or all(
+                    os.stat(p).st_uid == os.getuid() for p in (folder, folder / ".git", folder / ".claude")
+                    if p == folder or p.exists())
+                return chain if owned else [start]
+    except (OSError, RuntimeError):
+        pass
+    return [start]
+
+
+def project_folders(project: Path) -> list[Path]:
+    """Where project agents and files are looked for, nearest first: from `project` (the hook's cwd,
+    which follows cd) and from CLAUDE_PROJECT_DIR, which stays put, each up to its repository root.
+    Folders of `project`'s chain outside CLAUDE_PROJECT_DIR's repository come last."""
+    if not os.environ.get("CLAUDE_PROJECT_DIR"):
+        return _up_to_root(project)
+    session = _up_to_root(Path(os.environ["CLAUDE_PROJECT_DIR"]))
+    near = _up_to_root(project)
+    inside = [f for f in near if f == session[-1] or session[-1] in f.parents]
+    return list(dict.fromkeys([*inside, *session, *near]))
+
+
 def _merge(base: dict, override: dict) -> dict:
     out = dict(base)
     for key, value in override.items():
@@ -217,8 +250,12 @@ def _raises_only(project: dict, shipped: dict, held: list[Held]) -> None:
         floor = shipped.get(name) or {}
         if _number(floor.get("needs")) and spec.get("needs", floor["needs"]) < floor["needs"]:
             held.append(Held("level", name, f"needs {spec.pop('needs')} is below {floor['needs']}"))
-        if "effort" in spec and _effort_rank(spec["effort"]) < _effort_rank(floor.get("effort")):
-            held.append(Held("level", name, f"effort {spec.pop('effort')} is below {floor['effort']}"))
+        effort = floor.get("effort")
+        # A level left at no effort runs at Claude Code's default, medium on the current models.
+        if "effort" in spec and spec["effort"] != effort and _effort_rank(spec["effort"]) < _effort_rank(effort or "medium"):
+            why = (f"is below {effort}" if effort
+                   else "is below Claude Code's default medium, which your file leaves this level at")
+            held.append(Held("level", name, f"effort {spec.pop('effort')} {why}"))
 
 
 def _newer(file: dict) -> bool:
@@ -276,7 +313,14 @@ def _rules(base: dict, user: dict, project: dict, held: list[Held]) -> dict[str,
     for name, spec in project.items():
         if spec.get("route") is False:
             held.append(Held("rule", name, "route false is ignored: a project can't switch routing off for an agent"))
-        rules[name] = replace(rules.get(name, Rule()), floor=Level.parse(spec.get("level")), suggested=spec.get("model"))
+        own, floor, suggested = rules.get(name, Rule()), Level.parse(spec.get("level")), spec.get("model")
+        if own.level or own.model:
+            if floor:
+                held.append(Held("rule", name, f"level {floor} is ignored: your own rule sets this agent's level or model"))
+            if suggested:
+                held.append(Held("rule", name, f"model {suggested} is ignored: your own rule sets this agent's level or model"))
+            floor = suggested = None
+        rules[name] = replace(own, floor=floor, suggested=suggested)
     return rules
 
 
@@ -284,7 +328,8 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
     """The shipped registry, then the user's own override file, then the project's. The user's file is
     trusted in full. A project's file may add a model but not re-rank one the user's cap is measured
     against, may raise a level's needs or effort but not lower them, and may set a rule for an agent
-    that only raises."""
+    that only raises, and only for an agent whose level and model the user's own rule leaves open: a user
+    rule that sets either holds both the project's level and its model for that agent."""
     problems: list[str] = []
     held: list[Held] = []
     user_file, project_file = user or {}, project or {}
@@ -332,8 +377,13 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
 
 
 def load(hook_input: dict | None = None) -> Registry:
-    """The registry for this user and project, from the three files, each read once."""
-    paths = (store.claude_home() / OVERRIDE_FILE, project_dir(hook_input) / ".claude" / OVERRIDE_FILE)
+    """The registry for this user and project, from the three files, each read once. The project's file is
+    the nearest one up to the repository root from CLAUDE_PROJECT_DIR, else, for a skill command run
+    through Bash, from cwd."""
+    start = Path(os.environ["CLAUDE_PROJECT_DIR"]) if os.environ.get("CLAUDE_PROJECT_DIR") else project_dir(hook_input)
+    found = [f / ".claude" / OVERRIDE_FILE for f in project_folders(start)]
+    project_file = next((p for p in found if p.is_file()), found[0])
+    paths = (store.claude_home() / OVERRIDE_FILE, project_file)
     user, project = (store.load_dict(path) for path in paths)
     newer = tuple(path for path, file in zip(paths, (user, project)) if _newer(file))
     return replace(build(base_config(), user, project), newer=newer)

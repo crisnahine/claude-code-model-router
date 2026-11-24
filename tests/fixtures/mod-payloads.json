@@ -17,7 +17,6 @@
   "mod-spawn": {
     "session_id": "s1",
     "tool_use_id": "tu1",
-    "cwd": "/work/project",
     "parent_agent_id": "a0",
     "parent_model": "claude-opus-5-5",
     "kind": "subagent",

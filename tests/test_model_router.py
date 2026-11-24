@@ -1015,6 +1015,7 @@ class Allowlist(Sandbox):
         (self.project / ".claude" / "settings.json").write_text(json.dumps({"availableModels": ["fable"]}))
         (sub / "settings.local.json").write_text(json.dumps({"availableModels": ["haiku"]}))  # the root's wins
         (sub / "settings.json").write_text(json.dumps({"availableModels": ["sonnet"]}))  # read where the session is
+        os.environ["CLAUDE_PROJECT_DIR"] = str(self.project / "pkg")  # the session started in pkg
         self.assertEqual(allowlist.read(None, self.project / "pkg").permitted(self.config), {"sonnet", "opus"})
 
     @unittest.skipIf(os.name == "nt", "on Windows the local file stays beside settings.json")
@@ -2942,7 +2943,7 @@ class Mod(Sandbox):
 
     def spawn(self, agent: str, prompt: str, parent: str = "claude-opus-5-5", **extra) -> dict | None:
         tool_input = {"subagent_type": agent, "prompt": prompt, "description": "d", **extra}
-        return modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": parent,
+        return modpath.spawn({"session_id": "s1", "parent_model": parent,
                                 "kind": "subagent", "tool_input": tool_input})
 
     def test_spawns_are_routed_from_the_parents_exact_model(self):
@@ -3386,7 +3387,7 @@ class NewestOnProviders(Sandbox):
 
     def spawn(self, prompt: str, agent: str = "general-purpose", tool_use_id: str | None = None,
               **extra) -> tuple[dict | None, dict]:
-        hook_input = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+        hook_input = {"session_id": "s1", "parent_model": "claude-opus-5-5",
                       "kind": "subagent", **({"tool_use_id": tool_use_id} if tool_use_id else {}),
                       "tool_input": {"subagent_type": agent, "prompt": prompt, "description": "d", **extra}}
         return modpath.spawn(hook_input), hook_input
@@ -3587,7 +3588,7 @@ class ModPayloads(Sandbox):
         self.assertTrue(modpath.active("s1"))
 
     def test_spawn_reads_every_field(self):
-        payload = {**self.payloads["mod-spawn"], "cwd": str(self.project)}
+        payload = self.payloads["mod-spawn"]
         with mock.patch.object(router, "decide", wraps=router.decide) as decide:
             modpath.spawn(payload)
         found = decide.call_args.args[0]
@@ -3603,7 +3604,7 @@ class ModPayloads(Sandbox):
     def test_siblings_keep_their_sent_ids_when_the_same_call_is_issued_again(self):
         os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
         refused = "API Error: 404 not_found_error: model: claude-haiku-5-5"
-        base = {**self.payloads["mod-spawn"], "cwd": str(self.project), "parent_agent_id": None,
+        base = {**self.payloads["mod-spawn"], "parent_agent_id": None,
                 "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
         copies = [{**base, "tool_use_id": f"tu{i}"} for i in (1, 2, 3)]
         self.assertEqual([modpath.spawn(c)["model"] for c in copies[:2]], ["claude-haiku-5-5"] * 2)
