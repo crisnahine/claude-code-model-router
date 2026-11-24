@@ -29,7 +29,7 @@ SWAP = json.loads((FIXTURES / "agent-model-swap.json").read_text())
 FRAMING = json.loads((FIXTURES / "prompt-framing.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, ladder, ledger, profile, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
+from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, ladder, ledger, registry, report, request, router, session, settings, spawn, store, upstream  # noqa: E402
 from modelrouter import mod as modpath  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 from modelrouter.config import Level  # noqa: E402
@@ -39,6 +39,7 @@ LOOKUP = "list the files under src"
 BUILD = "implement the parser change"
 HARD = "fix the auth migration across every service"
 HARDEST = "investigate why auth is flaky and redesign it across every service"
+HAIKU = "claude-haiku-5-5"
 
 
 def frontmatter(path: Path) -> dict:
@@ -64,9 +65,6 @@ def held(path: Path, name: str | None = None):
     finally:
         store.owner = mine
 
-
-# Slow CI runners take about twice as long as a laptop; the quadratic negation regex took 32 s on 64 KB.
-LINEAR_SECONDS = 2
 
 class Sandbox(unittest.TestCase):
     """A private data dir, Claude home and project for each test, and a clean environment."""
@@ -213,38 +211,34 @@ class Shipped(unittest.TestCase):
         manifest = json.loads((ROOT / "plugins/model-router/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
         fields = manifest["userConfig"]
         models = list(json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8"))["models"])
-        accepted = {"routing_mode": set(cfg.MODES), "priority": set(cfg.PRIORITIES),
-                    "max_tier": {"none", *models}, "agent_pins": {"respect", "override"}}
+        accepted = {"routing_mode": set(cfg.MODES), "max_tier": {"none", *models}}
         for name, values in accepted.items():
             field = fields[name]
             self.assertIn(field["default"], field["options"], name)
             self.assertEqual(set(field["options"]), values, name)
-    def test_crew_matches_agent_files(self):
-        config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
-        files = {p.stem: frontmatter(p) for p in (PLUGIN / "agents").glob("*.md")}
-        self.assertEqual(set(config["crew"]), set(files))
-        for name, agent in config["crew"].items():
-            self.assertEqual(files[name].get("name"), name)
-            self.assertTrue(agent.get("role"), name)
+        self.assertEqual(set(fields) & {"priority", "agent_pins"}, set())
+
+    def test_each_agent_file_is_named_for_its_agent(self):
+        for path in (PLUGIN / "agents").glob("*.md"):
+            self.assertEqual(frontmatter(path).get("name"), path.stem)
 
     def test_the_costly_role_agents_say_when_not_to_use_them(self):
         # Claude delegates from descriptions, so these limits keep the costliest agents for the work they're for.
         # With no note on the request, this is all Claude reads before handing it a task that writes a file.
         for name, limit in (("architect", "Writes nothing, so not for a task that must make a file, or a clear change."),
-                            ("reviewer", "A small, tested change doesn't need one."),
-                            ("deep-solver", "Not for ordinary hard coding.")):
+                            ("reviewer", "A small, tested change doesn't need one.")):
             self.assertIn(limit, frontmatter(PLUGIN / "agents" / f"{name}.md")["description"], name)
 
-    # Always-cheap agents keep a model, so they stay cheap when the router isn't routing; the rest are routed.
-    PINNED = {"scout": ("haiku", "medium"), "verifier": ("haiku", "medium"), "docs-researcher": ("haiku", "medium")}
+    # Each role agent carries its level in its definition, which holds with the router off; the implementer names
+    # none, so the caller names one per step.
+    PINNED = {"scout": ("haiku", "medium"), "verifier": ("haiku", "medium"), "architect": ("opus", "high"),
+              "reviewer": ("opus", "high")}
 
-    def test_only_the_always_cheap_role_agents_carry_a_model(self):
-        config = json.loads((PLUGIN / "config" / "models.json").read_text(encoding="utf-8"))
+    def test_the_role_agents_carry_their_model_and_effort(self):
         for path in (PLUGIN / "agents").glob("*.md"):
             fields = frontmatter(path)
             self.assertEqual((fields.get("model"), fields.get("effort")), self.PINNED.get(path.stem, (None, None)),
                              path.name)
-            self.assertEqual(config["crew"][path.stem].get("model"), fields.get("model"), path.name)
             # A description is when Claude delegates (sub-agents docs), so none asks to run on every change.
             self.assertNotRegex(fields["description"], r"(?i)\b(?:every|any) (?:diff|code change|change)\b", path.name)
 
@@ -274,7 +268,7 @@ class Shipped(unittest.TestCase):
         for level in config["levels"].values():
             self.assertIn(level["effort"], (None, *cfg.EFFORTS))
         for name, model in config["models"].items():
-            for field in ("strength", "speed", "cost"):
+            for field in ("strength", "cost"):
                 self.assertIsInstance(model[field], (int, float), f"{name}.{field}")
 
     def test_skills_have_descriptions_and_use_the_launcher(self):
@@ -307,15 +301,6 @@ class Shipped(unittest.TestCase):
     def test_the_implementer_finishes_the_plan_and_stops_early_only_for_a_wrong_plan(self):
         body = (PLUGIN / "agents" / "implementer.md").read_text(encoding="utf-8").split("---", 2)[2]
         self.assertIn("Finish the planned change. Stop early only when the plan is wrong or needs the user's decision", body)
-
-    def test_the_docs_researcher_brief_carries_todays_date(self):
-        # Haiku 5.5 grounds its answers in recent search results when it is given the date with a search tool.
-        refresh = (PLUGIN / "skills" / "refresh" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("starting the brief with today's date: !`date +%F`", refresh)
-        self.assertIn("\n  - Bash(date +%F)\n", refresh)  # the `!` line runs under the skill's own allowed-tools
-        body = (PLUGIN / "agents" / "docs-researcher.md").read_text(encoding="utf-8").split("---", 2)[2]
-        self.assertIn("When your brief gives today's date, use it as today.", body)
-        self.assertIn("say in the first line of your answer that you don't know today's date", body)
 
     def test_the_architect_hands_back_a_file_it_was_asked_to_write(self):
         # Misrouted to it, a write-the-file task still ends with the content the caller can write.
@@ -681,11 +666,11 @@ class Snapshot(Sandbox):
                                   "error": "API Error: 404 not_found_error: model: haiku"})
         self.assertIn("looks unavailable", out["hookSpecificOutput"]["additionalContext"])
 
-    def test_the_snapshot_picks_with_its_priority_and_usable_models(self):
-        self.options(priority="quality")
+    def test_the_snapshot_picks_from_its_usable_models(self):
+        self.options(max_tier="sonnet")
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
         for level in cfg.LEVELS:
-            self.assertEqual(snap.pick(level), ladder.pick(snap.registry, level, "quality", snap.usable), level)
+            self.assertEqual(snap.pick(level), ladder.pick(snap.registry, level, snap.usable), level)
 
     def test_a_field_is_read_on_first_use_and_then_kept(self):
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
@@ -709,20 +694,16 @@ class Registry(Sandbox):
         for unknown in ("inherit", None, "gpt-9", 5, ["opus"]):
             self.assertIsNone(f(unknown))
 
-    def test_select_by_priority(self):
+    def test_select_takes_the_cheapest_model_strong_enough(self):
         usable = self.config.available()
-        pick = lambda needs, priority, names=usable: self.config.select(needs, priority, names)  # noqa: E731
-        self.assertEqual([pick(n, "balanced") for n in (1, 2, 3, 4)], ["haiku", "sonnet", "opus", "fable"])
-        self.assertEqual([pick(n, "quality") for n in (1, 2, 3, 4)], ["sonnet", "opus", "fable", "fable"])
-        self.assertEqual([pick(n, "fast") for n in (1, 2, 3, 4)], ["haiku", "haiku", "sonnet", "opus"])
-        self.assertEqual(pick(4, "balanced", ["haiku", "sonnet"]), "sonnet")
-        self.assertIsNone(pick(2, "balanced", []))
+        pick = lambda needs, names=usable: self.config.select(needs, names)  # noqa: E731
+        self.assertEqual([pick(n) for n in (1, 2, 3, 4)], ["haiku", "sonnet", "opus", "fable"])
+        self.assertEqual(pick(4, ["haiku", "sonnet"]), "sonnet")
+        self.assertIsNone(pick(2, []))
 
-    def test_select_uses_cost_and_speed_not_just_rank(self):
-        config = dataclasses.replace(self.config, models={**self.config.models, "swift": Model("swift", 3, 5, 2.5)})
-        usable = config.by_strength()
-        self.assertEqual(config.select(3, "balanced", usable), "swift")  # cheaper than opus
-        self.assertEqual(config.select(2, "fast", usable), "swift")  # the quickest that qualifies
+    def test_select_uses_cost_not_just_rank(self):
+        config = dataclasses.replace(self.config, models={**self.config.models, "swift": Model("swift", 3, 2.5)})
+        self.assertEqual(config.select(3, config.by_strength()), "swift")  # cheaper than opus
 
     def test_cap_limits_available_models(self):
         self.assertEqual(self.config.available(cap="sonnet"), ["haiku", "sonnet"])
@@ -744,7 +725,7 @@ class Registry(Sandbox):
         self.assertEqual(config.available(cap="sonnet"), ["haiku", "sonnet"])
 
     def test_the_users_own_file_is_trusted(self):
-        self.override({"models": {"saga": {"strength": 1.5, "speed": 3, "cost": 1.5}, "opus": {"strength": 3.5}}},
+        self.override({"models": {"saga": {"strength": 1.5, "cost": 1.5}, "opus": {"strength": 3.5}}},
                       user=True)
         self.override({"models": {"saga": {"strength": 9}}})  # a project can't re-rank the user's model
         config = cfg.load()
@@ -795,7 +776,7 @@ class Registry(Sandbox):
         self.assertEqual(registry_.problems, ())
         self.assertEqual([(h.kind, h.name) for h in registry_.held],
                          [("level", "complex"), ("level", "complex"), ("level", "lookup")])
-        d = self.decide("general-purpose", HARD)
+        d = self.decide("general-purpose", HARD, model="opus")
         self.assertEqual((d["model"], d["effort"]), ("opus", "high"))
 
     def test_the_floor_a_project_file_cannot_pass_is_the_users_own_value(self):
@@ -811,7 +792,7 @@ class Registry(Sandbox):
     def test_non_finite_numbers_are_rejected_in_every_file(self):
         nan, inf = float("nan"), float("inf")
         spec = {"levels": {"complex": {"needs": nan}, "hardest": {"needs": inf}, "standard": {"needs": 10 ** 400}},
-                "models": {"saga": {"strength": inf, "speed": nan, "cost": 2}}, "prices": {"claude-x-1": {"input": inf}}}
+                "models": {"saga": {"strength": inf, "cost": nan}}, "prices": {"claude-x-1": {"input": inf}}}
         for user in (True, False):
             with self.subTest(user=user):
                 self.override(spec, user=user)
@@ -819,9 +800,9 @@ class Registry(Sandbox):
                 self.assertEqual(config.levels, cfg.shipped().levels)
                 self.assertNotIn("saga", config.models)
                 self.assertNotIn("claude-x-1", config.prices)
-                self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")
+                self.assertEqual(self.decide("general-purpose", HARD, model="opus")["model"], "opus")
                 for where in ("levels.complex.needs", "levels.hardest.needs", "levels.standard.needs",
-                              "models.saga.strength", "models.saga.speed", "prices.claude-x-1.input"):
+                              "models.saga.strength", "models.saga.cost", "prices.claude-x-1.input"):
                     self.assertTrue(any(f"{where} is not a finite number" in p for p in config.problems), where)
                 data = json.loads(self.out("models", "--json"))
                 self.assertEqual(data["config_problems"], list(config.problems))
@@ -840,7 +821,8 @@ class Registry(Sandbox):
         self.override({"levels": {"lookup": {"needs": 3}}})  # a raise lifts every level above it
         levels = cfg.load().levels
         self.assertEqual([levels[level].needs for level in cfg.LEVELS], [3, 3, 3, 3, 4])
-        self.assertEqual(self.decide("general-purpose", BUILD)["model"], "opus")  # standard needs 3 now
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        self.assertEqual(snap.pick(Level.standard).model, "opus")  # standard needs 3 now
         self.override({"levels": {"hardest": {"needs": 1}}}, user=True)  # a level can't need less than the one below
         self.override({"levels": {}})
         self.assertEqual(cfg.load().levels[Level.hardest].needs, 3)
@@ -1170,7 +1152,7 @@ class Allowlist(Sandbox):
         text = report.explain(snap, LOOKUP)
         self.assertNotIn("None", text)
         self.assertIn("left as it is", text)
-        self.options(routing_mode="advise")
+        self.options(routing_mode="off")
         self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARD}))
 
     def test_a_later_payload_without_policy_keeps_the_stored_policy(self):
@@ -1208,7 +1190,7 @@ class Allowlist(Sandbox):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
         modpath.start({"session_id": "s1", "settings": {"policy": {"availableModels": ["sonnet"]}}})
         self.assertEqual(allowlist.read("s1", self.project).permitted(self.config), {"sonnet"})
-        self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "sonnet")  # a later hook of the session
+        self.assertEqual(self.decide("general-purpose", LOOKUP, model="haiku")["model"], "sonnet")  # a later hook of the session
 
     def test_a_failed_engine_read_falls_back_to_files(self):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
@@ -1238,7 +1220,8 @@ class Options(Sandbox):
 
     def test_mode_defaults_to_auto(self):
         self.assertEqual(self.mode(), "auto")
-        for value, expected in (("advise", "advise"), ("off", "off"), ("AUTO ", "auto"), ("nonsense", "auto")):
+        # advise, from an older release, changed no call, so it reads as off.
+        for value, expected in (("advise", "off"), ("off", "off"), ("AUTO ", "auto"), ("nonsense", "auto")):
             self.options(routing_mode=value)
             self.assertEqual(self.mode(), expected)
 
@@ -1246,9 +1229,9 @@ class Options(Sandbox):
         self.override({"routing_mode": "off"})
         self.assertEqual(self.mode(), "off")
         self.override({"routing_mode": "auto"})
-        self.override({"routing_mode": "advise"}, user=True)
-        self.assertEqual(self.mode(), "advise")
-        self.options(routing_mode="off")
+        self.override({"routing_mode": "off"}, user=True)
+        self.assertEqual(self.mode(), "off")
+        self.options(routing_mode="auto")
         self.assertEqual(self.mode(), "off")
 
     def test_environment_facts(self):
@@ -1262,8 +1245,7 @@ class Options(Sandbox):
         self.assertNotIn("sk-test", repr(s))
 
     def test_skill_commands_read_options_recorded_at_session_start(self):
-        values = {"max_tier": "haiku", "priority": "quality", "agent_pins": "override", "routing_mode": "advise",
-                  "update_check": "off", "verify_gate": "false"}
+        values = {"max_tier": "haiku", "routing_mode": "off", "update_check": "off", "verify_gate": "false"}
         self.options(**values)
         hooks.session_start({"session_id": "s1"})
         for name in values:
@@ -1271,8 +1253,7 @@ class Options(Sandbox):
         config = cfg.load()
         self.assertEqual(settings.resolve(config), settings.Settings())
         self.assertEqual(settings.resolve(config, recorded=True), settings.Settings(
-            mode="advise", routing_mode="advise", priority="quality", cap="haiku", pins="override",
-            update_check=False, verify_gate=False))
+            mode="off", routing_mode="off", cap="haiku", update_check=False, verify_gate=False))
         self.assertIn("Cap: **haiku**", self.out("policy"))
 
     def test_policy_shows_the_routing_mode_the_user_set(self):
@@ -1293,7 +1274,7 @@ class ConfigSchema(Sandbox):
         self.assertEqual((shipped.problems, shipped.held), ((), ()))
         for name, spec in base["models"].items():
             model = shipped.models[name]
-            self.assertEqual((model.strength, model.speed, model.cost), (spec["strength"], spec["speed"], spec["cost"]), name)
+            self.assertEqual((model.strength, model.cost), (spec["strength"], spec["cost"]), name)
         for name, spec in base["levels"].items():
             self.assertEqual(shipped.levels[name], LevelSpec(spec["needs"], spec["effort"]), name)
         self.assertEqual(shipped.prices.keys(), base["prices"].keys())
@@ -1336,7 +1317,8 @@ class AgentDiscovery(Sandbox):
         self.assertEqual((found["source"], found["model"]), ("project", None))
 
     def test_own_crew(self):
-        self.assertIsNone(agents.find("model-router:architect", self.project)["model"])
+        self.assertEqual(agents.find("model-router:architect", self.project)["model"], "opus")
+        self.assertIsNone(agents.find("model-router:implementer", self.project)["model"])
         self.assertEqual(agents.find("model-router:scout", self.project)["model"], "haiku")
         self.assertIsNone(agents.find("model-router:nope", self.project))
 
@@ -1377,419 +1359,119 @@ class AgentDiscovery(Sandbox):
         self.assertEqual(agents.find("bom", self.project)["model"], "opus")
 
 
-class Profile(unittest.TestCase):
-    def level(self, prompt, agent="general-purpose"):
-        return profile.profile_call({"prompt": prompt}, agent)["level"]
-
-    def test_call_levels(self):
-        self.assertEqual(self.level(LOOKUP), "lookup")
-        self.assertEqual(self.level("run the test suite and report failures"), "lookup")
-        self.assertEqual(self.level(BUILD), "standard")
-        self.assertEqual(self.level("investigate why the checkout test is flaky"), "complex")
-        self.assertEqual(self.level(HARD), "complex")
-        self.assertEqual(self.level("review the auth module"), "complex")
-        self.assertEqual(self.level("investigate why auth is flaky and redesign it across every service"), "hardest")
-
-    def test_fixing_or_hunting_a_defect_is_complex_or_above(self):
-        for brief in ("Fix the off-by-one in page_slice.", "Do not touch the tests, fix the parser.",
-                      "investigate why the checkout test is flaky", "Debug why the job fails.",
-                      "Figure out why it times out and fix it."):
-            self.assertEqual(self.level(brief), "complex", brief)
-        self.assertIn("fixes or hunts a defect",
-                      profile.profile_call({"prompt": "Fix the off-by-one in page_slice."}, "general-purpose")["signals"])
-
-    def test_words_that_only_look_like_a_fix_stay_put(self):
-        for brief in ("Find the commit that landed the fix for the CSV export and give its hash.",
-                      "Add a prefix to each key.", "Add debug logging to the retry loop.",
-                      "Decide whether to log at debug or info.", "Rename the helper. Fixes #123"):
-            self.assertNotEqual(self.level(brief), "complex", brief)
-        for brief in ("Report which commit fixed the flaky test.", "Find where the test fixtures are loaded.",
-                      "List the failing tests. Do not fix anything."):
-            self.assertEqual(self.level(brief), "lookup", brief)
-
-    def test_a_debug_compound_is_not_a_fix_even_when_the_description_leads(self):
-        for description, prompt in (("Debug logging for the retry loop", "Add debug logging to the retry loop."),
-                                    ("Debug mode flag", "Add a debug mode flag to the CLI."),
-                                    ("Debug output", "Implement debug output for the exporter.")):
-            result = profile.profile_call({"description": description, "prompt": prompt}, "general-purpose")
-            self.assertEqual(result["level"], "standard", description)
-            self.assertNotIn("fixes or hunts a defect", result["signals"], description)
-
-    def test_finding_why_or_finding_a_defect_hunts_one(self):
-        for brief in ("Find why the checkout total is wrong",
-                      "Find the race condition between the api and worker services that drops jobs",
-                      "Find why the build is slow.", "Find the bug in parse_date.", "Find the leak in the worker.",
-                      "Find the regression.", "Find out why the nightly export fails."):
-            self.assertEqual(self.level(brief), "complex", brief)
-        for brief in ("Find where the auth middleware is defined", "Find all callers of parse_date",
-                      "Find the file that defines the User model", "Find the files that import auth",
-                      "Find the regression tests for the parser.", "Find the bug report template.",
-                      "Do not find the bug, just list the failing tests."):
-            self.assertEqual(self.level(brief), "lookup", brief)
-        for brief in ("Rename the helper. Avoid finding the bug in the tests.",
-                      "Rename the helper. Do not find why the tests fail."):
-            self.assertEqual(self.level(brief), "standard", brief)
-
-    def test_a_fix_the_brief_rules_out_does_not_floor_it(self):
-        for brief in ("Rename the helper. Avoid fixing the unrelated tests.",
-                      "Rename the helper. You must not fix the tests.",
-                      "Rename the helper and try not to fix the tests.",
-                      "Rename the helper. Out of scope: fixing the unrelated tests.",
-                      "Rename the helper. Avoid investigating the flaky tests."):
-            self.assertEqual(self.level(brief), "standard", brief)
-
-    def test_ruling_out_a_change_keeps_the_task_after_it(self):
-        for brief in ("Avoid breaking the CSV format and add tests for the parser.",
-                      "You must not rename the public symbols and write tests for the loader.",
-                      "Be careful not to touch the config and create a migration guide."):
-            self.assertEqual(self.level(brief), "standard", brief)
-
-    def test_the_standard_model_text_does_not_call_fixes_standard(self):
-        models = json.loads((ROOT / "plugins/model-router/config/models.json").read_text())["models"]
-        self.assertNotIn("ixes", models["sonnet"]["use_for"])
-        self.assertTrue(models["opus"]["use_for"].startswith("Defect fixes, migrations and performance work"))
-
-    def test_a_reading_is_levelled_with_the_agents_role(self):
-        brief = "Fix the auth bug across every service. Do not change the public API."
-        reading = profile.read(brief)
-        self.assertEqual(reading.signals, ("risk", "scope"))
-        self.assertEqual(profile.level(reading, profile.role("general-purpose")),
-                         profile.profile_call({"prompt": brief}, "general-purpose"))
-
-    def test_a_call_that_asks_for_nothing_is_a_lookup_and_a_long_one_is_standard(self):
-        self.assertEqual(self.level("the payments service"), "lookup")
-        self.assertEqual(self.level("notes " * 300), "lookup")
-        self.assertEqual(self.level("list the files. " + "x " * 2100), "standard")
-
-    def test_a_search_or_check_agent_stays_at_standard_for_a_fix_brief(self):
-        brief = {"prompt": "Fix the off-by-one in page_slice."}
-        self.assertEqual(profile.profile_call(brief, "model-router:verifier")["level"], "standard")
-        self.assertEqual(profile.profile_call(brief, "model-router:architect")["level"], "complex")
-
-    def test_reading_about_something_sensitive_or_broad_is_still_a_lookup(self):
-        self.assertEqual(self.level("read the auth module and list its functions"), "lookup")
-        self.assertEqual(self.level("search across the codebase for usages of foo()"), "lookup")
-        self.assertEqual(self.level("find the author of this file"), "lookup")
-        self.assertEqual(self.level("list the files under src. Do not change any files."), "lookup")
-        self.assertEqual(self.level("explain the architecture of the payment system"), "standard")
-
-    def test_words_that_only_look_like_changes(self):
-        self.assertEqual(self.level("find the port number the server listens on"), "lookup")
-        self.assertEqual(self.level("which plugins support hooks?"), "lookup")
-        self.assertEqual(self.level("read the update-check option"), "lookup")
-        self.assertEqual(self.level("list the routes. Make sure to include the line numbers"), "lookup")
-        # The limit names what the fix must work around, so its risk counts.
-        self.assertEqual(self.level("Fix the retry bug. Do not change the public API."), "complex")
-
-    def test_a_limit_ends_with_its_clause_and_keeps_the_task_after_it(self):
-        self.assertEqual(self.level("Without changing the public API, fix the race condition in the payments "
-                                    "service and add a regression test."), "complex")
-        self.assertEqual(self.level("Never guess: debug why the auth token refresh fails intermittently across "
-                                    "services, find the root cause and fix it."), "hardest")
-        self.assertEqual(self.level("Do not stop until the database migration across all services is fixed "
-                                    "and verified."), "standard")
-        self.assertEqual(self.level("No need to ask questions, just implement the OAuth2 login flow and secure "
-                                    "the session cookies."), "complex")
-
-    def test_a_task_joined_to_a_limit_by_and_keeps_what_it_is_about(self):
-        for brief, signals in (
-                ("Do not touch tests and implement the payment retry.", ["risk"]),
-                ("Don't break the public API and fix the authentication bug in the login service.", ["risk"]),
-                ("Never log secrets and refactor the credentials loader across all services.", ["risk", "scope"]),
-                ("Do not use any new dependencies and migrate the database schema to the new billing tables.",
-                 ["risk"])):
-            result = profile.profile_call({"prompt": brief}, "general-purpose")
-            self.assertEqual((result["level"], result["signals"]), ("complex", signals), brief)
-        # A risk named only inside the limit still says what the work touches.
-        self.assertEqual(self.level("Rename the session helper without touching the auth tokens."), "complex")
-        self.assertEqual(self.level("Find the config loader. Do not touch the database."), "lookup")
-        # A limit's scope and ambiguity words don't count, so guardrails can't push a small edit to hardest.
-        self.assertEqual(self.level("Fix the typo in docs/setup.md. Do not touch the database schema, do not make "
-                                    "changes across other modules, and do not try to figure out the flaky CI job."),
-                         "complex")
-        # "And" ends a limit only before a verb that takes an object.
-        for brief in ("Find X. Do not add and remove files.", "List the routes; don't review and fix anything.",
-                      "Explain Y. Never plan and design new modules.",
-                      "List the CI jobs. Do not edit the Dockerfile and build scripts.",
-                      "Find the deploy script. Do not touch the production config and build scripts.",
-                      "Show the migration files. Do not touch the schema and update scripts."):
-            self.assertEqual(self.level(brief), "lookup", brief)
-
-    def test_and_or_then_before_a_task_verb_ends_a_limit_without_an_article(self):
-        for brief in ("Do not touch tests and implement payment retries.",
-                      "Don't break the API and fix auth token refresh in the login service.",
-                      "Never log secrets and refactor credentials loading.",
-                      "Do not touch tests then implement the payment retry.",
-                      "Don't touch the UI and also fix the race condition in the payments worker.",
-                      "Never edit generated code and instead fix the auth bug in the source.",
-                      "Do not touch tests and just fix the auth bug.",
-                      "Do not touch tests and please fix the auth bug.",
-                      "Do not touch tests and debug why payments fail intermittently."):
-            self.assertEqual(self.level(brief), "complex", brief)
-        # A verb that is often a noun ends the limit only with an object after it.
-        for brief in ("List the CI jobs. Do not edit the Dockerfile and build scripts.",
-                      "Find the deploy script. Do not touch the production config and build scripts.",
-                      "Show the migration files. Do not touch the schema and update scripts."):
-            self.assertEqual(self.level(brief), "lookup", brief)
-        # So does a task verb in a compound noun such as "debug logs" or "audit trails".
-        for brief in ("List the endpoints. Do not touch the auth module and debug logs.",
-                      "Find the config. Do not delete the settings and audit logs.",
-                      "Show the release notes. Do not edit the changelog and upgrade notes.",
-                      "Find the tests. Do not edit the auth fixtures and debug output.",
-                      "Explain the logger. Do not touch production and audit trails."):
-            self.assertEqual(self.level(brief), "lookup", brief)
-        # Scripts, builds, records, paths and tools are what these verbs take as an object, not compounds.
-        for brief in ("Do not touch tests and fix scripts that rotate the production credentials.",
-                      "Never log secrets and migrate records in the billing database.",
-                      "Do not change the UI and fix builds that leak secrets.",
-                      "Do not touch tests and refactor tools that handle payments.",
-                      "Do not touch tests and fix paths in the auth middleware."):
-            result = profile.profile_call({"prompt": brief}, "general-purpose")
-            self.assertEqual((result["level"], result["signals"]), ("complex", ["risk"]), brief)
-
-    def test_joins_inside_a_limit_stay_fast(self):
-        started = time.monotonic()
-        self.level("do not touch" + " tests and fix" * 20_000)
-        self.level("do not add" + " and remove" * 20_000 + " files")
-        self.level("never x" + " and then just" * 20_000 + " fix it")
-        self.level("do not touch tests" + " " * 64_000 + "and fix it")
-        self.level("add" + "\n" * 64_000)
-        self.level("add" + "\n \t" * 32_000 + "x")
-        self.level("add across" + "\n" * 64_000)
-        self.level("add latency" + "\n" * 64_000)
-        self.assertLess(time.monotonic() - started, LINEAR_SECONDS)
-
-    def test_a_hyphenated_word_before_and_still_ends_a_limit(self):
-        # "edit-mode" and "review-ready" are nouns, not the limit verbs edit and review.
-        for brief in ("Do not touch the edit-mode and rename the helper.", "Do not touch the review-ready and implement the parser."):
-            self.assertEqual(self.level(brief), "standard", brief)
-
-    def test_a_long_hyphen_or_apostrophe_run_after_a_limit_stays_fast(self):
-        for run in ("a-" * 32_000, "a'" * 32_000):  # 64 KB, such as a pasted token or a kebab-case list
-            started = time.monotonic()
-            self.level("do not " + run)
-            self.assertLess(time.monotonic() - started, LINEAR_SECONDS, run[:4])
-
-    def test_a_limit_over_a_list_of_single_verbs_stays_a_limit(self):
-        for brief in ("Find where the retry logic lives. Do not add, remove or rename files.",
-                      "Find where the retry logic lives. Do not edit, delete or create any files.",
-                      "Explain how sessions are stored. Don't write, change or delete anything.",
-                      "List the routes; do not change, fix or refactor anything.",
-                      "Explain the cache. Never, ever change files.",
-                      "Find where the retry logic lives. Do not add, remove, or rename files.",
-                      "Find where the retry logic lives. Do not edit files, create branches or update the database."):
-            self.assertEqual(self.level(brief), "lookup", brief)
-
-    def test_a_comma_before_the_task_ends_the_limit(self):
-        self.assertEqual(self.level("No need to ask, just implement the OAuth2 login flow and secure the session "
-                                    "cookies."), "complex")
-        self.assertEqual(self.level("Never guess, debug why the auth token refresh fails intermittently across "
-                                    "services."), "hardest")
-        self.assertEqual(self.level("The sync job runs without retries, add backoff to the payments client."),
-                         "complex")
-
-    def test_a_task_after_a_limit_and_a_comma_is_not_a_list_item(self):
-        for brief in ("Do not ask questions, implement the OAuth2 login flow.",
-                      "Do not change the tests, fix the auth bug in the login handler.",
-                      "Don't touch the public API, fix the race condition in the payments service and add a "
-                      "regression test.",
-                      "Do not commit, write the migration for the payments table.",
-                      "Do not change the tests, fix the auth bug and add a regression test.",
-                      "Do not ask questions, migrate the database, then run the tests.",
-                      "Don't touch the tests, fix the auth bug, then report back.",
-                      "Do not ask questions, implement OAuth2 login, and secure the session cookies.",
-                      "Do not ask questions, fix the auth bug or remove the check.",
-                      "Never guess, fix the flaky auth test or delete it."):
-            self.assertEqual(self.level(brief), "complex", brief)
-        for brief in ("Do not modify tests, rename the parser, update the docs, and run the suite.",
-                      "Do not touch the API, rename it or roll it back."):
-            self.assertEqual(self.level(brief), "standard", brief)
-
-    def test_a_limit_keeps_an_aside_and_list_verbs_outside_the_change_words(self):
-        for brief in ("List the tables. Do not, under any circumstances, write to the database.",
-                      "Find the config loader. Never, for any reason, change files.",
-                      "Find the retry logic. Do not delete, modify or rename any files.",
-                      "Do not touch, edit or delete files.",
-                      "Find the schema. Do not edit files, create branches or update the database, or delete "
-                      "anything."):
-            self.assertEqual(self.level(brief), "lookup", brief)
-
-    def test_a_long_list_after_a_limit_stays_fast(self):
-        started = time.monotonic()
-        self.level("do not add" + ", add x y" * 20_000 + " or add it")
-        self.level("do not add" + ", add x y" * 20_000 + ", then stop")
-        self.level("never x" + ", add never x" * 4_000 + ", then stop")
-        self.level("never, add" + ", add never" * 4_000 + ", then stop")
-        self.assertLess(time.monotonic() - started, LINEAR_SECONDS)
-
-    def test_a_huge_whitespace_run_after_a_limit_stays_fast(self):
-        started = time.monotonic()
-        self.level("do not" + " " * 64_000 + "x")
-        self.assertLess(time.monotonic() - started, LINEAR_SECONDS)
-
-    def test_a_brief_in_another_language_starts_at_standard(self):
-        for brief in ("Corrige le bug de sécurité dans le module de paiement.",
-                      "Corrige le bug dans le module de paiement et ajoute un test pour la validation.",
-                      "Diseña una migración de OAuth2 para todos los servicios y encuentra la causa raíz del fallo.",
-                      "Behebe den Fehler in der Zahlungsfunktion und füge einen Test für die Validierung hinzu.",
-                      "Correggi il bug nella funzione di pagamento e aggiungi un test per la validazione.",
-                      "Corrija o erro na função de pagamento e adicione um teste para a validação.",
-                      "Los de fout in de betaalmodule op en voeg een test toe voor de validatie.",
-                      "すべてのサービスでOAuth2への移行を設計し、断続的な障害の根本原因を見つけてください。",
-                      "Найди, где определена функция retry."):
-            self.assertEqual(self.level(brief), "standard", brief)
-        for brief in ("grep TODO src/*.py", "list the files under src", "ls -la src/", "cat README.md",
-                      "List i18n files: locales/de.json, locales/en.json, locales/es.json",
-                      "grep -rn 'des_encrypt' lib/des/ lib/des.c"):
-            self.assertEqual(self.level(brief), "lookup", brief)
-
-    def test_a_judgment_verb_counts_at_the_start_of_the_prompt_too(self):
-        for call in ({"prompt": "Design a plugin loading strategy for the CLI."},
-                     {"description": "Review CLI flags", "prompt": "Review the proposal for the new CLI flags."}):
-            self.assertEqual(profile.profile_call(call, "general-purpose")["level"], "complex", call)
-        for brief in ("Explain the design of the cache layer.", "What does the design doc say about retries?",
-                      "Review the README for typos."):
-            self.assertEqual(self.level(brief), "standard", brief)
-        # Bare "research" is how people say "look into"; it isn't research-grade wording.
-        self.assertEqual(self.level("Research the trade-offs of switching the database driver and recommend one."),
-                         "complex")
-
-    def test_make_sure_keeps_the_task_it_introduces(self):
-        self.assertEqual(self.level("Make sure to fix the auth bug in the login handler."), "complex")
-        self.assertEqual(self.level("Make sure the payments database migration is safe across all services "
-                                    "and keep backward compatibility."), "standard")
-
-    def test_thorough_or_long_briefs_are_not_lookups(self):
-        self.assertEqual(self.level("very thorough: how does the request pipeline work"), "standard")
-        self.assertEqual(self.level("note " * 1000), "standard")
-
-    def test_agent_name_sets_a_floor_or_a_ceiling(self):
-        self.assertEqual(self.level("look at the diff", "acme:code-reviewer"), "complex")
-        self.assertEqual(self.level("look at this", "security-auditor"), "complex")
-        self.assertEqual(self.level(HARD, "Explore"), "standard")
-        self.assertEqual(self.level(HARD, "acme:test-runner"), "standard")
-        self.assertEqual(self.level("look at this", "Plan"), "lookup")
-        self.assertEqual(self.level(HARD, "helper"), "complex")
-
-
-class RoutingEvals(Sandbox):
-    """Each `claude plugin eval` case routes as its expected_outcome says, with no model call, so a
-    routing regression fails CI instead of waiting for a paid eval run. A case hands a subagent an exact
-    brief, and the router decides that call as it would in a session on the case's own model."""
-
-    def test_each_eval_case_routes_as_expected(self):
-        cases = sorted((PLUGIN / "evals").glob("*/prompt.md"))
-        self.assertGreaterEqual(len(cases), 2)
-        for path in cases:
-            name = path.parent.name
-            fields = frontmatter(path)
-            want = re.fullmatch(r"['\"]?level (\w+), model (\w+), effort (\w+)['\"]?", fields.get("expected_outcome", ""))
-            self.assertTrue(want, f"{name}: expected_outcome must read 'level L, model M, effort E'")
-            quoted = re.search(r'this exact prompt: "([^"]+)"', path.read_text(encoding="utf-8").split("\n---\n", 1)[1])
-            self.assertTrue(quoted, f"{name}: the case must quote the brief it hands a subagent")
-            self.session_on(fields["model"], session_id=name)
-            hook_input = {"session_id": name, "cwd": str(self.project),
-                          "tool_input": {"subagent_type": "general-purpose", "prompt": quoted[1]}}
-            d = spawn.decide(hook_input, settings.Snapshot(hook_input)).decision
-            self.assertEqual((d["level"], d["model"], d["effort"]), want.groups(), name)
-
-
 class Router(Sandbox):
     def setUp(self):
         super().setUp()
         self.session_on("claude-opus-5-5")
 
-    def test_the_cheap_role_agents_keep_their_pin_and_the_rest_are_routed(self):
-        self.session_on("claude-fable-5-2")
-        for brief in (LOOKUP, HARDEST):
-            d = self.decide("model-router:scout", brief)
-            self.assertEqual((d["model"] or "haiku", d["effort"] or "medium"), ("haiku", "medium"), brief)
-        self.assertEqual(self.decide("model-router:architect", HARDEST)["model"], "opus")
-        self.assertEqual(self.decide("model-router:deep-solver", LOOKUP)["model"], "opus")  # routed, never Fable by pin
+    def facts(self, agent="general-purpose", definition=None, **facts) -> dict:
+        """A decision from its facts alone, on the shipped registry and this setup's options."""
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        tool_input = {"subagent_type": agent, "prompt": HARD, **facts.pop("tool_input", {})}
+        found = router.Facts(agent=agent, tool_input=tool_input, usable=facts.pop("usable", snap.usable),
+                             definition=definition or agents.find(agent, self.project), **facts)
+        return router.decide(found, snap.registry, snap.options)
 
-    def test_the_shipped_ladder_picks_at_balanced_priority(self):
+    def test_the_role_agents_carry_their_level_in_their_definitions(self):
+        self.session_on("claude-fable-5-2")
+        for agent in ("scout", "verifier"):
+            d = self.decide(f"model-router:{agent}", HARDEST)
+            self.assertEqual((d["action"], d["source"], d["model"], d["effort"]), ("keep", "pin", "haiku", None), agent)
+        for agent in ("architect", "reviewer"):
+            d = self.decide(f"model-router:{agent}", LOOKUP)
+            self.assertEqual((d["action"], d["source"], d["level"], d["model"]), ("keep", "pin", "complex", "opus"), agent)
+        d = self.decide("model-router:implementer", HARD)  # names no model, so the caller does
+        self.assertEqual((d["action"], d["source"], d["model"], d["was"]), ("keep", None, None, "fable"))
+        d = self.decide("model-router:implementer", HARD, model="sonnet")
+        self.assertEqual((d["action"], d["source"], d["model"], d["effort"]), ("rewrite", "caller", "sonnet", "medium"))
+
+    def test_the_shipped_ladder(self):
         config = cfg.shipped()
         every = ["haiku", "sonnet", "opus", "fable"]
-        picks = [tuple(ladder.pick(config, level, "balanced", every)) for level in cfg.LEVELS]
+        picks = [tuple(ladder.pick(config, level, every)) for level in cfg.LEVELS]
         self.assertEqual(picks, [("haiku", "medium"), ("sonnet", "medium"), ("opus", "high"),
                                  ("opus", "xhigh"), ("fable", "high")])
 
+    def test_a_model_stands_for_its_lowest_rung_or_the_one_its_effort_reaches(self):
+        config = cfg.shipped()
+        rung = lambda model, effort=None: ladder.rung(config, model, effort)  # noqa: E731
+        self.assertEqual([rung(m) for m in ("haiku", "sonnet", "opus", "fable")],
+                         ["lookup", "standard", "complex", "frontier"])
+        self.assertEqual([rung("opus", e) for e in ("low", "medium", "high", "xhigh", "max")],
+                         ["complex", "complex", "complex", "hardest", "hardest"])
+        self.assertEqual((rung("haiku", "max"), rung(None)), ("lookup", None))
+
     def test_a_pick_weaker_than_the_levels_need_gets_one_more_effort_step(self):
         config = cfg.shipped()
-        pick = lambda level, usable: tuple(ladder.pick(config, level, "balanced", usable))  # noqa: E731
+        pick = lambda level, usable: tuple(ladder.pick(config, level, usable))  # noqa: E731
         self.assertEqual(pick("complex", ["haiku", "sonnet"]), ("sonnet", "xhigh"))
         self.assertEqual(pick("hardest", ["haiku", "sonnet"]), ("sonnet", "xhigh"))
         self.assertEqual(pick("frontier", ["haiku", "sonnet", "opus"]), ("opus", "xhigh"))
-        self.assertEqual(pick("complex", ["haiku"]), ("haiku", "xhigh"))
-        self.assertEqual(ladder.pick(config, "complex", "balanced", []), (None, "high"))
+        self.assertEqual(ladder.pick(config, "complex", []), (None, "high"))
+
+    def test_haikus_extra_effort_step_stops_at_high(self):
+        config = cfg.shipped()
+        self.assertEqual(tuple(ladder.pick(config, "complex", ["haiku"])), ("haiku", "high"))
+        self.assertEqual(tuple(ladder.pick(config, "standard", ["haiku"])), ("haiku", "high"))
+        self.assertEqual(ladder.effort_on(config, Level.hardest, "haiku"), "xhigh")  # the level's own effort
 
     def test_a_pick_at_or_above_the_levels_need_gets_no_extra_step(self):
         config = cfg.shipped()
-        pick = lambda level, usable, priority="balanced": tuple(ladder.pick(config, level, priority, usable))  # noqa: E731
+        pick = lambda level, usable: tuple(ladder.pick(config, level, usable))  # noqa: E731
         self.assertEqual(pick("lookup", ["sonnet"]), ("sonnet", "medium"))  # stronger than needed
         self.assertEqual(pick("standard", ["sonnet", "opus"]), ("sonnet", "medium"))
         self.assertEqual(pick("complex", ["opus", "fable"]), ("opus", "high"))
-        self.assertEqual(pick("complex", ["opus", "fable"], "quality"), ("fable", "high"))
-        self.assertEqual(pick("complex", ["sonnet", "opus"], "fast"), ("sonnet", None))  # fast steps down on purpose
 
     def test_the_extra_effort_step_never_goes_past_xhigh(self):
         config = cfg.shipped()
         for effort, want in (("medium", "high"), ("high", "xhigh"), ("xhigh", "xhigh"), ("max", "max")):
             levels = {**config.levels, Level.complex: LevelSpec(3, effort)}
-            pick = ladder.pick(dataclasses.replace(config, levels=levels), "complex", "balanced", ["sonnet"])
+            pick = ladder.pick(dataclasses.replace(config, levels=levels), "complex", ["sonnet"])
             self.assertEqual(pick, ("sonnet", want), effort)
 
-    def test_complex_without_opus_runs_on_sonnet_at_xhigh_and_a_redo_adds_effort(self):
+    def test_a_named_model_over_the_cap_runs_on_the_cap_one_effort_step_higher(self):
         self.options(max_tier="sonnet")
-        d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["level"], d["model"], d["effort"]), ("complex", "sonnet", "xhigh"))
-        self.pre("general-purpose", HARD)
-        self.done("general-purpose", HARD, "claude-sonnet-5-5", model="sonnet", effort="xhigh")
-        again = self.decide("general-purpose", HARD)
-        self.assertEqual((again["level"], again["model"], again["effort"]), ("hardest", "sonnet", "max"))
+        d = self.decide("general-purpose", HARD, model="opus")
+        self.assertEqual((d["level"], d["model"], d["effort"], d["source"]), ("complex", "sonnet", "xhigh", "caller"))
+        self.assertIn("opus is over the cap", d["reason"])
+        d = self.decide("general-purpose", LOOKUP, model="fable")
+        self.assertEqual((d["action"], d["model"], d["effort"]), ("rewrite", "sonnet", "xhigh"))
 
-    def test_complex_with_opus_and_fable_routed_around_runs_on_sonnet_at_xhigh_and_a_redo_adds_effort(self):
+    def test_a_named_model_that_is_routed_around_goes_to_the_nearest_usable_one_below_it(self):
         self.route_around("opus", "fable")
-        d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["level"], d["model"], d["effort"]), ("complex", "sonnet", "xhigh"))
-        self.pre("general-purpose", HARD)
-        self.done("general-purpose", HARD, "claude-sonnet-5-5", model="sonnet", effort="xhigh")
-        again = self.decide("general-purpose", HARD)
-        self.assertEqual((again["model"], again["effort"]), ("sonnet", "max"))
+        d = self.decide("general-purpose", HARD, model="opus")
+        self.assertEqual((d["model"], d["effort"]), ("sonnet", "xhigh"))
+        self.route_around("sonnet")
+        self.agent("pinned", "opus")
+        self.assertEqual(self.decide("pinned", LOOKUP)["model"], "haiku")  # a named model is only ever lowered
 
-    def test_complex_with_only_opus_routed_around_moves_up_to_fable_at_high(self):
-        self.route_around("opus")
-        d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["model"], d["effort"]), ("fable", "high"))
-
-    def test_a_pin_or_rule_the_cap_lowers_keeps_the_levels_own_effort(self):
+    def test_a_pin_a_rule_and_a_call_the_cap_lowers_all_get_the_extra_step(self):
         self.options(max_tier="sonnet")
         self.agent("pinned", "opus")
         self.agent("ruled")
-        self.override({"agents": {"ruled": {"model": "opus"}}})
-        for name, source in (("pinned", "pin"), ("ruled", "rule")):
-            d = self.decide(name, HARD)
-            self.assertEqual((d["source"], d["model"], d["effort"]), (source, "sonnet", "high"), name)
-        self.assertEqual(self.decide("general-purpose", HARD)["effort"], "xhigh")
+        self.override({"agents": {"ruled": {"model": "opus"}}}, user=True)
+        for name, source, extra in (("pinned", "pin", {}), ("ruled", "rule", {}), ("general-purpose", "caller", {"model": "opus"})):
+            d = self.decide(name, HARD, **extra)
+            self.assertEqual((d["source"], d["model"], d["effort"]), (source, "sonnet", "xhigh"), name)
 
-    def test_quality_priority_takes_complex_to_fable(self):
-        self.options(priority="quality")
-        d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["level"], d["model"], d["effort"]), ("complex", "fable", "high"))
-
-    def test_agents_without_a_model_get_the_one_their_subtask_needs(self):
+    def test_a_call_that_names_no_model_is_left_as_it_is(self):
         self.agent("helper")
-        for agent in ("helper", "general-purpose", None, "Explore"):
+        for agent in ("helper", "general-purpose", None):
             d = self.decide(agent, LOOKUP)
-            self.assertEqual((d["action"], d["model"], d["effort"], d["source"]),
-                             ("rewrite", "haiku", "medium", "router"), agent)
-        d = self.decide("helper", BUILD)
-        self.assertEqual((d["model"], d["effort"]), ("sonnet", "medium"))
-        d = self.decide("helper", HARD)
-        self.assertEqual((d["model"], d["effort"]), ("opus", "high"))
+            self.assertEqual((d["action"], d["model"], d["effort"], d["source"], d["level"], d["was"]),
+                             ("keep", None, None, None, "complex", "opus"), agent)
+            self.assertIn("no model is named for this call, so it runs on the parent's model, opus", d["reason"])
+        self.assertIsNone(self.pre("general-purpose", HARD))
+
+    def test_a_model_named_on_the_call_is_kept_and_gets_its_rungs_effort(self):
+        for model, effort in (("haiku", "medium"), ("sonnet", "medium"), ("opus", "high"), ("fable", "high")):
+            d = self.decide("general-purpose", LOOKUP, model=model)
+            self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", model, "caller", effort))
+        d = self.decide("general-purpose", LOOKUP, model="opus", effort="xhigh")
+        self.assertEqual((d["action"], d["level"], d["model"], d["effort"]), ("keep", "hardest", "opus", None))
 
     def test_a_rewrite_changes_two_fields_and_approves_nothing(self):
-        out = self.pre("general-purpose", LOOKUP, description="d", run_in_background=True)
+        out = self.pre("general-purpose", LOOKUP, description="d", run_in_background=True, model="haiku")
         self.assertEqual(out["updatedInput"], {"prompt": LOOKUP, "subagent_type": "general-purpose",
                                                "description": "d", "run_in_background": True,
                                                "model": "haiku", "effort": "medium"})
@@ -1801,21 +1483,24 @@ class Router(Sandbox):
     def test_no_output_when_the_model_would_be_the_same(self):
         self.session_on("claude-sonnet-5-5")
         self.override({"levels": {"standard": {"effort": None}}}, user=True)
-        self.assertIsNone(self.pre("general-purpose", BUILD))
+        self.assertIsNone(self.pre("general-purpose", BUILD, model="sonnet"))
         self.assertEqual(self.ledger()[-1]["action"], "keep")
 
-    def test_builtin_explore_is_always_written_out(self):
-        # Its default model has differed between Claude Code versions.
+    def test_builtin_explore_runs_on_its_own_default_unless_a_model_is_named(self):
+        # Its default model has differed between Claude Code versions, so what it would run on isn't assumed.
         self.session_on("claude-sonnet-5-5")
         d = self.decide("Explore", "very thorough: how does the request pipeline work")
-        self.assertEqual((d["action"], d["model"], d["was"]), ("rewrite", "sonnet", None))
+        self.assertEqual((d["action"], d["model"], d["was"], d["level"]), ("keep", None, None, None))
+        d = self.decide("Explore", LOOKUP, model="haiku")
+        self.assertEqual((d["action"], d["model"], d["effort"]), ("rewrite", "haiku", "medium"))
 
-    def test_inside_a_subagent_the_pick_is_always_written_out(self):
+    def test_inside_a_subagent_a_call_naming_no_model_is_left_alone(self):
         self.session_on("claude-sonnet-5-5")
         hook_input = {**self.call("general-purpose", BUILD), "agent_id": "agent-1", "agent_type": "helper"}
         snap = settings.Snapshot(hook_input)
         d = router.decide(spawn.facts(hook_input, snap), snap.registry, settings.Settings())
-        self.assertEqual((d["action"], d["model"], d["was"]), ("rewrite", "sonnet", None))
+        self.assertEqual((d["action"], d["model"], d["was"]), ("keep", None, None))
+        self.assertIn("Claude Code's own choice", d["reason"])
 
     def test_decide_needs_only_its_facts(self):
         config = cfg.load()
@@ -1827,91 +1512,59 @@ class Router(Sandbox):
 
         self.assertEqual(decide()["action"], "keep")  # no definition found: left alone
         d = decide(definition={"source": "project", "model": None}, parent="opus")
-        self.assertEqual((d["action"], d["model"], d["effort"], d["was"]), ("rewrite", "haiku", "medium", "opus"))
+        self.assertEqual((d["action"], d["model"], d["level"], d["was"]), ("keep", None, "complex", "opus"))
+        d = decide(definition={"source": "project", "model": None}, tool_input={"prompt": LOOKUP, "model": "haiku"})
+        self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "haiku", "caller", "medium"))
         d = decide(definition={"source": "project", "model": "opus"})
-        self.assertEqual((d["model"], d["source"], d["effort"]), ("opus", "pin", "medium"))
+        self.assertEqual((d["model"], d["source"], d["effort"]), ("opus", "pin", "high"))
         d = decide(definition={"source": "project", "model": None}, earlier={"level": "lookup", "model": "haiku"})
         self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("standard", "sonnet", "lookup"))
 
     def test_fork_is_never_touched(self):
-        self.assertEqual(self.decide("fork", LOOKUP)["action"], "keep")
+        self.assertEqual(self.decide("fork", LOOKUP, model="haiku")["action"], "keep")
 
-    def test_a_model_named_on_the_call_is_kept(self):
-        d = self.decide("general-purpose", LOOKUP, model="opus")
-        self.assertEqual((d["action"], d["model"], d["source"]), ("keep", "opus", "caller"))
+    def test_a_named_model_is_raised_to_a_rules_level(self):
+        self.agent("worker")
+        self.override({"agents": {"worker": {"level": "complex"}}})
+        d = self.decide("worker", LOOKUP, model="sonnet")
+        self.assertEqual((d["level"], d["model"], d["effort"], d["source"]), ("complex", "opus", "high", "caller"))
+        self.assertIn("raises it to complex", d["reason"])
+        self.options(max_tier="sonnet")
+        d = self.decide("worker", LOOKUP, model="sonnet")
+        self.assertEqual((d["model"], d["effort"]), ("sonnet", "xhigh"))  # the cap still holds
+        self.override({"agents": {"worker": {"level": "lookup"}}})
+        os.environ.pop("CLAUDE_PLUGIN_OPTION_MAX_TIER")
+        self.assertEqual(self.decide("worker", HARD, model="opus")["model"], "opus")  # a floor never lowers
 
-    def test_a_project_file_may_raise_a_level_but_not_past_the_cap(self):
-        self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "haiku")
+    def test_a_project_file_may_raise_a_levels_model_but_not_past_the_cap(self):
         self.override({"levels": {"lookup": {"needs": 3, "effort": "high"}}})
-        d = self.decide("general-purpose", LOOKUP)
-        self.assertEqual((d["model"], d["effort"]), ("opus", "high"))
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        self.assertEqual(tuple(snap.pick(Level.lookup)), ("opus", "high"))
         self.options(max_tier="sonnet")
-        d = self.decide("general-purpose", LOOKUP)
-        self.assertEqual((d["model"], d["effort"]), ("sonnet", "xhigh"))  # the cap bounds the model; the missing strength costs one more effort step
-
-    def test_a_model_named_on_the_call_is_lowered_to_the_cap(self):
-        self.options(max_tier="sonnet")
-        d = self.decide("general-purpose", LOOKUP, model="fable")
-        self.assertEqual((d["action"], d["model"], d["effort"]), ("rewrite", "sonnet", None))
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        self.assertEqual(tuple(snap.pick(Level.lookup)), ("sonnet", "xhigh"))
 
     def test_agents_that_name_a_model_keep_it_within_the_cap(self):
         self.agent("pinned", "opus")
-        d = self.decide("pinned", LOOKUP)  # the pin holds the model; effort still follows the subtask
-        self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "opus", "pin", "medium"))
+        d = self.decide("pinned", LOOKUP)  # the pin holds the model; nobody chose effort, so its rung's is set
+        self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "opus", "pin", "high"))
         self.agent("deep", "fable", extra="effort: xhigh\n")
         d = self.decide("deep", LOOKUP)
         self.assertEqual((d["model"], d["effort"]), ("fable", None))  # its own effort: xhigh
         self.options(max_tier="sonnet")
         d = self.decide("pinned", LOOKUP)
-        self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", "medium"))
+        self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", "xhigh"))
         self.assertEqual(self.decide("deep", HARD)["model"], "sonnet")
 
-    def test_a_hand_off_to_a_role_agent_is_levelled_by_its_brief_alone(self):
-        self.session_on("claude-sonnet-5-5")
-        hooks.user_prompt({"session_id": "s1", "prompt": (
-            "Our order service double-charges customers under concurrent retries across the payments API and "
-            "the worker queue. Find the root cause and design a fix that keeps backward compatibility.")})
-        d = self.decide("model-router:architect", "Plan a fix for the double-charge bug described above.")
-        self.assertEqual((d["level"], d["model"]), ("complex", "opus"))
-
-    def test_a_role_agent_called_without_a_model_routes_by_its_brief_and_its_redo_climbs(self):
+    def test_a_redo_of_the_architect_keeps_its_model_and_effort_unless_the_call_names_more(self):
         self.session_on("claude-haiku-5-5")
         brief = "Design the session store migration across the API and worker services."
-        named = self.decide("model-router:architect", brief, model="sonnet", effort="high")  # the old hint
-        self.assertEqual((named["source"], named["model"]), ("caller", "sonnet"))
-        d = self.decide("model-router:architect", brief)
-        self.assertEqual((d["source"], d["level"], d["model"]), ("router", "hardest", "opus"))
         self.pre("model-router:architect", brief)
-        self.done("model-router:architect", brief, "claude-opus-5-5", model="opus", effort="xhigh")
+        self.done("model-router:architect", brief, "claude-opus-5-5")
         d = self.decide("model-router:architect", brief)
-        self.assertEqual((d["level"], d["model"], d["escalated_from"]), ("frontier", "fable", "hardest"))
-
-    def test_the_deep_solver_starts_at_hardest_and_can_go_higher(self):
-        d = self.decide("model-router:deep-solver", LOOKUP)  # its name floors the level; the ladder sets the model
-        self.assertEqual((d["source"], d["level"], d["model"], d["effort"]), ("router", "hardest", "opus", "xhigh"))
-        frontier = ("Investigate the unknown root cause of intermittent data loss in the payments database across "
-                    "every service and design a fix; there is no known approach.")
-        d = self.decide("model-router:deep-solver", frontier)
-        self.assertEqual((d["level"], d["model"]), ("frontier", "fable"))
-        self.assertNotIn("model-router:deep-solver", cfg.base_config().get("agents") or {})
-
-    def test_the_role_agents_are_routed_by_their_brief(self):
-        d = self.decide("model-router:implementer", LOOKUP)
-        self.assertEqual((d["action"], d["source"], d["model"], d["effort"]), ("rewrite", "router", "haiku", "medium"))
-        for agent in ("scout", "verifier", "docs-researcher"):  # pinned to Haiku, their own effort kept
-            d = self.decide(f"model-router:{agent}", HARDEST)
-            self.assertEqual((d["action"], d["source"], d["model"]), ("keep", "pin", "haiku"), agent)
-        for agent in ("architect", "reviewer"):  # their names set a complex floor
-            d = self.decide(f"model-router:{agent}", LOOKUP)
-            self.assertEqual((d["source"], d["level"]), ("router", "complex"), agent)
-        self.assertEqual(self.decide("model-router:implementer", HARD)["source"], "router")
-
-    def test_pins_can_be_overridden(self):
-        self.agent("pinned", "opus")
-        self.options(agent_pins="override")
-        d = self.decide("pinned", LOOKUP)
-        self.assertEqual((d["action"], d["model"], d["source"]), ("rewrite", "haiku", "router"))
-        self.assertEqual(self.decide("mystery:agent", LOOKUP)["model"], "haiku")
+        self.assertEqual((d["action"], d["level"], d["model"], d["escalated_from"]), ("keep", "hardest", "opus", "complex"))
+        d = self.decide("model-router:architect", brief, model="fable")
+        self.assertEqual((d["source"], d["model"]), ("caller", "fable"))
 
     def test_unknown_agents_and_unknown_models_are_left_alone(self):
         self.agent("exotic", "some-custom-model-id")
@@ -1921,72 +1574,76 @@ class Router(Sandbox):
 
     def test_an_agents_own_effort_and_a_callers_effort_are_kept(self):
         self.agent("careful", None, extra="effort: max\n")
-        self.assertIsNone(self.decide("careful", LOOKUP)["effort"])
-        out = self.pre("general-purpose", LOOKUP, effort="high")
-        self.assertEqual(out["updatedInput"]["effort"], "high")
+        self.assertIsNone(self.decide("careful", LOOKUP, model="haiku")["effort"])
+        d = self.decide("general-purpose", LOOKUP, model="haiku", effort="high")
+        self.assertEqual((d["action"], d["effort"]), ("keep", None))
         self.options(CLAUDE_CODE_EFFORT_LEVEL="medium")
-        self.assertIsNone(self.decide("general-purpose", "list the tests")["effort"])
+        self.assertIsNone(self.decide("general-purpose", "list the tests", model="haiku")["effort"])
 
-    def test_a_forced_subagent_model_still_gets_its_effort(self):
+    def test_a_forced_subagent_model_still_gets_its_rungs_effort(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="claude-opus-5-5[1m]", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         out = self.pre("general-purpose", LOOKUP)
-        self.assertEqual(out["updatedInput"], {"prompt": LOOKUP, "subagent_type": "general-purpose", "effort": "medium"})
-        self.assertIn("effort to medium", out["additionalContext"])
-        self.assertEqual(self.decide("general-purpose", HARD)["effort"], "high")
-        self.options(priority="fast")
-        self.assertIsNone(self.decide("general-purpose", HARD)["effort"])
-        self.assertEqual(self.decide("general-purpose", LOOKUP)["effort"], None)
+        self.assertEqual(out["updatedInput"], {"prompt": LOOKUP, "subagent_type": "general-purpose", "effort": "high"})
+        self.assertIn("effort to high", out["additionalContext"])
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="haiku")
+        self.assertEqual(self.decide("general-purpose", HARD)["effort"], "medium")
         self.options(CLAUDE_CODE_SUBAGENT_EFFORT="medium")
         self.assertEqual(self.decide("general-purpose", LOOKUP)["action"], "keep")
 
     def test_the_subagent_effort_variable_does_not_reach_a_teammate(self):
         self.options(CLAUDE_CODE_SUBAGENT_EFFORT="low")
-        self.assertEqual(self.decide("general-purpose", HARD)["action"], "keep")
+        self.assertEqual(self.decide("general-purpose", HARD, model="opus")["action"], "keep")
         # The fallback knows a teammate by its named Agent call with agent teams on, the mod by the spawn's kind.
         self.options(CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1")
-        out = self.pre("general-purpose", HARD, name="auditor")
+        out = self.pre("general-purpose", HARD, name="auditor", model="opus")
         self.assertEqual((out["updatedInput"]["effort"], out["updatedInput"]["name"]), ("high", "auditor"))
         for kept in ({"isolation": "worktree"}, {"effort": "low"}):
-            self.assertEqual(self.decide("general-purpose", HARD, name="auditor", **kept)["action"], "keep", kept)
+            self.assertEqual(self.decide("general-purpose", HARD, name="auditor", model="opus", **kept)["action"], "keep", kept)
         mod = lambda kind: modpath.spawn({"session_id": kind, "cwd": str(self.project), "parent_model": "claude-opus-5-5",  # noqa: E731
-                                            "kind": kind, "tool_input": {"subagent_type": "general-purpose", "prompt": HARD}})
+                                          "kind": kind, "tool_input": {"subagent_type": "general-purpose", "prompt": HARD,
+                                                                       "model": "opus"}})
         self.assertEqual(mod("teammate")["effort"], "high")
         self.assertIsNone(mod("subagent"))
+
+    def test_a_teammate_whose_parent_is_weaker_than_sonnet_starts_on_sonnet(self):
+        self.session_on("claude-haiku-5-5")
+        self.options(CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1")
+        out = self.pre("general-purpose", LOOKUP, name="auditor")
+        self.assertEqual((out["updatedInput"]["model"], out["updatedInput"]["effort"]), ("sonnet", "medium"))
+        self.assertEqual(self.ledger()[-1]["source"], "router")
+        self.assertIsNone(self.pre("general-purpose", LOOKUP))  # a subagent stays on its parent's model
+        self.session_on("claude-sonnet-5-5")
+        self.assertIsNone(self.pre("general-purpose", LOOKUP, name="auditor"))
+        spawned = modpath.spawn({"session_id": "t", "cwd": str(self.project), "parent_model": "claude-haiku-5-5",
+                                 "kind": "teammate", "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}})
+        self.assertEqual(spawned["model"], "sonnet")
 
     def test_an_agent_on_the_sessions_own_model_runs_at_least_at_the_sessions_effort(self):
         # Claude Code runs a subagent on the main conversation's model at the session's level (sub-agents docs),
         # such as xhigh under --effort ultracode, so the router never sets one below it there.
-        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        def run(model, session_effort, earlier=None):
+            return self.facts(tool_input={"model": model} if model else {}, parent="opus",
+                              session_effort=session_effort, earlier=earlier)
 
-        def run(prompt, session_effort, earlier=None):
-            facts = router.Facts(agent="general-purpose", tool_input={"subagent_type": "general-purpose", "prompt": prompt},
-                                 usable=snap.usable, definition=agents.find("general-purpose", self.project),
-                                 parent="opus", session_effort=session_effort, earlier=earlier)
-            return router.decide(facts, snap.registry, snap.options)
-
-        hard = run(HARD, "xhigh")
+        hard = run("opus", "xhigh")
         self.assertEqual((hard["model"], hard["effort"]), ("opus", "xhigh"))
         self.assertIn("at least the session's xhigh", hard["reason"])
-        self.assertEqual(run(HARD, None)["effort"], "high")
-        self.assertEqual(run(HARD, "low")["effort"], "high")  # it only raises
-        self.assertEqual(run(LOOKUP, "xhigh")["effort"], "medium")  # on another model the session's level doesn't apply
-        redo = run(HARD, "xhigh", earlier={"level": "complex", "model": "opus", "effort": "xhigh"})
+        self.assertEqual(run("opus", None)["effort"], "high")
+        self.assertEqual(run("opus", "low")["effort"], "high")  # it only raises
+        self.assertEqual(run("haiku", "xhigh")["effort"], "medium")  # on another model the session's level doesn't apply
+        redo = run(None, "xhigh", earlier={"level": "complex", "model": "opus", "effort": "xhigh"})
         self.assertNotEqual((redo["model"], redo["effort"]), ("opus", "xhigh"))  # a redo still asks for more
 
     def test_a_pinned_model_on_the_sessions_own_model_gets_the_sessions_effort_too(self):
         def run(**facts):
-            snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
-            found = router.Facts(agent="general-purpose", tool_input={"subagent_type": "general-purpose", "prompt": LOOKUP},
-                                 usable=snap.usable, definition=agents.find("general-purpose", self.project),
-                                 parent="opus", session_effort="xhigh", **facts)
-            return router.decide(found, snap.registry, snap.options)
+            return self.facts(tool_input={"prompt": LOOKUP}, parent="opus", session_effort="xhigh", **facts)
 
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="opus")
         pinned = run(workflow=True)
         self.assertEqual((pinned["model"], pinned["was"], pinned["effort"]), (None, "opus", "xhigh"))
         self.assertIn("at least the session's xhigh", pinned["reason"])
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="haiku")
-        self.assertEqual(run(workflow=True)["effort"], "medium")  # a pin on another model keeps the level's effort
+        self.assertEqual(run(workflow=True)["effort"], "medium")  # a pin on another model keeps its rung's effort
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="", CLAUDE_CODE_SUBAGENT_MODEL="opus",
                      CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         forced = run()
@@ -2014,38 +1671,22 @@ class Router(Sandbox):
         self.assertEqual(self.decide("pinned", LOOKUP, model="fable")["action"], "keep")
 
     def test_modes(self):
-        self.options(routing_mode="advise")
-        d = self.decide("general-purpose", LOOKUP)
-        self.assertEqual((d["action"], d["pick"]), ("keep", "haiku"))
         self.options(routing_mode="off")
-        self.assertIsNone(self.pre("general-purpose", LOOKUP))
+        self.assertIsNone(self.pre("general-purpose", LOOKUP, model="haiku"))
         self.assertEqual(self.ledger()[-1]["event"], "spawn")  # the ledger still records
+        self.options(routing_mode="advise")  # an older release's mode that changed no call reads as off
+        d = self.decide("general-purpose", LOOKUP, model="haiku")
+        self.assertEqual((d["action"], d["reason"]), ("keep", "routing is off"))
 
-    def test_priority_shifts_the_pick_and_fast_drops_extra_thinking(self):
-        self.options(priority="quality")
-        self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "sonnet")
-        self.options(priority="fast")
-        self.assertEqual(self.decide("general-purpose", BUILD)["model"], "haiku")
-        d = self.decide("general-purpose", HARD)
-        self.assertEqual((d["model"], d["effort"]), ("sonnet", None))
-        self.assertEqual(self.decide("general-purpose", LOOKUP)["effort"], None)
-
-    def test_an_unavailable_model_is_routed_around(self):
-        self.route_around("sonnet")
-        self.session_on("claude-sonnet-5-5")
-        self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")  # the next one strong enough
-        self.route_around("fable", "opus")
-        self.agent("pinned", "opus")
-        self.assertEqual(self.decide("pinned", LOOKUP)["model"], "haiku")  # a named model is only ever lowered
-
-    def test_a_project_rule_model_applies_only_when_it_is_not_weaker_than_the_pick(self):
+    def test_a_project_rule_model_applies_only_when_it_is_not_weaker_than_what_the_call_runs_on(self):
         self.agent("worker")
         self.override({"agents": {"worker": {"model": "haiku"}}})
-        held = self.decide("worker", HARD)  # the pick is opus
-        self.assertEqual((held["source"], held["model"], held["effort"]), ("router", "opus", "high"))
-        self.assertIn("a project rule names haiku for worker, weaker than the pick opus", held["held"])
+        held = self.decide("worker", HARD)  # it would run on the parent's opus
+        self.assertEqual((held["action"], held["source"], held["model"]), ("keep", None, None))
+        self.assertIn("a project rule names haiku for worker, weaker than the parent's model opus", held["held"])
         self.assertIn(held["held"], held["reason"])
-        same = self.decide("worker", LOOKUP)  # the pick is haiku: not weaker
+        self.session_on("claude-haiku-5-5")
+        same = self.decide("worker", LOOKUP)  # not weaker than the parent's haiku
         self.assertEqual((same["source"], same["model"], same["held"]), ("rule", "haiku", None))
         self.override({"agents": {"worker": {"model": "fable"}}})
         raised = self.decide("worker", LOOKUP)
@@ -2053,7 +1694,7 @@ class Router(Sandbox):
 
     def test_a_project_rule_model_never_lowers_what_the_call_would_run_on_without_it(self):
         self.override({"agents": {"deep": {"model": "haiku"}, "ghost": {"model": "haiku"}}})
-        self.agent("deep", "opus")  # the user's own agent pins opus; the brief is a lookup, so the pick is haiku
+        self.agent("deep", "opus")  # the user's own agent pins opus
         pinned = self.decide("deep", LOOKUP)
         self.assertEqual((pinned["source"], pinned["model"]), ("pin", "opus"))
         self.assertIn("weaker than the agent's own model opus", pinned["held"])
@@ -2112,19 +1753,21 @@ class Router(Sandbox):
     def test_a_project_rule_level_is_a_floor(self):
         self.agent("worker")
         self.override({"agents": {"worker": {"level": "complex"}}})
+        self.assertEqual(self.decide("worker", LOOKUP)["action"], "keep")  # the parent's opus is at the floor
+        self.session_on("claude-haiku-5-5")
         d = self.decide("worker", LOOKUP)
-        self.assertEqual((d["level"], d["model"]), ("complex", "opus"))
+        self.assertEqual((d["level"], d["model"], d["effort"], d["source"]), ("complex", "opus", "high", "rule"))
         self.override({"agents": {"worker": {"level": "lookup"}}})
-        d = self.decide("worker", HARD)  # it never lowers what the brief needs
-        self.assertEqual((d["level"], d["model"]), ("complex", "opus"))
+        d = self.decide("worker", HARD, model="sonnet")  # it never lowers what the call names
+        self.assertEqual((d["level"], d["model"]), ("standard", "sonnet"))
 
     def test_a_project_rule_cannot_switch_routing_off_but_the_users_can(self):
         self.agent("worker")
         self.override({"agents": {"worker": {"route": False}}})
-        d = self.decide("worker", LOOKUP)
+        d = self.decide("worker", LOOKUP, model="haiku")
         self.assertEqual((d["action"], d["model"]), ("rewrite", "haiku"))
         self.override({"agents": {"worker": {"route": False}}}, user=True)
-        self.assertEqual(self.decide("worker", LOOKUP)["action"], "keep")
+        self.assertEqual(self.decide("worker", LOOKUP, model="haiku")["action"], "keep")
 
     def test_a_spawn_that_held_a_project_rule_says_so_in_the_ledger_and_in_models(self):
         self.agent("worker")
@@ -2132,49 +1775,47 @@ class Router(Sandbox):
         self.session_on("claude-sonnet-5-5")
         self.pre("worker", HARD)
         row = self.ledger()[-1]
-        self.assertIn("weaker than the pick opus", row["held"])
+        self.assertIn("weaker than the parent's model sonnet", row["held"])
         found = json.loads(self.out("models", "--json"))["held_back"]
         self.assertEqual(found, [{"kind": "rule", "name": "worker", "reason": row["held"]}])
         self.pre("general-purpose", LOOKUP)
         self.assertNotIn("held", self.ledger()[-1])
 
     def test_a_redo_the_effort_cap_holds_at_the_same_model_and_effort_goes_one_model_up(self):
-        (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "high"}))
-        first = self.decide("general-purpose", HARD)
-        self.assertEqual((first["model"], first["effort"]), ("opus", "high"))
-        self.pre("general-purpose", HARD)
-        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="high")
-        again = self.decide("general-purpose", HARD)
+        earlier = {"level": "complex", "model": "opus", "effort": "high"}
+        again = self.facts(parent="opus", earlier=earlier, effort_caps={"opus": "high", "fable": "high"})
         self.assertEqual((again["level"], again["model"], again["effort"]), ("hardest", "fable", "high"))
         self.assertIn("maxEffortLevel holds opus at high, the same as the run that came back before, so it goes to fable",
                       again["reason"])
-        self.pre("general-purpose", HARD)
-        self.assertIn("so it goes to fable", self.ledger()[-1]["reason"])
+        (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "high"}))
+        self.agent("careful", None, extra="effort: high\n")  # its run's effort is on record
+        self.pre("careful", HARD)
+        self.done("careful", HARD, "claude-opus-5-5")
+        self.pre("careful", HARD)
+        self.assertIn("opus would run at high again, the same as the run that came back before, so it goes to fable",
+                      self.ledger()[-1]["reason"])
 
     def test_the_redo_stays_when_no_stronger_model_is_usable_and_a_pin_keeps_its_model(self):
-        (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "high"}))
-        self.options(max_tier="opus")
-        self.pre("general-purpose", HARD)
-        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="high")
-        again = self.decide("general-purpose", HARD)
+        earlier = {"level": "complex", "model": "opus", "effort": "high"}
+        again = self.facts(parent="opus", earlier=earlier, effort_caps={"opus": "high"},
+                           usable=["haiku", "sonnet", "opus"])
         self.assertEqual((again["model"], again["effort"]), ("opus", "high"))
         self.assertNotIn("so it goes to", again["reason"])
-        del os.environ["CLAUDE_PLUGIN_OPTION_MAX_TIER"]
         self.agent("pinned", "opus")
-        self.pre("pinned", HARD)
-        self.done("pinned", HARD, "claude-opus-5-5", model="opus", effort="high")
-        self.assertEqual(self.decide("pinned", HARD)["model"], "opus")
+        self.assertEqual(self.facts("pinned", earlier=earlier)["model"], "opus")
 
     def test_rules_in_override_files(self):
         self.override({"agents": {"Explore": {"route": False}}}, user=True)
-        self.override({"agents": {"general-purpose": {"model": "sonnet"}, "Plan": {"level": "frontier"}}})
-        self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "sonnet")
-        self.assertEqual(self.decide("Explore", LOOKUP)["action"], "keep")
+        self.override({"agents": {"general-purpose": {"model": "fable"}, "Plan": {"level": "frontier"}}})
+        self.assertEqual(self.decide("general-purpose", LOOKUP)["model"], "fable")
+        self.assertEqual(self.decide("Explore", LOOKUP, model="haiku")["action"], "keep")
         self.assertEqual(self.decide("Plan", LOOKUP)["model"], "fable")
 
-    def test_session_model_unknown_still_routes(self):
+    def test_session_model_unknown_leaves_a_call_naming_none_alone(self):
         d = self.decide("general-purpose", BUILD, session_id="fresh")
-        self.assertEqual((d["action"], d["model"], d["was"]), ("rewrite", "sonnet", None))
+        self.assertEqual((d["action"], d["model"], d["was"]), ("keep", None, None))
+        d = self.decide("general-purpose", BUILD, session_id="fresh", model="sonnet")
+        self.assertEqual((d["action"], d["model"], d["effort"]), ("rewrite", "sonnet", "medium"))
 
     def test_session_model_comes_from_the_main_thread_of_the_transcript(self):
         path = Path(self.tmp.name) / "t.jsonl"
@@ -2184,7 +1825,8 @@ class Router(Sandbox):
         hook_input = {**self.call("general-purpose", BUILD), "transcript_path": str(path)}
         snap = settings.Snapshot(hook_input)
         d = router.decide(spawn.facts(hook_input, snap), snap.registry, settings.Settings())
-        self.assertEqual((d["model"], d["was"]), ("sonnet", "sonnet"))  # not the recorded opus, not the subagent's haiku
+        self.assertEqual((d["model"], d["was"]), (None, "sonnet"))  # not the recorded opus, not the subagent's haiku
+
 
     def test_hooks_never_break_on_garbage(self):
         payloads = ("", "not json", "[]", json.dumps({"tool_input": "x"}),
@@ -2206,115 +1848,125 @@ class Router(Sandbox):
 
 
 class RepeatGuard(Sandbox):
-    """A rewrite that didn't run is never repeated, so a refused rewrite can't loop."""
+    """A rewrite that didn't run is never repeated, so a refused rewrite can't loop. A call that names no model
+    runs on its parent's, so a redo of one climbs from the level that model stands for."""
 
     def setUp(self):
         super().setUp()
         self.session_on("claude-opus-5-5")
 
     def test_the_same_call_again_without_a_result_passes_through(self):
-        self.assertIsNotNone(self.pre("general-purpose", LOOKUP))
+        self.assertIsNotNone(self.pre("general-purpose", LOOKUP, model="haiku"))
         self.next_message()
-        self.assertIsNone(self.pre("general-purpose", LOOKUP))
+        self.assertIsNone(self.pre("general-purpose", LOOKUP, model="haiku"))
         self.assertIn("passed through", self.ledger()[-1]["reason"])
-        self.assertIsNotNone(self.pre("general-purpose", "list the tests"))  # a different call is routed
+        self.assertIsNotNone(self.pre("general-purpose", "list the tests", model="haiku"))  # a different call is routed
 
     def test_a_passed_through_call_is_routed_with_no_source(self):
         key = calls.identify(self.call("general-purpose", LOOKUP)["tool_input"])[1]
-        self.pre("general-purpose", LOOKUP)
-        self.assertEqual(calls.route_of("s1", key).source, "router")
+        self.pre("general-purpose", LOOKUP, model="haiku")
+        self.assertEqual(calls.route_of("s1", key).source, "caller")
         self.next_message()
-        self.pre("general-purpose", LOOKUP)
+        self.pre("general-purpose", LOOKUP, model="haiku")
         self.assertIsNone(calls.route_of("s1", key).source)
 
     def test_after_a_result_the_same_call_is_routed_again(self):
-        self.pre("general-purpose", LOOKUP)
+        self.pre("general-purpose", LOOKUP, model="haiku")
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
-        self.assertIsNotNone(self.pre("general-purpose", LOOKUP))
+        self.assertIsNotNone(self.pre("general-purpose", LOOKUP, model="haiku"))
 
     def test_a_call_redone_after_its_result_runs_one_level_up(self):
+        self.session_on("claude-haiku-5-5")
         self.pre("general-purpose", LOOKUP)
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
         again = self.decide("general-purpose", LOOKUP)
         self.assertEqual((again["level"], again["model"], again["effort"]), ("standard", "sonnet", "medium"))
         self.assertIn("one level above the lookup run", again["reason"])
 
     def test_a_run_an_api_error_cut_off_is_retried_at_its_level(self):
         # Sent again after an overload, the call is a retry, not a redo: the level didn't fail on quality.
+        self.session_on("claude-haiku-5-5")
         self.pre("general-purpose", LOOKUP)
         cut = {"resolvedModel": "claude-haiku-5-5", "status": "completed", "totalTokens": 40,
                "content": [{"type": "text", "text": "API Error: 529 {\"type\":\"overloaded_error\"}"}]}
-        hooks.post_agent({**self.call("general-purpose", LOOKUP, model="haiku", effort="low"), "tool_response": cut})
+        hooks.post_agent({**self.call("general-purpose", LOOKUP), "tool_response": cut})
         again = self.decide("general-purpose", LOOKUP)
-        self.assertEqual((again["level"], again["model"], again["escalated_from"]), ("lookup", "haiku", None))
+        self.assertEqual((again["action"], again["level"], again["escalated_from"]), ("keep", "lookup", None))
         self.assertEqual([r["status"] for r in ledger.read() if r.get("event") == "result"], ["cut_off"])
         answer = dict(cut, content=[{"type": "text", "text": "The API Error: 529 handler retries twice."}])
-        hooks.post_agent({**self.call("general-purpose", LOOKUP, model="haiku", effort="low"), "tool_response": answer})
+        hooks.post_agent({**self.call("general-purpose", LOOKUP), "tool_response": answer})
         self.assertEqual(self.decide("general-purpose", LOOKUP)["escalated_from"], "lookup")  # a real answer finishes it
 
     def test_a_standard_redo_moves_to_opus_at_high(self):
+        self.session_on("claude-sonnet-5-5")
         self.pre("general-purpose", BUILD)
-        self.done("general-purpose", BUILD, "claude-sonnet-5-5", model="sonnet", effort="medium")
+        self.done("general-purpose", BUILD, "claude-sonnet-5-5")
         again = self.decide("general-purpose", BUILD)
         self.assertEqual((again["level"], again["model"], again["effort"], again["escalated_from"]),
                          ("complex", "opus", "high", "standard"))
 
     def test_a_complex_redo_stays_on_opus_at_xhigh(self):
         self.pre("general-purpose", HARD)
-        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="high")
+        self.done("general-purpose", HARD, "claude-opus-5-5")
         again = self.decide("general-purpose", HARD)
         self.assertEqual((again["level"], again["model"], again["effort"], again["escalated_from"]),
                          ("hardest", "opus", "xhigh", "complex"))
 
     def test_redo_counts_only_within_the_same_request(self):
+        self.session_on("claude-haiku-5-5")
         hooks.user_prompt({"session_id": "s1", "prompt": "check the repo", "prompt_id": "p1"})
         self.pre("general-purpose", LOOKUP)
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
         hooks.user_prompt({"session_id": "s1", "prompt": "check the repo again", "prompt_id": "p2"})
         self.assertEqual(self.decide("general-purpose", LOOKUP)["level"], "lookup")  # a loop, not a redo
         self.pre("general-purpose", LOOKUP)
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
         self.assertEqual(self.decide("general-purpose", LOOKUP)["level"], "standard")
 
     def test_a_rewritten_brief_marked_redo_runs_one_level_above_the_run_it_redoes(self):
+        self.session_on("claude-sonnet-5-5")
         self.pre("general-purpose", BUILD, description="Parser change")
-        self.done("general-purpose", BUILD, "claude-sonnet-5-5", model="sonnet", effort="medium", description="Parser change")
+        self.done("general-purpose", BUILD, "claude-sonnet-5-5", description="Parser change")
         rewritten = "implement the parser change, this time keeping quoted fields whole"
         unmarked = self.decide("general-purpose", rewritten, description="Parser change")
         self.assertEqual((unmarked["level"], unmarked["escalated_from"]), ("standard", None))  # a new call
         again = self.decide("general-purpose", rewritten, description="Redo: parser change")
         self.assertEqual((again["level"], again["model"], again["effort"], again["escalated_from"]),
                          ("complex", "opus", "high", "standard"))
-        self.assertIn("one level above the standard run", again["reason"])
+        self.assertIn("one level above the standard run that came back before", again["reason"])
         self.pre("general-purpose", rewritten, description="redo: parser change")
         self.assertEqual(self.ledger()[-1]["escalated_from"], "standard")
 
     def test_a_marked_redo_climbs_from_a_run_of_an_earlier_request(self):
         hooks.user_prompt({"session_id": "s1", "prompt": "fix the auth migration", "prompt_id": "p1"})
         self.pre("general-purpose", HARD, description="Second try")
-        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="high", description="Second try")
+        self.done("general-purpose", HARD, "claude-opus-5-5", description="Second try")
         hooks.user_prompt({"session_id": "s1", "prompt": "that dropped rows, try again", "prompt_id": "p2"})
         again = self.decide("general-purpose", BUILD, description="Redo: second try")
         self.assertEqual((again["level"], again["effort"], again["escalated_from"]), ("hardest", "xhigh", "complex"))
+        self.assertIn("run that came back before", again["reason"])
         with self.clock_at(self.clock + calls.REDO_WINDOW + 1):
             late = self.decide("general-purpose", BUILD, description="Redo: second try")
-        self.assertEqual((late["level"], late["escalated_from"]), ("complex", "standard"))  # too old to climb from
+        self.assertIn("marked a redo", late["reason"])  # too old to climb from: it climbs from where it would run
 
-    def test_a_marked_redo_with_no_run_on_record_goes_one_level_above_its_brief(self):
+    def test_a_marked_redo_with_no_run_on_record_goes_one_level_above_where_it_would_run(self):
+        self.session_on("claude-sonnet-5-5")
         again = self.decide("general-purpose", BUILD, description="Redo: parser change")
         self.assertEqual((again["level"], again["model"], again["escalated_from"]), ("complex", "opus", "standard"))
         self.assertIn("marked a redo", again["reason"])
 
     def test_a_background_run_is_climbed_from_only_after_it_stops(self):
         self.pre("general-purpose", HARD, description="Second try")
-        self.launched("general-purpose", HARD, "claude-opus-5-5", "a1", model="opus", effort="high", description="Second try")
+        self.launched("general-purpose", HARD, "claude-opus-5-5", "a1", description="Second try")
         running = self.decide("general-purpose", BUILD, description="Redo: second try")
-        self.assertEqual((running["level"], running["escalated_from"]), ("complex", "standard"))
+        self.assertIn("marked a redo", running["reason"])
         self.stopped("a1")
         again = self.decide("general-purpose", BUILD, description="Redo: second try")
         self.assertEqual((again["level"], again["escalated_from"]), ("hardest", "complex"))
+        self.assertIn("run that came back before", again["reason"])
 
     def test_only_a_description_that_starts_with_the_mark_is_a_redo(self):
+        self.session_on("claude-sonnet-5-5")
         for description in ("Redo the header layout", "Parser redo: second try", None):
             extra = {"description": description} if description else {}
             d = self.decide("general-purpose", BUILD, **extra)
@@ -2324,34 +1976,35 @@ class RepeatGuard(Sandbox):
 
     def test_a_marked_redo_climbs_from_the_run_with_its_description_not_the_agents_latest(self):
         self.pre("general-purpose", HARD, description="Second try")
-        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="high", description="Second try")
+        self.done("general-purpose", HARD, "claude-opus-5-5", description="Second try")
+        self.session_on("claude-haiku-5-5")
         self.pre("general-purpose", LOOKUP, description="Other job")  # a later, lighter run of the same agent
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="medium", description="Other job")
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", description="Other job")
         again = self.decide("general-purpose", BUILD, description="Redo:  second TRY")
         self.assertEqual((again["level"], again["effort"], again["escalated_from"]), ("hardest", "xhigh", "complex"))
 
     def test_a_marked_redo_with_no_run_under_its_description_ignores_the_agents_other_runs(self):
         self.pre("general-purpose", HARDEST, description="Other job")
-        self.done("general-purpose", HARDEST, "claude-opus-5-5", model="opus", effort="xhigh", description="Other job")
+        self.done("general-purpose", HARDEST, "claude-opus-5-5", description="Other job")
+        self.session_on("claude-sonnet-5-5")
         again = self.decide("general-purpose", BUILD, description="Redo: second try")
         self.assertEqual((again["level"], again["model"], again["escalated_from"]), ("complex", "opus", "standard"))
 
     def test_a_marked_redo_with_no_run_on_record_never_repeats_the_plain_call(self):
         # One level up can land on the model and effort the plain call already gets: under the session's floor,
-        # a cap, a pin, the fast priority, or at the top of the ladder.
-        frontier = "research a novel fix for the auth migration across every service, root cause unknown"
+        # a cap, a pin, or at the top of the ladder.
         self.agent("worker", model="sonnet")
-        cases = {"ultracode": ("general-purpose", HARD, {"effort": {"level": "xhigh"}}, {}),
-                 "an opus cap": ("general-purpose", HARDEST, {}, {"max_tier": "opus"}),
-                 "the top of the ladder": ("general-purpose", frontier, {}, {}),
-                 "a pinned agent": ("worker", HARDEST, {}, {}),
-                 "the fast priority": ("general-purpose", LOOKUP, {}, {"priority": "fast"})}
-        for name, (agent, prompt, hook, options) in cases.items():
+        cases = {"ultracode": ("general-purpose", "claude-opus-5-5", {"effort": {"level": "xhigh"}}, {}),
+                 "an opus cap": ("general-purpose", "claude-opus-5-5", {}, {"max_tier": "opus"}),
+                 "the top of the ladder": ("general-purpose", "claude-fable-5-2", {}, {}),
+                 "a pinned agent": ("worker", "claude-opus-5-5", {}, {})}
+        for name, (agent, session_model, hook, options) in cases.items():
             with self.subTest(name), mock.patch.dict(os.environ):
                 self.options(**options)
+                self.session_on(session_model)
 
                 def run(description: str) -> tuple:
-                    hook_input = {**self.call(agent, prompt, description=description), **hook}
+                    hook_input = {**self.call(agent, HARDEST, description=description), **hook}
                     snap = settings.Snapshot(hook_input)
                     d = router.decide(spawn.facts(hook_input, snap), snap.registry, snap.options)
                     return d["model"] or d["was"], d["effort"]
@@ -2362,6 +2015,7 @@ class RepeatGuard(Sandbox):
                     self.assertGreater(cfg.EFFORTS.index(marked[1]), cfg.EFFORTS.index(plain[1]))
 
     def test_a_swapped_run_is_not_a_redo(self):
+        self.session_on("claude-haiku-5-5")
         key = calls.identify({"subagent_type": "general-purpose", "prompt": LOOKUP})[1]
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", models_used=SWAP["swapped"]["modelsUsed"])
@@ -2376,7 +2030,7 @@ class RepeatGuard(Sandbox):
             self.pre(agent, LOOKUP)
             self.done(agent, LOOKUP, "claude-sonnet-5-5")
             again = self.decide(agent, LOOKUP)
-            self.assertEqual((again["level"], again["escalated_from"]), ("standard", "lookup"), agent)
+            self.assertEqual((again["level"], again["model"], again["escalated_from"]), ("complex", "sonnet", "standard"), agent)
 
     def test_a_spawn_identifies_its_call_once(self):
         with mock.patch.object(calls, "identify", wraps=calls.identify) as identify:
@@ -2384,11 +2038,12 @@ class RepeatGuard(Sandbox):
         self.assertEqual(identify.call_count, 1)
 
     def test_a_redo_of_a_frontier_run_stays_on_the_top_rung(self):
+        self.session_on("claude-sonnet-5-5")
         for expected in ("standard", "complex", "hardest", "frontier"):
             d = self.decide("general-purpose", BUILD)
             self.assertEqual(d["level"], expected)
             self.pre("general-purpose", BUILD)
-            self.done("general-purpose", BUILD, "claude-opus-5-5", model=d["model"], effort=d["effort"])
+            self.done("general-purpose", BUILD, "claude-opus-5-5")
         top = self.decide("general-purpose", BUILD)
         self.assertEqual((top["level"], top["model"]), ("frontier", "fable"))
         self.assertGreater(cfg.EFFORTS.index(top["effort"]), cfg.EFFORTS.index("high"))
@@ -2402,76 +2057,70 @@ class RepeatGuard(Sandbox):
             again = self.decide("general-purpose", prompt)
             self.assertGreater(cfg.EFFORTS.index(again["effort"]), cfg.EFFORTS.index(first["effort"]), prompt)
 
-    def test_a_fast_redo_does_not_repeat_the_run_it_replaces(self):
-        self.options(priority="fast")
-        first = self.decide("general-purpose", LOOKUP)
-        self.pre("general-purpose", LOOKUP)
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku")
-        again = self.decide("general-purpose", LOOKUP)
-        self.assertNotEqual((again["model"], again["effort"]), (first["model"], first["effort"]))
-
     def test_a_redo_held_on_the_same_model_by_the_cap_gets_more_effort(self):
         self.options(max_tier="opus")
-        hard = "investigate why auth is flaky and redesign it across every service"
-        first = self.decide("general-purpose", hard)
-        self.assertEqual((first["level"], first["model"], first["effort"]), ("hardest", "opus", "xhigh"))
-        self.pre("general-purpose", hard)
-        self.done("general-purpose", hard, "claude-opus-5-5", model="opus", effort="xhigh")
-        again = self.decide("general-purpose", hard)
+        for want in (("complex", None, None), ("hardest", "opus", "xhigh")):
+            d = self.decide("general-purpose", HARDEST)
+            self.assertEqual((d["level"], d["model"], d["effort"]), want)
+            self.pre("general-purpose", HARDEST)
+            self.done("general-purpose", HARDEST, "claude-opus-5-5")
+        again = self.decide("general-purpose", HARDEST)
         self.assertEqual((again["level"], again["model"], again["effort"]), ("frontier", "opus", "max"))
 
     def test_redo_escalation_stops_at_the_top_and_skips_named_models(self):
-        hard = "research a novel fix for the auth migration across every service, root cause unknown"
-        self.assertEqual(self.decide("general-purpose", hard)["level"], "frontier")
-        self.pre("general-purpose", hard)
-        self.done("general-purpose", hard, "claude-fable-5-2", model="fable", effort="high")
-        self.assertEqual(self.decide("general-purpose", hard)["level"], "frontier")
+        self.session_on("claude-fable-5-2")
+        self.assertEqual(self.decide("general-purpose", HARD)["level"], "frontier")
+        self.pre("general-purpose", HARD)
+        self.done("general-purpose", HARD, "claude-fable-5-2")
+        self.assertEqual(self.decide("general-purpose", HARD)["level"], "frontier")
         self.pre("general-purpose", LOOKUP)
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
+        self.done("general-purpose", LOOKUP, "claude-fable-5-2")
         named = self.decide("general-purpose", LOOKUP, model="haiku")
         self.assertEqual((named["source"], named["escalated_from"]), ("caller", None))
 
     def test_the_ledger_names_the_level_a_redo_climbed_from(self):
+        self.session_on("claude-haiku-5-5")
         self.pre("general-purpose", LOOKUP)
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
         self.pre("general-purpose", LOOKUP)
         spawns = [r for r in self.ledger() if r.get("event") == "spawn"]
         self.assertEqual([(r["level"], r["escalated_from"]) for r in spawns], [("lookup", None), ("standard", "lookup")])
 
     def test_an_error_also_settles_the_call(self):
-        self.pre("general-purpose", LOOKUP)
+        self.pre("general-purpose", LOOKUP, model="haiku")
         hooks.agent_failed({**self.call("general-purpose", LOOKUP, model="haiku"), "error": "timed out"})
-        self.assertIsNotNone(self.pre("general-purpose", LOOKUP))
+        self.assertIsNotNone(self.pre("general-purpose", LOOKUP, model="haiku"))
 
     def test_a_background_launch_settles_the_call_but_is_not_its_result(self):
+        self.session_on("claude-haiku-5-5")
         self.pre("general-purpose", LOOKUP)
-        self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1", model="haiku", effort="low")
+        self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1")
         again = self.decide("general-purpose", LOOKUP)  # the same brief, while the first still runs
-        self.assertEqual((again["action"], again["level"], again["escalated_from"]), ("rewrite", "lookup", None))
+        self.assertEqual((again["action"], again["level"], again["escalated_from"]), ("keep", "lookup", None))
         self.stopped("a1")
         again = self.decide("general-purpose", LOOKUP)
         self.assertEqual((again["level"], again["model"], again["escalated_from"]), ("standard", "sonnet", "lookup"))
 
     def test_claude_reissuing_the_rewritten_call_is_fine(self):
         for prompt in ("list the files under a", "list the files under b"):
-            self.pre("general-purpose", prompt)
-            self.assertIsNone(self.pre("general-purpose", prompt, model="haiku", effort="low"))
+            self.pre("general-purpose", prompt, model="haiku")
+            self.assertIsNone(self.pre("general-purpose", prompt, model="haiku", effort="medium"))
         self.assertEqual(self.ledger()[-1]["source"], "caller")
         self.assertTrue(health.load().healthy("haiku"))
 
     def test_a_model_that_never_runs_is_routed_around_after_two_refused_rewrites(self):
         for prompt in ("list the files under a", "list the files under b"):
-            self.pre("general-purpose", prompt)
+            self.pre("general-purpose", prompt, model="haiku")
             self.next_message()
-            self.pre("general-purpose", prompt)
+            self.pre("general-purpose", prompt, model="haiku")
         self.assertFalse(health.load().healthy("haiku"))
-        self.assertEqual(self.decide("general-purpose", "list the files under c")["model"], "sonnet")
+        self.assertEqual(self.decide("general-purpose", "list the files under c", model="haiku")["model"], "sonnet")
         self.assertIn(health.REFUSED, self.out("models"))
 
     def test_a_refused_effort_only_rewrite_under_force_passes_through(self):
-        self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", max_tier="sonnet")
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", max_tier="sonnet")
         for session_id in ("s1", "s2"):  # s2's own model is unknown
-            self.assertEqual(self.pre("general-purpose", LOOKUP, session_id=session_id)["updatedInput"]["effort"], "medium")
+            self.assertEqual(self.pre("general-purpose", LOOKUP, session_id=session_id)["updatedInput"]["effort"], "high")
             for _ in range(2):
                 self.next_message()
                 self.assertIsNone(self.pre("general-purpose", LOOKUP, session_id=session_id))
@@ -2481,9 +2130,9 @@ class RepeatGuard(Sandbox):
     def test_a_model_known_to_work_is_not_blamed(self):
         health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
         for prompt in ("list the files under a", "list the files under b"):
-            self.pre("general-purpose", prompt)
+            self.pre("general-purpose", prompt, model="haiku")
             self.next_message()
-            self.pre("general-purpose", prompt)
+            self.pre("general-purpose", prompt, model="haiku")
         self.assertTrue(health.load().healthy("haiku"))
 
     def test_the_cap_holds_even_when_a_lowering_rewrite_did_not_take(self):
@@ -2496,51 +2145,53 @@ class RepeatGuard(Sandbox):
         self.assertIn('model: "sonnet"', again["permissionDecisionReason"])
         self.assertIsNone(self.pre("general-purpose", LOOKUP, model="sonnet"))
 
-    def test_a_refused_rewrite_is_denied_when_the_untouched_call_would_break_the_cap(self):
+    def test_a_call_naming_no_model_is_held_to_the_cap_too(self):
         # The session runs on opus, so the call left untouched would inherit opus.
         self.options(max_tier="sonnet")
-        self.assertEqual(self.pre("general-purpose", LOOKUP)["updatedInput"]["model"], "haiku")
+        out = self.pre("general-purpose", LOOKUP)
+        self.assertEqual((out["updatedInput"]["model"], out["updatedInput"]["effort"]), ("sonnet", "xhigh"))
+        self.assertIn("would run on the parent's opus", self.ledger()[-1]["reason"])
         self.next_message()
         again = self.pre("general-purpose", LOOKUP)
         self.assertEqual(again["permissionDecision"], "deny")
-        self.assertIn('model: "haiku"', again["permissionDecisionReason"])
+        self.assertIn('model: "sonnet"', again["permissionDecisionReason"])
 
     def test_pending_calls_survive_a_new_user_prompt(self):
-        self.pre("general-purpose", LOOKUP)
+        self.pre("general-purpose", LOOKUP, model="haiku")
         hooks.user_prompt({"session_id": "s1", "prompt": "try that again"})
         self.next_message()
-        self.assertIsNone(self.pre("general-purpose", LOOKUP))
+        self.assertIsNone(self.pre("general-purpose", LOOKUP, model="haiku"))
 
     def test_copies_of_one_call_issued_together_are_all_routed(self):
         for _ in range(3):
-            self.assertEqual(self.pre("general-purpose", LOOKUP)["updatedInput"]["model"], "haiku")
+            self.assertEqual(self.pre("general-purpose", LOOKUP, model="haiku")["updatedInput"]["effort"], "medium")
         self.assertTrue(health.load().healthy("haiku"))
 
     def test_a_redo_at_the_top_of_the_ladder_gets_more_effort(self):
-        hard = "research a novel fix for the auth migration across every service, root cause unknown"
-        self.pre("general-purpose", hard)
-        self.done("general-purpose", hard, "claude-fable-5-2", model="fable", effort="high")
-        again = self.decide("general-purpose", hard)
+        self.agent("deep", "fable")
+        self.pre("deep", HARD)
+        self.done("deep", HARD, "claude-fable-5-2")
+        again = self.decide("deep", HARD)
         self.assertEqual((again["action"], again["level"], again["model"], again["effort"], again["escalated_from"]),
                          ("rewrite", "frontier", "fable", "xhigh", None))
 
     def test_a_redo_keeps_the_effort_the_call_names(self):
         self.pre("general-purpose", HARD)
-        self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", effort="high")
+        self.done("general-purpose", HARD, "claude-opus-5-5")
         for named in ("max", "low"):
             with self.subTest(effort=named):
                 again = self.decide("general-purpose", HARD, effort=named)
-                self.assertEqual((again["escalated_from"], again["model"], again["effort"]), ("complex", "opus", None))
+                self.assertEqual((again["level"], again["model"], again["effort"]), ("hardest", "opus", None))
 
     def test_a_redo_that_would_repeat_the_run_at_the_environments_effort_goes_one_model_up(self):
         for sid, name in (("e1", "CLAUDE_CODE_SUBAGENT_EFFORT"), ("e2", "CLAUDE_CODE_EFFORT_LEVEL")):
             with self.subTest(env=name):
                 self.options(**{name: "high"})
-                self.session_on("claude-sonnet-5-5", sid)
+                self.session_on("claude-opus-5-5", sid)
                 first = self.decide("general-purpose", HARD, session_id=sid)
-                self.assertEqual((first["level"], first["model"], first["effort"]), ("complex", "opus", None))
+                self.assertEqual((first["level"], first["model"], first["effort"]), ("complex", None, None))
                 self.pre("general-purpose", HARD, session_id=sid)
-                self.done("general-purpose", HARD, "claude-opus-5-5", model="opus", session_id=sid)
+                self.done("general-purpose", HARD, "claude-opus-5-5", session_id=sid)
                 again = self.decide("general-purpose", HARD, session_id=sid)  # hardest is opus too: the same run
                 self.assertEqual((again["escalated_from"], again["model"], again["effort"]), ("complex", "fable", None))
                 self.assertIn("so it goes to fable", again["reason"])
@@ -2575,14 +2226,14 @@ class Calls(Sandbox):
         self.assertEqual(calls.models_used({"modelsUsed": many}), many[:5])
         self.assertEqual(calls.models_used({"modelsUsed": ["a", "a", "a", "a", "a", "b"]}), [])
 
-    def test_only_runs_at_their_level_are_redone(self):
+    def test_a_run_whose_call_named_its_model_is_redone_only_when_the_router_rewrote_it(self):
         for source, rewrote in (("caller", False), (None, False), ("caller", True), ("router", False), ("pin", False),
                                 ("rule", False)):
             call = {"prompt": f"list {source} {rewrote}"}
             self.route(call, source=source, rewrote=rewrote)
             self.assertTrue(self.came_back(call).finished, source)  # every foreground result finishes its call
             self.assertEqual(calls.finished_run("s1", calls.identify(call)[1]) is not None,
-                             source in ("router", "pin", "rule") or rewrote, (source, rewrote))
+                             source != "caller" or rewrote, (source, rewrote))
 
     def test_a_finished_run_counts_in_its_own_request_or_window(self):
         call = {"prompt": LOOKUP}
@@ -2672,13 +2323,13 @@ class Fallback(Sandbox):
     def test_a_rewrite_waits_for_its_result_and_only_a_result_finishes_the_run(self):
         self.session_on("claude-opus-5-5")
         key = calls.identify({"prompt": LOOKUP})[1]
-        self.pre("general-purpose", LOOKUP)
+        self.pre("general-purpose", LOOKUP, model="haiku")
         self.assertIsNone(fallback.refused("s1", key))  # a copy issued alongside it
         self.next_message()
         self.assertEqual(fallback.refused("s1", key)["model"], "haiku")
         hooks.agent_failed({**self.call("general-purpose", LOOKUP), "error": "timed out"})  # accepted, nothing finished
         self.assertEqual((fallback.refused("s1", key), calls.finished_run("s1", key)), (None, None))
-        self.pre("general-purpose", LOOKUP)
+        self.pre("general-purpose", LOOKUP, model="haiku")
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
         self.assertEqual(calls.finished_run("s1", key)["level"], "lookup")
 
@@ -2737,11 +2388,12 @@ class Mod(Sandbox):
         return modpath.spawn({"session_id": "s1", "parent_model": parent,
                                 "kind": "subagent", "tool_input": tool_input})
 
-    def test_spawns_are_routed_from_the_parents_exact_model(self):
-        self.assertEqual(self.spawn("general-purpose", LOOKUP), {"model": "haiku", "effort": "medium",
-                                                                 "reason": "lookup subtask"})
-        self.assertEqual(self.spawn("general-purpose", HARD)["model"], "opus")
+    def test_a_spawn_keeps_the_model_its_call_names_and_sets_the_effort_nobody_named(self):
+        self.assertEqual(self.spawn("general-purpose", LOOKUP, model="haiku"), {"model": "haiku", "effort": "medium",
+                                                                                "reason": "the call names a model"})
+        self.assertEqual(self.spawn("general-purpose", HARD, model="opus")["model"], "opus")
         self.assertIsNone(self.spawn("general-purpose", BUILD, model="sonnet", effort="high"))
+        self.assertIsNone(self.spawn("general-purpose", BUILD))  # it runs on the parent's model
         self.assertEqual(self.ledger()[-1]["via"], "mod")
 
     def mark(self, tool_use_id: str) -> Path:
@@ -2752,7 +2404,7 @@ class Mod(Sandbox):
         return path
 
     def pre_call(self, prompt: str, tool_use_id: str | None, session_id: str = "s1") -> dict | None:
-        return hooks.pre_agent({**self.call("general-purpose", prompt, session_id=session_id),
+        return hooks.pre_agent({**self.call("general-purpose", prompt, session_id=session_id, model="haiku"),
                                 **({"tool_use_id": tool_use_id} if tool_use_id else {})})
 
     def test_the_settings_hook_stands_down_only_for_a_call_the_mod_marked(self):
@@ -2791,116 +2443,116 @@ class Mod(Sandbox):
         modpath.start({"session_id": "s1"})  # no marks folder yet
 
     def test_a_spawn_redone_after_its_result_runs_one_level_up(self):
-        self.spawn("general-purpose", LOOKUP)
+        self.assertIsNone(self.spawn("general-purpose", LOOKUP, parent=HAIKU))
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
-        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "sonnet")
+        self.assertEqual(self.spawn("general-purpose", LOOKUP, parent=HAIKU)["model"], "sonnet")
 
     def test_a_workflow_stage_is_never_redone(self):
         stage = lambda **tool: modpath.spawn({  # noqa: E731
-            "session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5", "kind": "workflow",
+            "session_id": "s1", "cwd": str(self.project), "parent_model": HAIKU, "kind": "workflow",
             "tool_input": {"subagent_type": "general-purpose", "prompt": BUILD, **tool}})
         plain = stage(description="Build step")
-        self.assertEqual(plain["model"], "sonnet")
+        self.assertIsNone(plain)  # it runs on the parent's haiku
         self.assertEqual(stage(description="Redo: build step"), plain)  # a mark on a stage changes nothing
-        self.spawn("general-purpose", BUILD, description="Build step")
+        self.spawn("general-purpose", BUILD, parent=HAIKU, description="Build step")
         self.done("general-purpose", BUILD, "claude-sonnet-5-5", description="Build step")
         self.assertEqual(stage(description="Build step"), plain)  # a subagent's finished run is no run of the stage
         self.assertEqual(stage(description="Redo: build step"), plain)
 
     def test_copies_of_one_brief_launched_in_the_background_all_run_at_its_level(self):
         for agent_id in ("a1", "a2", "a3"):
-            self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku", agent_id)
+            self.assertEqual(self.spawn("general-purpose", LOOKUP, model="haiku")["model"], "haiku", agent_id)
             self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", agent_id)
 
     def test_a_background_spawn_is_redone_one_level_up_only_after_it_stops(self):
-        self.spawn("general-purpose", LOOKUP)
+        self.spawn("general-purpose", LOOKUP, parent=HAIKU)
         self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1")
         self.stopped("a9")  # another agent, one this session never launched in the background
-        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku")
+        self.assertEqual(self.spawn("general-purpose", LOOKUP, parent=HAIKU), None)
         self.stopped("a1")
-        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "sonnet")
+        self.assertEqual(self.spawn("general-purpose", LOOKUP, parent=HAIKU)["model"], "sonnet")
         self.stopped("a1")  # a second stop for the same agent changes nothing
         self.assertEqual(store.load_entry("launched", "s1").get("a1"), None)
 
     def test_a_background_agent_that_stops_without_an_answer_is_not_a_result(self):
-        self.spawn("general-purpose", LOOKUP)
+        self.spawn("general-purpose", LOOKUP, parent=HAIKU)
         self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1")
         self.stopped("a1", answer=" ")
-        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku")
+        self.assertEqual(self.spawn("general-purpose", LOOKUP, parent=HAIKU), None)
         self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a2")
         self.stopped("a2", answer=None)  # a Claude Code that doesn't send the answer
-        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "sonnet")
+        self.assertEqual(self.spawn("general-purpose", LOOKUP, parent=HAIKU)["model"], "sonnet")
 
     def test_a_background_agent_that_handed_back_its_report_is_a_result(self):
-        self.spawn("general-purpose", LOOKUP)
+        self.spawn("general-purpose", LOOKUP, parent=HAIKU)
         self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1")
         self.stopped("a1", answer="", transcript=self.handback("src/a.py and src/b.py"))
-        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "sonnet")
+        self.assertEqual(self.spawn("general-purpose", LOOKUP, parent=HAIKU)["model"], "sonnet")
 
     def test_a_handback_with_no_message_is_no_answer(self):
-        self.spawn("general-purpose", LOOKUP)
+        self.spawn("general-purpose", LOOKUP, parent=HAIKU)
         for agent_id, transcript in (("a1", self.handback(" ")), ("a2", str(Path(self.tmp.name) / "missing.jsonl"))):
             self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", agent_id)
             self.stopped(agent_id, answer="", transcript=transcript)
-            self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku", agent_id)
+            self.assertEqual(self.spawn("general-purpose", LOOKUP, parent=HAIKU), None, agent_id)
 
     def test_a_lagging_handback_transcript_is_no_answer(self):
         lines = (FIXTURES / "subagent-handback.jsonl").read_text().splitlines(keepends=True)
         lagging = {"only-the-blank-row": lines[1], "truncated-last-line": lines[0][:60]}
-        self.spawn("general-purpose", LOOKUP)
+        self.spawn("general-purpose", LOOKUP, parent=HAIKU)
         for agent_id, text in lagging.items():
             path = Path(self.tmp.name) / f"{agent_id}.jsonl"
             path.write_text(text)
             self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", agent_id)
             self.stopped(agent_id, answer="", transcript=str(path))
-            self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku", agent_id)
+            self.assertEqual(self.spawn("general-purpose", LOOKUP, parent=HAIKU), None, agent_id)
 
     def test_a_transcript_read_that_raises_still_counts_the_stop(self):
-        self.spawn("general-purpose", LOOKUP)
+        self.spawn("general-purpose", LOOKUP, parent=HAIKU)
         self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1")
         with mock.patch.object(session, "handed_back", side_effect=ValueError("boom")):
             self.stopped("a1", answer="", transcript=self.handback("src/a.py"))
-        self.assertEqual(self.spawn("general-purpose", LOOKUP)["model"], "haiku")
+        self.assertEqual(self.spawn("general-purpose", LOOKUP, parent=HAIKU), None)
 
     def test_a_pinned_agent_redone_gets_more_effort(self):
         self.agent("pinned", "opus")
-        self.assertEqual(self.spawn("pinned", LOOKUP)["effort"], "medium")
+        self.assertEqual(self.spawn("pinned", LOOKUP)["effort"], "high")
         self.done("pinned", LOOKUP, "claude-opus-5-5")
         pick = self.spawn("pinned", LOOKUP)
-        self.assertEqual((pick["model"], pick["effort"]), ("opus", "high"))
+        self.assertEqual((pick["model"], pick["effort"]), ("opus", "xhigh"))
 
     def test_workflow_stages_and_teammate_roles_without_a_file_are_routed(self):
         for kind, agent in (("workflow", "workflow-subagent"), ("teammate", "helper-two")):
             pick = modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
-                                    "kind": kind, "tool_input": {"subagent_type": agent, "prompt": LOOKUP}})
+                                    "kind": kind, "tool_input": {"subagent_type": agent, "prompt": LOOKUP, "model": "haiku"}})
             self.assertEqual((pick["model"], pick["effort"]), ("haiku", "medium"), kind)
         self.assertIsNone(self.spawn("no-such-agent", LOOKUP))
 
     def test_forced_subagent_model_gets_effort_only(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         pick = self.spawn("general-purpose", LOOKUP)
-        self.assertEqual((pick["model"], pick["effort"]), (None, "medium"))
+        self.assertEqual((pick["model"], pick["effort"]), (None, "high"))
 
     def test_a_max_effort_level_holds_every_effort_the_router_sets(self):
         session.record("s1", "claude-opus-5-5")
         capped = {"user": {"maxEffortLevel": "medium"}}
         spawned = modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                                    "kind": "subagent", "settings": capped,
-                                   "tool_input": {"subagent_type": "general-purpose", "prompt": HARD}})
+                                   "tool_input": {"subagent_type": "general-purpose", "prompt": HARD, "model": "opus"}})
         self.assertEqual((spawned["model"], spawned["effort"]), ("opus", "medium"))
         self.assertIn("effort held to medium by maxEffortLevel", spawned["reason"])
         self.assertIn("effort held to medium by maxEffortLevel", self.ledger()[-1]["reason"])
-        self.assertEqual(self.spawn("general-purpose", LOOKUP)["effort"], "medium")  # at the cap: no reason
+        self.assertEqual(self.spawn("general-purpose", LOOKUP, model="haiku")["effort"], "medium")  # at the cap: no reason
         self.assertNotIn("maxEffortLevel", self.ledger()[-1]["reason"])
         # Without the mod, the settings files say it.
         (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "low"}))
-        out = self.pre("general-purpose", HARD, session_id="s2")
+        out = self.pre("general-purpose", HARD, session_id="s2", model="opus")
         self.assertEqual(out["updatedInput"]["effort"], "low")
         self.assertIn("effort held to low by maxEffortLevel", out["additionalContext"])
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         self.assertEqual(self.pre("general-purpose", HARD, session_id="s3")["updatedInput"]["effort"], "low")
         route = self.out("explain", HARD)
-        self.assertIn("effort: low.", route)
+        self.assertIn("effort: low (the call is changed).", route)
         self.assertIn("effort held to low by maxEffortLevel", route.split("Why:", 1)[1].splitlines()[0])
         self.assertIn("| complex | opus | low (effort held to low by maxEffortLevel) |", self.out("policy"))
 
@@ -2932,10 +2584,9 @@ class Mod(Sandbox):
         self.assertIsNone(config.price("claude-opus-5-6"))  # a new version is never priced as its neighbour
 
     def test_results_are_checked_against_the_model_the_mod_routed_to(self):
-        self.options(agent_pins="override")
         self.agent("rev", "opus")
         for prompt in ("list the files under a", "list the files under b"):
-            self.assertEqual(self.spawn("rev", prompt)["model"], "haiku")
+            self.assertEqual(self.spawn("rev", prompt, model="haiku")["model"], "haiku")
             self.done("rev", prompt, "claude-haiku-5-5")
         self.assertTrue(health.load().healthy("opus"))
         self.assertEqual(self.ledger()[-1]["asked"], "haiku")
@@ -2951,6 +2602,7 @@ class Mod(Sandbox):
     def test_a_pick_that_never_arrived_is_no_substitution(self):
         # The mod's answer timed out, or a later mod replaced it: the call ran on what it would have had untouched.
         parent = "claude-sonnet-5-5"
+        self.override({"agents": {"general-purpose": {"level": "complex"}}})  # the router raises the parent's sonnet
         for number in range(3):
             brief = f"{HARD} {number}"
             self.assertEqual(self.spawn("general-purpose", brief, parent=parent)["model"], "opus")
@@ -2966,6 +2618,7 @@ class Mod(Sandbox):
     def test_a_fallback_rewrite_that_ran_on_the_untouched_model_is_a_substitution(self):
         # On the fallback the rewrite is applied before the call starts, so a run on the parent's model didn't take it.
         self.session_on("claude-sonnet-5-5")
+        self.override({"agents": {"general-purpose": {"level": "complex"}}})
         for number in range(2):
             brief = f"{HARD} {number}"
             self.assertEqual(self.pre("general-purpose", brief)["updatedInput"]["model"], "opus")
@@ -3142,6 +2795,8 @@ class NewestOnProviders(Sandbox):
 
     def spawn(self, prompt: str, agent: str = "general-purpose", tool_use_id: str | None = None,
               **extra) -> tuple[dict | None, dict]:
+        if agent == "general-purpose":  # Claude names the model each brief needs
+            extra.setdefault("model", {LOOKUP: "haiku", BUILD: "sonnet", HARDEST: "opus"}[prompt])
         hook_input = {"session_id": "s1", "parent_model": "claude-opus-5-5",
                       "kind": "subagent", **({"tool_use_id": tool_use_id} if tool_use_id else {}),
                       "tool_input": {"subagent_type": agent, "prompt": prompt, "description": "d", **extra}}
@@ -3218,7 +2873,7 @@ class NewestOnProviders(Sandbox):
         self.assertEqual({out["model"] for out, _ in copies}, {"claude-haiku-5-5"})
         hooks.agent_failed({**copies[0][1], "error": refused})
         # The call comes again, now on the alias, before its siblings' failures arrive.
-        self.assertEqual(self.spawn(LOOKUP, tool_use_id="t3")[0], {"model": "haiku", "effort": "medium", "reason": "lookup subtask"})
+        self.assertEqual(self.spawn(LOOKUP, tool_use_id="t3")[0], {"model": "haiku", "effort": "medium", "reason": "the call names a model"})
         for _, hook_input in copies[1:]:
             hooks.agent_failed({**hook_input, "error": refused})
         self.assertEqual([r["model"] for r in self.ledger() if r["event"] == "model_error"], ["claude-haiku-5-5"] * 3)
@@ -3235,7 +2890,7 @@ class NewestOnProviders(Sandbox):
     def test_the_agent_call_fallback_sends_only_aliases(self):
         os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
         hook_input = {"session_id": "s9", "cwd": str(self.project),
-                      "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
+                      "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP, "model": "haiku"}}
         self.assertEqual(hooks.pre_agent(hook_input)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
 
 
@@ -3277,7 +2932,7 @@ class ModPayloads(Sandbox):
         os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
         refused = "API Error: 404 not_found_error: model: claude-haiku-5-5"
         base = {**self.payloads["mod-spawn"], "parent_agent_id": None,
-                "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
+                "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP, "model": "haiku"}}
         copies = [{**base, "tool_use_id": f"tu{i}"} for i in (1, 2, 3)]
         self.assertEqual([modpath.spawn(c)["model"] for c in copies[:2]], ["claude-haiku-5-5"] * 2)
         self.assertEqual([calls.route_of("s1", "none", f"tu{i}").sent for i in (1, 2)], ["claude-haiku-5-5"] * 2)
@@ -3312,7 +2967,7 @@ class Ledger(Sandbox):
                      "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}, None)
         rows = ledger.read()
         self.assertEqual([list(r) for r in rows], [
-            ["ts", "event", "via", "session", "agent", "action", "level", "signals", "model", "was", "effort", "source",
+            ["ts", "event", "via", "session", "agent", "action", "level", "model", "was", "effort", "source",
              "escalated_from", "reason", "description", "kind"],
             ["ts", "event", "session", "agent", "asked", "resolved_model", "status", "total_tokens"],
             ["ts", "event", "session", "agent", "model"],
@@ -3380,19 +3035,20 @@ class Hooks(Sandbox):
     def text(self, output: dict | None) -> str:
         return output["hookSpecificOutput"]["additionalContext"]
 
-    def test_a_swapped_run_of_a_risk_brief_tells_claude(self):
+    def test_a_swapped_run_tells_claude_whatever_its_brief(self):
         out = self.done("general-purpose", HARD, "claude-sonnet-5-5", models_used=SWAP["swapped"]["modelsUsed"])
         self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
         self.assertEqual(self.text(out), "Model Router: this agent switched models mid-run "
                          "(claude-sonnet-5-5 to claude-sonnet-5), so its result needs a check before it is "
                          "relied on.")
 
-    def test_a_swapped_run_of_a_plain_brief_says_nothing(self):
-        self.assertIsNone(self.done("general-purpose", LOOKUP, "claude-haiku-5-5", models_used=["claude-haiku-5-5", "x-1"]))
+        out = self.done("general-purpose", LOOKUP, "claude-haiku-5-5", models_used=["claude-haiku-5-5", "x-1"])
+        self.assertIn("switched models mid-run (claude-haiku-5-5 to x-1)", self.text(out))
         self.assertEqual(ledger.read()[-1]["models_used"], ["claude-haiku-5-5", "x-1"])
 
     def test_a_run_with_junk_models_used_is_recorded_as_any_other_run(self):
         key = calls.identify({"subagent_type": "general-purpose", "prompt": HARD})[1]
+        self.session_on("claude-opus-5-5")
         self.pre("general-purpose", HARD)
         for junk in ([1, 2], "claude-sonnet-5", ["claude-sonnet-5-5"]):
             self.assertIsNone(self.done("general-purpose", HARD, "claude-sonnet-5-5", models_used=junk))
@@ -3400,6 +3056,7 @@ class Hooks(Sandbox):
         self.assertIsNotNone(calls.finished_run("s1", key))
 
     def test_a_background_launch_is_never_read_as_a_swap(self):
+        self.session_on("claude-opus-5-5")
         self.pre("general-purpose", HARD)
         out = hooks.post_agent({**self.call("general-purpose", HARD), "tool_response": {
             "resolvedModel": "claude-sonnet-5-5", "status": "async_launched", "agentId": "a9",
@@ -3430,9 +3087,6 @@ class Hooks(Sandbox):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         text = self.text(hooks.session_start({"session_id": "s1", "model": "claude-opus-5-5"}))
         self.assertIn("CLAUDE_CODE_SUBAGENT_MODEL sets the model of every agent without its own", text)
-        self.options(agent_pins="override")  # then the router picks again, and the plain note is true
-        text = self.text(hooks.session_start({"session_id": "s1", "model": "claude-opus-5-5"}))
-        self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL", text)
 
     def test_the_text_in_context_every_session_stays_within_budget(self):
         # The session-start note, the role agents' descriptions and the model-invoked skills' listings are in
@@ -3479,7 +3133,7 @@ class Hooks(Sandbox):
         text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": "use haiku to refactor the auth module"}))
         self.assertIn('model: "haiku"', text)
         self.assertIn("If it asks for that model", text)
-        self.assertEqual(self.decide("general-purpose", HARD)["model"], "opus")  # nothing is forced
+        self.assertEqual(self.decide("general-purpose", HARD)["action"], "keep")  # nothing is forced
         config = cfg.load()
         self.assertEqual(request.named_model(config, "Use Opus for the review"), "opus")
         self.assertEqual(request.named_model(config, "run this on claude fable please"), "fable")
@@ -3523,19 +3177,9 @@ class Hooks(Sandbox):
         self.session_on("claude-haiku-5-5")
         with mock.patch.object(session, "model", side_effect=AssertionError("reads no session model")), \
                 mock.patch.object(agents, "installed_roots", side_effect=AssertionError("reads no skill file")):
-            for mode in ("auto", "advise"):
-                self.options(routing_mode=mode)
-                self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST, "prompt_id": "p1"}))
+            self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST, "prompt_id": "p1"}))
             self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": "/acme:go 482", "prompt_id": "p2"}))
         self.assertEqual(request.load("s1").prompt_id, "p2")
-
-    def test_advise_mode_never_tells_claude_to_pass_a_model(self):
-        # A model passed on a call outranks the agent definition's own `model`, so it would undo a pin.
-        self.options(routing_mode="advise")
-        note = self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))
-        self.assertNotRegex(note, r"(?i)\bpass\b")
-        self.assertIn("Agents keep the model their definition sets", note)
-        self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": "use haiku to refactor auth"}))
 
     def test_the_notes_state_facts_and_give_no_commands(self):
         # Text framed as an out-of-band command can trip Claude's prompt-injection defenses (hooks.md, additionalContext).
@@ -3642,7 +3286,7 @@ class Gates(Sandbox):
         self.assertIsNone(hooks.stop({"session_id": "s1", "stop_hook_active": True}))
         self.options(verify_gate="false")
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
-        self.options(verify_gate="true", routing_mode="advise")
+        self.options(verify_gate="true", routing_mode="off")
         self.assertIsNone(hooks.stop({"session_id": "s1"}))
 
     def test_edits_outside_the_project_dont_count(self):
@@ -4098,16 +3742,16 @@ class RefreshBackoff(Sandbox):
 
 
 class Reports(Sandbox):
-    def test_policy_shows_levels_cap_and_the_crew(self):
+    def test_policy_shows_levels_cap_and_the_role_agents(self):
         self.assertIn("| complex | opus | high |", self.out("policy"))
-        store.update_state(lambda state: state.update(max_tier="sonnet", priority="quality"))
+        store.update_state(lambda state: state.update(max_tier="sonnet"))
         text = self.out("policy")
         self.assertIn("Cap: **sonnet**", text)
         self.assertIn("fable (not in use)", text)
-        self.assertIn("| model-router:deep-solver | routed by brief | Research-grade, open-ended tasks with no known approach |",
-                      text)
-        self.assertIn("| model-router:scout | haiku | Read-only search and summary |", text)
-        self.assertIn("| lookup | sonnet |", text)
+        self.assertIn("| model-router:implementer | named on the call | - |", text)
+        self.assertIn("| model-router:scout | haiku | medium |", text)
+        self.assertIn("| model-router:architect | opus | high |", text)
+        self.assertIn("| complex | sonnet | xhigh |", text)
 
     def test_models_report(self):
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
@@ -4122,44 +3766,25 @@ class Reports(Sandbox):
         self.assertIn("Not in the registry yet, so not routed to: saga", text)
 
     def test_explain(self):
-        self.assertIn("**complex**", self.out("explain", *HARD.split()))
+        self.assertIn("**complex**", self.out("explain", "--model", "opus", *HARD.split()))
+        self.assertIn("Level: **hardest**", self.out("explain", "--model", "opus", "--effort", "xhigh", "go"))
         self.agent("pinned", "opus")
         self.assertIn("names its own model", self.out("explain", "--agent", "pinned", "list", "files"))
         self.assertIn("wasn't found", self.out("explain", "--agent", "mystery:agent", "list", "files"))
 
     def test_explain_says_what_the_spawn_decision_says(self):
+        self.session_on("claude-opus-5-5")
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
-        for agent, brief in (("general-purpose", HARD), ("general-purpose", LOOKUP), ("model-router:scout", HARDEST)):
-            d = spawn.decide({"session_id": "s1", "tool_input": {"prompt": brief, "subagent_type": agent}}, snap).decision
-            text = report.explain(snap, brief, agent)
+        for agent, brief, model in (("general-purpose", HARD, "opus"), ("general-purpose", LOOKUP, None),
+                                    ("model-router:scout", HARDEST, None)):
+            tool_input = {"prompt": brief, "subagent_type": agent, **({"model": model} if model else {})}
+            d = spawn.decide({"session_id": "s1", "tool_input": tool_input}, snap).decision
+            text = report.explain(snap, brief, agent, model)
             self.assertIn(f"Level: **{d['level']}**", text)
-            self.assertIn(f"Model: **{d['model'] or 'left as it is'}**, effort: {d['effort'] or 'unchanged'}.", text)
+            self.assertIn(f"Model: **{d['model'] or d['was']}**, effort: {d['effort'] or 'unchanged'} (", text)
             self.assertIn(f"Why: {d['reason']}.", text)
 
-    def test_the_readme_banner_shows_each_brief_on_the_level_explain_gives(self):
-        sys.path.insert(0, str(ROOT / "tools"))
-        import docs_assets
-        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
-        for brief, level in docs_assets.CALLS:
-            _, model, effort = docs_assets.RUNG[level]
-            text = report.explain(snap, brief)
-            self.assertIn(f"Level: **{level}**", text, brief)
-            self.assertIn(f"Model: **{model.lower()}**, effort: {effort}.", text, brief)
-
-    def test_explain_reads_a_find_that_hunts_a_defect_as_complex_and_a_find_that_looks_up_as_lookup(self):
-        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
-        for brief, level, model in (
-                ("Find why the checkout total is wrong", "complex", "opus"),
-                ("Find the race condition between the api and worker services that drops jobs", "complex", "opus"),
-                ("Find where the auth middleware is defined", "lookup", "haiku"),
-                ("Find all callers of parse_date", "lookup", "haiku"),
-                ("Find the file that defines the User model", "lookup", "haiku")):
-            d = spawn.decide({"session_id": "s1", "tool_input": {"prompt": brief}}, snap).decision
-            self.assertEqual((d["level"], d["model"]), (level, model), brief)
-            self.assertIn(f"Level: **{level}**", report.explain(snap, brief), brief)
-            self.assertNotIn("your own request", report.explain(snap, brief), brief)
-
-    def test_explain_reports_the_rules_the_old_profile_and_ladder_copy_missed(self):
+    def test_explain_reports_the_rules_a_spawn_applies(self):
         self.override({"agents": {"quiet": {"route": False}}}, user=True)
         self.assertIn("leaves this agent alone", self.out("explain", "--agent", "quiet", *LOOKUP.split()))
         self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
@@ -4193,7 +3818,7 @@ class Reports(Sandbox):
         report.explain(settings.Snapshot(hook_input), LOOKUP, "model-router:architect")
         report.policy(settings.Snapshot(hook_input))
         self.assertEqual(files(), before)
-        self.assertIn("models in use: haiku, sonnet.", text)  # fable is routed around, and the record stays as it was
+        self.assertIn("Models in use: haiku, sonnet.", text)  # fable is routed around, and the record stays as it was
         state = store.state_path().read_bytes()
         modpath.spawn({**hook_input, "kind": "subagent", "tool_input": {"subagent_type": "general-purpose",
                                                                           "prompt": LOOKUP}})
@@ -4203,7 +3828,7 @@ class Reports(Sandbox):
     def test_usage_report(self):
         self.assertIn("No activity", self.out("usage"))
         self.session_on("claude-opus-5-5")
-        self.pre("general-purpose", LOOKUP)
+        self.pre("general-purpose", LOOKUP, model="haiku")
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku")
         text = self.out("usage", "30")
         self.assertIn("| general-purpose | 1 | 1 | lookup x1 | claude-haiku-5-5 x1 |", text)
@@ -4362,11 +3987,11 @@ class Launcher(Sandbox):
     def test_launcher_runs_hooks_and_commands(self):
         self.session_on("claude-opus-5-5")
         launcher = (SCRIPTS / "model-router.sh").as_posix()
-        res = subprocess.run(["sh", launcher, "pre-agent"], input=json.dumps(self.call("general-purpose", LOOKUP)),
+        res = subprocess.run(["sh", launcher, "pre-agent"], input=json.dumps(self.call("general-purpose", LOOKUP, model="haiku")),
                              capture_output=True, text=True, env={**os.environ})
         self.assertEqual(json.loads(res.stdout)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
         res = subprocess.run(["sh", launcher, "policy"], capture_output=True, text=True, env={**os.environ})
-        self.assertIn("Subtask level", res.stdout)
+        self.assertIn("| Level | Model | Effort |", res.stdout)
 
     def fake_pythons(self, python3: str, python: str) -> dict:
         """A PATH whose python3 and python are scripts that log each start and then run `real`
@@ -4389,7 +4014,7 @@ class Launcher(Sandbox):
         self.session_on("claude-opus-5-5")
         fake = self.fake_pythons("real", "real")
         res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), "pre-agent"],
-                             input=json.dumps(self.call("general-purpose", LOOKUP)), capture_output=True,
+                             input=json.dumps(self.call("general-purpose", LOOKUP, model="haiku")), capture_output=True,
                              text=True, env=fake["env"])
         self.assertEqual(json.loads(res.stdout)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
         self.assertEqual(fake["log"].read_text().split(), ["python3"])
@@ -4400,7 +4025,7 @@ class Launcher(Sandbox):
             with self.subTest(python3=kind):
                 fake = self.fake_pythons(kind, "real")
                 res = subprocess.run(["sh", (SCRIPTS / "model-router.sh").as_posix(), "pre-agent"],
-                                     input=json.dumps(self.call("general-purpose", LOOKUP)), capture_output=True,
+                                     input=json.dumps(self.call("general-purpose", LOOKUP, model="haiku")), capture_output=True,
                                      text=True, env=fake["env"])
                 self.assertEqual(json.loads(res.stdout)["hookSpecificOutput"]["updatedInput"]["model"], "haiku")
                 shutil.rmtree(fake["log"].parent)
@@ -4510,8 +4135,8 @@ class ReadmeDiagrams(unittest.TestCase):
 
     def test_the_ladder_note_says_where_a_ruled_out_model_moves_the_pick(self):
         config = cfg.shipped()
-        self.assertEqual(ladder.pick(config, "lookup", "balanced", ["sonnet", "opus", "fable"]).model, "sonnet")
-        self.assertEqual(ladder.pick(config, "complex", "balanced", ["haiku", "sonnet"]).model, "sonnet")
+        self.assertEqual(ladder.pick(config, "lookup", ["sonnet", "opus", "fable"]).model, "sonnet")
+        self.assertEqual(ladder.pick(config, "complex", ["haiku", "sonnet"]).model, "sonnet")
         text = self.text("ladder.svg")
         self.assertIn("the pick moves to the nearest usable model above it, or to the strongest one left", text)
         self.assertNotIn("never raised", text)
@@ -4539,7 +4164,7 @@ class MachineReadable(Sandbox):
             "spend": {"total_usd": 0, "rows": [], "unpriced": []}})
         self.assertIsInstance(self.json_out("usage")["spend"]["total_usd"], float)
         self.session_on("claude-opus-5-5")
-        self.pre("general-purpose", LOOKUP)
+        self.pre("general-purpose", LOOKUP, model="haiku")
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku")
         for agent_id, model in ((None, "claude-opus-5-5"), ("a1", "claude-new-9")):
             modpath.usage({"session_id": "s1", "agent_id": agent_id, "usage": {
@@ -4555,10 +4180,11 @@ class MachineReadable(Sandbox):
             {"loop": "subagent", "model": "claude-new-9", "turns": 1, "output_tokens": 1_000_000, "usd": 0}]})
 
     def test_usage_counts_redos_by_the_level_they_climbed_from(self):
-        self.session_on("claude-opus-5-5")
+        self.session_on("claude-sonnet-5-5")
         self.pre("general-purpose", BUILD, description="parser change")
         self.done("general-purpose", BUILD, "claude-sonnet-5-5", description="parser change")
         self.pre("general-purpose", BUILD + " and keep the old API", description="Redo: parser change")
+        self.session_on("claude-haiku-5-5")
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5")
         self.pre("general-purpose", LOOKUP)
@@ -4578,14 +4204,14 @@ class MachineReadable(Sandbox):
             self.pre("general-purpose", prompt)
         spawns = [r for r in self.ledger() if r.get("event") == "spawn"]
         self.assertEqual([(r["action"], r["escalated_from"]) for r in spawns[2::3]], [("keep", None), ("deny", None)])
-        self.assertEqual(self.json_out("usage")["redos"], {"lookup": 2})
+        self.assertEqual(self.json_out("usage")["redos"], {"complex": 2})
 
     def test_a_marked_redo_with_no_run_on_record_is_not_counted(self):
-        # The level it climbs from is what its own brief gets, and nothing shows that ran.
+        # The level it climbs from is where the call would run unmarked, and nothing shows that ran.
         self.session_on("claude-opus-5-5")
         self.pre("general-purpose", BUILD, description="Redo: second try")
         row = self.ledger()[-1]
-        self.assertEqual((row["escalated_from"], row["on_record"]), ("standard", False))
+        self.assertEqual((row["escalated_from"], row["on_record"]), ("complex", False))
         self.assertNotIn("redos", self.json_out("usage"))
 
     def test_usage_json_sums_an_agents_turns_beside_its_final_request(self):
@@ -4627,8 +4253,8 @@ class MachineReadable(Sandbox):
         (self.home / "settings.json").write_text(json.dumps({"availableModels": ["haiku", "opus", "fable"]}))
         store.save_json(upstream.path(), {"cache": {"aliases": ["haiku", "saga"]}})
         data = self.json_out("models")
-        self.assertEqual(data["schema"], "model-router.models/2")
-        self.assertEqual((data["cap"], data["priority"], data["strongest_in_use"]), (None, "balanced", "opus"))
+        self.assertEqual(data["schema"], "model-router.models/3")
+        self.assertEqual((data["cap"], data["strongest_in_use"]), (None, "opus"))
         rows = {m["model"]: m for m in data["models"]}
         self.assertEqual(list(rows), ["haiku", "sonnet", "opus", "fable"])
         self.assertEqual(rows["haiku"], {"model": "haiku", "last_ran_as": "claude-haiku-5-5",
@@ -4641,7 +4267,7 @@ class MachineReadable(Sandbox):
         store.update_state(lambda state: state.update(max_tier="sonnet"))
         rows = {m["model"]: m for m in self.json_out("models")["models"]}
         self.assertEqual(rows["opus"]["status"], "above_cap")
-        self.assertEqual(json.loads(self.out("models", "--reset", "--json"))["schema"], "model-router.models/2")
+        self.assertEqual(json.loads(self.out("models", "--reset", "--json"))["schema"], "model-router.models/3")
         store.save_json(upstream.path(), {"cache": {"aliases": "saga"}})  # a corrupt cache lists nothing
         self.assertEqual(self.json_out("models")["not_in_registry"], [])
 
@@ -4650,7 +4276,7 @@ class MachineReadable(Sandbox):
         stage = {"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
                  "kind": "workflow", "tool_input": {"subagent_type": "stage", "prompt": LOOKUP}}
         sub = dict(stage, kind="subagent", tool_input={"subagent_type": "general-purpose", "prompt": LOOKUP})
-        self.assertEqual(modpath.spawn(stage)["model"], "haiku")
+        self.assertIsNone(modpath.spawn(stage))  # it names no model, so it runs on the parent's
         routed = modpath.spawn(sub)
         self.assertIsNone(self.json_out("models")["workflow_model"])
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="claude-opus-5-5")
@@ -4660,13 +4286,13 @@ class MachineReadable(Sandbox):
         self.assertIn("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on claude-opus-5-5", note)
         self.assertIn("so the router sets only their effort", note)
         pick = modpath.spawn(stage)
-        self.assertEqual((pick["model"], pick["effort"]), (None, "medium"))
+        self.assertEqual((pick["model"], pick["effort"]), (None, "high"))
         self.assertIn("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", pick["reason"])
         row = [r for r in ledger.read() if r.get("event") == "spawn"][-1]
-        self.assertEqual((row["model"], row["was"], row["effort"]), ("opus", "opus", "medium"))
+        self.assertEqual((row["model"], row["was"], row["effort"]), ("opus", "opus", "high"))
         self.assertEqual(modpath.spawn(sub), routed)
         named = dict(stage, tool_input=dict(stage["tool_input"], model="sonnet"))
-        self.assertIsNone(modpath.spawn(named))  # a model the script names is kept, as before
+        self.assertEqual(modpath.spawn(named)["model"], "sonnet")  # a model the script names is kept
 
     def test_usage_shows_the_model_a_workflow_agent_ran_on(self):
         # A workflow agent never reaches the Agent tool's PostToolUse, so only its usage rows say what it ran on.
@@ -4723,10 +4349,10 @@ class JsonOutputs(Sandbox):
     def recorded(self) -> None:
         store.ledger_path().write_text(json.dumps({"ts": "2000-01-01T00:00:00+00:00", "event": "spawn"}) + "\n")  # no `since`
         self.override({"levels": {"complex": {"effort": "xhigh"}}, "agents": {"ruled": {"model": "sonnet"}},
-                       "models": {"swift": {"strength": 2.5, "speed": 5, "cost": 2.5}},
+                       "models": {"swift": {"strength": 2.5, "cost": 2.5}},
                        "prices": {"claude-swift-1": {"input": 1, "output": 5}}}, user=True)
         self.override({"levels": {"standard": {"effort": "high"}}, "agents": {"slow": {"level": "complex"}},
-                       "models": {"saga": {"strength": 1.5, "speed": 2, "cost": 1.2}}})
+                       "models": {"saga": {"strength": 1.5, "cost": 1.2}}})
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
         health.ran("haiku", "claude-haiku-5-5", "haiku", forced=False)
@@ -4803,15 +4429,11 @@ class PriceTable(unittest.TestCase):
                                                       "cache_write_1h")), rates, version)
 
 
-import random  # noqa: E402
-import timeit  # noqa: E402
-
-
 class SecurityClaims(Sandbox):
     """Each claim in docs/SECURITY.md's assessment, rerun on every change (S8.3)."""
 
     def test_a_repository_file_keeps_only_routing_mode_models_levels_and_agents(self):
-        cleaned = cfg._clean({"routing_mode": "advise", "models": {"saga": {"strength": 1}},
+        cleaned = cfg._clean({"routing_mode": "off", "models": {"saga": {"strength": 1}},
                               "levels": {"lookup": {"effort": "low"}}, "agents": {"x": {"level": "lookup"}},
                               "prices": {"claude-saga-1": {"input": 1}}, "newest": {"opus": "claude-x"},
                               "older_aliases": {"bedrock": ["opus"]}, "crew": {"x": {}}, "main": {}}, cfg.PROJECT_FILE, [])
@@ -4822,7 +4444,7 @@ class SecurityClaims(Sandbox):
         self.assertEqual(config.prices["claude-opus-5-5"], cfg.base_config()["prices"]["claude-opus-5-5"])
 
     def test_the_weakest_routing_mode_wins(self):
-        for user, project, want in (("auto", "off", "off"), ("off", "auto", "off"), ("advise", "auto", "advise")):
+        for user, project, want in (("auto", "off", "off"), ("off", "auto", "off"), ("advise", "auto", "off")):
             with self.subTest(user=user, project=project):
                 self.override({"routing_mode": user}, user=True)
                 self.override({"routing_mode": project})
@@ -4838,13 +4460,12 @@ class SecurityClaims(Sandbox):
 
     def test_a_project_model_is_never_the_routers_pick(self):
         shipped = cfg.load()
-        self.override({"models": {"gpt-mini": {"strength": 9, "cost": 0, "speed": 9}, "saga": {"strength": 2.5}}})
+        self.override({"models": {"gpt-mini": {"strength": 9, "cost": 0}, "saga": {"strength": 2.5}}})
         config = cfg.load()
-        for priority in cfg.PRIORITIES:
-            for level in Level:
-                with self.subTest(priority=priority, level=level):
-                    self.assertEqual(ladder.pick(config, level, priority, config.available()),
-                                     ladder.pick(shipped, level, priority, shipped.available()))
+        for level in Level:
+            with self.subTest(level=level):
+                self.assertEqual(ladder.pick(config, level, config.available()), ladder.pick(shipped, level, shipped.available()))
+                self.assertEqual(ladder.model_for(config, level), ladder.model_for(shipped, level))
         self.session_on("claude-opus-5-5")
         self.assertEqual(self.decide("general-purpose", HARD, model="gpt-mini")["model"], "gpt-mini")
 
@@ -4858,14 +4479,14 @@ class SecurityClaims(Sandbox):
 
     def test_a_redo_the_effort_cap_holds_never_moves_to_a_project_model(self):
         self.override({"models": {"saga": {"strength": 3.5}, "titan": {"strength": 5}}})
-        self.session_on("claude-opus-5-5")
-        (self.home / "settings.json").write_text(json.dumps({"maxEffortLevel": "high"}))
-        frontier = "research a novel fix for the auth migration across every service, root cause unknown"
-        for prompt, ran, redo in ((HARD, "opus", "fable"), (frontier, "fable", "fable")):
+        snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
+        for level, ran, redo in (("complex", "opus", "fable"), ("frontier", "fable", "fable")):
             with self.subTest(ran=ran):
-                self.pre("general-purpose", prompt)
-                self.done("general-purpose", prompt, f"claude-{ran}-5-{2 if ran == 'fable' else 5}", model=ran, effort="high")
-                self.assertEqual(self.decide("general-purpose", prompt)["model"], redo)
+                facts = router.Facts(agent="general-purpose", tool_input={"prompt": HARD}, usable=snap.usable,
+                                     definition=agents.find("general-purpose", self.project), parent=ran,
+                                     earlier={"level": level, "model": ran, "effort": "high"},
+                                     effort_caps={n: "high" for n in snap.registry.models})
+                self.assertEqual(router.decide(facts, snap.registry, snap.options)["model"], redo)
 
     def test_it_writes_only_under_its_data_directory(self):
         outside = [self.home, self.project]
@@ -4915,52 +4536,6 @@ class SecurityClaims(Sandbox):
         self.assertIn("test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files", names)
 
 
-class ProfileProperties(unittest.TestCase):
-    """Property tests of profile.py with a fixed seed (S9.8)."""
-
-    VERBS = ["fix", "add", "list", "find", "review", "explain", "update", "investigate", "show", "write"]
-    NOUNS = ["the parser", "the cache", "the readme", "src", "the config loader", "the retry logic", "a test",
-             "the login page", "the docs", "the build"]
-    SIGNALS = ["security", "the database schema", "across every service", "a race condition", "production",
-               "the payments flow", "the root cause", "the public API"]
-    LIMITS = ["Do not change any files.", "Don't touch the tests.", "Never edit the README.",
-              "Without changing the public API.", "No need to ask questions."]
-    AGENTS = ["general-purpose", "Explore", "acme:code-reviewer", "helper"]
-
-    def briefs(self, count=300):
-        rng = random.Random(7)
-        for _ in range(count):
-            words = [rng.choice(self.VERBS), rng.choice(self.NOUNS)]
-            if rng.random() < 0.4:
-                words += ["and", rng.choice(self.VERBS), rng.choice(self.NOUNS)]
-            yield " ".join(words) + ".", rng.choice(self.AGENTS), rng
-
-    def level(self, text, agent):
-        return profile.profile_call({"prompt": text}, agent)["level"]
-
-    def test_adding_a_signal_word_never_lowers_the_level(self):
-        for brief, agent, rng in self.briefs():
-            signal = rng.choice(self.SIGNALS)
-            with self.subTest(brief=brief, signal=signal, agent=agent):
-                self.assertGreaterEqual(self.level(f"{brief} It touches {signal}.", agent), self.level(brief, agent))
-
-    def test_a_limit_never_lowers_what_the_brief_gets_without_it(self):
-        for brief, agent, rng in self.briefs():
-            limit = rng.choice(self.LIMITS)
-            with self.subTest(brief=brief, limit=limit, agent=agent):
-                self.assertGreaterEqual(self.level(f"{brief} {limit}", agent), self.level(brief, agent))
-
-    def test_time_grows_linearly_with_length(self):
-        rng = random.Random(11)
-        words = self.VERBS + [w for n in self.NOUNS + self.SIGNALS for w in n.split()] + ["do", "not", ",", "or"]
-        text = " ".join(rng.choice(words) for _ in range(4000))
-
-        def took(t):
-            return min(timeit.repeat(lambda: profile.profile_call({"prompt": t}, "x"), number=1, repeat=3))
-        small, large = took(text), took(text * 8)
-        self.assertLess(large, small * 8 * 4 + 0.05)  # linear, with room for noise; quadratic would be 64x
-
-
 class SpawnPaths(Sandbox):
     """The mod path and the Agent-call fallback decide the same spawn the same way (S9.8, differential)."""
 
@@ -4995,11 +4570,11 @@ class SpawnPaths(Sandbox):
                 self.assertEqual(seen["fallback"], seen["mod"])
 
     def spawn_on(self, path: str, session: str, agent: str, brief: str) -> None:
-        self.session_on("claude-opus-5-5", session)
+        self.session_on(HAIKU, session)
         if path == "fallback":
             hooks.pre_agent(self.call(agent, brief, session_id=session, tool_use_id="t1"))
         else:
-            modpath.spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+            modpath.spawn({"session_id": session, "cwd": str(self.project), "parent_model": HAIKU,
                              "kind": "subagent", **({"tool_use_id": "t1"} if path == "mod with a spawn id" else {}),
                              "tool_input": {"subagent_type": agent, "prompt": brief}})
 
@@ -5029,25 +4604,26 @@ class SpawnPaths(Sandbox):
                     came_back(session)
                     again = self.decide(agent, brief, session_id=session)
                     seen[path] = (again["level"], again["model"], again["effort"], again["escalated_from"])
-            want = ("standard", "sonnet", "medium", "lookup") if redo else ("lookup", "haiku", "medium", None)
+            want = ("standard", "sonnet", "medium", "lookup") if redo else ("lookup", None, None, None)
             self.assertEqual(seen, {path: want for path in ("fallback", "mod", "mod with a spawn id")}, name)
 
-    def test_a_model_the_cap_lowered_is_redone_on_both_paths_and_one_the_caller_kept_is_not(self):
+    def test_a_model_the_cap_lowered_is_redone_the_same_way_on_both_paths(self):
         self.options(max_tier="sonnet")
-        for number, (path, model, redo) in enumerate((("fallback", "fable", True), ("mod", "fable", True),
-                                                      ("fallback", "sonnet", False), ("mod", "sonnet", False))):
-            session = f"s{number}"
-            self.session_on("claude-opus-5-5", session)
-            if path == "fallback":
-                hooks.pre_agent(self.call("general-purpose", LOOKUP, session_id=session, model=model))
-            else:
-                modpath.spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
-                                 "kind": "subagent", "tool_input": {"subagent_type": "general-purpose",
-                                                                    "prompt": LOOKUP, "model": model}})
-            self.done("general-purpose", LOOKUP, "claude-sonnet-5-5", session_id=session)
-            again = self.decide("general-purpose", LOOKUP, session_id=session)
-            self.assertEqual((again["escalated_from"], again["level"]), ("lookup", "standard") if redo else (None, "lookup"),
-                             (path, model))
+        for model in ("fable", "sonnet"):
+            seen = {}
+            for path in ("fallback", "mod"):
+                session = f"{path}-{model}"
+                self.session_on("claude-opus-5-5", session)
+                if path == "fallback":
+                    hooks.pre_agent(self.call("general-purpose", LOOKUP, session_id=session, model=model))
+                else:
+                    modpath.spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                                   "kind": "subagent", "tool_input": {"subagent_type": "general-purpose",
+                                                                      "prompt": LOOKUP, "model": model}})
+                self.done("general-purpose", LOOKUP, "claude-sonnet-5-5", session_id=session)
+                again = self.decide("general-purpose", LOOKUP, session_id=session)
+                seen[path] = (again["level"], again["model"], again["effort"], again["escalated_from"])
+            self.assertEqual(seen["fallback"], seen["mod"], model)
 
     def locks_taken(self, act) -> list[str]:
         """The state files `act` took a lock on, in order."""
@@ -5066,10 +4642,10 @@ class SpawnPaths(Sandbox):
     def spawn_again(self, path: str, session: str, brief: str) -> None:
         """One more spawn in a session `spawn_on` already set up."""
         if path == "fallback":
-            hooks.pre_agent(self.call("general-purpose", brief, session_id=session))
+            hooks.pre_agent(self.call("general-purpose", brief, session_id=session, model="opus"))
         else:
-            modpath.spawn({"session_id": session, "cwd": str(self.project), "parent_model": "claude-opus-5-5",
-                             "kind": "subagent", "tool_input": {"subagent_type": "general-purpose", "prompt": brief}})
+            modpath.spawn({"session_id": session, "cwd": str(self.project), "parent_model": HAIKU, "kind": "subagent",
+                           "tool_input": {"subagent_type": "general-purpose", "prompt": brief, "model": "opus"}})
 
     def test_a_spawn_takes_one_lock_per_state_file_it_writes(self):
         # A spawn that is the request's strongest so far still writes its route and that fact in one go.
@@ -5107,7 +4683,7 @@ class EdgeCases(Sandbox):
     def test_a_compaction_keeps_the_request_and_routed_calls_and_the_model(self):
         self.session_on("claude-sonnet-5-5")
         hooks.user_prompt({"session_id": "s1", "prompt": HARD, "cwd": str(self.project)})
-        self.pre("general-purpose", LOOKUP)
+        self.pre("general-purpose", LOOKUP, model="haiku")
         def snapshot() -> dict:
             return {"prompts": request.load("s1"), "routes": store.load_entry("routes", "s1"),
                     "pending": store.load_entry("pending", "s1"), "sessions": store.load_entry("sessions", "s1")}
@@ -5121,12 +4697,7 @@ class EdgeCases(Sandbox):
         self.assertEqual(session.model("s1"), "claude-opus-5-5")
         self.assertEqual(store.load_entry("pending", "s1"), state["pending"])
 
-    def test_an_empty_or_blank_brief_is_a_lookup_and_fails_open(self):
-        for prompt in ("", "   ", "\n\t \n"):
-            with self.subTest(prompt=repr(prompt)):
-                self.assertEqual(profile.profile_call({"prompt": prompt}, "general-purpose")["level"], "lookup")
-                self.assertEqual(profile.profile_call({"prompt": prompt, "description": None}, "x")["level"],
-                                 "lookup")
+    def test_an_empty_or_blank_brief_fails_open(self):
         self.session_on("claude-opus-5-5")
         for tool_input in ({"prompt": ""}, {"prompt": "   "}, {}, {"prompt": None}, {"description": ""}):
             with self.subTest(tool_input=tool_input):
@@ -5143,15 +4714,15 @@ class EdgeCases(Sandbox):
     def test_a_result_on_another_model_is_logged_as_the_model_that_ran(self):
         self.session_on("claude-opus-5-5")
         # The fallback path routed a lookup to haiku; the provider ran it on sonnet: a substitution.
-        self.pre("general-purpose", LOOKUP)
+        self.pre("general-purpose", LOOKUP, model="haiku")
         self.done("general-purpose", LOOKUP, "claude-sonnet-5-5")
         rows = [r for r in self.ledger() if r.get("event") == "result"]
         self.assertEqual((rows[-1]["asked"], rows[-1]["resolved_model"]), ("haiku", "claude-sonnet-5-5"))
         self.assertTrue(health.load().healthy("haiku"))
         # A model that ran as asked clears it, so one stray change never takes a model out of rotation.
-        self.pre("general-purpose", LOOKUP + " again")
+        self.pre("general-purpose", LOOKUP + " again", model="haiku")
         self.done("general-purpose", LOOKUP + " again", "claude-haiku-5-5")
-        self.pre("general-purpose", LOOKUP + " third")
+        self.pre("general-purpose", LOOKUP + " third", model="haiku")
         self.done("general-purpose", LOOKUP + " third", "claude-sonnet-5-5")
         self.assertTrue(health.load().healthy("haiku"))  # a second substitution in a row would have routed it around
         # Under CLAUDE_CODE_SUBAGENT_MODEL_FORCE every agent runs on the forced model: never a substitution.
@@ -5299,83 +4870,6 @@ class ClockAndCleanup(Sandbox):
                          ['{"broken": ' + str(i) for i in range(3, store.KEEP_SET_ASIDE + 3)])
 
 
-class DesignDecisions(unittest.TestCase):
-    """A design decision worked out against load and consistency limits needs the strongest coding level."""
-
-    def test_a_design_against_load_and_consistency_limits_is_hardest(self):
-        brief = ("Read SPEC.md and design how the catalog servers cache prices. This is a design decision with "
-                 "data-consistency and performance trade-offs: honour the staleness limits and the database's "
-                 "capacity. Write DESIGN.json with the strategy, ttl_seconds and max_staleness_seconds.")
-        result = profile.profile_call({"description": "Design catalog price caching", "prompt": brief}, "claude")
-        self.assertEqual((result["level"], sorted(result["signals"])), ("hardest", ["ambiguity", "load", "risk"]))
-        # Loading a file isn't a load limit.
-        self.assertEqual(profile.profile_call({"description": "Find the key load path",
-                                               "prompt": "Find where the app loads its config."}, "Explore")["level"],
-                         "lookup")
-
-    def test_a_load_word_without_a_design_choice_adds_nothing(self):
-        for prompt in ("Rename the flaky latency test in test_client.py.",
-                       "Review this function for performance issues."):
-            result = profile.profile_call({"prompt": prompt}, "general-purpose")
-            self.assertEqual(result["level"], "standard", prompt)
-            self.assertNotIn("load", result["signals"], prompt)
-
-    def test_a_decision_already_made_asks_for_none(self):
-        for prompt in ("As decided on Monday, rename the payments column in every service that reads it, across all "
-                       "services.", "We decided on Postgres, so migrate the billing schema in all services to it."):
-            result = profile.profile_call({"prompt": prompt}, "general-purpose")
-            self.assertEqual(result["level"], "complex", prompt)
-            self.assertNotIn("ambiguity", result["signals"], prompt)
-        for prompt in ("Help me decide on a cache for the session store.",
-                       "We need to decide whether to shard the orders table.",
-                       "Choosing between Kafka and SQS for the event bus.", "Weighing the options for the job queue."):
-            self.assertIn("ambiguity", profile.profile_call({"prompt": prompt}, "general-purpose")["signals"], prompt)
-
-    def test_a_reported_plan_or_choice_lets_no_load_word_count(self):
-        for prompt in ("As planned, rename the payments column in every service, across all services, to keep latency "
-                       "low.", "We decided on Postgres to handle 10,000 writes per second; migrate the billing schema "
-                       "in all services to it."):
-            result = profile.profile_call({"prompt": prompt}, "general-purpose")
-            self.assertEqual(result["level"], "complex", prompt)
-            self.assertNotIn("load", result["signals"], prompt)
-
-    def test_a_doc_or_file_name_is_not_a_signal(self):
-        cases = {"Read the migration guides under docs/ and list every renamed option.": [],
-                 "Using only docs/, find the version that changed the default and write RESEARCH.json.": [],
-                 "Migrate the billing schema to Postgres.": ["risk"],
-                 "Research which queue the team should adopt and write a short note.": ["ambiguity"]}
-        for prompt, expected in cases.items():
-            self.assertEqual(profile.profile_call({"prompt": prompt}, "general-purpose")["signals"], expected, prompt)
-
-    def test_researching_docs_is_not_research_grade(self):
-        brief = ("Research the fetchkit docs: read the changelogs and migration guides across the docs tree, then "
-                 "write RESEARCH.json with the version where the retry default changed.")
-        self.assertEqual(profile.profile_call({"prompt": brief}, "general-purpose")["level"], "complex")
-        grade = ("Research-grade problem: our CRDT editor diverges in rare three-way merges across clients; find the "
-                 "root cause and design a fix for the data loss.")
-        self.assertEqual(profile.profile_call({"prompt": grade}, "general-purpose")["level"], "frontier")
-
-    def test_only_a_millisecond_budget_counts_as_load(self):
-        for prompt in ("Plan the release notes for 2.0; the API answers in 120 ms.",
-                       "Plan the sprint: rename the 300 ms login delay."):
-            result = profile.profile_call({"prompt": prompt}, "general-purpose")
-            self.assertEqual(result["level"], "standard", prompt)
-            self.assertNotIn("load", result["signals"], prompt)
-        for prompt in ("Choose a partitioning scheme for the events table so writes stay under 50 ms at 10,000 per "
-                       "second.", "Design a scheme that keeps p99 under 200 ms.",
-                       "Choose a caching approach with p99 200 ms for reads."):
-            self.assertIn("load", profile.profile_call({"prompt": prompt}, "general-purpose")["signals"], prompt)
-
-    def test_a_capacity_or_sizing_decision_keeps_its_load_signal(self):
-        for prompt, level in (("Plan the capacity of the queue cluster for 10x traffic: how many brokers do we need?",
-                               "complex"),
-                              ("Size the connection pool so the billing service meets its latency target under "
-                               "peak load.", "standard")):
-            result = profile.profile_call({"prompt": prompt}, "general-purpose")
-            self.assertEqual(result["level"], level, prompt)
-            self.assertIn("load", result["signals"], prompt)
-
-
 class Levels(unittest.TestCase):
     def test_levels_order_by_difficulty_not_alphabetically(self):
         names = ["lookup", "standard", "complex", "hardest", "frontier"]
@@ -5406,28 +4900,6 @@ class Levels(unittest.TestCase):
                 if path.name != "config.py" and "LEVELS" + ".index" in path.read_text(encoding="utf-8"):
                     found.append(str(path.relative_to(ROOT)))
         self.assertEqual(found, [])
-
-
-class Roles(unittest.TestCase):
-    """An agent's name reads as a role by whole parts, from one table: "researcher" holds "search",
-    "relocation" holds "locat". The levels each name gets are in tests/fixtures/agent-name-corpus.json."""
-
-    def test_the_table_carries_what_each_of_our_agents_is(self):
-        role = profile.role
-        self.assertEqual(role("model-router:architect"), profile.Role("heavy", floor="complex"))
-        self.assertEqual(role("model-router:reviewer"), profile.Role("heavy", floor="complex", checker=True))
-        self.assertEqual(role("model-router:deep-solver"), profile.Role("heavy", floor="hardest"))
-        self.assertEqual(role("model-router:verifier"), profile.Role("light", cap="standard", checker=True))
-        self.assertEqual(role("model-router:implementer"), profile.Role())
-
-    def test_another_plugins_agent_is_only_a_kind(self):
-        self.assertEqual(profile.role("acme:deep-solver"), profile.Role("heavy", floor="complex"))
-        self.assertEqual(profile.role("acme:code-reviewer"), profile.Role("heavy", floor="complex", checker=True))
-        self.assertEqual(profile.role("scout"), profile.Role("light", cap="standard"))
-
-    def test_a_name_that_only_contains_a_role_word_has_no_role(self):
-        for agent in ("researcher", "relocation-migrator", "dependency-resolver", "helper", "", None):
-            self.assertEqual(profile.role(agent), profile.Role(), agent)
 
 
 if __name__ == "__main__":

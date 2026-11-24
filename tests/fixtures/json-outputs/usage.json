@@ -5,10 +5,9 @@
     {
       "agent": "general-purpose",
       "calls": 2,
-      "routed": 2,
+      "routed": 0,
       "levels": {
-        "lookup": 1,
-        "complex": 1
+        "complex": 2
       },
       "ran_on": {
         "claude-haiku-5-5": 1,
@@ -30,9 +29,7 @@
       "agent": "slow",
       "calls": 1,
       "routed": 0,
-      "levels": {
-        "complex": 1
-      },
+      "levels": {},
       "ran_on": {
         "claude-opus-5-5": 1
       }

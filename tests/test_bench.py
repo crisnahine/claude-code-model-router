@@ -1564,11 +1564,9 @@ print(json.dumps({"result": os.getcwd(), "total_cost_usd": 0.0, "modelUsage": {}
 
 
 class TaskIdentity(unittest.TestCase):
-    """A run's folder can't hand the router signal words, and a changed task is never pooled silently."""
+    """A run's folder doesn't carry its task id, and a changed task is never pooled silently."""
 
-    def test_no_task_id_or_signal_word_reaches_a_runs_working_directory(self):
-        sys.path.insert(0, str(ROOT / "plugins" / "model-router" / "scripts"))
-        from modelrouter import profile
+    def test_no_task_id_reaches_a_runs_working_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             claude = stub(tmp, CWD_STUB)
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
@@ -1580,7 +1578,6 @@ class TaskIdentity(unittest.TestCase):
                         row = run.run_one(task, run.load_configs()[1], options, {})
                         ours = str(Path(row["answer"]).resolve()).replace(base, "")
                         self.assertNotIn(task["id"], ours)
-                        self.assertEqual(profile.signals(ours.lower()), [], ours)
                         self.assertEqual(row["task_revision"], task.get("revision", 1))
 
     def test_every_task_has_a_revision_and_the_changed_one_moved_on(self):
@@ -1609,7 +1606,6 @@ class TaskIdentity(unittest.TestCase):
         self.assertEqual([r["task"] for r in loaded.rows], ["design-rate-limiter"])
         self.assertIn("`design-cache-invalidation` is at revision 2; 2 of its runs ($", page)
         self.assertIn("are left out of every table", page)
-        self.assertIn("- Bias: 1 router-arm runs", page)  # the one router row with no task_revision
 
     def test_a_missing_key_is_an_older_harness_only_below_the_row_schema(self):
         template = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-design-2026-11-22.jsonl")

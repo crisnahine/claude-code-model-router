@@ -60,7 +60,7 @@ Measured 2026-11-23 on Claude Code 2.1.330 with a headless Sonnet run that only 
 | Source | When it's paid | Before | After |
 | :- | :- | -: | -: |
 | Session-start note (`hooks.session_start`) | At session start, resume, clear, compact and fork | 147 tokens | 128 |
-| The seven role agents' names, descriptions and tools in the agent list | Once per session | 493 | 493 |
+| The role agents' names, descriptions and tools in the agent list (seven when measured, five now, not measured again) | Once per session | 493 | 493 |
 | The `route` skill's listing (the other four skills set `disable-model-invocation`, so theirs aren't in context, https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill) | Once per session | 84 | 61 |
 | The note that the request names a model | Per prompt, only when the request names one | about 34 | about 34 |
 

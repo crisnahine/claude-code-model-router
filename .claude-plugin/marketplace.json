@@ -9,7 +9,7 @@
     {
       "name": "model-router",
       "source": "./plugins/model-router",
-      "description": "Model Router, a plugin for Claude Code: automatic Claude model routing for every subagent, teammate and workflow agent, from any plugin, skill or agent, to Haiku, Sonnet, Opus or Fable with a matching reasoning effort, by task complexity, speed and cost.",
+      "description": "Model Router, a plugin for Claude Code: automatic Claude model routing for every subagent, teammate and workflow agent, from any plugin, skill or agent, on the Haiku, Sonnet, Opus or Fable model and reasoning effort Claude names for it, kept within your cap.",
       "category": "development",
       "tags": [
         "model-router",

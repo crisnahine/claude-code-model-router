@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import calls, fallback, gates, health, intake, mod, profile, request, session, settings, upstream
+from . import calls, fallback, gates, health, intake, mod, request, session, settings, upstream
 from . import config as cfg
 from .registry import Registry
 
@@ -40,7 +40,7 @@ def session_start(hook_input: dict) -> dict | None:
                 "their effort. Without it in the user's settings, the router would put each subtask on the "
                 "cheapest model strong enough for it. Worth telling the user once."
             )
-        elif options.subagent_model and options.pins != "override":
+        elif options.subagent_model:
             parts.append(
                 f"CLAUDE_CODE_SUBAGENT_MODEL sets the model of every agent without its own to {options.subagent_model}, "
                 "so Model Router leaves those calls as they are and sets only the effort of agents that name their "
@@ -48,11 +48,6 @@ def session_start(hook_input: dict) -> dict | None:
         if options.workflow_model:
             parts.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model}, "
                          "so the router sets only their effort. Worth telling the user once.")
-    elif mode == "advise":
-        parts.append(
-            "Model Router is in advise mode: it logs the level it reads for each agent call and changes no call. "
-            "Agents keep the model their definition sets, which a model passed on a call would override."
-        )
     if options.update_check:
         changes = upstream.pending()
         running = [hook_input.get("model")] + snap.health.seen_running()
@@ -127,7 +122,6 @@ def _settled(session_id: str | None, key: str) -> None:
 
 def post_agent(hook_input: dict) -> dict | None:
     snap = settings.Snapshot(hook_input)
-    tool_input = cfg.tool_input(hook_input)
     response = hook_input.get("tool_response")
     response = response if isinstance(response, dict) else {}
     ran_as = response.get("resolvedModel")
@@ -145,11 +139,9 @@ def post_agent(hook_input: dict) -> dict | None:
     returned = calls.returned(session_id, outcome)
     if returned.note != calls.SWAPPED:
         return None
-    if "risk" in profile.profile_call(tool_input, outcome.agent)["signals"]:
-        return _context("PostToolUse", (
-            f"Model Router: this agent switched models mid-run ({outcome.models_used[0]} to {outcome.models_used[-1]}), "
-            "so its result needs a check before it is relied on."))
-    return None
+    return _context("PostToolUse", (
+        f"Model Router: this agent switched models mid-run ({outcome.models_used[0]} to {outcome.models_used[-1]}), "
+        "so its result needs a check before it is relied on."))
 
 
 def agent_failed(hook_input: dict) -> dict | None:

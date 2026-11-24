@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import allowlist, health, ladder, store
 from . import config as cfg
-from .config import MODES, PRIORITIES, Level, parse_mode
+from .config import MODES, Level, parse_mode
 from .registry import Registry
 
 CLOUDS = ("bedrock", "vertex", "foundry")
@@ -23,9 +23,7 @@ PROVIDERS = (*CLOUDS, "anthropic_aws", "anthropic_google_cloud", "mantle")
 class Settings:
     mode: str = "auto"  # routing_mode merged with the override files: the weakest wins
     routing_mode: str = "auto"  # the user's own option
-    priority: str = "balanced"
     cap: str | None = None  # max_tier, when it names a registry model
-    pins: str = "respect"  # agent_pins: respect or override
     update_check: bool = True
     verify_gate: bool = True
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
@@ -81,9 +79,7 @@ def resolve(reg: Registry | None = None, recorded: bool = False) -> Settings:
     return Settings(
         mode=from_files if from_files and MODES.index(from_files) < MODES.index(user) else user,
         routing_mode=user,
-        priority=option("priority") if option("priority") in PRIORITIES else "balanced",
         cap=cap if reg and cap in reg.models else None,
-        pins="override" if option("agent_pins") == "override" else "respect",
         update_check=_on(option("update_check")),
         verify_gate=_on(option("verify_gate")),
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),
@@ -120,8 +116,8 @@ class Snapshot:
         return allowlist.read(self.session_id, self.project, (self.hook_input or {}).get("settings"))
 
     def pick(self, level: Level) -> ladder.Pick:
-        """The ladder's pick for `level` under this setup's priority and usable models."""
-        return ladder.pick(self.registry, level, self.options.priority, self.usable)
+        """The ladder's pick for `level` among this setup's usable models."""
+        return ladder.pick(self.registry, level, self.usable)
 
     def settle(self) -> None:
         """Write what reads only noticed: an outage the health table found too long. Dry runs skip it."""
@@ -139,8 +135,7 @@ class Snapshot:
 def record(settings: Settings) -> None:
     """Save every option where skill commands can read it."""
     flag = {True: "true", False: "false"}
-    options = {"routing_mode": settings.routing_mode, "priority": settings.priority,
-               "max_tier": settings.cap or "", "agent_pins": settings.pins,
+    options = {"routing_mode": settings.routing_mode, "max_tier": settings.cap or "",
                "update_check": flag[settings.update_check], "verify_gate": flag[settings.verify_gate]}
     if any(store.load_state().get(k) != v for k, v in options.items()):
         store.update_state(lambda state: state.update(options))

@@ -10,7 +10,7 @@ Short answers about Model Router, the Claude Code plugin with the id `model-rout
 
 ## What is Model Router?
 
-Model Router is an open-source Claude Code plugin that sets the Claude model and reasoning effort of every agent Claude Code starts, and moves a call one level up when its work comes back for a redo. It is an independent project by Cris Nahine, not made or endorsed by Anthropic. It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages, and leaves the agent, its prompt and its tools as they were. It is Apache-2.0 licensed and needs Claude Code 2.1.329 or later and Python 3.9 or later ([README](../README.md#install-the-claude-code-plugin)).
+Model Router is an open-source Claude Code plugin that keeps the Claude model and reasoning effort of every agent Claude Code starts inside your limits, sets the effort nobody named, and moves a call one level up when its work comes back for a redo. It is an independent project by Cris Nahine, not made or endorsed by Anthropic. It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages, and leaves the agent, its prompt and its tools as they were. It is Apache-2.0 licensed and needs Claude Code 2.1.329 or later and Python 3.9 or later ([README](../README.md#install-the-claude-code-plugin)).
 
 ## Does Model Router follow the Claude Code docs?
 
@@ -18,11 +18,11 @@ Yes. It uses only extension points Claude Code documents (the plugin manifest, h
 
 ## How does Model Router pick a model for a subagent?
 
-Model Router reads the subagent's brief and the agent's name, gives the call one of five levels, and runs it on the cheapest usable model and effort for that level. The levels are lookup (Haiku at medium effort), standard (Sonnet at medium), complex (Opus at high), hardest (Opus at xhigh) and frontier (Fable at high). A model you or the caller named still wins: the order is `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, a model named on the call, a per-agent rule, the agent's own `model` field, `CLAUDE_CODE_SUBAGENT_MODEL`, and only then the router's pick ([ARCHITECTURE.md](ARCHITECTURE.md#the-decision)).
+It doesn't pick from the work: Claude, which has read the work, names the model on each call, and the router keeps it inside your cap and the models that work here, raises it to a rule's level, and sets the effort nobody named. The model comes from, first found: `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` for a workflow agent, a model named on the call, a per-agent rule, the agent's own `model` field, `CLAUDE_CODE_SUBAGENT_MODEL`, and then the parent's model. Each model stands for a level, and a call that names no effort runs at that level's: Haiku at medium (lookup), Sonnet at medium (standard), Opus at high (complex), Opus at xhigh (hardest, when the call names `xhigh` or `max`) and Fable at high (frontier) ([ARCHITECTURE.md](ARCHITECTURE.md#the-decision)).
 
 ## What happens when the cheap model gets it wrong?
 
-When Claude redoes a weak result, the call runs one level higher. Claude marks the redo by starting the call's `description` with "Redo:", so a rewritten brief climbs too, and the same call issued again unchanged in the same request also counts. Lookup, standard and hardest move to a stronger model, complex moves to hardest (Opus at more effort), and a frontier redo runs at one more step of effort. A run that ended on an API error, such as an overload, counts as a retry, not a redo. A redo never changes later calls. `/model-router:usage` counts redos by level, and a level that keeps coming back can be raised in your own `~/.claude/model-router.json` ([ARCHITECTURE.md](ARCHITECTURE.md#redo-escalation)).
+When Claude redoes a weak result and the call names no model, it runs one level higher; a redo that names a model runs on that model. Claude marks the redo by starting the call's `description` with "Redo:", so a rewritten brief climbs too, and the same call issued again unchanged in the same request also counts. Lookup, standard and hardest move to a stronger model, complex moves to hardest (Opus at more effort), and a frontier redo runs at one more step of effort. A run that ended on an API error, such as an overload, counts as a retry, not a redo. A redo never changes later calls. `/model-router:usage` counts redos by level, and a level that keeps coming back can be raised in your own `~/.claude/model-router.json` ([ARCHITECTURE.md](ARCHITECTURE.md#redo-escalation)).
 
 ## What does Model Router cost?
 
@@ -38,15 +38,15 @@ The benchmark can't tell yet. In the run of the routing code at commit <!-- benc
 
 ## How do I turn Model Router off, or turn parts of it off?
 
-Set the plugin's `routing_mode` option to `off` in `/config`, and the router changes nothing and only keeps its ledger; `advise` logs the level each call reads as without changing any call. `verify_gate` (on) switches the check before a turn ends, and `update_check` (on) the daily fetch. To leave one agent alone, set `"route": false` for it under `agents` in `~/.claude/model-router.json`; a project's file can't ([README](../README.md#configuration)).
+Set the plugin's `routing_mode` option to `off` in `/config`, and the router changes nothing and only keeps its ledger. `verify_gate` (on) switches the check before a turn ends, and `update_check` (on) the daily fetch. To leave one agent alone, set `"route": false` for it under `agents` in `~/.claude/model-router.json`; a project's file can't ([README](../README.md#configuration)).
 
 ## Can I cap the strongest model, or force one model?
 
-Yes: `max_tier` caps the strongest model subagents may run on, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` pins every subagent to one model. With the cap at `sonnet`, anything the router or a caller picks above Sonnet is lowered to it, including a level a project's file raised. A pick the cap leaves weaker than its level needs gets one more effort step, up to `xhigh`. With the force variable set, the router only sets effort, and a pinned strong model costs far more on small jobs: Opus 5.5's list price is 40 times Haiku 5.5's per token ([guide](GUIDE.md#who-decides-the-model)).
+Yes: `max_tier` caps the strongest model subagents may run on, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` pins every subagent to one model. With the cap at `sonnet`, any model above Sonnet is lowered to it, whether a caller, a rule, the agent or the parent's model named it. A model the cap leaves weaker than its level needs gets one more effort step, up to `xhigh`, or `high` on Haiku. With the force variable set, the router only sets effort, and a pinned strong model costs far more on small jobs: Opus 5.5's list price is 40 times Haiku 5.5's per token ([guide](GUIDE.md#who-decides-the-model)).
 
 ## How is this different from setting one model for every agent?
 
-`CLAUDE_CODE_SUBAGENT_MODEL` gives every agent without its own model the same model, while Model Router gives each call the model and effort its brief needs. One model for everything puts lookups on an expensive model or hard design work on a weak one. The variable also outranks the router's pick: while it is set, agents that name no model run on it and the router leaves them alone, unless `agent_pins` is `override` ([ARCHITECTURE.md](ARCHITECTURE.md#the-decision)).
+`CLAUDE_CODE_SUBAGENT_MODEL` gives every agent without its own model the same model, while with Model Router Claude names the model each call needs. One model for everything puts lookups on an expensive model or hard design work on a weak one. While the variable is set, a call that names no model runs on it and the router leaves it alone ([ARCHITECTURE.md](ARCHITECTURE.md#the-decision)).
 
 ## Does it change the main conversation's model?
 
@@ -62,11 +62,11 @@ It keeps its state in its own plugin data directory and sends no prompt, brief, 
 
 ## Does it work with other plugins, skills and agents?
 
-Yes. It routes agents from any plugin, skill or agent, and never changes which agent runs. Another plugin's hook that denies or asks about a call still applies. An agent whose definition names its own model keeps it unless you set `agent_pins` to `override` ([README](../README.md#compatibility)).
+Yes. It routes agents from any plugin, skill or agent, and never changes which agent runs. Another plugin's hook that denies or asks about a call still applies. An agent whose definition names its own model keeps it, inside your cap ([README](../README.md#compatibility)).
 
 ## Does Model Router work with workflows and ultracode?
 
-Yes. Every workflow agent is routed by its brief like a subagent, a model the script names is kept, and on the session's own model a stage never runs below the session's effort, such as `xhigh` under ultracode. Under `claude --effort ultracode` on Claude Code 2.1.331, four stages ran on Haiku, Sonnet, Opus and Fable as routed, an `Agent` call sent again climbed one level, and the verify gate asked once ([guide](GUIDE.md#workflows-and-ultracode)).
+Yes. A model the script names is held to your cap like a subagent's, and on the session's own model a stage never runs below the session's effort, such as `xhigh` under ultracode. The live run under `claude --effort ultracode` on Claude Code 2.1.331 predates the caller naming each model, so it doesn't test this behavior ([guide](GUIDE.md#workflows-and-ultracode)).
 
 ## Does it approve tool calls or get around my permissions?
 
@@ -74,4 +74,4 @@ No. The plugin never approves a tool call, and your permission rules and auto mo
 
 ## How do I see what it routed and what it spent?
 
-Run `/model-router:usage` for what ran where and what it cost at list price, and `/model-router:models` for the models in use, what each runs as, and what is capped, unavailable or routed around. `/model-router:route <task>` explains which model a task would get and why before you run it ([README](../README.md#commands)).
+Run `/model-router:usage` for what ran where and what it cost at list price, and `/model-router:models` for the models in use, what each runs as, and what is capped, unavailable or routed around. `/model-router:route <task>` explains which model a call would run on and why before you run it ([README](../README.md#commands)).

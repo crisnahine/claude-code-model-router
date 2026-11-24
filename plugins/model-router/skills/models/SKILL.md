@@ -13,7 +13,7 @@ allowed-tools:
 
 Arguments: $ARGUMENTS
 
-If the arguments include `--json`, run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" models --json` (with `--reset` too if the arguments include `reset`). It prints one JSON object in the `model-router.models/2` schema: show it unchanged in a `json` code block and add nothing else.
+If the arguments include `--json`, run `sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" models --json` (with `--reset` too if the arguments include `reset`). It prints one JSON object in the `model-router.models/3` schema: show it unchanged in a `json` code block and add nothing else.
 
 Otherwise show the table above. "Last ran as" is the model Claude Code reported for the most recent agent on that model.
 

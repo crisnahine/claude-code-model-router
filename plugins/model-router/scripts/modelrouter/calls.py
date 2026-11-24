@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from . import health, ledger, request, store
-from .config import LEVEL_SOURCES, Level
+from .config import Level
 
 # Without a request id to compare, a call seen again within this long counts as a redo.
 REDO_WINDOW = 30 * 60
@@ -51,8 +51,8 @@ class Route:
 
     @property
     def leveled(self) -> bool:
-        """The call ran at the level the router gave it: the router, an agent's pin or a rule chose its model."""
-        return self.level is not None and self.source in LEVEL_SOURCES
+        """The call ran at a level, and the call itself named no model: a redo of one that did names its own."""
+        return self.level is not None and self.source != "caller"
 
     @property
     def redoable(self) -> bool:

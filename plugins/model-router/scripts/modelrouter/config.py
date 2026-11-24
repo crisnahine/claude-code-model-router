@@ -18,11 +18,8 @@ OVERRIDE_FILE = "model-router.json"
 # The shape of config/models.json and model-router.json; a file without `schema` is version 1.
 # docs/ARCHITECTURE.md "Compatibility" says when it changes.
 CONFIG_SCHEMA = 1
-MODES = ("off", "advise", "auto")
-PRIORITIES = ("fast", "balanced", "quality")
+MODES = ("off", "auto")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-# Who can choose a call's model and still leave its effort to the call's level.
-LEVEL_SOURCES = ("router", "pin", "rule")
 
 USER_FILE = "your model-router.json"
 PROJECT_FILE = "the project's model-router.json"
@@ -142,6 +139,7 @@ def _number(value: Any) -> bool:
 
 def parse_mode(value: Any) -> str | None:
     value = value.strip().lower() if isinstance(value, str) else None
+    value = "off" if value == "advise" else value  # advise, from older releases, changed no call
     return value if value in MODES else None
 
 
@@ -158,7 +156,7 @@ def _clean(override: Any, source: str, problems: list[str]) -> dict:
     if parse_mode(override.get("routing_mode")):
         out["routing_mode"] = parse_mode(override.get("routing_mode"))
     elif override.get("routing_mode") is not None:
-        bad("routing_mode", "is not off, advise or auto")
+        bad("routing_mode", "is not off or auto")
     models = override.get("models")
     if isinstance(models, dict):
         out["models"] = {}
@@ -166,10 +164,10 @@ def _clean(override: Any, source: str, problems: list[str]) -> dict:
             if not isinstance(name, str) or not isinstance(spec, dict):
                 bad(f"models.{name}", "is not an object")
                 continue
-            for field in ("strength", "speed", "cost"):
+            for field in ("strength", "cost"):
                 if spec.get(field) is not None and not _number(spec[field]):
                     bad(f"models.{name}.{field}", "is not a finite number")
-            out["models"][name.lower()] = {f: spec[f] for f in ("strength", "speed", "cost") if _number(spec.get(f))}
+            out["models"][name.lower()] = {f: spec[f] for f in ("strength", "cost") if _number(spec.get(f))}
     elif models is not None:
         bad("models", "is not an object")
     levels = override.get("levels")
@@ -281,9 +279,9 @@ def _models(raw: dict, added: set, base: dict, problems: list[str]) -> dict[str,
             if name not in base:
                 problems.append(f"models.{name} has no strength, so it is left out")
             continue
-        use_for = spec.get("use_for")
-        found[name] = Model(name, spec["strength"], _optional(spec, "speed"), _optional(spec, "cost"),
-                            use_for if isinstance(use_for, str) else "", project=name in added)
+        use_for, stops = spec.get("use_for"), spec.get("step_stops_at")
+        found[name] = Model(name, spec["strength"], _optional(spec, "cost"), use_for if isinstance(use_for, str) else "",
+                            project=name in added, step_stops_at=stops if stops in EFFORTS else None)
     return found
 
 
@@ -364,7 +362,6 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
         newest={k: v for k, v in (base.get("newest") or {}).items() if not k.startswith("$") and isinstance(v, str)},
         older_aliases={k: tuple(v) for k, v in (base.get("older_aliases") or {}).items()
                        if not k.startswith("$") and isinstance(v, list)},
-        crew=dict(base.get("crew") or {}),
         rules=_rules(base.get("agents") or {}, mine.get("agents") or {}, theirs.get("agents") or {}, held),
         routing_mode=min(file_modes, key=MODES.index) if file_modes else None,
         problems=tuple(problems),

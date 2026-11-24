@@ -54,10 +54,9 @@ CI runs all of them: the unit tests include the traceability count, `docs_assets
 
 - `bench/analyze.py ... --check` fails when `docs/BENCHMARKS.md` no longer matches the rows in `bench/results/`, or when a fact the docs' prose states about them (every run solved, a baseline cheaper in every class, no class PASS) is false now. Rebuild the page by running it without `--check`, and fix the prose when a fact fails.
 - `sh tests/mod/typecheck.sh` type-checks the mod and its test with `tsc` against Claude Code's published mod API types, pinned to a commit, using the tsconfig in `tests/mod`. To check against the types your installed Claude Code writes, see [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md).
-- The labeled corpora in `tests/fixtures` (Agent briefs, the user's requests, agent names) fail a change that moves a level, so a row changes only with its reason in the commit.
 - A change to routing reruns `claude plugin eval plugins/model-router --trust-plugin`. It runs live models, so record what it cost. CI's `eval` job runs it on Claude Code 2.1.330 when started by hand from the Actions tab, with the repository's `ANTHROPIC_API_KEY` secret.
 
-The routing evals also run free in the unittest gate: `RoutingEvals` in `tests/test_model_router.py` runs `spawn.decide` on the brief each case under `plugins/model-router/evals` hands a subagent, in a session on the case's model, and compares it with `expected_outcome` (`level L, model M, effort E`). For `route-redo-escalates` that covers the first call only; the Sonnet redo is checked only by the live run. To run only that check: `python3 -m unittest tests.test_model_router.RoutingEvals`. A change that moves a case's route on purpose updates its `expected_outcome` in the same commit.
+The routing evals have no free check in the unittest gate yet: their expected routes predate the caller naming each call's model.
 
 ## Rules for a change
 

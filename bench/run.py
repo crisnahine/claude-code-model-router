@@ -347,7 +347,7 @@ def final_answer(shipped: Path, work: Path, reply: str) -> dict:
 
 
 def run_one(task: dict, config: dict, options: dict, registry_config: Registry) -> dict:
-    # No task or configuration name: a brief that quotes its working directory would hand the router signal words.
+    # No task or configuration name: a brief that quotes its working directory would tell the model what it is graded on.
     scratch = Path(tempfile.mkdtemp(prefix="mrbench-"))
     work = scratch / "work"
     shutil.copytree(task["dir"] / "repo", work)

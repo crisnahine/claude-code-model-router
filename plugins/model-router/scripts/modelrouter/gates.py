@@ -6,7 +6,7 @@ import os
 import re
 from pathlib import Path
 
-from . import profile, session, store
+from . import session, store
 from . import config as cfg
 from .settings import Settings
 
@@ -29,7 +29,7 @@ _SAME_MESSAGE_SLACK = 5
 
 
 def is_checker(agent_type: object) -> bool:
-    return profile.role(agent_type).checker
+    return isinstance(agent_type, str) and agent_type.endswith(("verifier", "reviewer"))
 
 
 def note_edit(hook_input: dict) -> None:

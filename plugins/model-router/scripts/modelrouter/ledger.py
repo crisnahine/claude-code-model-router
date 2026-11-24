@@ -13,7 +13,7 @@ def spawn(session_id: str | None, via: str, decision: router.Decision, descripti
           kind: str | None = None, on_record: bool = True) -> None:
     action = decision["action"]
     row = {"event": "spawn", "via": via, "session": session_id, "agent": decision["agent"], "action": action,
-           "level": decision["level"], "signals": decision["signals"],
+           "level": decision["level"],
            "model": None if action == "deny" else decision["model"] or decision["was"],
            "was": decision["was"], "effort": decision["effort"], "source": decision["source"],
            "escalated_from": decision["escalated_from"], "reason": decision["reason"],

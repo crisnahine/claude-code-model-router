@@ -23,7 +23,7 @@ import run  # noqa: E402
 sys.path.insert(0, str(run.PLUGIN / "scripts"))
 sys.path.insert(0, str(BENCH.parent / "tools"))
 from docs_pages import HEAD_END, HEAD_START  # noqa: E402
-from modelrouter import config as mrconfig, profile  # noqa: E402
+from modelrouter import config as mrconfig  # noqa: E402
 from modelrouter.registry import Registry  # noqa: E402
 from overhead import percentile  # noqa: E402
 
@@ -512,14 +512,6 @@ def _notes(results: Results) -> list[str]:
             lines.append(f"- `{task['id']}` is at revision {task['revision']}; {len(old)} of its runs "
                          f"(${sum(r['total_cost_usd'] for r in old):.2f}) ran on an earlier revision ({changes}), so "
                          "they are left out of every table.")
-    named = [t["id"] for t in results.tasks if profile.signals(t["id"].lower())]
-    early = sum(r["config"] in results.routers and r["task"] in named and _lacks(r, "task_revision") for r in rows)
-    if named and early:
-        lines.append(f"- Bias: {early} router-arm runs of the tasks named here were recorded while each run's "
-                     "folder name held its task id, so a brief that quoted its working directory could give the "
-                     "router signal words from the folder name for " + ", ".join(f"`{t}`" for t in named) +
-                     ". That could only have raised the router's level and cost on those tasks, so on cost those rows understate the router; a "
-                     "pass the higher level bought may not repeat.")
     unclocked = sum(1 for r in rows if _lacks(r, "wall_ms"))
     if unclocked:
         lines.append(f"- {unclocked} run(s) here carry no `wall_ms`, the runner's own clock around the `claude` "
@@ -721,7 +713,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "Defined in `bench/configs.json` but not run here: "
         + (", ".join(f"`{c['id']}`" for c in results.configs if c["id"] not in used) or "none") + ".", "",
         "Not covered yet: the fan-out, workflow, team and redo shapes; a cold and a warm prompt cache measured "
-        "apart; router overhead per spawn and per turn; and each `priority` setting. `opusplan` in a headless `dontAsk` run never enters plan mode, so it runs Sonnet "
+        "apart; and router overhead per spawn and per turn. `opusplan` in a headless `dontAsk` run never enters plan mode, so it runs Sonnet "
         "throughout (https://code.claude.com/docs/en/model-config.md#opusplan-model-setting, "
         "https://code.claude.com/docs/en/permission-modes.md). The advisor needs the Anthropic API, Claude "
         "Platform on AWS or Claude Models on Google Cloud (https://code.claude.com/docs/en/advisor.md), and the "

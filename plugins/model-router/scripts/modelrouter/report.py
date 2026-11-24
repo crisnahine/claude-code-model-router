@@ -2,13 +2,13 @@
 fall back to what the last SessionStart recorded."""
 from __future__ import annotations
 
-from . import ladder, ledger, router, settings, spawn, store, upstream
+from . import agents, ladder, ledger, router, settings, spawn, store, upstream
 from . import config as cfg
 from . import registry
 
 # The --json shapes. A new key keeps the version; removing or renaming one bumps it.
 USAGE_SCHEMA = "model-router.usage/1"
-MODELS_SCHEMA = "model-router.models/2"
+MODELS_SCHEMA = "model-router.models/3"
 
 
 def _strongest(reg: registry.Registry, usable: list[str]) -> str | None:
@@ -26,29 +26,30 @@ def _effort(snap: settings.Snapshot, pick: ladder.Pick) -> str | None:
 def policy(snap: settings.Snapshot) -> str:
     reg, options, usable = snap.registry, snap.options, snap.usable
     limit = options.cap
-    lines = [f"Routing: **{options.mode}**. Priority: **{options.priority}**. "
-             f"Cap: **{limit or 'none'}**. Strongest model in use: **{_strongest(reg, usable) or 'none'}**.", "",
-             "| Subtask level | Model | Effort |", "| :- | :- | :- |"]
+    lines = [f"Routing: **{options.mode}**. Cap: **{limit or 'none'}**. "
+             f"Strongest model in use: **{_strongest(reg, usable) or 'none'}**.", "",
+             "A model named on a call, by a rule or by the agent stands for the lowest level it runs, and runs at that "
+             "level's effort when nobody chose one. A call that names none runs on its parent's model.", "",
+             "| Level | Model | Effort |", "| :- | :- | :- |"]
     for level in cfg.LEVELS:
         pick = snap.pick(level)
         lines.append(f"| {level} | {pick.model or 'left as it is'} | {_effort(snap, pick) or 'as the agent or session sets it'} |")
-    lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
+    lines += ["", "| Model | Strength | Cost | Use for |", "| :- | -: | -: | :- |"]
     for name in reg.by_strength():
         info = reg.models[name]
         flag = "" if name in usable else " (not in use)"
-        lines.append(f"| {name}{flag} | {info.strength} | {'-' if info.speed is None else info.speed} | "
-                     f"{'-' if info.cost is None else info.cost} | {info.use_for} |")
-    lines += ["", "Strength, speed and cost are relative ranks, not prices.", "",
-              "A role agent with a model keeps it, also where the router doesn't route; the others are "
-              "routed by their brief, like any other agent.", "",
-              "| Role agent | Model | Role |", "| :- | :- | :- |"]
-    for name, agent in reg.crew.items():
-        lines.append(f"| {cfg.PLUGIN_NAME}:{name} | {agent.get('model') or 'routed by brief'} | {agent.get('role', '')} |")
+        lines.append(f"| {name}{flag} | {info.strength} | {'-' if info.cost is None else info.cost} | {info.use_for} |")
+    lines += ["", "Strength and cost are relative ranks, not prices.", "",
+              "| Role agent | Model | Effort |", "| :- | :- | :- |"]
+    for path in sorted((cfg.PLUGIN_ROOT / "agents").glob("*.md")):
+        agent = agents.parse(path, "plugin") or {}
+        lines.append(f"| {cfg.PLUGIN_NAME}:{agent.get('name') or path.stem} | {agent.get('model') or 'named on the call'} | "
+                     f"{agent.get('effort') or '-'} |")
     return "\n".join(lines)
 
 
 def models_data(snap: settings.Snapshot) -> dict:
-    """Each registry model's state here, in the `model-router.models/2` shape."""
+    """Each registry model's state here, in the `model-router.models/3` shape."""
     reg, options, table, usable = snap.registry, snap.options, snap.health, snap.usable
     limit = options.cap
     allowed = snap.allowed.permitted(reg)
@@ -73,7 +74,6 @@ def models_data(snap: settings.Snapshot) -> dict:
         "schema": MODELS_SCHEMA,
         "cap": limit or None,
         "strongest_in_use": _strongest(reg, usable),
-        "priority": options.priority,
         "models": rows,
         "doc_aliases": aliases,
         "not_in_registry": [f for f in upstream.model_families(aliases) if f not in reg.models],
@@ -104,8 +104,7 @@ def _held_back(reg: registry.Registry) -> list[dict]:
 
 def models(snap: settings.Snapshot) -> str:
     data = models_data(snap)
-    lines = [f"Cap: **{data['cap'] or 'none'}**. Strongest model in use: **{data['strongest_in_use'] or 'none'}**. "
-             f"Priority: **{data['priority']}**.",
+    lines = [f"Cap: **{data['cap'] or 'none'}**. Strongest model in use: **{data['strongest_in_use'] or 'none'}**.",
              "", "| Model | Last ran as | Status |", "| :- | :- | :- |"]
     lines += [f"| {m['model']} | {m['last_ran_as'] or '-'} | {m['detail']} |" for m in data["models"]]
     if data.get("config_problems"):
@@ -160,18 +159,19 @@ def lock_table(rows: list[dict]) -> list[str]:
             f"{store.LOCK_WAIT_SECONDS:g} seconds."]
 
 
-def explain(snap: settings.Snapshot, text: str, agent: str | None = None) -> str:
-    """What the router would make of an agent call with this brief, and why: a dry run of spawn.decide, which
-    writes nothing."""
-    options, usable = snap.options, snap.usable
-    call = {"session_id": snap.session_id, "tool_input": {"prompt": text, "subagent_type": agent or "general-purpose"}}
-    decision = spawn.decide(call, snap).decision
-    level = decision["level"]
-    why = ", ".join(decision["signals"]) or "no risk, scope or ambiguity wording"
-    out = [f"Level: **{level}** ({why})." if level else "Level: none, the call is not routed by level.",
-           f"Model: **{decision['model'] or 'left as it is'}**, effort: {decision['effort'] or 'unchanged'}.",
+def explain(snap: settings.Snapshot, text: str, agent: str | None = None, model: str | None = None,
+            effort: str | None = None) -> str:
+    """What an agent call naming `model` and `effort` would run on here, and why: a dry run of spawn.decide,
+    which writes nothing. `text` is the call's prompt."""
+    tool_input = {"prompt": text, "subagent_type": agent or "general-purpose",
+                  **({"model": model} if model else {}), **({"effort": effort} if effort else {})}
+    decision = spawn.decide({"session_id": snap.session_id, "tool_input": tool_input}, snap).decision
+    runs_on = decision["model"] or decision["was"]
+    out = [f"Level: **{decision['level']}**." if decision["level"] else "Level: none, the model it runs on isn't known.",
+           f"Model: **{runs_on or 'left as it is'}**, effort: {decision['effort'] or 'unchanged'}"
+           + (" (the call is changed)." if decision["action"] == "rewrite" else " (the call is left as it is)."),
            f"Why: {decision['reason']}.",
-           f"Priority {options.priority}; models in use: {', '.join(usable) or 'none: availableModels and deniedModels leave no registry model open'}."]
+           f"Models in use: {', '.join(snap.usable) or 'none: availableModels and deniedModels leave no registry model open'}."]
     return "\n".join(out)
 
 

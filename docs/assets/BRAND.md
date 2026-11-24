@@ -22,7 +22,7 @@ Model Router starts each agent on the cheapest rung of a ladder and climbs one w
 | `logo.svg` | Mark and wordmark, following the viewer's light or dark setting. |
 | `logo-light.svg`, `logo-dark.svg` | Mark and wordmark fixed for a light or a dark background. |
 | `social-preview.svg` | The 1280 x 640 link-preview card, fixed dark. `social-preview.png` is its raster copy; the script copies it but does not render it. |
-| `headline.svg`, `headline-phone.svg` | The README's opening banner, fixed dark like the social preview. Its briefs are checked against `explain` and its prices come from the registry. |
+| `headline.svg`, `headline-phone.svg` | The README's opening banner, fixed dark like the social preview. Its prices come from the registry. |
 | `video.mp4`, `video-poster.jpg`, `video-play.jpg` | The 22-second video, its first frame for the site's player, and a still with a play button for Markdown pages to link from. They are rendered outside the script, which copies the first two to the site. Music: Sascha Ende, ende.app (CC BY 4.0). |
 
 The rest of `docs/assets/` is badges, page banners and icons (`banner-<slug>.svg`, `icon-<slug>.svg`) and diagrams.

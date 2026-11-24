@@ -1,8 +1,7 @@
 {
-  "schema": "model-router.models/2",
+  "schema": "model-router.models/3",
   "cap": "sonnet",
   "strongest_in_use": "sonnet",
-  "priority": "balanced",
   "models": [
     {
       "model": "haiku",

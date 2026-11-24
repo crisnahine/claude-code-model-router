@@ -427,10 +427,10 @@ test('a turn sends each request\'s usage, so each is priced on its own', async (
 })
 
 test('plugin options reach the CLI env', async () => {
-  const mod = load({}, { priority: 'fast', verify_gate: false, tiers: ['haiku', 'sonnet'], budget: 3 })
+  const mod = load({}, { max_tier: 'sonnet', verify_gate: false, tiers: ['haiku', 'sonnet'], budget: 3 })
   await mod.sessionStart({ source: 'startup' })
   const env = mod.calls[0]!.env
-  assert.equal(env.CLAUDE_PLUGIN_OPTION_PRIORITY, 'fast')
+  assert.equal(env.CLAUDE_PLUGIN_OPTION_MAX_TIER, 'sonnet')
   assert.equal(env.CLAUDE_PLUGIN_OPTION_VERIFY_GATE, 'false')
   assert.equal(env.CLAUDE_PLUGIN_OPTION_TIERS, 'haiku,sonnet')
   assert.equal(env.CLAUDE_PLUGIN_OPTION_BUDGET, '3')

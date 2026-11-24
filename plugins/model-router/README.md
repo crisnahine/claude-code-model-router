@@ -1,6 +1,6 @@
 # Model Router
 
-Model Router (`model-router`) is a Claude Code plugin that sets the model and reasoning effort of every agent Claude Code starts, choosing the cheapest Claude model that should do the job and moving a call one level up when its work comes back for a redo.
+Model Router (`model-router`) is a Claude Code plugin that keeps the model and reasoning effort Claude names for every agent Claude Code starts inside your limits, sets the effort nobody named, and moves a call one level up when its work comes back for a redo.
 
 Install it in Claude Code:
 
@@ -10,7 +10,7 @@ Install it in Claude Code:
 
 In a session this opens the plugin in `/plugin`, where you pick a scope.
 
-Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. The six options in `/config` start at their defaults, so nothing has to be set.
+Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. The four options in `/config` start at their defaults, so nothing has to be set.
 
 Commands: `/model-router:route`, `/model-router:usage`, `/model-router:models`, `/model-router:refresh` and `/model-router:ship`. Type `/model-router:ship` in full: where Claude Code has its own `/ship`, the bare `/ship` runs that command, which can commit, push and open a pull request with no confirmation prompt.
 

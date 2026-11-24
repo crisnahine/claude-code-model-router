@@ -2,7 +2,7 @@
   "name": "model-router",
   "displayName": "Model Router",
   "version": "0.1.2",
-  "description": "Claude Code model router: a Claude Code plugin for autonomous multi-model orchestration. Automatic Claude model routing that sets the right model and reasoning effort for every subagent, teammate and workflow agent, from any plugin, skill or agent, by task complexity, quality, speed and cost. It starts cheap, escalates work that comes back for a redo, tracks new and retiring models, and checks the work before a turn ends.",
+  "description": "Claude Code model router: a Claude Code plugin for autonomous multi-model orchestration. Claude model routing for every subagent, teammate and workflow agent, from any plugin, skill or agent: Claude names the model and reasoning effort each call needs, and the plugin keeps it within your cap and the models that work here, sets the effort nobody named, escalates work that comes back for a redo, tracks new and retiring models, and checks the work before a turn ends.",
   "author": {
     "name": "Cris",
     "url": "https://github.com/crisnahine"
@@ -34,23 +34,11 @@
     "routing_mode": {
       "type": "string",
       "title": "Routing mode",
-      "description": "auto (default): the model and reasoning effort of every subagent call are set automatically. advise: the level each agent call reads as is logged, and nothing is changed. off: no routing.",
+      "description": "auto (default): the model and effort Claude names on each subagent call are kept within your limits, and an effort nobody named is set. off: no routing.",
       "default": "auto",
       "options": [
         "auto",
-        "advise",
         "off"
-      ]
-    },
-    "priority": {
-      "type": "string",
-      "title": "Priority",
-      "description": "What routing favors. balanced (default): the cheapest model strong enough for each subtask. quality: one step stronger. fast: one step lighter, and the quickest that qualifies.",
-      "default": "balanced",
-      "options": [
-        "balanced",
-        "quality",
-        "fast"
       ]
     },
     "max_tier": {
@@ -64,16 +52,6 @@
         "sonnet",
         "opus",
         "fable"
-      ]
-    },
-    "agent_pins": {
-      "type": "string",
-      "title": "Agents that name their own model",
-      "description": "respect (default): an agent whose definition names a model keeps it, within the cap. override: those agents are routed by task like every other.",
-      "default": "respect",
-      "options": [
-        "respect",
-        "override"
       ]
     },
     "update_check": {

@@ -32,7 +32,7 @@ class SessionModel(Sandbox):
 class Teammates(Sandbox):
     def test_a_named_call_is_a_teammate_only_when_agent_teams_are_on(self):
         self.options(CLAUDE_CODE_SUBAGENT_EFFORT="low")
-        self.assertIsNone(self.decide("general-purpose", HARD, name="auditor")["effort"])
+        self.assertIsNone(self.decide("general-purpose", HARD, name="auditor", model="opus")["effort"])
         self.options(CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1")
-        out = self.pre("general-purpose", HARD, name="auditor")
+        out = self.pre("general-purpose", HARD, name="auditor", model="opus")
         self.assertEqual(out["updatedInput"]["effort"], "high")

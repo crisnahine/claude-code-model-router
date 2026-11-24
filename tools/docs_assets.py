@@ -456,8 +456,8 @@ def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,),
 
 
 HERO_TITLE = "Model Router: every Claude Code agent on the cheapest model that should do the job"
-HERO_LABEL = ("Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and "
-              "runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level "
+HERO_LABEL = ("Model Router, a Claude Code plugin. An agent call to implement a function runs on Sonnet at medium "
+              "effort, the standard level. Its result comes back for a redo, so the same call climbs one level "
               "to complex, Opus at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on "
               "Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.")
 
@@ -498,8 +498,8 @@ def hero(phone=False) -> str:
 HEADLINE_EYEBROW = "ATTENTION, CLAUDE CODE USERS"
 HEADLINE = ("Stop paying for", "the wrong model.")
 HEADLINE_SUB = ("A subagent that names no model runs on your session's model, so easy work pays strong-model prices. "
-                "Model Router gives every call the model and effort its own brief needs, and moves a call up a level "
-                "when its work comes back.")
+                "Claude names the model and effort each call needs, Model Router holds it to your cap, and a call "
+                "moves up a level when its work comes back.")
 PROOF_EYEBROW = "BUILT BY THE BOOK"
 PROOFS = [
     ("Follows Claude's best practices",
@@ -514,7 +514,7 @@ PROOFS = [
      "A model you name, an agent's own model and CLAUDE_CODE_SUBAGENT_MODEL stay, inside your max_tier."),
 ]
 HEADLINE_TITLE = "Model Router: stop paying for the wrong model"
-# One brief per model. A test checks that `explain` puts each one on its level.
+# One brief per model, as Claude would name it.
 CALLS = [("List the files under src", "lookup"), ("Write tests for the slugify helper", "standard"),
          ("Review the auth change for security holes", "complex"),
          ("Investigate open-ended data loss across services", "frontier")]
@@ -544,7 +544,7 @@ PHONE = Fit(w=600, margin=32, mark_y=40, mark_scale=0.75, eyebrow=14, head=46, s
 def headline_label() -> str:
     models = [RUNG[level][1] for _, level in CALLS]
     return (f"{' '.join(HEADLINE)} Four agent calls that would all run on the session's model run on "
-            f"{', '.join(models[:-1])} and {models[-1]} instead, each at the effort its brief needs.")
+            f"{', '.join(models[:-1])} and {models[-1]} instead, the model Claude names for each, at that model's effort.")
 
 
 def dot(cx, cy, cls, r=5.5):
@@ -702,7 +702,7 @@ def headline(prices: dict, phone=False) -> str:
 def diagram_ladder() -> str:
     w, h = 920, 492
     out = [frame(w, h), text(32, 42, "The ladder", "ink b", 17),
-           text(32, 66, "Balanced priority: the cheapest usable model strong enough for each level.", "mut", 13.5)]
+           text(32, 66, "Each level runs on the cheapest usable model strong enough for it.", "mut", 13.5)]
     for x, label in ((180, "Level"), (300, "Model"), (392, "Effort"), (482, "Model strength"), (590, "Typical subtask")):
         out.append(text(x, 104, label, "mut b", 12))
     out.append('<path d="M24 114H896" class="ln" stroke-width="1"/>')
@@ -731,12 +731,12 @@ def diagram_ladder() -> str:
                f'<g class="lredo">' + pill(30, cy - 12, "redo", cls="rt", tcls="tag", size=12)[0] + "</g></g>")
     out.append(f'<path class="lstatic rts" d="M124 {ys["standard"] - 4}V{cy + 18}" stroke-width="2.5" '
                f'stroke-dasharray="4 4" fill="none" stroke-linecap="round"/>')
-    out.append(text(32, 432, "Priority quality goes one step stronger, fast one step lighter. When the cap, "
+    out.append(text(32, 432, "A model named on a call stands for its lowest level. When the cap, "
                     "availableModels, deniedModels or failures", "mut", 13))
     out.append(text(32, 452, "rule a model out, the pick moves to the nearest usable model above it, or to the "
                     "strongest one left. A redo runs one level higher.", "mut", 13))
-    out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh, "
-                    "which makes up part of the loss.", "mut", 13))
+    out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh (high on "
+                    "Haiku), which makes up part of the loss.", "mut", 13))
     at = lambda lv: f"transform:translate(0px,{ys[lv] - cy}px)"  # noqa: E731
     stops = [(0, at("lookup") + ";opacity:0"), (4, at("lookup") + ";opacity:1"), (18, at("lookup")),
              (24, at("standard")), (40, at("standard")), (46, at("complex")), (62, at("complex")),
@@ -749,12 +749,12 @@ def diagram_ladder() -> str:
            + ".lredo{animation:lr 12s linear infinite}" + keyframes("lr", pulse + [(100, "opacity:0")])
            + ".lstatic{animation:hide 1s infinite}" + keyframes("hide", [(0, "opacity:0"), (100, "opacity:0")]))
     title = "The ladder: five levels to a model and an effort"
-    label = ("With balanced priority, lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on "
-             "Opus at high, hardest on Opus at xhigh, and frontier on Fable at high. A call climbs one rung each "
-             "time it comes back for a redo. Quality priority goes one step stronger, fast one step lighter. When "
-             "the cap, the availableModels or deniedModels settings, or failures rule a model out, the pick moves "
-             "to the nearest usable model above it, or to the strongest one left, and a pick weaker than its level needs "
-             "gets one more effort step, up to xhigh.")
+    label = ("Lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on Opus at high, hardest "
+             "on Opus at xhigh, and frontier on Fable at high. A model named on a call stands for its lowest level. "
+             "A call climbs one rung each time it comes back for a redo. When the cap, the availableModels or "
+             "deniedModels settings, or failures rule a model out, the pick moves to the nearest usable model above "
+             "it, or to the strongest one left, and a pick weaker than its level needs gets one more effort step, up "
+             "to xhigh, or high on Haiku.")
     return svg(w, h, title, label, "".join(out), css)
 
 
@@ -857,7 +857,7 @@ def diagram_two_paths() -> str:
     out.append(card(132, 404, 656, 110, rx=12))
     out.append('<rect x="133" y="420" width="4" height="78" rx="2" class="rt"/>')
     out.append(text(156, 434, "scripts/modelrouter: one Python runtime, one router", "ink b", 15))
-    out.append(chip_row(156, 450, ["spawn", "router.decide", "ladder", "registry", "profile", "calls", "gates"], 11.5))
+    out.append(chip_row(156, 450, ["spawn", "router.decide", "ladder", "registry", "calls", "gates"], 11.5))
     out.append(text(156, 500, "One decision procedure and one state store for both paths.", "mut", 13))
     for name in ("pa", "pb", "pc"):
         out.append(f'<circle cx="0" cy="0" r="6" class="rt {name}"/>')
@@ -893,9 +893,9 @@ PRECEDENCE = [
     ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "pins every subagent's model; the router sets effort only", True),
     ("A model named on the call", "by Claude, a skill's instructions or a workflow script", False),
     ("A per-agent rule", "in ~/.claude/model-router.json or .claude/model-router.json", False),
-    ("The agent's own model field", "kept unless agent_pins is override", False),
+    ("The agent's own model field", "in its definition's frontmatter", False),
     ("CLAUDE_CODE_SUBAGENT_MODEL", "your default for agents that name no model", True),
-    ("The router's pick", "the ladder's model and effort for the brief's level", False),
+    ("The parent's model", "Claude Code's own default when nothing names one", False),
 ]
 
 
@@ -929,12 +929,12 @@ def diagram_precedence() -> str:
     out.append(card(632, ey, 256, 138, rx=12))
     out.append(f'<rect x="633" y="{ey + 16}" width="4" height="106" rx="2" class="r3"/>')
     out.append(text(652, ey + 28, "And the effort", "ink b", 14.5))
-    out.append(lines(652, ey + 54, ["Set from the level, unless the call,", "the agent or one of these sets it:"],
+    out.append(lines(652, ey + 54, ["Set from the model's level, unless the", "call, the agent or one of these sets it:"],
                      "mut", 13, 19))
     out.append(lines(652, ey + 98, ["CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_EFFORT"], "mono ink", 11.5, 18))
-    out.append(text(32, 476, "Example: a standard brief with nothing above it set falls through to the router's "
-                    "pick,", "mut", 13))
-    out.append(text(32, 496, "Sonnet at medium effort, which is inside the cap and runs.", "mut", 13))
+    out.append(text(32, 476, "Example: a call that names sonnet and no effort runs on Sonnet at medium effort, the",
+                    "mut", 13))
+    out.append(text(32, 496, "standard level's, which is inside the cap. A rule's level raises a model below it.", "mut", 13))
     marks = [(0, "transform:translate(0px,-300px);opacity:0"), (3, "transform:translate(0px,-300px);opacity:1")]
     t = 3
     for k in range(1, 6):
@@ -948,10 +948,10 @@ def diagram_precedence() -> str:
                               (100, "opacity:0")]))
     title = "Who decides the model: the order of authority"
     label = ("Strongest first: CLAUDE_CODE_SUBAGENT_MODEL_FORCE, then a model named on the call, then a per-agent "
-             "rule in model-router.json, then the agent's own model field unless agent_pins is override, then "
-             "CLAUDE_CODE_SUBAGENT_MODEL, then the router's pick. For all but the two environment variables, the "
-             "winner must be usable under the cap and your settings, else the strongest usable model below it runs. Effort follows the level unless something "
-             "already sets it.")
+             "rule in model-router.json, then the agent's own model field, then CLAUDE_CODE_SUBAGENT_MODEL, then "
+             "the parent's model. For all but the two environment variables, the winner must be usable under the "
+             "cap and your settings, else the strongest usable model below it runs. Effort follows the model's level "
+             "unless something already sets it.")
     return svg(w, h, title, label, "".join(out), css)
 
 
@@ -1255,10 +1255,11 @@ message: "If you use Model Router in your work, please cite it with these detail
 type: software
 title: "Model Router"
 abstract: >-
-  Model Router (model-router) is a Claude Code plugin that routes every agent
-  Claude Code starts (subagents, agent-team teammates and workflow stages) to
-  the cheapest Claude model and reasoning effort that should do the job, and
-  runs a call one level higher when its work comes back for a redo.
+  Model Router (model-router) is a Claude Code plugin that holds the Claude
+  model and reasoning effort Claude names for every agent Claude Code starts
+  (subagents, agent-team teammates and workflow stages) to the user's limits,
+  sets the effort nobody named, and runs a call one level higher when its work
+  comes back for a redo.
 authors:
   - given-names: Cris
     family-names: Nahine

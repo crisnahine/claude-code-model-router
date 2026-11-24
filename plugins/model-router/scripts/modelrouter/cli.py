@@ -4,8 +4,8 @@
              post-edit, stop, model-switch, refresh-cache
   policy     the routing policy as it stands for this user and project
   models     what each registry model really runs as, and what is unavailable
-             (--reset forgets learned availability; --json prints model-router.models/2)
-  explain    what the router would make of a task: explain [--agent NAME] TEXT
+             (--reset forgets learned availability; --json prints model-router.models/3)
+  explain    what an agent call would run on and why: explain [--agent NAME] [--model M] [--effort E] [TEXT]
   refresh    fetch upstream (--force) and show what changed; status shows the cache;
              ack marks it reviewed
   usage      the ledger by agent and model: usage [DAYS] [--json for model-router.usage/1]
@@ -66,6 +66,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("explain")
     p.add_argument("--agent")
+    p.add_argument("--model")
+    p.add_argument("--effort")
     p.add_argument("text", nargs="*")
     sub.add_parser("refresh").add_argument("--force", action="store_true")
     sub.add_parser("status").add_argument("--json", action="store_true")
@@ -108,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report.models_data(snap), indent=2) if args.json
               else report.models(snap))
     elif args.cmd == "explain":
-        print(report.explain(snap, " ".join(args.text), args.agent))
+        print(report.explain(snap, " ".join(args.text), args.agent, args.model, args.effort))
     elif args.cmd == "refresh":
         try:
             data = upstream.refresh(options, force=args.force)
