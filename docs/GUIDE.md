@@ -159,7 +159,7 @@ So on those providers the mod starts routed work for those families on the newes
 
 Needs Claude Code 2.1.329 or later. The manifest's `network` field needs 2.1.328 ([manifest reference](https://code.claude.com/docs/en/plugins/manifest-reference.md)), 2.1.329 fixed the Agent tool's `effort` parameter being ignored for named teammates ([changelog](https://code.claude.com/docs/en/changelog), 2.1.329), and the mod reads its hook environment with `$.process.hookEnv()`, added in 2.1.326 ([mods reference](https://code.claude.com/docs/en/plugins/mods/reference.md)). That one floor covers the older versions the plugin's features name, such as mods (2.1.287) and per-call effort (2.1.292).
 
-Tested live on 2.1.330 (subagents, workflow agents, teammates, effort per request, the spend log) and, for workflows under ultracode and the workflow model pin, on 2.1.331. What each run covered is in [verified live](ARCHITECTURE.md#verified-live).
+Tested live on 2.1.330 (subagents, workflow agents, teammates, the spend log) and, for workflows under ultracode and the workflow model pin, on 2.1.331. What each run covered is in [verified live](ARCHITECTURE.md#verified-live).
 
 ### Operating systems
 

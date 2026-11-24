@@ -835,9 +835,9 @@ def diagram_two_paths() -> str:
     out.append(card(32, 222, 410, 108, rx=12))
     out.append('<rect x="33" y="238" width="4" height="76" rx="2" class="r2"/>')
     out.append(text(52, 252, "The mod: hooks/router.ts", "ink b", 15))
-    out.append(lines(52, 276, ["Primary path. Sets each spawn's model, its effort on",
-                               "each model request, and a hard turn's effort. Reaches",
-                               "teammates and workflow stages too."], "mut", 13, 19))
+    out.append(lines(52, 276, ["Primary path. Sets each spawn's model and its effort",
+                               "on each model request. Reaches teammates and",
+                               "workflow stages too."], "mut", 13, 19))
     out.append(card(478, 92, 410, 238, rx=12, cls="faint", sw=0))
     out.append(text(498, 120, "Settings hooks: hooks/hooks.json", "ink b", 14.5))
     out.append(chip_row(498, 138, ["SessionStart", "UserPromptSubmit", "PreToolUse"], 11.5))

@@ -36,7 +36,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Signal**: one kind of difficulty a Reading looks for in a brief: risk (security, data and its consistency, migrations, public APIs), scope (several modules or services), load (performance, latency, throughput, staleness and capacity limits, counted only when the brief also asks for a design or a choice) or ambiguity (design, a decision between approaches, root cause, trade-offs). More signals mean a higher level.
 
-**Registry**: the one value `config.load` builds per hook call or command from the shipped `config/models.json` and the override files (`registry.Registry`). It holds the models (the plugin's, the user's or the project's) with their relative strength, speed and cost, the levels with their `needs` and effort, aliases, list prices, the main-loop effort table, agent rules, and the keys it dropped or held back. Its methods say which models are usable and pick between them (`available`, `select`, `clamp`, `family`, `price`, `cost`). A level's `needs` is finite and never lower than the level below it.
+**Registry**: the one value `config.load` builds per hook call or command from the shipped `config/models.json` and the override files (`registry.Registry`). It holds the models (the plugin's, the user's or the project's) with their relative strength, speed and cost, the levels with their `needs` and effort, aliases, list prices, agent rules, and the keys it dropped or held back. Its methods say which models are usable and pick between them (`available`, `select`, `clamp`, `family`, `price`, `cost`). A level's `needs` is finite and never lower than the level below it.
 
 **Override file**: `~/.claude/model-router.json` or a project's `.claude/model-router.json`, merged over the registry. The user's file is trusted in full. A project's only raises: it can turn routing down but never on, raise a level's `needs` or `effort` but never lower it, and can't switch routing off for an agent or re-rank a shipped or user-defined model. A key of the wrong type, such as a `needs` that isn't a finite number, is dropped from every file. `/model-router:models` lists what was dropped or held back. An override file is only read, never set aside.
 
@@ -72,7 +72,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Intake**: the check of whether a prompt is the person's request (`intake.py`). A teammate's report, another session's message and a background notification are not, so they never start a request.
 
-**Request**: one prompt from the user and the turns it starts. An unmarked redo counts only within one request; a call marked "Redo:" also climbs from a run of an earlier request, within 30 minutes. `request.py` keeps its `prompt_id`, its start time and the model the user named. The settings hook's `UserPromptSubmit` starts it.
+**Request**: one prompt from the user and the turns it starts. An unmarked redo counts only within one request; a call marked "Redo:" also climbs from a run of an earlier request, within 30 minutes. `request.py` keeps its `prompt_id`. The settings hook's `UserPromptSubmit` starts it.
 
 **Ledger** (`ledger.py`): the append-only log of every spawn, result and turn's spend, with the reason for each decision. A result row names the models of a swapped run in `models_used`.
 

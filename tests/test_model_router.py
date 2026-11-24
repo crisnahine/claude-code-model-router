@@ -2580,7 +2580,7 @@ class Calls(Sandbox):
         self.assertIsNotNone(calls.finished_run("s1", key))
         with self.clock_at(self.clock + calls.REDO_WINDOW + 1):
             self.assertIsNone(calls.finished_run("s1", key))
-        request.start("s1", prompt_id="p1", named=None)
+        request.start("s1", prompt_id="p1")
         self.assertIsNone(calls.finished_run("s1", key))
 
     def test_each_outcome_kind_says_whether_it_finished_the_call(self):
@@ -2706,11 +2706,10 @@ class Fallback(Sandbox):
 
 class Request(Sandbox):
     def test_a_new_request_replaces_the_record(self):
-        request.start("s1", prompt_id="p1", named="opus")
-        self.assertEqual(request.load("s1"), request.Request(prompt_id="p1", named="opus", started=self.clock))
-        self.advance(5)
-        request.start("s1", prompt_id=None, named=None)
-        self.assertEqual(request.load("s1"), request.Request(started=self.clock))
+        request.start("s1", prompt_id="p1")
+        self.assertEqual(request.load("s1"), request.Request(prompt_id="p1"))
+        request.start("s1", prompt_id=None)
+        self.assertEqual(request.load("s1"), request.Request())
 
     def test_a_session_without_a_request_reads_empty(self):
         self.assertEqual(request.load("nobody"), request.Request())
@@ -3379,6 +3378,8 @@ class Hooks(Sandbox):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         text = self.text(hooks.session_start({"session_id": "s1"}))
         self.assertIn("pins every subagent to opus, so Model Router sets only their effort", text)
+        self.assertIn("omit `effort` unless the user named one.", text)
+        self.assertNotIn("name `model`", text)  # Claude can't pass a model under FORCE (sub-agents.md)
 
     def test_session_start_says_when_the_subagent_model_default_leaves_calls_alone(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
@@ -3450,7 +3451,15 @@ class Hooks(Sandbox):
         # Under FORCE, Claude can't pass a model when it starts a subagent (sub-agents.md).
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": prompt, "prompt_id": "p2"}))
-        self.assertEqual((request.load("s1").prompt_id, request.load("s1").named), ("p2", "opus"))
+        self.assertEqual(request.load("s1").prompt_id, "p2")
+
+    def test_a_named_model_the_allowlist_rules_out_is_not_promised(self):
+        self.managed.write_text(json.dumps({"availableModels": ["sonnet", "haiku"]}))
+        prompt = "use opus to review the auth module"
+        text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": prompt}))
+        self.assertIn('model: "opus" runs on sonnet, since opus isn\'t available here', text)
+        self.assertNotIn("keeps it", text)
+        self.assertEqual(self.decide("general-purpose", prompt, model="opus")["model"], "sonnet")
 
     def test_user_prompt_records_the_request_and_says_nothing_unless_it_names_a_model(self):
         self.session_on("claude-haiku-5-5")
@@ -3460,8 +3469,7 @@ class Hooks(Sandbox):
                 self.options(routing_mode=mode)
                 self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": HARDEST, "prompt_id": "p1"}))
             self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": "/acme:go 482", "prompt_id": "p2"}))
-        found = request.load("s1")
-        self.assertEqual((found.prompt_id, found.named, found.started), ("p2", None, self.clock))
+        self.assertEqual(request.load("s1").prompt_id, "p2")
 
     def test_advise_mode_never_tells_claude_to_pass_a_model(self):
         # A model passed on a call outranks the agent definition's own `model`, so it would undo a pin.
@@ -4100,7 +4108,7 @@ class Reports(Sandbox):
         self.assertIn("pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE", self.out("explain", *LOOKUP.split()))
         for name in ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_CODE_SUBAGENT_MODEL"):
             del os.environ[name]
-        request.start("s1", prompt_id="p1", named=None)
+        request.start("s1", prompt_id="p1")
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
         self.assertIn("Level: **complex**", report.explain(snap, LOOKUP, "model-router:architect"))
         key = calls.identify({"prompt": LOOKUP})[1]
@@ -4182,7 +4190,7 @@ class StateFiles(Sandbox):
 
     def test_state_files_carry_a_schema_version_that_reads_never_see(self):
         store.update_state(lambda state: state.update(max_tier="opus"))
-        request.start("s1", prompt_id=None, named=None)
+        request.start("s1", prompt_id=None)
         self.assertEqual(json.loads((self.data / "state.json").read_text())["schema"], store.SCHEMA)
         self.assertEqual(json.loads((self.data / "prompts.json").read_text())["schema"], store.SCHEMA)
         self.assertEqual(store.load_state(), {"max_tier": "opus"})

@@ -15,7 +15,7 @@ python3 bench/overhead.py --runs 30 --calls 1000 --json # the same as JSON
 
 It uses throwaway folders and turns the daily check off, so it never touches your plugin state or the network.
 
-Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330.
+Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330. The `user-prompt` and `mod-turn` rows and the `prompts.json` row were rerun on 2026-11-25 on Claude Code 2.1.331, after the router stopped sizing up the request and its record kept only the prompt id.
 
 ## Settings hooks
 
@@ -26,7 +26,7 @@ Wall milliseconds per call over 30 runs, from a `--runs 30 --calls 200` run (its
 | Command | Event | Cold p50 | Cold p95 | Warm p50 | Warm p95 |
 | :- | :- | -: | -: | -: | -: |
 | `session-start` | SessionStart | 182 | 231 | 59 | 82 |
-| `user-prompt` | UserPromptSubmit | 187 | 208 | 58 | 64 |
+| `user-prompt` | UserPromptSubmit | 183 | 195 | 56 | 58 |
 | `pre-agent` | PreToolUse (Agent) | 188 | 208 | 60 | 63 |
 | `post-agent` | PostToolUse (Agent) | 183 | 204 | 54 | 62 |
 | `post-edit` | PostToolUse (Edit, Write, NotebookEdit) | 183 | 207 | 55 | 57 |
@@ -49,7 +49,7 @@ The mod (`hooks/router.ts`) asks the runtime through the same launcher, one run 
 | :- | :- | -: | -: | -: | -: |
 | `mod-start` | `session.start`, once per process | 183 | 197 | 54 | 64 |
 | `mod-spawn` | `agent.spawn`, before each agent starts | 187 | 197 | 58 | 70 |
-| `mod-turn` | `turn.start`, before each main-loop prompt runs | 186 | 202 | 56 | 59 |
+| `mod-turn` | `turn.start`, before each main-loop prompt runs | 187 | 210 | 56 | 58 |
 | `mod-usage` | `turn.complete`, after the turn, before the handler returns | 182 | 194 | 54 | 56 |
 
 In process, loading the config, gathering the facts and running `router.decide` take 0.26 ms (p50) and 0.29 ms (p95). The mod's own handlers, timed in Node with the runtime's answer returned at once, take 0.001 to 0.004 ms (p50) and at most 0.005 ms (p95) for `agent.spawn`, `turn.start` and `turn.step`, so almost all of the time is starting Python. Not timed: before `mod-start`, `mod-spawn` and `mod-turn` the mod reads the five settings sources, waiting at most 2 seconds (`SETTINGS_MS` in `hooks/router.ts`).
@@ -89,7 +89,7 @@ Before is the code that also wrote each spawn's count and votes to `learned.json
 | `ledger.jsonl` | 798,174 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
 | `routes.json` | 200,006 | yes | Sessions written in the last day (`calls.KEPT_FOR`), at most the 200 most recently written (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
 | `done.json` | 114,486 | yes | Same as `routes.json` |
-| `prompts.json` | 5,140 | yes | The 200 most recently written sessions |
+| `prompts.json` | 2,461 | yes | The 200 most recently written sessions |
 | `edits.json` | 3,120 | yes | Same |
 | `sessions.json` | 2,911 | yes | Same |
 | `mod.json` | 1,738 | yes | Same |

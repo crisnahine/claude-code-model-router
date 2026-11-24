@@ -26,10 +26,11 @@ def session_start(hook_input: dict) -> dict | None:
     name = cfg.PLUGIN_NAME
     if mode == "auto":
         # Only what Claude must act on: every word here is in context for the whole session.
+        name_model = ("" if options.force else ", and name `model` only when the user did or when what was read shows "
+                      "the task harder or easier than its brief")
         parts.append(
             "Model Router sets each subagent's, teammate's and workflow agent's model and effort from its brief. "
-            "Calls omit `effort` unless the user named one, and name `model` only when the user did or when what "
-            "was read shows the task harder or easier than its brief. "
+            f"Calls omit `effort` unless the user named one{name_model}. "
             "A redo of a weak result keeps its `description` with \"Redo:\" in front, and runs one level higher."
         )
         if options.force:
@@ -87,11 +88,16 @@ def user_prompt(hook_input: dict) -> dict | None:
     if not intake.is_user_prompt(prompt):
         return None  # a task notification or a delivered message continues the user's request
     wanted = request.named_model(reg, prompt)
-    request.start(hook_input.get("session_id"), prompt_id=hook_input.get("prompt_id"), named=wanted)
+    request.start(hook_input.get("session_id"), prompt_id=hook_input.get("prompt_id"))
     if not wanted or options.mode != "auto" or options.force:
         return None
-    runs = (f"runs within the cap the user set, {options.cap}" if options.cap and reg.stronger(wanted, options.cap)
-            else "runs on it, and Model Router keeps it")
+    final = reg.clamp(wanted, snap.usable)
+    if final == wanted:
+        runs = "runs on it, and Model Router keeps it"
+    elif options.cap and reg.stronger(wanted, options.cap):
+        runs = f"runs within the cap the user set, {options.cap}"
+    else:
+        runs = f"runs on {final}, since {wanted} isn't available here"
     return _context("UserPromptSubmit", f"The request mentions the {wanted} model. If it asks for that model, an "
                                         f"Agent call with model: \"{wanted}\" {runs}.")
 

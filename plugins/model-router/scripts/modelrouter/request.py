@@ -1,5 +1,5 @@
-"""The current request's record: its id, when it started and the model the user named. The only module
-that reads or writes the `prompts` entry for a session. Where each call was routed is `calls.py`'s.
+"""The current request's id, and the model a prompt names. The only module that reads or writes the
+`prompts` entry for a session. Where each call was routed is `calls.py`'s.
 
 A new request replaces the whole record. A message from someone else never starts one."""
 from __future__ import annotations
@@ -31,19 +31,13 @@ def named_model(reg: Registry, prompt: str) -> str | None:
 @dataclass(frozen=True)
 class Request:
     prompt_id: str | None = None
-    named: str | None = None
-    started: float = 0.0
 
 
 def load(session_id: str | None) -> Request:
-    entry = store.load_entry("prompts", session_id)
-    fields: dict = {k: entry[k] for k in ("prompt_id", "named") if isinstance(entry.get(k), str)}
-    started = entry.get("started")
-    if isinstance(started, (int, float)) and not isinstance(started, bool):
-        fields["started"] = float(started)
-    return Request(**fields)
+    prompt_id = store.load_entry("prompts", session_id).get("prompt_id")
+    return Request(prompt_id if isinstance(prompt_id, str) else None)
 
 
-def start(session_id: str | None, *, prompt_id: str | None, named: str | None) -> None:
+def start(session_id: str | None, *, prompt_id: str | None) -> None:
     """The person's new request."""
-    store.save_entry("prompts", session_id, {"prompt_id": prompt_id, "named": named, "started": store.now()})
+    store.save_entry("prompts", session_id, {"prompt_id": prompt_id})

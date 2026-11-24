@@ -47,7 +47,7 @@ None.
 - Whether the Mythos models become a routable family. They are priced in the registry, so their spend is logged, but no level routes to them. Row S2.15.
 - A live install check: installing from the marketplace into a scratch config folder and running one routed call. A scratch config folder has its own login, so the run needs the maintainer's login or an API key. Row S6.1.
 - Requirement against design: the requirements say the router never blocks a spawn. On the fallback path, a repeated call whose untouched model would break the user's cap is denied, with the model to use (`docs/ARCHITECTURE.md`, "Rewrites that don't take"). Either the requirements make an exception for the cap or the design changes. Row S2.25.
-- The mod's one decision: `turn.step` compares effort ranks so the main loop's effort only rises. The requirements say the mod holds no routing logic. Rows S5.2, S13.2.
+- The mod's one decision: at `turn.start`, a subagent's first request takes an in-flight effort only when every spawn of that brief got the same. The requirements say the mod holds no routing logic. Rows S5.2, S13.2.
 
 ### Blocked
 
@@ -62,4 +62,4 @@ None.
 - No live run: Desktop, VS Code, JetBrains and the Agent SDK (S3.7); an API-key login, which needs a key (S3.9); Bedrock, Vertex and Foundry (S3.10); `allowManagedHooksOnly` (S3.13); Linux and Windows installs (S6.1); undocumented binary behaviour beyond macOS (S5.6).
 - Edge cases without a test or with a known gap: a short brief, or a language outside the profile's list (S12.10); on the mod path, a spawn another plugin's mod moves to another family counts as a substitution (S12.14); the upstream workflow, whose scheduled runs on `main` passed but have not yet flagged a real change (S6.16).
 - Not measured: fan-out, workflow, team and redo shapes, cache temperature and `priority` (S4.13).
-- Design and process: the cap denial (S2.25); the mod's effort check (S5.2, S13.2); an inline skill's effort is left to the skill, `ultrathink` or `/effort` (S3.4); agents with no definition on disk are left alone (S3.6); fast mode in the spend ledger (S10.7).
+- Design and process: the cap denial (S2.25); the mod's in-flight effort match (S5.2, S13.2); an inline skill's effort is left to the skill, `ultrathink` or `/effort` (S3.4); agents with no definition on disk are left alone (S3.6); fast mode in the spend ledger (S10.7).
