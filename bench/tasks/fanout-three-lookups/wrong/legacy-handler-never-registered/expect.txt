@@ -1,0 +1,1 @@
+refund_email is 'shop/notify/legacy.py:email_refund_notice'

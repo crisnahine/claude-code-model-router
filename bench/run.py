@@ -32,7 +32,8 @@ from modelrouter import config as mrconfig  # noqa: E402
 from modelrouter.registry import Registry  # noqa: E402
 from modelrouter.ledger import read as read_ledger  # noqa: E402
 ROW_SCHEMA = 2  # a row's schema says which harness wrote it; analyze reads a missing key as old only below this
-CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research")
+CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research",
+           "redo")
 
 # Every run starts from the same environment: nothing a parent Claude Code session, its plugins or the shell's
 # subagent and effort settings put there, except the provider switches and token auth. A configuration adds its
@@ -47,6 +48,19 @@ TOOLS = ("Read", "Edit", "Write", "Glob", "Grep", "Bash(python3 *)", "Bash(pytho
 STATE_FILES = ("state.json", "learned.json")
 PROMPT = ("Hand the task below to one subagent with the Agent tool and wait for its answer; don't do the work "
           "yourself. When it returns, reply with its final answer.\n\nTask: {brief}")
+# A task.json "shape" picks how the session hands the work out; with none it goes to one subagent.
+SHAPES = {
+    "single": PROMPT,
+    "redo": ("Hand the task below to a subagent with the Agent tool and wait for its answer; don't do the work "
+             "yourself, but do run any check the task names and send the work back when the task says to. When the "
+             "work is done, reply with its final answer.\n\nTask: {brief}"),
+    "fanout": ("Give each question in the task below to its own subagent with the Agent tool, all started at once, and "
+               "wait for their answers; don't look up the answers yourself. Then write the answer file the task asks "
+               "for from what they found, and reply with its contents.\n\nTask: {brief}"),
+    "plan-build": ("Hand each step of the task below to a subagent with the Agent tool, one step at a time and in "
+                   "order, giving each one what the steps before it decided; don't do the work yourself. When the "
+                   "last step returns, reply with its final answer.\n\nTask: {brief}"),
+}
 
 
 def load_tasks() -> list[dict]:
@@ -55,6 +69,13 @@ def load_tasks() -> list[dict]:
         task = json.loads((folder / "task.json").read_text(encoding="utf-8"))
         tasks.append({**task, "id": folder.name, "dir": folder})
     return tasks
+
+
+def prompt_for(task: dict) -> str:
+    shape = task.get("shape", "single")
+    if shape not in SHAPES:
+        raise ValueError(f"unknown task shape {shape!r}; known: {', '.join(SHAPES)}")
+    return SHAPES[shape].format(brief=task["brief"])
 
 
 def load_configs() -> list[dict]:
@@ -354,7 +375,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
     if config.get("router_config"):  # a router variant, as the project's own model-router.json
         (work / ".claude").mkdir(exist_ok=True)
         (work / ".claude" / "model-router.json").write_text(json.dumps(config["router_config"]), encoding="utf-8")
-    cmd, env = command(PROMPT.format(brief=task["brief"]), config,
+    cmd, env = command(prompt_for(task), config,
                        {**options, "plugins_root": str(scratch / "plugins")}, dict(os.environ))
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     plugin_state = state_hashes(plugin_data_dir(env)) if config.get("plugin") else None

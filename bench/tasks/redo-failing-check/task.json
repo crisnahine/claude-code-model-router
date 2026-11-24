@@ -1,0 +1,6 @@
+{
+  "class": "redo",
+  "shape": "redo",
+  "revision": 1,
+  "brief": "We release 2.4.0 today, 2026-11-20. Write its section in CHANGELOG.md from the commits listed in commits.txt, following CONTRIBUTING.md. When the section is written, run python3 tools/check_changelog.py 2.4.0. If it reports problems, send the work back once with what it printed, then run it again. Reply with the check's last line."
+}

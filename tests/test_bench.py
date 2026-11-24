@@ -1199,7 +1199,7 @@ class SuiteCoverage(unittest.TestCase):
     def test_every_task_class_has_two_tasks(self):
         tasks = run.load_tasks()
         for cls in run.CLASSES:
-            self.assertGreaterEqual(sum(t["class"] == cls for t in tasks), 2, cls)
+            self.assertGreaterEqual(sum(t["class"] == cls for t in tasks), 1 if cls == "redo" else 2, cls)
 
     def test_work_dir_code_cannot_exit_the_check_with_success(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1888,7 +1888,7 @@ class HardTier(unittest.TestCase):
                 "security-prefix-check", "rootcause-cached-rates", "design-event-partitions",
                 "research-yanked-release"}
         tasks = {t["id"]: t for t in run.load_tasks()}
-        self.assertEqual({tasks[t]["class"] for t in hard}, set(run.CLASSES))
+        self.assertEqual({tasks[t]["class"] for t in hard}, set(run.CLASSES) - {"redo"})
 
 
 class ProbeHelper(unittest.TestCase):
@@ -2159,6 +2159,90 @@ class QualityTier(unittest.TestCase):
             took = time.monotonic() - start
         self.assertFalse(verdict)
         self.assertLess(took, 40)
+
+
+class DelegationTasks(unittest.TestCase):
+    """Tasks that measure how work is handed out: a redo after a failing check, calls started together, a plan
+    and then a build. Each one's prompt lets the session start more than one subagent."""
+    WANT = {"redo-failing-check": ("redo", "redo"), "fanout-three-lookups": ("lookup", "fanout"),
+            "mixed-plan-then-build": ("cross-module", "plan-build")}
+
+    def task(self, task_id):
+        return next(t for t in run.load_tasks() if t["id"] == task_id)
+
+    def test_each_delegation_task_has_its_class_and_shape(self):
+        tasks = {t["id"]: t for t in run.load_tasks()}
+        self.assertEqual({i: (tasks[i]["class"], tasks[i].get("shape")) for i in self.WANT}, self.WANT)
+
+    def test_a_task_without_a_shape_gets_the_one_subagent_prompt(self):
+        self.assertEqual(run.prompt_for({"brief": "Do x."}), run.PROMPT.format(brief="Do x."))
+
+    def test_each_shape_keeps_the_brief_and_lets_the_session_start_more_than_one_subagent(self):
+        prompts = {shape: run.prompt_for({"brief": "Do x.", "shape": shape}) for shape in run.SHAPES}
+        self.assertEqual(set(prompts), {"single", "redo", "fanout", "plan-build"})
+        for shape, prompt in prompts.items():
+            with self.subTest(shape=shape):
+                self.assertTrue(prompt.endswith("\n\nTask: Do x."))
+                if shape != "single":
+                    self.assertNotIn("one subagent", prompt)
+                self.assertNotRegex(prompt, "[–—]")
+
+    def test_an_unknown_shape_is_an_error(self):
+        with self.assertRaises(ValueError):
+            run.prompt_for({"brief": "Do x.", "shape": "swarm"})
+        for task in run.load_tasks():
+            run.prompt_for(task)
+
+    def test_a_run_sends_its_tasks_shape_prompt(self):
+        task = self.task("redo-failing-check")
+        defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
+        with tempfile.TemporaryDirectory() as tmp:
+            claude, seen = stub(tmp, VARIANT_STUB), Path(tmp) / "seen.json"
+            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+            with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
+                run.run_one(task, defaults, options, {})
+            argv = json.loads(seen.read_text())["argv"]
+        self.assertEqual(argv[argv.index("-p") + 1], run.prompt_for(task))
+
+    def lint(self, work):
+        return subprocess.run([sys.executable, "-I", "tools/check_changelog.py", "2.4.0"], cwd=work,
+                              capture_output=True, text=True, timeout=60)
+
+    def test_the_visible_changelog_check_agrees_with_the_grade_and_says_why(self):
+        task = self.task("redo-failing-check")
+        for overlay in [None, *overlay_dirs(task, "wrong"), *overlay_dirs(task, "right")]:
+            with self.subTest(answer=overlay and overlay.name), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp) / "work"
+                build_work(task, overlay, work)
+                answer = Path(tmp) / "answer.txt"
+                answer.write_text("", encoding="utf-8")
+                graded = run.grade(task["dir"] / "check.py", work, answer, timeout=60)
+                linted = self.lint(work)
+                self.assertEqual(linted.returncode == 0, graded.passed, linted.stdout + graded.reason)
+                if not graded.passed:
+                    self.assertTrue(linted.stdout.strip(), "the visible check printed no reason")
+
+    def test_the_visible_changelog_check_fails_the_shipped_changelog_with_a_reason(self):
+        task = self.task("redo-failing-check")
+        with tempfile.TemporaryDirectory() as tmp:
+            shutil.copytree(task["dir"] / "repo", Path(tmp) / "work")
+            res = self.lint(Path(tmp) / "work")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("2.4.0", res.stdout)
+
+    def test_no_shipped_file_names_an_answer(self):
+        leaks = {"redo-failing-check": ["save card", "#220"], "fanout-three-lookups": [],
+                 "mixed-plan-then-build": ["choose b", "option b is", "pick b"]}
+        for task_id, words in leaks.items():
+            files = [p for p in (self.task(task_id)["dir"] / "repo").rglob("*") if p.is_file()]
+            names = {p.name for p in files}
+            with self.subTest(task=task_id):
+                self.assertFalse(names & {"ANSWERS.json", "DESIGN.json", "test_idempotency.py"})
+                text = self.task(task_id)["brief"].lower()
+                for word in words:
+                    self.assertNotIn(word, text)
+
 
 if __name__ == "__main__":
     unittest.main()

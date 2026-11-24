@@ -1,0 +1,1 @@
+the [Unreleased] link at the bottom of CHANGELOG.md is https://git.example.com/shop/compare/v2.3.1...HEAD
