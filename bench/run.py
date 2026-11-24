@@ -1,7 +1,7 @@
 """Run bench tasks under each configuration through headless Claude Code and append one JSON line per run.
 
-Example (the pilot):
-  python3 bench/run.py --tasks lookup-retry-limit bugfix-pagination --configs plugin defaults haiku \\
+Example:
+  python3 bench/run.py --tasks lookup-retry-limit bugfix-pagination --configs plugin defaults haiku-high \\
       --runs 1 --budget 0.5 --max-total 3 --out bench/results/pilot/pilot-2026-11-22.jsonl
 """
 from __future__ import annotations
@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -31,7 +32,7 @@ sys.path.insert(0, str(PLUGIN / "scripts"))
 from modelrouter import config as mrconfig  # noqa: E402
 from modelrouter.registry import Registry  # noqa: E402
 from modelrouter.ledger import read as read_ledger  # noqa: E402
-ROW_SCHEMA = 2  # a row's schema says which harness wrote it; analyze reads a missing key as old only below this
+ROW_SCHEMA = 3  # a row's schema says which harness wrote it; analyze reads a missing key as old only below this
 CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research")
 
 # Every run starts from the same environment: nothing a parent Claude Code session, its plugins or the shell's
@@ -41,12 +42,25 @@ CLEARED = ("CLAUDE_CODE_", "CLAUDECODE", "CLAUDE_PLUGIN_", "CLAUDE_PROJECT_DIR")
 KEPT = ("CLAUDE_CODE_USE_",)
 KEPT_EXACT = ("CLAUDE_CODE_OAUTH_TOKEN",)
 ISOLATION = {"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
-# tail, head and echo let a subagent pipe its test output; every part of a compound command must be allowed.
-TOOLS = ("Read", "Edit", "Write", "Glob", "Grep", "Bash(python3 *)", "Bash(python *)", "Bash(tail *)",
-         "Bash(head *)", "Bash(echo *)")
+TOOLS = ("Read", "Edit", "Write", "Glob", "Grep", "Bash")
+# Bash runs in the OS sandbox and is approved there without a prompt (https://code.claude.com/docs/en/sandboxing).
+SANDBOX = {"enabled": True, "autoAllowBashIfSandboxed": True, "allowUnsandboxedCommands": False, "failIfUnavailable": True}
+# The sandbox reads most of the machine by default and has no built-in credential list.
+CREDENTIAL_FILES = ("~/.ssh", "~/.aws", "~/.azure", "~/.config/gcloud", "~/.config/gh", "~/.docker", "~/.gnupg",
+                    "~/.kube", "~/.netrc", "~/.npmrc", "~/.pypirc", "~/.git-credentials", "~/.claude", "~/.claude.json")
+# Where Claude Code reads managed settings from (https://code.claude.com/docs/en/managed-settings.md).
+MANAGED_SETTINGS = ("/Library/Application Support/ClaudeCode/managed-settings.json",
+                    "/Library/Application Support/ClaudeCode/managed-settings.d",
+                    "/Library/Managed Preferences/com.anthropic.claudecode.plist",
+                    "/etc/claude-code/managed-settings.json", "/etc/claude-code/managed-settings.d",
+                    "C:\\Program Files\\ClaudeCode\\managed-settings.json", "C:\\Program Files\\ClaudeCode\\managed-settings.d")
+AUTH = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 STATE_FILES = ("state.json", "learned.json")
-PROMPT = ("Hand the task below to one subagent with the Agent tool and wait for its answer; don't do the work "
-          "yourself. When it returns, reply with its final answer.\n\nTask: {brief}")
+PROMPTS = {
+    "delegate": ("Hand the task below to one subagent with the Agent tool and wait for its answer; don't do the work "
+                 "yourself. When it returns, reply with its final answer.\n\nTask: {brief}"),
+    "direct": "{brief}",
+}
 
 
 def load_tasks() -> list[dict]:
@@ -59,6 +73,36 @@ def load_tasks() -> list[dict]:
 
 def load_configs() -> list[dict]:
     return json.loads((BENCH / "configs.json").read_text(encoding="utf-8"))
+
+
+def prompt(task: dict, arm: str) -> str:
+    """The prompt for an arm: `delegate` hands the task to one subagent, `direct` is the brief as a person types it."""
+    return PROMPTS[arm].format(brief=task["brief"])
+
+
+def _plugin_files(folder: Path) -> list[Path]:
+    return sorted(p for p in folder.rglob("*") if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc")
+
+
+def plugin_hash(folder: Path) -> str:
+    digest = hashlib.sha256()
+    for path in _plugin_files(folder):
+        digest.update(path.relative_to(folder).as_posix().encode() + b"\0" + path.read_bytes() + b"\0")
+    return digest.hexdigest()[:16]
+
+
+def freeze_plugin(source: Path = PLUGIN) -> tuple[str, str]:
+    """A copy of the plugin made once at the start of a batch, so an edit or a checkout during it can't reach later
+    runs, and the hash of what was copied."""
+    target = Path(tempfile.mkdtemp(prefix="mrbench-plugin-")) / "model-router"
+    atexit.register(shutil.rmtree, target.parent, ignore_errors=True)
+    shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    return str(target), plugin_hash(target)
+
+
+def managed_settings() -> list[str]:
+    """The managed settings sources on this machine; a run loads them whatever its own settings say."""
+    return [p for p in MANAGED_SETTINGS if os.path.exists(p)]
 
 
 _EXPORTED: dict = {}
@@ -81,23 +125,36 @@ def plugin_dir_for(config: dict, options: dict) -> str:
     return _EXPORTED[ref]
 
 
+def _plugin_name() -> str:
+    return json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"]
+
+
+def settings(config: dict, env: dict) -> dict:
+    """The one --settings JSON a run gets: the sandbox, credentials kept from sandboxed commands, and a router
+    variant's plugin options."""
+    sandbox = {**SANDBOX, "credentials": {
+        "files": [{"path": path, "mode": "deny"} for path in CREDENTIAL_FILES],
+        "envVars": [{"name": name, "mode": "deny"} for name in sorted(env) if is_secret(name)]}}
+    out: dict = {"sandbox": sandbox}
+    if config.get("plugin_options"):
+        # A --plugin-dir plugin's id is <name>@inline; project settings can't set plugin options.
+        out["pluginConfigs"] = {f"{_plugin_name()}@inline": {"options": config["plugin_options"]}}
+    return out
+
+
 def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[list[str], dict]:
     env = {k: v for k, v in base_env.items() if k in KEPT_EXACT or k.startswith(KEPT) or not k.startswith(CLEARED)}
     env.update(ISOLATION)
-    if options.get("plugins_root"):
-        # The run's own plugins root, so the router's data never lands in the folder other sessions share.
-        env["CLAUDE_CODE_PLUGIN_CACHE_DIR"] = options["plugins_root"]
+    if options.get("config_dir"):
+        # The run's own config folder: ~/.claude.json, settings, plugins and transcripts all live under it.
+        env.update({"CLAUDE_CONFIG_DIR": options["config_dir"], "CLAUDE_CODE_PROJECT_DIR_NAME": "run"})
     env.update(config.get("env", {}))
-    cmd = [*options["claude"], "-p", prompt, "--output-format", "json",
+    cmd = [*options["claude"], "-p", prompt, "--output-format", "stream-json", "--verbose",
            "--model", config.get("model", options["model"]),
            "--max-budget-usd", str(options["budget"]), "--setting-sources", "project", "--strict-mcp-config",
-           "--permission-mode", "dontAsk"]
+           "--permission-mode", "dontAsk", "--settings", json.dumps(settings(config, env))]
     if config.get("plugin"):
         cmd += ["--plugin-dir", plugin_dir_for(config, options)]
-    if config.get("plugin_options"):
-        # A --plugin-dir plugin's id is <name>@inline; project settings can't set plugin options.
-        name = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"]
-        cmd += ["--settings", json.dumps({"pluginConfigs": {f"{name}@inline": {"options": config["plugin_options"]}}})]
     return cmd + list(config.get("args", [])) + ["--allowedTools", *TOOLS], env
 
 
@@ -213,18 +270,75 @@ def can_start(spent: float, budget: float, max_total: float) -> bool:
 
 def plugin_data_dir(env: dict) -> Path:
     """Where Claude Code keeps the --plugin-dir router's data (health, learned raises, the ledger):
-    <plugins root>/data/<id>, the id with anything but letters, digits, _ and - turned into -."""
-    name = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["name"]
-    home = Path(env.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-    root = Path(env.get("CLAUDE_CODE_PLUGIN_CACHE_DIR") or home / "plugins")
-    return root / "data" / re.sub(r"[^A-Za-z0-9_-]", "-", f"{name}@inline")
+    <config>/plugins/data/<id>, the id with anything but letters, digits, _ and - turned into -."""
+    return Path(env["CLAUDE_CONFIG_DIR"]) / "plugins" / "data" / re.sub(r"[^A-Za-z0-9_-]", "-", f"{_plugin_name()}@inline")
 
 
-def session_dir(work: Path, env: dict) -> Path:
-    """The folder Claude Code keeps a session's transcripts in for this cwd: projects/<the resolved path with
-    anything but letters and digits turned into ->, as Claude Code 2.1.330 names it."""
-    home = Path(env.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-    return home / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(work.resolve()))
+def session_dir(env: dict) -> Path:
+    """The run's transcripts: <config>/projects/<CLAUDE_CODE_PROJECT_DIR_NAME> (https://code.claude.com/docs/en/env-vars)."""
+    return Path(env["CLAUDE_CONFIG_DIR"]) / "projects" / env["CLAUDE_CODE_PROJECT_DIR_NAME"]
+
+
+def read_stream(stdout: str) -> tuple[dict, dict, dict[str, int]]:
+    """The system/init event, the last result line and the subagents started by type, from stream-json output.
+    A line that isn't a JSON object is skipped, as is a tool_use id seen before."""
+    init, result, started, seen = {}, {}, {}, set()
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "system" and event.get("subtype") == "init" and not init:
+            init = event
+        elif event.get("type") == "result":
+            result = event
+        elif event.get("type") == "assistant":
+            for block in (event.get("message") or {}).get("content") or []:
+                if (isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") in ("Agent", "Task")
+                        and block.get("id") not in seen):
+                    seen.add(block.get("id"))
+                    kind = (block.get("input") or {}).get("subagent_type") or "general-purpose"
+                    started[kind] = started.get(kind, 0) + 1
+    return init, result, started
+
+
+def plugin_loaded(init: dict) -> bool:
+    """Whether system/init lists the router among the loaded plugins and reports no plugin errors."""
+    name = _plugin_name()
+    listed = any(isinstance(p, dict) and str(p.get("name", "")).split("@")[0] == name for p in init.get("plugins") or [])
+    return listed and not init.get("plugin_errors")
+
+
+def transcript_cost(folder: Path, registry_config: Registry) -> float | None:
+    """A run's spend at list price from its saved transcripts, main and subagents, each message once (streamed lines
+    repeat its usage); None when no transcript holds usage."""
+    if not folder.is_dir():
+        return None
+    messages = {}
+    for path in folder.rglob("*.jsonl"):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            message = event.get("message") if isinstance(event, dict) else None
+            if isinstance(message, dict) and isinstance(message.get("usage"), dict) and message.get("id"):
+                messages[message["id"]] = message
+    if not messages:
+        return None
+    total = 0.0
+    for message in messages.values():
+        usage = message["usage"]
+        tokens = {k: v for k, v in usage.items() if isinstance(v, (int, float))}
+        tokens.update({k: v for k, v in (usage.get("cache_creation") or {}).items() if isinstance(v, (int, float))})
+        total += registry_config.cost(message.get("model") or "", tokens) or 0.0
+    return round(total, 6)
 
 
 def ledger_rows(env: dict) -> list[dict] | None:
@@ -240,11 +354,11 @@ def ledger_rows(env: dict) -> list[dict] | None:
     return read_ledger(path=path)
 
 
-def agent_types(work: Path, env: dict) -> dict[str, str]:
-    """Each subagent's type by id, from the saved session's subagents/agent-<id>.meta.json (as Claude Code 2.1.330
-    writes it)."""
+def agent_types(env: dict) -> dict[str, str]:
+    """Each subagent's type by id, from the saved session's subagents/agent-<id>.meta.json, a layout no page documents
+    (Claude Code 2.1.330 writes it). Only the ledger spend join reads it."""
     types = {}
-    for meta in session_dir(work, env).glob("*/subagents/agent-*.meta.json"):
+    for meta in session_dir(env).glob("*/subagents/agent-*.meta.json"):
         try:
             types[meta.name[len("agent-"):-len(".meta.json")]] = json.loads(meta.read_text(encoding="utf-8"))["agentType"]
         except (OSError, ValueError, KeyError):
@@ -270,14 +384,6 @@ def spawns(ledger: list[dict]) -> list[dict]:
     """A router run's spawn decisions, in order. A key the router didn't log stays out, so an older router's
     missing escalated_from reads as unknown rather than as no escalation."""
     return [{k: row[k] for k in ROUTED_KEYS if k in row} for row in ledger if row.get("event") == "spawn"]
-
-
-def _forget_session(folder: Path) -> bool:
-    # Only a folder named after one of the bench's own scratch copies is ever removed.
-    if "-mrbench-" not in folder.name or not folder.is_dir():
-        return False
-    shutil.rmtree(folder)
-    return True
 
 
 def state_hashes(folder: Path) -> dict:
@@ -354,15 +460,15 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
     if config.get("router_config"):  # a router variant, as the project's own model-router.json
         (work / ".claude").mkdir(exist_ok=True)
         (work / ".claude" / "model-router.json").write_text(json.dumps(config["router_config"]), encoding="utf-8")
-    cmd, env = command(PROMPT.format(brief=task["brief"]), config,
-                       {**options, "plugins_root": str(scratch / "plugins")}, dict(os.environ))
+    arm = options.get("arm", "delegate")
+    cmd, env = command(prompt(task, arm), config, {**options, "config_dir": str(scratch / "config")}, dict(os.environ))
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     plugin_state = state_hashes(plugin_data_dir(env)) if config.get("plugin") else None
     clock = time.monotonic()
-    stdout, stderr, code, wall_ms, result = "", "interrupted", None, None, {}
-    ledger, types, final, graded, kept, stopped = None, {}, None, None, None, None
+    stdout, stderr, code, wall_ms, result, init, started_agents = "", "interrupted", None, None, {}, {}, {}
+    ledger, types, final, graded, kept, stopped, priced, transcripts = None, {}, None, None, None, None, None, None
     # Once claude starts the run costs money: whatever stops it or the steps after it, its row is still built and its
-    # scratch removed. With no result yet the cost is unknown, so the row is charged the whole budget.
+    # scratch removed. With no result the row is priced from its transcripts, or charged the whole budget.
     try:
         try:
             proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=options["timeout"])
@@ -371,29 +477,31 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
             stdout, stderr, code = _text(exc.stdout), "timed out", None
         # The run's wall time: Claude Code's own duration_ms can fall short of it.
         wall_ms = round((time.monotonic() - clock) * 1000)
-        try:
-            result = json.loads(stdout)
-        except ValueError:
-            result = {}
+        init, result, started_agents = read_stream(stdout)
         answer = result.get("result") or ""
         (scratch / "answer.txt").write_text(answer, encoding="utf-8")
+        if not isinstance(result.get("total_cost_usd"), (int, float)) or result.get("subtype") == "error_during_execution":
+            priced = transcript_cost(session_dir(env), registry_config)
         # Read before grading: the check also runs the code the run left, which could rewrite these files.
         ledger = ledger_rows(env) if config.get("plugin") else None
-        types = agent_types(work, env) if config.get("plugin") else {}
+        types = agent_types(env) if config.get("plugin") else {}
         final = final_answer(task["dir"] / "repo", work, answer)
         graded = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
+        denied = bool(result.get("permission_denials"))
+        if options.get("transcripts") and (not graded.passed or denied) and session_dir(env).is_dir():
+            transcripts = Path(options["transcripts"]) / scratch.name
+            shutil.copytree(session_dir(env), transcripts, symlinks=True)
         if options.get("keep"):
             # The work the run left, its answer, the router's own data and ledger, and the session's transcripts.
             target = Path(options["keep"]) / scratch.name
             shutil.copytree(scratch, target, symlinks=True)
-            if session_dir(work, env).is_dir():
-                shutil.copytree(session_dir(work, env), target / "session", symlinks=True)
+            if session_dir(env).is_dir():
+                shutil.copytree(session_dir(env), target / "session", symlinks=True)
             kept = target
     except BaseException as exc:
         stopped = exc
     if wall_ms is None:
         wall_ms = round((time.monotonic() - clock) * 1000)
-    session_removed = _forget_session(session_dir(work, env))
     shutil.rmtree(scratch, ignore_errors=True)
     if graded is None:
         graded = Grade("broken", f"the bench stopped before the check finished: {stopped!r}",
@@ -402,19 +510,26 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
                  {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr,
                   "grade": graded._asdict(), "final_answer": final,
                   "plugin_state": plugin_state, "ledger": ledger, "agent_types": types,
-                  "session_dir_removed": session_removed, "kept": kept and str(kept)})
+                  "kept": kept and str(kept), "init": init, "agents_started": started_agents,
+                  "transcript_cost": priced, "transcripts": transcripts and str(transcripts)})
     if stopped is not None:
         stopped.row = row  # main writes it before the bench stops
         raise stopped
     return row
 
 
+def _denial(d: dict) -> dict:
+    tool_input = d.get("tool_input")
+    text = tool_input.get("command") if isinstance(tool_input, dict) and isinstance(tool_input.get("command"), str) \
+        else json.dumps(tool_input, sort_keys=True)
+    return {"tool": d.get("tool_name"), "input": text[:200]}
+
+
 def record(task: dict, config: dict, options: dict, registry_config: Registry, result: dict, facts: dict) -> dict:
-    """The row for one run, from Claude Code's parsed result and what the runner saw around the process."""
+    """The row for one run, from Claude Code's result line and what the runner saw around the process."""
     models = {name: {k: usage.get(k) for k in ("inputTokens", "outputTokens", "cacheReadInputTokens",
                                                 "cacheCreationInputTokens", "costUSD", "costBasis")}
               for name, usage in (result.get("modelUsage") or {}).items()}
-    agents = result.get("subagent_stats") or {}
     cost = result.get("total_cost_usd")
     ledger, code = facts["ledger"], facts["exit_code"]
     stderr = facts["stderr"][-300:] if code else ""
@@ -425,42 +540,60 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
     # except when the API refused the run: it never started, so nothing was spent.
     known = isinstance(cost, (int, float)) and not (
         result.get("subtype") == "error_during_execution" and cost == 0 and not refused)
+    priced = facts.get("transcript_cost")
+    source = "result" if known else "transcripts" if priced is not None else "budget"
     return {
         "schema": ROW_SCHEMA, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
-        "config": config["id"],
+        "config": config["id"], "arm": options.get("arm", "delegate"),
+        "batch": options.get("batch"), "order_seed": options.get("seed"),
         "started_at": facts["started_at"], "claude_version": options["claude_version"],
         "main_model": config.get("model", options["model"]),
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
+        "plugin_hash": options.get("plugin_hash"), "managed_settings": options.get("managed"),
         "plugin_state": facts["plugin_state"],
+        "plugin_loaded": plugin_loaded(facts.get("init") or {}) if config.get("plugin") else None,
         "agent_costs": None if ledger is None else spend_by_agent(ledger, facts["agent_types"]),
         "routed": None if ledger is None else spawns(ledger),
+        "gate_events": sum(r.get("event") == "gate" for r in ledger or []),
         "plugin_ref": config.get("plugin_ref"), "plugin_data_own": True, "sessions_saved": True,
-        "session_dir_removed": facts["session_dir_removed"],
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
-        "api_error_status": result.get("api_error_status"),
-        # Without a known cost, count the whole budget so totals never understate spend.
-        "total_cost_usd": cost if known else options["budget"],
-        "cost_known": known,
+        "api_error_status": result.get("api_error_status"), "terminal_reason": result.get("terminal_reason"),
+        "errors": result.get("errors"),
+        # Without a cost from the result, the transcripts' list price, else the whole budget so totals never understate.
+        "total_cost_usd": cost if known else priced if priced is not None else options["budget"],
+        "cost_known": known, "cost_source": source,
         "duration_ms": result.get("duration_ms"), "duration_api_ms": result.get("duration_api_ms"),
         "wall_ms": facts["wall_ms"], "num_turns": result.get("num_turns"),
         "models": models, "prices": {name: registry_config.price(name) for name in models},
-        "subagents": {k: agents.get(k) for k in ("spawned", "completed", "failed", "by_type")},
-        "permission_denials": [d.get("tool_name") for d in result.get("permission_denials") or []],
+        "agents_started": facts.get("agents_started") or {},
+        "permission_denials": [_denial(d) for d in result.get("permission_denials") or [] if isinstance(d, dict)],
         "passed": facts["grade"]["verdict"] == "pass", "grade": facts["grade"],
         "answer": (result.get("result") or "")[:2000], "final_answer": facts["final_answer"],
         **({"kept": facts["kept"]} if facts["kept"] else {}),
+        **({"transcripts": facts["transcripts"]} if facts.get("transcripts") else {}),
         "stderr": stderr,
     }
 
 
-def schedule(tasks: list[dict], configs: list[dict], runs: int, first_run: int = 0) -> list[tuple[int, dict, dict]]:
-    """Each run to make as (run number, task, configuration). The configuration order rotates with the run number
-    so none always goes first on a cold prompt cache."""
-    out = []
-    for run_index in range(first_run, first_run + runs):
-        shift = run_index % len(configs)
-        out += [(run_index, task, config) for task in tasks for config in configs[shift:] + configs[:shift]]
+def schedule(tasks: list[dict], configs: list[dict], runs: int, first_run: int = 0, seed: int = 0,
+             arms: tuple[str, ...] = ("delegate",)) -> list[tuple[int, dict, dict, str]]:
+    """Each run to make as (run number, task, configuration, arm), in an order shuffled by `seed`, so no
+    configuration always goes first on a cold prompt cache or at one time of day."""
+    out = [(run_index, task, config, arm) for run_index in range(first_run, first_run + runs)
+           for task in tasks for config in configs for arm in arms]
+    random.Random(seed).shuffle(out)
     return out
+
+
+def _write(path: Path, row: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row, sort_keys=True) + "\n")
+
+
+def set_aside(row: dict) -> str | None:
+    """Why a row stays out of the results: the API never got to the task, or a router run's plugin didn't load."""
+    return refusal(row) or ("plugin_not_loaded" if row.get("plugin_loaded") is False else None)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -469,6 +602,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--configs", nargs="*", help="configuration ids (default: all)")
     parser.add_argument("--runs", type=int, default=1, help="runs of each task under each configuration")
     parser.add_argument("--first-run", type=int, default=0, help="number of the first run, to go on from an earlier round")
+    parser.add_argument("--arms", nargs="+", choices=sorted(PROMPTS), default=["delegate"],
+                        help="delegate: the prompt hands the task to one subagent; direct: the brief alone")
+    parser.add_argument("--seed", type=int, help="the run order's shuffle seed (default: a random one, recorded)")
+    parser.add_argument("--batch", help="the batch name every row records; processes started together share one")
     parser.add_argument("--model", default="sonnet", help="the session model, the same for every configuration that sets none")
     parser.add_argument("--budget", type=float, default=0.5, help="--max-budget-usd for each run")
     parser.add_argument("--max-total", type=float, required=True, help="stop before total spend could pass this")
@@ -483,44 +620,48 @@ def main(argv: list[str] | None = None) -> int:
     for flag, asked, found in (("--tasks", args.tasks, tasks), ("--configs", args.configs, configs)):
         if asked and not found:
             parser.error(f"{flag} matches no id: {', '.join(asked)}")
+    # Each run has its own config folder, and a Keychain login is keyed to the folder, so it can't sign in.
+    if not (any(os.environ.get(k) for k in AUTH) or any(k.startswith("CLAUDE_CODE_USE_") and v for k, v in os.environ.items())):
+        parser.error("set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (or a CLAUDE_CODE_USE_* provider switch)")
+    seed = args.seed if args.seed is not None else random.SystemRandom().randrange(2 ** 31)
+    batch = args.batch or f"{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}-{seed}"
     version = subprocess.run([*args.claude, "--version"], capture_output=True, text=True).stdout.strip()
     registry_config = mrconfig.shipped()
+    frozen, digest = freeze_plugin()
     options = {"claude": args.claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,
-               "plugin_dir": str(PLUGIN), "claude_version": version, "commit": _git_head(), "dirty": _git_dirty(),
-               "keep": str(args.keep) if args.keep else None}
+               "plugin_dir": frozen, "plugin_hash": digest, "claude_version": version, "commit": _git_head(),
+               "dirty": _git_dirty(), "managed": managed_settings(), "seed": seed, "batch": batch,
+               "keep": str(args.keep) if args.keep else None,
+               "transcripts": str(args.out.parent / "transcripts" / args.out.stem)}
+    print(f"batch {batch}, seed {seed}", file=sys.stderr)
     args.out.parent.mkdir(parents=True, exist_ok=True)
+    limited = args.out.parent / "limited" / args.out.name
     spent, errors = 0.0, 0
-    for run_index, task, config in schedule(tasks, configs, args.runs, args.first_run):
+    for run_index, task, config, arm in schedule(tasks, configs, args.runs, args.first_run, seed, tuple(args.arms)):
         begin = time.time()
         for attempt in range(LIMIT_RETRIES + 1):
             if not can_start(spent, args.budget, args.max_total):  # a retry spends too
                 print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
                 return 1
             try:
-                row = run_one(task, config, options, registry_config)
+                row = run_one(task, config, {**options, "arm": arm}, registry_config)
             except BaseException as exc:
                 row = getattr(exc, "row", None)
                 if row is not None:  # the run was paid for, so it goes on record where the loop would put it
                     row["run"], reason = run_index, refusal(row)
                     if reason:
                         row["limited_reason"] = reason
-                    path = args.out.parent / "limited" / args.out.name if reason else args.out
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    with path.open("a", encoding="utf-8") as fh:
-                        fh.write(json.dumps(row, sort_keys=True) + "\n")
+                    _write(limited if reason else args.out, row)
                 raise
             row["run"] = run_index
             spent += row["total_cost_usd"]
-            reason = refusal(row)
+            reason = set_aside(row)
             if reason is None:
                 break
             row["limited_reason"] = reason
             # Kept apart, outside results/*.jsonl, so the spend is on record but never a failed task.
-            limited = args.out.parent / "limited" / args.out.name
-            limited.parent.mkdir(parents=True, exist_ok=True)
-            with limited.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(row, sort_keys=True) + "\n")
-            if reason == "api_error":  # a pause fixes no key, balance or model access
+            _write(limited, row)
+            if reason in ("api_error", "plugin_not_loaded"):  # a pause fixes no key, balance, model access or load
                 break
             if attempt == LIMIT_RETRIES:
                 print(f"stopped: still rate or usage limited after {LIMIT_RETRIES} pauses, "
@@ -528,19 +669,18 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             print(f"{task['id']} {config['id']}: rate or usage limited, pausing", file=sys.stderr)
             time.sleep(LIMIT_PAUSE * 2 ** attempt)
-        if row.get("limited_reason") == "api_error":
+        if row.get("limited_reason") in ("api_error", "plugin_not_loaded"):
             errors += 1
-            print(f"{task['id']} {config['id']}: API error before any spend, set aside: {row['answer'][:200]}",
-                  file=sys.stderr)
+            why = "the plugin did not load" if row["limited_reason"] == "plugin_not_loaded" else "API error before any spend"
+            print(f"{task['id']} {config['id']}: {why}, set aside: {row['answer'][:200]}", file=sys.stderr)
             if errors == API_ERROR_STOP:
-                print(f"stopped: {errors} API errors in a row before any spend; check the key, the credit balance "
-                      "and the account's model access", file=sys.stderr)
+                print(f"stopped: {errors} runs in a row set aside before the task ran; check the key, the credit "
+                      "balance, the account's model access and the plugin's load errors", file=sys.stderr)
                 return 2
             continue
         errors = 0
-        with args.out.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, sort_keys=True) + "\n")
-        print(f"{task['id']} {config['id']} run {run_index}: passed={row['passed']} "
+        _write(args.out, row)
+        print(f"{task['id']} {config['id']} {arm} run {run_index}: passed={row['passed']} "
               f"${row['total_cost_usd']:.4f} {time.time() - begin:.0f}s, total ${spent:.4f}")
         if row["grade"]["verdict"] == "broken":
             print(f"{task['id']}: its pass check broke ({row['grade']['reason']}); analyze sets this run aside",
