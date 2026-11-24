@@ -18,15 +18,15 @@ def _context(event: str, text: str) -> dict:
 
 def _rules(options: settings.Settings) -> str:
     """The level rule for Claude, written as facts: the Agent tool sets `effort` only when instructions ask."""
-    redo = ("A redo after a failed check or a gap in the report keeps its `description` with \"Redo:\" in front; "
-            "one that names {neither} {climbs}.")
+    redo = ("A redo after a failed check or a gap in the report keeps its `description` with \"Redo:\" in front "
+            "and runs {above}.")
     if options.force:
         # Claude can't pass a model under FORCE (sub-agents.md), so only the effort half applies.
         return (f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE runs every subagent on {options.subagent_model or 'one model'}, so a "
                 "`model` on an Agent call has no effect. Model Router keeps the `effort` a call names, by the work: "
                 "medium for finding, reading, listing and everyday work to a clear brief; high for work that is hard "
                 "to check, high-stakes, ambiguous or broad, such as a bug's cause, a design, a review, a contract or "
-                "financial figures. " + redo.format(neither="no effort", climbs="runs one effort step higher"))
+                "financial figures. " + redo.format(above="one effort step higher"))
     if options.subagent_model:
         neither = "its agent's own model or CLAUDE_CODE_SUBAGENT_MODEL"
     else:
@@ -39,7 +39,7 @@ def _rules(options: settings.Settings) -> str:
             "a design, a review, a contract or financial figures\n"
             "- fable at high: open-ended research\n"
             f"A call that names neither runs on {neither}. " + redo.format(
-                neither="neither", climbs="climbs, effort before model"))
+                above="above the run it redoes, effort before model"))
 
 
 def session_start(hook_input: dict) -> dict | None:

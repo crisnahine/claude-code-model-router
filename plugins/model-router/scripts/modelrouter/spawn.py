@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 from . import agents, calls, ledger, router, session, settings
 from . import config as cfg
 from .config import EFFORTS, Level
+from .registry import Registry
 
 
 @dataclass
@@ -49,17 +50,32 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     level = hook_input.get("session_effort") or (effort.get("level") if isinstance(effort, dict) else None)
     session_effort = level if not hook_input.get("agent_id") and level in EFFORTS else None
     workflow = hook_input.get("kind") == "workflow"
-    # A workflow stage is never redone: its script decides what runs again, and a fan-out needs one model and
-    # effort. A redo that names its own model or effort runs as named: the caller picked the lever.
-    redo = (not workflow and calls.marked_redo(tool_input)
-            and not (tool_input.get("model") or tool_input.get("effort")))
-    task = calls.task(tool_input) if redo else None
     found = router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable, definition=definition,
-                         parent=parent, earlier=calls.last_run(hook_input.get("session_id"), task) if task else None,
-                         teammate=teammate, workflow=workflow, session_effort=session_effort, effort_caps=caps,
-                         lagging=snap.lagging)
-    unmarked = _unmarked_run(found, snap) if redo and found.earlier is None else None
-    return replace(found, earlier=unmarked, on_record=False) if unmarked and unmarked["level"] else found
+                         parent=parent, teammate=teammate, workflow=workflow, session_effort=session_effort,
+                         effort_caps=caps, lagging=snap.lagging)
+    # A workflow stage is never redone: its script decides what runs again, and a fan-out needs one model and effort.
+    if workflow or not calls.marked_redo(tool_input):
+        return found
+    task = calls.task(tool_input)
+    earlier = calls.last_run(hook_input.get("session_id"), task) if task else None
+    named = _unmarked_run(found, snap)
+    if earlier and _asks_more(reg, named, earlier):
+        return replace(found, redoes=Level.parse(earlier.get("level")))  # the caller picked a stronger lever itself
+    # Claude names a model on every call, the redo included, so the same one named again must not repeat the run.
+    if earlier:
+        return replace(found, earlier=earlier)
+    return replace(found, earlier=named, on_record=False) if named["level"] else found
+
+
+def _asks_more(reg: Registry, named: dict, earlier: dict) -> bool:
+    """What a redo names for itself asks for more than the run it redoes: a stronger model, or the same at more effort."""
+    model, ran = reg.family(named.get("model")), reg.family(earlier.get("model"))
+    levels = Level.parse(named.get("level")), Level.parse(earlier.get("level"))
+    if not model or not ran or None in levels:
+        return False
+    if model != ran:
+        return reg.stronger(model, ran)
+    return router._above(router._ran_at(reg, named, levels[0]), router._ran_at(reg, earlier, levels[1]))
 
 
 def _runs_at(effort: str | None, model: str | None, found: router.Facts, snap: settings.Snapshot) -> str | None:

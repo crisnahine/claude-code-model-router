@@ -1530,7 +1530,7 @@ class Router(Sandbox):
         self.assertEqual((d["action"], d["level"], d["model"], d["effort"], d["escalated_from"]),
                          ("rewrite", "frontier", "fable", "high", "complex"))
         d = self.decide("model-router:architect", brief, description="Redo: store design", model="opus", effort="xhigh")
-        self.assertEqual((d["source"], d["model"], d["escalated_from"]), ("caller", "opus", None))
+        self.assertEqual((d["source"], d["model"], d["escalated_from"]), ("caller", "opus", "complex"))  # more effort, as named
 
     def test_unknown_agents_and_unknown_models_are_left_alone(self):
         self.agent("exotic", "some-custom-model-id")
@@ -1863,6 +1863,31 @@ class RepeatGuard(Sandbox):
         self.assertIn("a redo of the run that came back before (haiku at medium): one effort step up on haiku",
                       redo["reason"])
 
+    def test_a_redo_that_names_the_same_model_again_still_climbs(self):
+        # Claude names a model on every call, the redo included, so naming the same one must not repeat the run.
+        self.pre("general-purpose", LOOKUP, model="haiku", description="List src")
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="medium", description="List src")
+        redo = self.decide("general-purpose", LOOKUP, model="haiku", description="Redo: list src")
+        self.assertEqual((redo["action"], redo["model"], redo["effort"], redo["escalated_from"]),
+                         ("rewrite", "haiku", "high", "lookup"))
+        self.pre("general-purpose", LOOKUP, model="haiku", description="Redo: list src")
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="high", description="Redo: list src")
+        again = self.decide("general-purpose", LOOKUP, model="haiku", description="Redo: list src")
+        self.assertEqual((again["action"], again["model"], again["escalated_from"]), ("rewrite", "sonnet", "lookup"))
+
+    def test_a_redo_that_names_more_than_the_run_it_redoes_runs_as_named(self):
+        self.pre("general-purpose", LOOKUP, model="haiku", description="List src")
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="medium", description="List src")
+        stronger = self.decide("general-purpose", LOOKUP, model="opus", description="Redo: list src")
+        self.assertEqual((stronger["model"], stronger["effort"], stronger["source"], stronger["escalated_from"]),
+                         ("opus", "high", "caller", "lookup"))
+        harder = self.decide("general-purpose", LOOKUP, model="haiku", effort="xhigh", description="Redo: list src")
+        self.assertEqual((harder["model"], harder["source"], harder["escalated_from"]), ("haiku", "caller", "lookup"))
+
+    def test_a_redo_that_names_a_model_with_no_run_on_record_still_climbs(self):
+        redo = self.decide("general-purpose", LOOKUP, model="haiku", description="Redo: list src")
+        self.assertEqual((redo["action"], redo["model"], redo["effort"]), ("rewrite", "haiku", "high"))
+
     def test_a_redo_raises_effort_below_high_and_moves_model_from_high(self):
         self.session_on("claude-sonnet-5-5")
         self.pre("general-purpose", BUILD, description="Parser change")
@@ -1945,17 +1970,18 @@ class RepeatGuard(Sandbox):
             d = self.decide("general-purpose", BUILD, **extra)
             self.assertEqual((d["level"], d["escalated_from"]), ("standard", None), description)
 
-    def test_a_redo_that_names_its_model_or_effort_runs_as_named(self):
-        # The caller picked the lever: more effort for work it skipped, a stronger model for work it got wrong.
+    def test_a_redo_runs_as_named_only_when_that_asks_for_more(self):
+        # The caller may pick the lever, more effort or a stronger model. Naming less never repeats or lowers the run.
         self.pre("general-purpose", HARD, description="Second try")
         self.done("general-purpose", HARD, "claude-opus-5-5", description="Second try")
         for named, want in (({"effort": "max"}, ("keep", "hardest", None, None, None)),
-                            ({"effort": "low"}, ("keep", "complex", None, None, None)),
-                            ({"model": "sonnet"}, ("rewrite", "standard", "sonnet", "medium", "caller"))):
+                            ({"model": "fable"}, ("rewrite", "frontier", "fable", "high", "caller")),
+                            ({"effort": "low"}, ("rewrite", "frontier", "fable", "high", "router")),
+                            ({"model": "sonnet"}, ("rewrite", "frontier", "fable", "high", "router"))):
             with self.subTest(**named):
                 d = self.decide("general-purpose", HARD, description="Redo: second try", **named)
                 self.assertEqual((d["action"], d["level"], d["model"], d["effort"], d["source"]), want)
-                self.assertIsNone(d["escalated_from"])
+                self.assertEqual(d["escalated_from"], "complex")
                 self.pre("general-purpose", HARD, description="Redo: second try", **named)
                 self.assertNotIn("on_record", self.ledger()[-1])
 
@@ -3110,8 +3136,8 @@ class Hooks(Sandbox):
             self.assertIn(line, text)
         self.assertIn("a contract or financial figures", text)  # any kind of work, not only code
         self.assertIn("A call that names neither runs on its agent's own model or the conversation's.", text)
-        self.assertIn('A redo after a failed check or a gap in the report keeps its `description` with "Redo:" in front; '
-                      "one that names neither climbs, effort before model.", text)
+        self.assertIn('A redo after a failed check or a gap in the report keeps its `description` with "Redo:" in front '
+                      "and runs above the run it redoes, effort before model.", text)
         self.assertNotIn("from its brief", text)
         self.assertNotIn("model-router:deep-solver", text)  # the Agent tool lists the role agents already
         self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL", text)
@@ -3122,7 +3148,7 @@ class Hooks(Sandbox):
         self.assertIn("keeps the `effort` a call names, by the work: medium for finding", text)
         self.assertNotIn("haiku at medium", text)  # Claude can't pass a model under FORCE (sub-agents.md)
         self.assertNotIn("names only a model", text)
-        self.assertIn("one that names no effort runs one effort step higher.", text)
+        self.assertIn("in front and runs one effort step higher.", text)
 
     def test_session_start_says_when_the_subagent_model_default_leaves_calls_alone(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")

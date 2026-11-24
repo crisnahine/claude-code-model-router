@@ -40,8 +40,9 @@ class Facts:
     usable: list  # registry.available for this project and cap
     definition: dict | None = None  # agents.find, or the engine's stand-in for its own agents
     parent: str | None = None  # the model an agent without one inherits, when known
-    earlier: dict | None = None  # the run a marked redo climbs from, set only for a redo that names no model or effort
+    earlier: dict | None = None  # the run a marked redo climbs from; None when its own model and effort already ask for more
     on_record: bool = True  # False when `earlier` is what a marked redo would run at unmarked, not a finished run
+    redoes: Level | None = None  # the level of the run a redo that runs as named redoes
     teammate: bool = False  # an agent-team teammate, which CLAUDE_CODE_SUBAGENT_EFFORT doesn't reach
     workflow: bool = False  # a workflow agent, which CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins
     session_effort: str | None = None  # the main conversation's level, for a call made from it
@@ -52,7 +53,7 @@ class Facts:
 def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     tool_input, agent, definition, usable = facts.tool_input, facts.agent, facts.definition, facts.usable
     out: Decision = {"agent": agent, "action": "keep", "model": None, "effort": None, "level": None,
-                     "source": None, "was": None, "reason": "", "repeat_of": None, "escalated_from": None,
+                     "source": None, "was": None, "reason": "", "repeat_of": None, "escalated_from": facts.redoes,
                      "version": None, "held": None}
     if agent == "fork":
         out["reason"] = "a fork runs on its conversation's model"
@@ -113,7 +114,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
 
     floor = rule.level or rule.floor
     target, source, why, chosen = None, None, "", False  # chosen: the router picked the model, nobody named it
-    if requested:
+    if requested and not redo:  # a redo climbs past a model it names that asks for no more than the run it redoes
         target, source, why = requested, "caller", "the call names a model"
     elif reg.family(rule.model):
         target, source, why = reg.family(rule.model), "rule", "a rule in model-router.json sets this agent's model"
@@ -189,10 +190,10 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
 
 
 def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Level, free: bool, held: str) -> Decision:
-    """A marked redo that names no model or effort climbs from the run it redoes: one effort step up on the
-    same model while that run's effort was below high, else the next stronger usable model at its own rung's
-    effort, else one more effort step, at most max or the model's `effort_stops_at`. The agent's own model and
-    effort, a rule's model and CLAUDE_CODE_SUBAGENT_MODEL don't hold it back."""
+    """A marked redo climbs from the run it redoes: one effort step up on the same model while that run's
+    effort was below high, else the next stronger usable model at its own rung's effort, else one more effort
+    step, at most max or the model's `effort_stops_at`. A model or effort the call names that asks for no more
+    than that run, the agent's own, a rule's model and CLAUDE_CODE_SUBAGENT_MODEL don't hold it back."""
     ran, before = reg.family(done.get("model")), _ran_at(reg, done, done_level)
     up = ladder.at_most(reg, ran, _one_step(before))
     gains = free and _above(capped(up, facts.effort_caps.get(ran))[0], before)
