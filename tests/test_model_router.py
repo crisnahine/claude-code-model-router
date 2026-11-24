@@ -2383,6 +2383,15 @@ class RepeatGuard(Sandbox):
         self.assertIn("passed through", self.ledger()[-1]["reason"])
         self.assertIsNotNone(self.pre("general-purpose", "list the tests"))  # a different call is routed
 
+    def test_a_passed_through_call_is_routed_and_counted_with_no_source(self):
+        key = calls.identify(self.call("general-purpose", LOOKUP)["tool_input"])[1]
+        self.pre("general-purpose", LOOKUP)
+        self.assertEqual(calls.route_of("s1", key).source, "router")
+        self.next_message()
+        self.pre("general-purpose", LOOKUP)
+        route = calls.route_of("s1", key)
+        self.assertEqual((route.source, route.counted), (None, None))
+
     def test_after_a_result_the_same_call_is_routed_again(self):
         self.pre("general-purpose", LOOKUP)
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="low")
@@ -4513,6 +4522,20 @@ class Upstream(Sandbox):
                 upstream.refresh(settings.Settings(), force=True)
         self.assertEqual(upstream.load()["cache"]["aliases"], ["haiku"])
 
+    def test_refresh_offline_says_so_in_one_line_and_shows_the_last_check(self):
+        import urllib.error
+        store.save_json(upstream.path(), {"reviewed": {"claude_code_version": "2.1.330"},
+                                          "cache": {"fetched_at": 1, "releases": [{"version": "2.1.331"}]}})
+        offline = urllib.error.URLError("[Errno 8] nodename nor servname provided, or not known")
+        with mock.patch.object(upstream, "http_get", side_effect=offline), \
+                redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(cli.main(["refresh", "--force"]), 1)
+        first, rest = buf.getvalue().split("\n", 1)
+        self.assertEqual(first, "Couldn't reach the Claude Code docs (<urlopen error [Errno 8] nodename nor servname "
+                                "provided, or not known>); showing the last check.")
+        self.assertIn("Last reviewed Claude Code version: 2.1.330", rest)
+        self.assertIn("- 2.1.331", rest)
+
 
 class RefreshBackoff(Sandbox):
     """A failed daily fetch waits before the next try: an hour, doubling to a day."""
@@ -5286,6 +5309,22 @@ class MachineReadable(Sandbox):
                          [{"model": "claude-haiku-5-5", "runs": 1, "tokens": 1200, "run_tokens": 5000}])
         self.assertIn("| claude-haiku-5-5 | 1 | 1,200 | 5,000 |", self.out("usage"))
 
+    def test_usage_says_where_a_trimmed_ledger_starts(self):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        path = store.ledger_path()
+        path.write_text("".join(json.dumps({"ts": (now - datetime.timedelta(days=d)).isoformat(timespec="seconds"),
+                                            "event": "spawn", "agent": "old", "pad": "x" * 40}) + "\n"
+                                for d in (8, 3)))
+        self.assertNotIn("since", self.json_out("usage"))
+        self.assertIn("Subagent usage, last 7 days\n", self.out("usage"))
+        self.pre("general-purpose", LOOKUP)
+        with mock.patch.object(store, "LEDGER_MAX_BYTES", path.stat().st_size):
+            store.append_ledger({"event": "spawn", "agent": "general-purpose"})  # the trim drops both old rows
+        self.assertNotIn("old", [r.get("agent") for r in ledger.read()])
+        start = ledger.read()[0]["ts"]
+        self.assertEqual(self.json_out("usage")["since"], start)
+        self.assertIn(f"Subagent usage, last 7 days (the ledger starts {start[:10]})\n", self.out("usage"))
+
     def test_a_model_the_project_added_is_never_shown_as_the_strongest_in_use(self):
         self.override({"models": {"gpt-mini": {"strength": 9, "cost": 0}}})
         self.assertEqual(self.json_out("models")["strongest_in_use"], "fable")
@@ -5398,6 +5437,7 @@ class JsonOutputs(Sandbox):
     DIR = FIXTURES / "json-outputs"
 
     def recorded(self) -> None:
+        store.ledger_path().write_text(json.dumps({"ts": "2000-01-01T00:00:00+00:00", "event": "spawn"}) + "\n")  # no `since`
         self.override({"levels": {"complex": {"effort": "xhigh"}}, "agents": {"ruled": {"model": "sonnet"}},
                        "models": {"swift": {"strength": 2.5, "speed": 5, "cost": 2.5}},
                        "prices": {"claude-swift-1": {"input": 1, "output": 5}}}, user=True)

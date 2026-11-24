@@ -90,3 +90,20 @@ def read(days: int | None = None, path: Path | None = None) -> list[dict]:
         if isinstance(row, dict):
             rows.append(row)
     return rows
+
+
+def since(days: int, path: Path | None = None) -> str | None:
+    """The oldest row's `ts` when the ledger starts inside the last `days` days, so `read(days)` covers
+    less than asked: a new ledger, or one `store.append_ledger` cut to its newer half."""
+    cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)
+    try:
+        with (path or store.ledger_path()).open(encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    ts = json.loads(line)["ts"]
+                    return ts if _dt.datetime.fromisoformat(ts) > cutoff else None
+                except (KeyError, ValueError, TypeError):
+                    continue
+    except OSError:
+        pass
+    return None

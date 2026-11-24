@@ -4,13 +4,17 @@
     "404 model not found",
     "model claude-fable-5-2 is not available on this account",
     "model: claude-haiku-5-5 does not exist",
-    "invalid model: claude-x"
+    "invalid model: claude-x",
+    "Agent terminated early due to an API error: There's an issue with the selected model (claude-fable-5-2). It may not exist or you may not have access to it. (error type model_not_found, HTTP 404, request id req_011CXabc, model sent to the API: claude-fable-5-2)"
   ],
   "other": [
     "Command timed out",
     "API Error: 529 overloaded_error",
     "API Error: Rate limit reached",
     "The user doesn't want to proceed with this tool use",
-    "Permission to use Agent has been denied"
+    "Permission to use Agent has been denied",
+    "Agent type 'model-router:archtect' not found. Available agents: general-purpose, Explore",
+    "Agent type 'data-modeler' not found. Available agents: general-purpose, Explore",
+    "Agent type 'my-plugin:model' not found. Available agents: general-purpose, Explore"
   ]
 }

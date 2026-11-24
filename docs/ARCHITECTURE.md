@@ -298,6 +298,7 @@ The top-level `schema` key is `<shape>/<version>`. A new key keeps the version, 
 | Key | Contents |
 | :- | :- |
 | `days` | The window read from the ledger |
+| `since` | Only when the ledger starts inside the window: its oldest row's `ts`. A new ledger does, and so does one cut to its newer half past 4 MB, so the window holds less than `days`. The table's heading names the date |
 | `agents` | One entry per agent type, most calls first: `agent` (`?` when the call named none), `calls`, `routed` (calls the router rewrote), `levels` (level to count), `ran_on` (reported model to count) |
 | `models` | One entry per reported model: `model`, `runs`, `tokens` (the sum of each run's `totalTokens`, which counts only the run's final request: https://code.claude.com/docs/en/hooks.md) and `run_tokens` (every subagent request on that model, from the mod's per-turn usage, background agents' included, so it can cover more runs than `runs`; `null` where the mod reported none). A background agent whose model wasn't reported counts under `background (not reported)`, here and in `ran_on` |
 | `model_errors` | Agent calls that failed with a model error |
