@@ -7,6 +7,7 @@ Example (the pilot):
 from __future__ import annotations
 
 import argparse
+import atexit
 import datetime
 import filecmp
 import hashlib
@@ -73,6 +74,7 @@ def plugin_dir_for(config: dict, options: dict) -> str:
         archive = subprocess.run(["git", "-C", str(ROOT), "archive", ref, "plugins/model-router"],
                                  capture_output=True, check=True).stdout
         target = Path(tempfile.mkdtemp(prefix="mrbench-plugin-"))
+        atexit.register(shutil.rmtree, target, ignore_errors=True)
         with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
             tar.extractall(target, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
         _EXPORTED[ref] = str(target / "plugins" / "model-router")
