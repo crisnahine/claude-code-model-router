@@ -6,7 +6,7 @@
 
 # Model Router documentation
 
-Every page about Model Router, the Claude Code plugin that routes each agent to the cheapest Claude model and effort that should do the job. New here? Start with the [README](../README.md) and the [questions](FAQ.md).
+Every page about Model Router, the Claude Code plugin that routes each agent to the cheapest Claude model and effort that should do the job. New here? Start with the [README](../README.md) and the [questions](FAQ.md), or watch the [22-second video](https://crisnahine.github.io/claude-code-model-router/assets/video.mp4).
 
 <!-- Cards, written by tools/docs_assets.py from PAGES in tools/docs_pages.py. -->
 <table>

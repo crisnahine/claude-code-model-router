@@ -31,6 +31,11 @@
 
 Without it, a subagent that names no model runs on its conversation's model ([Claude Code docs](https://code.claude.com/docs/en/sub-agents.md#choose-a-model)), so on an Opus session a file listing runs on Opus too. One model for every agent, set with `CLAUDE_CODE_SUBAGENT_MODEL`, puts lookups on an expensive model or hard design work on a weak one. Model Router does autonomous multi-model orchestration instead: each call gets the model and effort its own brief needs.
 
+<p align="center">
+  <a href="https://crisnahine.github.io/claude-code-model-router/assets/video.mp4"><img src="docs/assets/video-play.jpg" width="720" alt="Play the 22-second video: four agent calls that would all run on Opus get Haiku, Sonnet, Opus and Fable instead, and a call sent back for a redo climbs one level."></a><br>
+  <sub><a href="https://crisnahine.github.io/claude-code-model-router/assets/video.mp4"><b>Watch it in 22 seconds</b></a>, with sound. Music: Sascha Ende, ende.app (CC BY 4.0).</sub>
+</p>
+
 ## What it does
 
 - Sets the model and effort of every subagent, teammate and workflow agent as it starts. The agent the caller chose stays the same.
@@ -184,5 +189,7 @@ The [documentation index](docs/README.md) lists every other page, including perf
 Apache-2.0. See [LICENSE](LICENSE).
 
 Copyright 2026 Cris Nahine.
+
+The music in the [video](docs/assets/BRAND.md) is by Sascha Ende ([ende.app](https://ende.app/en)) under CC BY 4.0, so the Apache-2.0 license doesn't cover it.
 
 Model Router is an independent project, not made or endorsed by Anthropic.

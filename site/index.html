@@ -271,7 +271,8 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 var(-
 a { color: inherit; text-decoration-color: color-mix(in srgb, var(--route) 70%, transparent); text-underline-offset: 3px; }
 a:hover { color: var(--route); }
 :focus-visible { outline: 3px solid var(--route); outline-offset: 3px; border-radius: 6px; }
-img { max-width: 100%; height: auto; display: block; }
+img, video { max-width: 100%; height: auto; display: block; }
+.figure video { width: 100%; border-radius: 12px; }
 code { font: 0.88em var(--mono); background: var(--faint); padding: 0.1em 0.35em; border-radius: 5px; }
 .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
 .skip { position: absolute; left: -999px; }
@@ -396,6 +397,16 @@ footer nav a { display: inline-flex; align-items: center; min-height: 44px; padd
     <img src="assets/routing-call.svg" width="520" height="416" alt="One agent call to implement a function is profiled as standard and runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs to complex, Opus at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.">
   </div>
 </div>
+
+<section id="video">
+  <div class="wrap">
+    <h2>Model Router in 22 seconds</h2>
+    <figure>
+      <div class="figure"><video controls preload="none" poster="assets/video-poster.jpg" width="1920" height="1080" aria-label="Four agent calls that would all run on Opus get Haiku, Sonnet, Opus and Fable instead, and a call sent back for a redo climbs one level."><source src="assets/video.mp4" type="video/mp4"></video></div>
+      <figcaption>Four agent calls that would all run on your session's model each get the model and effort their own brief needs, and a call sent back for a redo climbs one level. Music: Sascha Ende, <a href="https://ende.app/en">ende.app</a> (CC BY 4.0).</figcaption>
+    </figure>
+  </div>
+</section>
 
 <section id="what">
   <div class="wrap">

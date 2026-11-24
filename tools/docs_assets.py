@@ -1312,7 +1312,8 @@ keywords:
 
 SITE_ASSETS = ["logo-mark.svg", "logo.svg", "routing-call.svg", "badge-version.svg", "badge-claude-code.svg",
                "badge-python.svg", "badge-license.svg", "ladder.svg", "redo-escalation.svg",
-               "two-paths.svg", "precedence.svg", "stop-checks.svg", "social-preview.png"]
+               "two-paths.svg", "precedence.svg", "stop-checks.svg", "social-preview.png",
+               "video.mp4", "video-poster.jpg"]
 
 
 @dataclasses.dataclass(frozen=True)
