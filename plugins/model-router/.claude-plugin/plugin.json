@@ -84,8 +84,8 @@
     },
     "verify_gate": {
       "type": "boolean",
-      "title": "Test run before finishing",
-      "description": "On by default. Claude is asked once, before it finishes a turn, to run the verifier when code in the project changed and no test, lint or build ran afterwards. This check is the failure signal that lets the router start cheap and re-run what fails. Turn it off to skip the ask.",
+      "title": "Check before finishing",
+      "description": "On by default, as this plugin's own choice. When files in the project changed and no check ran afterwards, Claude is asked once, before it finishes a turn, to run the work's own check: tests, build or linter for code, a recompute for figures, a reread against the request for a document. That costs one more turn. Set it to false to skip the ask.",
       "default": true
     }
   }

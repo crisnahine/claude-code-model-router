@@ -35,7 +35,7 @@ Options, in `/config` under the plugin:
 | `max_tier` | none | The strongest model subagents may run on: `haiku`, `sonnet`, `opus` or `fable`. Anything stronger is lowered to it |
 | `agent_pins` | `respect` | `respect` keeps the model an agent names for itself. `override` routes those agents by task too |
 | `update_check` | on | The daily check of the changelog, docs index, model list and deprecations |
-| `verify_gate` | on | Asks for a test run before a turn ends when code changed and nothing checked it. It is the failure signal the router needs to start cheap and rerun what fails ([cost and intelligence](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence)), at the price of a turn and sometimes an agent |
+| `verify_gate` | on | Asks once, before a turn ends, for the work's own check when project files changed and nothing checked them. On by the plugin's own choice, since a cheap first pass needs a check that catches a weak result ([cost and intelligence](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence#re-run-failures-at-higher-effort)). It costs one more turn when it asks. `false` turns it off |
 
 On plans where Fable bills to usage credits, a frontier subtask sent to Fable bills there too. A background or teammate session may have nobody to answer the consent prompt, so Claude Code ends the turn when its `dialogExpiry` deadline passes, and `claude -p` or an Agent SDK host with no prompt bills without asking ([Fable and usage credits](https://code.claude.com/docs/en/model-config.md#fable-and-usage-credits)). Set `max_tier` to `opus` where that matters.
 
@@ -95,11 +95,11 @@ Stages whose briefs land on the same level get the same model and effort, which 
 
 ## The check before a turn ends
 
-![The check before a turn ends. verify_gate, on by default, asks once for a test run when code changed and nothing checked it.](assets/stop-checks.svg)
+![The check before a turn ends. verify_gate, on by default, asks once for the work's own check when project files changed and nothing checked them.](assets/stop-checks.svg)
 
 Before Claude ends a turn, the `Stop` hook runs one check, once per batch of edits, then lets the turn end.
 
-`verify_gate`, when on: Claude is asked once for a test run when code in the project changed and no test, lint, type-check or build ran after the last edit, and no verifier or reviewer is still running. A test run inside a subagent counts.
+`verify_gate`, when on: Claude is asked once for the work's own check when Claude or a subagent edited a file in the project and no check command ran after the last edit. For code that is the project's tests, build or linter, with the verifier for a check that takes more than one command; for figures or a spreadsheet, a recompute or a diff against known values; for a document or an analysis, a reread against the request and its sources. Work that isn't finished or waits on the user ends with one line saying so. A check run inside a subagent counts. Starting a verifier or reviewer doesn't. The ask comes as guidance, not a hook error ([Stop decision control](https://code.claude.com/docs/en/hooks.md#stop-decision-control)). It waits while a workflow, subagent, background shell or teammate is still running, and it doesn't ask when the session's transcript can't be read, as under `--no-session-persistence`, since it can't tell whether a check ran.
 
 ## What it can't do
 

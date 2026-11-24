@@ -78,7 +78,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Spend** (`ledger.py`): a request's tokens priced at list price from the registry, summed per turn. A model with no price is counted as unpriced, never priced as its neighbour.
 
-**Gate**: the check before a turn ends (`gates.py`). It asks once for a test run when code in the project changed and nothing checked it, and then lets go. It is on by default; `verify_gate` set to `false` turns it off.
+**Gate**: the check before a turn ends (`gates.py`). It asks once for the work's own check when a project file changed and nothing checked it, and then lets go. It is on by default; `verify_gate` set to `false` turns it off.
 
 **Schema**: the version number written into every state file and allowed in override files. An older file is upgraded as it is read and saved at the current version on its next write. A file from a newer release is read but never overwritten.
 

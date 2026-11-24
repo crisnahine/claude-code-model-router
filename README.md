@@ -40,7 +40,7 @@ Without it, a subagent that names no model runs on its conversation's model ([Cl
 
 - Sets the model and effort of every subagent, teammate and workflow agent as it starts. The agent the caller chose stays the same.
 - Runs a call one level higher when Claude redoes a weak result, and `/model-router:usage` counts the redos per level.
-- Asks once, before a turn ends, for a test run when code changed unchecked.
+- Asks once, before a turn ends, for the work's own check when project files changed and nothing checked them: tests for code, a recompute for figures, a reread for a document.
 - Logs what each turn cost at list price in `/model-router:usage`, and checks the Claude Code changelog, docs and model retirements once a day.
 
 ## Built on the Claude Code docs

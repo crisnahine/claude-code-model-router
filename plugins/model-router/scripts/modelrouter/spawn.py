@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from . import agents, calls, gates, ledger, request, router, session, settings
+from . import agents, calls, ledger, request, router, session, settings
 from . import config as cfg
 from .config import EFFORTS, Level
 
@@ -109,9 +109,4 @@ def _record(spawned: Spawn, via: str, newest: str | None) -> None:
                         level=Level.parse(decision["level"]), effort=effort, source=source, path=via,
                         prompt_id=request.load(session_id).prompt_id, rewrote=rewrote, was=decision["was"])
     spawn_id = hook_input.get("tool_use_id")
-    try:  # a route that can't be written mustn't cost the checker's note
-        calls.routed(session_id, spawned.key, route, spawn_id if isinstance(spawn_id, str) and spawn_id else None)
-    except OSError:
-        pass
-    if gates.is_checker(decision["agent"]):
-        gates.note_check(session_id)
+    calls.routed(session_id, spawned.key, route, spawn_id if isinstance(spawn_id, str) and spawn_id else None)

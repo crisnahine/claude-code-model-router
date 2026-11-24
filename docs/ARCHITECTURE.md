@@ -166,9 +166,9 @@ A mod could send the main loop's requests to another model, and the first probe 
 
 When the request names a model ("use opus"), the note says an Agent call with that `model` runs on it, within the user's `max_tier` when it is above the cap, or on the closest model this setup allows when `availableModels`, `deniedModels` or an outage rules it out. Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` Claude can't pass a model (https://code.claude.com/docs/en/sub-agents.md#run-every-subagent-on-one-model), so there is no note, nor when no registry model is usable here, since Claude Code's allowlist then decides. Any other prompt gets no note and costs no extra tokens.
 
-The `Stop` check ([Guide](GUIDE.md#the-check-before-a-turn-ends)) asks once per batch of edits. `verify_gate` asks when code in the project (under `cwd` or `CLAUDE_PROJECT_DIR`, prose files such as `.md` and `.txt` aside) changed and, after the last edit, no check command ran and no verifier or reviewer is still running. A command is split at `&&`, `||`, `;`, `|` and newlines, even inside quotes, and a part counts when it names a test, lint, type-check or build tool and doesn't start with a word that only installs, finds, reads or mentions one (`gates.is_check`): `cd api && pytest` counts, `pip install pytest` doesn't. A subagent's commands count too, read from the transcript `SubagentStop` names (`agent_transcript_path`).
+The `Stop` check ([Guide](GUIDE.md#the-check-before-a-turn-ends)) asks once per batch of edits. `verify_gate` asks when a file in the project (under `cwd` or `CLAUDE_PROJECT_DIR`) was edited and no check command ran after the last edit. Any file counts, since a memo or a table of figures is work too. A command is split at `&&`, `||`, `;`, `|` and newlines, even inside quotes, and a part counts when it names a test, lint or type-check tool or runner, a Gradle build, or a script named for a check (`run_tests.sh`, `_scratch_check.py`), and doesn't start with a word that only installs, finds, reads, opens, copies or mentions one (`gates.is_check`): `cd api && pytest` counts, `pip install pytest`, `vim pytest.ini` and a bare `cargo build` don't. A subagent's commands count too, read from the transcript `SubagentStop` names (`agent_transcript_path`). Starting a verifier or reviewer doesn't count; its commands do, when it stops. When the transcript can't be read (`--no-session-persistence` saves none), the check can't tell whether a check ran, so it doesn't ask. The ask is `additionalContext` on `Stop`, which keeps the turn going as hook feedback, not a hook error, under the same `stop_hook_active` guard and continuation cap as a block (https://code.claude.com/docs/en/hooks.md#stop-decision-control). Each ask writes a `gate` row to the ledger.
 
-The check doesn't run when routing isn't `auto`, on a stop the hook already blocked (`stop_hook_active`), or while a workflow or subagent runs in the background (`gates.still_running`), since the turn is only paused. It also waits while a verifier or reviewer runs in the background.
+The check doesn't run when routing isn't `auto`, on a stop a hook already continued (`stop_hook_active`), or while a workflow, subagent, shell or teammate runs in the background (`gates.still_running`), since the turn is only paused.
 
 ## Discovery and adaptation
 
@@ -209,7 +209,7 @@ PreToolUse (Agent) ─ pre-agent      fallback: fallback.route, returns updatedI
 PostToolUse (Agent) ─ post-agent    the model that ran; a finished result is kept for redos
 SubagentStop (.) ─ agent-stopped    a background agent's result or handback is back; counts its checks
 PostToolUseFailure (Agent) ─ agent-failed   counts model errors
-PostToolUse (Edit|Write|NotebookEdit) ─ post-edit   notes that code changed
+PostToolUse (Edit|Write|NotebookEdit) ─ post-edit   notes that a project file changed
 Stop ─ stop                      the check before a turn ends
 ```
 
@@ -238,6 +238,7 @@ Every ledger row has `ts`, `event` and `session`:
 | `spawn` | `via`, `agent`, `action`, `level`, `signals`, `model`, `was`, `effort`, `source`, `escalated_from`, `reason`, `description` (first 120 characters); `kind` on the mod path; `held` when a project rule's model was held; `on_record: false` on a marked redo with no finished run on record |
 | `result` | `agent`, `asked`, `resolved_model`, `status` (`cut_off` for an API-error answer), `total_tokens`; `models_used` only on a mid-run swap |
 | `model_error` | `agent`, `model` |
+| `gate` | `kind`: `verify` when the check before a turn ends asked |
 | `usage` | `agent_id` (none for the main loop), `model`, the four token counts, `ephemeral_1h_input_tokens` when reported, `cost_usd` at list price (null when unpriced); `agent` for a workflow agent, which has no result row |
 
 A spawn in flight when a session upgrades has no route, so its result finishes nothing, which costs at most one redo. An older `prompts.json` entry keeps keys such as `level`, `need`, `calls` and `top_spawn` that nothing reads.
