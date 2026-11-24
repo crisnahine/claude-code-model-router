@@ -61,10 +61,10 @@ MANAGED_SETTINGS = ("/Library/Application Support/ClaudeCode/managed-settings.js
 AUTH = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 STATE_FILES = ("state.json", "learned.json")
 PLUGIN_OPTIONS = ("routing_mode", "max_tier", "verify_gate")
-# Every run's scratch folder sits here, so one sandbox rule hides the others' work from it. Kept short: the
-# run's CLAUDE_CODE_TMPDIR is its scratch folder, and a long one falls back to the shared temp folder.
-RUNS = (Path("/tmp").resolve() / f"mrbench-{os.getuid()}" if hasattr(os, "getuid")
-        else Path(tempfile.gettempdir()) / "mrbench")
+# Every run's scratch folder sits here, so one sandbox rule hides the others' work from it. Short and unresolved:
+# the run's CLAUDE_CODE_TMPDIR is its scratch folder, and one over about 30 bytes falls back to the shared temp folder.
+RUNS = (Path("/tmp") / f"mrb-{os.getuid()}" if hasattr(os, "getuid")
+        else Path(tempfile.gettempdir()) / "mrb")
 VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # what sandbox.credentials.envVars accepts
 # The shell's directories can name the checkout, whose tasks hold the reference answers.
 DROPPED = ("PWD", "OLDPWD")
@@ -166,8 +166,9 @@ def _git_lines(*args: str) -> list[str]:
 
 def answer_paths(*extra: str | None) -> list[str]:
     """Where this machine keeps the tasks' answers or graded runs: this checkout, the repository's git data and main
-    checkout, every worktree, Claude Code's shared temp folder (other sessions copy files there), and `extra`
-    (results and kept runs). Each path as given and resolved, so a symlink such as macOS's /tmp can't get round it."""
+    checkout, every worktree, Claude Code's shared temp folder (other sessions copy files there) and the one under the
+    harness's own CLAUDE_CODE_TMPDIR, and `extra` (results and kept runs). Each path as given and resolved, so a
+    symlink such as macOS's /tmp can't get round it."""
     found = [ROOT]
     common = _git_lines("rev-parse", "--git-common-dir")
     if common:
@@ -177,8 +178,14 @@ def answer_paths(*extra: str | None) -> list[str]:
               if line.startswith("worktree ")]
     if hasattr(os, "getuid"):
         found.append(Path("/tmp") / f"claude-{os.getuid()}")
+        if os.environ.get("CLAUDE_CODE_TMPDIR"):
+            found.append(Path(os.environ["CLAUDE_CODE_TMPDIR"]) / f"claude-{os.getuid()}")
     found += [Path(p) for p in extra if p]
     return list(dict.fromkeys(str(q) for p in found for q in (p.absolute(), p.resolve())))
+
+
+def _both(path: Path) -> list[str]:
+    return list(dict.fromkeys([str(path), str(path.resolve())]))
 
 
 def _under(path: str, folder: str) -> bool:
@@ -191,7 +198,7 @@ def settings(config: dict, env: dict, hidden: list[str] | None = None, own: str 
     hidden = answer_paths() if hidden is None else hidden
     sandbox = {**SANDBOX,
                # The narrower allowRead re-opens the run's own folder under RUNS (https://code.claude.com/docs/en/sandboxing).
-               "filesystem": {"denyRead": [*hidden, str(RUNS)], "allowRead": [own] if own else []},
+               "filesystem": {"denyRead": [*hidden, *_both(RUNS)], "allowRead": _both(Path(own)) if own else []},
                "credentials": {
                    "files": [{"path": path, "mode": "deny"} for path in CREDENTIAL_FILES],
                    "envVars": [{"name": name, "mode": "deny"} for name in sorted(env)
@@ -317,14 +324,22 @@ def _last_line(data: bytes) -> str:
 
 
 def grade(check: Path, work: Path, answer: Path, timeout: int = 120) -> Grade:
-    """The task's check run on a work dir and an answer file. -I keeps the check's folder and the work dir off
-    sys.path and ignores PYTHON* variables, so code a run left behind can't shadow what the check imports."""
+    """The task's check run on a throwaway copy of a work dir, from a scratch folder, and an answer file, so code a
+    run left behind can't write into the work dir, the checkout or the results. -I keeps the check's folder and the
+    work dir off sys.path and ignores PYTHON* variables, so that code can't shadow what the check imports."""
     digest = check_hash(check)
+    scratch = Path(tempfile.mkdtemp(prefix="mrbench-grade-"))
     try:
-        res = subprocess.run([sys.executable, "-I", "-c", _LAUNCH, str(check), str(work), str(answer)],
-                             capture_output=True, env=grading_env(dict(os.environ)), timeout=timeout)
+        copy = scratch / "work"
+        shutil.copytree(work, copy, symlinks=True)
+        res = subprocess.run([sys.executable, "-I", "-c", _LAUNCH, str(check), str(copy), str(answer)],
+                             capture_output=True, cwd=scratch, env=grading_env(dict(os.environ)), timeout=timeout)
     except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
         return Grade("fail", f"the check timed out after {timeout} s", digest)
+    except OSError as exc:
+        return Grade("broken", f"the work dir could not be copied for the check: {exc}", digest)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
     if res.returncode == 0:
         return Grade("pass", _last_line(res.stdout), digest)
     if res.returncode == 2:

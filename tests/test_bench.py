@@ -601,6 +601,19 @@ class Analysis(unittest.TestCase):
             part = page.split(f"## Results: session model `{model}`")[1].split("## ")[0]
             self.assertIn("| sonnet-via-opusplan |", part)
             self.assertNotIn("| opusplan |", part)
+        self.assertIn("Session models: claude-opus-5-5, sonnet (`--model`), one results table each", page)
+        self.assertIn("A configuration that sets its own model is shown in every table of its arm.", page)
+        # These rows have no batch field, so the file name gives theirs.
+        self.assertIn(f"`sonnet-via-opusplan` a ({n})", page)
+        self.assertIn("A row without a `batch` field takes its batch from its results file's name", page)
+
+    def test_the_page_says_rows_below_schema_3_used_the_machines_config_folder(self):
+        page = analyze.build_page(self.committed())
+        self.assertIn("A row below schema 3 used the machine's config folder.", page)
+        self.assertIn("From row schema 3 it has a Claude Code config folder of its own", page)
+        self.assertIn("From row schema 3 that folder is inside the run's own config folder", page)
+        self.assertIn("- From row schema 3, sessions are saved in the run's own config folder", page)
+        self.assertNotIn("Each run starts in a fresh copy of the task's files, outside any repository, with a", page)
 
     def test_the_page_reports_latency_cache_level_accuracy_and_escalation(self):
         real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
@@ -1890,6 +1903,28 @@ class Grading(unittest.TestCase):
                     caught = {n.id for n in ast.walk(node.type) if isinstance(n, ast.Name)} if node.type else {"bare"}
                     self.assertFalse(caught & {"bare", "Exception", "BaseException"}, f"{path.parent.name}:{node.lineno}")
 
+    def test_the_check_runs_on_a_copy_of_the_work_dir_away_from_the_harness_cwd(self):
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as here:
+            work = Path(tmp) / "work"
+            work.mkdir()
+            (work / "a.txt").write_text("a", encoding="utf-8")
+            check = Path(tmp) / "check.py"
+            check.write_text("import os, sys\nfrom pathlib import Path\n"
+                             "if (Path(sys.argv[1]) / 'a.txt').read_text() != 'a':\n    raise SystemExit(1)\n"
+                             "(Path(sys.argv[1]) / 'left.txt').write_text('x')\nPath('stray.txt').write_text('x')\n"
+                             "print(os.getcwd())\n", encoding="utf-8")
+            old = os.getcwd()
+            os.chdir(here)
+            try:
+                graded = run.grade(check, work, Path(tmp) / "answer.txt")
+            finally:
+                os.chdir(old)
+            self.assertEqual(graded.verdict, "pass", graded.reason)
+            self.assertEqual(sorted(p.name for p in work.iterdir()), ["a.txt"])
+            self.assertEqual(os.listdir(here), [])
+            self.assertNotEqual(Path(graded.reason).resolve(), Path(here).resolve())
+            self.assertFalse(Path(graded.reason).exists())
+
     def test_a_check_that_hangs_fails_with_a_reason(self):
         graded = self.grade("import time\ntime.sleep(30)\n", timeout=1)
         self.assertEqual(graded.verdict, "fail")
@@ -2637,7 +2672,7 @@ class Harness(unittest.TestCase):
         worktrees = [line.split(" ", 1)[1] for line in subprocess.run(
             ["git", "-C", str(run.ROOT), "worktree", "list", "--porcelain"], capture_output=True, text=True
         ).stdout.splitlines() if line.startswith("worktree ")]
-        expected = [str(git_dir), str(git_dir.parent), *worktrees, str(run.RUNS)]
+        expected = [str(git_dir), str(git_dir.parent), *worktrees, str(run.RUNS), str(run.RUNS.resolve())]
         if hasattr(os, "getuid"):  # Claude Code's own temp folder, where other sessions leave copies of files
             expected += [f"/tmp/claude-{os.getuid()}", str(Path(f"/tmp/claude-{os.getuid()}").resolve())]
         for path in expected:
@@ -2655,13 +2690,27 @@ class Harness(unittest.TestCase):
         argv = seen["argv"]
         settings = json.loads(argv[argv.index("--settings") + 1])
         own = settings["sandbox"]["filesystem"]["allowRead"]
-        self.assertEqual(len(own), 1)
         scratch = Path(own[0])
+        self.assertEqual(own, list(dict.fromkeys([str(scratch), str(scratch.resolve())])))
         self.assertEqual(scratch.parent, run.RUNS)
         self.assertEqual(Path(seen["env"]["CLAUDE_CODE_TMPDIR"]), scratch)
-        self.assertLess(len(str(scratch / f"claude-{os.getuid()}")) if hasattr(os, "getuid") else 0, 60)
-        self.assertIn(str(run.RUNS), settings["sandbox"]["filesystem"]["denyRead"])
+        # Claude Code falls back to the shared temp folder when CLAUDE_CODE_TMPDIR is over about 30 bytes.
+        self.assertLessEqual(len(seen["env"]["CLAUDE_CODE_TMPDIR"].encode()), 30)
+        if hasattr(os, "getuid"):
+            self.assertEqual(run.RUNS, Path("/tmp") / f"mrb-{os.getuid()}")
+        denied = settings["sandbox"]["filesystem"]["denyRead"]
+        self.assertIn(str(run.RUNS), denied)
+        self.assertIn(str(run.RUNS.resolve()), denied)
         self.assertFalse(scratch.exists())
+
+    def test_the_harness_own_claude_temp_folder_is_hidden(self):
+        if not hasattr(os, "getuid"):
+            self.skipTest("Claude Code names its temp folder by uid only where there is one")
+        with tempfile.TemporaryDirectory() as tmp, unittest.mock.patch.dict("os.environ", {"CLAUDE_CODE_TMPDIR": tmp}):
+            hidden = run.answer_paths()
+        own = Path(tmp) / f"claude-{os.getuid()}"
+        self.assertIn(str(own), hidden)
+        self.assertIn(str(own.resolve()), hidden)
 
     def test_results_and_kept_runs_are_hidden_from_later_runs(self):
         keep = self.dir / "keep"

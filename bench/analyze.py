@@ -624,7 +624,8 @@ def _notes(results: Results) -> list[str]:
         batches.setdefault(r["config"], {}).setdefault(r.get("_batch", "?"), 0)
         batches[r["config"]][r.get("_batch", "?")] += 1
     lines.append("- A verdict compares the router only with a baseline that ran in the same batches, since pass "
-                 "rates and the prompt cache drift between batches. Batches, by configuration: "
+                 "rates and the prompt cache drift between batches. A row without a `batch` field takes its batch "
+                 "from its results file's name, less the date and the task class. Batches, by configuration: "
                  + "; ".join(f"`{c}` " + ", ".join(f"{b} ({n})" for b, n in sorted(batches[c].items()))
                              for c in sorted(batches)) + ".")
     return lines
@@ -676,7 +677,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
     rows, files, tasks = results.rows, results.files, results.tasks
     total = sum(r["total_cost_usd"] for r in rows)
     versions = sorted({r["claude_version"] for r in rows})
-    main = sorted({r["main_model"] for r in rows})
+    main = sorted({r["main_model"] for r in rows if r["config"] not in results.own_model})
     dates = sorted(r["started_at"][:10] for r in rows)
     used = sorted({r["config"] for r in rows})
     models: dict[str, list[float]] = {}
@@ -755,7 +756,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "## Setup", "",
         f"- Claude Code: {', '.join(versions) or 'n/a'}. Session models: {', '.join(main) or 'n/a'} (`--model`), "
         "one results table each, and one per prompt arm. Inside a table every configuration ran on that session "
-        "model, except those that set their own.",
+        "model. A configuration that sets its own model is shown in every table of its arm.",
         "- Configurations run: " + "; ".join(f"`{c}` ({_described(c, current)})" for c in used) + ".",
         "- Models that ran, with Claude Code's list-price cost across all runs: "
         + "; ".join(f"`{name}` ${sum(costs):.4f} over {len(costs)} runs" for name, costs in sorted(models.items()))
@@ -771,10 +772,11 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "or set a model or effort on the Agent call, which outranks the agent's own "
         "(https://code.claude.com/docs/en/sub-agents), is set aside as `off_pin`. In the `direct` arm the "
         "prompt is the brief alone, as a person would type it; its rows get their own table.",
-        "- Each run starts in a fresh copy of the task's files, outside any repository, with a Claude Code config "
-        "folder of its own inside that copy (`CLAUDE_CONFIG_DIR`, with `CLAUDE_CODE_PROJECT_DIR_NAME=run`; "
-        "https://code.claude.com/docs/en/env-vars), so `~/.claude.json`, user settings, plugins and transcripts "
-        "never come from the machine's own. It runs with `--output-format stream-json --verbose`, "
+        "- Each run starts in a fresh copy of the task's files, outside any repository. From row schema 3 it has a "
+        "Claude Code config folder of its own inside that copy (`CLAUDE_CONFIG_DIR`, with "
+        "`CLAUDE_CODE_PROJECT_DIR_NAME=run`; https://code.claude.com/docs/en/env-vars), so `~/.claude.json`, user "
+        "settings, plugins and transcripts never come from the machine's own. A row below schema 3 used the "
+        "machine's config folder. It runs with `--output-format stream-json --verbose`, "
         "`--setting-sources project`, `--strict-mcp-config`, `--permission-mode dontAsk`, `--allowedTools` "
         + ", ".join(f"`{t}`" for t in run.TOOLS) + " (so the file tools read and edit only the work dir), and one "
         "`--settings` JSON that runs Bash in the OS sandbox "
@@ -800,11 +802,12 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "loaded in `plugin_hash`, null with no plugin, and for a router run the options the plugin saved at start "
         "in `plugin_options`; a run whose saved options differ from its configuration's is set aside."
         + (f" {allowlisted} run(s) here are below row schema 3: they ran with an exact list of `python3`, "
-           "`python`, `tail`, `head` and `echo` command rules instead of the sandbox, which denied many test runs, "
-           "and shared the machine's config folder." if allowlisted else ""),
-        "- The router keeps learned state (model health, level raises and its ledger) in its plugin data folder, "
-        "which for each run is inside that run's own config folder, so every router run starts from an empty one "
-        "and its data goes when the scratch copy does. Each raw line records `plugin_data_own` and, for router "
+           "`python`, `tail`, `head` and `echo` command rules instead of the sandbox, which denied many test runs."
+           if allowlisted else ""),
+        "- The router keeps learned state (model health, level raises and its ledger) in its plugin data folder. "
+        "From row schema 3 that folder is inside the run's own config folder; a row below schema 3 had a plugins "
+        "root of its own inside its scratch copy (`CLAUDE_CODE_PLUGIN_CACHE_DIR`). Either way every router run "
+        "starts from an empty one and its data goes when the scratch copy does. Each raw line records `plugin_data_own` and, for router "
         "runs, hashes of the `state.json` and `learned.json` the run started from in `plugin_state`. "
         f"{since} also records the count of ledger rows with event `gate` in `gate_events`."
         + (f" {borrowed} router run(s) here borrowed the shared folder instead: the runner copied it before the "
@@ -814,9 +817,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
            "`lookup-retry-limit` check, and their `bench_commit` is the "
            "commit the harness ran on top of before it was committed. Newer lines carry `bench_dirty`, true when "
            "`bench/` or the plugin had uncommitted changes." if predate else ""),
-        "- Sessions are saved in the run's own config folder, as Claude Code saves them by default, so the router's "
-        "Stop check can read the transcripts and see a test run, the subagents' included. They go with the scratch "
-        "copy. From row schema 3, a run that failed or had a denied tool call keeps them in `transcripts/` beside "
+        "- From row schema 3, sessions are saved in the run's own config folder, as Claude Code saves them by "
+        "default, so the router's Stop check can read the transcripts and see a test run, the subagents' included. "
+        "They go with the scratch copy. A row below schema 3 saved them under the machine's `~/.claude/projects/`, "
+        "and the runner deleted that run's folder there after it. From row schema 3, a run that failed or had a denied tool call keeps them in `transcripts/` beside "
         "its results file, its raw line naming the folder in `transcripts`."
         + (f" {unsaved} run(s) here ran with `--no-session-persistence`, which saves no transcript, so the Stop "
            "check could never see a test run and asked for a verifier after every edit; their lines have no "
