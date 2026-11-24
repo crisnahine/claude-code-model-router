@@ -44,7 +44,7 @@ Run 2026-11-24 on macOS (Darwin 27.2.0), on the commit that records these result
 | Docs assets | `python3 tools/docs_assets.py --check` | Every generated asset, page head and site block matches the script |
 | Benchmarks page | `python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check` | The committed page matches the results |
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
-| Plugin evals, Claude Code 2.1.331 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78 |
+| Plugin evals, Claude Code 2.1.331 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | 3 of 3 cases pass with the plugin and none without, mean delta 0.78, on the earlier three cases |
 
 The 710 unit tests are 524 in `tests/test_model_router.py`, 145 in `tests/test_bench.py`, 8 in `tests/test_routing_corpus.py`, 3 in `tests/test_traceability.py` and 30 in `tests/test_docs_assets.py`. The routing corpus test prints "2 of 268 briefs over-routed (0.7%), budget 2%; 4 known under-routes" on each interpreter. CI's run on `8ec8eec` had 180 tests.
 
@@ -53,6 +53,8 @@ Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verifi
 ## Plugin evals
 
 ### Routing cases
+
+The cases changed after this run: the session note now has Claude name a model and effort for each kind of work, and a contract summary and a design question that names no agent were added. The five cases haven't run live yet, so the numbers below are for the earlier three.
 
 Run 2026-11-24 on Claude Code 2.1.331, on the working tree at `338dc7e` plus the change that recorded it, on the three cases in `plugins/model-router/evals/`:
 

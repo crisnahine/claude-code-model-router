@@ -16,42 +16,64 @@ def _context(event: str, text: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
 
 
+def _rules(options: settings.Settings) -> str:
+    """The level rule for Claude, written as facts: the Agent tool sets `effort` only when instructions ask."""
+    redo = ("A redo after a failed check or a gap in the report keeps its `description` with \"Redo:\" in front; "
+            "one that names {neither} runs one step higher.")
+    if options.force:
+        # Claude can't pass a model under FORCE (sub-agents.md), so only the effort half applies.
+        return (f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE runs every subagent on {options.subagent_model or 'one model'}, so a "
+                "`model` on an Agent call has no effect. Model Router keeps the `effort` a call names, by the work: "
+                "medium for finding, reading, listing and everyday work to a clear brief; high for work that is hard "
+                "to check, high-stakes, ambiguous or broad, such as a bug's cause, a design, a review, a contract or "
+                "financial figures. " + redo.format(neither="no effort"))
+    if options.pins == "override":
+        neither = "the conversation's model"
+    elif options.subagent_model:
+        neither = "its agent's own model or CLAUDE_CODE_SUBAGENT_MODEL"
+    else:
+        neither = "its agent's own model or the conversation's"
+    return ("Model Router keeps the `model` and `effort` an Agent call names, within the user's cap, and fills in "
+            "`effort` when a call names only a model. Calls name both by the work:\n"
+            "- haiku at medium: finding, reading and listing\n"
+            "- sonnet at medium: everyday work to a clear brief\n"
+            "- opus at high: work that is hard to check, high-stakes, ambiguous or broad, such as a bug's cause, "
+            "a design, a review, a contract or financial figures\n"
+            "- fable at high: open-ended research\n"
+            f"A call that names neither runs on {neither}. " + redo.format(neither="neither"))
+
+
 def session_start(hook_input: dict) -> dict | None:
+    """The level rule goes to Claude. The notices go to the user (`systemMessage`), only when a session
+    opens, since a clear or a compaction continues one they already saw."""
     snap = settings.Snapshot(hook_input)
     options = snap.options
     session.record(hook_input.get("session_id"), hook_input.get("model"))
-    parts = []
+    note, notices = None, []
     mode = options.mode
+    opens = hook_input.get("source") not in ("clear", "compact")
     if mode == "auto":
-        # Only what Claude must act on: every word here is in context for the whole session.
-        name_model = ("" if options.force else ", and name `model` only when the user did or when what was read shows "
-                      "the task harder or easier than its brief")
-        parts.append(
-            "Model Router sets each subagent's, teammate's and workflow agent's model and effort from its brief. "
-            f"Calls omit `effort` unless the user named one{name_model}. "
-            "A redo of a weak result keeps its `description` with \"Redo:\" in front, and runs one level higher."
-        )
+        note = _rules(options)
         if options.force:
-            pinned = options.subagent_model or "one model"
-            parts.append(
-                f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent to {pinned}, so Model Router sets only "
-                "their effort. Without it in the user's settings, the router would put each subtask on the "
-                "cheapest model strong enough for it. Worth telling the user once."
-            )
+            notices.append(
+                f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent to {options.subagent_model or 'one model'}, "
+                "so Model Router sets only their effort. Without it, an agent call would run on the model it names, "
+                "within your cap.")
         elif options.subagent_model and options.pins != "override":
-            parts.append(
-                f"CLAUDE_CODE_SUBAGENT_MODEL sets the model of every agent without its own to {options.subagent_model}, "
-                "so Model Router leaves those calls as they are and sets only the effort of agents that name their "
-                "own model. Worth telling the user once.")
+            notices.append(
+                f"CLAUDE_CODE_SUBAGENT_MODEL is {options.subagent_model}, so an agent call that names no model runs on "
+                f"its agent's own model or {options.subagent_model}. Model Router keeps the model a call names, within "
+                "your cap.")
         if options.workflow_model:
-            parts.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model}, "
-                         "so the router sets only their effort. Worth telling the user once.")
+            notices.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model}, "
+                           "so the router sets only their effort.")
     elif mode == "advise":
-        parts.append(
-            "Model Router is in advise mode: it logs the level it reads for each agent call and changes no call. "
-            "Agents keep the model their definition sets, which a model passed on a call would override."
-        )
-    return _context("SessionStart", " ".join(parts)) if parts else None
+        note = ("Model Router is in advise mode: it logs the level it reads for each agent call and changes no call. "
+                "Agents keep the model their definition sets, which a model passed on a call would override.")
+    out = _context("SessionStart", note) if note else {}
+    if notices and opens:
+        out["systemMessage"] = "Model Router: " + " ".join(notices)
+    return out or None
 
 
 def user_prompt(hook_input: dict) -> dict | None:
