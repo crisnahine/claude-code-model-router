@@ -38,11 +38,33 @@ class ProjectFromASubfolder(Sandbox):
         package.mkdir(parents=True)
         os.environ["CLAUDE_PROJECT_DIR"] = str(package)
         self.assertEqual(agents.find("pinned-helper", package)["model"], "haiku")
+        self.assertEqual(cfg.load({"cwd": str(package)}).routing_mode, "off")
+        self.assertEqual(cfg.load().routing_mode, "off")
 
     def test_the_walk_stops_at_the_repository_root(self):
         outer = self.project.parent / ".claude" / "agents"
         self.agent("outsider", "opus", folder=outer)
         self.assertIsNone(agents.find("outsider", self.sub))
+
+    def test_the_walk_stops_where_the_roots_git_or_claude_folder_is_another_users(self):
+        del os.environ["CLAUDE_PROJECT_DIR"]
+        real = os.stat
+        for planted in (self.project / ".git", self.project / ".claude"):
+            def stat(path, *args, **kwargs):
+                found = real(path, *args, **kwargs)
+                if Path(path) != planted:
+                    return found
+                return os.stat_result((*found[:4], found.st_uid + 1, *found[5:]))
+            with self.subTest(planted=planted.name), mock.patch.object(os, "stat", stat):
+                self.assertIsNone(agents.find("pinned-helper", self.sub))
+
+    def test_after_cd_into_another_repository_the_sessions_agent_still_wins(self):
+        other = Path(self.tmp.name) / "other"
+        (other / ".git").mkdir(parents=True)
+        self.agent("pinned-helper", "opus", folder=other / ".claude" / "agents")
+        self.assertEqual(agents.find("pinned-helper", other)["model"], "haiku")
+        self.agent("pinned-helper", "sonnet", folder=self.sub / ".claude" / "agents")
+        self.assertEqual(agents.find("pinned-helper", self.sub)["model"], "sonnet")
 
 
 class ProjectEffortOverAUserNull(Sandbox):
@@ -69,6 +91,18 @@ class UsersRuleOverAProjectFloor(Sandbox):
         d = self.decide("worker", HARD)
         self.assertEqual((d["level"], d["model"]), ("lookup", "haiku"))
         self.assertEqual(len(cfg.load().held), 2)  # the project's level and model, each said once
+
+    def test_a_users_level_or_model_for_an_agent_holds_both_of_the_projects(self):
+        self.agent("worker")
+        self.override({"agents": {"worker": {"level": "lookup"}}}, user=True)
+        self.override({"agents": {"worker": {"model": "opus"}}})
+        d = self.decide("worker", HARD)
+        self.assertEqual((d["level"], d["model"]), ("lookup", "haiku"))
+        self.assertEqual([(h.kind, h.name) for h in cfg.load().held], [("rule", "worker")])
+        self.override({"agents": {"worker": {"model": "haiku"}}}, user=True)
+        self.override({"agents": {"worker": {"level": "frontier"}}})
+        self.assertEqual(self.decide("worker", HARD)["model"], "haiku")
+        self.assertEqual([(h.kind, h.name) for h in cfg.load().held], [("rule", "worker")])
 
 
 class ProjectModelNames(Sandbox):
