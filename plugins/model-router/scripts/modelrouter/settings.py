@@ -12,21 +12,19 @@ from pathlib import Path
 
 from . import allowlist, health, ladder
 from . import config as cfg
-from .config import PRIORITIES, Level, parse_mode
+from .config import Level, parse_mode
 from .registry import Registry
 
 CLOUDS = ("bedrock", "vertex", "foundry")
 PROVIDERS = (*CLOUDS, "anthropic_aws", "anthropic_google_cloud", "mantle")
 # The userConfig keys in plugin.json.
-OPTIONS = ("routing_mode", "priority", "max_tier", "agent_pins", "verify_gate")
+OPTIONS = ("routing_mode", "max_tier", "verify_gate")
 
 
 @dataclass(frozen=True)
 class Settings:
     mode: str = "auto"  # routing_mode
-    priority: str = "balanced"
     cap: str | None = None  # max_tier, when it names a registry model
-    pins: str = "respect"  # agent_pins: respect or override
     verify_gate: bool = True
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
     force: bool = False  # CLAUDE_CODE_SUBAGENT_MODEL_FORCE
@@ -72,9 +70,7 @@ def resolve(reg: Registry | None = None) -> Settings:
     cap = option("max_tier")
     return Settings(
         mode=parse_mode(option("routing_mode")) or "auto",
-        priority=option("priority") if option("priority") in PRIORITIES else "balanced",
         cap=cap if reg and cap in reg.models else None,
-        pins="override" if option("agent_pins") == "override" else "respect",
         verify_gate=_on(option("verify_gate")),
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),
         force=truthy(env("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")),
@@ -108,8 +104,8 @@ class Snapshot:
         return allowlist.read(self.session_id, self.project, (self.hook_input or {}).get("settings"))
 
     def pick(self, level: Level) -> ladder.Pick:
-        """The ladder's pick for `level` under this setup's priority and usable models."""
-        return ladder.pick(self.registry, level, self.options.priority, self.usable)
+        """The ladder's pick for `level` among this setup's usable models."""
+        return ladder.pick(self.registry, level, self.usable)
 
     def settle(self) -> None:
         """Write what reads only noticed: an outage the health table found too long. Dry runs skip it."""
@@ -122,4 +118,3 @@ class Snapshot:
     @cached_property
     def usable(self) -> list[str]:
         return self.registry.available(self.options.cap, allowed=self.allowed, table=self.health)
-

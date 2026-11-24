@@ -24,10 +24,10 @@ if TYPE_CHECKING:
 class Model:
     name: str
     strength: float
-    speed: float | None = None
     cost: float | None = None
     use_for: str = ""
     project: bool = False  # added by a project's override file, so its rank is only that file's claim
+    effort_stops_at: str | None = None  # the most effort the router sets on this model
 
     @property
     def trusted(self) -> bool:
@@ -42,8 +42,8 @@ class LevelSpec:
 
 @dataclass(frozen=True)
 class Rule:
-    """What an override file says about one agent. The user's file sets `model`, `level` and `route` in
-    full. A project's file only raises: its `level` becomes `floor`, its `model` becomes `suggested` and
+    """What an override file says about one agent. The user's file sets `model` and `route` in full, and
+    its `level` is a floor. A project's file only raises: its `level` becomes `floor`, its `model` becomes `suggested` and
     applies only when it isn't weaker than what the call would run on without it, and its `route` is held back."""
     model: str | None = None
     level: Level | None = None
@@ -68,7 +68,6 @@ class Registry:
     prices: Mapping[str, Any] = field(default_factory=dict)  # the shipped list prices, which the benchmark reads
     newest: Mapping[str, str] = field(default_factory=dict)
     older_aliases: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
-    crew: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     rules: Mapping[str, Rule] = field(default_factory=dict)
     problems: tuple[str, ...] = ()  # keys an override file had wrong and the registry dropped
     held: tuple[Held, ...] = ()
@@ -138,38 +137,20 @@ class Registry:
         lower = [n for n in trusted if self.strength(n) <= self.strength(name)]
         return lower[-1] if lower else trusted[0]
 
-    def select(self, needs: float, priority: str, usable: list[str]) -> str | None:
-        """balanced: the cheapest model strong enough. quality: one step stronger than needed.
-        fast: one step below, and the quickest of what qualifies. A model a repository added is
-        never picked: its rank, cost and speed are only that repository's claim."""
+    def select(self, needs: float, usable: list[str]) -> str | None:
+        """The cheapest usable model strong enough for `needs`, else the strongest usable. A model a
+        repository added is never picked: its rank and cost are only that repository's claim."""
         usable = [n for n in usable if self.models[n].trusted]
         if not usable:
             return None
-        steps = sorted({self.strength(n) for n, m in self.models.items() if m.trusted})
-        floor, top = steps[0], self.strength(usable[-1])
-
-        def step(value: float, by: int) -> float:
-            index = min(range(len(steps)), key=lambda i: abs(steps[i] - value)) + by
-            return steps[max(0, min(index, len(steps) - 1))]
-
-        if priority == "quality":
-            needs = step(needs, 1)
-        elif priority == "fast":
-            needs = step(needs, -1)
-        needs = max(floor, min(needs, top))
+        needs = min(needs, max(self.strength(n) for n in usable))
         qualifying = [n for n in usable if self.strength(n) >= needs]
 
         def cost(n: str) -> float:
             value = self.models[n].cost
             return float(value) if value is not None else self.strength(n)
 
-        def speed(n: str) -> float:
-            value = self.models[n].speed
-            return float(value) if value is not None else -self.strength(n)
-
-        if priority == "fast":
-            return min(qualifying, key=lambda n: (-speed(n), cost(n)))
-        return min(qualifying, key=lambda n: (cost(n), -speed(n)))
+        return min(qualifying, key=lambda n: (cost(n), self.strength(n), n))
 
     def price(self, model_id: str) -> dict | None:
         """List prices for a full model ID, or None for a version the table doesn't list. The router prices

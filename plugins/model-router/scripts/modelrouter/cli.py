@@ -5,7 +5,7 @@
   policy     the routing policy as it stands for this user and project
   models     what each registry model really runs as, and what is unavailable
              (reset forgets learned availability; --json prints model-router.models/3)
-  explain    what the router would make of a task: explain [--agent NAME] TEXT
+  explain    what an agent call would run on and why: explain [--agent NAME] [--model M] [--effort E] [TEXT]
   usage      the ledger by agent and model: usage [DAYS] [--json for model-router.usage/2]
 
 policy, models and explain take the plugin's options as flags, such as --max-tier=sonnet:
@@ -22,7 +22,7 @@ from . import health, hooks, report, settings, store
 
 
 # Hook fields the handlers use as text: as file keys, paths, or things to match against.
-_TEXT_FIELDS = ("session_id", "cwd", "transcript_path", "prompt", "prompt_id", "agent_id", "agent_type",
+_TEXT_FIELDS = ("session_id", "cwd", "transcript_path", "prompt", "agent_id", "agent_type",
                 "model", "to_model", "error")
 
 
@@ -70,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("explain", parents=[options])
     p.add_argument("--agent")
+    p.add_argument("--model")
+    p.add_argument("--effort")
     p.add_argument("text", nargs="*")
     p = sub.add_parser("usage")
     p.add_argument("days", nargs="?", default="7")
@@ -110,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(report.models_data(snap), indent=2) if args.json
               else report.models(snap))
     elif args.cmd == "explain":
-        print(report.explain(snap, " ".join(args.text), args.agent))
+        print(report.explain(snap, " ".join(args.text), args.agent, args.model, args.effort))
     elif args.cmd == "usage":
         days = int(args.days) if str(args.days).isdigit() and int(args.days) > 0 else 7  # ledger.read(0) is everything
         print(json.dumps(report.usage_data(days), indent=2) if args.json else report.usage(days))

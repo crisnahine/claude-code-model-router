@@ -13,13 +13,13 @@ python3 bench/overhead.py --runs 30 --calls 1000 --json # the same as JSON
 
 It uses throwaway folders, so it never touches your plugin state.
 
-Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330. The `user-prompt` row was rerun on 2026-11-25 on Claude Code 2.1.331, after the router stopped sizing up the request and its record kept only the prompt id, and the state size table the same day, on the code that also records Claude Code's own figures per subagent and sends each mod session's settings layers.
+Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330. The `user-prompt` row was rerun on 2026-11-25 on Claude Code 2.1.331, after the router stopped sizing up the request and its record kept only the prompt id, and the state size table the same day, on the code that also records Claude Code's own figures per subagent, sends each mod session's settings layers, keeps no description in the ledger and no request record.
 
 ## Settings hooks
 
-Each hook runs as `hooks/hooks.json` runs it: `sh scripts/model-router.sh <command>` with the hook's JSON on stdin ([hook input](https://code.claude.com/docs/en/hooks.md)), a different brief each run so repeats don't read as redos. Cold is an empty bytecode cache and no state, so even the standard library compiles from source (a real first hook lands between the two). Warm is bytecode in place after one seeded session, with a 1 MB transcript.
+Each hook runs as `hooks/hooks.json` runs it: `sh scripts/model-router.sh <command>` with the hook's JSON on stdin ([hook input](https://code.claude.com/docs/en/hooks.md)), a different brief each run so repeats don't read as refused rewrites. Cold is an empty bytecode cache and no state, so even the standard library compiles from source (a real first hook lands between the two). Warm is bytecode in place after one seeded session, with a 1 MB transcript.
 
-Wall milliseconds per call over 30 runs, from a `--runs 30 --calls 200` run (its bytes per 1,000 calls agree with the state table below within 1%). `stop` (asks for a check once) and `agent-stopped` (finds no background agent waiting) take a quick path on most warm runs.
+Wall milliseconds per call over 30 runs, from a `--runs 30 --calls 200` run. `stop` (asks for a check once) and `agent-stopped` (finds no background agent waiting) take a quick path on most warm runs.
 
 | Command | Event | Cold p50 | Cold p95 | Warm p50 | Warm p95 |
 | :- | :- | -: | -: | -: | -: |
@@ -58,13 +58,13 @@ Measured 2026-11-23 on Claude Code 2.1.330 with a headless Sonnet run that only 
 | Source | When it's paid | Before | After |
 | :- | :- | -: | -: |
 | Session-start note (`hooks.session_start`) | At session start, resume, clear, compact and fork | 147 tokens | 128 |
-| The seven role agents' names, descriptions and tools in the agent list | Once per session | 493 | 493 |
+| The role agents' names, descriptions and tools in the agent list (seven when measured, five now, not measured again) | Once per session | 493 | 493 |
 | The `route` skill's listing (the other four skills set `disable-model-invocation`, so theirs aren't in context, https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill) | Once per session | 84 | 61 |
 | The note that the request names a model | Per prompt, only when the request names one | about 34 | about 34 |
 
 The first three are measured, the last is rendered text at about 4 characters a token. On the fallback path each routed spawn also gets a one-line note.
 
-Since that measurement the session-start note carries the table of which model and effort fit which kind of work, because the Agent tool sets `effort` only when instructions ask for it. It is 680 characters on a session with no pinned model, about 170 tokens at 4 characters a token, not measured, and a test holds it to 700 in the default, `CLAUDE_CODE_SUBAGENT_MODEL`, `agent_pins` override, FORCE and advise setups. The notices meant for you, such as a pinned subagent model or a newer model version, go to a message shown to you when a session opens (`systemMessage`, https://code.claude.com/docs/en/hooks.md#json-output), so they add nothing to Claude's context.
+Since that measurement the session-start note carries the table of which model and effort fit which kind of work, because the Agent tool sets `effort` only when instructions ask for it. It is 687 characters on a session with no pinned model, about 170 tokens at 4 characters a token, not measured, and a test holds it to 700 in the default, `CLAUDE_CODE_SUBAGENT_MODEL` and FORCE setups. The notices meant for you, such as a pinned subagent model or a newer model version, go to a message shown to you when a session opens (`systemMessage`, https://code.claude.com/docs/en/hooks.md#json-output), so they add nothing to Claude's context.
 
 A once-per-session source is cached on the first request and read from the cache on later ones, until it lapses or the conversation is compacted (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md). On Sonnet 5.5 the 683 tokens cost about $0.0027 to write at the one-hour price (a Claude subscription's main conversation, within its plan) or $0.0017 at the five-minute price (an API key, usage credits or a cloud provider), then $0.00007 per later request (https://code.claude.com/docs/en/prompt-caching.md#which-ttl-each-request-gets, https://platform.claude.com/docs/en/about-claude/pricing.md). No subagent gets them: in kept benchmark transcripts the main loop's first request was 730 tokens bigger with the plugin and the subagents' first requests weren't. In the benchmark of commit `27b94e6` on a Sonnet session, the router lost by $0.009 to $0.012 a run in implementation, bugfix, cross-module and security review, and this text is about $0.003 of that. In the kept security-review pair, the router's subagent at `high` effort cost $0.0064 more than `defaults`' at the session's default.
 
@@ -81,23 +81,22 @@ Before is the code that also wrote each spawn's count and votes to `learned.json
 
 ## State size
 
-1,000 routed calls were simulated with the real hook functions, 20 per session, even sessions on the fallback path and odd ones on the mod path, each mod session sending its own settings layers. One call in four is a background agent finished by `SubagentStop`, every call adds a usage row, every fifth an edit and every fiftieth a model error. Rerun 2026-11-25:
+1,000 routed calls were simulated with the real hook functions, 20 per session, even sessions on the fallback path and odd ones on the mod path, each mod session sending its own settings layers. Each call names a model and has its own description, as Claude makes them. One call in four is a background agent finished by `SubagentStop`, every call adds a usage row, every fifth an edit and every fiftieth a model error. Rerun 2026-11-25:
 
 | File | Bytes after 1,000 calls | Bounded | What bounds it |
 | :- | -: | :- | :- |
-| `ledger.jsonl` | 833,890 | yes | Rows older than 30 days go once the oldest one is (`store.LEDGER_MAX_DAYS`), and it is halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the size cap after about 5,000 calls |
-| `routes.json` | 200,152 | yes | Sessions written in the last day (`calls.KEPT_FOR`), at most the 200 most recently written (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
-| `done.json` | 114,553 | yes | Same as `routes.json` |
-| `prompts.json` | 2,448 | yes | The 200 most recently written sessions |
-| `edits.json` | 3,110 | yes | Same |
-| `sessions.json` | 2,899 | yes | Same |
-| `allowlist.json` | 2,734 | yes | Same |
-| `launched.json` | 1,596 | yes | Same as `routes.json` |
-| `pending.json` | 805 | yes | The 200 most recently written sessions, 100 calls each |
+| `ledger.jsonl` | 800,298 | yes | Rows older than 30 days go once the oldest one is (`store.LEDGER_MAX_DAYS`), and it is halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the size cap after about 5,000 calls |
+| `routes.json` | 185,857 | yes | Sessions written in the last day (`calls.KEPT_FOR`), at most the 200 most recently written (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
+| `done.json` | 97,296 | yes | Same as `routes.json` |
+| `edits.json` | 3,106 | yes | The 200 most recently written sessions |
+| `sessions.json` | 2,898 | yes | Same |
+| `allowlist.json` | 2,737 | yes | Same |
+| `launched.json` | 1,599 | yes | Same as `routes.json` |
+| `pending.json` | 803 | yes | The 200 most recently written sessions, 100 calls each |
 | `state.json` | 539 | yes | One health entry per model |
 
 The simulation calls the runtime directly, so it writes no `mod-calls/` marks. Each mark is an empty file that the call's `PreToolUse` hook removes, and `mod-start` clears any left for over a day.
 
 `locks.json` holds one entry per state file; the simulation doesn't write it, since one process never waits on a lock.
 
-The "Bounded" column comes from a run of the script. The script lowers three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them in two rounds, the second with twice the calls, once with one call per session (`max(40, calls // 5)` sessions, then twice as many: 200, then 400 at `--calls 1000`) and once with one long session (`max(50, calls // 5)` calls, then twice as many). A file is bounded when its second-round peak is at most 25% plus 256 bytes above its first. Removing each trim in turn, rerun 2026-11-24 with `--calls 1000`, proved the check, and the session cap again on 2026-11-25: without the session cap all eight per-session files report unbounded, without the per-session call cap `routes.json` and `done.json` do, and without the ledger's halving `ledger.jsonl` does.
+The "Bounded" column comes from a run of the script. The script lowers three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them in two rounds, the second with twice the calls, once with one call per session (`max(40, calls // 5)` sessions, then twice as many: 200, then 400 at `--calls 1000`) and once with one long session (`max(50, calls // 5)` calls, then twice as many). A file is bounded when its second-round peak is at most 25% plus 256 bytes above its first. Removing each trim in turn, rerun 2026-11-24 with `--calls 1000`, proved the check, and the session cap again on 2026-11-25: without the session cap all the per-session files report unbounded, without the per-session call cap `routes.json` and `done.json` do, and without the ledger's halving `ledger.jsonl` does.

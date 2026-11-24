@@ -2,7 +2,7 @@
   "name": "model-router",
   "displayName": "Model Router",
   "version": "0.1.2",
-  "description": "Sets the Claude model and reasoning effort of every subagent, agent-team teammate and workflow agent Claude Code starts, and runs a redo one level higher.",
+  "description": "Keeps the Claude model and reasoning effort Claude names for every subagent, agent-team teammate and workflow agent within your cap, fills in the effort nobody named, and runs a marked redo with more effort or on a stronger model.",
   "author": {
     "name": "Cris",
     "url": "https://github.com/crisnahine"
@@ -25,23 +25,11 @@
     "routing_mode": {
       "type": "string",
       "title": "Routing mode",
-      "description": "auto (default): the model and reasoning effort of every subagent call are set automatically. advise: the level each agent call reads as is logged, and nothing is changed. off: no routing.",
+      "description": "auto (default): the model and effort Claude names on each subagent call are kept within your limits, and an effort nobody named is set. off: no routing.",
       "default": "auto",
       "options": [
         "auto",
-        "advise",
         "off"
-      ]
-    },
-    "priority": {
-      "type": "string",
-      "title": "Priority",
-      "description": "What routing favors. balanced (default): the cheapest model strong enough for each subtask. quality: one step stronger. fast: one step lighter, and the quickest that qualifies.",
-      "default": "balanced",
-      "options": [
-        "balanced",
-        "quality",
-        "fast"
       ]
     },
     "max_tier": {
@@ -55,16 +43,6 @@
         "sonnet",
         "opus",
         "fable"
-      ]
-    },
-    "agent_pins": {
-      "type": "string",
-      "title": "Agents that name their own model",
-      "description": "respect (default): an agent whose definition names a model keeps it, within the cap. override: those agents are routed by task like every other.",
-      "default": "respect",
-      "options": [
-        "respect",
-        "override"
       ]
     },
     "verify_gate": {

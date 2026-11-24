@@ -19,7 +19,7 @@ plugins/model-router/
   hooks/hooks.json             loads the mod, and the SessionStart, UserPromptSubmit, PreToolUse,
                                PostToolUse, PostToolUseFailure, PostModelSwitch, SubagentStop and Stop hooks
   scripts/modelrouter/         the runtime, standard library only
-  agents/                      the seven role agents
+  agents/                      the five role agents
   skills/                      route, models, usage
 .claude/skills/                refresh and deliver, maintainer skills for this repository (not shipped)
   evals/                       routing evals
@@ -54,7 +54,6 @@ CI runs all of them: the unit tests include the traceability count, `docs_assets
 
 - `bench/analyze.py ... --check` fails when `docs/BENCHMARKS.md` no longer matches the rows in `bench/results/`, or when a fact the docs' prose states about them (every run solved, a baseline cheaper in every class, no class PASS) is false now. Rebuild the page by running it without `--check`, and fix the prose when a fact fails.
 - `sh tests/mod/typecheck.sh` type-checks the mod and its test with `tsc` against Claude Code's published mod API types, pinned to a commit, using the tsconfig in `tests/mod`. `TYPES_COMMIT=main sh tests/mod/typecheck.sh` checks against the newest published types instead, as the daily upstream workflow does. To check against the types your installed Claude Code writes, see [docs/TEST_RESULTS.md](docs/TEST_RESULTS.md).
-- The labeled corpora in `tests/fixtures` (Agent briefs, the user's requests, agent names) fail a change that moves a level, so a row changes only with its reason in the commit.
 - A change to routing reruns `claude plugin eval plugins/model-router --trust-plugin`. It runs live models, so record what it cost. CI's `eval` job runs it on Claude Code 2.1.331 when started by hand from the Actions tab, and on the newest release once a week, with the repository's `ANTHROPIC_API_KEY` secret.
 
 The routing evals also run free in the unittest gate. Each case under `plugins/model-router/evals` names in `expected_outcome` the model and effort Claude should name for its work (`model M, effort E`, with `agent A, ` in front when the case checks which agent Claude picks). `RoutingEvals` in `tests/test_model_router.py` checks that the session note pairs that model with that effort, that a grader checks that model (and that agent, and the model Claude names when that agent sets none), and that `spawn.decide` runs a call naming both on them, in a session on the case's model. Whether Claude names them, and the redo's climb in `route-redo-escalates`, are checked only by the live run. To run only that check: `python3 -m unittest tests.test_model_router.RoutingEvals`. A change to the note's table updates the cases' `expected_outcome` and graders in the same commit.

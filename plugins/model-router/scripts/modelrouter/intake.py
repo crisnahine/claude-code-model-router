@@ -25,7 +25,7 @@ def is_delivered(text: object) -> bool:
 
 def is_user_prompt(text: object) -> bool:
     """UserPromptSubmit also fires for background-task notifications, teammates' reports
-    and other sessions' messages. Those must not reset what is known about the user's
+    and other sessions' messages. Those must not get a note meant for the person's own
     request. Pasted text is the user's, though it arrives wrapped in a <pasted_content> tag, and so is
     a request that opens with a tag of its own, such as `<button> does nothing`."""
     text = (text if isinstance(text, str) else "").lstrip()

@@ -195,7 +195,7 @@ def check_ladder_against_registry(config: dict):
 def diagram_ladder() -> str:
     w, h = 920, 492
     out = [frame(w, h), text(32, 42, "The ladder", "ink b", 17),
-           text(32, 66, "Balanced priority: the cheapest usable model strong enough for each level.", "mut", 13.5)]
+           text(32, 66, "Each level runs on the cheapest usable model strong enough for it.", "mut", 13.5)]
     for x, label in ((180, "Level"), (300, "Model"), (392, "Effort"), (482, "Model strength"), (590, "Typical subtask")):
         out.append(text(x, 104, label, "mut b", 12))
     out.append('<path d="M24 114H896" class="ln" stroke-width="1"/>')
@@ -217,38 +217,39 @@ def diagram_ladder() -> str:
         room("ladder.svg: subtask", 590 + width_of(sub, 12.5), 900)
         room("ladder.svg: level", 180 + width_of(lv, 15, bold=True), 290 - 5 - 6)
         room("ladder.svg: model", 300 + width_of(model, 15), 392 - 8)
-    # a call that came back from standard for a redo, now on complex
+    # a call redone from standard, more effort on Sonnet first, now on complex
     cy = ys["complex"]
     out.append(f'<circle cx="124" cy="{cy}" r="13" class="halo" fill="none" stroke-width="5"/>'
                f'<circle cx="124" cy="{cy}" r="11" class="rt"/>'
                + pill(30, cy - 12, "redo", cls="rt", tcls="tag", size=12)[0])
     out.append(f'<path class="rts" d="M124 {ys["standard"] - 4}V{cy + 18}" stroke-width="2.5" '
                f'stroke-dasharray="4 4" fill="none" stroke-linecap="round"/>')
-    out.append(text(32, 432, "Priority quality goes one step stronger, fast one step lighter. When the cap, "
+    out.append(text(32, 432, "A model named on a call stands for its lowest level. When the cap, "
                     "availableModels, deniedModels or failures", "mut", 13))
     out.append(text(32, 452, "rule a model out, the pick moves to the nearest usable model above it, or to the "
-                    "strongest one left. A redo runs one level higher.", "mut", 13))
-    out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh, "
-                    "which makes up part of the loss.", "mut", 13))
+                    "strongest one left. A redo adds effort first.", "mut", 13))
+    out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh (high on "
+                    "Haiku), which makes up part of the loss.", "mut", 13))
     title = "The ladder: five levels to a model and an effort"
-    label = ("With balanced priority, lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on "
-             "Opus at high, hardest on Opus at xhigh, and frontier on Fable at high. A call climbs one rung each "
-             "time it comes back for a redo. Quality priority goes one step stronger, fast one step lighter. When "
-             "the cap, the availableModels or deniedModels settings, or failures rule a model out, the pick moves "
-             "to the nearest usable model above it, or to the strongest one left, and a pick weaker than its level needs "
-             "gets one more effort step, up to xhigh.")
+    label = ("Lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on Opus at high, hardest "
+             "on Opus at xhigh, and frontier on Fable at high. A model named on a call stands for its lowest level. "
+             "A call Claude marks as a redo runs one effort step higher on its model while it ran below high, and "
+             "after that on the next stronger model: Haiku, Sonnet, Opus, then Fable. When the cap, the availableModels or "
+             "deniedModels settings, or failures rule a model out, the pick moves to the nearest usable model above "
+             "it, or to the strongest one left, and a pick weaker than its level needs gets one more effort step, up "
+             "to xhigh, or high on Haiku.")
     return svg(w, h, title, label, "".join(out))
 
 
 def diagram_redo() -> str:
     w, h = 920, 336
     out = [frame(w, h), text(32, 42, "Redo escalation", "ink b", 17),
-           text(32, 66, 'A call whose description starts with "Redo:" runs one level higher.', "mut", 13.5)]
+           text(32, 66, "A call Claude marks as a redo climbs from the run it redoes.", "mut", 13.5)]
     steps = [
-        ("1. Agent call", ["Routed at its level:"], "standard, Sonnet, medium", 2),
-        ("2. Result comes back", ["Recorded as finished,", "with the level it ran at."], None, 0),
-        ("3. Marked as a redo", ["Its description starts", 'with "Redo:".'], None, -1),
-        ("4. One level higher", ["Up a model, or up effort:"], "complex, Opus, high", 3),
+        ("1. Agent call", ["Runs at its level:"], "standard, Sonnet, medium", 2),
+        ("2. Claude marks it", ["The result fell short:", 'its description gets "Redo:"'], None, -1),
+        ("3. Effort first", ["Below high, the same", "model, one step up:"], "Sonnet, high", 2),
+        ("4. Then the model", ["From high, the next", "stronger model:"], "complex, Opus, high", 3),
     ]
     cw, gap, top = 196, 28, 92
     for k, (head, body, code, accent) in enumerate(steps):
@@ -273,15 +274,16 @@ def diagram_redo() -> str:
     last = 32 + 3 * (cw + gap) + cw / 2
     out.append(f'<circle cx="{last}" cy="{track}" r="11" class="halo" fill="none" stroke-width="5"/>'
                f'<circle cx="{last}" cy="{track}" r="9" class="rt"/>')
-    note = ["One level up the ladder: lookup, standard and hardest move to a stronger model; complex stays on Opus",
-            "at more effort, and a frontier redo runs at one step more effort. Not a redo: copies of one brief started",
-            "together. Never escalated: a call that names its own model. A background agent's call counts as finished",
-            "when the agent stops with an answer."]
+    note = ["The next model runs at its own level's effort; with no stronger usable model, one more effort step, at",
+            "most max. Not a redo: the same call sent again unmarked. Run as named: a redo that names its own model or",
+            "effort. Never redone: a workflow stage. A background agent's call counts as finished when the agent stops",
+            "with an answer."]
     out.append(lines(32, 264, note, "mut", 13, 20))
-    title = "Redo escalation: a call marked as a redo runs one level higher"
-    label = ("A call is routed at its level, for example standard on Sonnet at medium effort. Its result comes back "
-             'and the call is recorded as finished. When Claude starts a call\'s description with "Redo:", the call '
-             "runs one level higher, complex on Opus at high.")
+    title = "Redo escalation: effort first, then the model"
+    label = ("A call runs at its level, for example standard on Sonnet at medium effort. When its result falls short, "
+             "Claude marks a redo by starting the call's description with Redo. Below high effort, the redo runs the "
+             "same model one effort step up, Sonnet at high. From high, the next redo runs the next stronger model at "
+             "its own level's effort, complex on Opus at high.")
     return svg(w, h, title, label, "".join(out))
 
 
@@ -333,7 +335,7 @@ def diagram_two_paths() -> str:
     out.append(card(132, 404, 656, 110, rx=12))
     out.append('<rect x="133" y="420" width="4" height="78" rx="2" class="rt"/>')
     out.append(text(156, 434, "scripts/modelrouter: one Python runtime, one router", "ink b", 15))
-    out.append(chip_row(156, 450, ["spawn", "router.decide", "ladder", "registry", "profile", "calls", "gates"], 11.5))
+    out.append(chip_row(156, 450, ["spawn", "router.decide", "ladder", "registry", "calls", "gates"], 11.5))
     out.append(text(156, 500, "One decision procedure and one state store for both paths.", "mut", 13))
     title = "Two control paths, one router"
     label = ("Claude Code engine events (agent.spawn, turn.start, turn.step, turn.complete) reach the mod, "
@@ -347,9 +349,9 @@ PRECEDENCE = [
     ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "pins every subagent's model; the router sets effort only", True),
     ("A model named on the call", "by Claude, a skill's instructions or a workflow script", False),
     ("A per-agent rule", "in ~/.claude/model-router.json or .claude/model-router.json", False),
-    ("The agent's own model field", "kept unless agent_pins is override", False),
+    ("The agent's own model field", "in its definition's frontmatter", False),
     ("CLAUDE_CODE_SUBAGENT_MODEL", "your default for agents that name no model", True),
-    ("The router's pick", "the ladder's model and effort for the brief's level", False),
+    ("The parent's model", "Claude Code's own default when nothing names one", False),
 ]
 
 
@@ -383,18 +385,18 @@ def diagram_precedence() -> str:
     out.append(card(632, ey, 256, 138, rx=12))
     out.append(f'<rect x="633" y="{ey + 16}" width="4" height="106" rx="2" class="r3"/>')
     out.append(text(652, ey + 28, "And the effort", "ink b", 14.5))
-    out.append(lines(652, ey + 54, ["Set from the level, unless the call,", "the agent or one of these sets it:"],
+    out.append(lines(652, ey + 54, ["Set from the model's level, unless the", "call, the agent or one of these sets it:"],
                      "mut", 13, 19))
     out.append(lines(652, ey + 98, ["CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_EFFORT"], "mono ink", 11.5, 18))
-    out.append(text(32, 476, "Example: a standard brief with nothing above it set falls through to the router's "
-                    "pick,", "mut", 13))
-    out.append(text(32, 496, "Sonnet at medium effort, which is inside the cap and runs.", "mut", 13))
+    out.append(text(32, 476, "Example: a call that names sonnet and no effort runs on Sonnet at medium effort, the",
+                    "mut", 13))
+    out.append(text(32, 496, "standard level's, which is inside the cap. A rule's level raises a model below it.", "mut", 13))
     title = "Who decides the model: the order of authority"
     label = ("Strongest first: CLAUDE_CODE_SUBAGENT_MODEL_FORCE, then a model named on the call, then a per-agent "
-             "rule in model-router.json, then the agent's own model field unless agent_pins is override, then "
-             "CLAUDE_CODE_SUBAGENT_MODEL, then the router's pick. For all but the two environment variables, the "
-             "winner must be usable under the cap and your settings, else the strongest usable model below it runs. Effort follows the level unless something "
-             "already sets it.")
+             "rule in model-router.json, then the agent's own model field, then CLAUDE_CODE_SUBAGENT_MODEL, then "
+             "the parent's model. For all but the two environment variables, the winner must be usable under the "
+             "cap and your settings, else the strongest usable model below it runs. Effort follows the model's level "
+             "unless something already sets it.")
     return svg(w, h, title, label, "".join(out))
 
 
@@ -665,10 +667,11 @@ message: "If you use Model Router in your work, please cite it with these detail
 type: software
 title: "Model Router"
 abstract: >-
-  Model Router (model-router) is a Claude Code plugin that routes every agent
-  Claude Code starts (subagents, agent-team teammates and workflow stages) to
-  the cheapest Claude model and reasoning effort that should do the job, and
-  runs a call one level higher when its work comes back for a redo.
+  Model Router (model-router) is a Claude Code plugin that holds the Claude
+  model and reasoning effort Claude names for every agent Claude Code starts
+  (subagents, agent-team teammates and workflow stages) to the user's limits,
+  sets the effort nobody named, and runs a call Claude marks as a redo with
+  more effort or on a stronger model.
 authors:
   - given-names: Cris
     family-names: Nahine

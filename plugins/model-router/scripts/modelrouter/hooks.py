@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import calls, fallback, gates, health, intake, ledger, mod, profile, request, session, settings
+from . import calls, fallback, gates, health, intake, ledger, mod, request, session, settings
 from . import config as cfg
 from .registry import Registry
 
@@ -19,17 +19,15 @@ def _context(event: str, text: str) -> dict:
 def _rules(options: settings.Settings) -> str:
     """The level rule for Claude, written as facts: the Agent tool sets `effort` only when instructions ask."""
     redo = ("A redo after a failed check or a gap in the report keeps its `description` with \"Redo:\" in front; "
-            "one that names {neither} runs one step higher.")
+            "one that names {neither} {climbs}.")
     if options.force:
         # Claude can't pass a model under FORCE (sub-agents.md), so only the effort half applies.
         return (f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE runs every subagent on {options.subagent_model or 'one model'}, so a "
                 "`model` on an Agent call has no effect. Model Router keeps the `effort` a call names, by the work: "
                 "medium for finding, reading, listing and everyday work to a clear brief; high for work that is hard "
                 "to check, high-stakes, ambiguous or broad, such as a bug's cause, a design, a review, a contract or "
-                "financial figures. " + redo.format(neither="no effort"))
-    if options.pins == "override":
-        neither = "the conversation's model"
-    elif options.subagent_model:
+                "financial figures. " + redo.format(neither="no effort", climbs="runs one effort step higher"))
+    if options.subagent_model:
         neither = "its agent's own model or CLAUDE_CODE_SUBAGENT_MODEL"
     else:
         neither = "its agent's own model or the conversation's"
@@ -40,7 +38,8 @@ def _rules(options: settings.Settings) -> str:
             "- opus at high: work that is hard to check, high-stakes, ambiguous or broad, such as a bug's cause, "
             "a design, a review, a contract or financial figures\n"
             "- fable at high: open-ended research\n"
-            f"A call that names neither runs on {neither}. " + redo.format(neither="neither"))
+            f"A call that names neither runs on {neither}. " + redo.format(
+                neither="neither", climbs="climbs, effort before model"))
 
 
 def session_start(hook_input: dict) -> dict | None:
@@ -59,7 +58,7 @@ def session_start(hook_input: dict) -> dict | None:
                 f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent to {options.subagent_model or 'one model'}, "
                 "so Model Router sets only their effort. Without it, an agent call would run on the model it names, "
                 "within your cap.")
-        elif options.subagent_model and options.pins != "override":
+        elif options.subagent_model:
             notices.append(
                 f"CLAUDE_CODE_SUBAGENT_MODEL is {options.subagent_model}, so an agent call that names no model runs on "
                 f"its agent's own model or {options.subagent_model}. Model Router keeps the model a call names, within "
@@ -67,9 +66,6 @@ def session_start(hook_input: dict) -> dict | None:
         if options.workflow_model:
             notices.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model}, "
                            "so the router sets only their effort.")
-    elif mode == "advise":
-        note = ("Model Router is in advise mode: it logs the level it reads for each agent call and changes no call. "
-                "Agents keep the model their definition sets, which a model passed on a call would override.")
     out = _context("SessionStart", note) if note else {}
     if notices and opens:
         out["systemMessage"] = "Model Router: " + " ".join(notices)
@@ -77,16 +73,15 @@ def session_start(hook_input: dict) -> dict | None:
 
 
 def user_prompt(hook_input: dict) -> dict | None:
-    """Record the person's new request. Says something only when the request names a model."""
+    """Says something only when the person's request names a model."""
     snap = settings.Snapshot(hook_input)
     reg, options = snap.registry, snap.options
     if options.mode == "off":
         return None
     prompt = hook_input.get("prompt")
     if not intake.is_user_prompt(prompt):
-        return None  # a task notification or a delivered message continues the user's request
+        return None  # a task notification or a delivered message isn't the person asking for a model
     wanted = request.named_model(reg, prompt)
-    request.start(hook_input.get("session_id"), prompt_id=hook_input.get("prompt_id"))
     if not wanted or options.mode != "auto" or options.force or not snap.usable:
         return None  # with no registry model usable, Claude Code's allowlist decides where the call runs
     final = reg.clamp(wanted, snap.usable)
@@ -125,7 +120,6 @@ def _settled(session_id: str | None, key: str) -> None:
 
 def post_agent(hook_input: dict) -> dict | None:
     snap = settings.Snapshot(hook_input)
-    tool_input = cfg.tool_input(hook_input)
     response = hook_input.get("tool_response")
     response = response if isinstance(response, dict) else {}
     ran_as = response.get("resolvedModel")
@@ -137,17 +131,14 @@ def post_agent(hook_input: dict) -> dict | None:
     outcome = _outcome("result", hook_input, snap.registry, ran_as=ran_as, ran_family=snap.registry.family(ran_as),
                        forced=snap.options.force, status=response.get("status"),
                        launched=launched, agent_id=agent_id if launched and isinstance(agent_id, str) else None,
-                       models_used=() if launched else tuple(calls.models_used(response)),
-                       cut_off=not launched and calls.cut_off(response))
+                       models_used=() if launched else tuple(calls.models_used(response)))
     _settled(session_id, outcome.key)
     returned = calls.returned(session_id, outcome)
     if returned.note != calls.SWAPPED:
         return None
-    if "risk" in profile.profile_call(tool_input, outcome.agent)["signals"]:
-        return _context("PostToolUse", (
-            f"Model Router: this agent switched models mid-run ({outcome.models_used[0]} to {outcome.models_used[-1]}), "
-            "so its result needs a check before it is relied on."))
-    return None
+    return _context("PostToolUse", (
+        f"Model Router: this agent switched models mid-run ({outcome.models_used[0]} to {outcome.models_used[-1]}), "
+        "so its result needs a check before it is relied on."))
 
 
 def agent_failed(hook_input: dict) -> dict | None:

@@ -15,7 +15,7 @@ Checked 2026-11-24 for 0.1.2 on Claude Code 2.1.330 and 2.1.331; the evals and t
 | Every subagent, teammate and workflow stage routed on the mod path | PASS | Unit and Node tests cover all three; all three ran live on 2.1.330, and workflow agents under ultracode on 2.1.331 (S10.1) |
 | A working fallback where mods don't load | PASS | Fallback tests, and live runs of the `Agent` call path in default and auto mode (S10.2) |
 | The precedence order and the cap honored in every case | PASS | `Router` tests; the cap holds even when a lowering rewrite didn't take (S10.3) |
-| Redo escalation that never loops and never lowers quality | PASS | `RepeatGuard` tests; a run cut off by an API error is retried, not escalated (S10.4, S12.33) |
+| Redo escalation that never loops and never lowers quality | PASS | `RepeatGuard` tests; only a call marked "Redo:" climbs, so a check sent again after a fix stays at its level (S10.4, S2.18) |
 | Availability tracking that routes around a model that doesn't work here | PASS | `Registry` and `Router` tests (S10.5) |
 | The daily upstream check, run in CI only, failing on a bad feed instead of writing it | PASS | `test_upstream_check` tests for an empty feed, a body cut short and a request past its deadline; the plugin makes no network call (S10.6) |
 | A spend ledger that matches list prices | PARTIAL | Each subagent's dollars are Claude Code's own estimate, fast mode, long prompts and search fees included, and the report labels them an estimate. Workflow agents get none, since Claude Code doesn't list them to a mod (S10.7, S4.8) |
@@ -58,6 +58,6 @@ None.
 ### Incomplete or not verified enough (PARTIAL)
 
 - No live run: Desktop, VS Code, JetBrains and the Agent SDK (S3.7); an API-key login, which needs a key (S3.9); Bedrock, Vertex and Foundry (S3.10); `allowManagedHooksOnly` (S3.13); Linux and Windows installs (S6.1); undocumented binary behaviour beyond macOS (S5.6); the per-call mark that decides which path routes an `Agent` call (S2.7).
-- Edge cases without a test or with a known gap: a short brief, or a language outside the profile's list (S12.10); on the mod path, a spawn another plugin's mod moves to another family counts as a substitution (S12.14); the upstream workflow, whose scheduled runs on `main` passed but have not yet flagged a real change (S6.16); a release that changes a mod field, since only a pinned copy of the types is checked (S12.26).
-- Not measured: fan-out, workflow, team and redo shapes, cache temperature and `priority` (S4.13).
+- Edge cases without a test or with a known gap: on the mod path, a spawn another plugin's mod moves to another family counts as a substitution (S12.14); the upstream workflow, whose scheduled runs on `main` passed but have not yet flagged a real change (S6.16); a release that changes a mod field, since only a pinned copy of the types is checked (S12.26).
+- Not measured: fan-out, workflow, team and redo shapes, and cache temperature (S4.13). Nor how well Claude's own model picks do, inside software and out.
 - Design and process: the cap denial (S2.25); the mod's in-flight effort match (S5.2, S13.2); an inline skill's effort is left to the skill, `ultrathink` or `/effort` (S3.4); agents with no definition on disk are left alone (S3.6); fast mode in the spend ledger (S10.7).

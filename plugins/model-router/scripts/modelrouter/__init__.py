@@ -5,8 +5,7 @@
     settings   the plugin's options and the environment facts, resolved once per call
     registry   which models exist, which are usable here, and how to pick one
     agents     finds an agent's definition, wherever it comes from
-    profile    scores a subtask from its wording and its agent
-    ladder     turns a level and the priority into a model and an effort
+    ladder     the levels: each one's model and effort, and the level a model stands for
     router     decides the model and effort for one agent call
     calls      what happened to each call: routed, waiting for a result, finished
     ledger     one append per row kind, the turn Spend rule, and reading the rows

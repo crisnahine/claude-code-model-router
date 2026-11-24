@@ -2,7 +2,6 @@
   "schema": "model-router.models/3",
   "cap": null,
   "strongest_in_use": "opus",
-  "priority": "balanced",
   "models": [
     {
       "model": "haiku",
