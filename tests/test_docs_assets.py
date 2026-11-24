@@ -6,6 +6,7 @@ import copy
 import dataclasses
 import html
 import io
+import json
 import re
 import sys
 import tempfile
@@ -27,11 +28,14 @@ def check() -> tuple:
     return code, err.getvalue()
 
 
+BASELINES = {analyze.OPUS: ["defaults", "haiku", "haiku-high", "opusplan"],
+             analyze.SONNET: ["defaults", "sonnet-medium", "sonnet-high", "opusplan"]}
+
+
 def fixture_results(solved=3, cps=0.12344, runs=4, router="mine", cls="lookup"):
-    """analyze.Results for a router and every configuration BENCH_SERIES names, one task class, on each session."""
-    rows, ids = [], {}
-    for model, (_, series) in docs_assets.BENCH_SERIES.items():
-        ids[model] = [c for c, _, _ in series if c != "router"]
+    """analyze.Results for a router and a few baselines, one task class, on each session."""
+    rows, ids = [], BASELINES
+    for model in ids:
         for config in [router, *ids[model]]:
             ok, cost = (solved, cps * solved / runs) if config == router else (runs, 0.2)
             rows += [{"config": config, "class": cls, "task": f"{cls}-1", "total_cost_usd": cost, "passed": i < ok,
@@ -88,28 +92,8 @@ class DocsAssets(unittest.TestCase):
         self.assertTrue(head.startswith(docs_pages.HEAD_START) and head.endswith(docs_pages.HEAD_END))
         self.assertIs(analyze.HEAD_END, docs_pages.HEAD_END)
 
-    def test_the_chart_draws_from_the_figures_not_the_page(self):
-        data = bench_data()
-        svg = docs_assets.bench_chart(data)
-        self.assertIn("$0.1234 (3 of 4)", svg)
-        self.assertIn(f"{data['runs']} runs on 2030-01-01", svg)
-
-    def test_a_cell_with_nothing_solved_is_not_drawn_as_not_run(self):
-        svg = docs_assets.bench_chart(bench_data(solved=0))
-        self.assertIn("none solved (0 of 4)", svg)
-        self.assertNotIn("not run", svg)
-
-    def test_a_series_configuration_with_no_runs_stops_the_build(self):
-        results = fixture_results()
-        results = dataclasses.replace(results, rows=[r for r in results.rows if r["config"] != "defaults"])
-        data = analyze.figures(results)
-        with self.assertRaises(SystemExit) as caught:
-            docs_assets.bench_chart(data)
-        self.assertIn(f"no defaults runs for {data['sessions'][0]['model']}; update BENCH_SERIES", str(caught.exception))
-
     def test_renaming_the_router_changes_no_figure_but_its_own_name(self):
         old, new = bench_data(), bench_data(router="renamed")
-        self.assertEqual(docs_assets.bench_chart(old), docs_assets.bench_chart(new))
         a, b = docs_assets.bench_figures(old), docs_assets.bench_figures(new)
         named = lambda f: {k: v for k, v in f.items() if not k.endswith((".router_code", ".trace"))}  # noqa: E731
         self.assertEqual(named(a), named(b))
@@ -192,17 +176,9 @@ class DocsAssets(unittest.TestCase):
         with self.assertRaises(SystemExit) as raised:
             docs_assets.with_figures("x.md", "a <!-- bench:nope -->1<!-- /bench --> b", {})
         self.assertIn("x.md: unknown benchmark figure nope", str(raised.exception))
-        with self.assertRaises(SystemExit) as raised:
-            docs_assets.fill("a {nope} b", {}, "alt")
-        self.assertIn("alt: unknown benchmark figure nope", str(raised.exception))
 
     def patched_build(self):
         return self.build(bench=self.with_changed_figures())
-
-    def test_the_figure_alt_text_follows_the_figures(self):
-        files = self.patched_build()
-        alt = re.search(r'benchmark\.svg"[^>]*? alt="([^"]*)"', files["site/index.html"]).group(1)
-        self.assertIn("bugfix $9.9999 against", alt)
 
     def test_no_figure_span_sits_inside_backticks(self):
         for path in (*docs_assets.FIGURE_PAGES, "site/index.html"):
@@ -233,6 +209,39 @@ class DocsAssets(unittest.TestCase):
             self.assertIn('badge-version.svg', files[path], path)
             self.assertIn('alt="version 9.8.7"', files[path], path)
 
+    def test_the_sites_structured_data_parses_and_follows_the_plugin(self):
+        def apps(page):
+            blocks = [json.loads(b) for b in re.findall(r'<script type="application/ld\+json">(.*?)</script>', page, re.S)]
+            self.assertEqual(len(blocks), 2)
+            return next(n for n in blocks[0]["@graph"] if n["@type"] == "SoftwareApplication")
+        self.assertEqual(apps(self.build()["site/index.html"])["softwareVersion"], docs_assets.version())
+        app = apps(self.build(version="9.8.7", released="2030-01-01", claude_code="3.0.0")["site/index.html"])
+        self.assertEqual((app["softwareVersion"], app["datePublished"], app["dateModified"]),
+                         ("9.8.7", "2026-11-23", "2030-01-01"))
+        self.assertTrue(app["softwareRequirements"].startswith("Claude Code 3.0.0 or later;"))
+        ladder = "Five levels: " + ", ".join(f"{lv} on {m} at {e}" for lv, m, e, *_ in docs_assets.LADDER)
+        self.assertIn(ladder, app["featureList"])
+
+    def test_every_structured_data_reference_names_a_node(self):
+        graph = json.loads(re.search(r'<script type="application/ld\+json">(.*?)</script>',
+                                     self.build()["site/index.html"], re.S).group(1))["@graph"]
+        refs = re.findall(r'\{"@id": "([^"]+)"\}', json.dumps(graph))
+        self.assertTrue(refs)
+        self.assertLessEqual(set(refs), {n["@id"] for n in graph})
+
+    def test_a_site_rewrite_whose_text_is_gone_stops_the_build(self):
+        texts = dict(self.snap.texts)
+        texts["site/index.html"] = texts["site/index.html"].replace('"dateModified"', '"modified"')
+        with self.assertRaises(SystemExit) as raised:
+            self.build(texts=texts)
+        self.assertIn("dateModified", str(raised.exception))
+
+    def test_an_faq_answer_cannot_close_the_structured_data_script(self):
+        ld = docs_assets.site_faq_ld("# FAQ\n\n## Q?\n\nA </script> tag.\n")
+        self.assertEqual(ld.count("</script>"), 1)
+        self.assertEqual(json.loads(ld.split(">", 2)[2].rsplit("</script>", 1)[0])["mainEntity"][0]["acceptedAnswer"]["text"],
+                         "A </script> tag.")
+
     def test_an_invalid_or_inaccessible_svg_is_reported(self):
         ok = ('<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-label="a"><title>a</title>'
               "<style>@keyframes k{}@media (prefers-reduced-motion: reduce){*{animation:none}}</style></svg>")
@@ -261,7 +270,7 @@ class BrokenInputs(unittest.TestCase):
 
     def test_a_site_page_with_a_marker_missing(self):
         page = (ROOT / "site" / "index.html").read_text(encoding="utf-8")
-        site = lambda text: docs_assets.site_files("", {}, {"site/index.html": text}, "0.0.0", "2030-01-01")  # noqa: E731
+        site = lambda text: docs_assets.site_files("", {}, {"site/index.html": text}, "0.0.0", "2030-01-01", "2.1.0")  # noqa: E731
         self.stops(lambda: site(docs_assets.SITE_URL.sub("", page)), "site/index.html", "SITE_URL")
         for marks in (docs_assets.FAQ_HTML, docs_assets.FAQ_LD):
             for mark in marks:

@@ -56,9 +56,9 @@ The wordmark is drawn with strokes, so it needs no font. Write "Model Router" in
 
 ## Motion
 
-- Diagrams that explain a process loop slowly, 5 to 12 seconds. Banners and the benchmark bars play once and hold.
+- Diagrams that explain a process loop slowly, 5 to 12 seconds. Banners play once and hold.
 - Animate `transform`, `opacity` and, for a line being drawn, `stroke-dashoffset`. No scripts.
-- Every animated file turns animation off under `@media (prefers-reduced-motion: reduce)`, and its resting state is the meaningful final frame: the call on its last rung, the bars at full length.
+- Every animated file turns animation off under `@media (prefers-reduced-motion: reduce)`, and its resting state is the meaningful final frame: the call on its last rung.
 
 ## Rules for every SVG
 
@@ -66,7 +66,7 @@ The wordmark is drawn with strokes, so it needs no font. Write "Model Router" in
 - Light and dark through `@media (prefers-color-scheme: dark)` inside the file, with colors as classes, except the files the table fixes to one theme. CSS variables render black in some viewers.
 - Self-contained: no script, no external font, image or stylesheet.
 - Valid XML and under 40 KB.
-- Numbers in a diagram come from the code or the docs; the benchmark chart takes its from `bench/analyze.py`.
+- Numbers in a diagram come from the code or the docs.
 
 `--check` enforces the XML, `role`, `aria-label`, `<title>`, reduced-motion, no-outside-loads, no-CSS-variables and size rules.
 
@@ -80,4 +80,4 @@ The wordmark is drawn with strokes, so it needs no font. Write "Model Router" in
 
 ## The site
 
-`site/` holds a static landing page that reuses these SVGs. The script copies the files the site uses into `site/assets/`, so run it after any change here. The site's address is the `SITE_URL` comment at the top of `site/index.html`. Its benchmark figures, chart alt text and FAQ come from `bench/analyze.py`'s summary, so rerun analyze and the script, never edit a figure by hand.
+`site/` holds a static landing page that reuses these SVGs. The script copies the files the site uses into `site/assets/`, so run it after any change here. The site's address is the `SITE_URL` comment at the top of `site/index.html`. Its benchmark figures come from `bench/analyze.py`'s summary and its FAQ from `docs/FAQ.md`, so rerun analyze and the script, never edit a figure by hand.

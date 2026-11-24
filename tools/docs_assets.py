@@ -1024,129 +1024,6 @@ def diagram_stop_checks() -> str:
     return svg(w, h, title, label, "".join(out), css)
 
 
-# ---------------------------------------------------------------- the benchmark chart
-
-BENCH_SERIES = {  # session model in docs/BENCHMARKS.md: (heading, [(role or config id, legend label, color class)])
-    "claude-opus-5-5": ("Opus 5.5 session", [
-        ("router", "Model Router", "rt"),
-        ("defaults", "Claude Code defaults", "faintbar"),
-        ("haiku", "All subagents on Haiku", "r2"),
-        ("haiku-high", "All subagents on Haiku, high", "r3"),
-        ("opusplan", "opusplan (runs Sonnet when headless)", "r4"),
-    ]),
-    "sonnet": ("Sonnet 5.5 session", [
-        ("router", "Model Router", "rt"),
-        ("defaults", "Claude Code defaults", "faintbar"),
-        ("sonnet-medium", "All subagents on Sonnet, medium", "r2"),
-        ("sonnet-high", "All subagents on Sonnet, high", "r3"),
-        ("opusplan", "opusplan (runs Sonnet when headless)", "r4"),
-    ]),
-}
-def bench_data(data: dict):
-    by_model = {s["model"]: s for s in data["sessions"]}
-    sessions = []
-    for session, (heading, series) in BENCH_SERIES.items():
-        if session not in by_model:
-            raise SystemExit(f"bench results have no runs for {session}")
-        roles = by_model[session]["roles"]
-        rows = []
-        for cls in by_model[session]["classes"]:
-            values = []
-            for config, _, _ in series:
-                cell = cls["configs"].get(roles.get(config) or config)
-                if cell is None:
-                    raise SystemExit(f"bench results have no {config} runs for {session}; update BENCH_SERIES")
-                cps = cell["cost_per_solved"]
-                values.append((cell["solved"], cell["runs"], None if cps is None else float(f"{cps:.4f}")))
-            rows.append((cls["class"], values, cls["status"]))
-        sessions.append((heading, series, rows))
-    return sessions, str(data["runs"]), data["dates"][0]
-
-
-def status_summary(rows) -> str:
-    counts = {}
-    for _, _, status in rows:
-        counts[status] = counts.get(status, 0) + 1
-    return ", ".join(f"{status} in {n} of {len(rows)}" for status, n in counts.items())
-
-
-def bench_chart(data: dict, phone=False) -> str:
-    sessions, runs, date = bench_data(data)
-    peak = max((v[2] for _, _, rows in sessions for _, vals, _ in rows for v in vals if v[2] is not None), default=0)
-    axis = max(0.1, -(-peak // 0.1) * 0.1)
-    w = 520 if phone else 920
-    label_w = 0 if phone else 150
-    bar_x = 32 + label_w
-    bar_w = w - bar_x - (150 if phone else 160)
-    bh, gap = (12, 4) if phone else (11, 3)
-    out = ["", text(32, 42, "Cost per solved task", "ink b", 18 if phone else 17),
-           text(32, 66, "Lower is cheaper. Each status compares the router with the best baseline.", "mut",
-                14 if phone else 13.5)]
-    css = ".faintbar{fill:#9AA6B8}@media (prefers-color-scheme: dark){.faintbar{fill:#5B6880}}"
-    css += ".bar{transform-box:fill-box;transform-origin:0% 50%;animation:grow 1.1s cubic-bezier(.2,.7,.2,1) both}"
-    css += keyframes("grow", [(0, "transform:scaleX(0)"), (100, "transform:scaleX(1)")])
-    y0, delay, runs_per_cell, parts = 104, 0, set(), []
-    for heading, series, rows in sessions:
-        out.append(text(32, y0, f"{heading}: {status_summary(rows)} classes", "ink b", 16 if phone else 15))
-        ly = y0 + 28
-        lx = 32
-        for k, (_, name, cls) in enumerate(series):
-            if phone:
-                ly = y0 + 28 + k * 24
-            elif lx + 20 + width_of(name, 13) > w - 32:
-                lx, ly = 32, ly + 22
-            out.append(f'<rect x="{lx}" y="{ly - 10}" width="14" height="10" rx="3" class="{cls}"/>')
-            out.append(text(lx + 20, ly, name, "ink", 14 if phone else 13))
-            if not phone:
-                lx += 40 + width_of(name, 13)
-        n = len(series)
-        row_h = (n * bh + (n - 1) * gap) + (40 if phone else 22)
-        top = ly + (34 if phone else 30)
-        bottom = top + len(rows) * row_h - 10
-        for k in range(0, int(round(axis / 0.1)) + 1):
-            gx = bar_x + bar_w * (k * 0.1) / axis
-            out.append(f'<path d="M{gx:.1f} {top - 6}V{bottom}" class="ln" stroke-width="1"/>')
-            out.append(text(gx, bottom + 18, f"${k * 0.1:.2f}", "mono mut", 11.5, "middle"))
-        for r, (cls_name, vals, status) in enumerate(rows):
-            y = top + r * row_h
-            if phone:
-                out.append(text(32, y + 4, f"{cls_name}  {status}", "ink b", 15))
-                y += 14
-            else:
-                out.append(text(32, y + 16, cls_name, "ink b", 13.5))
-                out.append(text(32, y + 33, status, "mono mut", 11.5))
-                room("benchmark.svg: class name", 32 + width_of(cls_name, 13.5, bold=True), bar_x - 8)
-            for k, v in enumerate(vals):
-                by = y + k * (bh + gap)
-                solved, total, cost = v
-                runs_per_cell.add(total)
-                if cost is None:
-                    out.append(text(bar_x, by + bh - 1, f"none solved ({solved} of {total})", "mono mut", 11))
-                    continue
-                bw = max(2.0, bar_w * cost / axis)
-                out.append(f'<rect x="{bar_x}" y="{by}" width="{bw:.1f}" height="{bh}" rx="3" '
-                           f'class="{series[k][2]} bar" style="animation-delay:{delay * 0.04 + k * 0.05:.2f}s"/>')
-                out.append(text(bar_x + bw + 8, by + bh - 1.5, f"${cost:.4f} ({solved} of {total})", "mono mut",
-                                12.5 if phone else 11))
-            delay += 1
-            bits = [f"{series[k][1]} " + (f"${v[2]:.4f} ({v[0]} of {v[1]} solved)" if v[2] is not None
-                                          else f"none solved ({v[0]} of {v[1]})") for k, v in enumerate(vals)]
-            parts.append(f"{heading}, {cls_name}, {status}: " + ", ".join(bits))
-        y0 = bottom + 80
-    each = " or ".join(str(n) for n in sorted(runs_per_cell))
-    note = (f"{each} runs per class and configuration. PASS means cheaper per solved task than the best baseline, "
-            f"with the whole 95% interval of the difference below zero, at a pass rate not behind it. Source: docs/BENCHMARKS.md, "
-            f"{runs} runs on {date}.")
-    size = 14 if phone else 12.5
-    note_lines = wrap(note, size, w - 64)
-    out.append(lines(32, y0 - 30, note_lines, "mut", size, round(size * 1.45)))
-    h = int(y0 - 30 + len(note_lines) * round(size * 1.45) + 24)
-    out[0] = frame(w, h)
-    title = "Cost per solved task on Opus 5.5 and Sonnet 5.5 sessions, by task class"
-    label = ("Cost per solved task, from docs/BENCHMARKS.md, lower is cheaper. " + "; ".join(parts) + ".")
-    return svg(w, h, title, label, "".join(out), css)
-
-
 # ---------------------------------------------------------------- social preview
 
 def social_preview() -> str:
@@ -1157,11 +1034,11 @@ def social_preview() -> str:
             + text(74, 232, "CLAUDE CODE PLUGIN", "mono rt b", 18, extra=' letter-spacing="2.4"')
             + "".join(text(72, 300 + i * 56, s, "ink b", 46) for i, s in
                       enumerate(["Every agent on the", "cheapest model that", "should do the job."]))
-            + lines(73, 488, ["A redo climbs one level. Subagents,", "teammates and workflow stages."], "mut", 24, 36)
+            + lines(73, 488, ["For subagents, teammates and workflow", "agents. A call sent again climbs a level."], "mut", 24, 36)
             + text(74, 590, "github.com/crisnahine/claude-code-model-router", "mono mut", 18)
             + panel)
     label = ("Model Router, a Claude Code plugin: every agent on the cheapest model that should do the job, and a "
-             "redo climbs one level.")
+             "call Claude sends again climbs one level.")
     return svg(w, h, "Model Router social preview", label, body, theme="dark")
 
 
@@ -1172,17 +1049,6 @@ FIGURE_PAGES = ("README.md", "docs/ARCHITECTURE.md", "docs/FAQ.md", "docs/RELEAS
 BENCH_SPAN = re.compile(r"<!-- bench:([\w.-]+) -->(.*?)<!-- /bench -->")
 SESSION_NAMES = {"claude-opus-5-5": "opus", "sonnet": "sonnet"}
 CLASS_WORDS = {"security-review": "security review", "root-cause": "root cause"}
-BENCH_ALT = (
-    "Cost per solved task by task class, from docs/BENCHMARKS.md, {per_cell} runs per class and configuration. "
-    "On an Opus 5.5 session the router cost less than Claude Code's defaults in {opus.below.defaults} classes, "
-    "for example bugfix {opus.cell.bugfix.router} against {opus.cell.bugfix.defaults}, but more than the "
-    "cheapest baseline in {opus.status.FAIL} of {opus.classes} (FAIL): opusplan, which runs Sonnet throughout when "
-    "headless, in {opus.best_count.opusplan} classes, and every subagent on Haiku in {opus.best.haiku} and "
-    "{opus.best.haiku-high}, for example bugfix {opus.cell.bugfix.router} against "
-    "{opus.cell.bugfix.opusplan} for opusplan. On a Sonnet session the router is cheapest in {sonnet.status.PASS} of "
-    "{sonnet.classes} classes (PASS) and costs more than the best baseline in {sonnet.status.FAIL} (FAIL), from "
-    "{sonnet.behind.min}% more in {sonnet.behind.min_class} to {sonnet.behind.max}% more in {sonnet.behind.max_class}. "
-    "A class with too few runs is PARTIAL.")
 
 
 def class_word(k: str) -> str:
@@ -1283,14 +1149,6 @@ def bench_figures(data: dict) -> dict:
     return f
 
 
-def fill(template: str, figures: dict, where: str) -> str:
-    def one(m):
-        if m.group(1) not in figures:
-            raise SystemExit(f"{where}: unknown benchmark figure {m.group(1)}")
-        return figures[m.group(1)]
-    return re.sub(r"\{([\w.-]+)\}", one, template)
-
-
 def with_figures(path: str, text: str, figures: dict) -> str:
     def one(m):
         if m.group(1) not in figures:
@@ -1304,10 +1162,6 @@ def img_alt(page: str, name: str, alt: str) -> str:
     if '"' in alt:
         raise SystemExit(f"{name}: its label can't carry a double quote")
     return re.sub(rf'({re.escape(name)}"[^>]*? alt=")[^"]*"', lambda m: m.group(1) + esc(alt) + '"', page)
-
-
-def bench_alt(page: str, figures: dict) -> str:
-    return img_alt(page, "benchmark.svg", fill(BENCH_ALT, figures, "benchmark figure alt text"))
 
 
 # ---------------------------------------------------------------- the site
@@ -1355,8 +1209,8 @@ def site_faq_ld(faq: str) -> str:
     data = {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
         {"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": md_plain(a)}}
         for q, a in faq_entries(faq)]}
-    return (FAQ_LD[0] + '\n<script type="application/ld+json">\n' + json.dumps(data, indent=2, ensure_ascii=False)
-            + "\n</script>\n" + FAQ_LD[1])
+    body = json.dumps(data, indent=2, ensure_ascii=False).replace("</", "<\\/")  # an answer can't close the script
+    return FAQ_LD[0] + '\n<script type="application/ld+json">\n' + body + "\n</script>\n" + FAQ_LD[1]
 
 
 def between(current: str, marks: tuple, body: str, where: str) -> str:
@@ -1367,7 +1221,7 @@ def between(current: str, marks: tuple, body: str, where: str) -> str:
     return before + body + after
 
 
-def site_files(faq: str, figures: dict, texts: dict, v: str, day: str) -> dict:
+def site_files(faq: str, figures: dict, texts: dict, v: str, day: str, floor: str) -> dict:
     if "site/index.html" not in texts:
         return {}
     page = texts["site/index.html"]
@@ -1384,12 +1238,19 @@ def site_files(faq: str, figures: dict, texts: dict, v: str, day: str) -> dict:
         page = head + sep + tail.replace(old, url)
     page = between(page, FAQ_HTML, site_faq_html(faq), "site/index.html")
     page = between(page, FAQ_LD, site_faq_ld(faq), "site/index.html")
-    page = re.sub(r'"softwareVersion": "[^"]*"', f'"softwareVersion": "{v}"', page)
     page = badge_alt(page, v)
-    page = bench_alt(with_figures("site/index.html", page, figures), figures)
-    page = re.sub(r'"datePublished": "[^"]*"', f'"datePublished": "{day}"', page)
-    page = re.sub(r'Version [^,]+, released <time datetime="[^"]*">[^<]*</time>',
-                  f'Version {v}, released <time datetime="{day}">{day}</time>', page)
+    page = with_figures("site/index.html", page, figures)
+    ladder = "Five levels: " + ", ".join(f"{lv} on {model} at {effort}" for lv, model, effort, *_ in LADDER)
+    for pattern, value in ((r'"softwareVersion": "[^"]*"', f'"softwareVersion": "{v}"'),
+                           (r'"dateModified": "[^"]*"', f'"dateModified": "{day}"'),
+                           (r'"softwareRequirements": "Claude Code [^ ]+ or later;',
+                            f'"softwareRequirements": "Claude Code {floor} or later;'),
+                           (r'"Five levels: [^"]*"', f'"{ladder}"'),
+                           (r'Version [^,]+, released <time datetime="[^"]*">[^<]*</time>',
+                            f'Version {v}, released <time datetime="{day}">{day}</time>')):
+        page, found = re.subn(pattern, lambda m: value, page)
+        if found != 1:
+            raise SystemExit(f"site/index.html: expected one match for {pattern}, found {found}")
     return {
         "site/index.html": page,
         "site/sitemap.xml": ('<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -1406,8 +1267,12 @@ def badge_alt(page: str, v: str) -> str:
     return re.sub(r'(badge-version\.svg"[^>]*? alt=")version [^"]*"', rf'\g<1>version {v}"', page)
 
 
+def manifest() -> dict:
+    return json.loads((ROOT / "plugins/model-router/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
+
+
 def version() -> str:
-    return json.loads((ROOT / "plugins/model-router/.claude-plugin/plugin.json").read_text(encoding="utf-8"))["version"]
+    return manifest()["version"]
 
 
 def release_date(v: str) -> str:
@@ -1447,16 +1312,17 @@ keywords:
 
 SITE_ASSETS = ["logo-mark.svg", "logo.svg", "routing-call.svg", "badge-version.svg", "badge-claude-code.svg",
                "badge-python.svg", "badge-license.svg", "ladder.svg", "redo-escalation.svg",
-               "two-paths.svg", "precedence.svg", "stop-checks.svg", "benchmark.svg", "benchmark-phone.svg",
-               "social-preview.png"]
+               "two-paths.svg", "precedence.svg", "stop-checks.svg", "social-preview.png"]
 
 
 @dataclasses.dataclass(frozen=True)
 class Snapshot:
-    """Everything `build` reads, taken once: the plugin's version and its release date, the shipped ladder, the
-    text of every page it rewrites, the page index and the benchmark figures from `analyze.figures`."""
+    """Everything `build` reads, taken once: the plugin's version, its release date and its Claude Code floor, the
+    shipped ladder, the text of every page it rewrites, the page index and the benchmark figures from
+    `analyze.figures`."""
     version: str
     released: str
+    claude_code: str
     ladder: dict
     texts: dict
     bench: dict
@@ -1469,7 +1335,7 @@ def snapshot() -> Snapshot:
     v = version()
     wanted = [*(p[0] for p in PAGES), "README.md", "site/index.html", "site/sitemap.xml"]
     return Snapshot(
-        version=v, released=release_date(v),
+        version=v, released=release_date(v), claude_code=manifest()["engines"]["claude-code"].removeprefix(">="),
         ladder=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
         texts={path: (ROOT / path).read_text(encoding="utf-8") for path in wanted if (ROOT / path).exists()},
         bench=analyze.figures(analyze.load(analyze.default_paths())))
@@ -1495,8 +1361,6 @@ def build(snap: Snapshot) -> dict:
     assets["two-paths.svg"] = diagram_two_paths()
     assets["precedence.svg"] = diagram_precedence()
     assets["stop-checks.svg"] = diagram_stop_checks()
-    assets["benchmark.svg"] = bench_chart(snap.bench)
-    assets["benchmark-phone.svg"] = bench_chart(snap.bench, phone=True)
     assets["social-preview.svg"] = social_preview()
     panel, css, ph = ladder_panel(1, 1, 518, prefix="c")
     assets["routing-call.svg"] = svg(520, round(ph) + 2, "One agent call, routed and redone", HERO_LABEL, panel, css)
@@ -1508,12 +1372,12 @@ def build(snap: Snapshot) -> dict:
             if path == "docs/README.md":
                 files[path] = with_cards(files[path], snap.pages)
     readme = badge_alt(snap.texts["README.md"], v)
-    files["README.md"] = img_alt(bench_alt(readme, figures), "headline.svg", headline_label())
+    files["README.md"] = img_alt(readme, "headline.svg", headline_label())
     for path in FIGURE_PAGES:
         if path in files:
             files[path] = with_figures(path, files[path], figures)
     files["CITATION.cff"] = citation(v, snap.released)
-    files.update(site_files(files.get("docs/FAQ.md", ""), figures, snap.texts, v, snap.released))
+    files.update(site_files(files.get("docs/FAQ.md", ""), figures, snap.texts, v, snap.released, snap.claude_code))
     return files
 
 
