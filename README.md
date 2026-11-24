@@ -41,7 +41,7 @@ Without it, a subagent that names no model runs on its conversation's model ([Cl
 - Sets the model and effort of every subagent, teammate and workflow agent as it starts. The agent the caller chose stays the same.
 - Runs a call one level higher when Claude redoes a weak result, and `/model-router:usage` counts the redos per level.
 - Asks once, before a turn ends, for the work's own check when project files changed and nothing checked them: tests for code, a recompute for figures, a reread for a document.
-- Logs what each turn cost at list price in `/model-router:usage`, and makes no network call of its own.
+- Shows in `/model-router:usage` what each subagent ran on and Claude Code's own cost estimate for it, and makes no network call of its own.
 
 ## Built on the Claude Code docs
 
@@ -125,7 +125,7 @@ The run measured the routing code at <!-- bench:opus.commit_code -->`780ee86`<!-
 | :- | :- |
 | `/model-router:route <task>` | Explains which model a task would get and why, and how to split it |
 | `/model-router:models [reset]` | Lists the models in use, what each runs as, and what is capped, unavailable or routed around. `reset` clears learned availability |
-| `/model-router:usage [days]` | Shows what ran where and what it cost at list price, over `days` (default 7) |
+| `/model-router:usage [days]` | Shows what ran where and Claude Code's cost estimate per subagent, over `days` (default 7) |
 
 The plugin also ships seven role agents for work no better-fitting agent covers: `model-router:scout`, `verifier`, `docs-researcher`, `implementer`, `architect`, `reviewer` and `deep-solver` ([what each is for](docs/GUIDE.md#role-agents)). Scripts can print the models and usage tables as JSON; the shapes are in the [guide](docs/GUIDE.md#commands).
 
@@ -141,7 +141,7 @@ Rules and extra models go in `~/.claude/model-router.json` (yours, applies every
 - It reads the brief's wording and the agent's name, never the code, so a level is an estimate. Claude can overrule it on any call, and a redo moves it up. It reads English: a brief in another script starts at standard.
 - It leaves forks alone, and agents whose definition it can't read, such as one defined on the command line.
 - It routes a new model family only once the registry has an entry for it, and does nothing when hooks are switched off.
-- Spend figures are list prices; your bill is in `/usage` and `/cost`.
+- Its dollar figures are Claude Code's estimate, not your bill, and on a subscription usage inside the plan isn't billed in dollars. The main conversation's cost is in `/usage`.
 
 [Every limit, and why](docs/GUIDE.md#what-it-cant-do).
 

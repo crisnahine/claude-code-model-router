@@ -600,8 +600,9 @@ LEDGER = [
     {"event": "spawn", "agent": "model-router:implementer", "level": "standard", "model": "sonnet",
      "effort": "medium", "escalated_from": None, "reason": "standard subtask"},
     {"event": "spawn", "agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"},
-    {"event": "usage", "agent_id": "a1", "cost_usd": 0.05}, {"event": "usage", "agent_id": "a2", "cost_usd": 0.01},
-    {"event": "usage", "agent_id": None, "cost_usd": 0.03}, {"event": "usage", "agent_id": "a1", "cost_usd": 0.02}]
+    {"event": "usage", "agent_id": "a1", "running": True, "cost_usd": 0.05},
+    {"event": "usage", "agent_id": "a2", "running": True, "cost_usd": 0.01},
+    {"event": "usage", "agent_id": "a1", "running": True, "cost_usd": 0.07}]  # a1's newer total holds its first turn
 AGENT_TYPES = {"a1": "model-router:implementer", "a2": "model-router:verifier"}
 
 
@@ -694,12 +695,13 @@ class Recorder(unittest.TestCase):
                 self.assertIsNone(run.ledger_rows(env))
 
     def test_ledger_rows_give_spend_by_agent_and_spawns(self):
-        self.assertEqual(run.spend_by_agent(LEDGER, AGENT_TYPES),
+        self.assertEqual(run.spend_by_agent(LEDGER, AGENT_TYPES, 0.11),
                          {"model-router:implementer": 0.07, "model-router:verifier": 0.01, "main": 0.03})
+        self.assertNotIn("main", run.spend_by_agent(LEDGER, AGENT_TYPES, None))  # the run's total is unknown
         spawned = run.spawns(LEDGER)
         self.assertIsNone(spawned[0]["escalated_from"])
         self.assertNotIn("escalated_from", spawned[1])
-        row = self.row({}, ledger=LEDGER, agent_types=AGENT_TYPES)
+        row = self.row({"total_cost_usd": 0.11}, ledger=LEDGER, agent_types=AGENT_TYPES)
         self.assertEqual(row["agent_costs"]["main"], 0.03)
         self.assertEqual(len(row["routed"]), 2)
         row = self.row({}, ledger=None)
@@ -1329,8 +1331,9 @@ data.mkdir(parents=True)
 rows = [{"event": "spawn", "agent": "model-router:implementer", "level": "standard", "model": "sonnet",
          "effort": "medium", "escalated_from": None, "reason": "standard subtask"},
         {"event": "spawn", "agent": "model-router:verifier", "level": "lookup", "model": "haiku", "effort": "low"},
-        {"event": "usage", "agent_id": "a1", "cost_usd": 0.05}, {"event": "usage", "agent_id": "a2", "cost_usd": 0.01},
-        {"event": "usage", "agent_id": None, "cost_usd": 0.03}, {"event": "usage", "agent_id": "a1", "cost_usd": 0.02}]
+        {"event": "usage", "agent_id": "a1", "running": True, "cost_usd": 0.05},
+        {"event": "usage", "agent_id": "a2", "running": True, "cost_usd": 0.01},
+        {"event": "usage", "agent_id": "a1", "running": True, "cost_usd": 0.07}]
 (data / "ledger.jsonl").write_text("\\n".join(json.dumps(r) for r in rows))
 folder = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(Path.cwd().resolve()))
 sub = folder / "s1" / "subagents"

@@ -6,7 +6,7 @@
   models     what each registry model really runs as, and what is unavailable
              (reset forgets learned availability; --json prints model-router.models/3)
   explain    what the router would make of a task: explain [--agent NAME] TEXT
-  usage      the ledger by agent and model: usage [DAYS] [--json for model-router.usage/1]
+  usage      the ledger by agent and model: usage [DAYS] [--json for model-router.usage/2]
 
 policy, models and explain take the plugin's options as flags, such as --max-tier=sonnet:
 skills pass them as ${user_config.KEY}, since the Bash tool doesn't carry CLAUDE_PLUGIN_OPTION_<KEY>.
@@ -85,7 +85,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd in hooks.HANDLERS:
         try:
             try:
-                hook_input = json.load(sys.stdin)
+                # Bytes: json detects UTF-8 itself, where the text stream would decode in the locale's code page.
+                hook_input = json.loads(sys.stdin.buffer.read())
             except ValueError:
                 hook_input = {}
             hook_input = _well_formed(hook_input)

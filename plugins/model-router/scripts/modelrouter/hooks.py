@@ -135,7 +135,7 @@ def post_agent(hook_input: dict) -> dict | None:
     agent_id = response.get("agentId")
     session_id = hook_input.get("session_id")
     outcome = _outcome("result", hook_input, snap.registry, ran_as=ran_as, ran_family=snap.registry.family(ran_as),
-                       forced=snap.options.force, status=response.get("status"), tokens=response.get("totalTokens"),
+                       forced=snap.options.force, status=response.get("status"),
                        launched=launched, agent_id=agent_id if launched and isinstance(agent_id, str) else None,
                        models_used=() if launched else tuple(calls.models_used(response)),
                        cut_off=not launched and calls.cut_off(response))

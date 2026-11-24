@@ -18,6 +18,8 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}, 
   const catches: Record<string, Hook> = {}
   const calls: Call[] = []
   const writes: [string, string][] = []
+  // What $.agent.list() and $.session.usage() answer; a test sets them.
+  const engine: { agents: object[]; rateLimits: object[] } = { agents: [], rateLimits: [] }
   const on = (event: string, ...rest: unknown[]) => {
     hooks[event] = rest.pop() as Hook
     if (rest.length) matchers[event] = rest[0]
@@ -41,6 +43,8 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}, 
     fs: {
       write: async (path: string, text: string) => { writes.push([path, text]) },
     },
+    agent: { list: async () => engine.agents },
+    session: { usage: async () => ({ startedAt: 0, context: {}, rateLimits: engine.rateLimits }) },
     process: {
       hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: 's1', CLAUDE_PLUGIN_DATA: '/tmp/x' }),
       run: async (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) => {
@@ -53,7 +57,7 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}, 
   }
   register(on as unknown as On, options)
   return {
-    hooks, matchers, catches, calls, writes, $,
+    hooks, matchers, catches, calls, writes, $, engine,
     toolCall: (e: object) => hooks['tool.call']!($, e, same),
     sessionStart: (e: object) => hooks['session.start']!($, e, same),
     spawn: (e: object, next: Hook = (x: object) => ({ ...x, agentId: 'a1' })) => hooks['agent.spawn']!($, e, next),
@@ -85,6 +89,7 @@ function spawnEvent(extra: object = {}) {
 const stepEvent = (extra: object) => ({ turnId: 't1', model: 'claude-opus-5-5', index: 0, messageCount: 1, ...extra })
 const completeEvent = (extra: object) => ({ turnId: 't1', answer: '', durationMs: 1, isAborted: false, reason: 'answer', ...extra })
 const PICK = { stdout: JSON.stringify({ model: 'haiku', effort: 'low', reason: 'lookup subtask' }) }
+const TURN = { model: 'claude-haiku-5-5', input_tokens: 10, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 
 test('a spawn passes the pick model to next', async () => {
   const mod = load({ 'mod-spawn': PICK })
@@ -320,7 +325,7 @@ test("a main-loop turn's start asks the runtime nothing, and its effort is left 
   const mod = load({}, {}, { policy: { deniedModels: ['opus'] } })
   const start = { turnId: 't1', text: 'fix the auth migration' }
   assert.equal(await mod.start(start), start)
-  assert.deepEqual(mod.calls, [])
+  assert.equal(mod.calls.length, 0)
   assert.equal((await mod.step(stepEvent({ effort: 'medium' }))).effort, 'medium')
 })
 
@@ -339,10 +344,10 @@ test('an Agent call is marked for the fallback only while the runtime answers', 
   await mod.toolCall(agentCall('toolu_2'))
   const run = mod.$.process.run
   mod.$.process.run = async () => { throw new Error('refused by another mod') }
-  await mod.complete(completeEvent({ usage: payloads['mod-usage'].usage }))
+  await mod.complete(completeEvent({ agentId: 'a1', usage: TURN }))
   await mod.toolCall(agentCall('toolu_3'))
   mod.$.process.run = run
-  await mod.complete(completeEvent({ usage: payloads['mod-usage'].usage }))
+  await mod.complete(completeEvent({ agentId: 'a1', usage: TURN }))
   await mod.toolCall(agentCall('toolu_4'))
   assert.deepEqual(mod.writes.map(([path]) => path), ['/tmp/x/mod-calls/toolu_1', '/tmp/x/mod-calls/toolu_4'])
 })
@@ -352,7 +357,7 @@ test('with no Python the launcher answers nothing, so no call is marked', async 
   const mod = load({ 'mod-start': none, 'mod-usage': none, 'mod-spawn': none })
   await mod.sessionStart({ source: 'startup' })
   await mod.toolCall(agentCall('toolu_1'))
-  await mod.complete(completeEvent({ usage: payloads['mod-usage'].usage }))
+  await mod.complete(completeEvent({ agentId: 'a1', usage: TURN }))
   await mod.spawn(spawnEvent({ tool_use_id: 'tu9' }))
   await mod.toolCall(agentCall('toolu_2'))
   assert.deepEqual(mod.writes, [])
@@ -411,19 +416,20 @@ test('a workflow agent stepping before its spawn resolves is only raised too', a
   assert.equal(sent.effort, 'max')
 })
 
-test('a turn sends each request\'s usage, so each is priced on its own', async () => {
+test("a subagent's turn end sends Claude Code's own figures for it, and the main loop's sends nothing", async () => {
   const mod = load()
-  const request = (input_tokens: number) => ({
-    model: 'claude-haiku-5-5', input_tokens, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
-  })
-  await mod.step(stepEvent({ agentId: 'a1' }), { usage: request(10) })
-  await mod.step(stepEvent({ agentId: 'a1', index: 1 }), { usage: null })
-  await mod.step(stepEvent({ turnId: 't2', agentId: 'a2' }), { usage: request(99) })
-  await mod.step(stepEvent({ agentId: 'a1', index: 2 }), { usage: request(20) })
-  await mod.complete(completeEvent({ agentId: 'a1', usage: request(30) }))
-  assert.deepEqual(mod.calls[0]!.stdin.requests, [request(10), request(20)])
-  await mod.complete(completeEvent({ agentId: 'a1', usage: request(30) }))
-  assert.equal(mod.calls[1]!.stdin.requests, undefined)
+  const [opus, haiku] = payloads['mod-usage'].models
+  mod.engine.agents = [{ id: 'a1', type: 'Explore', usage: [opus, haiku], cost: { usd: 6 } }, { id: 'a2', type: 'x' }]
+  await mod.complete(completeEvent({ usage: TURN }))
+  assert.equal(mod.calls.length, 0)
+  await mod.complete(completeEvent({ agentId: 'a1', usage: TURN }))
+  mod.engine.rateLimits = [{ kind: 'spend_limit', percentUsed: 5 }]
+  await mod.complete(completeEvent({ agentId: 'a1', usage: TURN }))
+  mod.engine.rateLimits = [{ kind: 'five_hour', percentUsed: 5 }]
+  await mod.complete(completeEvent({ agentId: 'a1', usage: TURN }))
+  await mod.complete(completeEvent({ agentId: 'a2' })) // listed, with nothing counted yet
+  const sent = { session_id: 's1', agent_id: 'a1', subagent_type: 'Explore', models: [opus, haiku], cost: { usd: 6 } }
+  assert.deepEqual(mod.calls.map(c => c.stdin), [sent, sent, { ...sent, subscription: true }])
 })
 
 test('plugin options reach the CLI env', async () => {
@@ -452,7 +458,7 @@ test('a failing or garbled CLI leaves every event unchanged', async () => {
     for (const step of [stepEvent({ agentId: 'a1', effort: 'high' }), stepEvent({ effort: 'medium' })]) {
       assert.equal(await mod.step(step), step)
     }
-    const done = completeEvent({ usage: payloads['mod-usage'].usage })
+    const done = completeEvent({ agentId: 'a1', usage: TURN })
     assert.equal(await mod.complete(done), done)
     assert.equal(mod.calls.length, 3)
   }
@@ -461,7 +467,7 @@ test('a failing or garbled CLI leaves every event unchanged', async () => {
 test('a CLI that throws after next(e) ran does not run next again', async () => {
   const mod = load()
   mod.$.process.run = async () => { throw new Error('spawn failed') }
-  const events = [['session.start', { source: 'startup' }], ['turn.complete', completeEvent({ usage: payloads['mod-usage'].usage })]] as const
+  const events = [['session.start', { source: 'startup' }], ['turn.complete', completeEvent({ agentId: 'a1', usage: TURN })]] as const
   for (const [event, e] of events) {
     let runs = 0
     const next = (x: unknown) => { runs++; return x }
@@ -492,15 +498,18 @@ test('every hook falls back to next(e) when it throws', async () => {
   }
 })
 
-test("a workflow agent's usage names its type, and a subagent's doesn't", async () => {
+test("a workflow agent, which Claude Code doesn't list, sends its turn's tokens and the type it was spawned as", async () => {
   const mod = load({ 'mod-spawn': PICK })
-  const usage = payloads['mod-usage'].usage
+  mod.engine.agents = [{ id: 's1', type: 'general-purpose', usage: [TURN], cost: { usd: 1 } }]
   await mod.spawn(spawnEvent({ subagentType: 'workflow-subagent', workflow: { runId: 'wf_1', agentIndex: 1 } }), (x: object) => ({ ...x, agentId: 'w1' }))
   await mod.spawn(spawnEvent({ tool_use_id: 'tu2' }), (x: object) => ({ ...x, agentId: 's1' }))
-  await mod.complete(completeEvent({ turnId: 'tw', agentId: 'w1', usage }))
-  await mod.complete(completeEvent({ turnId: 'ts', agentId: 's1', usage }))
-  const sent = mod.calls.filter(c => c.command === 'mod-usage').map(c => c.stdin.subagent_type)
-  assert.deepEqual(sent, ['workflow-subagent', undefined])
+  await mod.complete(completeEvent({ turnId: 'tw', agentId: 'w1', usage: TURN }))
+  await mod.complete(completeEvent({ turnId: 'ts', agentId: 's1', usage: TURN }))
+  const sent = mod.calls.filter(c => c.command === 'mod-usage').map(c => c.stdin)
+  assert.deepEqual(sent, [
+    { session_id: 's1', agent_id: 'w1', subagent_type: 'workflow-subagent', usage: TURN },
+    { session_id: 's1', agent_id: 's1', subagent_type: 'general-purpose', models: [TURN], cost: { usd: 1 } },
+  ])
 })
 
 test('each payload the mod sends matches its fixture', async () => {
@@ -513,9 +522,8 @@ test('each payload the mod sends matches its fixture', async () => {
     parentAgentId: spawn.parent_agent_id, parentModel: spawn.parent_model, model: spawn.tool_input.model,
     subagentType: spawn.tool_input.subagent_type, prompt: spawn.tool_input.prompt, description: spawn.tool_input.description,
   }))
-  for (const [index, request] of usage.requests.entries()) {
-    await mod.step(stepEvent({ turnId: 't2', agentId: usage.agent_id, index }), { usage: request })
-  }
-  await mod.complete(completeEvent({ turnId: 't2', agentId: usage.agent_id, usage: usage.usage }))
+  mod.engine.agents = [{ id: usage.agent_id, type: usage.subagent_type, usage: usage.models, cost: usage.cost }]
+  mod.engine.rateLimits = [{ kind: 'seven_day', percentUsed: 1 }]
+  await mod.complete(completeEvent({ turnId: 't2', agentId: usage.agent_id, usage: usage.models[0] }))
   assert.deepEqual(Object.fromEntries(mod.calls.map(c => [c.command, c.stdin])), payloads)
 })

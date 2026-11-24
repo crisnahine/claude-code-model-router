@@ -1,4 +1,4 @@
-import type { EngineInterface, ModelEffort, PluginOptions, Register, SettingsSource, TurnUsage } from 'claude-code'
+import type { EngineInterface, ModelEffort, PluginOptions, Register, SettingsSource } from 'claude-code'
 
 // The engine's own events, forwarded to the Python runtime the settings hooks use, so
 // one router decides everything. agent.spawn sees every subagent, teammate and workflow
@@ -104,6 +104,23 @@ async function modelSettings($: EngineInterface, reads: Reads): Promise<Layers |
   }
 }
 
+// Claude Code's own figures for one subagent: its tokens per model and its estimate in dollars, both over
+// all of its turns so far. None for an agent the engine doesn't list, such as a workflow's. Never throws.
+async function agentUsage($: EngineInterface, id: string): Promise<object | undefined> {
+  try {
+    const agent = (await $.agent.list()).find(a => a.id === id)
+    if (!agent || (!agent.usage?.length && !agent.cost)) return undefined
+    // Plan windows appear on a subscription only; a gateway's spend_limit is not one.
+    const plan = (await $.session.usage()).rateLimits.some(r => r.kind === 'five_hour' || r.kind === 'seven_day')
+    return {
+      subagent_type: agent.type, models: agent.usage ?? [],
+      ...(agent.cost ? { cost: agent.cost } : {}), ...(plan ? { subscription: true } : {}),
+    }
+  } catch {
+    return undefined
+  }
+}
+
 function remember<V>(map: Map<string, V>, key: string, value: V): void {
   map.set(key, value)
   if (map.size > KEPT) map.delete(map.keys().next().value as string)
@@ -123,7 +140,7 @@ export const register: Register = (on, options) => {
   const marked = new Map<string, boolean>()
   const reads: Reads = { latest: {}, out: new Set(), slow: new Set() }
   const agentEffort = new Map<string, Want>()
-  // The type of each workflow agent this mod started, so its usage can name it: it has no Agent result.
+  // The type of each workflow agent this mod started, so its usage can name it: the engine doesn't list it.
   const agentType = new Map<string, string>()
   // The main conversation's level, from its latest request: an agent on its model runs at it unless told otherwise.
   let sessionEffort: string | undefined
@@ -133,8 +150,6 @@ export const register: Register = (on, options) => {
   // between their pick and next() returning, with the effort each got (null for none): the first request takes
   // that effort only while every one of them got the same, so it never runs at another spawn's.
   const inFlight = new Map<string, (Want | null)[]>()
-  // Each request's usage by turn: Haiku 5.5 bills a long prompt per request, not per turn.
-  const turnRequests = new Map<string, TurnUsage[]>()
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     const id = typeof e.tool_use_id === 'string' ? e.tool_use_id : ''
@@ -205,27 +220,18 @@ export const register: Register = (on, options) => {
     const want = e.agentId !== undefined ? agentEffort.get(e.agentId) : undefined
     const apply = want !== undefined && current !== undefined
       && (want.raiseOnly ? raises(want.effort, current) : want.effort !== current)
-    const result = yield* next(apply ? { ...e, effort: want.effort } : e)
-    if (result?.usage) {
-      const requests = turnRequests.get(e.turnId)
-      if (requests) requests.push(result.usage)
-      else remember(turnRequests, e.turnId, [result.usage])
-    }
-    return result
+    return yield* next(apply ? { ...e, effort: want.effort } : e)
   }).catch(async function* ($, e, next) {
     return yield* next(e)
   })
 
+  // The main loop's cost and tokens are Claude Code's own (/usage), so only a subagent's turn is recorded.
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    const requests = turnRequests.get(e.turnId)
-    turnRequests.delete(e.turnId)
-    const type = e.agentId !== undefined ? agentType.get(e.agentId) : undefined
-    if (e.usage) {
-      heard(await ask($, opts, 'mod-usage', {
-        agent_id: e.agentId, ...(type ? { subagent_type: type } : {}), usage: e.usage, ...(requests ? { requests } : {}),
-      }))
-    }
+    if (e.agentId === undefined) return done
+    const type = agentType.get(e.agentId)
+    const figures = await agentUsage($, e.agentId) ?? (e.usage ? { ...(type ? { subagent_type: type } : {}), usage: e.usage } : undefined)
+    if (figures) heard(await ask($, opts, 'mod-usage', { agent_id: e.agentId, ...figures }))
     return done
   }).catch(($, e, next) => next(e))
 }

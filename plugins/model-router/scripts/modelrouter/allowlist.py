@@ -3,7 +3,7 @@ maxEffortLevel sets for each.
 
 The mod reads each settings source from the engine and sends the keys that matter;
 without the mod, or for a source whose read failed, the settings files are read at their
-documented paths. The managed files are read either way and can only narrow what the engine
+documented paths. Where the engine sent no policy, the managed files can only narrow what it
 reports. The rules live here, in `from_layers`."""
 from __future__ import annotations
 
@@ -225,14 +225,21 @@ def _sent(session_id: str | None, sent: object) -> tuple[dict[str, dict] | None,
 
 def read(session_id: str | None, project: Path, sent: object = None) -> Allowlist:
     """Each source from the layers sent now, else the latest the session sent, else its
-    settings file. The managed files always apply as a floor. Reading stores nothing: the mod's
-    own hooks call `remember`."""
+    settings file. Without an engine policy the managed files apply as a floor. Reading stores
+    nothing: the mod's own hooks call `remember`."""
     layers, stored = _sent(session_id, sent)
     if layers is None:
         layers = stored
     files = file_layers(project)
     merged = {s: layers[s] if s in layers else files[s] for s in SOURCES}
-    return from_layers(merged, "engine" if layers else "files", floor=files["policy"])
+    floor = files["policy"]
+    if "policy" in layers:
+        # Under first-wins Claude Code can skip these files, and its answer is what runs. maxEffortLevel is read
+        # from every admin source, but a policyHelper's output replaces them all, so a reported cap stands alone
+        # (https://code.claude.com/docs/en/managed-settings.md).
+        own_cap = "maxEffortLevel" in layers["policy"]
+        floor = {k: v for k, v in floor.items() if k == "maxEffortLevel" and not own_cap}
+    return from_layers(merged, "engine" if layers else "files", floor=floor)
 
 
 def file_layers(project: Path) -> dict[str, dict]:

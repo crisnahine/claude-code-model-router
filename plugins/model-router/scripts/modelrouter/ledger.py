@@ -1,12 +1,12 @@
-"""The ledger: one writer per row kind, the turn Spend rule, and a read of the rows."""
+"""The ledger: one writer per row kind, and a read of the rows."""
 from __future__ import annotations
 
 import datetime as _dt
 import json
+import math
 from pathlib import Path
 
 from . import router, store
-from .registry import Registry
 
 
 def spawn(session_id: str | None, via: str, decision: router.Decision, description: object,
@@ -28,9 +28,9 @@ def spawn(session_id: str | None, via: str, decision: router.Decision, descripti
 
 
 def result(session_id: str | None, agent: str, asked: str | None, resolved_model: object, status: object,
-           total_tokens: object, models_used: list[str] | None = None) -> None:
+           models_used: list[str] | None = None) -> None:
     store.append_ledger({"event": "result", "session": session_id, "agent": agent, "asked": asked,
-                         "resolved_model": resolved_model, "status": status, "total_tokens": total_tokens,
+                         "resolved_model": resolved_model, "status": status,
                          **({"models_used": models_used} if models_used else {})})
 
 
@@ -42,34 +42,38 @@ def gate(session_id: str | None, kind: str) -> None:
     store.append_ledger({"event": "gate", "session": session_id, "kind": kind})
 
 
+TOKENS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+
+
 def _tokens(usage: dict) -> dict:
-    tokens = {k: int(usage.get(k) or 0) for k in
-              ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")}
-    if "ephemeral_1h_input_tokens" in usage:
-        tokens["ephemeral_1h_input_tokens"] = int(usage.get("ephemeral_1h_input_tokens") or 0)
-    return tokens
+    return {"model": usage["model"], **{k: int(store.stamp(usage.get(k))) for k in TOKENS}}
 
 
 def _usage(value: object) -> bool:
     return isinstance(value, dict) and isinstance(value.get("model"), str)
 
 
-def turn_cost(reg: Registry, usage: dict, requests: object) -> float | None:
-    """The turn's dollars: each request priced on its own model, None if any has no price.
-    Without requests the summed tokens are priced at the base rate."""
-    requests = [r for r in requests if _usage(r)] if isinstance(requests, list) else []
-    if not requests:
-        return reg.cost(usage["model"], _tokens(usage), whole_turn=True)
-    costs = [reg.cost(r["model"], _tokens(r)) for r in requests]
-    return None if None in costs else round(sum(costs), 6)
-
-
-def usage(reg: Registry, session_id: str | None, agent_id: object, usage: object, requests: object,
-          agent: str | None = None) -> None:
-    if not _usage(usage):
+def usage(session_id: str | None, agent_id: object, agent: str | None, models: object = None, cost: object = None,
+          subscription: bool = False, turn: object = None) -> None:
+    """One subagent turn's row. `models` and `cost` are Claude Code's figures for the agent so far, its
+    tokens per model and its dollar estimate, so the agent's newest row stands for all of its turns.
+    Without them `turn` is that turn's tokens alone: a workflow agent's, which Claude Code doesn't list."""
+    if not isinstance(agent_id, str) or not agent_id:
         return
-    store.append_ledger({"event": "usage", "session": session_id, "agent_id": agent_id, "model": usage["model"],
-                         **_tokens(usage), "cost_usd": turn_cost(reg, usage, requests), **({"agent": agent} if agent else {})})
+    listed = [_tokens(m) for m in models if _usage(m)] if isinstance(models, list) else []
+    cost = cost if isinstance(cost, dict) else {}
+    usd = cost.get("usd")
+    if listed or cost:
+        row = {"models": listed, "running": True,
+               "cost_usd": usd if isinstance(usd, (int, float)) and not isinstance(usd, bool) and math.isfinite(usd) else None,
+               **({"unknown_price": True} if cost.get("hasUnknownPrice") is True else {}),
+               **({"subscription": True} if subscription else {})}
+    elif _usage(turn):
+        row = {"models": [_tokens(turn)]}
+    else:
+        return
+    store.append_ledger({"event": "usage", "session": session_id, "agent_id": agent_id,
+                         **({"agent": agent} if agent else {}), **row})
 
 
 def read(days: int | None = None, path: Path | None = None) -> list[dict]:

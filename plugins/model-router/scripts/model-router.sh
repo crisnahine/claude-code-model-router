@@ -8,6 +8,7 @@
 # interpreter must never block a session, a tool call or a skill. The plugin's hooks are
 # then inactive, and skills say why. A hook's error exits 1, never 2: exit 2 blocks the tool
 # call, the prompt or the stop (https://code.claude.com/docs/en/hooks.md#exit-code-2-behavior-per-event).
+# -I: a repository's settings can set PYTHONPATH or PYTHONHOME for hooks, which must not load code here.
 dir=$(dirname "$0")
 hook=
 # The command is the first argument after --data-dir; a hook name later on, as in `explain ... stop`, is text.
@@ -22,10 +23,10 @@ case "$cmd" in
 esac
 for py in python3 python; do
   if command -v "$py" >/dev/null 2>&1; then
-    "$py" "$dir/model-router.py" "$@"
+    "$py" -I "$dir/model-router.py" "$@"
     code=$?
     [ "$code" -eq 0 ] && exit 0
-    if [ "$code" -ne 87 ] && "$py" -c 'import sys; sys.exit(sys.version_info < (3, 9))' >/dev/null 2>&1; then
+    if [ "$code" -ne 87 ] && "$py" -I -c 'import sys; sys.exit(sys.version_info < (3, 9))' >/dev/null 2>&1; then
       [ -n "$hook" ] && exit 1
       exit "$code"
     fi

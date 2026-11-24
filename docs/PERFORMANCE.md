@@ -15,7 +15,7 @@ python3 bench/overhead.py --runs 30 --calls 1000 --json # the same as JSON
 
 It uses throwaway folders, so it never touches your plugin state.
 
-Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330. The `user-prompt` row was rerun on 2026-11-25 on Claude Code 2.1.331, after the router stopped sizing up the request and its record kept only the prompt id, and the state size table the same day, after `mod.json` went and the options stopped being saved in `state.json`.
+Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330. The `user-prompt` row was rerun on 2026-11-25 on Claude Code 2.1.331, after the router stopped sizing up the request and its record kept only the prompt id, and the state size table the same day, on the code that also records Claude Code's own figures per subagent and sends each mod session's settings layers.
 
 ## Settings hooks
 
@@ -49,7 +49,7 @@ The mod (`hooks/router.ts`) asks the runtime through the same launcher, one run 
 | :- | :- | -: | -: | -: | -: |
 | `mod-start` | `session.start`, once per process | 183 | 197 | 54 | 64 |
 | `mod-spawn` | `agent.spawn`, before each agent starts | 187 | 197 | 58 | 70 |
-| `mod-usage` | `turn.complete`, after the turn, before the handler returns | 182 | 194 | 54 | 56 |
+| `mod-usage` | `turn.complete` of a subagent's turn, after the turn, before the handler returns | 182 | 194 | 54 | 56 |
 
 In process, loading the config, gathering the facts and running `router.decide` take 0.26 ms (p50) and 0.29 ms (p95). The mod's own handlers, timed in Node with the runtime's answer returned at once, take 0.001 to 0.004 ms (p50) and at most 0.005 ms (p95) for `agent.spawn`, `turn.start` and `turn.step`, so almost all of the time is starting Python. Not timed: before `mod-start` and `mod-spawn` the mod reads the five settings sources, waiting at most 2 seconds (`SETTINGS_MS` in `hooks/router.ts`) and never again for a source that took longer, and while its runtime answers its `tool.call` hook writes one empty mark file per `Agent` call. `turn.start` starts no Python.
 
@@ -83,20 +83,23 @@ Before is the code that also wrote each spawn's count and votes to `learned.json
 
 ## State size
 
-1,000 routed calls were simulated with the real hook functions, 20 per session, even sessions on the fallback path and odd ones on the mod path. One call in four is a background agent finished by `SubagentStop`, every call adds a usage row, every fifth an edit and every fiftieth a model error.
+1,000 routed calls were simulated with the real hook functions, 20 per session, even sessions on the fallback path and odd ones on the mod path, each mod session sending its own settings layers. One call in four is a background agent finished by `SubagentStop`, every call adds a usage row, every fifth an edit and every fiftieth a model error. Rerun 2026-11-25:
 
 | File | Bytes after 1,000 calls | Bounded | What bounds it |
 | :- | -: | :- | :- |
-| `ledger.jsonl` | 798,174 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
-| `routes.json` | 199,985 | yes | Sessions written in the last day (`calls.KEPT_FOR`), at most the 200 most recently written (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
-| `done.json` | 114,463 | yes | Same as `routes.json` |
-| `prompts.json` | 2,462 | yes | The 200 most recently written sessions |
-| `edits.json` | 3,111 | yes | Same |
-| `sessions.json` | 2,915 | yes | Same |
-| `launched.json` | 1,612 | yes | Same as `routes.json` |
-| `pending.json` | 810 | yes | The 200 most recently written sessions, 100 calls each |
+| `ledger.jsonl` | 833,890 | yes | Rows older than 30 days go once the oldest one is (`store.LEDGER_MAX_DAYS`), and it is halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the size cap after about 5,000 calls |
+| `routes.json` | 200,152 | yes | Sessions written in the last day (`calls.KEPT_FOR`), at most the 200 most recently written (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
+| `done.json` | 114,553 | yes | Same as `routes.json` |
+| `prompts.json` | 2,448 | yes | The 200 most recently written sessions |
+| `edits.json` | 3,110 | yes | Same |
+| `sessions.json` | 2,899 | yes | Same |
+| `allowlist.json` | 2,734 | yes | Same |
+| `launched.json` | 1,596 | yes | Same as `routes.json` |
+| `pending.json` | 805 | yes | The 200 most recently written sessions, 100 calls each |
 | `state.json` | 539 | yes | One health entry per model |
 
 The simulation calls the runtime directly, so it writes no `mod-calls/` marks. Each mark is an empty file that the call's `PreToolUse` hook removes, and `mod-start` clears any left for over a day.
 
-The "Bounded" column comes from a run of the script. The script lowers three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them in two rounds, the second with twice the calls, once with one call per session (`max(40, calls // 5)` sessions, then twice as many: 200, then 400 at `--calls 1000`) and once with one long session (`max(50, calls // 5)` calls, then twice as many). A file is bounded when its second-round peak is at most 25% plus 256 bytes above its first. Removing each trim in turn, rerun 2026-11-24 with `--calls 1000`, proved the check: without the session cap all seven per-session files report unbounded, without the per-session call cap `routes.json` and `done.json` do, and without the ledger's halving `ledger.jsonl` does.
+`locks.json` holds one entry per state file; the simulation doesn't write it, since one process never waits on a lock.
+
+The "Bounded" column comes from a run of the script. The script lowers three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them in two rounds, the second with twice the calls, once with one call per session (`max(40, calls // 5)` sessions, then twice as many: 200, then 400 at `--calls 1000`) and once with one long session (`max(50, calls // 5)` calls, then twice as many). A file is bounded when its second-round peak is at most 25% plus 256 bytes above its first. Removing each trim in turn, rerun 2026-11-24 with `--calls 1000`, proved the check, and the session cap again on 2026-11-25: without the session cap all eight per-session files report unbounded, without the per-session call cap `routes.json` and `done.json` do, and without the ledger's halving `ledger.jsonl` does.

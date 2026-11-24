@@ -65,7 +65,7 @@ class Registry:
     models: Mapping[str, Model]
     levels: Mapping[Level, LevelSpec]  # in level order; `needs` never falls as the level rises
     aliases: Mapping[str, str] = field(default_factory=dict)
-    prices: Mapping[str, Any] = field(default_factory=dict)
+    prices: Mapping[str, Any] = field(default_factory=dict)  # the shipped list prices, which the benchmark reads
     newest: Mapping[str, str] = field(default_factory=dict)
     older_aliases: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     crew: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
@@ -172,31 +172,11 @@ class Registry:
         return min(qualifying, key=lambda n: (cost(n), -speed(n)))
 
     def price(self, model_id: str) -> dict | None:
-        """List prices for a full model ID, or None for a version the table doesn't list.
-        A near match never counts: a new version is often priced differently."""
+        """List prices for a full model ID, or None for a version the table doesn't list. The router prices
+        nothing: the benchmark reads these. A near match never counts: a new version is often priced differently."""
         table = self.prices
         model_id = re.sub(r"-\d{8}$", "", (model_id or "").lower().split("[")[0])
         if model_id in table:
             return table[model_id]
         families = [k for k in table if k.endswith("-*") and model_id.startswith(k[:-1])]
         return table[max(families, key=len)] if families else None
-
-    def cost(self, model_id: str, tokens: dict, whole_turn: bool = False) -> float | None:
-        """USD for one request's tokens at list price, or None for a model with no price. A
-        whole turn's summed tokens can't say which request crossed a long-prompt threshold,
-        so they are priced at the base rate."""
-        rates = self.price(model_id)
-        if not rates:
-            return None
-        long = rates.get("long_prompt")
-        prompt = sum(tokens.get(k, 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
-        if not whole_turn and isinstance(long, dict) and prompt > long.get("over", float("inf")):
-            rates = long
-        # The rest of the writes count as five minutes.
-        hour = max(0, min(tokens.get("ephemeral_1h_input_tokens", 0), tokens.get("cache_creation_input_tokens", 0)))
-        total = (tokens.get("input_tokens", 0) * rates.get("input", 0)
-                 + tokens.get("output_tokens", 0) * rates.get("output", 0)
-                 + tokens.get("cache_read_input_tokens", 0) * rates.get("cache_read", 0)
-                 + (tokens.get("cache_creation_input_tokens", 0) - hour) * rates.get("cache_write", 0)
-                 + hour * rates.get("cache_write_1h", 2 * rates.get("input", 0)))
-        return round(total / 1_000_000, 6)

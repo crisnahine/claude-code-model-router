@@ -37,7 +37,8 @@ ROUTED_AROUND = "routed-around"  # ... and it is now routed around
 class Route:
     """Where one spawn went, written by `spawn.record` on either path. `sent` is the name or ID the
     path put on the call, a full ID where the alias lags; `was` is the model the call would have run on
-    untouched (the parent's, or the agent's pin); `rewrote` says the decision changed the call."""
+    untouched (the parent's, or the agent's pin); `rewrote` says the decision changed the call; `version`
+    is the exact model the caller or the agent named, when the call ran on it."""
     model: str | None
     sent: str | None
     level: Level | None
@@ -48,6 +49,7 @@ class Route:
     at: float = 0.0
     rewrote: bool = False
     was: str | None = None
+    version: str | None = None
 
     @property
     def leveled(self) -> bool:
@@ -80,7 +82,6 @@ class Outcome:
     ran_family: str | None = None
     forced: bool = False
     status: object = None
-    tokens: object = None
     launched: bool = False
     models_used: tuple = ()
     error: str = ""
@@ -161,13 +162,13 @@ def _route(record: object) -> Route | None:
                  source=_text(record.get("source")), path=_text(record.get("path")) or "",
                  prompt_id=_text(record.get("prompt_id")),
                  at=float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else 0.0,
-                 rewrote=record.get("rewrote") is True, was=_text(record.get("was")))
+                 rewrote=record.get("rewrote") is True, was=_text(record.get("was")), version=_text(record.get("version")))
 
 
 def _record(route: Route, key: str) -> dict:
     record = {"model": route.model, "sent": route.sent, "level": route.level.value if route.level else None,
               "effort": route.effort, "source": route.source, "path": route.path, "prompt_id": route.prompt_id,
-              "rewrote": route.rewrote or None, "was": route.was, "call": key}
+              "rewrote": route.rewrote or None, "was": route.was, "version": route.version, "call": key}
     return {k: v for k, v in record.items() if v is not None}
 
 
@@ -221,7 +222,7 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
     except OSError:
         pass
     ledger.result(session_id, outcome.agent, asked, outcome.ran_as, CUT_OFF if outcome.cut_off else outcome.status,
-                  outcome.tokens, models_used=list(outcome.models_used) or None)
+                  models_used=list(outcome.models_used) or None)
     return Returned(asked, route, finished, SWAPPED if swapped else None)
 
 
@@ -242,6 +243,10 @@ def _keep_done(done: dict, key: str, task: object, run: dict) -> None:
 
 def _failed(session_id: str | None, outcome: Outcome, route: Route | None, asked: str | None) -> Returned:
     if not asked or not health.is_model_error(outcome.error, outcome.interrupted):
+        return Returned(asked, route, False)
+    if route and route.version:
+        # The caller or the agent chose this exact model, so its failure says nothing of the family.
+        ledger.model_error(session_id, outcome.agent, route.version)
         return Returned(asked, route, False)
     sent = route.sent if route and route.model == asked else None
     if sent and sent.lower() != asked:
