@@ -1,7 +1,8 @@
 """Pass when test_migrate.py, unchanged, passes and ledger.migrate_v3.migrate, run in a child on a generated export
 that holds every v2 quirk many times over (revisions out of file order, repeated revisions, legacy kind codes,
-timestamps without an offset, null and foreign currencies, currencies without two decimals, amounts written
-without their trailing zeros), writes exactly the v3 file the formats describe and returns its record count."""
+timestamps without an offset, null and foreign currencies, every currency money.py gives other than two decimals,
+amounts written without their trailing zeros), writes exactly the v3 file the formats describe and returns its
+record count, and migrates an export of 80,000 lines in a few seconds."""
 import datetime
 import importlib.util
 import json
@@ -18,8 +19,12 @@ _spec.loader.exec_module(passcheck)
 HERE = Path(__file__).resolve().parent
 ACCOUNTS = {"acc-ny": ("USD", "-05:00"), "acc-ber": ("EUR", "+01:00"), "acc-tok": ("JPY", "+09:00"),
             "acc-kwi": ("KWD", "+03:00"), "acc-del": ("INR", "+05:30"), "acc-sp": ("BRL", "-03:00"),
-            "acc-lon": ("GBP", "+00:00")}
-PLACES = {"JPY": 0, "KWD": 3}
+            "acc-lon": ("GBP", "+00:00"), "acc-seo": ("KRW", "+09:00")}
+# Every currency ledger/money.py lists, so a table copied from FORMAT_V3's two examples is off by 100 or 1000.
+PLACES = {"JPY": 0, "KRW": 0, "CLP": 0, "KWD": 3, "BHD": 3, "OMR": 3}
+FOREIGN = sorted({c for c, _ in ACCOUNTS.values()} | set(PLACES))
+BIG = 60_000
+BIG_SECONDS = 15
 LEGACY = {"credit": "CR", "debit": "DR", "chargeback": "CB"}
 SIGN = {"credit": 1, "refund": 1, "debit": -1, "fee": -1, "chargeback": -1}
 FIELDS = ("source_rev", "type", "amount_minor", "currency", "posted_at", "memo", "account")
@@ -45,7 +50,7 @@ def entry(rng, n, account):
     currency, utc = ACCOUNTS[account]
     kind = rng.choice(["credit", "debit", "fee", "refund", "chargeback"])
     roll = rng.random()
-    own = currency if roll > 0.07 else rng.choice([c for c, _ in ACCOUNTS.values() if c != currency])
+    own = currency if roll > 0.12 else rng.choice([c for c in FOREIGN if c != currency])
     local = datetime.datetime(2020, 12, 31, 18) + datetime.timedelta(minutes=rng.randint(0, 60 * 24 * 20))
     if rng.random() < 0.25:
         stamp = local.strftime("%Y-%m-%dT%H:%M:%S")
@@ -66,11 +71,11 @@ def edited(rng, record, rev):
     return new
 
 
-def generate(seed):
+def generate(seed, count=240):
     """v2 lines in file order: each entry once, or as one of the ways retries and edits repeat it."""
     rng = random.Random(seed)
     groups = []
-    for n in range(1, 241):
+    for n in range(1, count + 1):
         first = entry(rng, n, rng.choice(sorted(ACCOUNTS)))
         shape = rng.random()
         if shape < 0.06:
@@ -87,7 +92,7 @@ def generate(seed):
             group = [first]
         groups.append(group)
     # Same account and posted_at as entry 1, with ids that sort one way as text and the other way as numbers.
-    for n in (2000, 300):
+    for n in (2000, 300) if count < 300 else ():
         groups.append([dict(groups[0][0], id=f"t-{n}", rev=1, memo="same time")])
     lines = [record for group in groups for record in group]
     rng.shuffle(lines)
@@ -173,9 +178,24 @@ def wrong(got, want):
 work = Path(sys.argv[1])
 if not passcheck.tests_pass(work, HERE / "repo", "test_migrate.py"):
     passcheck.finish(False, "test_migrate.py doesn't pass unchanged")
+accounts = json.dumps({a: {"name": a.upper(), "currency": c, "utc_offset": o} for a, (c, o) in ACCOUNTS.items()})
+
+
+def migrated(lines, timeout=45):
+    return passcheck.probe(work, HERE / "probe.py", {"v2": "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in lines),
+                                                    "accounts": accounts}, timeout=timeout)
+
+
 lines = generate(23)
-accounts = {a: {"name": a.upper(), "currency": c, "utc_offset": o} for a, (c, o) in ACCOUNTS.items()}
-got = passcheck.probe(work, HERE / "probe.py", {"v2": "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in lines),
-                                               "accounts": json.dumps(accounts)})
+missing = set(PLACES) - {r["currency"] or ACCOUNTS[r["account"]][0] for r in lines}
+if missing:
+    raise RuntimeError(f"the generated export has no entry in {sorted(missing)}")
+reason = wrong(migrated(lines), reference(lines))
+if reason:
+    passcheck.finish(False, reason[:300])
+lines = generate(29, BIG)
+got = migrated(lines, BIG_SECONDS)
+if got is None:
+    passcheck.finish(False, f"too slow: {len(lines):,} lines took more than {BIG_SECONDS} seconds")
 reason = wrong(got, reference(lines))
-passcheck.finish(reason is None, (reason or "")[:300])
+passcheck.finish(reason is None, f"on {len(lines):,} lines, {reason}"[:300])

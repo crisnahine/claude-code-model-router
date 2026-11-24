@@ -15,8 +15,70 @@ passcheck = importlib.util.module_from_spec(_spec)
 sys.modules["passcheck"] = passcheck
 _spec.loader.exec_module(passcheck)
 
+# Set before the work dir's code is imported, so its imports write no bytecode the hook would count.
+sys.dont_write_bytecode = True
 passcheck.use_work(Path(sys.argv[1]))
 payload = json.load(sys.stdin)
+# event: (the positions of the paths it writes, the positions of its dir_fd arguments)
+WRITES = {"os.mkdir": ((0,), (2,)), "os.rmdir": ((0,), (1,)), "os.remove": ((0,), (1,)), "os.symlink": ((1,), (2,)),
+          "os.link": ((1,), (2, 3)), "os.rename": ((0, 1), (2, 3)), "os.chmod": ((0,), (2,)),
+          "os.chown": ((0,), (3,)), "os.utime": ((0,), (3,)), "os.truncate": ((0,), ()), "os.mkfifo": ((0,), (2,)),
+          "os.mknod": ((0,), (3,)), "shutil.rmtree": ((0,), (1,))}
+FOLLOWED = {"os.chmod", "os.chown", "os.utime", "os.truncate"}
+OPEN_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+
+
+def landing(path, follow):
+    """Where a write to path really lands, following the links already on disk."""
+    path = os.path.abspath(os.fsdecode(path))
+    if follow:
+        return os.path.realpath(path)
+    return os.path.join(os.path.realpath(os.path.dirname(path)), os.path.basename(path))
+
+
+def watcher():
+    """An audit hook that records each write the task code makes outside the folder it was given, even one it
+    removes again before it returns, and a function that sets that folder (None stops recording)."""
+    state = {"top": None, "seen": []}
+
+    def hook(event, args):
+        top = state["top"]
+        if top is None:
+            return
+        try:
+            places = landings(event, args)
+        except Exception:
+            places = ["?"]
+        for place in places:
+            if not (place == top or place.startswith(top + os.sep)):
+                state["seen"].append(f"{event} {os.path.relpath(place, top) if place != '?' else args!r}"[:200])
+
+    def landings(event, args):
+        if event == "open":
+            path, _, flags = args
+            if isinstance(path, int) or not flags & OPEN_FLAGS:
+                return []
+            return [landing(path, not flags & os.O_NOFOLLOW)]
+        if event in WRITES:
+            at, fds = WRITES[event]
+            # shortcut: a write relative to a dir_fd isn't checked; no extractor here works that way.
+            if any(n < len(args) and isinstance(args[n], int) and args[n] >= 0 for n in fds):
+                return []
+            if any(isinstance(args[n], int) for n in at):
+                return []
+            return [landing(args[n], event in FOLLOWED) for n in at]
+        return []
+
+    def watch(top):
+        state["top"] = top and os.path.realpath(top)
+        seen, state["seen"] = state["seen"], []
+        return seen
+
+    sys.addaudithook(hook)
+    return watch
+
+
+watch = watcher()
 TYPES = {"dir": (tarfile.DIRTYPE, 0o755), "link": (tarfile.SYMTYPE, 0o777), "hard": (tarfile.LNKTYPE, 0o644),
          "fifo": (tarfile.FIFOTYPE, 0o644)}
 
@@ -63,15 +125,21 @@ def run(case, scratch):
     try:
         if case["via"] == "extract":
             os.mkdir(os.path.join(base, "dest"))
+            watch(os.path.join(base, "dest"))
             importlib.import_module("archive.extract").safe_extract(tar, os.path.join(base, "dest"))
         elif case["via"] == "install":
             os.mkdir(os.path.join(base, "plugins"))
+            named = [json.loads(m[2])["name"] for m in case["members"] if m[:2] == ["file", "plugin.json"]]
+            watch(os.path.join(base, "plugins", *named[:1]))
             importlib.import_module("plugins.installer").install_bundle(tar, os.path.join(base, "plugins"))
         else:
+            watch(os.path.join(base, "restored"))
             importlib.import_module("backups.restore").restore_backup(tar, os.path.join(base, "restored"))
     except Exception as e:
         error = type(e).__name__
-    return {"error": error, "tree": tree(box)}
+    finally:
+        outside = watch(None)
+    return {"error": error, "tree": tree(box), "outside": outside}
 
 
 scratch = tempfile.mkdtemp()

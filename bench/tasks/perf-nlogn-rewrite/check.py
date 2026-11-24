@@ -1,7 +1,7 @@
 """Pass when reports.render, run in a child, prints byte for byte what the shipped code prints on awkward inputs
 (ties, regions with no sales, spellings that casefold together, decomposed accents, half cents, reused ids),
 builds the report for 20,000 rows in a few seconds, keeps test_report.py passing unchanged, and builds the right
-report for 200,000 rows in at most 10 seconds."""
+report for 200,000 rows, with every awkward row above spread through them, in at most 10 seconds."""
 import csv
 import datetime
 import hashlib
@@ -113,6 +113,27 @@ def big(rows, seed):
         lines.append(f"T{n},2024-05-{rng.randint(1, 31):02d},{rng.choice('NQEIS')},{rng.choice(customers)},"
                      f"{rng.choice(products)},{amount}\n")
     return HEADER + "".join(lines)
+
+
+def with_edges(text, seed):
+    """text with the rows of every hand-made and mixed case spread through it in order, under ids of their own."""
+    rng = random.Random(seed)
+    lines = text.splitlines(True)
+    extras = []
+    for n, (_, _, case) in enumerate(CASES):
+        for record in list(csv.reader(io.StringIO(case, newline="")))[1:]:
+            if record:
+                record[0] = record[0].replace("T", f"C{n}T", 1)
+                out = io.StringIO()
+                csv.writer(out, lineterminator="\n").writerow(record)
+                extras.append(out.getvalue())
+    slots = sorted(rng.randrange(1, len(lines) + 1) for _ in extras)
+    merged, last = [], 0
+    for slot, extra in zip(slots, extras):
+        merged += lines[last:slot]
+        merged.append(extra)
+        last = slot
+    return "".join(merged + lines[last:])
 
 
 def clean(text):
@@ -247,7 +268,7 @@ gate = passcheck.probe(work, PROBE, {"cases": [{"sales": big(20_000, 5), "region
                        timeout=4)
 if not gate:
     passcheck.finish(False, "too slow: 20,000 rows took more than 4 seconds")
-text = big(200_000, 11)
+text = with_edges(big(200_000, 11), 13)
 full = passcheck.probe(work, PROBE, {"cases": [{"sales": text, "regions": REGIONS}], "digest": True},
                        timeout=int(BUDGET) + 5)
 if not full:

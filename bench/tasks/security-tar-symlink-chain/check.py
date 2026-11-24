@@ -1,6 +1,7 @@
 """Pass when test_extract.py, unchanged, passes and, run in a child, safe_extract and both of its callers refuse
 every symlink chain below before writing anything (each one escapes the shipped checks), while normal archives
-with links still extract exactly as they are."""
+with links still extract exactly as they are. An audit hook in the probe sees every write, so one made outside the
+folder and removed again before the call returns still fails."""
 import hashlib
 import importlib.util
 import json
@@ -121,6 +122,8 @@ def wrong(results):
             return f"{name}: raised {got['error']}, expected {REFUSED[via]}"
         if diff:
             return f"{name}: refused, but left {', '.join(diff[:3])} changed"
+        if got.get("outside"):
+            return f"{name}: refused, but first wrote outside the folder it was given ({', '.join(got['outside'][:2])})"
     for name, via, members in NORMAL:
         got = results.get(name) or {}
         if got.get("error") is not None or not isinstance(got.get("tree"), dict):
@@ -129,6 +132,8 @@ def wrong(results):
         diff = changes(got["tree"], want)
         if diff:
             return f"{name}: {diff[0]} is {got['tree'].get(diff[0])}, expected {want.get(diff[0])}"
+        if got.get("outside"):
+            return f"{name}: wrote outside the folder it was given ({', '.join(got['outside'][:2])})"
     return None
 
 
