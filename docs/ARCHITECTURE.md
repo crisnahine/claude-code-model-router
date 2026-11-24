@@ -162,7 +162,7 @@ A mod could send the main loop's requests to another model, and the first probe 
 
 `UserPromptSubmit` records the `prompt_id` of the person's request (`request.start`), which redo bookkeeping reads to tell one request from the next. `intake.py` decides whether a prompt is the person's, so a delivered message never replaces the record or adds a note. Not the person's: text framed as "Another Claude session sent a message:" over a `<teammate-message>` or `<cross-session-message>`; text that opens with a framing tag Claude Code adds (`<task-notification>`, `<command-...>`, `<bash-...>`, `<local-command-...>`, `<system-reminder>`); and text that is nothing but elements with hyphenated tag names, as every framing seen so far has. A request that opens with its own tag (`<button> does nothing on Safari`) or is written in XML tags (`<task>...</task>`) is the person's.
 
-When the request names a model ("use opus"), the note says an Agent call with that `model` runs on it, within the user's `max_tier` when it is above the cap, or on the closest model this setup allows when `availableModels`, `deniedModels` or an outage rules it out. Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` Claude can't pass a model (https://code.claude.com/docs/en/sub-agents.md#run-every-subagent-on-one-model), so there is no note. Any other prompt gets no note and costs no extra tokens.
+When the request names a model ("use opus"), the note says an Agent call with that `model` runs on it, within the user's `max_tier` when it is above the cap, or on the closest model this setup allows when `availableModels`, `deniedModels` or an outage rules it out. Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` Claude can't pass a model (https://code.claude.com/docs/en/sub-agents.md#run-every-subagent-on-one-model), so there is no note, nor when no registry model is usable here, since Claude Code's allowlist then decides. Any other prompt gets no note and costs no extra tokens.
 
 The `Stop` check ([Guide](GUIDE.md#the-check-before-a-turn-ends)) asks once per batch of edits. `verify_gate` asks when code in the project (under `cwd` or `CLAUDE_PROJECT_DIR`, prose files such as `.md` and `.txt` aside) changed and, after the last edit, no check command ran and no verifier or reviewer is still running. A command is split at `&&`, `||`, `;`, `|` and newlines, even inside quotes, and a part counts when it names a test, lint, type-check or build tool and doesn't start with a word that only installs, finds, reads or mentions one (`gates.is_check`): `cd api && pytest` counts, `pip install pytest` doesn't. A subagent's commands count too, read from the transcript `SubagentStop` names (`agent_transcript_path`).
 
@@ -321,7 +321,7 @@ Plugin options have no version key, since `userConfig` has Claude Code's shape (
 
 ## Verified live
 
-Records of what ran. The ladder has changed since some of them (see [The ladder](#the-ladder)): the lookup agents then ran at `low` and now run at `medium`, and Sonnet at `high` or Opus at `xhigh` describes that day's ladder.
+Records of what ran. The ladder has changed since some of them (see [The ladder](#the-ladder)): the lookup agents then ran at `low` and now run at `medium`, and Sonnet at `high` or Opus at `xhigh` describes that day's ladder. Every run here predates the removal of the request profile and the main-loop effort, so a main turn that was raised, or a turn's level, is behavior the router no longer has.
 
 Claude Code 2.1.330, plugin from disk, headless and interactive auto mode:
 

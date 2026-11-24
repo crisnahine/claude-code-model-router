@@ -89,13 +89,14 @@ def user_prompt(hook_input: dict) -> dict | None:
         return None  # a task notification or a delivered message continues the user's request
     wanted = request.named_model(reg, prompt)
     request.start(hook_input.get("session_id"), prompt_id=hook_input.get("prompt_id"))
-    if not wanted or options.mode != "auto" or options.force:
-        return None
+    if not wanted or options.mode != "auto" or options.force or not snap.usable:
+        return None  # with no registry model usable, Claude Code's allowlist decides where the call runs
     final = reg.clamp(wanted, snap.usable)
     if final == wanted:
         runs = "runs on it, and Model Router keeps it"
     elif options.cap and reg.stronger(wanted, options.cap):
-        runs = f"runs within the cap the user set, {options.cap}"
+        runs = (f"runs within the cap the user set, {options.cap}" if final == options.cap
+                else f"runs on {final}, within the cap the user set ({options.cap})")
     else:
         runs = f"runs on {final}, since {wanted} isn't available here"
     return _context("UserPromptSubmit", f"The request mentions the {wanted} model. If it asks for that model, an "

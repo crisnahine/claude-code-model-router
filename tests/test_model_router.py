@@ -3461,6 +3461,19 @@ class Hooks(Sandbox):
         self.assertNotIn("keeps it", text)
         self.assertEqual(self.decide("general-purpose", prompt, model="opus")["model"], "sonnet")
 
+    def test_a_named_model_note_names_where_the_call_runs_or_says_nothing(self):
+        prompt = "use opus to review the auth module"
+        self.options(max_tier="sonnet")
+        self.route_around("sonnet")
+        text = self.text(hooks.user_prompt({"session_id": "s1", "prompt": prompt}))
+        self.assertIn('model: "opus" runs on haiku, within the cap the user set (sonnet)', text)
+        self.assertEqual(self.decide("general-purpose", prompt, model="opus")["model"], "haiku")
+        # No registry model left: Claude Code's allowlist decides, so the router promises nothing.
+        self.options(max_tier="")
+        self.managed.write_text(json.dumps({"availableModels": ["claude-3-x"]}))
+        self.assertIsNone(hooks.user_prompt({"session_id": "s1", "prompt": prompt, "prompt_id": "p2"}))
+        self.assertEqual(request.load("s1").prompt_id, "p2")
+
     def test_user_prompt_records_the_request_and_says_nothing_unless_it_names_a_model(self):
         self.session_on("claude-haiku-5-5")
         with mock.patch.object(session, "model", side_effect=AssertionError("reads no session model")), \

@@ -135,7 +135,7 @@ The findings above were written on 2026-11-23 against the settings of that day. 
 - **Effort is set on a routed call** unless the caller, the agent or the user chose one, the call names its own model, or `priority` is `fast` (`router.decide`, `ladder.effort`), and never below the session's own effort on the session's model (`router._session_floor`).
 - **No level moves on its own.** `learn.py`, which raised a level after enough redos, was removed. A redo climbs for that call only, `/model-router:usage` counts redos by level, and the user raises a level under `levels` in `model-router.json`.
 - **The redo climbs.** `router.decide` moves a redone call one level up and, when the model can't change, to more effort (`router._above_earlier`); a redo that would repeat the same model and effort goes to the next stronger model. This is "re-run failures at a higher setting" `[plat-optimizing]`.
-- **The strong-agent gate fires only when the session model is weaker than the need** (`gates.escalation`), matching the advisor finding that a second model helps only when it adds capability the first lacks `[plat-optimizing]`. The router gives no `opusplan` or advisor advice; both measured as small or uncertain gains `[blog-which]`, `[plat-optimizing]`.
+- **No stronger-agent check.** The strong-agent gate, which held a stop on a wording estimate of the request, was removed. The only Stop check is `verify_gate` (`gates.before_stop`). The router gives no `opusplan` or advisor advice; both measured as small or uncertain gains `[blog-which]`, `[plat-optimizing]`.
 
 ### Quality risks found, and where they stand
 
@@ -147,7 +147,7 @@ The findings above were written on 2026-11-23 against the settings of that day. 
 | `complex` stayed on Sonnet, though migrations and performance work are Opus work even with a clear spec `[blog-which]` | `complex` is `needs: 3` at `high` (Opus); `hardest` is Opus at `xhigh` |
 | A content fallback was invisible to the ledger: Sonnet 5 scored 10.3% to Sonnet 5.5's 70.6% on Terminal-Bench 4.0 `[news-sonnet]` | `hooks.post_agent` reads `modelsUsed`; a swapped run is its own result (`calls.SWAPPED`), is in the ledger, and gets a note on a `risk` brief |
 | `priority: fast` drops a step of model and sets no effort above `low` (`registry.select`, `ladder.effort`). The documented way to buy speed at the same quality is fast mode on Opus 5.5 or Fable 5.2, at twice the price `[plat-optimizing]#show-the-model-elapsed-time` | Unchanged. `docs/GUIDE.md` describes the effort rule but not the quality trade or fast mode |
-| `main_effort` is off by default, so a hard request on an Opus session runs the main loop at `medium`; raising effort keeps the cache `[plat-effort]#change-effort-mid-conversation` | Unchanged (`plugin.json` default `false`). The mod raises only where the cache survives (`mod._cache_drop`) |
+| `main_effort` is off by default, so a hard request on an Opus session runs the main loop at `medium`; raising effort keeps the cache `[plat-effort]#change-effort-mid-conversation` | The option was removed with the request profile. The router leaves the main loop's effort alone; for a hard request the person types `ultrathink` or uses `/effort` |
 
 ### Recommendations, ranked
 
@@ -157,7 +157,7 @@ The findings above were written on 2026-11-23 against the settings of that day. 
 4. **Move `complex` to Opus.** On SWE-bench Pro, Opus `medium` solved 92.8% against Sonnet `high`'s 87.6%, at twice the cost per solved task `[plat-optimizing]`; migrations and performance work "warrant Opus 5.5" `[blog-which]`. The one recommendation with a clear cost; under the user's rule the docs support paying it. Status: shipped, then raised to Opus at `high`.
 5. **Check a routed subagent's own edits at SubagentStop.** When a routed agent that edits code ran no check, return `decision: "block"` once with a reason to run the project's checks `[hooks]#stop-decision-control`; that is cheapest inside the subagent that made the change. Status: not shipped (`hooks.agent_stopped` only notes the checks via `gates.note_agent_checks`).
 6. **Treat a mid-run model swap as its own result** (`hooks.post_agent`). Status: shipped.
-7. **Turn `main_effort` on where the cache survives.** Status: not shipped. It stays off by default.
+7. **Turn `main_effort` on where the cache survives.** Status: dropped. The option was removed with the request profile, so the router no longer changes the main loop's effort.
 8. **Say plainly that `priority: fast` trades quality**, and point to fast mode as the documented way to buy speed at the same quality (`docs/GUIDE.md`, `/model-router:*` output). Status: not shipped.
 9. **Pick effort or model on a redo by the failure kind.** A run that skipped checks should redo at more effort on the same model; one that tried and was wrong should redo on the next model `[blog-dials]`, `[blog-effort]`. The router can't read the failure kind, so this waits on rec 5. Status: not shipped.
 
