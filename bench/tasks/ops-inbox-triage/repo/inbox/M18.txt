@@ -1,0 +1,5 @@
+From: Mark Ellis <mark@granitepay.com>
+Date: 2026-11-23 17:05 UTC
+Subject: Dark mode?
+
+Any plans for a dark mode? Half our team works night shifts and would love it.

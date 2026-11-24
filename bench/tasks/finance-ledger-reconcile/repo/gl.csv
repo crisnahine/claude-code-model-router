@@ -1,0 +1,420 @@
+posting_date,ref,account,amount_usd,memo
+2026-09-25,TRX-103293,1010 Operating cash,-2011.63,Northwind Logistics
+2026-09-25,TRX-567489,1010 Operating cash,-5222.44,Contoso Cloud
+2026-09-25,TRX-592653,1010 Operating cash,-1471.68,Umbrella Insurance
+2026-09-25,TRX-869725,1010 Operating cash,-1407.62,Fabrikam Freight
+2026-09-27,TRX-366621,1010 Operating cash,-1475.39,Acme Office Supply
+2026-09-27,TRX-712423,1010 Operating cash,-3859.44,Fabrikam Freight
+2026-09-27,TRX-728427,1010 Operating cash,-1664.04,Umbrella Insurance
+2026-09-28,TRX-712203,1010 Operating cash,-372.48,Contoso Cloud
+2026-09-28,TRX-823573,1010 Operating cash,-59.50,Contoso Cloud
+2026-09-30,TRX-109065,1010 Operating cash,1136.81,Pinecrest Hotels INV-4646
+2026-10-01,TRX-119563,1010 Operating cash,-2577.86,Stark Hardware
+2026-10-01,TRX-184372,1010 Operating cash,-1197.58,Soylent Catering
+2026-10-01,TRX-188290,1010 Operating cash,-3669.14,Acme Office Supply
+2026-10-01,TRX-229878,1010 Operating cash,8190.66,Silverline Media INV-4651
+2026-10-01,TRX-304786,1010 Operating cash,7803.24,Redwood Clinics INV-4050
+2026-10-01,TRX-342788,1010 Operating cash,2120.34,Redwood Clinics INV-4483
+2026-10-01,TRX-350594,1010 Operating cash,-358.23,Stark Hardware
+2026-10-01,TRX-357885,1010 Operating cash,-4878.86,Pied Piper Hosting
+2026-10-01,TRX-364207,1010 Operating cash,-942.02,Hooli Ads
+2026-10-01,TRX-486931,1010 Operating cash,-5601.49,Pied Piper Hosting
+2026-10-01,TRX-555889,1010 Operating cash,4066.77,Silverline Media INV-4330
+2026-10-01,TRX-580212,1010 Operating cash,6921.88,Pinecrest Hotels INV-4172
+2026-10-01,TRX-736400,1010 Operating cash,1523.50,Maple Retail INV-4723
+2026-10-01,TRX-767826,1010 Operating cash,-2843.65,Vandelay Imports
+2026-10-01,TRX-788244,1010 Operating cash,2265.72,Cedar Logistics INV-4889
+2026-10-01,TRX-799091,1010 Operating cash,-3253.25,Contoso Cloud
+2026-10-01,TRX-823545,1010 Operating cash,4896.49,Orchard Labs INV-4966
+2026-10-01,TRX-869479,1010 Operating cash,-2476.00,Stark Hardware
+2026-10-01,TRX-901404,1010 Operating cash,-5980.18,Initech Payroll Svc
+2026-10-01,TRX-919075,1010 Operating cash,7263.40,Pinecrest Hotels INV-4825
+2026-10-01,TRX-967653,1010 Operating cash,4685.00,Summit Dental INV-4967
+2026-10-01,TRX-984973,1010 Operating cash,5247.40,Pinecrest Hotels INV-4721
+2026-10-02,TRX-158228,1010 Operating cash,457.77,Lakeside Foods INV-4333
+2026-10-02,TRX-164981,1010 Operating cash,3937.34,Pinecrest Hotels INV-4443
+2026-10-02,TRX-244264,1010 Operating cash,7904.92,Blue Harbor LLC INV-4319
+2026-10-02,TRX-339660,1010 Operating cash,8775.22,Granite Builders INV-4095
+2026-10-02,TRX-350182,1010 Operating cash,7550.18,Cedar Logistics INV-4174
+2026-10-02,TRX-404541,1010 Operating cash,-4016.02,Tyrell Staffing
+2026-10-02,TRX-432759,1010 Operating cash,-1294.78,Pied Piper Hosting
+2026-10-02,TRX-460775,1010 Operating cash,5437.87,Redwood Clinics INV-4591
+2026-10-02,TRX-608940,1010 Operating cash,-2670.22,Pied Piper Hosting
+2026-10-02,TRX-663262,1010 Operating cash,-5720.29,Tyrell Staffing
+2026-10-02,TRX-701116,1010 Operating cash,-2161.27,Wayne Leasing
+2026-10-02,TRX-748378,1010 Operating cash,-3602.78,Tyrell Staffing
+2026-10-02,TRX-835237,1010 Operating cash,-5368.97,Acme Office Supply
+2026-10-02,TRX-977666,1010 Operating cash,1674.38,Granite Builders INV-4707
+2026-10-03,TRX-170700,1010 Operating cash,1146.37,Silverline Media INV-4778
+2026-10-03,TRX-257068,1010 Operating cash,-5229.55,Tyrell Staffing
+2026-10-03,TRX-360783,1010 Operating cash,-4648.15,Cyberdyne Repairs
+2026-10-03,TRX-363993,1010 Operating cash,5828.16,Orchard Labs INV-4517
+2026-10-03,TRX-378671,1010 Operating cash,6934.52,Blue Harbor LLC INV-4647
+2026-10-03,TRX-388913,1010 Operating cash,3182.69,Granite Builders INV-4397
+2026-10-03,TRX-526330,1010 Operating cash,-983.87,Stark Hardware
+2026-10-03,TRX-540740,1010 Operating cash,7640.92,Pinecrest Hotels INV-4587
+2026-10-03,TRX-554848,1010 Operating cash,-4839.71,Northwind Logistics
+2026-10-03,TRX-645452,1010 Operating cash,6990.42,Orchard Labs INV-4402
+2026-10-03,TRX-662985,1010 Operating cash,3449.43,Blue Harbor LLC INV-4411
+2026-10-03,TRX-752940,1010 Operating cash,-4819.45,Fabrikam Freight
+2026-10-03,TRX-914927,1010 Operating cash,4364.06,Granite Builders INV-4338
+2026-10-04,TRX-133226,1010 Operating cash,-5594.58,Fabrikam Freight
+2026-10-04,TRX-249940,1010 Operating cash,-4687.50,Acme Office Supply
+2026-10-04,TRX-328837,1010 Operating cash,-2076.40,Tyrell Staffing
+2026-10-04,TRX-331918,1010 Operating cash,1417.08,Pinecrest Hotels INV-4132
+2026-10-04,TRX-345631,1010 Operating cash,-3245.67,Cyberdyne Repairs
+2026-10-04,TRX-349122,1010 Operating cash,4148.09,Orchard Labs INV-4987
+2026-10-04,TRX-401407,1010 Operating cash,-4655.75,Soylent Catering
+2026-10-04,TRX-402874,1010 Operating cash,-3231.81,Fabrikam Freight
+2026-10-04,TRX-439616,1010 Operating cash,-2246.66,Northwind Logistics
+2026-10-04,TRX-469658,1010 Operating cash,-1384.32,Acme Office Supply
+2026-10-04,TRX-715322,1010 Operating cash,2848.88,Lakeside Foods INV-4449
+2026-10-04,TRX-800983,1010 Operating cash,-5670.85,Soylent Catering
+2026-10-04,TRX-809222,1010 Operating cash,-913.47,Hooli Ads
+2026-10-04,TRX-844436,1010 Operating cash,-2215.69,Globex Utilities
+2026-10-04,TRX-858455,1010 Operating cash,2087.75,Silverline Media INV-4177
+2026-10-04,TRX-984097,1010 Operating cash,-4269.28,Soylent Catering
+2026-10-05,TRX-156624,1010 Operating cash,4774.40,Orchard Labs INV-4047
+2026-10-05,TRX-310087,1010 Operating cash,1416.53,Summit Dental INV-4108
+2026-10-05,TRX-357302,1010 Operating cash,8943.40,Granite Builders INV-4199
+2026-10-05,TRX-359112,1010 Operating cash,-2197.74,Wayne Leasing
+2026-10-05,TRX-370444,1010 Operating cash,4094.45,Pinecrest Hotels INV-4559
+2026-10-05,TRX-379029,1010 Operating cash,2717.92,Silverline Media INV-4216 (part 1)
+2026-10-05,TRX-379029,1010 Operating cash,2717.93,Silverline Media INV-4216 (part 2)
+2026-10-05,TRX-443218,1010 Operating cash,-3945.68,Cyberdyne Repairs
+2026-10-05,TRX-541344,1010 Operating cash,2721.75,Redwood Clinics INV-4572
+2026-10-05,TRX-570550,1010 Operating cash,-3717.07,Globex Utilities
+2026-10-05,TRX-580965,1010 Operating cash,-2094.97,Globex Utilities
+2026-10-05,TRX-591556,1010 Operating cash,4363.64,Silverline Media INV-4244
+2026-10-05,TRX-629108,1010 Operating cash,8834.55,Redwood Clinics INV-4683
+2026-10-05,TRX-679535,1010 Operating cash,2270.60,Cedar Logistics INV-4274
+2026-10-05,TRX-693077,1010 Operating cash,-61.03,Contoso Cloud
+2026-10-05,TRX-749309,1010 Operating cash,-5611.97,Smythe Ltd
+2026-10-05,TRX-776539,1010 Operating cash,-653.57,Stark Hardware
+2026-10-05,TRX-786541,1010 Operating cash,-2761.50,Initech Payroll Svc
+2026-10-05,TRX-937321,1010 Operating cash,-5547.66,Hooli Ads
+2026-10-06,TRX-134222,1010 Operating cash,603.20,Orchard Labs INV-4495
+2026-10-06,TRX-159459,1010 Operating cash,-2401.13,Stark Hardware
+2026-10-06,TRX-307729,1010 Operating cash,6491.27,Silverline Media INV-4071
+2026-10-06,TRX-350375,1010 Operating cash,-4885.67,Contoso Cloud
+2026-10-06,TRX-430583,1010 Operating cash,5751.64,Blue Harbor LLC INV-4714
+2026-10-06,TRX-475831,1010 Operating cash,-116.08,Fabrikam Freight
+2026-10-06,TRX-489034,1010 Operating cash,-3136.40,Umbrella Insurance
+2026-10-06,TRX-629108,1010 Operating cash,8834.55,Redwood Clinics INV-4683
+2026-10-06,TRX-788532,1010 Operating cash,5529.96,Pinecrest Hotels INV-4349
+2026-10-06,TRX-804578,1010 Operating cash,-4612.08,Globex Utilities
+2026-10-06,TRX-834142,1010 Operating cash,-894.54,Vandelay Imports
+2026-10-06,TRX-999034,1010 Operating cash,-1069.01,Pied Piper Hosting
+2026-10-07,TRX-145700,1010 Operating cash,8239.87,Orchard Labs INV-4129
+2026-10-07,TRX-185129,1010 Operating cash,-2840.64,Soylent Catering
+2026-10-07,TRX-225586,1010 Operating cash,2352.61,Lakeside Foods INV-4446
+2026-10-07,TRX-294666,1010 Operating cash,-5664.90,Globex Utilities
+2026-10-07,TRX-387723,1010 Operating cash,2716.53,Pinecrest Hotels INV-4060
+2026-10-07,TRX-394799,1010 Operating cash,2944.36,Orchard Labs INV-4671
+2026-10-07,TRX-409592,1010 Operating cash,-5185.06,Cyberdyne Repairs
+2026-10-07,TRX-683714,1010 Operating cash,1951.91,Cedar Logistics INV-4737
+2026-10-07,TRX-702898,1010 Operating cash,-2024.59,Fabrikam Freight
+2026-10-07,TRX-736456,1010 Operating cash,-3482.97,Acme Office Supply
+2026-10-07,TRX-893879,1010 Operating cash,584.13,Granite Builders INV-4212
+2026-10-07,TRX-975851,1010 Operating cash,-5205.23,Acme Office Supply
+2026-10-07,TRX-980497,1010 Operating cash,7319.82,Silverline Media INV-4914
+2026-10-07,TRX-985080,1010 Operating cash,-5642.02,Fabrikam Freight
+2026-10-08,TRX-373444,1010 Operating cash,1808.07,Redwood Clinics INV-4552
+2026-10-08,TRX-376637,1010 Operating cash,-5989.87,Wayne Leasing
+2026-10-08,TRX-393313,1010 Operating cash,4497.72,Lakeside Foods INV-4474
+2026-10-08,TRX-459002,1010 Operating cash,5603.68,Granite Builders INV-4343
+2026-10-08,TRX-485695,1010 Operating cash,-1843.77,Hooli Ads
+2026-10-08,TRX-540782,1010 Operating cash,-244.34,Tyrell Staffing
+2026-10-08,TRX-552462,1010 Operating cash,-3547.91,Hooli Ads
+2026-10-08,TRX-580601,1010 Operating cash,-2439.44,Stark Hardware
+2026-10-08,TRX-649763,1010 Operating cash,8341.17,Pinecrest Hotels INV-4330
+2026-10-08,TRX-676378,1010 Operating cash,300.36,Silverline Media INV-4567
+2026-10-08,TRX-865144,1010 Operating cash,-2746.34,Soylent Catering
+2026-10-09,TRX-122150,1010 Operating cash,-1838.68,Umbrella Insurance
+2026-10-09,TRX-164391,1010 Operating cash,-1637.60,Globex Utilities
+2026-10-09,TRX-200492,1010 Operating cash,-2412.10,Globex Utilities
+2026-10-09,TRX-271341,1010 Operating cash,8601.04,Maple Retail INV-4569
+2026-10-09,TRX-275851,1010 Operating cash,7891.21,Summit Dental INV-4706
+2026-10-09,TRX-291103,1010 Operating cash,-3904.01,Tyrell Staffing
+2026-10-09,TRX-355788,1010 Operating cash,7919.21,Cedar Logistics INV-4528
+2026-10-09,TRX-562614,1010 Operating cash,-772.04,Vandelay Imports
+2026-10-09,TRX-653572,1010 Operating cash,-5337.99,Cyberdyne Repairs
+2026-10-09,TRX-683233,1010 Operating cash,-4686.08,Globex Utilities
+2026-10-09,TRX-875052,1010 Operating cash,-5985.53,Tyrell Staffing
+2026-10-09,TRX-963427,1010 Operating cash,4344.53,Maple Retail INV-4299
+2026-10-10,TRX-125296,1010 Operating cash,-5049.62,Cyberdyne Repairs
+2026-10-10,TRX-284172,1010 Operating cash,-999.58,Umbrella Insurance
+2026-10-10,TRX-403405,1010 Operating cash,-4385.38,Wayne Leasing
+2026-10-10,TRX-403682,1010 Operating cash,-5771.59,Umbrella Insurance
+2026-10-10,TRX-410050,1010 Operating cash,-2394.75,Tanaka KK
+2026-10-10,TRX-624458,1010 Operating cash,-5520.18,Acme Office Supply
+2026-10-10,TRX-656238,1010 Operating cash,3076.25,Redwood Clinics INV-4209
+2026-10-10,TRX-684922,1010 Operating cash,-5142.94,Hooli Ads
+2026-10-10,TRX-814951,1010 Operating cash,-4918.48,Stark Hardware
+2026-10-10,TRX-915419,1010 Operating cash,6748.69,Granite Builders INV-4843
+2026-10-10,TRX-935239,1010 Operating cash,-4321.64,Soylent Catering
+2026-10-11,TRX-110186,1010 Operating cash,-2642.08,Initech Payroll Svc
+2026-10-11,TRX-111862,1010 Operating cash,-2133.82,Stark Hardware
+2026-10-11,TRX-148252,1010 Operating cash,-1047.03,Initech Payroll Svc
+2026-10-11,TRX-235206,1010 Operating cash,-1354.70,Vandelay Imports
+2026-10-11,TRX-315694,1010 Operating cash,2648.97,Maple Retail INV-4784
+2026-10-11,TRX-442947,1010 Operating cash,-2091.76,Globex Utilities
+2026-10-11,TRX-458506,1010 Operating cash,-1357.83,Initech Payroll Svc
+2026-10-11,TRX-461277,1010 Operating cash,-1242.90,Hooli Ads
+2026-10-11,TRX-485429,1010 Operating cash,-4586.08,Stark Hardware
+2026-10-11,TRX-506341,1010 Operating cash,-3235.11,Umbrella Insurance
+2026-10-11,TRX-508322,1010 Operating cash,-3021.89,Northwind Logistics
+2026-10-11,TRX-613035,1010 Operating cash,2875.04,Orchard Labs INV-4366
+2026-10-11,TRX-766594,1010 Operating cash,2062.47,Granite Builders INV-4865 (part 1)
+2026-10-11,TRX-766594,1010 Operating cash,2062.47,Granite Builders INV-4865 (part 2)
+2026-10-11,TRX-812038,1010 Operating cash,4969.78,Redwood Clinics INV-4638
+2026-10-11,TRX-849482,1010 Operating cash,-581.42,Northwind Logistics
+2026-10-11,TRX-881828,1010 Operating cash,7015.31,Summit Dental INV-4856
+2026-10-11,TRX-931901,1010 Operating cash,-65.55,Fabrikam Freight
+2026-10-11,TRX-939192,1010 Operating cash,4124.60,Silverline Media INV-4515
+2026-10-12,TRX-123595,1010 Operating cash,-4044.34,Hooli Ads
+2026-10-12,TRX-191768,1010 Operating cash,-5711.30,Pied Piper Hosting
+2026-10-12,TRX-262978,1010 Operating cash,-1892.29,Tyrell Staffing
+2026-10-12,TRX-333941,1010 Operating cash,-1638.15,Acme Office Supply
+2026-10-12,TRX-337248,1010 Operating cash,-2517.65,Wayne Leasing
+2026-10-12,TRX-427103,1010 Operating cash,-2300.72,Globex Utilities
+2026-10-12,TRX-513886,1010 Operating cash,-5920.60,Umbrella Insurance
+2026-10-12,TRX-544029,1010 Operating cash,7415.09,Maple Retail INV-4952
+2026-10-12,TRX-725362,1010 Operating cash,-3507.90,Soylent Catering
+2026-10-12,TRX-836511,1010 Operating cash,-4304.04,Pied Piper Hosting
+2026-10-12,TRX-856734,1010 Operating cash,7018.42,Maple Retail INV-4046
+2026-10-12,TRX-895817,1010 Operating cash,4751.02,Cedar Logistics INV-4715
+2026-10-13,TRX-110029,1010 Operating cash,-4669.13,Globex Utilities
+2026-10-13,TRX-169021,1010 Operating cash,-5389.95,Globex Utilities
+2026-10-13,TRX-178870,1010 Operating cash,7263.65,Orchard Labs INV-4466
+2026-10-13,TRX-234828,1010 Operating cash,-1230.57,Hooli Ads
+2026-10-13,TRX-330935,1010 Operating cash,783.20,Pinecrest Hotels INV-4792
+2026-10-13,TRX-465472,1010 Operating cash,1838.70,Pinecrest Hotels INV-4354
+2026-10-13,TRX-577093,1010 Operating cash,-5870.81,Hooli Ads
+2026-10-13,TRX-626440,1010 Operating cash,-5740.49,Initech Payroll Svc
+2026-10-13,TRX-687503,1010 Operating cash,-3993.27,Cyberdyne Repairs
+2026-10-13,TRX-743575,1010 Operating cash,-1786.31,Pied Piper Hosting
+2026-10-13,TRX-825987,1010 Operating cash,8576.26,Maple Retail INV-4742
+2026-10-13,TRX-915502,1010 Operating cash,-1828.36,Pied Piper Hosting
+2026-10-13,TRX-955791,1010 Operating cash,7905.77,Blue Harbor LLC INV-4837
+2026-10-14,TRX-140533,1010 Operating cash,7654.33,Summit Dental INV-4236
+2026-10-14,TRX-211204,1010 Operating cash,3502.34,Blue Harbor LLC INV-4829
+2026-10-14,TRX-213140,1010 Operating cash,-4835.09,Hooli Ads
+2026-10-14,TRX-351204,1010 Operating cash,5962.23,Summit Dental INV-4135
+2026-10-14,TRX-353693,1010 Operating cash,-157.65,Cyberdyne Repairs
+2026-10-14,TRX-406709,1010 Operating cash,-2604.98,Vandelay Imports
+2026-10-14,TRX-617216,1010 Operating cash,-4964.24,Wayne Leasing
+2026-10-14,TRX-737672,1010 Operating cash,1890.41,Lakeside Foods INV-4831
+2026-10-14,TRX-780154,1010 Operating cash,-968.49,Initech Payroll Svc
+2026-10-14,TRX-827685,1010 Operating cash,-4385.89,Globex Utilities
+2026-10-14,TRX-842642,1010 Operating cash,-3758.09,Umbrella Insurance
+2026-10-14,TRX-895401,1010 Operating cash,7846.59,Lakeside Foods INV-4648
+2026-10-14,TRX-946827,1010 Operating cash,-5188.79,Hooli Ads
+2026-10-14,TRX-995853,1010 Operating cash,7624.60,Lakeside Foods INV-4924
+2026-10-15,TRX-102040,1010 Operating cash,-4909.48,Vandelay Imports
+2026-10-15,TRX-185273,1010 Operating cash,1921.45,Redwood Clinics INV-4982
+2026-10-15,TRX-221395,1010 Operating cash,-5633.40,Fabrikam Freight
+2026-10-15,TRX-236381,1010 Operating cash,1176.58,Redwood Clinics INV-4319
+2026-10-15,TRX-359412,1010 Operating cash,-1790.99,Acme Office Supply
+2026-10-15,TRX-397945,1010 Operating cash,-367.63,Vandelay Imports
+2026-10-15,TRX-409784,1010 Operating cash,5550.56,Granite Builders INV-4655
+2026-10-15,TRX-414433,1010 Operating cash,300.19,Redwood Clinics INV-4929
+2026-10-15,TRX-521390,1010 Operating cash,-5281.50,Cyberdyne Repairs
+2026-10-15,TRX-582862,1010 Operating cash,8638.11,Pinecrest Hotels INV-4782
+2026-10-15,TRX-753489,1010 Operating cash,-4027.21,Umbrella Insurance
+2026-10-15,TRX-810718,1010 Operating cash,1032.74,Pinecrest Hotels INV-4553
+2026-10-16,TRX-182930,1010 Operating cash,4479.83,Cedar Logistics INV-4287
+2026-10-16,TRX-230193,1010 Operating cash,4580.36,Granite Builders INV-4892
+2026-10-16,TRX-309782,1010 Operating cash,8172.97,Maple Retail INV-4888
+2026-10-16,TRX-318877,1010 Operating cash,2959.92,Silverline Media INV-4876
+2026-10-16,TRX-338973,1010 Operating cash,-5384.59,Fabrikam Freight
+2026-10-16,TRX-477121,1010 Operating cash,4023.91,Maple Retail INV-4529
+2026-10-16,TRX-493899,1010 Operating cash,-3578.98,Soylent Catering
+2026-10-16,TRX-496365,1010 Operating cash,-798.72,Contoso Cloud
+2026-10-16,TRX-692816,1010 Operating cash,1894.53,Blue Harbor LLC INV-4142
+2026-10-16,TRX-733981,1010 Operating cash,631.77,Orchard Labs INV-4618
+2026-10-16,TRX-822301,1010 Operating cash,6493.15,Blue Harbor LLC INV-4660
+2026-10-16,TRX-840354,1010 Operating cash,-1480.21,Hooli Ads
+2026-10-17,TRX-153722,1010 Operating cash,-4203.41,Northwind Logistics
+2026-10-17,TRX-215902,1010 Operating cash,-2923.65,Soylent Catering
+2026-10-17,TRX-258836,1010 Operating cash,-3953.68,Pied Piper Hosting
+2026-10-17,TRX-327781,1010 Operating cash,-2364.65,Soylent Catering
+2026-10-17,TRX-330466,1010 Operating cash,2723.43,Blue Harbor LLC INV-4702
+2026-10-17,TRX-403842,1010 Operating cash,3096.42,Maple Retail INV-4151
+2026-10-17,TRX-491575,1010 Operating cash,-4307.25,Soylent Catering
+2026-10-17,TRX-579890,1010 Operating cash,-3176.87,Cyberdyne Repairs
+2026-10-17,TRX-627513,1010 Operating cash,7217.21,Orchard Labs INV-4059
+2026-10-17,TRX-690623,1010 Operating cash,-5987.18,Contoso Cloud
+2026-10-18,TRX-159596,1010 Operating cash,7996.11,Blue Harbor LLC INV-4781
+2026-10-18,TRX-176329,1010 Operating cash,2297.71,Maple Retail INV-4276
+2026-10-18,TRX-370355,1010 Operating cash,-9292.83,Muller GmbH
+2026-10-18,TRX-385462,1010 Operating cash,6211.87,Lakeside Foods INV-4858
+2026-10-18,TRX-481304,1010 Operating cash,7263.02,Cedar Logistics INV-4264
+2026-10-18,TRX-637414,1010 Operating cash,5572.08,Maple Retail INV-4067
+2026-10-18,TRX-658606,1010 Operating cash,-4075.04,Stark Hardware
+2026-10-18,TRX-692665,1010 Operating cash,-5511.53,Acme Office Supply
+2026-10-18,TRX-701102,1010 Operating cash,3574.10,Lakeside Foods INV-4377
+2026-10-18,TRX-713409,1010 Operating cash,8081.83,Pinecrest Hotels INV-4364
+2026-10-18,TRX-781112,1010 Operating cash,5844.65,Blue Harbor LLC INV-4588
+2026-10-19,TRX-112085,1010 Operating cash,8539.95,Cedar Logistics INV-4173
+2026-10-19,TRX-143989,1010 Operating cash,-5789.58,Hooli Ads
+2026-10-19,TRX-222673,1010 Operating cash,3179.16,Granite Builders INV-4655
+2026-10-19,TRX-541165,1010 Operating cash,-5790.93,Wayne Leasing
+2026-10-19,TRX-637921,1010 Operating cash,-4105.70,Umbrella Insurance
+2026-10-19,TRX-710613,1010 Operating cash,3798.96,Lakeside Foods INV-4311
+2026-10-19,TRX-971533,1010 Operating cash,6265.48,Silverline Media INV-4283
+2026-10-19,TRX-984409,1010 Operating cash,6667.21,Redwood Clinics INV-4784
+2026-10-19,TRX-997632,1010 Operating cash,1156.90,Blue Harbor LLC INV-4035
+2026-10-20,TRX-116236,1010 Operating cash,-4252.05,Hooli Ads
+2026-10-20,TRX-215413,1010 Operating cash,-2092.44,Pied Piper Hosting
+2026-10-20,TRX-238996,1010 Operating cash,-5283.06,Cyberdyne Repairs
+2026-10-20,TRX-279340,1010 Operating cash,-1521.45,Vandelay Imports
+2026-10-20,TRX-309834,1010 Operating cash,7205.23,Summit Dental INV-4994
+2026-10-20,TRX-364124,1010 Operating cash,5022.49,Blue Harbor LLC INV-4551
+2026-10-20,TRX-374105,1010 Operating cash,-2911.38,Wayne Leasing
+2026-10-20,TRX-433656,1010 Operating cash,2521.48,Cedar Logistics INV-4556
+2026-10-20,TRX-473250,1010 Operating cash,2934.39,Summit Dental INV-4079
+2026-10-20,TRX-531235,1010 Operating cash,-4334.25,Initech Payroll Svc
+2026-10-20,TRX-751463,1010 Operating cash,-5277.80,Initech Payroll Svc
+2026-10-20,TRX-752412,1010 Operating cash,6407.33,Orchard Labs INV-4201
+2026-10-20,TRX-772696,1010 Operating cash,2891.96,Cedar Logistics INV-4389
+2026-10-20,TRX-787754,1010 Operating cash,-2420.09,Vandelay Imports
+2026-10-20,TRX-964461,1010 Operating cash,1075.66,Granite Builders INV-4700
+2026-10-20,TRX-991738,1010 Operating cash,8505.81,Orchard Labs INV-4002
+2026-10-21,TRX-267609,1010 Operating cash,923.08,Granite Builders INV-4308
+2026-10-21,TRX-411379,1010 Operating cash,1188.91,Cedar Logistics INV-4756
+2026-10-21,TRX-519729,1010 Operating cash,5298.28,Redwood Clinics INV-4135
+2026-10-21,TRX-622800,1010 Operating cash,-4613.87,Acme Office Supply
+2026-10-21,TRX-654307,1010 Operating cash,6656.76,Cedar Logistics INV-4380
+2026-10-21,TRX-674439,1010 Operating cash,-1886.79,Globex Utilities
+2026-10-21,TRX-737166,1010 Operating cash,-46.18,Wayne Leasing
+2026-10-21,TRX-740798,1010 Operating cash,1331.56,Maple Retail INV-4539
+2026-10-21,TRX-763481,1010 Operating cash,2513.25,Redwood Clinics INV-4694
+2026-10-21,TRX-824153,1010 Operating cash,-5844.42,Hooli Ads
+2026-10-21,TRX-855034,1010 Operating cash,-3364.60,Fabrikam Freight
+2026-10-21,TRX-949769,1010 Operating cash,-922.41,Soylent Catering
+2026-10-21,TRX-978664,1010 Operating cash,1134.46,Stark Hardware
+2026-10-21,TRX-999176,1010 Operating cash,-2627.79,Vandelay Imports
+2026-10-22,TRX-412546,1010 Operating cash,-4546.03,Pied Piper Hosting
+2026-10-22,TRX-456711,1010 Operating cash,-234.52,Acme Office Supply
+2026-10-22,TRX-629101,1010 Operating cash,2213.80,Lakeside Foods INV-4904
+2026-10-22,TRX-678001,1010 Operating cash,-5067.32,Tyrell Staffing
+2026-10-22,TRX-740710,1010 Operating cash,6919.34,Summit Dental INV-4404
+2026-10-22,TRX-755998,1010 Operating cash,1854.62,Orchard Labs INV-4673
+2026-10-22,TRX-769393,1010 Operating cash,-786.05,Initech Payroll Svc
+2026-10-22,TRX-787758,1010 Operating cash,5129.16,Pinecrest Hotels INV-4642
+2026-10-22,TRX-842233,1010 Operating cash,534.64,Granite Builders INV-4343
+2026-10-22,TRX-863003,1010 Operating cash,1191.49,Summit Dental INV-4801
+2026-10-22,TRX-876847,1010 Operating cash,5778.25,Blue Harbor LLC INV-4612
+2026-10-22,TRX-919565,1010 Operating cash,2445.20,Cedar Logistics INV-4771
+2026-10-23,TRX-325279,1010 Operating cash,-755.63,Wayne Leasing
+2026-10-23,TRX-343047,1010 Operating cash,7399.42,Lakeside Foods INV-4442
+2026-10-23,TRX-351265,1010 Operating cash,-1510.93,Wayne Leasing
+2026-10-23,TRX-445196,1010 Operating cash,-2169.18,Pied Piper Hosting
+2026-10-23,TRX-598958,1010 Operating cash,6231.24,Silverline Media INV-4840
+2026-10-23,TRX-637176,1010 Operating cash,-5494.98,Initech Payroll Svc
+2026-10-23,TRX-665965,1010 Operating cash,2863.85,Redwood Clinics INV-4658
+2026-10-23,TRX-679637,1010 Operating cash,-4830.01,Stark Hardware
+2026-10-23,TRX-713884,1010 Operating cash,-3006.46,Soylent Catering
+2026-10-23,TRX-754616,1010 Operating cash,8470.57,Blue Harbor LLC INV-4158
+2026-10-23,TRX-878282,1010 Operating cash,-969.48,Northwind Logistics
+2026-10-23,TRX-910425,1010 Operating cash,5356.86,Orchard Labs INV-4650
+2026-10-23,TRX-913436,1010 Operating cash,8668.98,Summit Dental INV-4814
+2026-10-24,TRX-142853,1010 Operating cash,-2245.40,Acme Office Supply
+2026-10-24,TRX-153732,1010 Operating cash,2654.84,Silverline Media INV-4966
+2026-10-24,TRX-193790,1010 Operating cash,-5833.13,Vandelay Imports
+2026-10-24,TRX-209106,1010 Operating cash,-5108.85,Initech Payroll Svc
+2026-10-24,TRX-323703,1010 Operating cash,-1363.43,Pied Piper Hosting
+2026-10-24,TRX-403178,1010 Operating cash,-2363.26,Initech Payroll Svc
+2026-10-24,TRX-405580,1010 Operating cash,1855.83,Blue Harbor LLC INV-4752
+2026-10-24,TRX-476727,1010 Operating cash,-4249.08,Hooli Ads
+2026-10-24,TRX-512470,1010 Operating cash,-5664.79,Globex Utilities
+2026-10-25,TRX-156987,1010 Operating cash,-562.53,Globex Utilities
+2026-10-25,TRX-165208,1010 Operating cash,2405.37,Maple Retail INV-4130
+2026-10-25,TRX-260035,1010 Operating cash,-3793.16,Northwind Logistics
+2026-10-25,TRX-296771,1010 Operating cash,7110.89,Orchard Labs INV-4821
+2026-10-25,TRX-437380,1010 Operating cash,-1877.82,Globex Utilities
+2026-10-25,TRX-489439,1010 Operating cash,-2443.98,Pied Piper Hosting
+2026-10-25,TRX-601012,1010 Operating cash,2837.53,Pinecrest Hotels INV-4017
+2026-10-25,TRX-684739,1010 Operating cash,-4910.36,Contoso Cloud
+2026-10-25,TRX-696809,1010 Operating cash,-893.03,Stark Hardware
+2026-10-25,TRX-697609,1010 Operating cash,-1882.91,Initech Payroll Svc
+2026-10-25,TRX-762780,1010 Operating cash,-2212.12,Soylent Catering
+2026-10-25,TRX-976749,1010 Operating cash,5427.50,Silverline Media INV-4366
+2026-10-26,TRX-203986,1010 Operating cash,-4845.51,Hooli Ads
+2026-10-26,TRX-253042,1010 Operating cash,2959.32,Granite Builders INV-4551
+2026-10-26,TRX-465310,1010 Operating cash,-5475.98,Hooli Ads
+2026-10-26,TRX-506962,1010 Operating cash,-3007.88,Wayne Leasing
+2026-10-26,TRX-518766,1010 Operating cash,-397.92,Northwind Logistics
+2026-10-26,TRX-679461,1010 Operating cash,6771.11,Blue Harbor LLC INV-4869
+2026-10-26,TRX-861366,1010 Operating cash,997.52,Summit Dental INV-4069
+2026-10-26,TRX-916663,1010 Operating cash,5338.92,Blue Harbor LLC INV-4015
+2026-10-27,TRX-383677,1010 Operating cash,8674.55,Summit Dental INV-4596
+2026-10-27,TRX-561104,1010 Operating cash,-4563.49,Pied Piper Hosting
+2026-10-27,TRX-672831,1010 Operating cash,-4967.96,Contoso Cloud
+2026-10-27,TRX-803945,1010 Operating cash,-5599.97,Soylent Catering
+2026-10-27,TRX-890612,1010 Operating cash,-4491.58,Acme Office Supply
+2026-10-27,TRX-933310,1010 Operating cash,-5501.91,Initech Payroll Svc
+2026-10-27,TRX-942489,1010 Operating cash,-4804.44,Cyberdyne Repairs
+2026-10-28,TRX-291531,1010 Operating cash,-1435.95,Cyberdyne Repairs
+2026-10-28,TRX-330973,1010 Operating cash,-725.76,Acme Office Supply
+2026-10-28,TRX-434437,1010 Operating cash,3757.82,Summit Dental INV-4986
+2026-10-28,TRX-487468,1010 Operating cash,802.20,Lakeside Foods INV-4925
+2026-10-28,TRX-607099,1010 Operating cash,5165.90,Blue Harbor LLC INV-4074
+2026-10-28,TRX-621411,1010 Operating cash,5358.95,Pinecrest Hotels INV-4607
+2026-10-28,TRX-704851,1010 Operating cash,-5892.79,Acme Office Supply
+2026-10-28,TRX-806471,1010 Operating cash,-4365.43,Northwind Logistics
+2026-10-28,TRX-828379,1010 Operating cash,-4223.24,Cyberdyne Repairs
+2026-10-28,TRX-833742,1010 Operating cash,-4378.85,Fabrikam Freight
+2026-10-28,TRX-863115,1010 Operating cash,-3323.25,Stark Hardware
+2026-10-28,TRX-896050,1010 Operating cash,1404.42,Summit Dental INV-4206
+2026-10-28,TRX-902913,1010 Operating cash,7467.31,Blue Harbor LLC INV-4239
+2026-10-28,TRX-913988,1010 Operating cash,-4208.16,Hooli Ads
+2026-10-28,TRX-952307,1010 Operating cash,2701.60,Maple Retail INV-4854
+2026-10-29,TRX-111395,1010 Operating cash,6001.11,Maple Retail INV-4102
+2026-10-29,TRX-221296,1010 Operating cash,-1875.00,Wayne Leasing
+2026-10-29,TRX-267066,1010 Operating cash,-4723.40,Acme Office Supply
+2026-10-29,TRX-303558,1010 Operating cash,7745.67,Summit Dental INV-4088
+2026-10-29,TRX-339984,1010 Operating cash,1049.39,Silverline Media INV-4688
+2026-10-29,TRX-345496,1010 Operating cash,2883.95,Blue Harbor LLC INV-4199
+2026-10-29,TRX-350874,1010 Operating cash,-2375.21,Northwind Logistics
+2026-10-29,TRX-447283,1010 Operating cash,-2451.61,Dupont SARL
+2026-10-29,TRX-461051,1010 Operating cash,8092.84,Maple Retail INV-4096
+2026-10-29,TRX-495552,1010 Operating cash,7081.45,Maple Retail INV-4661
+2026-10-29,TRX-535098,1010 Operating cash,-5833.80,Northwind Logistics
+2026-10-29,TRX-598139,1010 Operating cash,-5258.90,Initech Payroll Svc
+2026-10-29,TRX-680014,1010 Operating cash,7004.71,Cedar Logistics INV-4549
+2026-10-29,TRX-697778,1010 Operating cash,-4443.33,Stark Hardware
+2026-10-29,TRX-896788,1010 Operating cash,-1627.15,Fabrikam Freight
+2026-10-29,TRX-913026,1010 Operating cash,-596.66,Contoso Cloud
+2026-10-29,TRX-915655,1010 Operating cash,3294.98,Maple Retail INV-4131
+2026-10-29,TRX-931294,1010 Operating cash,-5253.88,Umbrella Insurance
+2026-10-29,TRX-950825,1010 Operating cash,-2353.58,Umbrella Insurance
+2026-10-29,TRX-959121,1010 Operating cash,6998.97,Blue Harbor LLC INV-4492
+2026-10-29,TRX-967579,1010 Operating cash,4762.24,Lakeside Foods INV-4094
+2026-10-30,TRX-136843,1010 Operating cash,2374.43,Summit Dental INV-4263
+2026-10-30,TRX-169607,1010 Operating cash,-1136.09,Wayne Leasing
+2026-10-30,TRX-253845,1010 Operating cash,-3844.02,Umbrella Insurance
+2026-10-30,TRX-266233,1010 Operating cash,4095.22,Cedar Logistics INV-4302
+2026-10-30,TRX-359871,1010 Operating cash,-4401.16,Soylent Catering
+2026-10-30,TRX-447658,1010 Operating cash,-5205.25,Cyberdyne Repairs
+2026-10-30,TRX-677339,1010 Operating cash,-4523.29,Rossi Srl
+2026-10-30,TRX-793027,1010 Operating cash,2912.85,Blue Harbor LLC INV-4154
+2026-10-30,TRX-900909,1010 Operating cash,5767.59,Pinecrest Hotels INV-4992
+2026-10-30,TRX-901130,1010 Operating cash,1903.22,Redwood Clinics INV-4983
+2026-10-31,TRX-143557,1010 Operating cash,-3660.11,Acme Office Supply
+2026-10-31,TRX-362616,1010 Operating cash,8409.63,Orchard Labs INV-4093
+2026-10-31,TRX-408628,1010 Operating cash,561.26,Lakeside Foods INV-4424
+2026-10-31,TRX-629516,1010 Operating cash,2179.46,Pinecrest Hotels INV-4966
+2026-10-31,TRX-674063,1010 Operating cash,-967.62,Umbrella Insurance
+2026-10-31,TRX-738121,1010 Operating cash,-1768.03,Vandelay Imports
+2026-10-31,TRX-855165,1010 Operating cash,7987.64,Orchard Labs INV-4714
+2026-10-31,TRX-998612,1010 Operating cash,-4412.30,Globex Utilities
+2026-11-02,TRX-175986,1010 Operating cash,8450.33,Pinecrest Hotels INV-4500
+2026-11-02,TRX-733577,1010 Operating cash,-3345.03,Acme Office Supply
+2026-11-03,TRX-776980,1010 Operating cash,-3943.58,Hooli Ads
+2026-11-04,TRX-195548,1010 Operating cash,-3978.89,Contoso Cloud
+2026-11-06,TRX-395155,1010 Operating cash,-2985.94,Globex Utilities
+2026-11-06,TRX-984754,1010 Operating cash,-3417.15,Globex Utilities
+2026-11-07,TRX-619472,1010 Operating cash,-3342.71,Vandelay Imports
+2026-11-07,TRX-953838,1010 Operating cash,-1346.30,Hooli Ads

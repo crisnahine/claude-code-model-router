@@ -1,0 +1,48 @@
+{
+  "mismatches": [
+    {
+      "ref": "TRX-109065",
+      "kind": "period"
+    },
+    {
+      "ref": "TRX-175986",
+      "kind": "period"
+    },
+    {
+      "ref": "TRX-200492",
+      "kind": "amount"
+    },
+    {
+      "ref": "TRX-221296",
+      "kind": "missing"
+    },
+    {
+      "ref": "TRX-629108",
+      "kind": "duplicate"
+    },
+    {
+      "ref": "TRX-749309",
+      "kind": "currency"
+    },
+    {
+      "ref": "TRX-761986",
+      "kind": "missing"
+    },
+    {
+      "ref": "TRX-835237",
+      "kind": "amount"
+    },
+    {
+      "ref": "TRX-869479",
+      "kind": "amount"
+    },
+    {
+      "ref": "TRX-978664",
+      "kind": "sign"
+    },
+    {
+      "ref": "TRX-103293",
+      "kind": "missing"
+    }
+  ]
+}

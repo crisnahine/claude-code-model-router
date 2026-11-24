@@ -10,6 +10,7 @@ import re
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,8 +28,8 @@ def check() -> tuple:
     return code, err.getvalue()
 
 
-BASELINES = {analyze.OPUS: ["defaults", "haiku", "haiku-high", "opusplan"],
-             analyze.SONNET: ["defaults", "sonnet-medium", "sonnet-high", "opusplan"]}
+BASELINES = {analyze.OPUS: ["defaults", "haiku", "haiku-high", "sonnet-via-opusplan"],
+             analyze.SONNET: ["defaults", "sonnet-medium", "sonnet-high", "sonnet-via-opusplan"]}
 
 
 def fixture_results(solved=3, cps=0.12344, runs=4, router="mine", cls="lookup"):
@@ -38,9 +39,10 @@ def fixture_results(solved=3, cps=0.12344, runs=4, router="mine", cls="lookup"):
         for config in [router, *ids[model]]:
             ok, cost = (solved, cps * solved / runs) if config == router else (runs, 0.2)
             rows += [{"config": config, "class": cls, "task": f"{cls}-1", "total_cost_usd": cost, "passed": i < ok,
-                      "main_model": model, "started_at": "2030-01-01T10:00:00+00:00", "claude_version": "2.1.0"}
+                      "main_model": model, "started_at": "2030-01-01T10:00:00+00:00", "claude_version": "2.1.0",
+                      "schema": analyze.run.ROW_SCHEMA}
                      for i in range(runs)]
-    configs = [{"id": router, "plugin": True, "env": {}}, {"id": "defaults", "plugin": False, "env": {}},
+    configs = [{"id": router, "plugin": True, "judged": True, "env": {}}, {"id": "defaults", "plugin": False, "env": {}},
                *({"id": c, "plugin": False, "env": {"X": "1"}} for c in sorted({c for v in ids.values() for c in v})
                  if c != "defaults")]
     return analyze.Results(files=[], rows=rows, stale=[], broken=[], aside=[], archive=[], configs=configs, tasks=[],
@@ -126,20 +128,19 @@ class DocsAssets(unittest.TestCase):
         self.assertEqual(f["opus.commit_code"], "`780ee86`")
         self.assertEqual((f["opus.pooled.router"], f["opus.pooled.defaults"], f["opus.pooled_less.defaults"]),
                          ("$0.121", "$0.151", "20"))
-        self.assertEqual((f["opus.below.defaults"], f["opus.less.defaults.min"], f["opus.less.defaults.max"],
-                          f["opus.level.defaults"]), ("5", "18", "32", "design"))
-        self.assertEqual((f["opus.behind.min"], f["opus.behind.max"], f["opus.status.FAIL"]), ("60", "144", "6"))
-        self.assertEqual((f["sonnet.status.PASS"], f["sonnet.behind.min"], f["sonnet.behind.max"],
-                          f["sonnet.solved.router"], f["sonnet.solved.defaults"]),
-                         ("0", "7", "63", "69 of 70", "68 of 70"))
-        self.assertNotIn("sonnet.pass_classes", f)
+        # No stored class has a verdict, so nothing is below, level or behind.
+        self.assertEqual((f["opus.status.REFUSED"], f["sonnet.status.REFUSED"], f["opus.status.WIN"]), ("8", "8", "0"))
+        self.assertEqual((f["opus.below.defaults"], f["sonnet.solved.router"], f["sonnet.solved.defaults"]),
+                         ("0", "69 of 70", "68 of 70"))
+        for gone in ("opus.level.defaults", "opus.behind.min", "opus.less.defaults.min"):
+            self.assertNotIn(gone, f)
 
     def test_the_figures_are_keyed_by_role(self):
         f = docs_assets.bench_figures(self.snap.bench)
         self.assertEqual((f["opus.pooled.best"], f["opus.pooled.strongest"], f["opus.solved.best"]),
-                         (f["opus.pooled.opusplan"], f["opus.pooled.fable-high"], "69 of 70"))
+                         (f["opus.pooled.sonnet-via-opusplan"], f["opus.pooled.fable-high"], "69 of 70"))
         self.assertEqual((f["opus.saturated"], f["sonnet.saturated"], f["opus.router_code"]), ("5", "0", "`plugin-next`"))
-        self.assertEqual((f["tasks"], f["tasks_total"], f["opus.partial_classes"]), ("14", "30", "lookup and cross-module"))
+        self.assertEqual((f["tasks"], f["tasks_total"]), ("14", "35"))
         self.assertFalse([k for k in f if "plugin-next" in k])
 
     def test_the_figures_do_not_read_the_wording_of_a_reason(self):
@@ -152,10 +153,11 @@ class DocsAssets(unittest.TestCase):
     def test_the_trace_text_lists_every_baseline_with_its_interval(self):
         data = bench_data(solved=9, cps=0.2, runs=10, cls="root-cause")
         trace = docs_assets.bench_figures(data)["opus.trace"]
-        self.assertRegex(trace, r"^root cause (FAIL|PARTIAL) \(router \$0\.200, 9 of 10 solved; `\w[\w-]*` \$0\.200 "
-                                r"\([+-]\d\.\d{3} to [+-]\d\.\d{3}\)")
-        for cfg in ("defaults", "haiku", "haiku-high", "opusplan"):
-            self.assertRegex(trace, rf"`{cfg}` \$0\.200 \([+-]\d\.\d{{3}} to [+-]\d\.\d{{3}}\)")
+        verdict = r"(WIN|LOSE|no difference shown)"
+        self.assertRegex(trace, rf"^root cause {verdict} \(router \$0\.200, 9 of 10 solved; `\w[\w-]*` \$0\.200 "
+                                rf"\({verdict}, [+-]\d\.\d{{3}} to [+-]\d\.\d{{3}}\)")
+        for cfg in ("defaults", "haiku", "haiku-high", "sonnet-via-opusplan"):
+            self.assertRegex(trace, rf"`{cfg}` \$0\.200 \({verdict}, [+-]\d\.\d{{3}} to [+-]\d\.\d{{3}}\)")
 
     def test_a_changed_figure_makes_the_docs_stale(self):
         problems = docs_assets.sync(self.build(bench=self.with_changed_figures()), True)
@@ -166,9 +168,11 @@ class DocsAssets(unittest.TestCase):
         base = analyze.load(analyze.default_paths())
         swap = lambda name: "renamed" if name == "plugin-next" else name  # noqa: E731
         results = dataclasses.replace(
-            base, rows=[dict(r, config=swap(r["config"])) for r in base.rows],
+            base, legacy=[dict(r, config=swap(r["config"])) for r in base.legacy],
             configs=[dict(c, id=swap(c["id"])) for c in base.configs], routers=frozenset(map(swap, base.routers)))
-        before, after = self.build(), self.build(bench=analyze.figures(results))
+        with unittest.mock.patch.object(analyze, "LEGACY_ROUTER", "renamed"):
+            renamed = analyze.figures(results, legacy=True)
+        before, after = self.build(), self.build(bench=renamed)
         self.assertEqual({p for p in before if before[p] != after[p]}, {"docs/TRACEABILITY.md"})
         self.assertIn("<!-- bench:opus.router_code -->`renamed`<!-- /bench -->", after["docs/TRACEABILITY.md"])
 

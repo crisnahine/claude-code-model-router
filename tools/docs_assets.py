@@ -437,6 +437,7 @@ FIGURE_PAGES = ("README.md", "docs/ARCHITECTURE.md", "docs/FAQ.md", "docs/RELEAS
 BENCH_SPAN = re.compile(r"<!-- bench:([\w.-]+) -->(.*?)<!-- /bench -->")
 SESSION_NAMES = {"claude-opus-5-5": "opus", "sonnet": "sonnet"}
 CLASS_WORDS = {"security-review": "security review", "root-cause": "root cause"}
+VERDICT_WORDS = {"WIN": "WIN", "LOSE": "LOSE", "NONE": "no difference shown", "REFUSED": "no verdict"}
 
 
 def class_word(k: str) -> str:
@@ -462,14 +463,8 @@ def session_figures(name: str, session: dict) -> dict:
     f["router_code"] = f"`{router}`"  # the span must sit outside the code span
     f["classes"] = str(len(classes))
     f["saturated"] = str(session["saturated"])
-    for status in ("PASS", "FAIL", "PARTIAL"):
+    for status in ("WIN", "LOSE", "NONE", "REFUSED"):
         f[f"status.{status}"] = str(sum(c["status"] == status for c in classes))
-    passed = [class_word(c["class"]) for c in classes if c["status"] == "PASS"]
-    if passed:
-        f["pass_classes"] = words(passed)
-    partial = [class_word(c["class"]) for c in classes if c["status"] == "PARTIAL"]
-    if partial:
-        f["partial_classes"] = words(partial)
     # The router is spelled by its role, never by its id; every other configuration by its id, and some by a role too.
     key = lambda cfg: "router" if cfg == router else cfg  # noqa: E731
     for c in classes:
@@ -518,11 +513,16 @@ def class_trace(c: dict, router: str) -> str:
         raise SystemExit(f"bench results have no {router} runs for {c['class']}")
     cell = c["configs"][router]
     key = lambda cfg: (c["configs"][cfg]["cost_per_solved"] is None, c["configs"][cfg]["cost_per_solved"] or 0, cfg)  # noqa: E731
+    def gap(cfg):
+        lo, hi = c["differences"][cfg] or (None, None)
+        return "" if lo is None or hi is None else f"{lo:+.3f} to {hi:+.3f}"
+
     base = ", ".join(
         f"`{cfg}` {usd(c['configs'][cfg]['cost_per_solved'])} "
-        f"({c['differences'][cfg][0]:+.3f} to {c['differences'][cfg][1]:+.3f}{missed(c['configs'][cfg])})"
-        for cfg in sorted(c["differences"], key=key))
-    return f"{class_word(c['class'])} {c['status']} (router {usd(cell['cost_per_solved'])}{missed(cell)}; {base})"
+        f"({VERDICT_WORDS[c['verdicts'][cfg]['verdict']]}{', ' + gap(cfg) if gap(cfg) else ''}{missed(c['configs'][cfg])})"
+        for cfg in sorted(c["verdicts"], key=key))
+    return (f"{class_word(c['class'])} {VERDICT_WORDS[c['status']]} (router {usd(cell['cost_per_solved'])}{missed(cell)}; "
+            f"{base})")
 
 
 def bench_figures(data: dict) -> dict:
@@ -713,7 +713,7 @@ def snapshot() -> Snapshot:
         version=v, released=release_date(v), claude_code=manifest()["engines"]["claude-code"].removeprefix(">="),
         ladder=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
         texts={path: (ROOT / path).read_text(encoding="utf-8") for path in wanted if (ROOT / path).exists()},
-        bench=analyze.figures(analyze.load(analyze.default_paths())))
+        bench=analyze.figures(analyze.load(analyze.default_paths()), legacy=True))
 
 
 def build(snap: Snapshot) -> dict:
