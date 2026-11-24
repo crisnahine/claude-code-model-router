@@ -41,7 +41,7 @@ Without it, a subagent that names no model runs on its conversation's model ([Cl
 - Sets the model and effort of every subagent, teammate and workflow agent as it starts. The agent the caller chose stays the same.
 - Runs a call one level higher when Claude redoes a weak result, and `/model-router:usage` counts the redos per level.
 - Asks once, before a turn ends, for a test run when code changed unchecked.
-- Logs what each turn cost at list price in `/model-router:usage`, and checks the Claude Code changelog, docs and model retirements once a day.
+- Shows in `/model-router:usage` what each subagent ran on and Claude Code's own cost estimate for it, and checks the Claude Code changelog, docs and model retirements once a day.
 
 ## Built on the Claude Code docs
 
@@ -126,7 +126,7 @@ The run measured the routing code at <!-- bench:opus.commit_code -->`780ee86`<!-
 | `/model-router:ship <task or issue>` | Plans, builds, verifies, reviews and commits a change on a branch, and stops before pushing, merging or deploying |
 | `/model-router:route <task>` | Explains which model a task would get and why, and how to split it |
 | `/model-router:models [reset] [--json]` | Lists the models in use, what each runs as, and what is capped, unavailable or routed around. `reset` clears learned availability |
-| `/model-router:usage [days] [--json]` | Shows what ran where and what it cost at list price, over `days` (default 7) |
+| `/model-router:usage [days] [--json]` | Shows what ran where and Claude Code's cost estimate per subagent, over `days` (default 7) |
 | `/model-router:refresh` | Reviews new Claude Code releases, docs changes and model retirements |
 
 Type `/model-router:ship` in full. Where Claude Code has its own `/ship`, the bare `/ship` runs that command instead, and it can commit, push and open a pull request with no confirmation prompt ([Claude Code docs](https://code.claude.com/docs/en/ship-command.md)).
@@ -145,7 +145,7 @@ Rules and extra models go in `~/.claude/model-router.json` (yours, applies every
 - It reads the brief's wording and the agent's name, never the code, so a level is an estimate. Claude can overrule it on any call, and a redo moves it up. It reads English: a brief in another script starts at standard.
 - It leaves forks alone, and agents whose definition it can't read, such as one defined on the command line.
 - It routes a new model family only once the registry has an entry for it, and does nothing when hooks are switched off.
-- Spend figures are list prices; your bill is in `/usage` and `/cost`.
+- Its dollar figures are Claude Code's estimate, not your bill, and on a subscription usage inside the plan isn't billed in dollars. The main conversation's cost is in `/usage`.
 
 [Every limit, and why](docs/GUIDE.md#what-it-cant-do).
 

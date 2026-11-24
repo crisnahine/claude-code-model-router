@@ -80,9 +80,8 @@ def _newest(snap: settings.Snapshot, decision: dict) -> str | None:
 
 
 def usage(hook_input: dict) -> None:
-    """One ledger row per turn, its cost the sum of its requests, each priced on its own."""
-    found = hook_input.get("usage")
-    if isinstance(found, dict) and isinstance(found.get("model"), str):
-        stage = hook_input.get("subagent_type")
-        ledger.usage(settings.Snapshot(hook_input).registry, hook_input.get("session_id"), hook_input.get("agent_id"),
-                     found, hook_input.get("requests"), stage if isinstance(stage, str) and stage else None)
+    """One ledger row per subagent turn, with the figures Claude Code keeps for that agent."""
+    agent = hook_input.get("subagent_type")
+    ledger.usage(hook_input.get("session_id"), hook_input.get("agent_id"), agent if isinstance(agent, str) and agent else None,
+                 models=hook_input.get("models"), cost=hook_input.get("cost"),
+                 subscription=hook_input.get("subscription") is True, turn=hook_input.get("usage"))

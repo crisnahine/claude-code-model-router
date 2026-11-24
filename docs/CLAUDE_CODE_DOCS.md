@@ -49,7 +49,7 @@ Last checked against the live docs on 2026-11-24, on Claude Code 2.1.330 and 2.1
 | The Stop input's `background_tasks` lists the tasks still in flight, such as a `workflow` or a `subagent` ([Stop input](https://code.claude.com/docs/en/hooks.md#stop-input)) | The check before a turn ends waits while a workflow or a subagent is in flight | `test_a_workflow_or_agent_still_running_holds_the_gates_and_keeps_the_ask` |
 | A hook's input carries `effort.level`, the level when the hook runs ([common input fields](https://code.claude.com/docs/en/hooks.md#common-input-fields)) | The fallback reads it as the main conversation's level, which a subagent on the session's own model runs at | `test_the_sessions_effort_counts_only_for_a_call_from_the_main_conversation` |
 | Claude Code's internal agents fire `SubagentStop` with an empty `agent_type` in a session run without `--agent`, and a matcher that can't match an empty string skips them ([SubagentStop](https://code.claude.com/docs/en/hooks.md#subagentstop)) | Its `SubagentStop` hook matches `.` | `Shipped.test_agent_hooks_match_the_agent_tool_and_skip_internal_agents` |
-| An Agent result reports `resolvedModel`, `modelsUsed` when the model was swapped, and `totalTokens` from the final request only ([hooks](https://code.claude.com/docs/en/hooks.md)) | Records the model that really ran, and labels `totalTokens` as the final request's | `test_results_teach_the_registry_which_models_really_run` |
+| An Agent result reports `resolvedModel`, `modelsUsed` when the model was swapped, and `totalTokens` from the final request only ([hooks](https://code.claude.com/docs/en/hooks.md)) | Records the model that really ran, and leaves `totalTokens` out, since it is the final request's only | `test_results_teach_the_registry_which_models_really_run` |
 
 ## The mods API
 
@@ -59,6 +59,7 @@ Last checked against the live docs on 2026-11-24, on Claude Code 2.1.330 and 2.1
 | The type files Claude Code writes for your build are the ones to trust over any page ([types](https://code.claude.com/docs/en/plugins/mods/create.md#get-the-types-for-your-build)) | The mod and its test are type-checked against those types | `sh tests/mod/typecheck.sh` and CI (S9.5) |
 | `agent.spawn` takes a model through `next`, and `turn.step` takes an effort ([events](https://code.claude.com/docs/en/plugins/mods/events.md)) | Sets a spawn's model there and its effort at `turn.step`, and leaves the main loop's model and effort alone | Node suite, live (S2.1) |
 | Plugins' `PreToolUse` hooks run after the last mod calls `next` ([order](https://code.claude.com/docs/en/plugins/mods/events.md#where-settings-hooks-run-in-the-order)), and `$.fs.write(path, text)` writes a file ([files](https://code.claude.com/docs/en/plugins/mods/api.md#reach-files-processes-and-the-network)) | The mod's `tool.call` hook marks each `Agent` call under `mod-calls/` in the data folder before passing it on, and the fallback stands down only for a marked call | `Mod.test_the_settings_hook_stands_down_only_for_a_call_the_mod_marked`; Node "an Agent call is marked for the fallback only while the runtime answers" (S2.7) |
+| `$.agent.list()` gives each subagent's own tokens per model and what `/cost` credited for them, a client-side estimate that a mod showing it should label one, and on a subscription no charge at all; a workflow's agents aren't listed (mod API types `AgentInfo`, `SessionCost`, [mods reference](https://code.claude.com/docs/en/plugins/mods/reference.md)) | Records those figures at each subagent's turn end, labels the dollars Claude Code's estimate, and says when the session is on a subscription | Node "a subagent's turn end sends Claude Code's own figures for it, and the main loop's sends nothing"; `Reports.test_usage_report` (S2.6, S2.22) |
 
 ## Plugin packaging
 
@@ -88,7 +89,7 @@ Last checked against the live docs on 2026-11-24, on Claude Code 2.1.330 and 2.1
 | :- | :- | :- |
 | A managed `availableModels` applies alone, otherwise the user, project and local lists are joined, and `deniedModels` counts only in managed settings ([restrict model selection](https://code.claude.com/docs/en/model-config.md#restrict-model-selection)) | Routes only to models those lists leave open | `test_a_managed_list_applies_alone_else_the_other_sources_are_concatenated` (S3.11) |
 | Aliases resolve per provider, and on Bedrock `sonnet` and `haiku` can be older versions ([model aliases](https://code.claude.com/docs/en/model-config.md#model-aliases)) | Routes by alias, and on the mod path sends the family's newest ID where an alias lags, falling back to the alias | `NewestOnProviders` tests, no live provider run (S3.10) |
-| A Haiku 5.5 request costs more per token when its prompt is over 100K tokens ([model configuration](https://code.claude.com/docs/en/model-config.md)) | Prices each request on its own | `LongPromptPricing` tests (S4.7) |
+| A Haiku 5.5 request costs more per token when its prompt is over 100K tokens ([model configuration](https://code.claude.com/docs/en/model-config.md)) | Takes each subagent's dollars from Claude Code's own estimate, which prices it | Node "a subagent's turn end sends Claude Code's own figures for it, and the main loop's sends nothing" (S4.7) |
 
 ## Anthropic's best practices
 
@@ -110,6 +111,5 @@ Each is recorded in [TRACEABILITY.md](TRACEABILITY.md) or [RELEASE_READINESS.md]
 - It refuses one kind of call: on the `Agent` call fallback, a repeated call that would break your `max_tier` cap is denied with the model to use instead (S2.25).
 - The mod reads `agent.spawn` fields such as `fork`, `parentModel` and `workflow` that the reference page doesn't list. They are in the type files Claude Code writes for each build, which the docs say to trust (S5.6).
 - An `availableModels` list passed with `--settings` is joined with the others. The docs' merge rule names user, project and local settings only.
-- Fast mode requests are priced at standard rates (S4.8).
 - The docs don't say whether `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` wins over the model a mod sets, or give an effort order for workflow agents. A live run on 2.1.331 showed the pin wins, and the router treats workflow agents as subagents: the mods reference names only subagents and teammates for `agent.spawn`, but the type files and the run show it fires for workflow agents too.
 - A script's `effort` on `agent()` isn't on the spawn event, so on a stage that names no model the router can't see it. It raises a stage's effort to its own pick and never lowers it.

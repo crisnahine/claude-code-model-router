@@ -7,7 +7,7 @@ from . import config as cfg
 from . import registry
 
 # The --json shapes. A new key keeps the version; removing or renaming one bumps it.
-USAGE_SCHEMA = "model-router.usage/1"
+USAGE_SCHEMA = "model-router.usage/2"
 MODELS_SCHEMA = "model-router.models/2"
 
 
@@ -206,8 +206,23 @@ def status(changes: dict | None) -> str:
     return "\n".join(out)
 
 
+def _runs(rows: list[dict]) -> dict[str, dict]:
+    """Each subagent's usage, by agent id: a listed agent's newest row holds all of its turns so far, and a
+    workflow agent's rows are one turn each, so they add up."""
+    runs: dict[str, dict] = {}
+    for r in rows:
+        if r.get("event") != "usage" or not r.get("agent_id") or not isinstance(r.get("models"), list):
+            continue
+        key = str(r["agent_id"])
+        if r.get("running") or key not in runs:
+            runs[key] = {**r, "models": list(r["models"])}
+        elif not runs[key].get("running"):
+            runs[key]["models"] += r["models"]
+    return runs
+
+
 def usage_data(days: int, exact: bool = False) -> dict:
-    """What the ledger shows for the last `days` days, in the `model-router.usage/1` shape.
+    """What the ledger shows for the last `days` days, in the `model-router.usage/2` shape.
     Dollars are rounded to six places unless `exact`, which the table uses."""
     rows = ledger.read(days)
     by_agent: dict[str, dict] = {}
@@ -234,37 +249,33 @@ def usage_data(days: int, exact: bool = False) -> dict:
             model = str(r.get("resolved_model") or "background (not reported)")
             a = row(r.get("agent"))
             a["ran_on"][model] = a["ran_on"].get(model, 0) + 1
-            m = by_model.setdefault(model, {"model": model, "runs": 0, "tokens": 0, "run_tokens": None})
+            m = by_model.setdefault(model, {"model": model, "runs": 0, "run_tokens": None})
             m["runs"] += 1
-            # totalTokens is the run's final request only (https://code.claude.com/docs/en/hooks.md).
-            m["tokens"] += r.get("total_tokens") if isinstance(r.get("total_tokens"), int) else 0
-    # A workflow agent has no result row, so its first usage row, which names its type, says what it ran on.
-    first_model: dict[tuple[str, str], str] = {}
-    for r in rows:
-        if r.get("event") == "usage" and r.get("agent") and r.get("agent_id"):
-            first_model.setdefault((str(r["agent"]), str(r["agent_id"])), str(r.get("model")))
-    for (agent, _), model in first_model.items():
-        a = row(agent)
-        a["ran_on"][model] = a["ran_on"].get(model, 0) + 1
-    for r in rows:
-        m = by_model.get(str(r.get("model"))) if r.get("event") == "usage" and r.get("agent_id") else None
-        if m is not None:
-            m["run_tokens"] = (m["run_tokens"] or 0) + sum(int(r.get(k) or 0) for k in (
-                "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
-    spend: dict[tuple[str, str], dict] = {}
-    unpriced = set()
-    for r in rows:
-        if r.get("event") != "usage":
+    runs = _runs(rows)
+    for run in runs.values():
+        used = [m for m in run["models"] if isinstance(m, dict)]
+        # A workflow agent has no result row, so its first turn says what it ran on.
+        if not run.get("running") and run.get("agent") and used:
+            a = row(run["agent"])
+            model = str(used[0].get("model"))
+            a["ran_on"][model] = a["ran_on"].get(model, 0) + 1
+        for m in used:
+            found = by_model.get(str(m.get("model")))
+            if found is not None:
+                found["run_tokens"] = (found["run_tokens"] or 0) + sum(int(m.get(k) or 0) for k in ledger.TOKENS)
+    spend: dict[str, dict] = {}
+    unknown, no_estimate, subscription = set(), set(), False
+    for run in runs.values():
+        agent = str(run.get("agent") or "?")
+        if not isinstance(run.get("cost_usd"), (int, float)):
+            no_estimate.add(agent)
             continue
-        loop, model = "subagent" if r.get("agent_id") else "main", str(r.get("model"))
-        s_row = spend.setdefault((loop, model), {"loop": loop, "model": model, "turns": 0,
-                                                  "output_tokens": 0, "usd": 0.0})
-        s_row["turns"] += 1
-        s_row["output_tokens"] += int(r.get("output_tokens") or 0)
-        if isinstance(r.get("cost_usd"), (int, float)):
-            s_row["usd"] += r["cost_usd"]
-        else:
-            unpriced.add(model)
+        s_row = spend.setdefault(agent, {"agent": agent, "runs": 0, "usd": 0.0})
+        s_row["runs"] += 1
+        s_row["usd"] += run["cost_usd"]
+        if run.get("unknown_price"):
+            unknown.add(agent)
+        subscription = subscription or run.get("subscription") is True
     spend_rows = sorted(spend.values(), key=lambda v: -v["usd"])
     total = sum((v["usd"] for v in spend_rows), 0.0)
     if not exact:
@@ -280,7 +291,8 @@ def usage_data(days: int, exact: bool = False) -> dict:
         **({"redos": redos} if redos else {}),
         "models": [by_model[m] for m in sorted(by_model)],
         "model_errors": sum(1 for r in rows if r.get("event") == "model_error"),
-        "spend": {"total_usd": total, "rows": spend_rows, "unpriced": sorted(unpriced)},
+        "spend": {"total_usd": total, "rows": spend_rows, "unknown_price": sorted(unknown),
+                  "no_estimate": sorted(no_estimate - set(spend)), "subscription": subscription},
     }
 
 
@@ -301,19 +313,21 @@ def usage(days: int) -> str:
         lines += ["", f"Redos by the level they climbed from: {redone}. A level that keeps coming back can be raised "
                   "under `levels` in ~/.claude/model-router.json."]
     if data["models"]:
-        lines += ["", "| Model | Agent runs | Final-request tokens | All subagent turns' tokens |", "| :- | -: | -: | -: |"]
-        lines += [f"| {m['model']} | {m['runs']} | {m['tokens']:,} | "
-                  f"{'-' if m['run_tokens'] is None else format(m['run_tokens'], ',')} |" for m in data["models"]]
+        lines += ["", "| Model | Agent runs | Subagent tokens |", "| :- | -: | -: |"]
+        lines += [f"| {m['model']} | {m['runs']} | {'-' if m['run_tokens'] is None else format(m['run_tokens'], ',')} |"
+                  for m in data["models"]]
     if data["model_errors"]:
         lines += ["", f"Agent calls that failed with a model error: {data['model_errors']}."]
     if spend["rows"]:
-        lines += ["", f"Spend at list price: ${spend['total_usd']:,.2f}", "",
-                  "| Loop | Model | Turns | Output tokens | USD |", "| :- | :- | -: | -: | -: |"]
-        lines += [f"| {v['loop']} | {v['model']} | {v['turns']} | {v['output_tokens']:,} | {v['usd']:,.2f} |"
-                  for v in spend["rows"]]
-        if spend["unpriced"]:
-            lines.append(f"\nNo price in the registry for: {', '.join(spend['unpriced'])}. "
-                         "Add one under `prices` in ~/.claude/model-router.json.")
-    else:
-        lines += ["", "Dollar totals are in /usage and /cost; this ledger shows what was routed where."]
+        lines += ["", f"Subagent spend, Claude Code's estimate and not the bill: ${spend['total_usd']:,.2f}"]
+        if spend["subscription"]:
+            lines.append("This session is on a subscription: usage inside the plan is not billed in dollars.")
+        lines += ["", "| Agent | Runs | USD |", "| :- | -: | -: |"]
+        lines += [f"| {v['agent']} | {v['runs']} | {v['usd']:,.2f} |" for v in spend["rows"]]
+        if spend["unknown_price"]:
+            lines.append("\nClaude Code priced a model with no known price at another model's rates for: "
+                         f"{', '.join(spend['unknown_price'])}.")
+    if spend["no_estimate"]:
+        lines += ["", f"Claude Code gives no estimate for these agents, such as workflow agents: {', '.join(spend['no_estimate'])}."]
+    lines += ["", "The session's own cost and plan usage are in /usage."]
     return "\n".join(lines)

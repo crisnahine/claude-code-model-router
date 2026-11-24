@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import operator
 import os
+import re
 from dataclasses import replace
 from enum import Enum
 from pathlib import Path
@@ -26,6 +27,8 @@ LEVEL_SOURCES = ("router", "pin", "rule")
 
 USER_FILE = "your model-router.json"
 PROJECT_FILE = "the project's model-router.json"
+# A repository's key names are printed into skill output Claude reads, so only short plain names are kept.
+_PLAIN_NAME = re.compile(r"[A-Za-z0-9._:/\[\]-]{1,64}")
 
 
 class Level(str, Enum):
@@ -145,14 +148,21 @@ def parse_mode(value: Any) -> str | None:
     return value if value in MODES else None
 
 
-def _clean(override: Any, source: str, problems: list[str]) -> dict:
+def _clean(override: Any, source: str, problems: list[str], plain_keys: bool = False) -> dict:
     """Keep only the well-formed parts of an override file, so a typo can't break a hook or put a
-    value on an agent call that Claude Code would reject. What is dropped is added to `problems`."""
+    value on an agent call that Claude Code would reject. What is dropped is added to `problems`.
+    With `plain_keys`, a model or agent key that isn't a short plain name is dropped unnamed."""
     if not isinstance(override, dict):
         return {}
 
     def bad(where: str, why: str) -> None:
         problems.append(f"{source}: {where} {why}, dropped")
+
+    def plain(name: object, section: str) -> bool:
+        if plain_keys and isinstance(name, str) and not _PLAIN_NAME.fullmatch(name):
+            problems.append(f"{source}: a key under {section} that is not a plain name, dropped")
+            return False
+        return True
 
     out: dict = {}
     if parse_mode(override.get("routing_mode")):
@@ -163,6 +173,8 @@ def _clean(override: Any, source: str, problems: list[str]) -> dict:
     if isinstance(models, dict):
         out["models"] = {}
         for name, spec in models.items():
+            if not plain(name, "models"):
+                continue
             if not isinstance(name, str) or not isinstance(spec, dict):
                 bad(f"models.{name}", "is not an object")
                 continue
@@ -195,6 +207,8 @@ def _clean(override: Any, source: str, problems: list[str]) -> dict:
     if isinstance(agents, dict):
         out["agents"] = {}
         for name, spec in agents.items():
+            if not plain(name, "agents"):
+                continue
             if not isinstance(name, str) or not isinstance(spec, dict):
                 bad(f"agents.{name}", "is not an object")
                 continue
@@ -215,23 +229,6 @@ def _clean(override: Any, source: str, problems: list[str]) -> dict:
     elif agents is not None:
         bad("agents", "is not an object")
     return out
-
-
-def _prices(value: Any, source: str, problems: list[str]) -> dict:
-    """The numeric rate fields of a prices block, keyed by lowercase model ID."""
-    if not isinstance(value, dict):
-        return {}
-    fields = ("input", "output", "cache_read", "cache_write", "cache_write_1h")
-    out = {}
-    for name, spec in value.items():
-        if not isinstance(name, str) or not isinstance(spec, dict):
-            problems.append(f"{source}: prices.{name} is not an object, dropped")
-            continue
-        for field in fields:
-            if spec.get(field) is not None and not _number(spec[field]):
-                problems.append(f"{source}: prices.{name}.{field} is not a finite number, dropped")
-        out[name.lower()] = {f: spec[f] for f in fields if _number(spec.get(f))}
-    return {k: v for k, v in out.items() if v}
 
 
 def tool_input(hook_input: dict) -> dict:
@@ -334,8 +331,7 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
     held: list[Held] = []
     user_file, project_file = user or {}, project or {}
     mine = _clean(user_file, USER_FILE, problems)
-    mine["prices"] = _prices(user_file.get("prices"), USER_FILE, problems)
-    theirs = _clean(project_file, PROJECT_FILE, problems)
+    theirs = _clean(project_file, PROJECT_FILE, problems, plain_keys=True)
     vouched = set(base.get("models") or {}) | set(mine.get("models") or {})
     added = {}
     for name, spec in (theirs.get("models") or {}).items():
@@ -360,7 +356,7 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
         models=models,
         levels=_levels(_merge(shipped_levels, project_levels), problems),
         aliases=aliases,
-        prices=_merge(base.get("prices") or {}, mine.get("prices") or {}),
+        prices=dict(base.get("prices") or {}),
         newest={k: v for k, v in (base.get("newest") or {}).items() if not k.startswith("$") and isinstance(v, str)},
         older_aliases={k: tuple(v) for k, v in (base.get("older_aliases") or {}).items()
                        if not k.startswith("$") and isinstance(v, list)},

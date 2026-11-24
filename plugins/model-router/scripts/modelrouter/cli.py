@@ -8,7 +8,7 @@
   explain    what the router would make of a task: explain [--agent NAME] TEXT
   refresh    fetch upstream (--force) and show what changed; status shows the cache;
              ack marks it reviewed
-  usage      the ledger by agent and model: usage [DAYS] [--json for model-router.usage/1]
+  usage      the ledger by agent and model: usage [DAYS] [--json for model-router.usage/2]
   upstream-check --baseline FILE [--write]   CI: compare live upstream with a baseline
 """
 from __future__ import annotations
@@ -83,7 +83,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd in hooks.HANDLERS:
         try:
             try:
-                hook_input = json.load(sys.stdin)
+                # Bytes: json detects UTF-8 itself, where the text stream would decode in the locale's code page.
+                hook_input = json.loads(sys.stdin.buffer.read())
             except ValueError:
                 hook_input = {}
             hook_input = _well_formed(hook_input)

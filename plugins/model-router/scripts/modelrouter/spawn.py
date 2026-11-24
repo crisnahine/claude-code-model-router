@@ -105,9 +105,15 @@ def _record(spawned: Spawn, via: str, newest: str | None) -> None:
     facts = spawned.facts
     # The effort it runs at, whoever chose it, so a redo can tell it would only repeat this run.
     effort = router.runs_at(decision["effort"], facts.tool_input, facts.definition, spawned.snap.options, facts.teammate)
+    named = facts.tool_input.get("model") or (facts.definition or {}).get("model")
+    reg = spawned.snap.registry
+    # A full ID or a [1m] variant the call keeps is the caller's or the agent's own pick, not its family's.
+    version = (named if not rewrote and runs_on and isinstance(named, str) and reg.family(named) == runs_on
+               and named.lower() not in (runs_on, *[a for a, t in reg.aliases.items() if t == runs_on]) else None)
     route = calls.Route(model=runs_on, sent=newest or (decision["model"] if rewrote else None),
                         level=Level.parse(decision["level"]), effort=effort, source=source, path=via,
-                        prompt_id=request.load(session_id).prompt_id, rewrote=rewrote, was=decision["was"])
+                        prompt_id=request.load(session_id).prompt_id, rewrote=rewrote, was=decision["was"],
+                        version=version)
     spawn_id = hook_input.get("tool_use_id")
     try:  # a route that can't be written mustn't cost the checker's note
         calls.routed(session_id, spawned.key, route, spawn_id if isinstance(spawn_id, str) and spawn_id else None)

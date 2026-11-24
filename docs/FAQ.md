@@ -26,7 +26,7 @@ When Claude redoes a weak result, the call runs one level higher. Claude marks t
 
 ## What does Model Router cost?
 
-The plugin is free, and it adds 683 tokens to the main conversation's context (subagents get none), measured on a headless Sonnet run. Each hook takes about 54 to 60 ms warm, and a `mod-spawn` round trip takes about 58 ms warm and 187 ms cold (p50), almost all of it starting Python ([PERFORMANCE.md](PERFORMANCE.md)). The models it routes to are billed to your Claude plan or API account as usual, and `/model-router:usage` shows what each turn cost at list price.
+The plugin is free, and it adds 683 tokens to the main conversation's context (subagents get none), measured on a headless Sonnet run. Each hook takes about 54 to 60 ms warm, and a `mod-spawn` round trip takes about 58 ms warm and 187 ms cold (p50), almost all of it starting Python ([PERFORMANCE.md](PERFORMANCE.md)). The models it routes to are billed to your Claude plan or API account as usual, and `/model-router:usage` shows Claude Code's own cost estimate for each subagent, which isn't the bill.
 
 ## Does Model Router reduce Claude Code cost?
 
@@ -58,7 +58,7 @@ Yes, through the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Cod
 
 ## What does Model Router store on my machine, and what leaves it?
 
-It keeps its state in its own plugin data directory and sends no prompt, brief, path or code anywhere. The ledger keeps the first 120 characters of each agent call's description, plus levels, reasons, model names, token counts and list-price cost; a repeated call is recognized by a hash. The only network traffic is the daily update check of the Claude Code changelog, docs index and model pages (`code.claude.com`, `platform.claude.com`), plus `api.anthropic.com` for your account's model list when `ANTHROPIC_API_KEY` is set, `ANTHROPIC_BASE_URL` is unset and none of `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` is on. Turning `update_check` off stops it ([SECURITY.md](SECURITY.md)).
+It keeps its state in its own plugin data directory and sends no prompt, brief, path or code anywhere. The ledger keeps the first 120 characters of each agent call's description, plus levels, reasons, model names, token counts and Claude Code's cost estimate per subagent, for 30 days; a repeated call is recognized by a hash. Its folder is readable by your user alone. The only network traffic is the daily update check of the Claude Code changelog, docs index and model pages (`code.claude.com`, `platform.claude.com`), plus `api.anthropic.com` for your account's model list when `ANTHROPIC_API_KEY` is set, `ANTHROPIC_BASE_URL` is unset and none of `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` is on. Turning `update_check` off stops it ([SECURITY.md](SECURITY.md)).
 
 ## Does it work with other plugins, skills and agents?
 
@@ -74,4 +74,4 @@ No. The plugin never approves a tool call, and your permission rules and auto mo
 
 ## How do I see what it routed and what it spent?
 
-Run `/model-router:usage` for what ran where and what it cost at list price, and `/model-router:models` for the models in use, what each runs as, and what is capped, unavailable or routed around. `/model-router:route <task>` explains which model a task would get and why before you run it ([README](../README.md#commands)).
+Run `/model-router:usage` for what ran where and Claude Code's cost estimate per subagent, and `/model-router:models` for the models in use, what each runs as, and what is capped, unavailable or routed around. `/model-router:route <task>` explains which model a task would get and why before you run it ([README](../README.md#commands)).

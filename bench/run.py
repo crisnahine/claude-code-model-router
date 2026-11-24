@@ -252,14 +252,19 @@ def agent_types(work: Path, env: dict) -> dict[str, str]:
     return types
 
 
-def spend_by_agent(ledger: list[dict], types: dict[str, str]) -> dict[str, float]:
-    """A router run's spend by agent type: usage rows carry the subagent's agent_id, or none for the main loop."""
-    spend: dict = {}
+def spend_by_agent(ledger: list[dict], types: dict[str, str], total: object) -> dict[str, float]:
+    """A router run's spend by agent type, from Claude Code's estimate per subagent: each one's newest usage row
+    holds all of its turns. `main` is the rest of the run's total: the main loop, and agents with no estimate."""
+    last: dict[str, float] = {}
     for row in ledger:
-        if row.get("event") != "usage" or not isinstance(row.get("cost_usd"), (int, float)):
-            continue
-        who = "main" if not row.get("agent_id") else types.get(row["agent_id"], "unknown")
-        spend[who] = round(spend.get(who, 0.0) + row["cost_usd"], 6)
+        if row.get("event") == "usage" and row.get("agent_id") and isinstance(row.get("cost_usd"), (int, float)):
+            last[row["agent_id"]] = row["cost_usd"]
+    spend: dict = {}
+    for agent_id, usd in last.items():
+        who = types.get(agent_id, "unknown")
+        spend[who] = round(spend.get(who, 0.0) + usd, 6)
+    if isinstance(total, (int, float)):
+        spend["main"] = round(max(0.0, total - sum(last.values())), 6)
     return spend
 
 
@@ -432,7 +437,7 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         "main_model": config.get("model", options["model"]),
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
         "plugin_state": facts["plugin_state"],
-        "agent_costs": None if ledger is None else spend_by_agent(ledger, facts["agent_types"]),
+        "agent_costs": None if ledger is None else spend_by_agent(ledger, facts["agent_types"], cost if known else None),
         "routed": None if ledger is None else spawns(ledger),
         "plugin_ref": config.get("plugin_ref"), "plugin_data_own": True, "sessions_saved": True,
         "session_dir_removed": facts["session_dir_removed"],

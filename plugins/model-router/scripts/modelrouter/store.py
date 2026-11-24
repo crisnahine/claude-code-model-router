@@ -12,15 +12,16 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 LEDGER_MAX_BYTES = 4 * 1024 * 1024
+LEDGER_MAX_DAYS = 30  # Claude Code's own default cleanupPeriodDays, which never reaches plugin data
 KEEP_ENTRIES = 200
 KEEP_SET_ASIDE = 3  # copies of an unreadable state file kept for a person to look at
 LOCK_WAIT_SECONDS = 1.0
 LOCK_POLL_MAX = 0.01  # the longest sleep between tries, so a waiter isn't starved by newcomers
 KEPT_RECORDS = 100  # calls kept per record file
-# The version written into every state file. MIGRATIONS[n] turns a version-n file into
-# version n + 1. A file with no version is version 0, which already has today's shape.
+# The version written into each shared file (state.json, upstream.json, locks.json), which
+# several releases can write at once. A file with no version has today's shape.
 SCHEMA = 1
-MIGRATIONS: dict[int, Callable[[dict], dict]] = {0: lambda data: data}
+DURABLE = ("state.json", "upstream.json", "locks.json")
 
 
 _clock: Callable[[], float] | None = None
@@ -51,10 +52,18 @@ def claude_home() -> Path:
     return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
 
 
+_private: set[Path] = set()
+
+
 def data_dir() -> Path:
     env = os.environ.get("CLAUDE_PLUGIN_DATA")
     path = Path(env) if env else claude_home() / "plugins" / "data" / "model-router-local"
     path.mkdir(parents=True, exist_ok=True)
+    if path not in _private:
+        # Claude Code creates the folder itself, so a mode on mkdir would not apply.
+        with contextlib.suppress(OSError):
+            os.chmod(path, 0o700)
+        _private.add(path)
     return path
 
 
@@ -74,7 +83,8 @@ def write_atomic(path: Path, text: str) -> None:
     # A unique temp name per process, then an atomic rename: a reader never sees a
     # half-written file.
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{time.monotonic_ns()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
+    with _private_file(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL) as fh:
+        fh.write(text)
     for _ in range(40):
         try:
             tmp.replace(path)
@@ -86,6 +96,10 @@ def write_atomic(path: Path, text: str) -> None:
     except OSError:
         pass
     raise OSError(f"could not replace {path.name}")
+
+
+def _private_file(path: Path, flags: int) -> Any:
+    return os.fdopen(os.open(str(path), flags, 0o600), "a" if flags & os.O_APPEND else "w", encoding="utf-8")
 
 
 # The session whose hook is running, written into the lock files it holds, so a wait can
@@ -136,7 +150,7 @@ def locked(path: Path) -> Iterator[None]:
     delay = 0.001
     events: list[str] = []
     holder = ""
-    handle = os.open(str(lock), os.O_CREAT | os.O_RDWR)
+    handle = os.open(str(lock), os.O_CREAT | os.O_RDWR, 0o600)
     try:
         while True:
             try:
@@ -206,9 +220,9 @@ else:
         fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def _read_state(path: Path) -> tuple[dict, str]:
-    """One state file, migrated to SCHEMA, without its version key, and how it read:
-    ok, corrupt, newer (written by a later release) or unreadable."""
+def _read_state(path: Path, durable: bool = True) -> tuple[dict, str]:
+    """One state file without its version key, and how it read: ok, corrupt, newer (a shared
+    file written by a later release) or unreadable. A per-session file has no version to check."""
     try:
         raw = path.read_bytes()
     except FileNotFoundError:
@@ -222,18 +236,15 @@ def _read_state(path: Path) -> tuple[dict, str]:
     if not isinstance(data, dict):
         return {}, "corrupt"
     version = data.pop("schema", 0)
+    if not durable:
+        return data, "ok"
     if type(version) is not int or version < 0:
         return {}, "corrupt"
-    if version > SCHEMA:
-        return data, "newer"
-    while version < SCHEMA:
-        data = MIGRATIONS[version](data)
-        version += 1
-    return data, "ok"
+    return data, "newer" if version > SCHEMA else "ok"
 
 
-def load_state_file(path: Path) -> dict:
-    return _read_state(path)[0]
+def load_state_file(path: Path, durable: bool = True) -> dict:
+    return _read_state(path, durable)[0]
 
 
 def _set_aside(path: Path) -> bool:
@@ -265,26 +276,28 @@ def set_aside() -> list[Path]:
 
 
 def newer_files() -> list[Path]:
-    """State files a later release wrote, which this one reads but never updates."""
-    return [p for p in sorted(data_dir().glob("*.json")) if _read_state(p)[1] == "newer"]
+    """Shared files a later release wrote, which this one reads but never updates."""
+    return [p for p in (data_dir() / name for name in DURABLE) if _read_state(p)[1] == "newer"]
 
 
-def try_update(path: Path, change: Callable[[dict], Any]) -> tuple[dict, str]:
-    """Load one state file, let `change` edit it in place, and save it, under its lock.
-    A file that fails to parse is moved aside first; one from a newer release, or one
-    that can't be read or moved, is never written. Saved compact, with its version.
-    Returns the data and "saved", or why it wasn't: newer, unreadable, corrupt, or busy
-    (the lock stayed held, so `change` edited a copy and nothing was written)."""
+def try_update(path: Path, change: Callable[[dict], Any], durable: bool = True) -> tuple[dict, str]:
+    """Load one state file, let `change` edit it in place, and save it, under its lock, compact.
+    A shared (`durable`) file is saved with its version; one that fails to parse is moved aside
+    first, and one from a newer release, or one that can't be read or moved, is never written.
+    A per-session file that fails to parse is replaced. Returns the data and "saved", or why it
+    wasn't: newer, unreadable, corrupt, or busy (the lock stayed held, so `change` edited a copy
+    and nothing was written)."""
     try:
         with locked(path):
-            data, status = _read_state(path)
-            writable = status == "ok" or (status == "corrupt" and _set_aside(path))
+            data, status = _read_state(path, durable)
+            writable = status == "ok" or (status == "corrupt" and (not durable or _set_aside(path)))
             change(data)
             if writable:
-                write_atomic(path, json.dumps({**data, "schema": SCHEMA}, separators=(",", ":"), sort_keys=True))
+                saved = {**data, "schema": SCHEMA} if durable else data
+                write_atomic(path, json.dumps(saved, separators=(",", ":"), sort_keys=True))
             return data, "saved" if writable else status
     except Busy:
-        data = _read_state(path)[0]
+        data = _read_state(path, durable)[0]
         change(data)
         return data, "busy"
 
@@ -310,7 +323,7 @@ def _keyed(name: str) -> Path:
 
 
 def load_entry(name: str, key: str | None) -> dict:
-    entry = load_state_file(_keyed(name)).get(key) if key else None
+    entry = load_state_file(_keyed(name), durable=False).get(key) if key else None
     return entry if isinstance(entry, dict) else {}
 
 
@@ -338,7 +351,7 @@ def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any], max_
             for old in sorted(data, key=written)[:len(data) - KEEP_ENTRIES]:
                 del data[old]
 
-    return try_update(_keyed(name), apply)[1]
+    return try_update(_keyed(name), apply, durable=False)[1]
 
 
 def save_entry(name: str, key: str | None, entry: dict) -> None:
@@ -365,17 +378,35 @@ def ledger_path() -> Path:
     return data_dir() / "ledger.jsonl"
 
 
+def _older(line: str, cutoff: _dt.datetime) -> bool | None:
+    """Whether a ledger line's row is older than `cutoff`, or None when it has no readable time."""
+    try:
+        return _dt.datetime.fromisoformat(json.loads(line)["ts"]) < cutoff
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
 def append_ledger(entry: dict) -> None:
-    entry = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"), **entry}
+    """Append one row. Rows older than LEDGER_MAX_DAYS go once the oldest one is, and past
+    LEDGER_MAX_BYTES the older half goes too."""
+    now = _dt.datetime.now(_dt.timezone.utc)
+    entry = {"ts": now.isoformat(timespec="seconds"), **entry}
+    cutoff = now - _dt.timedelta(days=LEDGER_MAX_DAYS)
     path = ledger_path()
     try:
         # The append takes the lock too: a row written between a trim's read and its
         # replace would land in the file the trim throws away.
         with locked(path):
-            with path.open("a", encoding="utf-8") as fh:
+            with _private_file(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND) as fh:
                 fh.write(json.dumps(entry) + "\n")
-            if path.stat().st_size > LEDGER_MAX_BYTES:
-                lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-                write_atomic(path, "".join(lines[len(lines) // 2:]))
+            with path.open(encoding="utf-8") as fh:
+                oldest = next((found for found in map(lambda line: _older(line, cutoff), fh) if found is not None), False)
+            big = path.stat().st_size > LEDGER_MAX_BYTES
+            if oldest or big:
+                lines = [line for line in path.read_text(encoding="utf-8").splitlines(keepends=True)
+                         if not _older(line, cutoff)]
+                if sum(len(line.encode("utf-8")) for line in lines) > LEDGER_MAX_BYTES:
+                    lines = lines[len(lines) // 2:]
+                write_atomic(path, "".join(lines))
     except OSError:
         pass

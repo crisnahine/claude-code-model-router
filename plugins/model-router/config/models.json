@@ -1,5 +1,5 @@
 {
-  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength, speed and cost are relative ranks. A model's name must be an alias the Agent tool accepts (haiku, sonnet, opus, fable). The crew lists the plugin's role agents and their roles. A crew model must match the agent's own frontmatter, which the tests check: the always-cheap agents keep theirs, and the others carry none, so the router routes each by its brief. Levels pair a strength with an effort: on current models effort is the cheaper lever, so standard runs on Sonnet at medium, complex on Opus at high, and hardest differs from complex in effort on the same model: Opus at xhigh. Prices are USD per million tokens on the Anthropic API, used only to report spend: a key is one model version, or ends in -* to cover every version of a family, and a version with no entry is reported as unpriced. Prices can be added or changed in your own ~/.claude/model-router.json only, not a project's file. cache_write is the five-minute cache write price and cache_write_1h the one-hour one, which is twice input when left out. A shipped long_prompt block holds the prices a request pays when its prompt (input, cache reads and cache writes) is over its `over` tokens; each request is priced on its own (https://platform.claude.com/docs/en/about-claude/pricing.md, Long context pricing). `schema` is the version of this shape; an override may carry it too, and docs/ARCHITECTURE.md \"Compatibility\" says what changes it.",
+  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength, speed and cost are relative ranks. A model's name must be an alias the Agent tool accepts (haiku, sonnet, opus, fable). The crew lists the plugin's role agents and their roles. A crew model must match the agent's own frontmatter, which the tests check: the always-cheap agents keep theirs, and the others carry none, so the router routes each by its brief. Levels pair a strength with an effort: on current models effort is the cheaper lever, so standard runs on Sonnet at medium, complex on Opus at high, and hardest differs from complex in effort on the same model: Opus at xhigh. Prices are USD per million tokens on the Anthropic API, read only by the benchmark's cost estimate and the README banner: Model Router prices nothing, and /model-router:usage shows Claude Code's own estimate. A key is one model version, or ends in -* to cover every version of a family. cache_write is the five-minute cache write price and cache_write_1h the one-hour one. `schema` is the version of this shape; an override may carry it too, and docs/ARCHITECTURE.md \"Compatibility\" says what changes it.",
   "schema": 1,
   "models": {
     "haiku": {
@@ -177,15 +177,7 @@
       "output": 0.5,
       "cache_read": 0.01,
       "cache_write": 0.125,
-      "cache_write_1h": 0.2,
-      "long_prompt": {
-        "over": 100000,
-        "input": 0.5,
-        "output": 2.5,
-        "cache_read": 0.05,
-        "cache_write": 0.625,
-        "cache_write_1h": 1
-      }
+      "cache_write_1h": 0.2
     },
     "claude-haiku-4-5": {
       "input": 1,
