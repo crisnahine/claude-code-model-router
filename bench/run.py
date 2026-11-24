@@ -156,7 +156,9 @@ def grading_env(env: dict) -> dict:
 
 # A check exits 0 when the task was solved, 1 when it wasn't and 2 when the check itself broke. The launcher turns
 # anything the check raises into 2, so a bug in a check can't read as a wrong answer.
-_LAUNCH = ("import runpy, sys, traceback\nsys.argv = sys.argv[1:]\ntry:\n"
+# It writes UTF-8 on any locale, since grade() decodes the check's output as UTF-8.
+_LAUNCH = ("import runpy, sys, traceback\nsys.stdout.reconfigure(encoding='utf-8')\nsys.stderr.reconfigure(encoding='utf-8')\n"
+           "sys.argv = sys.argv[1:]\ntry:\n"
            "    runpy.run_path(sys.argv[0], run_name='__main__')\nexcept SystemExit:\n    raise\n"
            "except BaseException:\n    traceback.print_exc()\n    sys.exit(2)\n")
 

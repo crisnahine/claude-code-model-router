@@ -285,8 +285,7 @@ class Analysis(unittest.TestCase):
             line = json.dumps({"task": "t", "config": "plugin", "started_at": "2026-11-22T10:00:00+00:00",
                                "infra_reason": "x"})
             (path.parent / "infra" / "a.jsonl").write_text(line + "\n", encoding="utf-8")
-            relative = Path(os.path.relpath(path))
-            results = analyze.load([path, relative])
+            results = analyze.load([path, path.parent / ".." / path.parent.name / path.name])
         self.assertEqual(len(results.files), 1)
         self.assertEqual(len(results.aside), 1)
 
@@ -810,7 +809,7 @@ from pathlib import Path
 if "--version" in sys.argv:
     print("9.9.9 (stub)"); sys.exit(0)
 Path("FINDING.json").write_text('{"file": "app/settings.py", "line": 7}')
-Path("app/client.py").write_text("changed\\n")
+Path("app/client.py").write_bytes(b"changed\\n")
 Path("app/backoff.py").unlink()
 print(json.dumps({"result": "x" * 3000, "total_cost_usd": 0.01, "modelUsage": {}}))
 '''
@@ -827,7 +826,7 @@ class FinalAnswer(unittest.TestCase):
                 (root / "same.py").write_text("a = 1\n", encoding="utf-8")
                 (root / "pkg" / "edit.py").write_text("b = 1\n", encoding="utf-8")
             (shipped / "gone.py").write_text("c = 1\n", encoding="utf-8")
-            (work / "pkg" / "edit.py").write_text("b = 2\n", encoding="utf-8")
+            (work / "pkg" / "edit.py").write_bytes(b"b = 2\n")
             (work / "DESIGN.json").write_text('{"x": 1}', encoding="utf-8")
             (work / "pkg" / "__pycache__").mkdir()
             (work / "pkg" / "__pycache__" / "edit.cpython-39.pyc").write_bytes(b"\0\1")
@@ -848,7 +847,7 @@ class FinalAnswer(unittest.TestCase):
             for folder in (shipped, work):
                 (folder / "same.txt").write_text(big, encoding="utf-8")
             (work / "huge.txt").write_text(big, encoding="utf-8")
-            (work / "small.txt").write_text("ok\n", encoding="utf-8")
+            (work / "small.txt").write_bytes(b"ok\n")
             with unittest.mock.patch.object(Path, "read_bytes", autospec=True, side_effect=Path.read_bytes) as read:
                 final = run.final_answer(shipped, work, "")
         self.assertEqual((final["files"], final["omitted"]), ({"small.txt": "ok\n"}, ["huge.txt"]))
@@ -894,7 +893,7 @@ class FinalAnswer(unittest.TestCase):
             shipped.mkdir()
             work.mkdir()
             (Path(tmp) / "secret.txt").write_text("outside\n", encoding="utf-8")
-            (work / "inside.txt").write_text("inside\n", encoding="utf-8")
+            (work / "inside.txt").write_bytes(b"inside\n")
             try:
                 (work / "out.txt").symlink_to(Path(tmp) / "secret.txt")
                 (work / "in.txt").symlink_to(work / "inside.txt")

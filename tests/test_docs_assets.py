@@ -287,7 +287,7 @@ class BrokenInputs(unittest.TestCase):
             torn = Path(tmp) / "results" / "a-lookup.jsonl"
             torn.parent.mkdir()
             torn.write_text('{"task": "lookup-todo-count"}\n{"task": "look', encoding="utf-8")
-            self.stops(lambda: analyze.load([torn]), f"{torn}:2")
+            self.stops(lambda: analyze.load([torn]), f"{torn.resolve()}:2")
 
 
 if __name__ == "__main__":
