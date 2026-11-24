@@ -298,7 +298,7 @@ Plugin options have no version key of their own, since `userConfig` has Claude C
 
 - The main conversation's model, by choice (see above).
 - Forks. A fork reads its parent's cache and always runs on its parent's model.
-- Skills with `context: fork`. Their subagent starts without an `agent.spawn` event, so it isn't routed. Its model comes from the skill's `model` field, else from its agent type and the session.
+- Skills with `context: fork`. Their subagent starts without an `agent.spawn` event, so it isn't routed. Its model comes from the skill's `model` field, else from its agent type and the session. Claude Code's own `/ship` reviews a change with `/code-review` (https://code.claude.com/docs/en/ship-command.md), which in a terminal session runs as a forked subagent (https://code.claude.com/docs/en/code-review-local.md#how-findings-are-reported), so that review isn't routed either. No live run has checked it.
 - Agents with no definition on disk that the engine didn't make (command-line agents), unless `agent_pins` is `override`.
 - Answer quality. The profile is an estimate from the brief's wording and the agent's name. Redo escalation and the feedback loop react to what Claude redoes. Neither measures whether an answer was right.
 - Sessions where hooks are disabled by `disableAllHooks` or `allowManagedHooksOnly`. Where an organization doesn't load user mods, routing falls back to the `Agent` call and workflow stages and teammates aren't routed.

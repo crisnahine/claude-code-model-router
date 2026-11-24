@@ -37,8 +37,8 @@ Run 2026-11-23 on macOS (Darwin 27.2.0), on `deepen-modules` after the merge of 
 | Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` (`python3` is the system `/usr/bin/python3` here) | 710 tests OK, run 2026-11-24 on the commit that records it |
 | Unit tests, Python 3.13.13 | `python3.13 -m unittest discover -s tests` | 710 tests OK, run 2026-11-24 on the commit that records it |
 | Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 30 of 30 pass, run 2026-11-24 on the commit that records it |
-| Marketplace, Claude Code 2.1.330 | `claude plugin validate --strict .` | Validation passed |
-| Plugin, Claude Code 2.1.330 | `claude plugin validate --strict plugins/model-router` | Validation passed |
+| Marketplace, Claude Code 2.1.331 | `claude plugin validate --strict .` | Validation passed |
+| Plugin, Claude Code 2.1.331 | `claude plugin validate --strict plugins/model-router` | Validation passed |
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
 | Docs assets | `python3 tools/docs_assets.py --check` | Every generated asset, page head and site block matches the script |
 | Benchmarks page | `python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check` | The committed page matches the results |

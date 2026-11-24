@@ -18,6 +18,8 @@ How to use, configure and run Model Router, and how it behaves on your setup. Th
 | `/model-router:usage [days] [--json]` | Shows what ran where, and what it cost at list price: agents, levels, models, tokens and dollars |
 | `/model-router:refresh` | Reviews new Claude Code releases, docs changes, model changes and retirements |
 
+Type `/model-router:ship` in full: where Claude Code has its own `/ship`, the bare `/ship` runs that command, which can commit, push and open a pull request with no confirmation prompt (https://code.claude.com/docs/en/ship-command.md). A plugin skill always loads under its `plugin:skill` name, so both stay available (https://code.claude.com/docs/en/skills.md#resolve-skills-that-share-a-name).
+
 With `--json`, `models` and `usage` print one JSON object instead of the tables. Its `schema` key names the shape and its version, `model-router.models/1` and `model-router.usage/1`. A new key keeps the version; a key removed, renamed or changed in meaning bumps it. Scripts can run the same commands without Claude: `sh <plugin>/scripts/model-router.sh --data-dir <plugin data dir> usage 30 --json`. The shapes are in [ARCHITECTURE.md](ARCHITECTURE.md#machine-readable-output).
 
 ## Role agents

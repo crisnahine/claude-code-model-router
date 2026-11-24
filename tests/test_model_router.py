@@ -4215,6 +4215,9 @@ class Upstream(Sandbox):
         changes = upstream.diff(old, new, in_use=["claude-sonnet-4-5-20250929", "claude-opus-5-5[1m]"])
         self.assertEqual([m["model"] for m in changes["newly_deprecated"]], ["claude-sonnet-4-5-20250929"])
         self.assertEqual([m["model"] for m in changes["deprecated_in_use"]], ["claude-sonnet-4-5-20250929"])
+        # a retirement covers the undated ID too
+        undated = upstream.diff(old, new, in_use=["claude-sonnet-4-5"])
+        self.assertEqual([m["model"] for m in undated["deprecated_in_use"]], ["claude-sonnet-4-5-20250929"])
         self.assertTrue(upstream.has_pending(changes))
         self.assertIn("retires November 30, 2026", report.status(changes))
         self.assertEqual(upstream.diff({}, new)["newly_deprecated"], [])  # a first review floods nothing
@@ -4816,10 +4819,10 @@ class SlashSkills(Sandbox):
         self.assertEqual(self.turn("model-router:ship", HARD, hard), {"level": "complex", "effort": "high"})
         self.assertEqual(self.turn("model-router:ship", "", body.replace("$ARGUMENTS", ""))["level"], "frontier")
         # The settings hook reads the raw file, where the placeholder is still there.
-        skills = self.project / ".claude" / "skills" / "ship"
+        skills = self.project / ".claude" / "skills" / "build"
         skills.mkdir(parents=True)
         (skills / "SKILL.md").write_text(raw, encoding="utf-8")
-        hooks.user_prompt({"session_id": "s1", "prompt": "/ship " + typo, "cwd": str(self.project)})
+        hooks.user_prompt({"session_id": "s1", "prompt": "/build " + typo, "cwd": str(self.project)})
         self.assertEqual(request.load("s1").level, "standard")
         named = self.project / ".claude" / "skills" / "named"
         named.mkdir()

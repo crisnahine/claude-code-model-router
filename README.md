@@ -130,6 +130,8 @@ The run measured the routing code at <!-- bench:opus.commit_code -->`780ee86`<!-
 | `/model-router:usage [days] [--json]` | Shows what ran where, and what it cost at list price: agents, levels, models, tokens and dollars |
 | `/model-router:refresh` | Reviews new Claude Code releases, docs changes, model changes and retirements |
 
+Type `/model-router:ship` in full. Where Claude Code has its own `/ship`, the bare `/ship` runs that command instead, and it can commit, push and open a pull request with no confirmation prompt ([Claude Code docs](https://code.claude.com/docs/en/ship-command.md)).
+
 The plugin also ships seven role agents for work no better-fitting agent covers: `model-router:scout`, `verifier`, `docs-researcher`, `implementer`, `architect`, `reviewer` and `deep-solver` ([what each is for](docs/GUIDE.md#role-agents)). `models` and `usage` take `--json` for scripts ([output shapes](docs/GUIDE.md#commands)).
 
 ## Configuration

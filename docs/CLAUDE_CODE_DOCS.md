@@ -73,6 +73,7 @@ Last checked against the live docs on 2026-11-24, on Claude Code 2.1.330 and 2.1
 | :- | :- | :- |
 | Put a skill's key use first in its `description`, and `allowed-tools` grants tools without asking, it doesn't restrict them ([skills](https://code.claude.com/docs/en/skills.md#frontmatter-reference)) | Each skill's description opens with its use, and its Bash grants cover only the plugin's own command | `test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files` |
 | An agent needs only `name` and `description`, and `tools` limits what it can use ([frontmatter](https://code.claude.com/docs/en/sub-agents.md#supported-frontmatter-fields)) | Seven role agents, each with a `tools` list | `test_skills_have_descriptions_and_use_the_launcher` |
+| A plugin skill loads as `/plugin-name:skill-name` beside any other skill of that name, and a skill of yours named `ship`, `ship-local` or `steward` doesn't load where Claude Code's own `/ship` is available ([skills](https://code.claude.com/docs/en/skills.md#resolve-skills-that-share-a-name)) | The pipeline is `/model-router:ship`, and the README and the guide say to type it in full, since the bare `/ship` runs Claude Code's command | Not checked live; `test_a_typed_plugin_skill_is_read_from_its_plugin_root` reads `/model-router:ship` from the plugin's own folder |
 
 ## Permissions
 
