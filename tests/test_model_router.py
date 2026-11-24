@@ -54,6 +54,18 @@ def frontmatter(path: Path) -> dict:
     return fields
 
 
+@contextlib.contextmanager
+def held(path: Path, name: str | None = None):
+    """Hold a state file's lock as another process would, with `name` written as its owner."""
+    mine, store.owner = store.owner, name
+    try:
+        with store.locked(path):
+            store.owner = mine
+            yield
+    finally:
+        store.owner = mine
+
+
 # Slow CI runners take about twice as long as a laptop; the quadratic negation regex took 32 s on 64 KB.
 LINEAR_SECONDS = 2
 
@@ -586,7 +598,9 @@ class Store(Sandbox):
         for worker in workers:
             self.assertEqual(worker.wait(timeout=120), 0)
         self.assertEqual(store.load_entry("sample", "s1")["n"], 120)
-        self.assertEqual(list(self.data.glob("*.lock")) + list(self.data.glob("*.tmp")), [])
+        self.assertEqual(list(self.data.glob("*.tmp")), [])
+        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0), store.locked(self.data / "sample.json"):
+            pass  # no worker still holds it
 
     def test_two_processes_waiting_on_one_keyed_file_both_keep_their_update(self):
         code = ("import sys; sys.path.insert(0, sys.argv[1])\n"
@@ -615,11 +629,8 @@ class Store(Sandbox):
         store.save_entry("sample", "s1", {"n": 1})
         path = self.data / "sample.json"
         before = path.read_bytes()
-        lock = self.data / "sample.json.lock"
-        lock.write_text("other")  # held by someone else, and fresh
-        (self.data / "ledger.jsonl.lock").write_text("")
         started = time.monotonic()
-        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
+        with held(path, "other"), held(store.ledger_path()), mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
             self.assertEqual(store.try_update(path, lambda data: data.update(b=2)), ({"s1": mock.ANY, "b": 2}, "busy"))
             store.mutate_entry("sample", "s1", lambda entry: entry.update(n=2))
             self.assertEqual(store.remove_state_file(path), "busy")
@@ -629,26 +640,14 @@ class Store(Sandbox):
         self.assertLess(time.monotonic() - started, 2)
         self.assertEqual(path.read_bytes(), before)
         self.assertFalse(store.ledger_path().exists())
-        self.assertTrue(lock.exists())  # not ours to remove
         self.assertEqual(store.lock_counts()["sample.json"]["skipped"], 4)
         self.assertEqual(store.lock_counts()["sample.json"]["other_session"], 1)
         self.assertEqual(store.lock_counts()["ledger.jsonl"]["skipped"], 1)
 
-    def test_a_stale_lock_is_broken(self):
-        self.data.mkdir(exist_ok=True)
-        lock = self.data / "state.json.lock"
-        lock.write_text("")
-        os.utime(lock, (time.time() - 60, time.time() - 60))
-        store.update_dict(self.data / "state.json", lambda data: data.update(a=1))
-        self.assertFalse(lock.exists())
-        self.assertEqual(store.load_state_file(self.data / "state.json"), {"a": 1})
-        self.assertEqual(store.lock_counts(), {"state.json": {"broken": 1, "at": self.clock}})
-
     def test_a_reset_while_another_process_holds_the_lock_says_so(self):
         self.data.mkdir(exist_ok=True)
-        (self.data / "state.json.lock").write_text("")
-        (self.data / "learned.json.lock").write_text("")
-        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02):
+        with held(self.data / "state.json"), held(self.data / "learned.json"), \
+                mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02):
             out = io.StringIO()
             with redirect_stdout(out):
                 cli.main(["models", "--reset"])
@@ -4419,8 +4418,7 @@ class Upstream(Sandbox):
         store.save_json(upstream.path(), {"schema": 99, "cache": {"claude_code_version": "2.1.330"}})
         self.assertEqual(self.out("ack"), "Review mark left as is: upstream.json was written by a newer Model Router release.\n")
         store.save_json(upstream.path(), {"cache": {"claude_code_version": "2.1.330"}})
-        Path(f"{upstream.path()}.lock").write_text("other")  # held by someone else, and fresh
-        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
+        with held(upstream.path(), "other"), mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
             self.assertEqual(cli.main(["ack"]), 1)
         self.assertNotIn("reviewed", json.loads(upstream.path().read_text()))
 
@@ -5055,11 +5053,9 @@ class SlashSkills(Sandbox):
         snap = settings.Snapshot(hook_input)
         request.begin("s1", prompt_id="p1", level="lookup", need="haiku", session_tier=None, named=None)
         reading = intake.Intake(False, True, Level.complex, (), command="hard")
-        (self.data / "prompts.json.lock").write_text("other")  # held by someone else, and fresh
-        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
+        with held(self.data / "prompts.json", "other"), mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
             self.assertFalse(request.raise_to("s1", reading, snap.registry, snap.usable, snap.raises))
         self.assertEqual(request.load("s1").level, "lookup")
-        (self.data / "prompts.json.lock").unlink()
         self.assertTrue(request.raise_to("s1", reading, snap.registry, snap.usable, snap.raises))
         self.assertEqual(request.load("s1").level, "complex")
 
@@ -5514,8 +5510,7 @@ class MachineReadable(Sandbox):
     def test_models_shows_lock_counts_per_state_file(self):
         self.assertNotIn("locks", self.json_out("models"))
         self.assertNotIn("Lock waits", self.out("models"))
-        (store.data_dir() / "sample.json.lock").write_text("")
-        with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02):
+        with held(store.data_dir() / "sample.json"), mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02):
             store.update_entry("sample", "s1", n=1)
         self.assertEqual(self.json_out("models")["locks"], [
             {"file": "sample.json", "waits": 0, "other_session": 0, "skipped": 1, "broken": 0, "last_at": self.clock}])
