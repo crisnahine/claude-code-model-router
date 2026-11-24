@@ -9,12 +9,14 @@ defaults, best, strongest), with the yes/no facts their prose relies on.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import random
 import re
 import sys
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 
 BENCH = Path(__file__).resolve().parent
@@ -34,6 +36,11 @@ MARGIN = 0.10  # the non-inferiority margin on pass rate, fixed before any run
 DENIAL_SHARE = 0.25  # a cell with more of its runs denied a Bash call than this gets no verdict
 LABELS = {"WIN": "WIN", "LOSE": "LOSE", "NONE": "no difference shown", "REFUSED": "no verdict"}
 SPLIT_STRONG, SPLIT_WEAK = "opus", "sonnet"  # the pair a task must split to count as telling models apart
+ALL = "all tasks"  # the row whose verdicts pair every task in a table, whatever its class
+# Router variants configs.json no longer defines; their archived rows keep the role.
+ARCHIVED_ROUTERS = ("plugin-cheap", "plugin-cheap-nomain", "plugin-cheap-nomain-nogate", "plugin-m6-08-b",
+                    "plugin-m6-08-b-nogate", "plugin-m6-10")
+LEGACY_ROUTER = "plugin-next"  # the build the rows below schema 3, and the docs that quote them, report on
 
 
 def _interval(draws: list[float]) -> tuple[float, float]:
@@ -101,13 +108,15 @@ def bash_denials(runs: list[dict]) -> tuple[int, int]:
     return denied, len(runs)
 
 
-def _paired(ours: list[dict], theirs: list[dict], rng: random.Random, draws: int) -> tuple[tuple, tuple]:
+def _paired(ours: list[dict], theirs: list[dict], rng: random.Random, draws: int) -> tuple[tuple, tuple, bool]:
     """95% intervals of the router's pass rate minus a baseline's and of its cost per solved task minus theirs, paired
     by task: each draw resamples the tasks, then each task's runs. A task's pool gets one solved and one failed run
-    that carry no cost, so a cell where every run passed still has spread (Agresti-Caffo)."""
+    that carry no cost, so a cell where every run passed still has spread (Agresti-Caffo). Also whether the router
+    solved a smaller share of runs, its per-task pass rates averaged, than the baseline did."""
     tasks = sorted({r["task"] for r in ours})
     cells = [[([float(r["total_cost_usd"]) for r in side if r["task"] == t], [bool(r["passed"]) for r in side if r["task"] == t])
               for side in (ours, theirs)] for t in tasks]
+    fewer = sum(Fraction(sum(a[1]), len(a[1])) - Fraction(sum(b[1]), len(b[1])) for a, b in cells) < 0
     rand, k = rng.random, len(tasks)
     rates, costs = [], []
     for _ in range(draws):
@@ -125,11 +134,11 @@ def _paired(ours: list[dict], theirs: list[dict], rng: random.Random, draws: int
                     i = int(rand() * (n + 2))
                     hits += passed[i] if i < n else i == n
                 gap += hits / (n + 2) if side == 0 else -hits / (n + 2)
-        rates.append(gap / k)
+        rates.append(round(gap / k, 12))  # so a bound on the margin itself can't land either side of it by float error
         a = sums[0] / sums[1] if sums[1] else math.inf
         b = sums[2] / sums[3] if sums[3] else math.inf
         costs.append(0.0 if math.isinf(a) and math.isinf(b) else a - b)
-    return _interval(rates), _interval(costs)
+    return _interval(rates), _interval(costs), fewer
 
 
 def _refusal(name: str, ours: list[dict], base: str, theirs: list[dict]) -> str | None:
@@ -148,14 +157,17 @@ def _refusal(name: str, ours: list[dict], base: str, theirs: list[dict]) -> str 
     return "; ".join(why) or None
 
 
-def _judge(base: str, pass_ci: tuple, cost_ci: tuple) -> tuple[str, str]:
+def _judge(base: str, pass_ci: tuple, cost_ci: tuple, fewer: bool) -> tuple[str, str]:
     (p_lo, p_hi), (c_lo, c_hi) = pass_ci, cost_ci
     seen = (f"cost per solved task {_fmt(c_lo)} to {_fmt(c_hi)}, pass rate {p_lo:+.0%} to {p_hi:+.0%} "
             "(95% intervals of the router's minus the baseline's)")
     if p_hi < 0:
         return "LOSE", f"pass rate behind beyond noise; {seen}"
     if c_hi < 0 and p_lo > -MARGIN:
-        return "WIN", f"cheaper per solved task beyond noise, pass rate within {MARGIN:.0%} of it; {seen}"
+        if fewer:  # a saving counts only at an equal or higher pass rate
+            return "NONE", f"cheaper per solved task beyond noise, but it solved a smaller share of the runs; {seen}"
+        return "WIN", (f"cheaper per solved task beyond noise, at an equal or higher share of runs solved, pass rate "
+                       f"within {MARGIN:.0%} of it; {seen}")
     if c_lo > 0 and p_hi < MARGIN:
         return "LOSE", f"dearer per solved task beyond noise, pass rate not {MARGIN:.0%} ahead; {seen}"
     return "NONE", seen
@@ -211,38 +223,53 @@ def _quality(cells: dict, runs: list[dict], forced: dict) -> dict:
     return {**out, "saturated": False, "reason": f"{seen}, so these tasks tell models apart"}
 
 
+def _summary(cls: str, runs: list[dict], *, routers: frozenset[str], router: str, draws: int, seed: int,
+             session: str, forced: dict | None) -> dict:
+    """One row of a table: each configuration's cell and the router's verdict against each baseline."""
+    configs = sorted({r["config"] for r in runs}, key=lambda c: (c != router, c))
+    by = {c: [r for r in runs if r["config"] == c] for c in configs}
+    # One generator per cell and per pair, so draws never depend on which other cells are in the page.
+    cells = {c: _cell(by[c], random.Random(f"{seed}/{session}/{cls}/{c}"), draws) for c in configs}
+    # A router variant (any configuration that loads the plugin) is a rival build, never a baseline.
+    base = [c for c in configs if c != router and c not in routers]
+    verdicts, differences, pass_differences = {}, {}, {}
+    for b in base if router in cells else []:
+        why = _refusal(router, by[router], b, by[b])
+        if why:
+            verdicts[b], differences[b] = {"verdict": "REFUSED", "reason": why}, None
+            continue
+        pass_ci, cost_ci, fewer = _paired(by[router], by[b], random.Random(f"{seed}/{session}/{cls}/{router}/{b}"), draws)
+        code, reason = _judge(b, pass_ci, cost_ci, fewer)
+        verdicts[b] = {"verdict": code, "reason": reason, "pass_ci": pass_ci, "cost_ci": tuple(map(_finite, cost_ci))}
+        differences[b], pass_differences[b] = verdicts[b]["cost_ci"], pass_ci
+    best = min(base, key=lambda name: (_key(cells[name]), name)) if base else None
+    status = _status(verdicts)
+    # A rank is a cost claim, which a row with no verdict can't support.
+    rank = 1 + sum(_key(cells[b]) < _key(cells[router]) for b in base) \
+        if router in cells and base and status != "REFUSED" else None
+    for cell in cells.values():
+        del cell["_cps"], cell["_rate"]
+    return {"class": cls, "configs": cells, "verdicts": verdicts, "differences": differences,
+            "pass_differences": pass_differences, "status": status, "rank": rank, "best_baseline": best,
+            "reason": "no router or baseline runs" if not verdicts else _verdict_text(verdicts),
+            "quality": _quality(cells, runs, forced or {})}
+
+
 def summarize(rows: list[dict], *, routers: frozenset[str], router: str = "plugin", draws: int = 2000,
               seed: int = 0, session: str = "", forced: dict | None = None) -> list[dict]:
+    """One row per task class."""
     order = {name: i for i, name in enumerate(run.CLASSES)}
-    out = []
-    for cls in sorted({r["class"] for r in rows}, key=lambda c: (order.get(c, len(order)), c)):
-        runs = [r for r in rows if r["class"] == cls]
-        configs = sorted({r["config"] for r in runs}, key=lambda c: (c != router, c))
-        by = {c: [r for r in runs if r["config"] == c] for c in configs}
-        # One generator per cell and per pair, so draws never depend on which other cells are in the page.
-        cells = {c: _cell(by[c], random.Random(f"{seed}/{session}/{cls}/{c}"), draws) for c in configs}
-        # A router variant (any configuration that loads the plugin) is a rival build, never a baseline.
-        base = [c for c in configs if c != router and c not in routers]
-        verdicts, differences, pass_differences = {}, {}, {}
-        for b in base if router in cells else []:
-            why = _refusal(router, by[router], b, by[b])
-            if why:
-                verdicts[b], differences[b] = {"verdict": "REFUSED", "reason": why}, None
-                continue
-            pass_ci, cost_ci = _paired(by[router], by[b], random.Random(f"{seed}/{session}/{cls}/{router}/{b}"), draws)
-            code, reason = _judge(b, pass_ci, cost_ci)
-            verdicts[b] = {"verdict": code, "reason": reason, "pass_ci": pass_ci, "cost_ci": tuple(map(_finite, cost_ci))}
-            differences[b], pass_differences[b] = verdicts[b]["cost_ci"], pass_ci
-        best = min(base, key=lambda name: (_key(cells[name]), name)) if base else None
-        rank = 1 + sum(_key(cells[b]) < _key(cells[router]) for b in base) if router in cells and base else None
-        status = _status(verdicts)
-        for cell in cells.values():
-            del cell["_cps"], cell["_rate"]
-        out.append({"class": cls, "configs": cells, "verdicts": verdicts, "differences": differences,
-                    "pass_differences": pass_differences, "status": status, "rank": rank, "best_baseline": best,
-                    "reason": "no router or baseline runs" if not verdicts else _verdict_text(verdicts),
-                    "quality": _quality(cells, runs, forced or {})})
-    return out
+    return [_summary(cls, [r for r in rows if r["class"] == cls], routers=routers, router=router, draws=draws,
+                     seed=seed, session=session, forced=forced)
+            for cls in sorted({r["class"] for r in rows}, key=lambda c: (order.get(c, len(order)), c))]
+
+
+def overall(rows: list[dict], *, routers: frozenset[str], router: str = "plugin", draws: int = 2000,
+            seed: int = 0, session: str = "", forced: dict | None = None) -> dict | None:
+    """One row over every task in a table, the tasks of all its classes resampled together, so a plan with one task
+    per class can still show the margin."""
+    return _summary(ALL, rows, routers=routers, router=router, draws=draws, seed=seed, session=session,
+                    forced=forced) if rows else None
 
 
 def _verdict_text(verdicts: dict) -> str:
@@ -283,27 +310,29 @@ def _group(r: dict) -> str:
     return model if arm == "delegate" else f"{model}, {arm} arm"
 
 
-def sessions(results: Results, router: str | None = None) -> list[tuple[str, str, list[dict], list[dict]]]:
-    """One summary per session model and prompt arm, since a configuration costs differently on each. Its router is
-    `router`, or else the first configuration in configs.json that loads the plugin and ran there. A configuration
-    that sets its own session model runs the same in any batch, so it joins every table of its arm."""
+def sessions(results: Results, router: str | None = None,
+             legacy: bool = False) -> list[tuple[str, str, list[dict], dict | None, list[dict]]]:
+    """One summary per session model and prompt arm, since a configuration costs differently on each, with its
+    class rows and its all-tasks row. Its router is `router`, or else the configuration configs.json marks
+    `judged`; the rows below schema 3 (`legacy`) are always judged on LEGACY_ROUTER. A configuration that sets its
+    own session model runs the same in any batch, so it joins every table of its arm."""
+    rows = results.legacy if legacy else results.rows
     groups: dict[str, list[dict]] = {}
-    for r in results.rows:
+    for r in rows:
         if r["config"] not in results.own_model:
             groups.setdefault(_group(r), []).append(r)
-    for r in results.rows:
+    for r in rows:
         if r["config"] in results.own_model:
             arm = r.get("arm") or "delegate"
             mine = [g for name, g in groups.items() if (name.endswith(f", {arm} arm") or arm == "delegate"
                                                          and not name.endswith(" arm"))]
             for group in mine or [groups.setdefault(_group(r), [])]:
                 group.append(r)
+    chosen = LEGACY_ROUTER if legacy else router or next((c["id"] for c in results.configs if c.get("judged")), "plugin")
     out = []
     for model, group in sorted(groups.items()):
-        ran = {r["config"] for r in group}
-        chosen = router or next((c["id"] for c in results.configs if c.get("plugin") and c["id"] in ran), "plugin")
-        out.append((model, chosen, summarize(group, routers=results.routers, router=chosen, session=model,
-                                             forced=results.forced), group))
+        kwargs = {"routers": results.routers, "router": chosen, "session": model, "forced": results.forced}
+        out.append((model, chosen, summarize(group, **kwargs), overall(group, **kwargs), group))
     return out
 
 
@@ -373,18 +402,21 @@ def _metrics(summary: list[dict], rows: list[dict], routers: frozenset[str]) -> 
     return lines
 
 
-def render_sessions(parts: list[tuple[str, str, list[dict], list[dict]]], meta: dict, routers: frozenset[str],
-                    own_model: frozenset[str] = frozenset()) -> str:
+def render_sessions(parts: list[tuple], meta: dict, routers: frozenset[str], own_model: frozenset[str] = frozenset(),
+                    legacy: list[tuple] = ()) -> str:
     body = []
-    for name, router, summary, rows in parts:
-        model, _, arm = name.partition(", ")
-        own = sorted({r["config"] for r in rows if r["config"] in own_model})
-        but = f", except {', '.join(f'`{c}`' for c in own)}, which sets its own" if own else ""
-        prompt = f" The prompt is the {arm}: the brief alone, with no order to delegate." if arm else ""
-        body += [f"## Results: session model `{model}`" + (f", {arm}" if arm else ""), "",
-                 f"Every run here had `{model}` as its session model{but}; router: `{router}`.{prompt}", "",
-                 *_table(summary), "", *_quality_lines(summary), "",
-                 *_metrics(summary, rows, routers), ""]
+    for title, group in (("Results", parts), ("Before the sandbox", legacy)):
+        for name, router, summary, every, rows in group:
+            model, _, arm = name.partition(", ")
+            own = sorted({r["config"] for r in rows if r["config"] in own_model})
+            but = f", except {', '.join(f'`{c}`' for c in own)}, which sets its own" if own else ""
+            prompt = f" The prompt is the {arm}: the brief alone, with no order to delegate." if arm else ""
+            old = (" These runs predate the sandboxed harness (row schema below 3), so no row here has a verdict or a "
+                   "rank.") if group is legacy else ""
+            body += [f"## {title}: session model `{model}`" + (f", {arm}" if arm else ""), "",
+                     f"Every run here had `{model}` as its session model{but}; router: `{router}`.{prompt}{old}", "",
+                     *_table(summary + ([every] if every else [])), "", *_quality_lines(summary), "",
+                     *_metrics(summary, rows, routers), ""]
     return "\n".join([meta.get("header", "# Benchmarks"), "", *body, meta.get("body", "")]).rstrip() + "\n"
 
 
@@ -428,6 +460,7 @@ class Results:
     routers: frozenset[str]
     own_model: frozenset[str]
     forced: dict
+    legacy: list[dict] = dataclasses.field(default_factory=list)  # rows below schema 3, in their own tables
 
 
 def default_paths() -> list[Path]:
@@ -435,7 +468,7 @@ def default_paths() -> list[Path]:
 
 
 def router_ids(configs: list[dict]) -> frozenset[str]:
-    return frozenset(c["id"] for c in configs if c.get("plugin"))
+    return frozenset(c["id"] for c in configs if c.get("plugin")) | frozenset(ARCHIVED_ROUTERS)
 
 
 def forced_ranks(configs: list[dict], registry_config: Registry) -> dict[str, tuple[float, int]]:
@@ -454,8 +487,9 @@ def forced_ranks(configs: list[dict], registry_config: Registry) -> dict[str, tu
 
 def load(paths: list[Path]) -> Results:
     """Everything the page is built from, read once. The order and repeats of `paths` don't matter. A row on an
-    earlier revision of its task isn't comparable with later runs of it, so it sits in `stale`, not `rows`, and a
-    row whose pass check broke sits in `broken`."""
+    earlier revision of its task isn't comparable with later runs of it, so it sits in `stale`, not `rows`, a
+    row whose pass check broke sits in `broken`, and a row below schema 3, which ran with Bash on an exact
+    allowlist, sits in `legacy`."""
     files = sorted({p.resolve() for p in paths})
     tasks = run.load_tasks()
     revisions = {t["id"]: t.get("revision", 1) for t in tasks}
@@ -469,7 +503,9 @@ def load(paths: list[Path]) -> Results:
     # A run whose pass check broke has no verdict: it was neither solved nor failed.
     bad_check = [(r.get("grade") or {}).get("verdict") == "broken" for r in every]
     broken = [r for r, gone, bad in zip(every, old, bad_check) if bad and not gone]
-    rows = [r for r, gone, bad in zip(every, old, bad_check) if not (gone or bad)]
+    counted = [r for r, gone, bad in zip(every, old, bad_check) if not (gone or bad)]
+    rows = [r for r in counted if r.get("schema", 1) >= run.ROW_SCHEMA]
+    legacy = [r for r in counted if r.get("schema", 1) < run.ROW_SCHEMA]
     folders = sorted({f.parent for f in files})
     aside = [(sub, row) for folder in folders for sub in ("infra", "limited") for row in _jsonl((folder / sub).glob("*.jsonl"))]
     archive = []
@@ -482,7 +518,8 @@ def load(paths: list[Path]) -> Results:
                 archive.append((folder.relative_to(results).as_posix(), kept, lines))
     registry_config = mrconfig.shipped()
     return Results(files, rows, stale, broken, aside, archive, configs, tasks, registry_config, router_ids(configs),
-                   frozenset(c["id"] for c in configs if c.get("model")), forced_ranks(configs, registry_config))
+                   frozenset(c["id"] for c in configs if c.get("model")), forced_ranks(configs, registry_config),
+                   legacy)
 
 
 def _lacks(row: dict, key: str) -> bool:
@@ -493,14 +530,20 @@ def _lacks(row: dict, key: str) -> bool:
 def _notes(results: Results) -> list[str]:
     """Page lines on runs set aside, router spend by agent type, and the batches each configuration's rows pool."""
     rows, found = results.rows, results.aside
-    unloaded = [row for _, row in found if row.get("limited_reason") == "plugin_not_loaded"]
-    aside = [row for _, row in found if row.get("limited_reason") != "plugin_not_loaded"]
+    own = {"plugin_not_loaded": "router run(s) are set aside, outside the results, because the plugin did not load: "
+                                "the run's `system/init` event didn't list it or reported a plugin error "
+                                "(https://code.claude.com/docs/en/headless)",
+           "no_start": "run(s) are set aside, outside the results, because `claude` stopped before its stream began "
+                       "(no `system/init` event and no result), as when the sandbox can't start",
+           "off_pin": "run(s) of a configuration with pinned agents are set aside, outside the results, because they "
+                      "used none of those agents, another one, or a model or effort set on the Agent call"}
+    aside = [row for _, row in found if row.get("limited_reason") not in own]
     where = " and ".join(f"`bench/results/{sub}/`" for sub in sorted({sub for sub, _ in found}))
     lines = []
-    if unloaded:
-        lines.append(f"- {len(unloaded)} router run(s) are set aside, outside the results, because the plugin did not "
-                     "load: the run's `system/init` event didn't list it or reported a plugin error "
-                     "(https://code.claude.com/docs/en/headless). Their raw lines are under `bench/results/limited/`.")
+    for reason, text in own.items():
+        n = sum(row.get("limited_reason") == reason for _, row in found)
+        if n:
+            lines.append(f"- {n} {text}. Their raw lines are under `bench/results/limited/`.")
     if aside:
         reasons = [r.get("limited_reason") or ("network" if "infra_reason" in r else "limit") for r in aside]
         again = sum(any(o["task"] == r["task"] and o["config"] == r["config"] and o["started_at"] > r["started_at"]
@@ -565,14 +608,17 @@ def _notes(results: Results) -> list[str]:
         lines.append(f"- {unrouted} router run(s) here carry no `routed`, the router's spawn decisions: they were "
                      "recorded before the runner kept them. Their accuracy by level and escalation count as n/a, "
                      "not as zero.")
-    denials = {c: bash_denials([r for r in rows if r["config"] == c]) for c in sorted({r["config"] for r in rows})}
-    if denials:
-        lines.append("- Runs with a Bash denial, by configuration: "
-                     + "; ".join(f"`{c}` {k} of {n}" for c, (k, n) in denials.items()) + ".")
+    eras: dict[tuple, list[dict]] = {}
+    for r in rows:
+        eras.setdefault((r["config"], r.get("schema", 1) < run.ROW_SCHEMA), []).append(r)
+    if eras:
+        counts = {key: bash_denials(group) for key, group in sorted(eras.items())}
+        lines.append("- Runs with a Bash denial, by configuration: " + "; ".join(
+            f"`{c}`{' below schema 3' if old else ''} {k} of {n}" for (c, old), (k, n) in counts.items()) + ".")
     managed = sum(bool(r.get("managed_settings")) for r in rows)
     if managed:
-        lines.append(f"- {managed} run(s) here ran on a machine with managed settings, which a run loads whatever "
-                     "its own settings say; each raw line's `managed_settings` names them.")
+        lines.append(f"- {managed} run(s) here ran on a machine with managed settings files or a macOS plist, which "
+                     "a run loads whatever its own settings say; each raw line's `managed_settings` names them.")
     batches: dict[str, dict[str, int]] = {}
     for r in rows:
         batches.setdefault(r["config"], {}).setdefault(r.get("_batch", "?"), 0)
@@ -609,13 +655,29 @@ def _archived(results: Results) -> list[str]:
     return lines + [""] if lines else []
 
 
+def _described(config: str, results: Results) -> str:
+    """A configuration as its rows ran it: configs.json says what a current row ran, and a router row below schema
+    3 ran the build its commit names."""
+    router = config in results.routers
+    parts = []
+    if not router or any(r["config"] == config for r in results.rows):
+        parts += [c["description"] for c in results.configs if c["id"] == config][:1]
+    old = [r for r in results.legacy if r["config"] == config] if router else []
+    if old:
+        builds = sorted({f"at `{r['plugin_ref']}`" if r.get("plugin_ref") else
+                         f"from the checkout at `{(r.get('bench_commit') or '?')[:7]}`" for r in old})
+        parts.append(f"Model Router loaded {' and '.join(builds)}, in its {len(old)} rows below schema 3")
+    return "; ".join(parts) or "?"
+
+
 def _page(results: Results, summary: list[dict]) -> dict:
+    current = results
+    results = dataclasses.replace(results, rows=results.rows + results.legacy)
     rows, files, tasks = results.rows, results.files, results.tasks
     total = sum(r["total_cost_usd"] for r in rows)
     versions = sorted({r["claude_version"] for r in rows})
     main = sorted({r["main_model"] for r in rows})
     dates = sorted(r["started_at"][:10] for r in rows)
-    configs = {c["id"]: c["description"] for c in results.configs}
     used = sorted({r["config"] for r in rows})
     models: dict[str, list[float]] = {}
     agents: dict[str, dict[str, int]] = {}
@@ -637,7 +699,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "# Benchmarks", "",
         f"Cost and quality of Model Router against Claude Code without it. {len(rows)} runs, "
         f"${total:.2f} at list price, on {dates[0] if dates else 'n/a'}"
-        + (f" to {dates[-1]}" if dates and dates[-1] != dates[0] else "") + ".", "",
+        + (f" to {dates[-1]}" if dates and dates[-1] != dates[0] else "") + "."
+        + (f" {'All' if not current.rows else len(current.legacy)} of them ran before Bash ran in the sandbox (row "
+           "schema below 3). They sit in their own tables, under \"Before the sandbox\", with no verdict or rank."
+           if current.legacy else ""), "",
         "No class here has a verdict against any baseline: the runs can't support one (each class line says why). "
         "Claim nothing from them beyond what the raw data shows."
         if summary and all(row["status"] == "REFUSED" for row in summary) else
@@ -655,23 +720,29 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "intervals, and 95% percentile bootstrap intervals of cost per solved task over runs (2,000 resamples, each "
         "cell from a generator seeded by its session model, class and configuration). No verdict rests on them.",
         f"- Verdicts, one per baseline, by a rule fixed before any run. The router's runs and the baseline's are "
-        "paired by task. Each of 2,000 resamples draws the class's tasks with replacement, then each drawn task's "
+        "paired by task. Each of 2,000 resamples draws the row's tasks with replacement, then each drawn task's "
         "runs with replacement, so the interval reflects how few tasks there are as well as how few runs. For the "
         "pass rate, each task's runs get one solved and one failed run added, so a cell where every run passed "
         f"still has spread. The non-inferiority margin is {MARGIN:.0%} of pass rate. WIN: the 95% interval of the "
-        "router's cost per solved task minus the baseline's is below zero, and the lower bound of its pass rate "
-        f"minus the baseline's is above minus {MARGIN:.0%}. LOSE: the router's pass rate is behind beyond noise, "
+        "router's cost per solved task minus the baseline's is below zero, the lower bound of its pass rate "
+        f"minus the baseline's is above minus {MARGIN:.0%}, and the router solved at least the baseline's share of "
+        "runs (per-task pass rates averaged), so a saving counts only at an equal or higher pass rate. LOSE: the "
+        "router's pass rate is behind beyond noise, "
         f"or its cost per solved task is above beyond noise while its pass rate isn't shown {MARGIN:.0%} ahead. "
         "Anything else is \"no difference shown\", which is not parity. There is no verdict when the two ran "
         "different tasks or in different batches, when either has a row from before Bash ran in the sandbox (row "
-        f"schema below 3), or when more than {DENIAL_SHARE:.0%} of either's runs had a Bash call denied. A class "
+        f"schema below 3), or when more than {DENIAL_SHARE:.0%} of either's runs had a Bash call denied. A row "
         "is LOSE when any baseline beats the router, has no verdict when any comparison has none, is WIN only when "
         "it wins against every baseline, and is otherwise \"no difference shown\".",
+        f"- Each table ends with an `{ALL}` row, judged the same way over every task in the table: the tasks of all "
+        "its classes are paired and resampled together. A class with one task can't show the margin, so a plan "
+        f"with a few tasks per class is judged on its `{ALL}` row.",
         "- A class is saturated when the weakest forced baseline (every subagent on the weakest model) can't be told "
         f"from the strongest by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an equal pass rate "
         "says nothing about quality. Runs on an earlier revision of a task are left out of every table.",
-        "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest. A router "
-        "variant (another configuration that loads the plugin) has its own column but is never a baseline.",
+        "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest, and n/a on a "
+        "row with no verdict. A router variant (another configuration that loads the plugin, or one archived) has "
+        "its own column but is never a baseline.",
         "- Run metrics, per class and configuration: p50 and p90 are nearest-rank percentiles of each run's wall "
         "time (`wall_ms`, the runner's clock around the `claude` process). Cache is cache-read tokens over all input tokens, which are input plus cache reads "
         "plus cache writes (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md), summed over "
@@ -684,7 +755,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         f"- Claude Code: {', '.join(versions) or 'n/a'}. Session models: {', '.join(main) or 'n/a'} (`--model`), "
         "one results table each, and one per prompt arm. Inside a table every configuration ran on that session "
         "model, except those that set their own.",
-        "- Configurations run: " + "; ".join(f"`{c}` ({configs.get(c, '?')})" for c in used) + ".",
+        "- Configurations run: " + "; ".join(f"`{c}` ({_described(c, current)})" for c in used) + ".",
         "- Models that ran, with Claude Code's list-price cost across all runs: "
         + "; ".join(f"`{name}` ${sum(costs):.4f} over {len(costs)} runs" for name, costs in sorted(models.items()))
         + ". Each run's raw line also carries the registry's prices for those models.",
@@ -694,7 +765,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
                     for c in used) + ".",
         *_notes(results),
         "- Shape: a single agent. In the `delegate` arm the prompt hands each task to one subagent with the Agent "
-        "tool and relays its answer, so the subagent is what each configuration changes. In the `direct` arm the "
+        "tool and relays its answer, so the subagent is what each configuration changes. For a configuration that "
+        "pins its agents with `--agents` the prompt names them, and a run that used none of them, another agent, "
+        "or set a model or effort on the Agent call, which outranks the agent's own "
+        "(https://code.claude.com/docs/en/sub-agents), is set aside as `off_pin`. In the `direct` arm the "
         "prompt is the brief alone, as a person would type it; its rows get their own table.",
         "- Each run starts in a fresh copy of the task's files, outside any repository, with a Claude Code config "
         "folder of its own inside that copy (`CLAUDE_CONFIG_DIR`, with `CLAUDE_CODE_PROJECT_DIR_NAME=run`; "
@@ -703,14 +777,21 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "`--setting-sources project`, `--strict-mcp-config`, `--permission-mode dontAsk`, `--allowedTools` "
         + ", ".join(f"`{t}`" for t in run.TOOLS) + ", and one `--settings` JSON that runs Bash in the OS sandbox "
         "with `sandbox.enabled`, `sandbox.autoAllowBashIfSandboxed`, `sandbox.allowUnsandboxedCommands: false` "
-        "and `sandbox.failIfUnavailable`, plus `sandbox.credentials` deny entries for credential folders and for "
-        "every secret variable in the environment (https://code.claude.com/docs/en/sandboxing). "
+        "and `sandbox.failIfUnavailable`, plus `sandbox.credentials` deny entries for credential folders, for the "
+        "bench's own checkout (whose tasks hold the reference answers) and for every secret variable in the "
+        "environment (https://code.claude.com/docs/en/sandboxing), and a `permissions.deny` rule `Read(//<checkout>/**)` "
+        "that keeps the file tools out of the checkout (https://code.claude.com/docs/en/permissions). "
         "`CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` are set. Every inherited "
         "`CLAUDE_CODE_*`, `CLAUDECODE` and `CLAUDE_PLUGIN_*` variable is dropped except the provider switches "
         "(`CLAUDE_CODE_USE_*`) and `CLAUDE_CODE_OAUTH_TOKEN`, so `CLAUDE_CODE_SUBAGENT_MODEL`, "
-        "`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and the effort variables are set only by a configuration. Only a "
+        "`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and the effort variables are set only by a configuration; so are "
+        "`PWD` and `OLDPWD`. Managed settings still load from the machine. Each raw line lists the managed "
+        "settings files and the macOS plist it found in `managed_settings`, but server-managed settings, which "
+        "claude.ai sends to an eligible login, and the Windows registry policy can't be seen that way, so an "
+        "empty list doesn't prove no policy applied (https://code.claude.com/docs/en/managed-settings.md). Only a "
         "router configuration passes `--plugin-dir`, from a copy of `plugins/model-router` made once when the "
-        "batch starts; every raw line records its hash in `plugin_hash`."
+        "batch starts, or for a `plugin_ref` an export of that commit; every router row records the hash of the "
+        "plugin it loaded in `plugin_hash`."
         + (f" {allowlisted} run(s) here are below row schema 3: they ran with an exact list of `python3`, "
            "`python`, `tail`, `head` and `echo` command rules instead of the sandbox, which denied many test runs, "
            "and shared the machine's config folder." if allowlisted else ""),
@@ -774,11 +855,11 @@ def _page(results: Results, summary: list[dict]) -> dict:
 
 
 def build_page(results: Results, router: str | None = None, current: str | None = None) -> str:
-    parts = sessions(results, router)
-    summary = [row for _, _, part, _ in parts for row in part]
+    parts, legacy = sessions(results, router), sessions(results, legacy=True)
+    summary = [row for part in (*parts, *legacy) for row in part[2]]
     kept = bool(current and current.startswith(HEAD_START) and HEAD_END in current)
     head = current.split(HEAD_END, 1)[0] + HEAD_END if kept else ""
-    return head + render_sessions(parts, _page(results, summary), results.routers, results.own_model)
+    return head + render_sessions(parts, _page(results, summary), results.routers, results.own_model, legacy)
 
 
 OPUS, SONNET = "claude-opus-5-5", "sonnet"  # the session models the docs' prose is about
@@ -894,14 +975,14 @@ def broken_facts(data: dict) -> list[str]:
             for name, ok in s["facts"].items() if not ok]
 
 
-def figures(results: Results, router: str | None = None) -> dict:
+def figures(results: Results, router: str | None = None, legacy: bool = False) -> dict:
     """The page's figures as data, for the docs: per session model, each table's classes, the figures over all
     runs, the roles (router, defaults, best, strongest), how the router stands against each baseline, and the
-    facts the docs' prose relies on."""
-    rows = results.rows
+    facts the docs' prose relies on. `legacy` reads the rows below schema 3, the run the docs quote today."""
+    rows = results.legacy if legacy else results.rows
     dates = sorted(r["started_at"][:10] for r in rows)
     out = []
-    for model, chosen, classes, group in sessions(results, router):
+    for model, chosen, classes, _, group in sessions(results, router, legacy):
         pooled = _pooled(group)
         role = roles(results, chosen, pooled)
         ref = next((c.get("plugin_ref") for c in results.configs if c["id"] == chosen), None)
@@ -926,14 +1007,15 @@ def check(results: Results, out: Path, current: str | None, router: str | None =
     that the rows no longer bear out."""
     stale = [f"{out}: out of date, run python3 bench/analyze.py bench/results/*.jsonl --out {out}"] \
         if current != build_page(results, router, current) else []
-    return stale + broken_facts(figures(results, router))
+    return stale + broken_facts(figures(results, legacy=True))  # the docs' prose quotes the stored run
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("results", nargs="+", type=Path)
-    parser.add_argument("--router", help="the router configuration (default: per session model, the first "
-                                             "configuration in configs.json that loads the plugin)")
+    parser.add_argument("--router", help="the router configuration the tables judge (default: the one configs.json "
+                                             "marks judged); the rows below schema 3 are always judged on "
+                                             f"{LEGACY_ROUTER}")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--check", action="store_true", help="fail when --out differs from the page the results give, or a fact the docs state about the rows is false")
     args = parser.parse_args(argv)

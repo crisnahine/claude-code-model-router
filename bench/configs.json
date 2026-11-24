@@ -11,6 +11,7 @@
     "id": "plugin",
     "description": "Model Router with today's defaults, loaded with --plugin-dir from a copy frozen at the start of the batch",
     "plugin": true,
+    "judged": true,
     "env": {},
     "price_model": "opus"
   },
@@ -33,7 +34,7 @@
   },
   {
     "id": "pinned",
-    "description": "No plugin: three inline agents with a fixed model and effort each (--agents): a searcher on haiku at medium, a worker on sonnet at medium and a reviewer on opus at high",
+    "description": "No plugin: three inline agents with a fixed model and effort each (--agents): a searcher on haiku at medium, a worker on sonnet at medium and a reviewer on opus at high, named in the delegate prompt",
     "plugin": false,
     "env": {},
     "args": [

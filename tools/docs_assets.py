@@ -1339,7 +1339,7 @@ def snapshot() -> Snapshot:
         version=v, released=release_date(v), claude_code=manifest()["engines"]["claude-code"].removeprefix(">="),
         ladder=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
         texts={path: (ROOT / path).read_text(encoding="utf-8") for path in wanted if (ROOT / path).exists()},
-        bench=analyze.figures(analyze.load(analyze.default_paths())))
+        bench=analyze.figures(analyze.load(analyze.default_paths()), legacy=True))
 
 
 def build(snap: Snapshot) -> dict:

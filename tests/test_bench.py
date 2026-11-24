@@ -77,11 +77,106 @@ class Analysis(unittest.TestCase):
         self.assertLess(v["pass_ci"][0], -analyze.MARGIN)
 
     def test_solving_fewer_is_never_a_win(self):
-        for solved in (7, 8, 9):  # against 10 of 10, cheaper: the old gate called all three PASS
-            with self.subTest(solved=solved):
-                v = self.verdict(rows("plugin", "lookup", [0.03] * 10, [True] * solved + [False] * (10 - solved))
-                                 + rows("defaults", "lookup", [0.10] * 10, [True] * 10))
+        # Inside the margin and far cheaper, but one run short of a baseline that solved them all.
+        for runs in (12, 24, 60):
+            with self.subTest(runs=runs):
+                ours = spread("plugin", "lookup", 6, runs, 0.03)
+                ours[0]["passed"] = False
+                v = self.verdict(ours + spread("defaults", "lookup", 6, runs, 0.10))
                 self.assertNotEqual(v["verdict"], "WIN")
+                self.assertIn("smaller share", v["reason"])
+        v = self.verdict(spread("plugin", "lookup", 6, 12, 0.03) + spread("defaults", "lookup", 6, 12, 0.10))
+        self.assertEqual(v["verdict"], "WIN")
+
+    def test_one_win_and_one_undecided_baseline_leave_the_class_undecided(self):
+        self.assertEqual(analyze._status({"a": {"verdict": "WIN"}, "b": {"verdict": "NONE"}}), "NONE")
+        self.assertEqual(analyze._status({"a": {"verdict": "WIN"}, "b": {"verdict": "WIN"}}), "WIN")
+
+    def test_behind_beyond_noise_loses_even_inside_the_margin(self):
+        self.assertEqual(analyze._judge("defaults", (-0.08, -0.01), (-0.05, -0.01), False)[0], "LOSE")
+
+    def test_a_baseline_with_more_than_a_quarter_of_runs_denied_gets_no_verdict(self):
+        theirs = spread("defaults", "lookup", 6, 12, 0.50)
+        for r in theirs[:19]:
+            r["permission_denials"] = [{"tool": "Bash", "input": "python3 -m unittest"}]
+        v = self.verdict(spread("plugin", "lookup", 6, 12, 0.10) + theirs)
+        self.assertEqual(v["verdict"], "REFUSED")
+        self.assertIn("Bash denied in 19 of 72 `defaults` runs", v["reason"])
+
+    def test_a_class_with_no_verdict_has_no_rank(self):
+        old = [dict(r, schema=2) for r in spread("plugin", "lookup", 1, 4, 0.10) + spread("defaults", "lookup", 1, 4, 0.50)]
+        row = self.summary(old)["lookup"]
+        self.assertEqual((row["status"], row["rank"]), ("REFUSED", None))
+
+    PLAN = (("bugfix-statement-queries", "bugfix"), ("cross-amount-cents", "cross-module"),
+            ("design-checkout-retries", "design"), ("security-admin-route", "security-review"),
+            ("rootcause-wallet-race", "root-cause"), ("impl-merge-customers", "implementation"))
+
+    def plan_rows(self, runs):
+        """The README's measurement plan: 6 tasks in 6 classes, every run solved, the router cheapest."""
+        return [dict(r, task=task, batch=f"measure-{1 + i // 2}") for task, cls in self.PLAN
+                for config, usd in (("plugin", 0.05), ("defaults", 0.26), ("haiku-high", 0.10), ("pinned", 0.20))
+                for i, r in enumerate(rows(config, cls, [usd] * runs, [True] * runs))]
+
+    def test_the_documented_plan_can_reach_a_win_over_all_tasks(self):
+        kwargs = {"routers": frozenset({"plugin"}), "router": "plugin", "session": analyze.OPUS}
+        for runs, verdict in ((6, "NONE"), (8, "NONE"), (10, "WIN")):
+            with self.subTest(runs=runs):
+                data = self.plan_rows(runs)
+                every = analyze.overall(data, **kwargs)
+                self.assertEqual({v["verdict"] for v in every["verdicts"].values()}, {verdict})
+                self.assertEqual(every["class"], analyze.ALL)
+                # One task per class, so a class alone can't show the margin.
+                self.assertEqual({c["status"] for c in analyze.summarize(data, **kwargs)}, {"NONE"})
+        # The knife edge at 8 runs: a lower bound equal to the margin is not inside it.
+        edge = analyze.overall(self.plan_rows(8), **kwargs)["verdicts"]["pinned"]
+        self.assertEqual((edge["pass_ci"][0], edge["verdict"]), (-analyze.MARGIN, "NONE"))
+
+    def test_a_new_batch_beside_stored_rows_with_the_same_ids_gets_a_verdict(self):
+        stored = [{k: v for k, v in r.items() if k != "schema"} for r in
+                  spread("plugin", "lookup", 6, 4, 0.30) + spread("defaults", "lookup", 6, 4, 0.20)]
+        fresh = spread("plugin", "lookup", 6, 12, 0.10, batch="m1") + spread("defaults", "lookup", 6, 12, 0.50, batch="m1")
+        extra = {"main_model": analyze.OPUS, "started_at": "2026-11-25T10:00:00+00:00", "claude_version": "2.1.331",
+                 "models": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            res = Path(tmp) / "results"
+            res.mkdir()
+            for name, data in (("stored-lookup.jsonl", stored), ("measure-1.jsonl", fresh)):
+                (res / name).write_text("".join(json.dumps(dict(r, **extra)) + "\n" for r in data), encoding="utf-8")
+            results = analyze.load(sorted(res.glob("*.jsonl")))
+            out = Path(tmp) / "page.md"
+            analyze.main([*map(str, sorted(res.glob("*.jsonl"))), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        self.assertEqual((len(results.rows), len(results.legacy)), (144, 48))
+        (name, router, summary, every, _), = analyze.sessions(results)
+        self.assertEqual((router, summary[0]["verdicts"]["defaults"]["verdict"]), ("plugin", "WIN"))
+        self.assertEqual(every["verdicts"]["defaults"]["verdict"], "WIN")
+        (_, _, old, _, _), = analyze.sessions(results, legacy=True)
+        self.assertEqual((old[0]["status"], old[0]["rank"]), ("REFUSED", None))
+        current = page.split("## Results: session model")[1].split("## Before the sandbox")[0]
+        self.assertIn("WIN against `defaults`", current)
+        self.assertIn("$0.1000 per solved", current)
+        self.assertNotIn("$0.3000", current)  # the stored rows sit in their own tables
+        self.assertIn("$0.3000 per solved", page.split("## Before the sandbox: session model")[1])
+
+    def test_the_judged_router_comes_from_configs_json_not_file_order(self):
+        data = [dict(r, main_model=analyze.OPUS) for r in spread("plugin", "lookup", 2, 4, 0.1)
+                + spread("plugin-nogate", "lookup", 2, 4, 0.1) + spread("defaults", "lookup", 2, 4, 0.1)]
+        base = analyze.load([])
+        self.assertEqual([c["id"] for c in base.configs if c.get("judged")], ["plugin"])
+        nogate_first = sorted(base.configs, key=lambda c: c["id"] != "plugin-nogate")
+        results = dataclasses.replace(base, rows=data, configs=nogate_first)
+        self.assertEqual([part[1] for part in analyze.sessions(results)], ["plugin"])
+        self.assertEqual([part[1] for part in analyze.sessions(results, "plugin-nogate")], ["plugin-nogate"])
+
+    def test_archived_router_variants_are_never_baselines(self):
+        routers = analyze.router_ids(run.load_configs())
+        for name in ("plugin-cheap", "plugin-cheap-nomain", "plugin-cheap-nomain-nogate", "plugin-m6-08-b",
+                     "plugin-m6-08-b-nogate", "plugin-m6-10", "plugin", "plugin-next", "plugin-nogate"):
+            self.assertIn(name, routers)
+        data = spread("plugin", "lookup", 1, 4, 0.3) + spread("plugin-cheap", "lookup", 1, 4, 0.1)
+        row = {s["class"]: s for s in analyze.summarize(data, routers=routers, draws=100)}["lookup"]
+        self.assertEqual((row["verdicts"], row["best_baseline"]), ({}, None))
 
     def test_behind_beyond_noise_loses_however_cheap(self):
         v = self.verdict(rows("plugin", "lookup", [0.01] * 10, [True] * 2 + [False] * 8)
@@ -317,14 +412,20 @@ class Analysis(unittest.TestCase):
         return cls._committed
 
     def changed(self, edit):
-        """The committed results with `edit(row)` applied to every row, as a new Results."""
-        rows = [dict(r) for r in self.committed().rows]
+        """The committed results with `edit(row)` applied to every stored row, as a new Results."""
+        rows = [dict(r) for r in self.committed().legacy]
         for row in rows:
             edit(row)
-        return dataclasses.replace(self.committed(), rows=rows)
+        return dataclasses.replace(self.committed(), legacy=rows)
 
     def session(self, results, model=None):
-        return next(s for s in analyze.figures(results)["sessions"] if s["model"] == (model or analyze.OPUS))
+        return next(s for s in analyze.figures(results, legacy=True)["sessions"] if s["model"] == (model or analyze.OPUS))
+
+    def test_stored_rows_from_before_the_sandbox_stay_out_of_the_tables(self):
+        results = self.committed()
+        self.assertEqual(results.rows, [])
+        self.assertEqual({r.get("schema", 1) for r in results.legacy}, {1})
+        self.assertEqual(analyze.figures(results)["sessions"], [])
 
     def test_figures_are_keyed_by_role(self):
         opus = self.session(self.committed())
@@ -335,14 +436,14 @@ class Analysis(unittest.TestCase):
                          / (opus["pooled"]["defaults"]["cost_usd"] / 70))
 
     def test_stored_rows_under_an_old_id_take_the_configurations_new_name(self):
-        self.assertNotIn("opusplan", {r["config"] for r in self.committed().rows})
-        self.assertIn("sonnet-via-opusplan", {r["config"] for r in self.committed().rows})
+        self.assertNotIn("opusplan", {r["config"] for r in self.committed().legacy})
+        self.assertIn("sonnet-via-opusplan", {r["config"] for r in self.committed().legacy})
 
     def test_the_defaults_are_the_configuration_with_no_plugin_and_no_forced_model(self):
         base = self.committed()
         rename = lambda row: dict(row, config="plain") if row["config"] == "defaults" else row  # noqa: E731
         results = dataclasses.replace(
-            base, rows=[rename(r) for r in base.rows],
+            base, legacy=[rename(r) for r in base.legacy],
             configs=[dict(c, id="plain") if c["id"] == "defaults" else c for c in base.configs])
         self.assertEqual(self.session(results)["roles"]["defaults"], "plain")
 
@@ -350,23 +451,26 @@ class Analysis(unittest.TestCase):
         base = self.committed()
         swap = lambda name: "renamed" if name == "plugin-next" else name  # noqa: E731
         results = dataclasses.replace(
-            base, rows=[dict(r, config=swap(r["config"])) for r in base.rows],
+            base, legacy=[dict(r, config=swap(r["config"])) for r in base.legacy],
             configs=[dict(c, id=swap(c["id"])) for c in base.configs],
             routers=frozenset(map(swap, base.routers)))
-        old, new = analyze.figures(base), analyze.figures(results)
+        old = analyze.figures(base, legacy=True)
+        with unittest.mock.patch.object(analyze, "LEGACY_ROUTER", "renamed"):
+            new = analyze.figures(results, legacy=True)
         for a, b in zip(old["sessions"], new["sessions"]):
             self.assertEqual((b["router"], b["roles"]["router"], b["facts"]), ("renamed", "renamed", a["facts"]))
             self.assertEqual((a["pooled_less"], a["behind"]), (b["pooled_less"], b["behind"]))
             self.assertEqual([c["status"] for c in a["classes"]], [c["status"] for c in b["classes"]])
 
     def test_the_facts_the_docs_state_hold_for_the_committed_results(self):
-        data = analyze.figures(self.committed())
+        data = analyze.figures(self.committed(), legacy=True)
         self.assertEqual(analyze.broken_facts(data), [])
         self.assertEqual({s["model"]: len(s["facts"]) for s in data["sessions"]}, {analyze.OPUS: 6, analyze.SONNET: 5})
 
     def test_no_stored_class_gets_a_verdict(self):
-        for s in analyze.figures(self.committed())["sessions"]:
+        for s in analyze.figures(self.committed(), legacy=True)["sessions"]:
             self.assertEqual({c["status"] for c in s["classes"]}, {"REFUSED"}, s["model"])
+            self.assertEqual({c["rank"] for c in s["classes"]}, {None}, s["model"])
 
     def test_a_fact_turning_false_fails_the_check(self):
         first = []
@@ -416,7 +520,7 @@ class Analysis(unittest.TestCase):
 
     def test_a_session_the_docs_say_nothing_about_has_no_facts(self):
         results = self.changed(lambda row: row.update(main_model="elsewhere"))
-        data = analyze.figures(results)
+        data = analyze.figures(results, legacy=True)
         self.assertEqual([s["facts"] for s in data["sessions"]], [{}])
         self.assertEqual(analyze.broken_facts(data), [])
 
@@ -435,7 +539,7 @@ class Analysis(unittest.TestCase):
         sonnet = [dict(real, main_model="sonnet", config=c, total_cost_usd=usd, passed=True)
                   for c, usd in (("plugin", 0.3), ("defaults", 0.2)) for _ in range(n)]
         opus = [dict(real, main_model="claude-opus-5-5", config=c, total_cost_usd=usd, passed=True)
-                for c, usd in (("plugin-nogate", 0.5), ("defaults", 0.9)) for _ in range(n)]
+                for c, usd in (("plugin", 0.5), ("plugin-nogate", 0.4), ("defaults", 0.9)) for _ in range(n)]
         with tempfile.TemporaryDirectory() as tmp:
             res = Path(tmp) / "results"
             res.mkdir()
@@ -443,14 +547,17 @@ class Analysis(unittest.TestCase):
             out = Path(tmp) / "page.md"
             analyze.main([str(res / "a-bugfix-2026-11-22.jsonl"), "--out", str(out)])
             page = out.read_text(encoding="utf-8")
+            analyze.main([str(res / "a-bugfix-2026-11-22.jsonl"), "--out", str(out), "--router", "plugin-nogate"])
+            chosen = out.read_text(encoding="utf-8")
         opus_part = page.split("## Results: session model `claude-opus-5-5`")[1].split("## Results: session model")[0]
         sonnet_part = page.split("## Results: session model `sonnet`")[1].split("## How to read it")[0]
-        self.assertIn("router: `plugin-nogate`", opus_part)
+        self.assertIn("router: `plugin`", opus_part)
         self.assertIn("$0.9000 per solved", opus_part)  # Opus defaults, not pooled with Sonnet's
         self.assertIn("bugfix: no difference shown against `defaults`", opus_part)
         self.assertIn("router: `plugin`", sonnet_part)
         self.assertIn("bugfix: no difference shown against `defaults`", sonnet_part)
         self.assertNotIn("$0.9000", sonnet_part)
+        self.assertIn("router: `plugin-nogate`", chosen.split("## Results: session model `claude-opus-5-5`")[1])
 
     def test_a_configuration_with_its_own_session_model_joins_every_table(self):
         # opusplan sets its own --model, so its runs are the same whichever session the batch used. The rows
@@ -458,9 +565,9 @@ class Analysis(unittest.TestCase):
         real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl")
                           .read_text().splitlines()[0])
         n = analyze.MIN_RUNS
-        rows = [dict(real, main_model=m, config=c, total_cost_usd=usd, passed=True)
-                for m, c, usd in (("claude-opus-5-5", "plugin-next", 0.5), ("claude-opus-5-5", "defaults", 0.9),
-                                  ("sonnet", "plugin-next", 0.3), ("sonnet", "defaults", 0.2),
+        rows = [dict(real, main_model=m, config=c, total_cost_usd=usd, passed=True, schema=run.ROW_SCHEMA)
+                for m, c, usd in (("claude-opus-5-5", "plugin", 0.5), ("claude-opus-5-5", "defaults", 0.9),
+                                  ("sonnet", "plugin", 0.3), ("sonnet", "defaults", 0.2),
                                   ("opusplan", "opusplan", 0.1)) for _ in range(n)]
         with tempfile.TemporaryDirectory() as tmp:
             res = Path(tmp) / "results"
@@ -502,7 +609,8 @@ class Analysis(unittest.TestCase):
         self.assertIn("p50 20 s, p90 40 s, cache 80%, Bash denied in 1 of 3, accuracy by level: standard 1/2 "
                       "(2 of 3 runs), escalated 1 of 3 spawns", row)
         self.assertIn("latency n/a, cache 80%, Bash denied in 0 of 2, not routed", row)
-        self.assertIn("- Runs with a Bash denial, by configuration: `defaults` 0 of 2; `plugin` 1 of 3.", page)
+        self.assertIn("- Runs with a Bash denial, by configuration: `defaults` below schema 3 0 of 2; "
+                      "`plugin` below schema 3 1 of 3.", page)
         self.assertIn("1 router run(s) here carry no `routed`", page)
         self.assertIn("2 run(s) here carry no `wall_ms`", page)
         never = next(line for line in page.splitlines() if line.startswith("Defined in `bench/configs.json` but"))
@@ -1579,7 +1687,7 @@ class TaskIdentity(unittest.TestCase):
             analyze.main([str(results / "a-design.jsonl"), "--out", str(out)])
             page = out.read_text(encoding="utf-8")
         self.assertEqual(sorted(r["task"] for r in loaded.stale), ["design-cache-invalidation"] * 2)
-        self.assertEqual([r["task"] for r in loaded.rows], ["design-rate-limiter"])
+        self.assertEqual([r["task"] for r in loaded.legacy], ["design-rate-limiter"])
         self.assertIn("`design-cache-invalidation` is at revision 2; 2 of its runs ($", page)
         self.assertIn("are left out of every table", page)
         self.assertIn("- Bias: 1 router-arm runs", page)  # the one router row with no task_revision
@@ -1815,6 +1923,9 @@ class Pilot(unittest.TestCase):
         self.assertIn("plus anything that subagents still running", page)
         self.assertIn("margin, not a bound", page)
         self.assertIn("`sandbox.autoAllowBashIfSandboxed`", page)
+        self.assertIn("`plugin` (Model Router loaded from the checkout at `27b94e6`", page)
+        self.assertNotIn("`plugin` (Model Router with today's defaults", page)  # no stored row ran today's build
+        self.assertIn("server-managed settings", page)
         self.assertNotIn("Bash(tail *)", page)
         self.assertNotIn("`--no-session-persistence`, `--permission-mode", page)
         self.assertNotIn("puts it back afterwards", page)
@@ -2174,6 +2285,15 @@ print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "re
 '''
 
 
+NO_START_STUB = '''#!/usr/bin/env python3
+import sys
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+print("Error: sandbox required but unavailable", file=sys.stderr)
+sys.exit(1)
+'''
+
+
 class Harness(unittest.TestCase):
     """How a run is started and recorded: the sandbox, its own config folder, the stream and the batch."""
 
@@ -2322,9 +2442,78 @@ class Harness(unittest.TestCase):
         (source / "hooks" / "hooks.json").write_text("{}")  # an edit after the batch starts
         self.assertNotEqual((Path(frozen) / "hooks" / "hooks.json").read_text(), "{}")
         self.assertNotEqual(run.freeze_plugin(source)[1], digest)
-        code, rows, _ = self.main("--configs", "defaults", "haiku-high", "--runs", "2", "--seed", "5")
-        self.assertEqual(len({r["plugin_hash"] for r in rows}), 1)
-        self.assertTrue(rows[0]["plugin_hash"])
+        loaded = json.dumps([{"name": "model-router", "path": "/p"}])
+        code, rows, _ = self.main("--configs", "plugin", "plugin-nogate", "defaults", "--runs", "2", "--seed", "5",
+                                  env={"STUB_PLUGINS": loaded})
+        self.assertEqual(len({r["plugin_hash"] for r in rows if r["config"] != "defaults"}), 1)
+        self.assertTrue(next(r["plugin_hash"] for r in rows if r["config"] == "plugin"))
+        self.assertEqual({r["plugin_hash"] for r in rows if r["config"] == "defaults"}, {None})
+
+    def test_a_plugin_ref_row_carries_the_hash_of_the_plugin_it_ran(self):
+        ref = {"id": "r", "plugin": True, "env": {}, "plugin_ref": "HEAD"}
+        options = {"claude": ["claude"], "model": "sonnet", "budget": 0.5, "plugin_dir": "/p", "plugin_hash": "frozen"}
+        cmd, _ = run.command("x", ref, options, {})
+        exported = run.plugin_hash(Path(cmd[cmd.index("--plugin-dir") + 1]))
+        record = lambda config: run.record(Recorder.task, config, {**Recorder.options, **options},  # noqa: E731
+                                           run.mrconfig.build({}), {}, Recorder.facts)["plugin_hash"]
+        self.assertEqual(record(ref), exported)
+        self.assertEqual(record(self.configs["plugin"]), "frozen")
+        self.assertIsNone(record(self.configs["defaults"]))
+
+    def test_a_run_that_never_started_is_set_aside_and_three_in_a_row_stop_the_bench(self):
+        claude = stub(self.dir, NO_START_STUB)
+        out = self.dir / "never.jsonl"
+        with unittest.mock.patch.dict("os.environ", AUTH), contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "4", "--max-total", "9",
+                             "--claude", *claude, "--out", str(out)])
+        limited = [json.loads(line) for line in (self.dir / "limited" / out.name).read_text().splitlines()]
+        self.assertEqual((code, out.exists()), (2, False))
+        self.assertEqual([r["limited_reason"] for r in limited], ["no_start"] * 3)
+        self.assertIn("stopped: 3 runs in a row", err.getvalue())
+
+    def test_runs_cannot_read_the_repository(self):
+        options = {"claude": ["claude"], "model": "sonnet", "budget": 0.5, "plugin_dir": "/p"}
+        cmd, env = run.command("x", self.configs["defaults"], options,
+                               {"PATH": "/bin", "PWD": str(run.ROOT), "OLDPWD": str(run.ROOT / "bench")})
+        settings = json.loads(cmd[cmd.index("--settings") + 1])
+        self.assertIn({"path": str(run.ROOT), "mode": "deny"}, settings["sandbox"]["credentials"]["files"])
+        self.assertIn(f"Read(//{run.ROOT.as_posix().lstrip('/')}/**)", settings["permissions"]["deny"])
+        self.assertEqual((env.get("PWD"), env.get("OLDPWD"), env["PATH"]), (None, None, "/bin"))
+
+    def test_pinned_names_its_agents_and_a_run_off_its_pins_is_set_aside(self):
+        pinned = self.configs["pinned"]
+        self.assertEqual(run.pins(pinned), ["reviewer", "searcher", "worker"])
+        self.assertIsNone(run.pins(self.configs["defaults"]))
+        asked = run.prompt(self.task, "delegate", pinned)
+        self.assertIn("reviewer, searcher or worker", asked)
+        self.assertEqual(run.prompt(self.task, "delegate", self.configs["defaults"]), run.prompt(self.task, "delegate"))
+        self.assertEqual(run.prompt(self.task, "direct", pinned), self.task["brief"])
+
+        def row(started, overrides=0, arm="delegate", config=pinned):
+            return run.record(Recorder.task, config, {**Recorder.options, "arm": arm}, run.mrconfig.build({}), {},
+                              dict(Recorder.facts, agents_started=started, agent_overrides=overrides,
+                                   init={"type": "system", "subtype": "init"}))
+        self.assertFalse(row({"worker": 1})["off_pin"])
+        for off in (row({"general-purpose": 1}), row({"worker": 1}, overrides=1), row({})):
+            self.assertTrue(off["off_pin"])
+            self.assertEqual(run.set_aside(off), "off_pin")
+        self.assertIsNone(row({"general-purpose": 1}, arm="direct")["off_pin"])  # a person's prompt picks freely
+        self.assertIsNone(row({"general-purpose": 1}, config=self.configs["defaults"])["off_pin"])
+
+    def test_agent_calls_that_set_a_model_or_effort_are_counted(self):
+        stream = "\n".join(json.dumps(e) for e in (
+            {"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "a", "name": "Agent", "input": {"subagent_type": "worker", "model": "opus"}},
+                {"type": "tool_use", "id": "b", "name": "Agent", "input": {"subagent_type": "worker", "effort": "low"}},
+                {"type": "tool_use", "id": "c", "name": "Agent", "input": {"subagent_type": "worker"}}]}},))
+        init, result, started, overrides = run.read_stream(stream)
+        self.assertEqual((started, overrides), ({"worker": 3}, 2))
+        self.assertEqual(self.one()[0]["agent_overrides"], 0)
+
+    def test_kept_transcripts_are_never_committed(self):
+        res = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", "bench/results/transcripts/out/s/s1.jsonl"])
+        self.assertEqual(res.returncode, 0)
 
     def test_every_row_records_the_seed_the_batch_and_the_arm(self):
         code, rows, _ = self.main("--configs", "defaults", "haiku-high", "--runs", "2", "--seed", "5",

@@ -11,6 +11,7 @@ import re
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,7 +43,7 @@ def fixture_results(solved=3, cps=0.12344, runs=4, router="mine", cls="lookup"):
                       "main_model": model, "started_at": "2030-01-01T10:00:00+00:00", "claude_version": "2.1.0",
                       "schema": analyze.run.ROW_SCHEMA}
                      for i in range(runs)]
-    configs = [{"id": router, "plugin": True, "env": {}}, {"id": "defaults", "plugin": False, "env": {}},
+    configs = [{"id": router, "plugin": True, "judged": True, "env": {}}, {"id": "defaults", "plugin": False, "env": {}},
                *({"id": c, "plugin": False, "env": {"X": "1"}} for c in sorted({c for v in ids.values() for c in v})
                  if c != "defaults")]
     return analyze.Results(files=[], rows=rows, stale=[], broken=[], aside=[], archive=[], configs=configs, tasks=[],
@@ -167,9 +168,11 @@ class DocsAssets(unittest.TestCase):
         base = analyze.load(analyze.default_paths())
         swap = lambda name: "renamed" if name == "plugin-next" else name  # noqa: E731
         results = dataclasses.replace(
-            base, rows=[dict(r, config=swap(r["config"])) for r in base.rows],
+            base, legacy=[dict(r, config=swap(r["config"])) for r in base.legacy],
             configs=[dict(c, id=swap(c["id"])) for c in base.configs], routers=frozenset(map(swap, base.routers)))
-        before, after = self.build(), self.build(bench=analyze.figures(results))
+        with unittest.mock.patch.object(analyze, "LEGACY_ROUTER", "renamed"):
+            renamed = analyze.figures(results, legacy=True)
+        before, after = self.build(), self.build(bench=renamed)
         self.assertEqual({p for p in before if before[p] != after[p]}, {"docs/TRACEABILITY.md"})
         self.assertIn("<!-- bench:opus.router_code -->`renamed`<!-- /bench -->", after["docs/TRACEABILITY.md"])
 
