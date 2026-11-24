@@ -422,8 +422,8 @@ def diagram_stop_checks() -> str:
     out.append(f'<path d="M{x + 20} 336H{x + 390}" class="ln" stroke-width="1"/>')
     out.append(text(x + 20, 360, "Then", "mut b", 12))
     out.append(lines(x + 62, 360, then, "ink", 13, 19))
-    out.append(text(32, 464, "A workflow, subagent, shell or teammate still running holds the check, since the "
-                    "turn is paused, not done.", "mut", 13))
+    out.append(text(32, 464, "Any background task still running, such as a subagent, shell or monitor, holds the "
+                    "check, since the turn is paused, not done.", "mut", 13))
     title = "The check before a turn ends: verify_gate"
     label = ("When Claude is about to end a turn, the Stop hook runs one check. verify_gate, on by default, asks "
              "once for the work's own check when project files changed and nothing checked them.")

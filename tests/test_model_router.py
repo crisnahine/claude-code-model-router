@@ -3135,7 +3135,8 @@ class Hooks(Sandbox):
                      "- fable at high: open-ended research"):
             self.assertIn(line, text)
         self.assertIn("a contract or financial figures", text)  # any kind of work, not only code
-        self.assertIn("A call that names neither runs on its agent's own model or the conversation's.", text)
+        self.assertIn("A call that names neither runs on its agent's own model or the conversation's, within the cap.",
+                      text)
         self.assertIn('A redo after a failed check or a gap in the report keeps its `description` with "Redo:" in front '
                       "and runs above the run it redoes, effort before model.", text)
         self.assertNotIn("from its brief", text)

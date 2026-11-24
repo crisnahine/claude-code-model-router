@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import os
 import re
 from pathlib import Path
@@ -11,30 +12,39 @@ from . import config as cfg
 from .settings import Settings
 
 # A script named for a check: test_api.py, _scratch_check.py, run_tests.sh, cart.spec.js.
-_SCRIPT = (r"(?:\S*/)?(?:(?:tests?|checks?|spec)(?:[_.-][\w.-]*)?|[\w.-]*[_.-](?:tests?|check|spec))"
-           r"\.(?:py|[cm]?js|ts|rb|sh)\b")
-CHECK_COMMAND = re.compile(
-    r"\b(?:pytest|unittest|tox|nox|jest|vitest|mocha|playwright|cypress|rspec|phpunit|ctest|tsc|mypy|pyright|"
-    r"ruff|eslint|flake8|pylint|clippy|golangci-lint|rubocop)\b|"
-    r"\b(?:npm|pnpm|yarn|bun)(?:\s+-\S+(?:\s+[^-\s]\S*)?)*\s+(?:(?:run\s+)?(?:test|lint|type-?check|check)\b|t(?!\S))|"
-    r"\b(?:cargo|go|dotnet|mvn|gradle|gradlew|make|just|swift|mix|deno)\s+\S*\s*(?:test|check|vet|lint|verify)\b|"
-    # Gradle's build task runs its check task; any other bare build only compiles.
-    r"\bgradlew?\s+build\b|"
-    r"\b(?:black|prettier|isort)\s(?:[^\n]*\s)?--check\b|"
-    r"\b(?:manage\.py|rails|artisan|bazel|sbt|flutter|zig(?:\s+build)?)\s+test\b|\brake\s+(?:test|spec)\b|"
-    r"\bnode\s+--test\b|"
-    rf"\b(?:python3?|node|ruby|bash|sh)\s+(?:-\S+\s+)*{_SCRIPT}|(?:^|\s)\./{_SCRIPT}")
-# A command part led by one of these only installs, finds, reads, opens, copies or mentions a tool, as in
-# "pip install pytest", "vim pytest.ini", "python -c 'import pytest'" or "git commit -m 'Run mypy'", is a
-# heredoc line ("import pytest"), or only lists tests ("pytest --collect-only").
-# Separators inside quotes still split the command.
-_PARTS = re.compile(r"&&|\|\||[;|\n]")
-_LEAD = re.compile(r"[\s({`$]*(?:(?:\w+=\S*|sudo)\s+)*")
-_MENTION = re.compile(
-    r"(?:pip3?|pipx|brew|apt(?:-get)?|which|type|whereis|command\s+-[vV]|e?grep|rg|ag|cat|less|more|head|tail|sed|"
-    r"awk|echo|printf|git|ls|find|wc|open|vim?|nvim|nano|emacs|code|cp|mv|cd|touch|mkdir|ln|chmod|import|from|"
-    r"(?:npm|pnpm|yarn|bun)\s+(?:install|i|add|ci|remove|uninstall|view|info|ls)|"
-    r"uv\s+(?:pip|add|tool\s+install)|(?:\S*/)?python[\d.]*\s+-c|[^\n]*\s--collect-only)(?:\s|$)")
+_SCRIPT = re.compile(r"(?:\S*/)?(?:(?:tests?|checks?|spec)(?:[_.-][\w.-]*)?|[\w.-]*[_.-](?:tests?|check|spec))"
+                     r"\.(?:py|[cm]?js|ts|rb|sh)")
+_TASK = re.compile(r"(?:tests?|lint|type-?check|check|vet|verify|spec|clippy|nextest|analyze)(?:[:_-][\w:.-]*)?")
+_RUNNERS = {"pytest", "py.test", "unittest", "tox", "nox", "jest", "vitest", "mocha", "rspec", "phpunit", "ctest",
+            "tsc", "mypy", "pyright", "ruff", "eslint", "flake8", "pylint", "clippy", "golangci-lint", "rubocop"}
+_SUBCOMMAND = {"playwright": "test", "cypress": "run"}  # `playwright install` and `cypress open` check nothing
+_FORMATTERS = {"black", "prettier", "isort", "rustfmt", "cargo fmt", "ruff format", "terraform fmt", "dotnet format",
+               "mix format", "deno fmt"}
+_FORMAT_CHECKS = {"--check", "-check", "--check-only", "--check-formatted", "--verify-no-changes"}
+_TASK_FIRST = {"cargo", "go", "dotnet", "swift", "mix", "deno", "bazel", "bazelisk", "flutter", "dart", "rails",
+               "manage.py", "artisan"}  # the first argument names the task
+_TASK_ANY = {"make", "gmake", "just", "mvn", "mvnw", "gradle", "gradlew", "rake", "sbt", "zig", "turbo", "nx", "lerna"}
+_PACKAGE_MANAGERS = {"npm", "pnpm", "yarn", "bun"}
+_SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+# The short flag that takes inline code, last in a cluster as in `ruby -pe`, and its long forms.
+_INLINE = {"python": ("c", ()), "node": ("ep", ("--eval", "--print")), "ruby": ("e", ()), "php": ("r", ())}
+_ONLY_PRINTS = {"--version", "--help", "-h", "--collect-only", "--co", "--list", "--listTests", "--list-tests"}
+# Each wrapper's own arguments before the command it runs: a container or service, a time limit.
+_WRAPPERS = {**dict.fromkeys(("sudo", "env", "time", "nice", "nohup", "stdbuf", "xargs", "npx", "pnpx", "bunx",
+                              "uvx", "nyc", "c8", "if", "then", "else", "elif", "do", "while", "until", "!", "{",
+                              "uv run", "uv tool run", "pipx run", "poetry run", "pipenv run", "pdm run", "hatch run",
+                              "rye run", "conda run", "mamba run", "pixi run", "bundle exec", "rbenv exec",
+                              "asdf exec"), 0),
+             **dict.fromkeys(("timeout", "rvm", "nvm exec", "mise exec", "mise x", "docker exec", "docker run",
+                              "docker compose run", "docker compose exec", "docker-compose run", "docker-compose exec",
+                              "podman exec", "podman run", "kubectl exec"), 1)}
+_COMMANDS = (_RUNNERS | set(_SUBCOMMAND) | _TASK_FIRST | _TASK_ANY | _PACKAGE_MANAGERS | _SHELLS | set(_INLINE)
+             | {key.split()[0] for key in (*_WRAPPERS, *_FORMATTERS)} | {"coverage"})
+_PYTHON = re.compile(r"python[\d.]*")
+_VARIABLE = re.compile(r"\$\{?\w+\}?")  # "$PY -m pytest": a variable that holds the interpreter
+_ASSIGN = re.compile(r"[A-Za-z_]\w*\+?=")
+_HEREDOC = re.compile(r"(?<!<)<<(?!<)(-?)[ \t]*\\?(['\"]?)([^\s'\"<>|&;()]+)\2")
+_SEPARATORS = frozenset(";&|()`\n")
 # A message's tool_use rows are stamped before its Edit's PostToolUse records the edit.
 _SAME_MESSAGE_SLACK = 5
 
@@ -73,15 +83,220 @@ def note_agent_checks(hook_input: dict) -> None:
 
 
 def is_check(command: str) -> bool:
-    """A check command: CHECK_COMMAND in a part of it no mention word leads."""
-    return any(CHECK_COMMAND.search(part) and not _MENTION.match(part, _LEAD.match(part).end())
-               for part in _PARTS.split(command))
+    """Does a part of this shell command, split as the shell splits it, run a check tool past any wrappers
+    (`sudo`, `npx`, `uv run`, `docker exec`)? A tool named anywhere else, as in `pip install pytest`, a quoted
+    message or a heredoc's lines, is only a mention."""
+    return any(_runs_check(words, _find(words, 0, 0, _known)) for words in _parts(_without_heredocs(command)))
+
+
+def _parts(command: str) -> list[list[str]]:
+    """The command's simple commands as words, split at separators outside quotes, with quotes, comments and
+    redirection targets removed."""
+    parts: list[list[str]] = []
+    words: list[str] = []
+    word: str | None = None
+    quote, i, target = None, 0, False
+    while i < len(command):
+        c = command[i]
+        if quote:
+            if c == quote:
+                quote = None
+            elif c == "\\" and quote == '"' and i + 1 < len(command):
+                i += 1
+                word += command[i]
+            else:
+                word += c
+        elif c == "\\":
+            i += 1
+            if i < len(command) and command[i] != "\n":
+                word = (word or "") + command[i]
+        elif c in "'\"":
+            quote, word = c, word or ""
+        elif c == "#" and word is None:
+            end = command.find("\n", i)
+            i = len(command) if end < 0 else end
+            continue
+        elif c in " \t\r<>" or c in _SEPARATORS:
+            if word is not None:
+                if not target:
+                    words.append(word)
+                word, target = None, False
+            if c in "<>":
+                target = True
+            elif c in _SEPARATORS:
+                target = False
+                if words:
+                    parts.append(words)
+                    words = []
+        else:
+            word = (word or "") + c
+        i += 1
+    if word is not None and not target:
+        words.append(word)
+    if words:
+        parts.append(words)
+    return parts
+
+
+def _without_heredocs(command: str) -> str:
+    """The command without the lines a heredoc feeds to a program, unless that program is a shell."""
+    if "<<" not in command:
+        return command
+    kept: list[str] = []
+    waiting: list[tuple[str, str]] = []
+    for line in command.split("\n"):
+        if waiting:
+            dash, delimiter = waiting[0]
+            if (line.lstrip("\t") if dash else line).rstrip("\r") == delimiter:
+                waiting.pop(0)
+            continue
+        kept.append(line)
+        if not any(_base(words[j]) in _SHELLS for words in _parts(line)
+                   for j in [_unwrap(words, _find(words, 0, 0, _known))] if j < len(words)):
+            waiting = [(m.group(1), m.group(3)) for m in _HEREDOC.finditer(line)]
+    return "\n".join(kept)
+
+
+def _base(word: str) -> str:
+    return word.rsplit("/", 1)[-1]
+
+
+def _known(word: str) -> bool:
+    """A word that names a command this module reads: a check tool, a wrapper, an interpreter or a check script."""
+    return (_base(word) in _COMMANDS or bool(_PYTHON.fullmatch(_base(word)) or _VARIABLE.fullmatch(word)
+                                             or _SCRIPT.fullmatch(word)))
+
+
+def _find(words: list[str], i: int, positionals: int, wanted) -> int:
+    """The index of the next command word from `i`: past assignments, flags and `positionals` other words. A flag's
+    next word is taken as its value unless it is `wanted`."""
+    while i < len(words):
+        word = words[i]
+        if word.startswith(("-", "+")) and len(word) > 1:
+            i += 1
+            if "=" not in word and i < len(words) and not words[i].startswith(("-", "+")) and not wanted(words[i]):
+                i += 1
+        elif _ASSIGN.match(word):
+            i += 1
+        elif positionals and not wanted(word):
+            positionals, i = positionals - 1, i + 1
+        else:
+            return i
+    return i
+
+
+def _unwrap(words: list[str], i: int) -> int:
+    """The index of the command that runs once the wrappers from `i` are past."""
+    while i < len(words):
+        name, rest = _base(words[i]), words[i + 1:i + 3]
+        key = next((k for k in (" ".join([name, *rest]), " ".join([name, *rest[:1]]), name) if k in _WRAPPERS), None)
+        if key is None:
+            return i
+        i = _find(words, i + key.count(" ") + 1, _WRAPPERS[key], _known)
+    return i
+
+
+def _runs_check(words: list[str], i: int) -> bool:
+    """Does the command at `words[i]` run a check?"""
+    while (i := _unwrap(words, i)) < len(words):
+        word = words[i]
+        name = _base(word)
+        pair = " ".join([name, *words[i + 1:i + 2]])
+        python = bool(_PYTHON.fullmatch(name) or _VARIABLE.fullmatch(word)) or pair == "coverage run"
+        if name in _SHELLS:
+            for k in range(i + 1, len(words)):
+                flag = words[k]
+                if flag.startswith("-") and not flag.startswith("--") and "c" in flag:
+                    return k + 1 < len(words) and is_check(words[k + 1])
+                if not flag.startswith(("-", "+")) and not re.fullmatch(r"[-+]\w*o", words[k - 1]):
+                    return _script_runs_check(words, k)
+            return False
+        if python or name in _INLINE:
+            k = i + (2 if pair == "coverage run" else 1)
+            letters, longs = _INLINE["python" if python else name]
+            while k < len(words) and words[k].startswith("-") and len(words[k]) > 1:
+                flag, k = words[k], k + 1
+                if flag in longs or (not flag.startswith("--") and flag[-1] in letters):
+                    return False
+                if name == "node" and flag == "--test":
+                    return not _prints(words[k:])
+                if python and flag == "-m":
+                    break
+                if k < len(words) and not words[k].startswith("-") and not _known(words[k]):
+                    k += 1
+            if k >= len(words) or not _known(words[k]):
+                return False
+            i = k
+            continue
+        if name in _PACKAGE_MANAGERS:
+            i = _package_task(words, i, name)
+            if i is None or i >= len(words):
+                return False
+            if _TASK.fullmatch(words[i]) or words[i] == "t":
+                return not _prints(words[i + 1:])
+            continue
+        rest = words[i + 1:]
+        if _prints(rest):
+            return False
+        if pair in _FORMATTERS or name in _FORMATTERS:
+            return any(w in _FORMAT_CHECKS for w in rest)
+        if name in _RUNNERS:
+            return True
+        if name in _SUBCOMMAND:
+            k = _find(words, i + 1, 0, _known)
+            return k < len(words) and words[k] == _SUBCOMMAND[name]
+        if name in _TASK_FIRST:
+            k = _find(words, i + 1, 0, _TASK.fullmatch)
+            return k < len(words) and bool(_TASK.fullmatch(words[k]))
+        if name in _TASK_ANY:
+            # Gradle's build task runs its check task; any other bare build only compiles.
+            return any(_TASK.fullmatch(w) or (w == "build" and name.startswith("gradle")) for w in rest)
+        return _script_runs_check(words, i)
+    return False
+
+
+def _script_runs_check(words: list[str], i: int) -> bool:
+    """A script named for a check, or a shell script given a test file to run, as in `bash run.sh tests/test_a.py`."""
+    script, args = words[i], words[i + 1:]
+    # A test file may carry a test's line or id: spec/a_spec.rb:12, tests/test_a.py::test_b.
+    named = _SCRIPT.fullmatch(script) or (script.endswith(".sh") and any(
+        _SCRIPT.fullmatch(re.split(r"[:\[]", w, maxsplit=1)[0]) for w in args))
+    return bool(named) and not _prints(args)
+
+
+def _package_task(words: list[str], i: int, name: str) -> int | None:
+    """The index of the task or command an npm, pnpm, yarn or bun command runs, or None when it runs neither."""
+    runs = {"run", "run-script", "exec", "dlx", "x", "workspace", "t"}
+    k = i + 1
+    while k < len(words):
+        word = words[k]
+        if word.startswith("-") and len(word) > 1:
+            k += 1
+            if ("=" not in word and k < len(words) and not words[k].startswith("-") and words[k] not in runs
+                    and not _TASK.fullmatch(words[k]) and not (name != "npm" and _known(words[k]))):
+                k += 1
+        elif word == "workspace":
+            k += 2
+        elif word in ("run", "run-script", "exec", "dlx", "x"):
+            return k + 1
+        elif _TASK.fullmatch(word) or word == "t" or name != "npm":
+            return k  # yarn, pnpm and bun also run a tool by its name
+        else:
+            return None
+    return None
+
+
+def _prints(args: list[str]) -> bool:
+    """Only a version, help or the list of tests: `--version`, `--help`, `--collect-only`."""
+    return any(arg in _ONLY_PRINTS for arg in args)
 
 
 def checks_ran_since(transcript_path: object, since: float) -> bool | None:
     """Did a check command run after `since`? None when the transcript can't be read."""
-    if session.transcript_tail(transcript_path, 0) is None:
+    tail = session.transcript_tail(transcript_path, 1024 * 1024)
+    if tail is None:
         return None
+    checks = set()
     for row, block in session.tool_calls(transcript_path, '"command"'):
         try:
             stamp = _dt.datetime.fromisoformat(str(row.get("timestamp", "")).replace("Z", "+00:00")).timestamp()
@@ -91,8 +306,32 @@ def checks_ran_since(transcript_path: object, since: float) -> bool | None:
             continue
         command = (block.get("input") or {}).get("command") if isinstance(block.get("input"), dict) else None
         if isinstance(command, str) and is_check(command):
-            return True
-    return False
+            checks.add(block["id"] if isinstance(block.get("id"), str) else None)
+    return bool(checks - _never_ran(tail, checks))
+
+
+def _never_ran(tail: str, ids: set) -> set:
+    """The calls among `ids` whose result is an error other than a non-zero exit: refused, denied by a
+    hook or auto mode, or never started."""
+    found = set()
+    for line in tail.splitlines() if ids - {None} else []:
+        if '"tool_result"' not in line:
+            continue
+        try:
+            content = json.loads(line)["message"]["content"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        for block in content if isinstance(content, list) else []:
+            if (not isinstance(block, dict) or not isinstance(block.get("tool_use_id"), str)
+                    or block["tool_use_id"] not in ids or block.get("is_error") is not True):
+                continue
+            text = block.get("content")
+            if isinstance(text, list):
+                text = "".join(str(p.get("text", "")) for p in text if isinstance(p, dict))
+            # Bash reports a command that ran and failed as "Exit code N".
+            if not str(text or "").startswith("Exit code "):
+                found.add(block["tool_use_id"])
+    return found
 
 
 def unverified_edit(hook_input: dict) -> str | None:
@@ -118,9 +357,9 @@ def unverified_edit(hook_input: dict) -> str | None:
 
 
 def still_running(hook_input: dict) -> bool:
-    """Background work still in flight (hooks.md#stop-input) means the turn is paused, not done."""
-    return any(isinstance(task, dict) and task.get("type") in ("workflow", "subagent", "shell", "teammate")
-               for task in hook_input.get("background_tasks") or [])
+    """Background work still in flight (hooks.md#stop-input) means the turn is paused, not done. Every entry
+    counts, since Claude Code adds task types and passes an unknown one through as it is."""
+    return any(isinstance(task, dict) for task in hook_input.get("background_tasks") or [])
 
 
 def before_stop(hook_input: dict, settings: Settings) -> str | None:
