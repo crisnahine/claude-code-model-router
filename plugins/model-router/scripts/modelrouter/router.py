@@ -94,7 +94,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if settings.force:
         model = env_default or facts.parent
         level = ladder.rung(reg, model, named_effort)
-        effort = None if decided or tool_input.get("model") or not level else ladder.effort(reg, level)
+        effort = None if decided or tool_input.get("model") or not level else ladder.at_most(reg, model, ladder.effort(reg, level))
         step = ""
         if redo:
             # The model is pinned, so effort is the one lever a redo has.
@@ -109,11 +109,12 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         # This pin wins over the model a mod sets, so it is kept like the one above.
         model = reg.family(settings.workflow_model)
         level = out["level"] = ladder.rung(reg, model, named_effort)
-        effort = None if decided or not level else ladder.effort(reg, level)
+        effort = None if decided or not level else ladder.at_most(reg, model, ladder.effort(reg, level))
         return _pinned(out, "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "workflow agent", model, level, effort, facts)
 
     floor = rule.level or rule.floor
     target, source, why, chosen = None, None, "", False  # chosen: the router picked the model, nobody named it
+    unseen = False  # a project's floor moved a call whose inherited model and effort the router can't see
     if requested and not redo:  # a redo climbs past a model it names that asks for no more than the run it redoes
         target, source, why = requested, "caller", "the call names a model"
     elif reg.family(rule.model):
@@ -127,6 +128,8 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         asked = f"a project rule names {suggested} for {agent}"
         if not reg.models[suggested].trusted:
             out["held"] = f"{asked}, a model only that file vouches for"
+        elif reg.clamp(suggested, usable) == runs_on:
+            pass  # the call runs on it anyway, and applying it would only reset the effort it inherits
         elif runs_on and not reg.stronger(runs_on, suggested):
             target, source, why = suggested, "rule", "a rule in model-router.json sets this agent's model"
         else:
@@ -151,9 +154,10 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if target is None:
         # Nothing names a model, so Claude Code's own order applies: the parent's model.
         runs_on = out["was"]
-        if floor and (level is None or level < floor):
+        if floor and _floor_lifts(reg, rule, floor, level, runs_on, usable):
             level, target, source, chosen = floor, ladder.model_for(reg, floor), "rule", True
             why = f"a rule in model-router.json raises this agent to {floor}"
+            unseen = runs_on is None and not rule.level and facts.session_effort is None
         elif facts.teammate and runs_on and reg.strength(runs_on) < reg.levels[Level.standard].needs:
             level, target, source, chosen = Level.standard, ladder.model_for(reg, Level.standard), "router", True
             why = f"a teammate starts no lower than {target}, since its model is fixed for all its tasks"
@@ -179,7 +183,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if final != clamped:
         why += f"; {clamped}'s alias runs an older model here"
     # Effort is set whenever nobody chose it: on current models it is the cheaper lever for quality.
-    effort = None if decided else ladder.effort_on(reg, level, final)
+    effort = None if decided or unseen else ladder.effort_on(reg, level, final)
     effort, floor_note = _session_floor(effort, final, facts)
     effort, capped_note = capped(effort, facts.effort_caps.get(final))
     out.update(model=final, source=source, level=level, reason=why + floor_note + capped_note + held)
@@ -216,13 +220,26 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
     effort, floor_note = _session_floor(ladder.at_most(reg, final, effort) if free else None, final, facts)
     effort, capped_note = capped(effort, facts.effort_caps.get(final))
     came = "the run that came back before" if facts.on_record else "the run it would get unmarked"
+    default = "its parent's effort" if done.get("inherited") else "its default effort"
     out.update(model=final, source="router", level=ladder.rung(reg, final, effort), escalated_from=done_level,
-               reason=f"a redo of {came} ({ran} at {before or 'its default effort'}): {how}"
+               reason=f"a redo of {came} ({ran} at {before or default}): {how}"
                + ("" if free else ", at the effort the environment sets") + clamp_note + floor_note + capped_note + held)
     if final == out["was"] and not effort:
         return out
     out.update(action="rewrite", effort=effort)
     return out
+
+
+def _floor_lifts(reg: Registry, rule: Rule, floor: Level, level: Level | None, runs_on: str | None, usable: list) -> bool:
+    """Whether a rule's level moves a call that names no model. The user's applies wherever the call stands below
+    it. A project's only raises: it applies when its model is stronger than the one the call runs on, and, with
+    that model unknown, only when no model in the registry is stronger, so it can't land below the inherited one."""
+    if rule.level:
+        return level is None or level < floor
+    lift = reg.clamp(ladder.model_for(reg, floor), usable)
+    if runs_on is None:
+        return not any(reg.models[n].trusted and reg.stronger(n, lift) for n in reg.models)
+    return level < floor and reg.stronger(lift, runs_on)
 
 
 def _pinned(out: Decision, pin: str, scope: str, pinned: str | None, level: Level | None, effort: str | None,
@@ -254,8 +271,11 @@ def capped(effort: str | None, cap: str | None) -> tuple[str | None, str]:
 
 
 def _ran_at(reg: Registry, done: dict, level: Level) -> str | None:
-    """The effort the run a redo redoes ran at; one nothing on record set ran at its level's, as far as the router knows."""
-    return done.get("effort") if done.get("effort") in EFFORTS else ladder.effort(reg, level)
+    """The effort the run a redo redoes ran at; one nothing on record set ran at its level's, as far as the router knows,
+    and one a nested call took from its parent (`spawn._inherited`) at an effort the router can't see."""
+    if done.get("effort") in EFFORTS:
+        return done["effort"]
+    return None if done.get("inherited") else ladder.effort(reg, level)
 
 
 def _one_step(effort: str | None) -> str | None:

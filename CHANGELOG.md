@@ -75,6 +75,13 @@ This release changes who picks a subagent's model. Claude now names the model an
 - Hook input is read as bytes, so its decoding no longer follows the system's locale.
 - `/model-router:models json`, or any word other than `reset`, shows the table instead of an argument error.
 - A bench run with `plugin_ref` no longer leaves an exported copy of the plugin in the system's temp folder.
+- A model a project's `model-router.json` adds now matches only its exact name. A name such as `arn:aws:bedrock` used to capture every Bedrock ARN, so your own agent pinned to an ARN, or every call in a session on one, was rewritten.
+- A project's agent `level` no longer moves Explore, Plan or a call inside a subagent to a weaker model than the one it inherits.
+- A project's raised level `needs` no longer gives a model named on a call, such as Opus, less effort.
+- A project rule that names the model a call runs on anyway no longer resets the effort it inherits, or drops the exact model ID its agent pins.
+- Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` or `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`, the effort the router sets no longer goes past the model's top effort, `high` on Haiku.
+- A redo of a call made inside a subagent now moves to a stronger model. It used to ask for the same model at an effort that could be below the one that ran.
+- A workflow's stages no longer push a running call's route out, so a redo of that call still climbs from the run that came back.
 
 ### Added
 
