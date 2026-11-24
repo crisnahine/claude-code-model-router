@@ -27,7 +27,7 @@
 </p>
 
 
-**Model Router (`model-router`) is a Claude Code plugin that keeps the model and reasoning effort Claude names for every agent Claude Code starts inside your limits, sets the effort nobody named, and moves a call one level up when its work comes back for a redo.** It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages, and you never pick a model by hand ([how it works](docs/ARCHITECTURE.md)).
+**Model Router (`model-router`) is a Claude Code plugin that keeps the model and reasoning effort Claude names for every agent Claude Code starts inside your limits, sets the effort nobody named, and runs a call Claude marks as a redo with more effort or on a stronger model.** It covers subagents from any plugin, skill or agent, agent-team teammates and workflow stages, and you never pick a model by hand ([how it works](docs/ARCHITECTURE.md)).
 
 Without it, a subagent that names no model runs on its conversation's model ([Claude Code docs](https://code.claude.com/docs/en/sub-agents.md#choose-a-model)), so on an Opus session a file listing runs on Opus too. One model for every agent, set with `CLAUDE_CODE_SUBAGENT_MODEL`, puts lookups on an expensive model or hard design work on a weak one. Model Router does autonomous multi-model orchestration instead: Claude, which has read the work, names the model and effort each call needs, and the plugin holds that to your cap and the models that work here.
 
@@ -39,7 +39,7 @@ Without it, a subagent that names no model runs on its conversation's model ([Cl
 ## What it does
 
 - Keeps the model of every subagent, teammate and workflow agent inside your cap as it starts, and sets the effort when nobody named one. The agent the caller chose stays the same.
-- Runs a call one level higher when Claude redoes a weak result, and `/model-router:usage` counts the redos per level.
+- Runs a call Claude marks "Redo:" one effort step higher on the same model, or on the next stronger model once the run it redoes was at `high` or above, and `/model-router:usage` counts the redos per level.
 - Asks once, before a turn ends, for a test run when code changed unchecked.
 - Logs what each turn cost at list price in `/model-router:usage`, and checks the Claude Code changelog, docs and model retirements once a day.
 
@@ -49,7 +49,6 @@ Model Router uses only the extension points Claude Code documents (the plugin ma
 
 - It keeps the docs' subagent model order: a model on the call, the agent's own model, `CLAUDE_CODE_SUBAGENT_MODEL`, then the parent's model ([sub-agents](https://code.claude.com/docs/en/sub-agents.md#choose-a-model)). It only lowers a model to your cap, raises one to a rule's level, and fills in the effort.
 - It never switches the main conversation's model, because a switch re-reads the history with no cache hits ([prompt caching](https://code.claude.com/docs/en/prompt-caching.md#switching-models)).
-- It re-runs failures one level higher, modeled on Anthropic's finding that low effort with failures re-run at high costs less than running every task at high ([cost and intelligence](https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence#re-run-failures-at-higher-effort)).
 - Its hooks fail open: a bug never blocks a tool call, a spawn or a session ([exit codes](https://code.claude.com/docs/en/hooks.md#exit-code-output)).
 
 The saving comes from Claude Code's own advice to put simple subagents on Haiku ([best practices](https://code.claude.com/docs/en/best-practices.md#know-what-subagents-cost)): the plugin's search and check agents carry Haiku in their definitions, and Claude names a cheaper model where the work allows it. The banner above shows each model's price per million input tokens. [Built on the docs](docs/CLAUDE_CODE_DOCS.md) lists every rule, its doc page and its test, and where the plugin goes past the docs.
@@ -94,7 +93,7 @@ Claude names the model on each agent call, and its effort when the work needs a 
 | hardest | Ambiguous, multi-system and risky at once | Opus | xhigh |
 | frontier | All of that, with no known approach: research, open-ended investigation | Fable | high |
 
-A model named with `xhigh` or `max` stands for hardest. A call that names no model runs on its parent's model, as Claude Code decides, unless that model is over your cap. A redo of a weak result that names no model runs one level higher: a stronger model, or more effort on the same one. Claude marks the redo in the call's `description`, so a rewritten brief still climbs. Anthropic measured low effort with failures re-run at high at about 97% solved for $0.17 a task on a coding benchmark, against 95.3% for $0.29 with every task at high ([research](docs/research/model-control.md), Q7).
+A model named with `xhigh` or `max` stands for hardest. A call that names no model runs on its parent's model, as Claude Code decides, unless that model is over your cap. Claude marks a redo by starting the call's `description` with "Redo:", when a check failed or the result fell short, so a rewritten brief still counts. A redo that names its own model or effort runs as named. One that names neither climbs from the run it redoes: one effort step up on the same model while that run was below `high`, else the next stronger model at its own level's effort, else one more effort step. The trigger is Claude's judgment, and no benchmark run has shown a redo yet.
 
 <a id="who-decides-the-model"></a><a id="the-checks-before-a-turn-ends"></a>Your choices come first. Inside your `max_tier` cap, a model named on the call, a per-agent rule or the agent's own `model` field decides the model, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and `CLAUDE_CODE_SUBAGENT_MODEL` leave the model as you set it ([who decides the model](docs/GUIDE.md#who-decides-the-model)). The [checks before a turn ends](docs/GUIDE.md#the-checks-before-a-turn-ends) are in the guide, and the full design in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

@@ -9,15 +9,14 @@ from . import router, store
 from .registry import Registry
 
 
-def spawn(session_id: str | None, via: str, decision: router.Decision, description: object,
-          kind: str | None = None, on_record: bool = True) -> None:
+def spawn(session_id: str | None, via: str, decision: router.Decision, kind: str | None = None,
+          on_record: bool = True) -> None:
     action = decision["action"]
     row = {"event": "spawn", "via": via, "session": session_id, "agent": decision["agent"], "action": action,
            "level": decision["level"],
            "model": None if action == "deny" else decision["model"] or decision["was"],
            "was": decision["was"], "effort": decision["effort"], "source": decision["source"],
-           "escalated_from": decision["escalated_from"], "reason": decision["reason"],
-           "description": str(description or "")[:120]}
+           "escalated_from": decision["escalated_from"], "reason": decision["reason"]}
     if kind is not None:
         row["kind"] = kind
     if decision.get("held"):

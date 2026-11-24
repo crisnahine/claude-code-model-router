@@ -15,13 +15,13 @@ python3 bench/overhead.py --runs 30 --calls 1000 --json # the same as JSON
 
 It uses throwaway folders and turns the daily check off, so it never touches your plugin state or the network.
 
-Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330. The `user-prompt` row was rerun on 2026-11-25 on Claude Code 2.1.331, after the router stopped sizing up the request and its record kept only the prompt id, and the state size table the same day, after `mod.json` went.
+Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330. The `user-prompt` row was rerun on 2026-11-25 on Claude Code 2.1.331, after the router stopped sizing up the request and its record kept only the prompt id, and the state size table again the same day, after the ledger dropped the description and the request's record went.
 
 ## Settings hooks
 
-Each hook runs as `hooks/hooks.json` runs it: `sh scripts/model-router.sh <command>` with the hook's JSON on stdin ([hook input](https://code.claude.com/docs/en/hooks.md)), a different brief each run so repeats don't read as redos. Cold is an empty bytecode cache and no state, so even the standard library compiles from source (a real first hook lands between the two). Warm is bytecode in place after one seeded session, with a 1 MB transcript.
+Each hook runs as `hooks/hooks.json` runs it: `sh scripts/model-router.sh <command>` with the hook's JSON on stdin ([hook input](https://code.claude.com/docs/en/hooks.md)), a different brief each run so repeats don't read as refused rewrites. Cold is an empty bytecode cache and no state, so even the standard library compiles from source (a real first hook lands between the two). Warm is bytecode in place after one seeded session, with a 1 MB transcript.
 
-Wall milliseconds per call over 30 runs, from a `--runs 30 --calls 200` run (its bytes per 1,000 calls agree with the state table below within 1%). `stop` (asks for a check once) and `agent-stopped` (finds no background agent waiting) take a quick path on most warm runs.
+Wall milliseconds per call over 30 runs, from a `--runs 30 --calls 200` run. `stop` (asks for a check once) and `agent-stopped` (finds no background agent waiting) take a quick path on most warm runs.
 
 | Command | Event | Cold p50 | Cold p95 | Warm p50 | Warm p95 |
 | :- | :- | -: | -: | -: | -: |
@@ -81,20 +81,19 @@ Before is the code that also wrote each spawn's count and votes to `learned.json
 
 ## State size
 
-1,000 routed calls were simulated with the real hook functions, 20 per session, even sessions on the fallback path and odd ones on the mod path. One call in four is a background agent finished by `SubagentStop`, every call adds a usage row, every fifth an edit and every fiftieth a model error.
+1,000 routed calls were simulated with the real hook functions, 20 per session, even sessions on the fallback path and odd ones on the mod path. Each call names a model and has its own description, as Claude makes them. One call in four is a background agent finished by `SubagentStop`, every call adds a usage row, every fifth an edit and every fiftieth a model error.
 
 | File | Bytes after 1,000 calls | Bounded | What bounds it |
 | :- | -: | :- | :- |
-| `ledger.jsonl` | 798,174 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
-| `routes.json` | 199,985 | yes | Sessions written in the last day (`calls.KEPT_FOR`), at most the 200 most recently written (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
-| `done.json` | 114,463 | yes | Same as `routes.json` |
-| `prompts.json` | 2,462 | yes | The 200 most recently written sessions |
-| `edits.json` | 3,111 | yes | Same |
+| `ledger.jsonl` | 762,518 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,500 calls |
+| `routes.json` | 185,666 | yes | Sessions written in the last day (`calls.KEPT_FOR`), at most the 200 most recently written (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
+| `done.json` | 97,148 | yes | Same as `routes.json` |
+| `edits.json` | 3,122 | yes | The 200 most recently written sessions |
 | `sessions.json` | 2,915 | yes | Same |
-| `launched.json` | 1,612 | yes | Same as `routes.json` |
-| `pending.json` | 810 | yes | The 200 most recently written sessions, 100 calls each |
-| `state.json` | 664 | yes | The plugin's options and one health entry per model |
+| `launched.json` | 1,614 | yes | Same as `routes.json` |
+| `pending.json` | 811 | yes | The 200 most recently written sessions, 100 calls each |
+| `state.json` | 619 | yes | The plugin's options and one health entry per model |
 
 The simulation calls the runtime directly, so it writes no `mod-calls/` marks. Each mark is an empty file that the call's `PreToolUse` hook removes, and `mod-start` clears any left for over a day.
 
-The "Bounded" column comes from a run of the script. The script lowers three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them in two rounds, the second with twice the calls, once with one call per session (`max(40, calls // 5)` sessions, then twice as many: 200, then 400 at `--calls 1000`) and once with one long session (`max(50, calls // 5)` calls, then twice as many). A file is bounded when its second-round peak is at most 25% plus 256 bytes above its first. Removing each trim in turn, rerun 2026-11-24 with `--calls 1000`, proved the check: without the session cap all seven per-session files report unbounded, without the per-session call cap `routes.json` and `done.json` do, and without the ledger's halving `ledger.jsonl` does.
+The "Bounded" column comes from a run of the script. The script lowers three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them in two rounds, the second with twice the calls, once with one call per session (`max(40, calls // 5)` sessions, then twice as many: 200, then 400 at `--calls 1000`) and once with one long session (`max(50, calls // 5)` calls, then twice as many). A file is bounded when its second-round peak is at most 25% plus 256 bytes above its first. Removing each trim in turn, rerun 2026-11-24 with `--calls 1000`, proved the check: without the session cap all the per-session files report unbounded, without the per-session call cap `routes.json` and `done.json` do, and without the ledger's halving `ledger.jsonl` does.

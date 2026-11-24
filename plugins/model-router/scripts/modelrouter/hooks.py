@@ -23,7 +23,6 @@ def session_start(hook_input: dict) -> dict | None:
     session.record(hook_input.get("session_id"), hook_input.get("model"))
     parts = []
     mode = options.mode
-    name = cfg.PLUGIN_NAME
     if mode == "auto":
         # Only what Claude must act on: every word here is in context for the whole session.
         name_model = ("" if options.force else ", and name `model` only when the user did or when what was read shows "
@@ -49,41 +48,50 @@ def session_start(hook_input: dict) -> dict | None:
             parts.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model}, "
                          "so the router sets only their effort. Worth telling the user once.")
     if options.update_check:
-        changes = upstream.pending()
-        running = [hook_input.get("model")] + snap.health.seen_running()
-        for model_id, latest in upstream.behind(running):
-            parts.append(
-                f"{model_id} is running here and {latest} is the newest of its family. A model setting that names a "
-                "full version stays on it; the alias (opus, sonnet, haiku, fable) follows new versions once Claude "
-                "Code is updated. Worth telling the user once.")
-        if changes and changes["new_model_families"]:
-            parts.append("New Claude model alias in the docs that isn't in Model Router's registry yet: "
-                         + ", ".join(changes["new_model_families"]) + f". /{name}:refresh reviews it; "
-                         "worth telling the user once.")
-        if changes and changes.get("deprecated_in_use"):
-            parts.append("Models this setup routes to are deprecated or retiring: " + "; ".join(
-                f"{m['model']} retires {m['retires']}" for m in changes["deprecated_in_use"])
-                + ". The model aliases move on by themselves; a pinned full ID doesn't. Worth telling the user once.")
-        if upstream.has_pending(changes):
-            parts.append(
-                f"Upstream: {len(changes['new_releases'])} Claude Code release(s) and "
-                f"{len(changes['watched_pages_touched'])} plugin-relevant docs page change(s) since the last "
-                f"review. /{name}:refresh reviews them; worth mentioning to the user once."
-            )
+        try:
+            parts += _upstream_notes(hook_input, snap)
+        except Exception:
+            pass  # a broken upstream.json or health table mustn't cost the routing note
     return _context("SessionStart", " ".join(parts)) if parts else None
 
 
+def _upstream_notes(hook_input: dict, snap: settings.Snapshot) -> list[str]:
+    parts = []
+    name = cfg.PLUGIN_NAME
+    changes = upstream.pending()
+    running = [hook_input.get("model")] + snap.health.seen_running()
+    for model_id, latest in upstream.behind(running):
+        parts.append(
+            f"{model_id} is running here and {latest} is the newest of its family. A model setting that names a "
+            "full version stays on it; the alias (opus, sonnet, haiku, fable) follows new versions once Claude "
+            "Code is updated. Worth telling the user once.")
+    if changes and changes["new_model_families"]:
+        parts.append("New Claude model alias in the docs that isn't in Model Router's registry yet: "
+                     + ", ".join(changes["new_model_families"]) + f". /{name}:refresh reviews it; "
+                     "worth telling the user once.")
+    if changes and changes.get("deprecated_in_use"):
+        parts.append("Models this setup routes to are deprecated or retiring: " + "; ".join(
+            f"{m['model']} retires {m['retires']}" for m in changes["deprecated_in_use"])
+            + ". The model aliases move on by themselves; a pinned full ID doesn't. Worth telling the user once.")
+    if upstream.has_pending(changes):
+        parts.append(
+            f"Upstream: {len(changes['new_releases'])} Claude Code release(s) and "
+            f"{len(changes['watched_pages_touched'])} plugin-relevant docs page change(s) since the last "
+            f"review. /{name}:refresh reviews them; worth mentioning to the user once."
+        )
+    return parts
+
+
 def user_prompt(hook_input: dict) -> dict | None:
-    """Record the person's new request. Says something only when the request names a model."""
+    """Says something only when the person's request names a model."""
     snap = settings.Snapshot(hook_input)
     reg, options = snap.registry, snap.options
     if options.mode == "off":
         return None
     prompt = hook_input.get("prompt")
     if not intake.is_user_prompt(prompt):
-        return None  # a task notification or a delivered message continues the user's request
+        return None  # a task notification or a delivered message isn't the person asking for a model
     wanted = request.named_model(reg, prompt)
-    request.start(hook_input.get("session_id"), prompt_id=hook_input.get("prompt_id"))
     if not wanted or options.mode != "auto" or options.force or not snap.usable:
         return None  # with no registry model usable, Claude Code's allowlist decides where the call runs
     final = reg.clamp(wanted, snap.usable)
@@ -133,8 +141,7 @@ def post_agent(hook_input: dict) -> dict | None:
     outcome = _outcome("result", hook_input, snap.registry, ran_as=ran_as, ran_family=snap.registry.family(ran_as),
                        forced=snap.options.force, status=response.get("status"), tokens=response.get("totalTokens"),
                        launched=launched, agent_id=agent_id if launched and isinstance(agent_id, str) else None,
-                       models_used=() if launched else tuple(calls.models_used(response)),
-                       cut_off=not launched and calls.cut_off(response))
+                       models_used=() if launched else tuple(calls.models_used(response)))
     _settled(session_id, outcome.key)
     returned = calls.returned(session_id, outcome)
     if returned.note != calls.SWAPPED:

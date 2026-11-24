@@ -10,6 +10,8 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Call**: one request to start an agent: a subagent, a teammate or a workflow stage. A call is known by its agent type and its prompt, so the same call issued twice is recognized.
 
+**Task**: the work a call does, known by a hash of its agent type and its `description` without the redo mark (`calls.task`), so a rewritten brief keeps its task. A marked redo climbs from the latest finished run of its task.
+
 **Spawn**: the moment a call starts an agent. The mod sees it as the engine's `agent.spawn` event, the fallback as a `PreToolUse` hook on the `Agent` tool.
 
 **Path**: how a call reaches the router. The **mod path** runs in `hooks/router.ts` on engine events and calls `mod.py`. The **fallback path** (`fallback.py`) rewrites the `Agent` tool call and stands down for a call the mod's `tool.call` hook marked.
@@ -18,15 +20,13 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Session floor**: the lowest effort the router sets on the session's own model for a call the main conversation starts: the session's level, since that call would run at it without the router (`router._session_floor`).
 
-**Cut-off run**: a run whose whole answer is an API error, such as an overload. It isn't a finished run, so the same call sent again is retried at its level, not redone one level up (`calls.cut_off`).
-
 **Adapter**: what one path adds around the shared spawn procedure (`spawn.decide`, `spawn.record`). It reads its path's event into the procedure's facts and turns the decision into what the path can apply: `mod.py` answers the mod with a model, an effort and a reason, `fallback.py` rewrites the `Agent` call's input. An adapter holds no routing rule, so either path gives the same route.
 
-**Route**: where one spawn went, written for every spawn that isn't denied, on either path (`calls.Route`): the model it runs on, the model it would have run on untouched (`was`), the name or ID the path sent, the level, the effort, who chose the model (`router`, a `pin`, a `rule` or the `caller`), the path and the request. It is kept under the spawn's own id where the path has one (the Agent call's `tool_use_id`; a workflow's agents share one, so they have none), else under the call.
+**Route**: where one spawn went, written for every spawn that isn't denied, on either path (`calls.Route`): the model it runs on, the model it would have run on untouched (`was`), the name or ID the path sent, the level, the effort, who chose the model (`router`, a `pin`, a `rule` or the `caller`) and the path. It is kept under the spawn's own id where the path has one (the Agent call's `tool_use_id`; a workflow's agents share one, so they have none), else under the call.
 
 **Outcome**: a result, a failure or a stop coming back for a call (`calls.Outcome`). One rule set reads it for either path (`calls.returned`): the done record a redo reads, the health evidence and the ledger row. A model error strikes the full ID the spawn sent, or else the model it was routed to.
 
-**Level**: how much reasoning a call needs: lookup, standard, complex, hardest or frontier. It comes from the model the call runs on: each model stands for its lowest level, or the level its named effort reaches (Opus at `xhigh` is hardest), and a rule can raise it. In code it is `config.Level`, a `str` written to state files and JSON as its bare name but ordered by difficulty (a plain `str` sorts alphabetically), so levels compare and `max` works on them. `Level.up()` is the next one.
+**Level**: how much reasoning a call needs: lookup, standard, complex, hardest or frontier. It comes from the model the call runs on: each model stands for its lowest level, or the level its named effort reaches (Opus at `xhigh` is hardest), and a rule can raise it. In code it is `config.Level`, a `str` written to state files and JSON as its bare name but ordered by difficulty (a plain `str` sorts alphabetically), so levels compare and `max` works on them.
 
 **Registry**: the one value `config.load` builds per hook call or command from the shipped `config/models.json` and the override files (`registry.Registry`). It holds the models (the plugin's, the user's or the project's) with their relative strength and cost, the levels with their `needs` and effort, aliases, list prices, agent rules, and the keys it dropped or held back. Its methods say which models are usable and pick between them (`available`, `select`, `clamp`, `family`, `price`, `cost`). A level's `needs` is finite and never lower than the level below it.
 
@@ -36,7 +36,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Ladder**: the five levels, each a model and an effort (`ladder.py`). `rung` gives the level a model stands for. When the model that runs is weaker than the level needs, because a cap, the allowlist or model health left nothing at or above it, it gets one more effort step, at most `xhigh`, or `high` on Haiku (the model's `step_stops_at`), which makes up part of the loss.
 
-**Pick**: the cheapest usable model for a level and its effort (`ladder.pick`), used where nothing names a model: a redo climbing a level, a rule's level and a teammate on a weak parent.
+**Pick**: the cheapest usable model for a level and its effort (`ladder.pick`), used where nothing names a model: a rule's level and a teammate on a weak parent.
 
 **Decision**: the model and effort a call finally gets, with the reason (`router.py`). It applies an order of authority (force settings, a model named on the call, agent rules, the agent's pin, the subagent default, then the parent's model), raises the winner to a rule's level, lowers it to the cap and to what is available, and sets the level's effort when nobody chose one. A call that names no model is left as it is.
 
@@ -56,13 +56,13 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Fork**: an agent that starts from its parent's conversation. It runs on its parent's model and cache, so the router leaves it alone. A skill with `context: fork` is not a fork ([skills](https://code.claude.com/docs/en/skills.md#run-skills-in-a-subagent)): it starts a new subagent of its `agent` type without an `agent.spawn` event, so it isn't routed either, and its model comes from the skill's `model` field, else from its agent type and the session.
 
-**Redo**: the same call issued again in the same request after its result came back, or a call whose `description` starts with "Redo:", which is how Claude marks a rewritten brief for a weak result. A marked redo climbs from the finished run with the same agent and description (the mark aside) in the session, within 30 minutes. With none on record it redoes the run it would get unmarked. A workflow stage is never redone. A redo runs one level higher, a pinned agent's or a rule's too, and never changes the level of later calls: `/model-router:usage` counts redos by the level they climbed from. A call is finished when its result comes back, except a background launch (finished when its agent stops with an answer) or a swapped run. Both paths give the same redo. A call that named its own model is never escalated, but a model the cap lowered counts as a run of the call. When `maxEffortLevel` holds a redo at the model and effort of the run it repeats, a redo of a model the router picked takes the next stronger usable model instead; a model named by a rule or by a pin stays.
+**Redo**: a call whose `description` starts with "Redo:", which is how Claude marks a call for a weak result, however it rewrites the brief. The same call sent again unmarked is a new call. A redo that names its own model or effort runs as named. Otherwise it climbs from the latest finished run of its task in the session, within 30 minutes, or with none on record from the run it would get unmarked: one effort step up on that run's model while its effort was below `high`, else the next stronger usable model at the effort of that model's own level, else one more effort step, at most `max`. An agent's pin or a rule's model doesn't hold it back, and a step `maxEffortLevel` or the environment holds counts as none. A workflow stage is never redone. A redo never changes the level of later calls: `/model-router:usage` counts redos by the level of the run they redo. A run is finished when its result comes back, except a background launch (finished when its agent stops with an answer) or a swapped run. Both paths give the same redo.
 
-**Model swap**: a run whose model changed mid-run, reported as `modelsUsed` on the `Agent` result ([hooks](https://code.claude.com/docs/en/hooks.md)). A content-classifier fallback causes it: Fable and Opus 5.5 to Opus 5 or Opus 4.8, Sonnet 5.5 to Sonnet 5, Opus 5 to Opus 4.8 ([model config](https://code.claude.com/docs/en/model-config.md#automatic-model-fallback)). A swapped run is no health evidence and doesn't finish its call, so issuing it again is no redo.
+**Model swap**: a run whose model changed mid-run, reported as `modelsUsed` on the `Agent` result ([hooks](https://code.claude.com/docs/en/hooks.md)). A content-classifier fallback causes it: Fable and Opus 5.5 to Opus 5 or Opus 4.8, Sonnet 5.5 to Sonnet 5, Opus 5 to Opus 4.8 ([model config](https://code.claude.com/docs/en/model-config.md#automatic-model-fallback)). A swapped run is no health evidence and doesn't finish its call, so no redo climbs from it.
 
-**Intake**: the check of whether a prompt is the person's request (`intake.py`). A teammate's report, another session's message and a background notification are not, so they never start a request.
+**Intake**: the check of whether a prompt is the person's request (`intake.py`). A teammate's report, another session's message and a background notification are not, so they never get the note for a model the request names.
 
-**Request**: one prompt from the user and the turns it starts. An unmarked redo counts only within one request; a call marked "Redo:" also climbs from a run of an earlier request, within 30 minutes. `request.py` keeps its `prompt_id`. The settings hook's `UserPromptSubmit` starts it.
+**Request**: one prompt from the user and the turns it starts. The settings hook's `UserPromptSubmit` reads it only for a model it names (`request.named_model`), and nothing keeps a record of it: a marked redo climbs from a run of any request within 30 minutes.
 
 **Ledger** (`ledger.py`): the append-only log of every spawn, result and turn's spend, with the reason for each decision. A result row names the models of a swapped run in `models_used`.
 

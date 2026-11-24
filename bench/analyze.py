@@ -628,8 +628,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "time (`wall_ms`, the runner's clock around the `claude` process). Cache is cache-read tokens over all input tokens, which are input plus cache reads "
         "plus cache writes (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md), summed over "
         "every model that ran. For a router configuration, accuracy by level is the pass rate of its runs grouped by "
-        "the level the router gave the run's first subagent. Escalated counts the spawns the router moved one level "
-        "up because the same call came back for a redo, over the spawns whose ledger row says either way. Both "
+        "the level the router gave the run's first subagent. Escalated counts the spawns whose ledger row names the "
+        "level of a run they redo (`escalated_from`), over the spawns whose row says either way. Both "
         "come from the run's `routed` line, and n/a means no run in the cell has it.", "",
         "## Setup", "",
         f"- Claude Code: {', '.join(versions) or 'n/a'}. Session models: {', '.join(main) or 'n/a'} (`--model`), "

@@ -1,6 +1,6 @@
 # Model Router
 
-Model Router (`model-router`) is a Claude Code plugin that keeps the model and reasoning effort Claude names for every agent Claude Code starts inside your limits, sets the effort nobody named, and moves a call one level up when its work comes back for a redo.
+Model Router (`model-router`) is a Claude Code plugin that keeps the model and reasoning effort Claude names for every agent Claude Code starts inside your limits, sets the effort nobody named, and runs a call Claude marks as a redo with more effort or on a stronger model.
 
 Install it in Claude Code:
 

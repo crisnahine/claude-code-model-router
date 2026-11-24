@@ -3,9 +3,8 @@ on either path; a result, a failure or a stop comes back as an Outcome, and one 
 it into the done record, the health evidence and the ledger row.
 The only module that reads or writes those records.
 
-Per session, `routes` holds a Route per spawn, and `launched` and `done` hold the per-call
-records of runs waiting for their agent and of finished runs. The request's own record is
-`request.py`'s."""
+Per session, `routes` holds a Route per spawn, `launched` the runs waiting for their agent, and
+`done` the latest finished run of each task, which a marked redo climbs from."""
 from __future__ import annotations
 
 import hashlib
@@ -13,10 +12,10 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-from . import health, ledger, request, store
+from . import health, ledger, store
 from .config import Level
 
-# Without a request id to compare, a call seen again within this long counts as a redo.
+# A marked redo climbs from a run of its task that finished at most this long ago.
 REDO_WINDOW = 30 * 60
 # A session that wrote no route, launch or finished run for this long is dropped from those files: each spawn
 # rewrites them whole under a lock it waits 1 s for, so old sessions there cost lost writes.
@@ -27,7 +26,6 @@ MAX_SWAPPED = 5
 
 # What a returned outcome says Claude should be told about.
 SWAPPED = "swapped"  # the run changed models mid-run
-CUT_OFF = "cut_off"  # the run ended on an API error, not an answer
 ID_FAILED = "id-failed"  # the full model ID the mod sent was refused
 MODEL_FAILED = "model-failed"  # a model error struck the model
 ROUTED_AROUND = "routed-around"  # ... and it is now routed around
@@ -37,28 +35,15 @@ ROUTED_AROUND = "routed-around"  # ... and it is now routed around
 class Route:
     """Where one spawn went, written by `spawn.record` on either path. `sent` is the name or ID the
     path put on the call, a full ID where the alias lags; `was` is the model the call would have run on
-    untouched (the parent's, or the agent's pin); `rewrote` says the decision changed the call."""
+    untouched (the parent's, or the agent's pin)."""
     model: str | None
     sent: str | None
     level: Level | None
     effort: str | None
     source: str | None
     path: str
-    prompt_id: str | None = None
     at: float = 0.0
-    rewrote: bool = False
     was: str | None = None
-
-    @property
-    def leveled(self) -> bool:
-        """The call ran at a level, and the call itself named no model: a redo of one that did names its own."""
-        return self.level is not None and self.source != "caller"
-
-    @property
-    def redoable(self) -> bool:
-        """A result finishes the call for a redo to climb from when the run was leveled, or when the router
-        rewrote the call, as it does for a model the caller named that the cap lowered."""
-        return self.leveled or (self.level is not None and self.rewrote)
 
     @property
     def run(self) -> dict:
@@ -86,7 +71,6 @@ class Outcome:
     error: str = ""
     interrupted: bool = False
     answered: bool = True
-    cut_off: bool = False  # the run ended on an API error, not an answer
 
 
 @dataclass(frozen=True)
@@ -99,16 +83,18 @@ class Returned:
     note: str | None = None
 
 
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
+
+
 def identify(tool_input: dict) -> tuple[str, str]:
     """The call's agent, and a key that recognizes the same call issued again."""
     agent = tool_input.get("subagent_type")
     agent = agent if isinstance(agent, str) and agent else "general-purpose"
-    text = agent + "\0" + str(tool_input.get("prompt") or "")
-    return agent, hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:16]
+    return agent, _digest(agent + "\0" + str(tool_input.get("prompt") or ""))
 
 
 _REDO_MARK = re.compile(r"\s*redo:", re.IGNORECASE)
-_TASK = "task:"  # a done record under this prefix is the latest finished run of an agent's task, not of a call
 
 
 def marked_redo(tool_input: dict) -> bool:
@@ -118,24 +104,14 @@ def marked_redo(tool_input: dict) -> bool:
 
 
 def task(tool_input: dict) -> str | None:
-    """A key for the work a call does, whatever its prompt says: its agent and its description without the
-    redo mark. None when the description is empty, since nothing then tells one task from another."""
+    """A key for the work a call does, whatever its prompt says: a hash of its agent and its description
+    without the redo mark, so no description is kept. None when the description is empty, since nothing
+    then tells one task from another."""
     described = str(tool_input.get("description") or "")
     while _REDO_MARK.match(described):
         described = described[_REDO_MARK.match(described).end():]
     described = " ".join(described.lower().split())
-    return identify(tool_input)[0] + "\0" + described if described else None
-
-
-API_ERROR = re.compile(r"API Error: \d{3}\b")
-
-
-def cut_off(response: dict) -> bool:
-    """The run's whole answer is an API error, such as an overload: sending it again is a retry, not a redo."""
-    content = response.get("content")
-    blocks = content if isinstance(content, list) else []
-    text = "".join(b["text"] for b in blocks if isinstance(b, dict) and isinstance(b.get("text"), str)).strip()
-    return bool(API_ERROR.match(text))
+    return _digest(identify(tool_input)[0] + "\0" + described) if described else None
 
 
 def models_used(response: object) -> list[str]:
@@ -159,15 +135,13 @@ def _route(record: object) -> Route | None:
     return Route(model=_text(record.get("model")), sent=_text(record.get("sent")),
                  level=Level.parse(record.get("level")), effort=_text(record.get("effort")),
                  source=_text(record.get("source")), path=_text(record.get("path")) or "",
-                 prompt_id=_text(record.get("prompt_id")),
                  at=float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else 0.0,
-                 rewrote=record.get("rewrote") is True, was=_text(record.get("was")))
+                 was=_text(record.get("was")))
 
 
 def _record(route: Route, key: str) -> dict:
     record = {"model": route.model, "sent": route.sent, "level": route.level.value if route.level else None,
-              "effort": route.effort, "source": route.source, "path": route.path, "prompt_id": route.prompt_id,
-              "rewrote": route.rewrote or None, "was": route.was, "call": key}
+              "effort": route.effort, "source": route.source, "path": route.path, "was": route.was, "call": key}
     return {k: v for k, v in record.items() if v is not None}
 
 
@@ -199,9 +173,9 @@ def route_of(session_id: str | None, key: str, spawn_id: str | None = None) -> R
 
 def returned(session_id: str | None, outcome: Outcome) -> Returned:
     """A result, a failure or a stop came back. One rule set, whichever path routed the call:
-    a result that is neither a background launch nor a swapped run finishes the call; a launch waits
-    for its agent to stop; a stop with an answer finishes it; a model error strikes the ID the spawn
-    sent, or else the model it was routed to."""
+    a result that is neither a background launch nor a swapped run finishes the call, and a run at a
+    level is kept as its task's latest; a launch waits for its agent to stop; a stop with an answer
+    finishes it; a model error strikes the ID the spawn sent, or else the model it was routed to."""
     if outcome.kind == "stop":
         return _stopped(session_id, outcome)
     route = route_of(session_id, outcome.key, outcome.spawn_id)
@@ -209,9 +183,9 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
     if outcome.kind == "failure":
         return _failed(session_id, outcome, route, asked)
     swapped = bool(outcome.models_used)
-    finished = not outcome.launched and not swapped and not outcome.cut_off
+    finished = not outcome.launched and not swapped
     try:
-        if route and route.redoable and (finished or (outcome.launched and outcome.agent_id)):
+        if route and route.level is not None and outcome.task and (finished or (outcome.launched and outcome.agent_id)):
             _wait_or_finish(session_id, outcome, route, finished)
     except OSError:
         pass
@@ -220,24 +194,17 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
                    untouched=route.was if route and route.path == "mod" else None)
     except OSError:
         pass
-    ledger.result(session_id, outcome.agent, asked, outcome.ran_as, CUT_OFF if outcome.cut_off else outcome.status,
-                  outcome.tokens, models_used=list(outcome.models_used) or None)
+    ledger.result(session_id, outcome.agent, asked, outcome.ran_as, outcome.status, outcome.tokens,
+                  models_used=list(outcome.models_used) or None)
     return Returned(asked, route, finished, SWAPPED if swapped else None)
 
 
 def _wait_or_finish(session_id: str | None, outcome: Outcome, route: Route, finished: bool) -> None:
     if finished:
-        run = {**route.run, "prompt_id": request.load(session_id).prompt_id}
-        _mutate("done", session_id, lambda done: _keep_done(done, outcome.key, outcome.task, run))
+        _mutate("done", session_id, lambda done: store.keep(done, outcome.task, route.run))
     else:
-        run = {**route.run, "prompt_id": request.load(session_id).prompt_id, "key": outcome.key, "task": outcome.task}
+        run = {**route.run, "task": outcome.task}
         _mutate("launched", session_id, lambda waiting: store.keep(waiting, outcome.agent_id, run))
-
-
-def _keep_done(done: dict, key: str, task: object, run: dict) -> None:
-    store.keep(done, key, run)
-    if isinstance(task, str) and task:
-        store.keep(done, _TASK + task, run)
 
 
 def _failed(session_id: str | None, outcome: Outcome, route: Route | None, asked: str | None) -> Returned:
@@ -268,34 +235,17 @@ def _stopped(session_id: str | None, outcome: Outcome) -> Returned:
         run.update(waiting if isinstance(waiting, dict) else {})
 
     _mutate("launched", session_id, take)
-    finished = outcome.answered and Level.parse(run.get("level")) is not None and isinstance(run.get("key"), str)
+    finished = outcome.answered and Level.parse(run.get("level")) is not None and isinstance(run.get("task"), str)
     if finished:
-        done = {k: run.get(k) for k in ("level", "model", "effort", "prompt_id")}
-        _mutate("done", session_id, lambda records: _keep_done(records, run["key"], run.get("task"), done))
+        done = {k: run.get(k) for k in ("level", "model", "effort")}
+        _mutate("done", session_id, lambda records: store.keep(records, run["task"], done))
     return Returned(run.get("model") if isinstance(run.get("model"), str) else None, None, finished)
 
 
 def last_run(session_id: str | None, task: str) -> dict | None:
-    """The latest finished run of this task (`task`) in the session, within REDO_WINDOW: what a marked redo
-    climbs from. The request doesn't matter here, since a redo often follows the user turning the result down."""
-    run = store.load_entry("done", session_id).get(_TASK + task)
+    """The latest finished run of this task in the session, within REDO_WINDOW: what a marked redo climbs
+    from. The request doesn't matter here, since a redo often follows the user turning the result down."""
+    run = store.load_entry("done", session_id).get(task)
     if not isinstance(run, dict) or Level.parse(run.get("level")) is None:
         return None
     return run if 0 <= store.now() - store.stamp(run.get("at")) < REDO_WINDOW else None
-
-
-def finished_run(session_id: str | None, key: str) -> dict | None:
-    """The run of this call that finished earlier in the current request: the same request
-    id, or within REDO_WINDOW when there is none."""
-    run = store.load_entry("done", session_id).get(key)
-    if not isinstance(run, dict) or Level.parse(run.get("level")) is None:
-        return None
-    return run if _same_request(run.get("prompt_id"), run.get("at"), request.load(session_id).prompt_id) else None
-
-
-def _same_request(prompt_id: object, at: object, current: object) -> bool:
-    """A record belongs to the current request when their ids match, and with no id to compare,
-    when it is younger than REDO_WINDOW. A clock moved back makes its age negative, which is unknown."""
-    if current:
-        return prompt_id == current
-    return 0 <= store.now() - (at if isinstance(at, (int, float)) else 0) < REDO_WINDOW

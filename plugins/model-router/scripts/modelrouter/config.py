@@ -54,10 +54,6 @@ class Level(str, Enum):
     def rank(self) -> int:
         return LEVELS.index(self)
 
-    def up(self) -> Level | None:
-        """The next level, or None at the top."""
-        return LEVELS[self.rank + 1] if self.rank + 1 < len(LEVELS) else None
-
     def _compare(self, other: object, op: Any) -> Any:
         found = Level.parse(other)
         return NotImplemented if found is None else op(self.rank, found.rank)

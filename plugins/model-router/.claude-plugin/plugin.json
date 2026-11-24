@@ -63,7 +63,7 @@
     "verify_gate": {
       "type": "boolean",
       "title": "Test run before finishing",
-      "description": "On by default. Claude is asked once, before it finishes a turn, to run the verifier when code in the project changed and no test, lint or build ran afterwards. This check is the failure signal that lets the router start cheap and re-run what fails. Turn it off to skip the ask.",
+      "description": "On by default. Claude is asked once, before it finishes a turn, to run the verifier when code in the project changed and no test, lint or build ran afterwards. A failed check is what Claude can mark a redo on, since the router never sees one. Turn it off to skip the ask.",
       "default": true
     }
   }

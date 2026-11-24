@@ -80,8 +80,7 @@ def summary(samples: list[float], digits: int = 1, **labels) -> dict:
 
 
 def vary(payload: dict, run: int) -> dict:
-    """The same call with a different brief each run, so repeats aren't read as redos or
-    refused rewrites."""
+    """The same call with a different brief each run, so repeats aren't read as refused rewrites."""
     payload = dict(payload)
     for key in _TOP_KEYS:
         if key in payload:
@@ -216,7 +215,9 @@ def in_process(base: Path, calls: int, runs: int):
         decide.append((time.perf_counter() - started) * 1000)
 
     def routed_call(session: str, i: int, mod: bool) -> None:
-        tool_input = {"subagent_type": "general-purpose", "prompt": f"{BRIEFS[i % 3]} (call {i})"}
+        # As Claude makes them: each call names a model and has a description of its own.
+        tool_input = {"subagent_type": "general-purpose", "prompt": f"{BRIEFS[i % 3]} (call {i})",
+                      "model": ("haiku", "sonnet", "opus")[i % 3], "description": f"task {i}"}
         call = {"session_id": session, "cwd": project, "tool_input": tool_input}
         before = len(taken)
         if mod:
