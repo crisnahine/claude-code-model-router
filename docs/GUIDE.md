@@ -101,11 +101,11 @@ Stages whose briefs land on the same level get the same model and effort, which 
 
 ![The checks before a turn ends. strong_agent_gate, on by default, blocks the stop once when a complex or harder request was answered by a weaker session model with no agent of the needed strength started, and asks for a stronger agent's check. verify_gate, on by default, asks once for a test run when code changed and nothing checked it.](assets/stop-checks.svg)
 
-Before Claude ends a turn, the `Stop` hook runs two checks. Each asks once, then lets the turn end.
+Before Claude ends a turn, the `Stop` hook runs two checks. The stronger-agent check asks once per request and the test-run check once per batch of edits, then each lets the turn end.
 
 `strong_agent_gate`, when on: a complex or harder request that a weaker session model answered alone, with no agent of the needed strength started, gets one blocked stop and a request for a stronger agent's check. That is the reviewer, given a saved diff, once code changed during the request, else the architect, or the deep-solver for a frontier request. The agent starts no lower than the request's level, so a short hand-off brief can't route it lower, and a redo of it still climbs. A complex request needs Opus, so a Sonnet session is below its need and gets the stop check.
 
-`verify_gate`, when on: Claude is asked once for a test run when code in the project changed and no test, lint, type-check or build ran after the last edit, and no verifier or reviewer was started. A test run inside a subagent counts.
+`verify_gate`, when on: Claude is asked once for a test run when code in the project changed and no test, lint, type-check or build ran after the last edit, and no verifier or reviewer is still running. A test run inside a subagent counts.
 
 ## What it can't do
 
@@ -140,7 +140,7 @@ On the `Agent` call fallback, a rewritten call that comes back without having ru
 `availableModels` and `deniedModels` are read the way Claude Code reads them.
 
 - With the mod, the router asks Claude Code for each settings source (`policy`, `user`, `project`, `local` and `flag`) and takes only `availableModels`, `deniedModels`, `availableModelsMatch` and `modelOverrides` (counted as set or not). `policy` is managed policy as Claude Code reports it to mods, every managed tier merged. A read that fails or takes over two seconds leaves that source out, and the router uses what the mod last sent for it in this session, else its file, so a failed `policy` read never leaves your own lists standing as if no managed policy existed.
-- Without the mod the settings files are read: the managed file and `managed-settings.d/` at their fixed paths, the user and project files, and the local file at the repository root. A file that isn't a regular file under 1 MiB is ignored. These files can't show server-managed, MDM, registry or `--settings` policy.
+- Without the mod the settings files are read: the managed file and `managed-settings.d/` at their fixed paths, the user and project files, and the local file at the repository root. A file that isn't a regular file of at most 1 MiB is ignored. These files can't show server-managed, MDM, registry or `--settings` policy.
 - The managed files apply even when the mod reports policy, as a floor under it: their `deniedModels` add to the reported ones, their `availableModels` must permit a model too, and `availableModelsMatch: exact` in either makes matching exact. A `policy` list key that isn't a list, or a managed file with content that can't be parsed as a JSON object, leaves no model open. An empty file, or a folder in `managed-settings.d/`, counts as no policy.
 - A `policy` `availableModels` list applies alone; otherwise the lists in the other sources are combined. `deniedModels` counts only in `policy`. An allow list is cut to 200 entries of 200 characters, which only allows less. A `policy` deny list over that size is never cut, since that would let a denied model through: it leaves no model open.
 - An allow entry stands for its family, so `claude-opus-4-6` permits `opus`. An entry naming a specific model (a version prefix such as `claude-sonnet-4-5` or a full ID: one with a digit, or a `claude-` or provider prefix, so `opusplan` beside `opus` keeps `opus`) turns off the entry that names the family, as Claude Code does ([merge behavior](https://code.claude.com/docs/en/model-config.md)). With `["sonnet", "claude-sonnet-4-5"]` the family is still routed, but the mod never sends `claude-sonnet-5-5` in place of the alias.

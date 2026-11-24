@@ -46,7 +46,7 @@ Last checked against the live docs on 2026-11-24, on Claude Code 2.1.330 and 2.1
 | :- | :- | :- |
 | `updatedInput` replaces the whole tool input, so include the fields you don't change ([PreToolUse](https://code.claude.com/docs/en/hooks.md#pretooluse-decision-control)) | The fallback rewrite keeps every field and changes only `model` and `effort` | `test_a_rewrite_changes_two_fields_and_approves_nothing` (S2.25) |
 | Exit code 2 blocks, any other failure lets the action go ahead, and a timed-out PreToolUse hook doesn't block ([exit codes](https://code.claude.com/docs/en/hooks.md#exit-code-output)) | Every hook exits 0 or 1, never 2, and exits 0 when Python is missing | `test_hooks_never_break_on_garbage` (S6.2), `test_every_hook_exits_0_and_a_command_explains` (S12.23) |
-| A matcher made of letters, digits and pipes is an exact list, and SessionStart fires on startup, resume, clear, compact and fork ([matchers](https://code.claude.com/docs/en/hooks.md#matcher-patterns)) | Its session hook matches all five sources | `test_a_compaction_keeps_the_request_and_routed_calls_and_the_model` (S12.7) |
+| A matcher made of letters, digits and pipes is an exact list, and SessionStart fires on startup, resume, clear, compact and fork ([matchers](https://code.claude.com/docs/en/hooks.md#matcher-patterns)) | Its session hook matches all five sources | Inspection of `hooks/hooks.json`; `test_a_compaction_keeps_the_request_and_routed_calls_and_the_model` covers the `compact` source (S12.7) |
 | The Stop input's `background_tasks` lists the tasks still in flight, such as a `workflow` or a `subagent` ([Stop input](https://code.claude.com/docs/en/hooks.md#stop-input)) | The checks before a turn ends wait while a workflow or a subagent is in flight | `test_a_workflow_or_agent_still_running_holds_the_gates_and_keeps_the_ask` |
 | A hook's input carries `effort.level`, the level when the hook runs ([common input fields](https://code.claude.com/docs/en/hooks.md#common-input-fields)) | The fallback reads it as the main conversation's level, which a subagent on the session's own model runs at | `test_the_sessions_effort_counts_only_for_a_call_from_the_main_conversation` |
 | An Agent result reports `resolvedModel`, `modelsUsed` when the model was swapped, and `totalTokens` from the final request only ([hooks](https://code.claude.com/docs/en/hooks.md)) | Records the model that really ran, and labels `totalTokens` as the final request's | `test_results_teach_the_registry_which_models_really_run` |
@@ -57,7 +57,7 @@ Last checked against the live docs on 2026-11-24, on Claude Code 2.1.330 and 2.1
 | :- | :- | :- |
 | A plugin's mod is listed under `modules` in `hooks/hooks.json` and exports `register(on, options)` ([mods reference](https://code.claude.com/docs/en/plugins/mods/reference.md#files)) | `hooks/router.ts` exports `register` | Node suite (S9.2) |
 | The type files Claude Code writes for your build are the ones to trust over any page ([types](https://code.claude.com/docs/en/plugins/mods/create.md#get-the-types-for-your-build)) | The mod and its test are type-checked against those types | `sh tests/mod/typecheck.sh` and CI (S9.5) |
-| `agent.spawn` takes a model and effort through `next`, and `turn.step` takes an effort ([events](https://code.claude.com/docs/en/plugins/mods/events.md)) | Sets a spawn's model and effort, and only the effort of a main-loop turn | Node suite, live (S2.1) |
+| `agent.spawn` takes a model through `next`, and `turn.step` takes an effort ([events](https://code.claude.com/docs/en/plugins/mods/events.md)) | Sets a spawn's model there and its effort at `turn.step`, and only the effort of a main-loop turn | Node suite, live (S2.1) |
 
 ## Plugin packaging
 
@@ -71,7 +71,7 @@ Last checked against the live docs on 2026-11-24, on Claude Code 2.1.330 and 2.1
 
 | The docs say | Model Router | Checked by |
 | :- | :- | :- |
-| Put a skill's key use first in its `description`, and `allowed-tools` grants tools without asking, it doesn't restrict them ([skills](https://code.claude.com/docs/en/skills.md#frontmatter-reference)) | Each skill's description opens with its use, and its Bash grants cover only the plugin's own command | `test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files` |
+| Put a skill's key use first in its `description`, and `allowed-tools` grants tools without asking, it doesn't restrict them ([skills](https://code.claude.com/docs/en/skills.md#frontmatter-reference)) | Each skill's description opens with its use, and its Bash grants cover only the plugin's own commands, plus `date +%F` for refresh | `test_each_skill_may_run_its_own_commands_and_nothing_that_writes_files` |
 | An agent needs only `name` and `description`, and `tools` limits what it can use ([frontmatter](https://code.claude.com/docs/en/sub-agents.md#supported-frontmatter-fields)) | Seven role agents. The architect, reviewer, scout, verifier and docs-researcher list their `tools`; the implementer and deep-solver keep all of them | `test_read_only_role_agents_say_they_write_nothing` |
 | A plugin skill loads as `/plugin-name:skill-name` beside any other skill of that name, and a skill of yours named `ship`, `ship-local` or `steward` doesn't load where Claude Code's own `/ship` is available ([skills](https://code.claude.com/docs/en/skills.md#resolve-skills-that-share-a-name)) | The pipeline is `/model-router:ship`, and the README and the guide say to type it in full, since the bare `/ship` runs Claude Code's command | Not checked live; `test_a_typed_plugin_skill_is_read_from_its_plugin_root` reads `/model-router:ship` from the plugin's own folder |
 
@@ -98,7 +98,7 @@ Last checked against the live docs on 2026-11-24, on Claude Code 2.1.330 and 2.1
 
 ## Staying current
 
-The plugin rereads the docs every day: at session start, at most once in 24 hours, it fetches the Claude Code changelog, the docs index (`llms.txt`), the model configuration page and the model deprecations page, plus the Models API when an Anthropic API key is set and no gateway or cloud provider is in use (`scripts/modelrouter/upstream.py`), and it flags changes to the pages it is built on. `/model-router:refresh` shows what changed that affects routing, and CI runs the same check every day (`.github/workflows/upstream-watch.yml`). Its `docs-researcher` agent checks a feature against the current docs and changelog, not memory.
+The plugin rereads the docs every day: at session start, at most once in 24 hours, it fetches the Claude Code changelog, the docs index (`llms.txt`), the model configuration page and the model deprecations page, plus the Models API when `ANTHROPIC_API_KEY` is set, `ANTHROPIC_BASE_URL` is unset and none of the Bedrock, Vertex or Foundry switches is on (`scripts/modelrouter/upstream.py`), and it flags changes to the pages it is built on. `/model-router:refresh` shows what changed that affects routing, and CI runs the same check every day (`.github/workflows/upstream-watch.yml`). Its `docs-researcher` agent checks a feature against the current docs and changelog, not memory.
 
 ## Where it goes past the docs
 

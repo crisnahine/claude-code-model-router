@@ -130,18 +130,7 @@ The plugin also ships seven role agents for work no better-fitting agent covers:
 
 ## Configuration
 
-Options, in `/config` under the plugin:
-
-| Option | Default | Meaning |
-| :- | :- | :- |
-| `routing_mode` | `auto` | `auto` sets model and effort on every agent. `advise` only tells Claude the estimate. `off` only keeps the ledger |
-| `priority` | `balanced` | `balanced`: the cheapest model strong enough. `quality`: one step stronger. `fast`: one step lighter |
-| `max_tier` | none | The strongest model subagents may run on: `haiku`, `sonnet`, `opus` or `fable` |
-| `agent_pins` | `respect` | `respect` keeps the model an agent names for itself. `override` routes those agents by task too |
-| `main_effort` | off | Raises the main conversation's effort for one turn on a complex or harder request. It stays off where that would re-read the context uncached ([where](docs/GUIDE.md#configuration)). Leave it off in a HIPAA organization, or if Claude Desktop reaches Claude through a Claude apps gateway |
-| `update_check` | on | The daily check of the changelog, docs index, model list and deprecations |
-| `verify_gate` | on | Asks for a test run before a turn ends when code changed and nothing checked it |
-| `strong_agent_gate` | on | Asks for a stronger agent's check before a turn ends when a weak session model answered a hard request alone |
+Eight options in `/config` under the plugin, each with a working default: `routing_mode` (`auto`; `advise` only estimates, `off` only keeps the ledger), `priority` (`balanced`; or `quality`, `fast`), `max_tier` (none), `agent_pins` (`respect`; or `override`), `main_effort` (off), `update_check` (on), `verify_gate` (on) and `strong_agent_gate` (on). Leave `main_effort` off in a HIPAA organization, or if Claude Desktop reaches Claude through a Claude apps gateway. What each option does, and where `main_effort` stays off on its own, is in the [guide](docs/GUIDE.md#configuration).
 
 Rules and extra models go in `~/.claude/model-router.json` (yours, applies everywhere) or `.claude/model-router.json` (a project's). A project's file only raises: a cloned repository can make its subagents cost more, never run weaker, and it can't get a model past your `max_tier`. The file's shape, every key and the trust rules are in the [guide](docs/GUIDE.md#configuration).
 
@@ -167,7 +156,7 @@ Rules and extra models go in `~/.claude/model-router.json` (yours, applies every
 <a id="security"></a>
 ## Privacy and security
 
-Model Router runs on your machine with your user permissions, as every plugin's hooks and mods do ([plugin security](https://code.claude.com/docs/en/plugins/security.md)). It reads each request and agent brief to pick a level, keeps its state in its own data directory, and sends no prompt or code anywhere. Its only network traffic is the daily update check to `code.claude.com` and `platform.claude.com`, plus `api.anthropic.com` for your account's model list when an Anthropic API key is set and no gateway or cloud provider is in use. Turn `update_check` off to stop it; `/model-router:refresh` still fetches when you run it. To see every hook, agent and skill it installs before you install it, run `claude --plugin-dir ./plugins/model-router plugin details model-router` from a clone. [SECURITY.md](docs/SECURITY.md) has the threat model, what is stored and how to report a problem (there is no private channel yet, so never put details in a public issue).
+Model Router runs on your machine with your user permissions, as every plugin's hooks and mods do ([plugin security](https://code.claude.com/docs/en/plugins/security.md)). It reads each request and agent brief to pick a level, keeps its state in its own data directory, and sends no prompt or code anywhere. Its only network traffic is the daily update check to `code.claude.com` and `platform.claude.com`, plus `api.anthropic.com` for your account's model list when `ANTHROPIC_API_KEY` is set, `ANTHROPIC_BASE_URL` is unset and none of `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` is on. Turn `update_check` off to stop it; `/model-router:refresh` still fetches when you run it. To see every hook, agent and skill it installs before you install it, run `claude --plugin-dir ./plugins/model-router plugin details model-router` from a clone. [SECURITY.md](docs/SECURITY.md) has the threat model, what is stored and how to report a problem (there is no private channel yet, so never put details in a public issue).
 
 ## Update and uninstall
 

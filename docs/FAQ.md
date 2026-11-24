@@ -26,7 +26,7 @@ When Claude issues the same call again in the same request after its result came
 
 ## What does Model Router cost?
 
-The plugin is free, and it adds 683 tokens to each request's context, measured on a headless Sonnet run. Each hook takes about 54 to 60 ms warm, and a `mod-spawn` round trip takes about 58 ms warm and 187 ms cold (p50), almost all of it starting Python ([PERFORMANCE.md](PERFORMANCE.md)). The models it routes to are billed to your Claude plan or API account as usual, and `/model-router:usage` shows what each turn cost at list price.
+The plugin is free, and it adds 683 tokens to the main conversation's context (subagents get none), measured on a headless Sonnet run. Each hook takes about 54 to 60 ms warm, and a `mod-spawn` round trip takes about 58 ms warm and 187 ms cold (p50), almost all of it starting Python ([PERFORMANCE.md](PERFORMANCE.md)). The models it routes to are billed to your Claude plan or API account as usual, and `/model-router:usage` shows what each turn cost at list price.
 
 ## Does Model Router reduce Claude Code cost?
 
@@ -58,7 +58,7 @@ Yes, through the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Cod
 
 ## What does Model Router store on my machine, and what leaves it?
 
-It keeps its state in its own plugin data directory and sends no prompt, brief, path or code anywhere. The ledger keeps the first 120 characters of each agent call's description, plus levels, reasons, model names, token counts and list-price cost; a repeated call is recognized by a hash. The only network traffic is the daily update check of the Claude Code changelog, docs index and model pages (`code.claude.com`, `platform.claude.com`), plus your account's model list from `api.anthropic.com` when an Anthropic API key is set and no gateway or cloud provider is in use. Turning `update_check` off stops it ([SECURITY.md](SECURITY.md)).
+It keeps its state in its own plugin data directory and sends no prompt, brief, path or code anywhere. The ledger keeps the first 120 characters of each agent call's description, plus levels, reasons, model names, token counts and list-price cost; a repeated call is recognized by a hash. The only network traffic is the daily update check of the Claude Code changelog, docs index and model pages (`code.claude.com`, `platform.claude.com`), plus `api.anthropic.com` for your account's model list when `ANTHROPIC_API_KEY` is set, `ANTHROPIC_BASE_URL` is unset and none of `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX` or `CLAUDE_CODE_USE_FOUNDRY` is on. Turning `update_check` off stops it ([SECURITY.md](SECURITY.md)).
 
 ## Does it work with other plugins, skills and agents?
 

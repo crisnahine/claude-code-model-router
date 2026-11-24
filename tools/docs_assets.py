@@ -989,7 +989,7 @@ def diagram_stop_checks() -> str:
           "for a frontier request, started no lower than", "the request's level."], 1.0),
         (478, "verify_gate", "on by default", "r1", "tag",
          ["code in the project changed, and no test, lint,", "type-check or build ran after the last edit,",
-          "and no verifier or reviewer started."],
+          "and no verifier or reviewer is still running."],
          ["Asks once for a test run (the verifier)", "before the turn ends. It is the failure signal", "the router reruns on. Turn it off in /config."],
          1.0),
     ]

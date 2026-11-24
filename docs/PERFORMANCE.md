@@ -29,7 +29,7 @@ Wall milliseconds per call over 30 runs, from a `--runs 30 --calls 200` run (its
 | `user-prompt` | UserPromptSubmit | 187 | 208 | 58 | 64 |
 | `pre-agent` | PreToolUse (Agent) | 188 | 208 | 60 | 63 |
 | `post-agent` | PostToolUse (Agent) | 183 | 204 | 54 | 62 |
-| `post-edit` | PostToolUse (Edit, Write) | 183 | 207 | 55 | 57 |
+| `post-edit` | PostToolUse (Edit, Write, NotebookEdit) | 183 | 207 | 55 | 57 |
 | `agent-failed` | PostToolUseFailure (Agent) | 187 | 203 | 55 | 57 |
 | `agent-stopped` | SubagentStop | 185 | 203 | 54 | 66 |
 | `stop` | Stop | 179 | 197 | 54 | 77 |
@@ -107,4 +107,4 @@ The strongest spawn is no longer written (`calls.strongest` reads it from the ro
 | `state.json` | 713 | yes | The plugin's options and one health entry per model |
 | `learned.json` | 144 | yes | One entry per level |
 
-The "Bounded" column comes from a run of the script. The script lowers three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them in two rounds, the second with twice the calls, once with one call per session (40 sessions, then 80) and once with one long session. A file is bounded when its second-round peak is at most 25% plus 256 bytes above its first. Removing each trim in turn, rerun 2026-11-24 with `--calls 1000`, proved the check: without the session cap all eight per-session files report unbounded, without the per-session call cap `routes.json` and `done.json` do, and without the ledger's halving `ledger.jsonl` does.
+The "Bounded" column comes from a run of the script. The script lowers three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them in two rounds, the second with twice the calls, once with one call per session (`max(40, calls // 5)` sessions, then twice as many: 200, then 400 at `--calls 1000`) and once with one long session (`max(50, calls // 5)` calls, then twice as many). A file is bounded when its second-round peak is at most 25% plus 256 bytes above its first. Removing each trim in turn, rerun 2026-11-24 with `--calls 1000`, proved the check: without the session cap all eight per-session files report unbounded, without the per-session call cap `routes.json` and `done.json` do, and without the ledger's halving `ledger.jsonl` does.
