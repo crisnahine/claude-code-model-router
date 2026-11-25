@@ -44,7 +44,7 @@ def full_row(**changes):
     """A row as run.record writes it, from a real result line, with `changes` applied. A row of a task in bench/tasks
     carries today's check hash, as a run of it would."""
     result = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    row = dict(run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}), result,
+    row = dict(run.record(Recorder.task, Recorder.config, Recorder.options, result,
                           Recorder.facts), **changes)
     return graded_today(row) if "grade" not in changes else row
 
@@ -775,7 +775,7 @@ class Recorder(unittest.TestCase):
              "ledger": None, "agent_types": {}, "kept": None}
 
     def row(self, result, **facts):
-        return run.record(self.task, self.config, self.options, run.mrconfig.build({}), result, {**self.facts, **facts})
+        return run.record(self.task, self.config, self.options, result, {**self.facts, **facts})
 
     def test_a_real_2_1_330_result_becomes_a_row(self):
         row = self.row(json.loads(FIXTURE.read_text(encoding="utf-8")))
@@ -947,7 +947,7 @@ class Runner(unittest.TestCase):
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 1,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
-            row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "defaults"), options, {})
+            row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "defaults"), options)
         self.assertEqual((row["exit_code"], row["passed"], row["cost_known"], row["total_cost_usd"], row["answer"]),
                          (None, False, False, 0.5, ""))
         self.assertGreaterEqual(row["wall_ms"], 1000)
@@ -961,7 +961,7 @@ class Runner(unittest.TestCase):
                 options = {"claude": stub(tmp, STOPPED_STUB), "model": "sonnet", "budget": 0.5, "timeout": 2,
                            "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
                 with unittest.mock.patch.dict("os.environ", {"STUB_HOW": how}):
-                    row = run.run_one(task, defaults, options, {})
+                    row = run.run_one(task, defaults, options)
                 self.assertEqual((row["stopped_by"], row["passed"]), (stopped, stopped is None), row["grade"])
                 self.assertIn("FINDING.json", row["final_answer"]["files"])  # the files would have passed
                 if stopped:
@@ -994,7 +994,7 @@ class Runner(unittest.TestCase):
                         (unittest.mock.patch.object(subprocess.Popen, "communicate", interrupted) if how == "interrupt"
                          else contextlib.nullcontext()), \
                         (self.assertRaises(KeyboardInterrupt) if how == "interrupt" else contextlib.nullcontext()):
-                    run.run_one(task, defaults, options, {})
+                    run.run_one(task, defaults, options)
                 pid = int(child.read_text())
                 for _ in range(100):
                     try:
@@ -1109,6 +1109,45 @@ print(json.dumps({"type": "result", "subtype": "error_max_budget_usd" if capped 
                   "result": "", "total_cost_usd": 0.5 if capped else 0.1, "modelUsage": {}}))
 sys.exit(1 if capped else 0)
 '''
+
+
+class Prices(unittest.TestCase):
+    """bench/prices.json, from https://platform.claude.com/docs/en/about-claude/pricing.md (checked 2026-11-22)."""
+
+    # The pricing page lists no rate for this one.
+    UNLISTED = {"claude-mythos-preview"}
+
+    def test_every_model_still_in_service_and_each_familys_newest_has_a_price(self):
+        lifecycle = json.loads((ROOT / "compat" / "baseline.json").read_text(encoding="utf-8"))["lifecycle"]
+        missing = [model for model, info in lifecycle.items()
+                   if info.get("state") in ("Active", "Deprecated") and model not in self.UNLISTED
+                   and run.price(model) is None]
+        self.assertEqual(missing, [])
+        for family, model_id in analyze.mrconfig.shipped().newest.items():
+            self.assertIsNotNone(run.price(model_id), family)
+
+    def test_a_model_id_finds_its_list_price(self):
+        self.assertEqual(run.price("claude-opus-4-7")["input"], 5)  # one entry covers Opus 4.x
+        self.assertEqual(run.price("claude-opus-4-1-20250805"),  # except 4.1, at its own list price
+                         {"input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75, "cache_write_1h": 30})
+        for opus_4 in ("claude-opus-4-0", "claude-opus-4-20250514"):  # Opus 4 lists at the same price as 4.1
+            self.assertEqual(run.price(opus_4), run.price("claude-opus-4-1"), opus_4)
+        self.assertEqual(run.price("claude-haiku-4-5-20251001")["input"], 1)
+        self.assertEqual(run.price("claude-opus-5-5[1m]")["input"], 4)
+        self.assertIsNone(run.price("claude-opus-5-6"))  # a new version is never priced as its neighbour
+
+    def test_mythos_is_priced_like_its_fable_twin(self):
+        for version, rates in (("5-2", (8, 40, 0.2, 10, 16)), ("5-1", (10, 50, 0.25, 12.5, 20)),
+                               ("5", (10, 50, 1, 12.5, 20))):
+            price = run.price(f"claude-mythos-{version}")
+            self.assertEqual(tuple(price[k] for k in ("input", "output", "cache_read", "cache_write",
+                                                      "cache_write_1h")), rates, version)
+
+    def test_the_plugin_carries_no_price(self):
+        sys.path.insert(0, str(run.PLUGIN / "scripts"))
+        from modelrouter import config as cfg
+        self.assertNotIn("prices", cfg.base_config())
+        self.assertFalse(hasattr(cfg.shipped(), "price"))
 
 
 class Overhead(unittest.TestCase):
@@ -1234,7 +1273,7 @@ class FinalAnswer(unittest.TestCase):
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
-            row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "defaults"), options, {})
+            row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "defaults"), options)
         self.assertEqual((len(row["answer"]), len(row["final_answer"]["reply"])), (2000, 3000))
         self.assertEqual(row["final_answer"]["files"], {"FINDING.json": '{"file": "app/settings.py", "line": 7}',
                                                         "app/client.py": "changed\n"})
@@ -1445,9 +1484,9 @@ class PluginState(unittest.TestCase):
             shared.chmod(0)  # any read or write of the shared folder now fails
             try:
                 with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
-                    first = run.run_one(task, configs["plugin"], options, {})
-                    second = run.run_one(task, configs["plugin"], options, {})
-                    baseline = run.run_one(task, configs["defaults"], options, {})
+                    first = run.run_one(task, configs["plugin"], options)
+                    second = run.run_one(task, configs["plugin"], options)
+                    baseline = run.run_one(task, configs["defaults"], options)
             finally:
                 shared.chmod(0o755)
             self.assertEqual([p.name for p in shared.iterdir()], ["state.json"])
@@ -1511,7 +1550,7 @@ class Sessions(unittest.TestCase):
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
-                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
             self.assertEqual([p.name for p in (home / "projects").iterdir()], ["-Users-someone-project"])
             self.assertTrue((other / "keep.jsonl").is_file())
             self.assertNotIn("session_dir_removed", row)
@@ -1524,7 +1563,7 @@ class Sessions(unittest.TestCase):
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60, "keep": str(kept),
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
-                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
             [folder] = list(kept.iterdir())
             self.assertEqual(row["kept"], str(folder))
             self.assertTrue((folder / "work" / "app" / "settings.py").is_file())
@@ -1673,9 +1712,9 @@ class RouterVariants(unittest.TestCase):
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
-                row = run.run_one(task, variant, options, {})
+                row = run.run_one(task, variant, options)
                 got = json.loads(seen.read_text())
-                run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+                run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
                 plain = json.loads(seen.read_text())
         settings = json.loads(got["argv"][got["argv"].index("--settings") + 1])
         self.assertEqual(settings["pluginConfigs"], {"model-router@inline": {"options": {"verify_gate": False}}})
@@ -1721,7 +1760,7 @@ class AgentCosts(unittest.TestCase):
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
-                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
         self.assertEqual(row["agent_costs"], {"model-router:implementer": 0.07, "model-router:verifier": 0.01,
                                               "main": 0.03})
         self.assertEqual(row["duration_ms"], 1)
@@ -1746,7 +1785,7 @@ class AgentCosts(unittest.TestCase):
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}), \
                     unittest.mock.patch.object(run, "grade", rewrite):
-                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
         self.assertEqual(row["agent_costs"], {"model-router:implementer": 0.07, "model-router:verifier": 0.01,
                                               "main": 0.03})
 
@@ -1844,7 +1883,7 @@ class Limits(unittest.TestCase):
     def test_an_api_error_before_any_spend_is_set_aside_not_retried(self):
         # What Claude Code 2.1.330 printed for an invalid API key: an error, nothing spent, no model usage.
         result = json.loads(API_ERROR.read_text(encoding="utf-8"))
-        row = run.record({"id": "t", "class": "lookup"}, {"id": "defaults"}, Recorder.options, run.mrconfig.build({}),
+        row = run.record({"id": "t", "class": "lookup"}, {"id": "defaults"}, Recorder.options,
                          result, dict(Recorder.facts, exit_code=1))
         self.assertEqual(run.refusal(row), "api_error")
         self.assertEqual((row["total_cost_usd"], row["cost_known"]), (0, True))
@@ -1921,7 +1960,7 @@ class TaskIdentity(unittest.TestCase):
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
                 for task in run.load_tasks():
                     with self.subTest(task=task["id"]):
-                        row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+                        row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
                         ours = str(Path(row["answer"]).resolve()).replace(base, "")
                         self.assertNotIn(task["id"], ours)
                         self.assertEqual(row["task_revision"], task.get("revision", 1))
@@ -2688,7 +2727,7 @@ class DelegationTasks(unittest.TestCase):
                 options = {"claude": stub(Path(tmp), STREAM_STUB), "model": "sonnet", "budget": 0.5, "timeout": 60,
                            "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
                 with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
-                    run.run_one(self.task(task_id), defaults, options, {})
+                    run.run_one(self.task(task_id), defaults, options)
                 argv = json.loads(seen.read_text())["argv"]
                 self.assertEqual(argv[argv.index("--allowedTools") + 1:], [*run.TOOLS, *extra])
                 self.assertNotIn("Read", argv)  # a bare Read would approve reading anywhere
@@ -2708,7 +2747,7 @@ class DelegationTasks(unittest.TestCase):
                 options = {"claude": stub(Path(tmp), STREAM_STUB), "model": "sonnet", "budget": 0.5, "timeout": 60,
                            "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
                 with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
-                    row = run.run_one(task, defaults, options, {})
+                    row = run.run_one(task, defaults, options)
                 argv = json.loads(seen.read_text())["argv"]
                 self.assertEqual(argv[argv.index("-p") + 1], run.prompt(task))
                 self.assertEqual(row["shape"], shape)
@@ -2959,7 +2998,7 @@ class Harness(unittest.TestCase):
 
     def one(self, config="defaults", env=None, **options):
         with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(self.seen), **(env or {})}):
-            row = run.run_one(self.task, self.configs[config], self.options(**options), run.mrconfig.shipped())
+            row = run.run_one(self.task, self.configs[config], self.options(**options))
         return row, json.loads(self.seen.read_text())
 
     def main(self, *argv, env=None):
@@ -3056,13 +3095,13 @@ class Harness(unittest.TestCase):
         self.assertIsNone(self.one("defaults")[0]["plugin_loaded"])
 
     def test_a_router_run_with_no_stream_is_not_filed_as_a_plugin_that_did_not_load(self):
-        stopped = run.record(Recorder.task, self.configs["plugin"], Recorder.options, run.mrconfig.build({}), {},
+        stopped = run.record(Recorder.task, self.configs["plugin"], Recorder.options, {},
                              dict(Recorder.facts, init={}, exit_code=None))
         self.assertIsNone(stopped["plugin_loaded"])
         self.assertNotEqual(run.set_aside(stopped), "plugin_not_loaded")
         (self.dir / "hang").mkdir()
         hang = stub(self.dir / "hang", HANGING_STUB)
-        row = run.run_one(self.task, self.configs["plugin"], self.options(timeout=1, claude=hang), run.mrconfig.shipped())
+        row = run.run_one(self.task, self.configs["plugin"], self.options(timeout=1, claude=hang))
         self.assertEqual((row["plugin_loaded"], row["stopped_by"]), (None, "timeout"))
 
     def test_a_router_run_whose_plugin_did_not_load_is_set_aside(self):
@@ -3077,7 +3116,7 @@ class Harness(unittest.TestCase):
     def test_denials_keep_the_tool_and_the_first_200_characters_of_its_input(self):
         denials = [{"tool_name": "Bash", "tool_use_id": "u1", "tool_input": {"command": "python3 " + "x" * 300}},
                    {"tool_name": "Write", "tool_use_id": "u2", "tool_input": {"file_path": "/etc/x"}}]
-        row = run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}),
+        row = run.record(Recorder.task, Recorder.config, Recorder.options,
                          {"permission_denials": denials, "terminal_reason": "completed", "errors": ["e"]}, Recorder.facts)
         self.assertEqual(row["permission_denials"], [{"tool": "Bash", "input": ("python3 " + "x" * 300)[:200]},
                                                      {"tool": "Write", "input": '{"file_path": "/etc/x"}'}])
@@ -3107,8 +3146,8 @@ class Harness(unittest.TestCase):
         usage = {"input_tokens": 0, "output_tokens": 1000000}
         first = {"type": "assistant", "message": {"id": "a", "model": "claude-haiku-4-5", "usage": usage}}
         (folder / "s.jsonl").write_text("\n".join(json.dumps(x) for x in (first, first, {"type": "user"})) + "\nnot json\n")
-        self.assertAlmostEqual(run.transcript_cost(folder, run.mrconfig.shipped()), 5.0)
-        self.assertIsNone(run.transcript_cost(self.dir / "none", run.mrconfig.shipped()))
+        self.assertAlmostEqual(run.transcript_cost(folder), 5.0)
+        self.assertIsNone(run.transcript_cost(self.dir / "none"))
 
     def test_main_needs_a_token_or_an_api_key(self):
         bare = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
@@ -3173,16 +3212,16 @@ class Harness(unittest.TestCase):
 
     def test_a_documented_startup_failure_is_no_start_under_every_configuration(self):
         for config in ("defaults", "haiku-high", "plugin", "plugin-nogate"):
-            row = run.record(Recorder.task, self.configs[config], Recorder.options, run.mrconfig.shipped(),
+            row = run.record(Recorder.task, self.configs[config], Recorder.options,
                              STARTUP_FAILURE, dict(Recorder.facts, init={}, exit_code=1))
             self.assertEqual((run.set_aside(row), row["claude_started"], row["total_cost_usd"], row["cost_known"]),
                              ("no_start", False, 0, True), config)
         # Without the reason field (an older Claude Code), the same shape with no init event is still no start.
         bare = {k: v for k, v in STARTUP_FAILURE.items() if k != "startup_failure_reason"}
-        row = run.record(Recorder.task, self.configs["defaults"], Recorder.options, run.mrconfig.shipped(), bare,
+        row = run.record(Recorder.task, self.configs["defaults"], Recorder.options, bare,
                          dict(Recorder.facts, init={}, exit_code=1))
         self.assertEqual(run.set_aside(row), "no_start")
-        started = run.record(Recorder.task, self.configs["defaults"], Recorder.options, run.mrconfig.shipped(), bare,
+        started = run.record(Recorder.task, self.configs["defaults"], Recorder.options, bare,
                              dict(Recorder.facts, init={"type": "system", "subtype": "init"}, exit_code=1))
         self.assertIsNone(run.set_aside(started))
         self.assertFalse(started["cost_known"])
@@ -3273,7 +3312,7 @@ class Harness(unittest.TestCase):
         lines = [{"type": "assistant", "message": {"id": "a", "model": "claude-haiku-4-5", "usage": usage}},
                  {"type": "assistant", "message": {"id": "b", "model": "claude-unpriced-9-9", "usage": usage}}]
         (folder / "s.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
-        self.assertIsNone(run.transcript_cost(folder, run.mrconfig.shipped()))
+        self.assertIsNone(run.transcript_cost(folder))
 
     def test_a_router_run_whose_ledger_rules_out_its_options_is_set_aside(self):
         # The plugin keeps no copy of its options, so only a row an option forbids can show it didn't apply.
@@ -3330,10 +3369,10 @@ class Harness(unittest.TestCase):
 
     def test_gate_rows_in_the_ledger_are_counted(self):
         ledger = [{"event": "gate"}, {"event": "spawn"}, {"event": "gate", "kind": "verify"}]
-        row = run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}), {},
+        row = run.record(Recorder.task, Recorder.config, Recorder.options, {},
                          dict(Recorder.facts, ledger=ledger))
         self.assertEqual(row["gate_events"], 2)
-        self.assertEqual(run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}), {},
+        self.assertEqual(run.record(Recorder.task, Recorder.config, Recorder.options, {},
                                     Recorder.facts)["gate_events"], 0)
 
 
@@ -3406,7 +3445,7 @@ class RunEdges(unittest.TestCase):
         self.assertEqual((hidden["router_silent"], run.set_aside(hidden)), (True, "router_silent"))
         # No subagent shown running, or no plugin at all: nothing says the router should have acted.
         self.assertFalse(Recorder().row({"total_cost_usd": 0.1}, ledger=None, agent_calls=unseen)["router_silent"])
-        plain = run.record(Recorder.task, {"id": "defaults"}, Recorder.options, run.mrconfig.build({}),
+        plain = run.record(Recorder.task, {"id": "defaults"}, Recorder.options,
                            {"total_cost_usd": 0.1}, {**Recorder.facts, "agent_calls": ran})
         self.assertFalse(plain["router_silent"])
 
@@ -3421,7 +3460,7 @@ class RunEdges(unittest.TestCase):
         self.assertNotIn("isn't shown", page)
 
     def test_a_paid_row_that_stops_the_bench_is_filed_by_the_set_aside_rules(self):
-        def stops(task, config, options, registry):
+        def stops(task, config, options):
             exc = OSError("disk full")
             exc.row = dict(Recorder().row({"total_cost_usd": 0.4}), plugin_loaded=False)
             raise exc

@@ -754,7 +754,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "- Configurations run: " + "; ".join(f"`{c}` ({described.get(c, '?')})" for c in used) + ".",
         "- Models that ran, with Claude Code's list-price cost across all runs: "
         + "; ".join(f"`{name}` ${sum(costs):.4f} over {len(costs)} runs" for name, costs in sorted(models.items()))
-        + ". Each run's raw line also carries the registry's prices for those models.",
+        + ". Each run's raw line also carries the list prices of those models in `bench/prices.json`.",
         "- Agents started, by configuration, counted from the Agent calls in the run's stream (`agents_started`): "
         + "; ".join(f"`{c}` " + ", ".join(f"{name} x{n}" for name, n in sorted(agents.get(c, {}).items()))
                     for c in used) + ".",

@@ -29,8 +29,6 @@ BENCH = Path(__file__).resolve().parent
 ROOT = BENCH.parent
 PLUGIN = ROOT / "plugins" / "model-router"
 sys.path.insert(0, str(PLUGIN / "scripts"))
-from modelrouter import config as mrconfig  # noqa: E402
-from modelrouter.registry import Registry  # noqa: E402
 from modelrouter.ledger import read as read_ledger  # noqa: E402
 ROW_SCHEMA = 3  # a row's schema says which harness wrote it; analyze refuses a row below this
 CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research",
@@ -455,9 +453,22 @@ def plugin_loaded(init: dict) -> bool:
     return listed and not init.get("plugin_errors")
 
 
-def list_cost(registry_config: Registry, model_id: str, tokens: dict) -> float | None:
-    """USD for one request's tokens at the registry's list price, or None for a model with no price."""
-    rates = registry_config.price(model_id)
+PRICES = json.loads((BENCH / "prices.json").read_text(encoding="utf-8"))
+
+
+def price(model_id: str) -> dict | None:
+    """List prices for a full model ID, or None for a version the table doesn't list. A near match never counts: a new
+    version is often priced differently."""
+    model_id = re.sub(r"-\d{8}$", "", (model_id or "").lower().split("[")[0])
+    if model_id in PRICES:
+        return PRICES[model_id]
+    families = [k for k in PRICES if k.endswith("-*") and model_id.startswith(k[:-1])]
+    return PRICES[max(families, key=len)] if families else None
+
+
+def list_cost(model_id: str, tokens: dict) -> float | None:
+    """USD for one request's tokens at list price, or None for a model with no price."""
+    rates = price(model_id)
     if not rates:
         return None
     long = rates.get("long_prompt")
@@ -474,7 +485,7 @@ def list_cost(registry_config: Registry, model_id: str, tokens: dict) -> float |
     return round(total / 1_000_000, 6)
 
 
-def transcript_cost(folder: Path, registry_config: Registry) -> float | None:
+def transcript_cost(folder: Path) -> float | None:
     """A run's spend at list price from its saved transcripts, main and subagents, each message once (streamed lines
     repeat its usage); None when no transcript holds usage or a message's model has no price, so the budget
     stands in rather than an understated sum."""
@@ -501,7 +512,7 @@ def transcript_cost(folder: Path, registry_config: Registry) -> float | None:
         usage = message["usage"]
         tokens = {k: v for k, v in usage.items() if isinstance(v, (int, float))}
         tokens.update({k: v for k, v in (usage.get("cache_creation") or {}).items() if isinstance(v, (int, float))})
-        cost = list_cost(registry_config, message.get("model") or "", tokens)
+        cost = list_cost(message.get("model") or "", tokens)
         if cost is None and any(tokens.values()):  # a message with no tokens, like an error notice, costs nothing
             return None
         total += cost or 0.0
@@ -663,7 +674,7 @@ def run_claude(cmd: list[str], work: Path, env: dict, timeout: float) -> tuple[s
     return out, err, proc.returncode
 
 
-def run_one(task: dict, config: dict, options: dict, registry_config: Registry) -> dict:
+def run_one(task: dict, config: dict, options: dict) -> dict:
     # No task or configuration name: a brief that quotes its working directory would tell the model what it is graded on.
     scratch = Path(tempfile.mkdtemp(dir=runs_folder()))
     work = scratch / "work"
@@ -692,7 +703,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
         answer = result.get("result") or ""
         (scratch / "answer.txt").write_text(answer, encoding="utf-8")
         if not isinstance(result.get("total_cost_usd"), (int, float)) or result.get("subtype") == "error_during_execution":
-            priced = transcript_cost(session_dir(env), registry_config)
+            priced = transcript_cost(session_dir(env))
         # Read before grading: the check also runs the code the run left, which could rewrite these files.
         ledger = ledger_rows(env) if config.get("plugin") else None
         types = agent_types(env) if config.get("plugin") else {}
@@ -720,7 +731,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
     if graded is None:
         graded = Grade("stopped", f"the bench stopped before the check finished: {stopped!r}",
                        check_hash(task["dir"] / "check.py"))
-    row = record(task, config, options, registry_config, result,
+    row = record(task, config, options, result,
                  {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr, "stopped_by": stopped_by,
                   "grade": graded._asdict(), "final_answer": final,
                   "ledger": ledger, "agent_types": types,
@@ -753,7 +764,7 @@ def never_started(init: dict, result: dict, exited: bool) -> bool:
                                                    and result.get("api_error_status") is None))
 
 
-def record(task: dict, config: dict, options: dict, registry_config: Registry, result: dict, facts: dict) -> dict:
+def record(task: dict, config: dict, options: dict, result: dict, facts: dict) -> dict:
     """The row for one run, from Claude Code's result line and what the runner saw around the process."""
     models = {name: {k: usage.get(k) for k in ("inputTokens", "outputTokens", "cacheReadInputTokens",
                                                 "cacheCreationInputTokens", "costUSD", "costBasis")}
@@ -808,7 +819,7 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         "cost_known": known, "cost_source": source,
         "duration_ms": result.get("duration_ms"), "duration_api_ms": result.get("duration_api_ms"),
         "wall_ms": facts["wall_ms"], "num_turns": result.get("num_turns"),
-        "models": models, "prices": {name: registry_config.price(name) for name in models}, **cache,
+        "models": models, "prices": {name: price(name) for name in models}, **cache,
         "agents_started": started, "agent_calls": facts.get("agent_calls") or [], "agent_overrides": overrides,
         "workflow_calls": facts.get("workflow_calls") or [],
         "permission_denials": [_denial(d) for d in result.get("permission_denials") or [] if isinstance(d, dict)],
@@ -895,7 +906,6 @@ def main(argv: list[str] | None = None) -> int:
     # The file the installer's symlink names now: an update during the round moves the link, never this.
     claude = [os.path.realpath(shutil.which(args.claude[0]) or args.claude[0]), *args.claude[1:]]
     version = subprocess.run([*claude, "--version"], capture_output=True, text=True).stdout.strip()
-    registry_config = mrconfig.shipped()
     frozen, digest = freeze_plugin()
     try:
         options = {"claude": claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,
@@ -940,7 +950,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
                     return 1
                 try:
-                    row = run_one(task, config, options, registry_config)
+                    row = run_one(task, config, options)
                 except BaseException as exc:
                     row = getattr(exc, "row", None)
                     if row is not None:  # the run was paid for, so it goes on record where the loop would put it

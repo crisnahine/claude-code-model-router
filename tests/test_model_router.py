@@ -1247,7 +1247,6 @@ class ConfigSchema(Sandbox):
             self.assertEqual((model.strength, model.cost), (spec["strength"], spec["cost"]), name)
         for name, spec in base["levels"].items():
             self.assertEqual(shipped.levels[name], LevelSpec(spec["needs"], spec["effort"]), name)
-        self.assertEqual(shipped.prices.keys(), base["prices"].keys())
         self.assertEqual(shipped.aliases, base["aliases"])
 
     def test_an_override_without_a_schema_still_loads(self):
@@ -2992,7 +2991,7 @@ class NewestOnProviders(Sandbox):
                     self.assertEqual(self.model(prompt), want, (provider, family))
         self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "sonnet"))  # the Anthropic API
 
-    def test_the_shipped_ids_belong_to_their_families_and_are_priced(self):
+    def test_the_shipped_ids_belong_to_their_families(self):
         config = cfg.shipped()
         self.assertEqual({p: tuple(f) for p, f in config.older_aliases.items()}, self.LAGS)
         for provider, runs in config.older_aliases.items():
@@ -3001,7 +3000,6 @@ class NewestOnProviders(Sandbox):
                 self.assertNotEqual(model_id, config.newest[family], provider)
         for family, model_id in config.newest.items():
             self.assertEqual((config.family(model_id), model_id), (family, self.NEWEST[family]))
-            self.assertIsNotNone(config.price(model_id))
 
     def test_a_pin_an_allowlist_a_denial_or_overrides_keep_the_alias(self):
         os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
@@ -4428,40 +4426,6 @@ class OverheadBench(unittest.TestCase):
             self.assertIn(key, report["machine"])
 
 
-class PriceTable(unittest.TestCase):
-    """Prices from https://platform.claude.com/docs/en/about-claude/pricing.md (checked 2026-11-22)."""
-
-    # The pricing page lists no rate for this one.
-    UNLISTED = {"claude-mythos-preview"}
-
-    def test_every_model_still_in_service_has_a_price(self):
-        config = cfg.load()
-        lifecycle = json.loads((ROOT / "compat" / "baseline.json").read_text(encoding="utf-8"))["lifecycle"]
-        missing = [model for model, info in lifecycle.items()
-                   if info.get("state") in ("Active", "Deprecated") and model not in self.UNLISTED
-                   and config.price(model) is None]
-        self.assertEqual(missing, [])
-
-    def test_a_model_id_finds_its_list_price(self):
-        config = cfg.shipped()
-        self.assertEqual(config.price("claude-opus-4-7")["input"], 5)  # one entry covers Opus 4.x
-        self.assertEqual(config.price("claude-opus-4-1-20250805"),  # except 4.1, at its own list price
-                         {"input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75, "cache_write_1h": 30})
-        for opus_4 in ("claude-opus-4-0", "claude-opus-4-20250514"):  # Opus 4 lists at the same price as 4.1
-            self.assertEqual(config.price(opus_4), config.price("claude-opus-4-1"), opus_4)
-        self.assertEqual(config.price("claude-haiku-4-5-20251001")["input"], 1)
-        self.assertEqual(config.price("claude-opus-5-5[1m]")["input"], 4)
-        self.assertIsNone(config.price("claude-opus-5-6"))  # a new version is never priced as its neighbour
-
-    def test_mythos_is_priced_like_its_fable_twin(self):
-        config = cfg.load()
-        for version, rates in (("5-2", (8, 40, 0.2, 10, 16)), ("5-1", (10, 50, 0.25, 12.5, 20)),
-                               ("5", (10, 50, 1, 12.5, 20))):
-            price = config.price(f"claude-mythos-{version}")
-            self.assertEqual(tuple(price[k] for k in ("input", "output", "cache_read", "cache_write",
-                                                      "cache_write_1h")), rates, version)
-
-
 class SecurityClaims(Sandbox):
     """Each claim in docs/SECURITY.md's assessment, rerun on every change."""
 
@@ -4474,11 +4438,6 @@ class SecurityClaims(Sandbox):
         self.override({"prices": {"claude-opus-5-5": {"output": 0}}, "newest": {"opus": "claude-evil-1"}})
         config = cfg.load()
         self.assertEqual(config.newest, {k: v for k, v in cfg.base_config()["newest"].items() if k[0] != "$"})
-        self.assertEqual(config.prices["claude-opus-5-5"], cfg.base_config()["prices"]["claude-opus-5-5"])
-        self.assertEqual(config.problems, ())
-        self.override({"prices": {"claude-opus-5-5": {"output": 0}}}, user=True)  # prices are the shipped list only
-        config = cfg.load()
-        self.assertEqual(config.prices, cfg.shipped().prices)
         self.assertEqual(config.problems, ())
 
     def test_a_project_model_cannot_take_a_trusted_name_or_count_under_a_cap(self):
