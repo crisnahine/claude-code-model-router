@@ -36,16 +36,16 @@ python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
 
 Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a configuration for one, and a router configuration here may run the plugin from another commit. A run the harness stopped, by the timeout or the budget cap, counts as failed whatever its files held. As in the judged tables, runs on an earlier revision of a task and runs whose pass check broke are left out.
 
-### `calibration-1`: 40 runs on 2026-11-25, $8.29, session on `claude-opus-5-5`
+### `calibration-1`: 36 runs on 2026-11-25, $7.45, session on `claude-opus-5-5`
 
 Eleven tasks under the two baselines, to look for tasks that tell a strong subagent from a cheap one. None did: both solved every run. The table counts ten of them, since `ops-inbox-triage` has changed since it ran.
 
-Left out of the table: 4 run(s) ($0.91) on an earlier revision of `ops-inbox-triage`.
+Left out of the table: 8 run(s) ($1.76) on an earlier revision of `bugfix-statement-queries`, `ops-inbox-triage`.
 
 | Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |
 | :- | -: | -: | :- | -: | :- |
-| `defaults` | 20 | 20 | none | $0.279 |  |
-| `haiku-high` | 20 | 20 | none | $0.136 |  |
+| `defaults` | 18 | 18 | none | $0.278 |  |
+| `haiku-high` | 18 | 18 | none | $0.136 |  |
 
 ### `calibration-2`: 28 runs on 2026-11-25, $9.87, session on `claude-opus-5-5`
 
@@ -56,12 +56,14 @@ The four hard coding tasks and the redo, fan-out and plan-then-build tasks under
 | `defaults` | 14 | 13 | 1 by the timeout | $0.523 |  |
 | `haiku-high` | 14 | 13 | 1 by the timeout | $0.182 |  |
 
-### `release-1`: 96 runs on 2026-11-25, $22.60, session on `opus`
+### `release-1`: 90 runs on 2026-11-25, $21.40, session on `opus`
 
 Sixteen tasks under the plugin and the two baselines, with the ladder and the table the plugin ships. It stays exploratory for two reasons: the plugin has changed since the commit it ran, and each run had a $0.50 cap, which stopped five runs before they finished.
 
+Left out of the table: 6 run(s) ($1.20) on an earlier revision of `bugfix-statement-queries`.
+
 | Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |
 | :- | -: | -: | :- | -: | :- |
-| `defaults` | 32 | 28 | 4 by the budget cap | $0.341 |  |
-| `plugin` | 32 | 31 | 1 by the budget cap | $0.218 | `99467a2` |
-| `haiku-high` | 32 | 32 | none | $0.147 |  |
+| `defaults` | 30 | 26 | 4 by the budget cap | $0.344 |  |
+| `plugin` | 30 | 29 | 1 by the budget cap | $0.222 | `99467a2` |
+| `haiku-high` | 30 | 30 | none | $0.147 |  |

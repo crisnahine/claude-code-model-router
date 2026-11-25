@@ -1,7 +1,7 @@
 """Pass when billing.statement.balances, run in a child on three generated databases, returns the exact balances with
 at most 3 SQL statements, leaves the schema alone, and its SQLite VM steps and Python line events grow at most 20 times
-from 150 to 1,500 accounts. Python's line events don't see loops that run in C, such as `x in list`; the statement
-limit and the VM steps bound the rest."""
+from 150 to 1,500 accounts; then, untraced on 15,000 accounts, returns them in at most 1 s of CPU time. Line events
+don't see a loop that runs in C, such as `x in list`, so only that timed call bounds one."""
 import importlib.util
 import json
 import random
@@ -17,6 +17,8 @@ _spec.loader.exec_module(passcheck)
 HERE = Path(__file__).resolve().parent
 SEEDS = ((21, 150), (22, 150), (23, 1500))
 GROWTH = 20
+TIMED = (24, 15_000)
+CPU = 1.0  # the reference takes about 0.03 s of CPU here, and `x in list` over the invoices about 10 s
 
 
 def generate(seed, size):
@@ -73,7 +75,13 @@ def passes(work):
                 or json.dumps(g.get("schema")) != json.dumps(schema_after)):
             return False
     small, large = got[0], got[2]
-    return all(large[k] <= GROWTH * max(1, small[k]) for k in ("vm", "lines"))
+    if not all(large[k] <= GROWTH * max(1, small[k]) for k in ("vm", "lines")):
+        return False
+    data = generate(*TIMED)
+    timed = passcheck.probe(work, HERE / "probe.py", {"schema": schema, "datasets": [data], "timed": True})
+    return (isinstance(timed, list) and len(timed) == 1 and isinstance(timed[0], dict) and timed[0].get("error") is None
+            and json.dumps(timed[0].get("pairs")) == json.dumps([list(p) for p in expected(data)])
+            and type(timed[0].get("cpu")) is float and timed[0]["cpu"] <= CPU)
 
 
 sys.exit(0 if passes(Path(sys.argv[1])) else 1)

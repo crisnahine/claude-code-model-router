@@ -2246,7 +2246,6 @@ class QualityTier(unittest.TestCase):
                 "cross-amount-cents": "cross-module", "design-checkout-retries": "design"}
         tasks = {t["id"]: t for t in run.load_tasks()}
         self.assertEqual({i: tasks[i]["class"] for i in want}, want)
-        self.assertTrue(all(tasks[i]["revision"] == 1 for i in want))
 
     def test_sqlite_carries_a_rename_into_foreign_keys(self):
         self.assertGreaterEqual(sqlite3.sqlite_version_info, (3, 26, 0))
