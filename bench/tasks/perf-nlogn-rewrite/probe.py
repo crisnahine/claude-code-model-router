@@ -53,6 +53,35 @@ def command(sales, regions):
     return text + "\0" + printed
 
 
+def refusal(sales, regions):
+    """For an input the report can't be built from: what render raises, or for the command its exit code, what it
+    printed to stderr and which files it wrote, with this probe's temp folder named <tmp>."""
+    def described(e):
+        return f"{type(e).__name__}: {e}".replace(tmp, "<tmp>")[:300]
+
+    if payload.get("via") != "command":
+        try:
+            importlib.import_module("reports").render(sales, regions)
+        except Exception as e:
+            return {"error": described(e)}
+        return {"error": None}
+    report, table = os.path.join(tmp, "report.txt"), os.path.join(tmp, "standings.csv")
+    for path in (report, table):
+        if os.path.exists(path):
+            os.remove(path)
+    real, sys.stderr = sys.stderr, io.StringIO()
+    try:
+        try:
+            code, error = importlib.import_module("reports.__main__").main(
+                [sales, regions, "--out", report, "--standings", table, "--verify"]), None
+        except Exception as e:
+            code, error = None, described(e)
+        printed = sys.stderr.getvalue().replace(tmp, "<tmp>")
+    finally:
+        sys.stderr = real
+    return {"error": error, "code": code, "stderr": printed, "wrote": [os.path.exists(report), os.path.exists(table)]}
+
+
 try:
     render = importlib.import_module("reports").render if payload.get("via") != "command" else command
     # Every case reuses the same two paths, so an answer that caches by path hands back the last case's report.
@@ -61,6 +90,9 @@ try:
         for path, text in ((sales, case["sales"]), (regions, case["regions"])):
             with open(path, "w", encoding="utf-8", newline="") as f:
                 f.write(text)
+        if payload.get("invalid"):
+            out.append(refusal(sales, regions))
+            continue
         try:
             start = time.perf_counter()
             text = render(sales, regions)

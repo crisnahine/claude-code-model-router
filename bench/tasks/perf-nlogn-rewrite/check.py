@@ -1,9 +1,10 @@
 """Pass when reports.render, python3 -m reports with --out, --standings and --verify, and python3 -m reports printing
 to stdout, run in a child that rewrites the same two input files for every case, write byte for byte what the
 shipped code writes on awkward inputs (ties, regions with no sales, spellings that casefold
-together, decomposed accents, half cents, reused ids, quoted fields, padded headers), render builds the report for
-20,000 rows in a few seconds, test_report.py passes unchanged, and each of them writes the right output for 200,000
-rows, with every awkward row above spread through them, in at most 10 seconds."""
+together, decomposed accents, half cents, reused ids, quoted fields, padded headers), refuse what it refuses (an
+empty file, a wrong header, a region listed twice) with the same error, or the same exit code, stderr and files,
+render builds the report for 20,000 rows in a few seconds, test_report.py passes unchanged, and each of them
+writes the right output for 200,000 rows, with every awkward row above spread through them, in at most 10 seconds."""
 import csv
 import datetime
 import hashlib
@@ -112,6 +113,16 @@ def mixed(seed):
 
 
 CASES = HAND + [(f"mixed case {seed}", REGIONS, mixed(seed)) for seed in range(1, 7)]
+# Inputs the report can't be built from: render must raise what the shipped code raises, and the command must exit
+# and print to stderr as it does.
+INVALID = [
+    ("an empty sales file", REGIONS, ""),
+    ("a sales header with a wrong name", REGIONS, "txn,date,region,customer,product,amount\n" +
+     sales(row(1, "Ana", "3.00")).split("\n", 1)[1]),
+    ("an empty regions file", "", sales(row(1, "Ana", "3.00"))),
+    ("a region listed twice", "code,name\nN,North\nE,East\nN,Nord\n", sales(row(1, "Ana", "3.00"))),
+    ("a regions row with three fields", "code,name\nN,North,extra\n", sales(row(1, "Ana", "3.00"))),
+]
 
 
 def big(rows, seed):
@@ -293,6 +304,17 @@ for via, what in (("render", "reports.render"), ("command", "python3 -m reports"
             for label, a, b in zip(labels, *parts):
                 if a != b:
                     passcheck.finish(False, f"on {name}, {what} wrote {label}{first_difference(a, b)}"[:300])
+    payload = {"cases": [{"sales": s, "regions": r} for _, r, s in INVALID], "via": via, "invalid": True}
+    want = passcheck.probe(HERE / "repo", PROBE, payload)
+    if not isinstance(want, list) or len(want) != len(INVALID) or not all(
+            str(w.get("error")).startswith("ReportError") if via == "render" else w.get("code") == 1 for w in want):
+        raise RuntimeError(f"the shipped report didn't refuse the check's invalid inputs as expected: {want!r}"[:300])
+    got = passcheck.probe(work, PROBE, payload)
+    if not isinstance(got, list) or len(got) != len(INVALID):
+        passcheck.finish(False, f"{what} didn't run on invalid inputs: {got!r}"[:300])
+    for (name, _, _), g, w in zip(INVALID, got, want):
+        if g != w:
+            passcheck.finish(False, f"on {name}, {what} gave {g!r}, the shipped code gives {w!r}"[:300])
 # The 20,000-row run only ends a slow answer early; the 200,000-row run decides, whatever the machine's speed.
 gate = passcheck.probe(work, PROBE, {"cases": [{"sales": big(20_000, 5), "regions": REGIONS}], "digest": True},
                        timeout=4)

@@ -1,6 +1,7 @@
 """Pass when test_checkout.py, unchanged, passes and, run in a child after each of several write orders, every
 product page, listing and service read shows what the database holds, while a page, a listing and the service
-reads that no change touched, and a second read of anything, are still served from the cache."""
+reads that no change touched, and a second read of anything, are still served from the cache, and the writes
+themselves never load those untouched values into the cache again."""
 import copy
 import importlib.util
 import sys
@@ -95,6 +96,12 @@ def wrong(name, got, want):
     for label, count in zip(labels, counts):
         if count != 0:
             return f"after {name}, reading {label}, which no change touched, went to the database"
+    stored = got.get("stored_other")
+    if not isinstance(stored, list) or len(stored) != len(labels):
+        return f"after {name}, the probe saw no stores for what no change touched"
+    for label, count in zip(labels, stored):
+        if count != 0:
+            return f"after {name}, the writes loaded {label} into the cache again, though no change touched it"
     if got.get("reads_again") != 0:
         return f"after {name}, reading everything a second time went to the database"
     return None

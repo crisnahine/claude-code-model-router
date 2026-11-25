@@ -1,8 +1,9 @@
 """Pass when test_extract.py, unchanged, passes and, run in a child, safe_extract and both of its callers refuse
-every symlink chain below before writing anything (each one escapes the shipped checks), while normal archives
-with links still extract exactly as they are. An audit hook in the probe sees every write, so one made outside the
-folder (the destination, or the plugins folder for an install) and removed again before the call returns still
-fails."""
+every symlink chain below and leave the tree as it was (each chain escapes the shipped checks), while normal
+archives with links still extract exactly as they are. An audit hook in the probe sees every write, so a write
+outside the folder (the destination, or the plugins folder for an install), or a link in it that leads out of it
+when a later write is made, fails even when it is undone before the call returns. Writes inside the folder that
+are undone are not checked."""
 import hashlib
 import importlib.util
 import json
@@ -76,6 +77,11 @@ CHAINS = [
      [("link", "a", "."), ("link", "b", "a//.."), ("file", "b/pwn.txt", "owned\n")]),
     ("a link through a target that ends in a slash", "extract",
      [("link", "a", "."), ("link", "b", "a/"), ("link", "c", "b/..")]),
+    # a/b lands at b, so a resolver that keys links by member name never sees it when it follows c.
+    ("a link reached through a link made under another link", "extract",
+     [("link", "a", "."), ("link", "a/b", "."), ("link", "c", "b/..")]),
+    ("a deeper link reached through a link made under another link", "extract",
+     [("dir", "d"), ("link", "d/up", ".."), ("link", "d/up/x", "."), ("link", "y", "x/..")]),
 ]
 DEPLOY = [("link", "config", "current/app.conf"), ("link", "current", "releases/v2"), ("dir", "empty"),
           ("link", "latest.log", "logs/2024-06.log"), ("dir", "logs"), ("dir", "notes"), ("dir", "releases"),
@@ -160,6 +166,8 @@ def wrong(results):
             return f"{name}: refused, but left {', '.join(diff[:3])} changed"
         if got.get("outside"):
             return f"{name}: refused, but first wrote outside the folder it was given ({', '.join(got['outside'][:2])})"
+        if got.get("leaked"):
+            return f"{name}: refused, but first left a link leading out of the folder ({', '.join(got['leaked'][:2])})"
     for name, via, members in NORMAL:
         got = results.get(name) or {}
         if got.get("error") is not None or not isinstance(got.get("tree"), dict):
@@ -170,6 +178,8 @@ def wrong(results):
             return f"{name}: {diff[0]} is {got['tree'].get(diff[0])}, expected {want.get(diff[0])}"
         if got.get("outside"):
             return f"{name}: wrote outside the folder it was given ({', '.join(got['outside'][:2])})"
+        if got.get("leaked"):
+            return f"{name}: left a link leading out of the folder while it ran ({', '.join(got['leaked'][:2])})"
     return None
 
 

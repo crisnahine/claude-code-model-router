@@ -49,10 +49,11 @@ def landing(path, follow, dir_fd=None):
 
 
 def watcher():
-    """An audit hook that records each write the task code makes outside the folder it was given, even one it
-    removes again before it returns, and a function that sets that folder (None stops recording). It can't see
-    writes made by a child process."""
-    state = {"top": None, "seen": [], "dir_fd": None, "opener": False}
+    """An audit hook that records each write the task code makes outside the folder it was given, and each link in
+    that folder that leads out of it when a write is made, even when the code undoes them before it returns, and a
+    function that sets that folder (None stops recording and returns both lists). It can't see writes made by a
+    child process."""
+    state = {"top": None, "seen": [], "leaked": [], "dir_fd": None, "opener": False}
 
     def hook(event, args):
         top = state["top"]
@@ -63,8 +64,23 @@ def watcher():
         except Exception:
             places = ["?"]
         for place in places:
-            if not (place == top or place.startswith(top + os.sep)):
+            if not inside(top, place):
                 state["seen"].append(f"{event} {os.path.relpath(place, top) if place != '?' else args!r}"[:200])
+        if places:
+            leaks(top)
+
+    def inside(top, path):
+        return path == top or path.startswith(top + os.sep)
+
+    def leaks(top):
+        """The links under top that lead out of it now, before the write the hook was called for."""
+        for here, dirs, files in os.walk(top):
+            for name in dirs + files:
+                path = os.path.join(here, name)
+                if os.path.islink(path) and not inside(top, os.path.realpath(path)):
+                    found = f"{os.path.relpath(path, top)} -> {os.readlink(path)}"
+                    if found not in state["leaked"]:
+                        state["leaked"].append(found)
 
     def landings(event, args):
         if event == "open":
@@ -100,8 +116,9 @@ def watcher():
 
     def watch(top):
         state["top"] = top and os.path.realpath(top)
-        seen, state["seen"] = state["seen"], []
-        return seen
+        found = state["seen"], state["leaked"]
+        state["seen"], state["leaked"] = [], []
+        return found
 
     os.open, io.open, builtins.open = os_open, io_open, io_open
     sys.addaudithook(hook)
@@ -167,8 +184,8 @@ def run(case, scratch):
     except Exception as e:
         error = type(e).__name__
     finally:
-        outside = watch(None)
-    return {"error": error, "tree": tree(box), "outside": outside}
+        outside, leaked = watch(None)
+    return {"error": error, "tree": tree(box), "outside": outside, "leaked": leaked}
 
 
 scratch = tempfile.mkdtemp()

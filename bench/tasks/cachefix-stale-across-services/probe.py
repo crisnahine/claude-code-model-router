@@ -71,9 +71,23 @@ def run(scenario):
     skus = [p["sku"] for p in payload["products"]]
     categories = payload["categories"]
     everything(app, skus, categories)
-    for s in scenario["steps"]:
-        step(app, s)
     sku, category = scenario["untouched"], scenario["quiet"]
+    key = importlib.import_module("shop.cache.keys").key
+    untouched = [key("page", sku), key("product", sku), key("price", sku), key("stock", sku), key("listing", category)]
+    # Stores during the steps, so a cache that reloads what no change touched while it commits is seen too.
+    backend, stored = app.cache.backend, []
+    real_set = backend.set
+
+    def watched_set(k, *args, **kwargs):
+        stored.append(k)
+        return real_set(k, *args, **kwargs)
+
+    backend.set = watched_set
+    try:
+        for s in scenario["steps"]:
+            step(app, s)
+    finally:
+        backend.set = real_set
     other = []
     # The page goes first, or a dropped page would be rebuilt from the facets just reloaded and cost no read.
     for read in (lambda: app.storefront.page(sku), lambda: app.catalog.product(sku), lambda: app.pricing.price(sku),
@@ -84,7 +98,8 @@ def run(scenario):
     seen = everything(app, skus, categories)
     before = reads(app)
     everything(app, skus, categories)
-    return dict(seen, error=None, reads_other=other, reads_again=reads(app) - before)
+    return dict(seen, error=None, reads_other=other, reads_again=reads(app) - before,
+                stored_other=[stored.count(k) for k in untouched])
 
 
 out = {}

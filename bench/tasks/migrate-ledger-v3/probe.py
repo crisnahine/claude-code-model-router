@@ -29,6 +29,10 @@ try:
             out["text"] = f.read()
 except BaseException as e:
     out["error"] = f"{type(e).__name__}: {e}"[:300]
+    # What a refused migration left at dst, if anything.
+    if os.path.lexists(dst):
+        with open(dst, "rb") as f:
+            out["text"] = f.read().decode("utf-8", "replace")
 shutil.rmtree(tmp, ignore_errors=True)
 # Written to the file descriptor and followed by _exit, so nothing the task code left behind can add a later line.
 os.write(1, ("\n" + json.dumps(out) + "\n").encode())

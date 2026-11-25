@@ -3,7 +3,8 @@ that holds every v2 quirk many times over (revisions out of file order, repeated
 entry, legacy kind codes, timestamps without an offset or at a negative half-hour one, null and foreign currencies,
 every currency money.py gives other than two decimals, amounts written without their trailing zeros), writes
 exactly the v3 file the formats describe and returns its record count, migrates an export of 80,000 lines in a
-few seconds, keeps amounts too big for a float exact, and refuses an amount with more places than its currency."""
+few seconds, keeps amounts too big for a float exact, and refuses an amount with more places than its currency
+without leaving a v3 file. The generated export has blank lines, which v2.read skips."""
 import datetime
 import importlib.util
 import json
@@ -196,16 +197,19 @@ if not passcheck.tests_pass(work, HERE / "repo", "test_migrate.py"):
 accounts = json.dumps({a: {"name": a.upper(), "currency": c, "utc_offset": o} for a, (c, o) in ACCOUNTS.items()})
 
 
-def migrated(lines, timeout=45):
-    return passcheck.probe(work, HERE / "probe.py", {"v2": "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in lines),
-                                                    "accounts": accounts}, timeout=timeout)
+def migrated(lines, timeout=45, blanks=False):
+    text = [json.dumps(r, ensure_ascii=False) + "\n" for r in lines]
+    if blanks:  # v2.read skips blank lines, so an answer with its own reader must too
+        text[len(text) // 2:len(text) // 2] = ["\n"]
+        text.append("\n")
+    return passcheck.probe(work, HERE / "probe.py", {"v2": "".join(text), "accounts": accounts}, timeout=timeout)
 
 
 lines = generate(23)
 missing = set(PLACES) - {r["currency"] or ACCOUNTS[r["account"]][0] for r in lines}
 if missing:
     raise RuntimeError(f"the generated export has no entry in {sorted(missing)}")
-reason = wrong(migrated(lines), reference(lines))
+reason = wrong(migrated(lines, blanks=True), reference(lines))
 if reason:
     passcheck.finish(False, reason[:300])
 lines = generate(29, BIG)
@@ -231,4 +235,6 @@ if reason:
 got = migrated([one(1, "acc-ny", "5.00"), one(2, "acc-ny", "1.000000001")])
 if not (got and str(got.get("error")).startswith("MigrationError")):
     passcheck.finish(False, f"1.000000001 USD has more places than USD allows, but migrate gave {got!r}"[:300])
+if got.get("text") is not None:
+    passcheck.finish(False, f"migrate refused 1.000000001 USD but left a v3 file: {got['text'][:120]!r}")
 passcheck.finish(True, "")
