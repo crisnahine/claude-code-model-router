@@ -274,6 +274,42 @@ class Analysis(unittest.TestCase):
                 self.assertEqual(v["verdict"], "REFUSED")
                 self.assertIn(why, v["reason"])
 
+    def test_a_run_the_harness_stopped_counts_as_failed_and_the_page_counts_them(self):
+        base = full_row(task="bugfix-median", main_model="sonnet", passed=True, **{"class": "bugfix"})
+        older = {k: v for k, v in base.items() if k != "stopped_by"}  # a row from before the field
+        data = [dict(older, config="defaults", exit_code=None, subtype=None),
+                dict(older, config="defaults", exit_code=1, subtype="error_max_budget_usd"),
+                dict(older, config="defaults"), dict(base, config="plugin", stopped_by="budget"), dict(base, config="plugin")]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.jsonl"
+            path.write_text("".join(json.dumps(r) + "\n" for r in data), encoding="utf-8")
+            loaded = analyze.load([path])
+            page = analyze.build_page(loaded)
+        self.assertEqual([(r["config"], r["passed"], r.get("stopped_by")) for r in loaded.rows],
+                         [("defaults", False, "timeout"), ("defaults", False, "budget"), ("defaults", True, None),
+                          ("plugin", False, "budget"), ("plugin", True, None)])
+        self.assertIn("- Runs the harness stopped, by configuration: `defaults` 2 of 3 (1 by the budget cap, 1 by the "
+                      "timeout); `plugin` 1 of 2 (1 by the budget cap).", page)
+        self.assertIn("A run the harness stopped, by the timeout or by the budget cap", page)
+
+    def test_a_baseline_whose_stopped_runs_decide_the_verdict_gets_no_verdict(self):
+        # Half the baseline's runs hit the cap: as failures they make the dearer router the cheaper per solved task.
+        theirs = spread("defaults", "lookup", 6, 12, 0.20)
+        for r in theirs[::2]:
+            r.update(passed=False, stopped_by="budget")
+        v = self.verdict(spread("plugin", "lookup", 6, 12, 0.30) + theirs)
+        self.assertEqual(v["verdict"], "REFUSED")
+        self.assertIn("36 of `defaults`'s 72 runs were stopped by the harness (36 by the budget cap); counted as "
+                      "solved, the verdict would be LOSE", v["reason"])
+        # A few stopped runs that don't decide it leave the verdict, and the router's own count against it.
+        dear = spread("defaults", "lookup", 6, 12, 0.50)
+        dear[0].update(passed=False, stopped_by="timeout")
+        self.assertEqual(self.verdict(spread("plugin", "lookup", 6, 12, 0.10) + dear)["verdict"], "WIN")
+        ours = spread("plugin", "lookup", 6, 12, 0.10, solved=6)
+        for r in ours:
+            r.update(stopped_by=None if r["passed"] else "budget")
+        self.assertEqual(self.verdict(ours + spread("defaults", "lookup", 6, 12, 0.50))["verdict"], "LOSE")
+
     def test_a_current_row_graded_by_another_check_stops_the_page(self):
         task = next(t for t in run.load_tasks() if t["id"] == "lookup-todo-count")
         today = {"verdict": "pass", "reason": "solved", "check_hash": run.check_hash(task["dir"] / "check.py")}
@@ -527,6 +563,9 @@ class Analysis(unittest.TestCase):
             lines = [full_row(config="plugin-cheap", bench_commit="f" * 40, total_cost_usd=0.25, passed=True, **batch),
                      full_row(config="plugin-cheap", bench_commit="f" * 40, total_cost_usd=0.27, passed=True, **batch),
                      full_row(config="defaults", plugin_loaded=None, total_cost_usd=0.4, passed=False, **batch),
+                     # An older row a timeout stopped, graded on what it had written by then.
+                     {k: v for k, v in full_row(config="defaults", plugin_loaded=None, total_cost_usd=0.2, passed=True,
+                                                exit_code=None, subtype=None, **batch).items() if k != "stopped_by"},
                      full_row(config="defaults", plugin_loaded=None, total_cost_usd=0.2, passed=True,
                               batch="calibration-1", main_model="claude-opus-5-5", started_at="2020-01-01T00:00:00+00:00")]
             (pilot / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in lines), encoding="utf-8")
@@ -541,10 +580,11 @@ class Analysis(unittest.TestCase):
         self.assertIn("No judged round has been recorded yet", page.split("\n\n")[1])
         section = page.split("## Exploratory rounds", 1)[1]
         self.assertLess(section.index("`calibration-1`"), section.index("`ladder-1`"))  # oldest first
-        self.assertIn("### `ladder-1`: 3 runs", section)
+        self.assertIn("### `ladder-1`: 4 runs", section)
         self.assertIn("Two ladders beside the defaults.", section)
-        self.assertIn("| `plugin-cheap` | 2 | 2 | $0.260 | `fffffff` |", section)
-        self.assertIn("| `defaults` | 1 | 0 | $0.400 |  |", section)  # a set-aside run is not counted
+        self.assertIn("| `plugin-cheap` | 2 | 2 | none | $0.260 | `fffffff` |", section)
+        self.assertIn("| `defaults` | 2 | 0 | 1 by the timeout | $0.300 |  |", section)  # a set-aside run is not counted
+        self.assertIn("A run the harness stopped, by the timeout or the budget cap, counts as failed", section)
         self.assertNotRegex(section, r"WIN|LOSE|no difference shown")
         self.assertNotIn("## Results", page)  # a pilot row is never a judged row
 
@@ -896,12 +936,43 @@ class Runner(unittest.TestCase):
         self.assertGreaterEqual(row["wall_ms"], 1000)
 
 
+    def test_a_run_the_harness_stopped_is_not_solved_whatever_its_files_hold(self):
+        task = next(t for t in run.load_tasks() if t["id"] == "security-sql-injection")
+        defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
+        for how, stopped in (("hang", "timeout"), ("cap", "budget"), ("finish", None)):
+            with self.subTest(how=how), tempfile.TemporaryDirectory() as tmp:
+                options = {"claude": stub(tmp, STOPPED_STUB), "model": "sonnet", "budget": 0.5, "timeout": 2,
+                           "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+                with unittest.mock.patch.dict("os.environ", {"STUB_HOW": how}):
+                    row = run.run_one(task, defaults, options, {})
+                self.assertEqual((row["stopped_by"], row["passed"]), (stopped, stopped is None), row["grade"])
+                self.assertIn("FINDING.json", row["final_answer"]["files"])  # the files would have passed
+                if stopped:
+                    self.assertIn(f"the harness stopped the run ({stopped})", row["grade"]["reason"])
+
+
 HANGING_STUB = '''#!/usr/bin/env python3
 import sys, time
 if "--version" in sys.argv:
     print("9.9.9 (stub)"); sys.exit(0)
 print('{"result": "half an ans', flush=True)
 time.sleep(30)
+'''
+
+# Leaves a passing FINDING.json, then hangs, stops at the budget cap as Claude Code does, or finishes.
+STOPPED_STUB = '''#!/usr/bin/env python3
+import json, os, sys, time
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+Path("FINDING.json").write_text(json.dumps({"file": "db/users.py", "line": 6}))
+how = os.environ["STUB_HOW"]
+if how == "hang":
+    time.sleep(30)
+capped = how == "cap"
+print(json.dumps({"type": "result", "subtype": "error_max_budget_usd" if capped else "success", "is_error": capped,
+                  "result": "", "total_cost_usd": 0.5 if capped else 0.1, "modelUsage": {}}))
+sys.exit(1 if capped else 0)
 '''
 
 

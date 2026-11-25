@@ -9,6 +9,7 @@ Cost and quality of Model Router against Claude Code without it. No judged round
 ## How to read it
 
 - A task counts as solved only when its pass check passes. A wrong answer is a failure, the router's too.
+- A run the harness stopped, by the timeout or by the budget cap (`--max-budget-usd`), counts as failed whatever its files held, the router's too; its raw line's `stopped_by` says which. There is no verdict against a baseline when its stopped runs decide it: counted as solved, they would give the router another verdict. The router's own stopped runs count against it and never withhold a verdict.
 - Cost per solved task is a configuration's total spend on a task class divided by the runs it solved, so failed runs count against it.
 - The cells show each configuration's own figures: exact 95% binomial (Clopper-Pearson) pass-rate intervals, and 95% percentile bootstrap intervals of cost per solved task over runs (2,000 resamples, each cell from a generator seeded by its session model, class and configuration). No verdict rests on them.
 - Verdicts, one per baseline, by a rule fixed before any run. The router's runs and the baseline's are paired by task. Each of 2,000 resamples draws the row's tasks with replacement, then each drawn task's runs with replacement, so the interval reflects how few tasks there are as well as how few runs. For the pass rate, each task's runs get one solved and one failed run added, so a cell where every run passed still has spread. The non-inferiority margin is 10% of pass rate. WIN: the 95% interval of the router's cost per solved task minus the baseline's is below zero, the lower bound of its pass rate minus the baseline's is above minus 10%, and the router solved at least the baseline's share of runs (per-task pass rates averaged), so a saving counts only at an equal or higher pass rate. LOSE: the router's pass rate is behind beyond noise (the upper bound of its pass rate minus the baseline's is below zero, or an exact one-sided test at 5% of its solved runs against the baseline's, every run of the row pooled, puts it behind, which catches a gap the added runs shrink), or its cost per solved task is above beyond noise while the upper bound of its pass rate minus the baseline's is below plus 10%, the mirror of the WIN rule. Anything else is "no difference shown", which is not parity. There is no verdict when the two didn't run each task the same number of times in each batch, since each side's cost is pooled over its runs and pass rates drift between batches, when more than 25% of either's runs had a Bash call denied, when the router's runs loaded more than one plugin build (`plugin_hash`), when the two ran a task at different budgets (`budget_usd`) or on different Claude Code versions (`claude_version`), or when any of their runs ran from code with uncommitted changes (`bench_dirty`). A row is LOSE when any baseline beats the router, has no verdict when any comparison has none, is WIN only when it wins against every baseline, and is otherwise "no difference shown".
@@ -33,22 +34,22 @@ python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
 
 ## Exploratory rounds
 
-Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a configuration for one, and a router configuration here may run the plugin from another commit.
+Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a configuration for one, and a router configuration here may run the plugin from another commit. A run the harness stopped, by the timeout or the budget cap, counts as failed whatever its files held.
 
 ### `calibration-1`: 44 runs on 2026-11-25, $9.20, session on `claude-opus-5-5`
 
 Eleven tasks under the two baselines, to look for tasks that tell a strong subagent from a cheap one. None did: both solved every run.
 
-| Configuration | Runs | Solved | Cost per run | Plugin commit |
-| :- | -: | -: | -: | :- |
-| `defaults` | 22 | 22 | $0.282 |  |
-| `haiku-high` | 22 | 22 | $0.136 |  |
+| Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |
+| :- | -: | -: | :- | -: | :- |
+| `defaults` | 22 | 22 | none | $0.282 |  |
+| `haiku-high` | 22 | 22 | none | $0.136 |  |
 
 ### `calibration-2`: 28 runs on 2026-11-25, $9.87, session on `claude-opus-5-5`
 
-The four hard coding tasks and the redo, fan-out and plan-then-build tasks under the same two baselines. Both solved every run again.
+The four hard coding tasks and the redo, fan-out and plan-then-build tasks under the same two baselines. Each solved 13 of 14 runs: the one it missed was a `perf-nlogn-rewrite` run the 900-second timeout stopped.
 
-| Configuration | Runs | Solved | Cost per run | Plugin commit |
-| :- | -: | -: | -: | :- |
-| `defaults` | 14 | 14 | $0.523 |  |
-| `haiku-high` | 14 | 14 | $0.182 |  |
+| Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |
+| :- | -: | -: | :- | -: | :- |
+| `defaults` | 14 | 13 | 1 by the timeout | $0.523 |  |
+| `haiku-high` | 14 | 13 | 1 by the timeout | $0.182 |  |

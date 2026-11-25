@@ -96,6 +96,31 @@ def _key(cell: dict) -> float:
     return math.inf if cell["cost_per_solved"] is None else cell["cost_per_solved"]
 
 
+STOPS = {"budget": "by the budget cap", "timeout": "by the timeout"}
+
+
+def stopped_by(r: dict) -> str | None:
+    """What the harness stopped a run with: `timeout` or `budget`. A row from before `stopped_by` was written shows a
+    timeout as a null exit code with no result, and the budget cap as its result subtype."""
+    if "stopped_by" in r:
+        return r["stopped_by"]
+    if r.get("subtype") == run.BUDGET_STOP:
+        return "budget"
+    return "timeout" if "exit_code" in r and r["exit_code"] is None and r.get("subtype") is None else None
+
+
+def _settle(r: dict) -> dict:
+    """The row as it counts: a run the harness stopped is failed, whatever its files held."""
+    how = stopped_by(r)
+    return dict(r, passed=False, stopped_by=how) if how else r
+
+
+def _stops(runs: list[dict]) -> str:
+    """How many of `runs` the harness stopped, by what."""
+    counts = Counter(r["stopped_by"] for r in runs if r.get("stopped_by"))
+    return ", ".join(f"{n} {STOPS.get(how, f'by {how}')}" for how, n in sorted(counts.items())) or "none"
+
+
 def bash_denials(runs: list[dict]) -> tuple[int, int]:
     """How many runs had a Bash call denied, of how many."""
     denied = sum(any(d.get("tool") == "Bash" for d in r.get("permission_denials") or []) for r in runs)
@@ -249,14 +274,27 @@ def _summary(cls: str, runs: list[dict], *, routers: frozenset[str], router: str
     # A router variant (any configuration that loads the plugin) is a rival build, never a baseline.
     base = [c for c in configs if c != router and c not in routers]
     verdicts = {}
+
+    def judge(b: str, theirs: list[dict]) -> tuple:
+        pass_ci, cost_ci, fewer = _paired(by[router], theirs, random.Random(f"{seed}/{session}/{cls}/{router}/{b}"), draws)
+        solved = [x for side in (by[router], theirs) for x in (sum(bool(r["passed"]) for r in side), len(side))]
+        return (*_judge(b, pass_ci, cost_ci, fewer, tuple(solved)), pass_ci, cost_ci)
+
     for b in base if router in cells else []:
         why = _refusal(router, by[router], b, by[b])
         if why:
             verdicts[b] = {"verdict": "REFUSED", "reason": why}
             continue
-        pass_ci, cost_ci, fewer = _paired(by[router], by[b], random.Random(f"{seed}/{session}/{cls}/{router}/{b}"), draws)
-        solved = [x for side in (by[router], by[b]) for x in (sum(bool(r["passed"]) for r in side), len(side))]
-        code, reason = _judge(b, pass_ci, cost_ci, fewer, tuple(solved))
+        code, reason, pass_ci, cost_ci = judge(b, by[b])
+        stopped = [r for r in by[b] if r.get("stopped_by")]
+        # A cap or timeout that stopped the baseline must not hand the router its verdict; a LOSE can't get worse.
+        if stopped and code != "LOSE":
+            again = judge(b, [dict(r, passed=True) if r.get("stopped_by") else r for r in by[b]])[0]
+            if again != code:
+                verdicts[b] = {"verdict": "REFUSED", "reason": f"{len(stopped)} of `{b}`'s {len(by[b])} runs were "
+                               f"stopped by the harness ({_stops(stopped)}); counted as solved, the verdict would be "
+                               f"{LABELS[again]}, so the stopped runs decide it"}
+                continue
         verdicts[b] = {"verdict": code, "reason": reason, "pass_ci": pass_ci, "cost_ci": tuple(map(_finite, cost_ci))}
     status = _status(verdicts)
     # A rank is a cost claim, which a row with no verdict can't support.
@@ -486,7 +524,7 @@ def load(paths: list[Path]) -> Results:
     # A run whose pass check broke has no verdict: it was neither solved nor failed.
     bad_check = [(r.get("grade") or {}).get("verdict") == "broken" for r in every]
     broken = [r for r, gone, bad in zip(every, old, bad_check) if bad and not gone]
-    rows = [r for r, gone, bad in zip(every, old, bad_check) if not (gone or bad)]
+    rows = [_settle(r) for r, gone, bad in zip(every, old, bad_check) if not (gone or bad)]
     today = {t["id"]: run.check_hash(t["dir"] / "check.py") for t in tasks}
     moved = sorted({(r["task"], str((r.get("grade") or {}).get("check_hash"))) for r in rows + broken
                     if r["task"] in today and (r.get("grade") or {}).get("check_hash") != today[r["task"]]})
@@ -587,6 +625,11 @@ def _notes(results: Results) -> list[str]:
     for r in rows:
         by_config.setdefault(r["config"], []).append(r)
     if by_config:
+        lines.append("- Runs the harness stopped, by configuration: " + "; ".join(
+            f"`{c}` {sum(bool(r.get('stopped_by')) for r in group)} of {len(group)}"
+            + (f" ({_stops(group)})" if any(r.get("stopped_by") for r in group) else "")
+            for c, group in sorted(by_config.items())) + ". They count as failed whatever their files held, so a "
+            "budget or timeout set too low shows here (`stopped_by`).")
         lines.append("- Runs with a Bash denial, by configuration: " + "; ".join(
             "`{}` {} of {}".format(c, *bash_denials(group)) for c, group in sorted(by_config.items())) + ".")
     if by_config:
@@ -612,6 +655,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
     read = [
         "## How to read it", "",
         "- A task counts as solved only when its pass check passes. A wrong answer is a failure, the router's too.",
+        "- A run the harness stopped, by the timeout or by the budget cap (`--max-budget-usd`), counts as failed "
+        "whatever its files held, the router's too; its raw line's `stopped_by` says which. There is no verdict "
+        "against a baseline when its stopped runs decide it: counted as solved, they would give the router another "
+        "verdict. The router's own stopped runs count against it and never withhold a verdict.",
         "- Cost per solved task is a configuration's total spend on a task class divided by the runs it solved, "
         "so failed runs count against it.",
         "- The cells show each configuration's own figures: exact 95% binomial (Clopper-Pearson) pass-rate "
@@ -809,14 +856,16 @@ def _exploratory(rows: list[dict], notes: dict) -> list[str]:
         batches.setdefault(r.get("batch") or "unnamed", []).append(r)
     out = ["## Exploratory rounds", "",
            "Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a "
-           "configuration for one, and a router configuration here may run the plugin from another commit.", ""]
+           "configuration for one, and a router configuration here may run the plugin from another commit. A run "
+           "the harness stopped, by the timeout or the budget cap, counts as failed whatever its files held.", ""]
     for name, runs in batches.items():
         models = ", ".join(f"`{m}`" for m in sorted({r.get("main_model") or "unknown" for r in runs}))
         out += [f"### `{name}`: {len(runs)} runs on {runs[0].get('started_at', '')[:10]}, "
                 f"${sum(r['total_cost_usd'] for r in runs):.2f}, session on {models}", ""]
         if isinstance(notes.get(name), str):
             out += [notes[name], ""]
-        out += ["| Configuration | Runs | Solved | Cost per run | Plugin commit |", "| :- | -: | -: | -: | :- |"]
+        out += ["| Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |",
+                "| :- | -: | -: | :- | -: | :- |"]
         cells: dict[str, list[dict]] = {}
         for r in runs:
             cells.setdefault(r["config"], []).append(r)
@@ -825,7 +874,7 @@ def _exploratory(rows: list[dict], notes: dict) -> list[str]:
             ran = {str(r.get("bench_commit") or "")[:7]
                    for r in cell if r.get("plugin_loaded") is not None}
             commit = ", ".join(f"`{c}`" for c in sorted(ran) if c)
-            out.append(f"| `{config}` | {len(cell)} | {sum(bool(r['passed']) for r in cell)} | "
+            out.append(f"| `{config}` | {len(cell)} | {sum(bool(r['passed']) for r in cell)} | {_stops(cell)} | "
                        f"${sum(r['total_cost_usd'] for r in cell) / len(cell):.3f} | {commit} |")
         out.append("")
     return out
@@ -837,7 +886,7 @@ def pilot_rows() -> tuple[list[dict], dict]:
         notes = json.loads((PILOT / "notes.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         notes = {}
-    return _jsonl(sorted(PILOT.glob("*.jsonl"))), notes if isinstance(notes, dict) else {}
+    return [_settle(r) for r in _jsonl(sorted(PILOT.glob("*.jsonl")))], notes if isinstance(notes, dict) else {}
 
 
 def build_page(results: Results, router: str | None = None, current: str | None = None) -> str:

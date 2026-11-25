@@ -269,6 +269,10 @@ _LAUNCH = ("import runpy, sys, traceback\nsys.stdout.reconfigure(encoding='utf-8
            "except BaseException:\n    traceback.print_exc()\n    sys.exit(2)\n")
 
 
+# The result subtype of a run that --max-budget-usd stopped; its cost is cut off at the cap.
+BUDGET_STOP = "error_max_budget_usd"
+
+
 class Grade(NamedTuple):
     verdict: str  # "pass", "fail" or "broken"
     reason: str  # the last line the check printed, or for a broken check the last line of its error
@@ -621,6 +625,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
     stdout, stderr, code, wall_ms, result, init, started_agents, calls = "", "interrupted", None, None, {}, {}, {}, []
     workflows: list[dict] = []
     ledger, types, final, graded, kept, stopped, priced, transcripts = None, {}, None, None, None, None, None, None
+    stopped_by = None
     # Once claude starts the run costs money: whatever stops it or the steps after it, its row is still built and its
     # scratch removed. With no result the row is priced from its transcripts, or charged the whole budget.
     try:
@@ -628,10 +633,12 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
             proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=options["timeout"])
             stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
         except subprocess.TimeoutExpired as exc:
-            stdout, stderr, code = _text(exc.stdout), "timed out", None
+            stdout, stderr, code, stopped_by = _text(exc.stdout), "timed out", None, "timeout"
         # The run's wall time: Claude Code's own duration_ms can fall short of it.
         wall_ms = round((time.monotonic() - clock) * 1000)
         init, result, started_agents, calls, workflows = read_stream(stdout)
+        if result.get("subtype") == BUDGET_STOP:
+            stopped_by = "budget"
         answer = result.get("result") or ""
         (scratch / "answer.txt").write_text(answer, encoding="utf-8")
         if not isinstance(result.get("total_cost_usd"), (int, float)) or result.get("subtype") == "error_during_execution":
@@ -640,7 +647,10 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
         ledger = ledger_rows(env) if config.get("plugin") else None
         types = agent_types(env) if config.get("plugin") else {}
         final = final_answer(task["dir"] / "repo", work, answer)
-        graded = grade(task["dir"] / "check.py", work, scratch / "answer.txt")
+        # A run the harness cut short isn't solved, whatever it had written by then.
+        graded = (Grade("fail", f"the harness stopped the run ({stopped_by}), so it isn't solved",
+                        check_hash(task["dir"] / "check.py")) if stopped_by
+                  else grade(task["dir"] / "check.py", work, scratch / "answer.txt"))
         denied = bool(result.get("permission_denials"))
         if options.get("transcripts") and (not graded.passed or denied) and session_dir(env).is_dir():
             transcripts = Path(options["transcripts"]) / scratch.name
@@ -661,7 +671,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
         graded = Grade("broken", f"the bench stopped before the check finished: {stopped!r}",
                        check_hash(task["dir"] / "check.py"))
     row = record(task, config, options, registry_config, result,
-                 {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr,
+                 {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr, "stopped_by": stopped_by,
                   "grade": graded._asdict(), "final_answer": final,
                   "ledger": ledger, "agent_types": types,
                   "kept": kept and str(kept), "init": init, "agents_started": started_agents,
@@ -738,7 +748,8 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         and (any(c.get("ran_on") for c in facts.get("agent_calls") or []) or bool(facts.get("agent_types")))
         and not any(r.get("event") == "spawn" for r in ledger or []),
         "gate_events": sum(r.get("event") == "gate" for r in ledger or []),
-        "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
+        "exit_code": code, "stopped_by": facts.get("stopped_by"), "subtype": result.get("subtype"),
+        "is_error": result.get("is_error"),
         "api_error_status": result.get("api_error_status"), "terminal_reason": result.get("terminal_reason"),
         "errors": result.get("errors"),
         # Without a cost from the result, the transcripts' list price, else the whole budget so totals never understate.
