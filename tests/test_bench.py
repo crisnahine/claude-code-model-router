@@ -394,8 +394,16 @@ class Analysis(unittest.TestCase):
                       "baseline, `haiku-high` (every subagent on Haiku), wasn't shown to solve fewer runs than Claude "
                       "Code's defaults (`defaults`), so an equal pass rate there says nothing about quality.", page)
         quality = page.split("### Do the tasks tell models apart")[1].split("###")[0]
-        self.assertIn("- lookup: saturated, haiku-high solved 60 of 60, defaults 60 of 60", quality)
-        self.assertIn("- all tasks: saturated, haiku-high solved 60 of 60, defaults 60 of 60", quality)
+        # The test is one-sided: it asks only whether haiku-high solved fewer, never whether the gap is chance.
+        for row in ("lookup", "all tasks"):
+            self.assertIn(f"- {row}: saturated, `haiku-high` solved 60 of 60 and `defaults` 60 of 60 (exact one-sided "
+                          "p = 1.000), so `haiku-high` wasn't shown to solve fewer and these tasks can't tell models "
+                          "apart.", quality)
+        self.assertNotIn("could be chance", page)
+        # The margin and the intervals are points of pass rate, never a share of it.
+        self.assertIn("pass rate within 10 points of it", page)
+        self.assertRegex(page, r"pass rate -\d+ to \+\d+ points \(95% intervals")
+        self.assertNotRegex(page, r"[+-]\d+% to")
         n = analyze.MIN_RUNS
         behind = (rows("plugin", "lookup", [0.3] * n, [True] * n) + rows("defaults", "lookup", [0.4] * n, [True] * n)
                   + rows("haiku-high", "lookup", [0.2] * n, [True] * 4 + [False] * 6))
@@ -3401,7 +3409,9 @@ class RunEdges(unittest.TestCase):
         stated = "the upper bound of its pass rate minus the baseline's is below plus 10 points"
         self.assertIn(stated, (ROOT / "bench" / "README.md").read_text(encoding="utf-8"))
         page = analyze.build_page(analyze.load([]))
-        self.assertIn(stated.replace("10 points", "10%"), page)
+        self.assertIn(stated, page)
+        self.assertIn("The non-inferiority margin is 10 points of pass rate", page)
+        self.assertNotIn("10%", page)
         self.assertNotIn("isn't shown", page)
 
     def test_a_paid_row_that_stops_the_bench_is_filed_by_the_set_aside_rules(self):

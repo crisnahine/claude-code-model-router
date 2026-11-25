@@ -33,6 +33,7 @@ PILOT = RESULTS / "pilot"  # exploratory rounds: shown on the page, never judged
 MIN_RUNS = 10  # fewer runs of either of the split pair than this and a class isn't read as saturated
 ALPHA = 0.05  # the 95% intervals, and the one-sided level of the exact comparisons
 MARGIN = 0.10  # the non-inferiority margin on pass rate, fixed before any run
+MARGIN_TEXT = f"{MARGIN * 100:.0f} points"  # a difference of pass rates, never a share of one
 DENIAL_SHARE = 0.25  # a cell with more of its runs denied a Bash call than this gets no verdict
 LABELS = {"WIN": "WIN", "LOSE": "LOSE", "NONE": "no difference shown", "REFUSED": "no verdict"}
 SPLIT_STRONG, SPLIT_WEAK = "defaults", "haiku-high"  # the pair a task must split to count as telling models apart
@@ -193,8 +194,8 @@ def _refusal(name: str, ours: list[dict], base: str, theirs: list[dict]) -> str 
 def _judge(base: str, pass_ci: tuple, cost_ci: tuple, fewer: bool, solved: tuple) -> tuple[str, str]:
     """The verdict against one baseline; `solved` is the router's solved runs and runs, then the baseline's."""
     (p_lo, p_hi), (c_lo, c_hi) = pass_ci, cost_ci
-    seen = (f"cost per solved task {_fmt(c_lo)} to {_fmt(c_hi)}, pass rate {p_lo:+.0%} to {p_hi:+.0%} "
-            "(95% intervals of the router's minus the baseline's)")
+    seen = (f"cost per solved task {_fmt(c_lo)} to {_fmt(c_hi)}, pass rate {p_lo * 100:+.0f} to {p_hi * 100:+.0f} "
+            "points (95% intervals of the router's minus the baseline's)")
     # The runs added per task shrink a pass-rate gap, so the exact test can see a loss the interval hides.
     behind = _lower_p(*solved)
     if p_hi < 0 or behind < ALPHA:
@@ -205,9 +206,9 @@ def _judge(base: str, pass_ci: tuple, cost_ci: tuple, fewer: bool, solved: tuple
         if fewer:  # a saving counts only at an equal or higher pass rate
             return "NONE", f"cheaper per solved task beyond noise, but it solved a smaller share of the runs; {seen}"
         return "WIN", (f"cheaper per solved task beyond noise, at an equal or higher share of runs solved, pass rate "
-                       f"within {MARGIN:.0%} of it; {seen}")
+                       f"within {MARGIN_TEXT} of it; {seen}")
     if math.isfinite(c_lo) and c_lo > 0 and p_hi < MARGIN:
-        return "LOSE", f"dearer per solved task beyond noise, pass rate shown under {MARGIN:.0%} ahead; {seen}"
+        return "LOSE", f"dearer per solved task beyond noise, pass rate shown under {MARGIN_TEXT} ahead; {seen}"
     return "NONE", seen
 
 
@@ -253,11 +254,12 @@ def _quality(cells: dict, runs: list[dict]) -> dict:
     if min(w["runs"], s["runs"]) < MIN_RUNS:
         return {**out, "reason": f"too few runs ({MIN_RUNS} needed) to say whether the tasks tell models apart"}
     p = _lower_p(w["solved"], w["runs"], s["solved"], s["runs"])
-    seen = f"{weak} solved {w['solved']} of {w['runs']}, {strong} {s['solved']} of {s['runs']} (exact p = {p:.3f})"
+    seen = (f"`{weak}` solved {w['solved']} of {w['runs']} and `{strong}` {s['solved']} of {s['runs']} (exact "
+            f"one-sided p = {p:.3f})")
     if p >= ALPHA:
-        return {**out, "saturated": True, "reason": f"{seen}, a gap that could be chance, so these tasks can't tell "
-                                                    "models apart"}
-    return {**out, "saturated": False, "reason": f"{seen}, so these tasks tell models apart"}
+        return {**out, "saturated": True, "reason": f"{seen}, so `{weak}` wasn't shown to solve fewer and these tasks "
+                                                    "can't tell models apart"}
+    return {**out, "saturated": False, "reason": f"{seen}, so `{weak}` solved fewer and these tasks tell models apart"}
 
 
 def _summary(cls: str, runs: list[dict], *, routers: frozenset[str], router: str, draws: int, seed: int,
@@ -655,15 +657,15 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "paired by task. Each of 2,000 resamples draws the row's tasks with replacement, then each drawn task's "
         "runs with replacement, so the interval reflects how few tasks there are as well as how few runs. For the "
         "pass rate, each task's runs get one solved and one failed run added, so a cell where every run passed "
-        f"still has spread. The non-inferiority margin is {MARGIN:.0%} of pass rate. WIN: the 95% interval of the "
+        f"still has spread. The non-inferiority margin is {MARGIN_TEXT} of pass rate. WIN: the 95% interval of the "
         "router's cost per solved task minus the baseline's is below zero, the lower bound of its pass rate "
-        f"minus the baseline's is above minus {MARGIN:.0%}, and the router solved at least the baseline's share of "
+        f"minus the baseline's is above minus {MARGIN_TEXT}, and the router solved at least the baseline's share of "
         "runs (per-task pass rates averaged), so a saving counts only at an equal or higher pass rate. LOSE: the "
         "router's pass rate is behind beyond noise (the upper bound of its pass rate minus the baseline's is below "
         "zero, or an exact one-sided test at 5% of its solved runs against the baseline's, every run of the row "
         "pooled, puts it behind, which catches a gap the added runs shrink), "
         "or its cost per solved task is above beyond noise while the upper bound of its pass rate minus the "
-        f"baseline's is below plus {MARGIN:.0%}, the mirror of the WIN rule. A cost bound that is n/a decides "
+        f"baseline's is below plus {MARGIN_TEXT}, the mirror of the WIN rule. A cost bound that is n/a decides "
         "nothing: it comes from resamples in which one side solved none of the runs drawn, so it has no cost per "
         "solved task, and a row where a side solved nothing, or nearly nothing, gets its verdict from the pass rate "
         "alone. Anything else is \"no difference shown\", which is not parity. There is no verdict when the two "
