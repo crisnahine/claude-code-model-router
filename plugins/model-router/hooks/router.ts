@@ -20,6 +20,11 @@ const PLAIN_NAME = /^[A-Za-z0-9._:/@[\]-]{1,100}$/
 // The mod's slash command, and the session check's /config row, keyed as Claude Code keys a plugin's userConfig field.
 const COMMAND = 'model-router'
 const CHECK = 'model-router.session_check'
+const OPTIONS = /^model-router\./
+// A change to an option reloads this module, which then forgets the effort it set for each agent still running.
+const BUSY = 'Model Router is setting the effort of agents that are still running. Change this when they finish.'
+// An agent the engine lists in any other state may take another turn, an idle teammate on its next message.
+const ENDED: readonly string[] = ['completed', 'failed', 'killed']
 
 // What the runtime answers. A spawn's: `note` is for Claude after the Agent call's result; `rules` is the session note,
 // for the Agent tool's description. mod-status: `line`, `text`, `reply`, `routing`. mod-check: a Step's fields.
@@ -232,6 +237,17 @@ function later($: EngineInterface, task: () => Promise<unknown>): boolean {
   }
 }
 
+// Whether an option change now would reload this module under a main-loop turn or an agent whose effort it set. A list
+// that fails counts as nothing running, so a change is never held for good. Never throws.
+async function busy($: EngineInterface, working: boolean, efforts: Map<string, Want>): Promise<boolean> {
+  if (working) return true
+  try {
+    return (await $.agent.list()).some(agent => efforts.has(agent.id) && !ENDED.includes(agent.status))
+  } catch {
+    return false
+  }
+}
+
 // Whether managed settings own the session check's option; a list that fails counts as owned, so nothing offers to write it.
 async function locked($: EngineInterface): Promise<boolean> {
   try {
@@ -306,7 +322,7 @@ type Live = {
   refreshing: boolean // one status refresh at a time: one asked for during it runs once more after it
   stale: boolean
   turned: boolean // the main loop's first turn started: a question now would land in the middle of work
-  working: boolean // a main-loop turn is in flight: an option change now reloads the module under running agents
+  working: boolean // a main-loop turn is in flight, so its agents may still be starting
 }
 
 function shown($: EngineInterface, live: Live, answer: Answer | undefined): void {
@@ -462,7 +478,8 @@ export const register: Register = (on, options) => {
       shown($, live, answer)
       text = typeof answer?.reply === 'string' ? answer.reply : 'Routing is unchanged: the runtime did not answer.'
     } else if (words === 'check on' || words === 'check off') {
-      text = live.working ? 'Run this when Claude is idle: changing an option reloads Model Router.'
+      // This plugin's own $.config.set skips its config.set hook.
+      text = await busy($, live.working, agentEffort) ? `Session check stays as it is: ${BUSY}`
         : await setCheck($, words === 'check on' ? 'ask' : 'off')
     } else if (!words) {
       const answer = await ask($, opts, 'mod-status', live.setup ? { setup: live.setup } : {})
@@ -471,6 +488,9 @@ export const register: Register = (on, options) => {
     }
     return { text, isTextDisplayOnly: true }
   }).catch(($, e, next) => next(e))
+
+  on('config.set', { key: OPTIONS }, async ($, e, next) => await busy($, live.working, agentEffort) ? { deny: BUSY } : next(e))
+    .catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     if (e.fork || e.resume) return next(e)

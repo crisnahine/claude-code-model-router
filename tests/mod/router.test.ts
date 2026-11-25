@@ -798,7 +798,7 @@ test('a failing or garbled CLI leaves every event unchanged', async () => {
 
 test('every hook falls back to next(e) when it throws', async () => {
   const mod = load()
-  const events = ['agent.spawn', 'command.run', 'session.end', 'session.start', 'tool.call', 'tool.describe', 'turn.complete', 'turn.start', 'turn.step']
+  const events = ['agent.spawn', 'command.run', 'config.set', 'session.end', 'session.start', 'tool.call', 'tool.describe', 'turn.complete', 'turn.start', 'turn.step']
   assert.deepEqual(Object.keys(mod.hooks).sort(), events)
   assert.deepEqual(Object.keys(mod.catches).sort(), events)
   for (const [event, handler] of Object.entries(mod.catches)) {
@@ -979,19 +979,46 @@ test('/model-router check off and on write the option, unless managed settings o
   assert.equal(mod.ui.sets.length, 4)
 })
 
-test('/model-router check on or off while Claude works writes nothing, since an option change reloads the mod', async () => {
-  const mod = load({ 'mod-status': STATUS, 'mod-check': { stdout: '' } })
+const BUSY = 'Model Router is setting the effort of agents that are still running. Change this when they finish.'
+
+test('/model-router check on or off while Claude works or a routed agent runs writes nothing, since an option change reloads the mod', async () => {
+  const mod = load({ 'mod-status': STATUS, 'mod-check': { stdout: '' }, 'mod-spawn': PICK })
   await mod.sessionStart(START)
   await mod.start(mainTurn)
-  await mod.start({ turnId: 'ta', agentId: 'a1', text: 'p' })
-  await mod.complete(completeEvent({ turnId: 'ta', agentId: 'a1' })) // a subagent's turn ends; the main loop's goes on
+  await mod.spawn(spawnEvent()) // a1 steps at the pick's effort
+  await mod.complete(completeEvent({ turnId: 'ta', agentId: 'a2' })) // a subagent's turn ends; the main loop's goes on
   for (const words of ['check off', 'check on']) {
-    assert.equal((await mod.command(words)).text, 'Run this when Claude is idle: changing an option reloads Model Router.')
+    assert.equal((await mod.command(words)).text, `Session check stays as it is: ${BUSY}`)
   }
-  assert.deepEqual(mod.ui.sets, [])
   assert.equal((await mod.command('')).text, 'auto · mod · 0 calls\nSwitch it off')
   await mod.complete(completeEvent({}))
+  mod.engine.agents = [{ id: 'a1', status: 'running' }] // in the background, after the main loop's turn
+  assert.equal((await mod.command('check off')).text, `Session check stays as it is: ${BUSY}`)
+  assert.deepEqual(mod.ui.sets, [])
+  mod.engine.agents = [{ id: 'a1', status: 'completed' }]
   assert.equal((await mod.command('check off')).text, 'Session check is off. /model-router check on, or Session check in /config, turns it back on.')
+})
+
+test("a change to this plugin's options in /config is refused while Claude works or an agent the router set the effort of runs", async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  const row = { previous: 'ask', provider: { plugin: 'model-router@claude-code-model-router', tier: 'user' }, origin: { kind: 'composer' } }
+  const set = (key: string) => mod.hooks['config.set']!(mod.$, { key, value: 'off', ...row }, (e: any) => ({ value: e.value }))
+  assert.deepEqual(mod.matchers['config.set'], { key: /^model-router\./ })
+  assert.deepEqual(await set('model-router.session_check'), { value: 'off' })
+  await mod.start(mainTurn)
+  assert.deepEqual(await set('model-router.routing_mode'), { deny: BUSY })
+  await mod.spawn(spawnEvent())
+  await mod.complete(completeEvent({}))
+  for (const status of ['pending', 'running', 'waiting', 'idle']) { // an idle teammate takes another turn on a message
+    mod.engine.agents = [{ id: 'a1', status }]
+    assert.deepEqual(await set('model-router.max_tier'), { deny: BUSY }, status)
+  }
+  for (const status of ['completed', 'failed', 'killed']) {
+    mod.engine.agents = [{ id: 'a1', status }, { id: 'a3', status: 'running' }] // a3: no effort of the router's
+    assert.deepEqual(await set('model-router.max_tier'), { value: 'off' }, status)
+  }
+  mod.$.agent.list = async () => { throw new Error('no list here') }
+  assert.deepEqual(await set('model-router.max_tier'), { value: 'off' })
 })
 
 test('a model and an effort picked run /model then /effort, and the session it is on is confirmed', async () => {

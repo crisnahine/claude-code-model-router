@@ -32,7 +32,9 @@ Set in `/config`:
 - `routing_mode`: `auto` (default) or `off`. `off` changes no call and adds no notes or checks, but still keeps records and tells Claude of a model error or a mid-run model swap.
 - `max_tier`: `none` (default), `haiku`, `sonnet`, `opus` or `fable`, the strongest model a subagent may run on. A stronger one is lowered, except an environment pin or a fork. A Mythos ID counts as Fable; a model ID the registry can't place in a family is left as it is.
 - `verify_gate`: `true` (default) or `false`, the [check before a turn ends](#the-check-before-a-turn-ends).
-- `session_check`: `ask` (default) or `off`, the [session check](#the-session-check). `/model-router check off` and `check on` write it too, unless managed settings own it, and only while Claude is idle: changing an option reloads Model Router, which would drop what it set for agents already running.
+- `session_check`: `ask` (default) or `off`, the [session check](#the-session-check). `/model-router check off` and `check on` write it too, unless managed settings own it.
+
+Where the mod runs, no option changes while Claude is working or an agent whose effort Model Router set is still running, a background agent or a team's teammate included. Changing an option reloads Model Router, which would drop the effort it set for those agents, so `/config` and `/model-router check` refuse it and say why. Change it once they finish.
 
 ### Rules files
 
