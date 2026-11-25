@@ -29,13 +29,13 @@ Counts come from each job's log (`gh run view --job <id> --log`), times from its
 
 ## Local
 
-Run 2026-11-25 on macOS (Darwin 27.2.0), on the tree committed as `e8cb503`, the merge of `v02-bench` (`f19bf85`) into `d6f9d0a`, and again with the 0.3.0 release edits on top, which change only docs. The times are from the first run.
+Run 2026-11-25 on macOS (Darwin 27.2.0), on the tree committed as `79a1f68`, the last of the five merges of the `v03-*` fix branches into `976c850`. The commit that records these results changes only docs.
 
 | Gate | Command | Result |
 | :- | :- | :- |
-| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` (`python3` is the system `/usr/bin/python3` here) | 670 tests, OK (skipped=1), 362 s |
-| Unit tests, Python 3.13.13 | the same with `python3.13` | 670 tests, OK (skipped=1), 268 s |
-| Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 31 of 31 pass |
+| Unit tests, Python 3.9.6 | `python3 -m unittest discover -s tests` (`python3` is the system `/usr/bin/python3` here) | 733 tests, OK (skipped=1), 386 s |
+| Unit tests, Python 3.13.13 | the same with `python3.13` | 733 tests, OK (skipped=1), 288 s |
+| Mod tests, Node 22.22.3 | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | 35 of 35 pass |
 | Marketplace, Claude Code 2.1.331 | `claude plugin validate --strict .` | Validation passed |
 | Plugin, Claude Code 2.1.331 | `claude plugin validate --strict plugins/model-router` | Validation passed |
 | Mod and its test, `tsc` 6.0.3 | `sh tests/mod/typecheck.sh` (published types at a pinned commit, `@types/node` 22.20.5) | No errors |
@@ -44,7 +44,7 @@ Run 2026-11-25 on macOS (Darwin 27.2.0), on the tree committed as `e8cb503`, the
 | Traceability count | `python3 tools/traceability.py` | Matches the summary line in [TRACEABILITY.md](TRACEABILITY.md) |
 | Plugin evals, Claude Code 2.1.331 | `claude plugin eval plugins/model-router --trust-plugin --ablation with-without --runs 3 --max-cost-usd 2 --no-publish` (below) | The five cases ran on this tree on 2026-11-24 at 22:30 UTC on Claude Code 2.1.331, three runs a case with and without the plugin, for $0.65, before this release's redo fix: 2 of 5 cases passed with the plugin and none without, overall score 0.79 against the 0.8 threshold, mean delta 0.61. With the plugin Claude named Haiku for the lookup in 3 of 3 runs and picked the architect on Opus for the design task that names no agent in 3 of 3. The review case passed 2 of 3: in one run the Haiku session answered without delegating. The contract case passed 0 of 3: Claude named Opus in 2 of 3 runs, and the grader that looks for the answer calling the $10 liability cap unusual failed in all three. The redo case marked its redos in 3 of 3 runs but stayed on Haiku, because each redo named haiku again and a redo ran as named. After the fix (a redo that names the same or less climbs anyway) the redo case alone ran again at 22:48 UTC for $0.21: the second redo reached Sonnet in 3 of 3 runs with the plugin and in 0 of 3 without, and 2 of 3 runs passed every grader (in the third the redo's description was worded differently from the grader's text). The full suite has not run again since the fix. Below the threshold, so this gate does not pass yet |
 
-The 670 unit tests are 399 in `tests/test_model_router.py`, 194 in `tests/test_bench.py`, 32 in `tests/test_docs_assets.py`, 13 in `tests/test_upstream_check.py`, 11 in `tests/test_project_trust.py`, 8 in `tests/test_ci.py`, 5 in `tests/test_store_lock.py`, 3 in `tests/test_traceability.py`, 3 in `tests/test_skill_and_agent_lookup.py` and 2 in `tests/test_session_model_and_teammates.py`, counted with the unittest loader. The one skip is `ModApiTypes.test_router_ts_uses_only_events_and_fields_the_types_declare`: it needs the installed Claude Code's mod types, and none were found here (set `MODEL_ROUTER_MOD_TYPES` to run it).
+The 733 unit tests are 402 in `tests/test_model_router.py`, 203 in `tests/test_bench.py`, 32 in `tests/test_docs_assets.py`, 18 in `tests/test_trust_and_floors.py`, 13 in `tests/test_stop_check_commands.py`, 13 in `tests/test_upstream_check.py`, 11 in `tests/test_project_trust.py`, 10 in `tests/test_cli_arguments.py`, 10 in `tests/test_mod_and_health.py`, 8 in `tests/test_ci.py`, 5 in `tests/test_store_lock.py`, 3 in `tests/test_traceability.py`, 3 in `tests/test_skill_and_agent_lookup.py` and 2 in `tests/test_session_model_and_teammates.py`, counted with the unittest loader. The one skip is `ModApiTypes.test_router_ts_uses_only_events_and_fields_the_types_declare`: it needs the installed Claude Code's mod types, and none were found here (set `MODEL_ROUTER_MOD_TYPES` to run it).
 
 Not run here: live sessions (the last ones are in `docs/ARCHITECTURE.md` "Verified live", all on the design before this one), the plugin evals and the benchmark.
 
