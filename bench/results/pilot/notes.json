@@ -1,0 +1,4 @@
+{
+  "calibration-1": "Eleven tasks under the two baselines, to look for tasks that tell a strong subagent from a cheap one. None did: both solved every run.",
+  "calibration-2": "The four hard coding tasks and the redo, fan-out and plan-then-build tasks under the same two baselines. Both solved every run again."
+}

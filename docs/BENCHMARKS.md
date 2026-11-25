@@ -4,7 +4,7 @@
 
 # Benchmarks
 
-Cost and quality of Model Router against Claude Code without it. No round has been recorded yet.
+Cost and quality of Model Router against Claude Code without it. No judged round has been recorded yet. The exploratory rounds are at the end of this page.
 
 ## How to read it
 
@@ -55,3 +55,25 @@ Cost and quality of Model Router against Claude Code without it. No round has be
 python3 bench/run.py --tasks <ids> --configs <ids> --runs <n> --budget 0.5 --max-total <usd> --out bench/results/<name>.jsonl
 python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
 ```
+
+## Exploratory rounds
+
+Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a configuration for one, and a router configuration here may run the plugin from another commit.
+
+### `calibration-1`: 44 runs on 2026-11-25, $9.20, session on `claude-opus-5-5`
+
+Eleven tasks under the two baselines, to look for tasks that tell a strong subagent from a cheap one. None did: both solved every run.
+
+| Configuration | Runs | Solved | Cost per run | Plugin commit |
+| :- | -: | -: | -: | :- |
+| `defaults` | 22 | 22 | $0.282 |  |
+| `haiku-high` | 22 | 22 | $0.136 |  |
+
+### `calibration-2`: 28 runs on 2026-11-25, $9.87, session on `claude-opus-5-5`
+
+The four hard coding tasks and the redo, fan-out and plan-then-build tasks under the same two baselines. Both solved every run again.
+
+| Configuration | Runs | Solved | Cost per run | Plugin commit |
+| :- | -: | -: | -: | :- |
+| `defaults` | 14 | 14 | $0.523 |  |
+| `haiku-high` | 14 | 14 | $0.182 |  |
