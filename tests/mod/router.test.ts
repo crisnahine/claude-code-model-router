@@ -31,6 +31,7 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
     switches: { opus: 'claude-opus-5-5' } as Record<string, string>,
     runFails: '' as string,
     launched: 'claude' as string | undefined, // the session's own command line; undefined: it can't be read
+    ps: 0, // how many times the command line was read
   }
   const on = (event: string, ...rest: unknown[]) => {
     hooks[event] = rest.pop() as Hook
@@ -91,6 +92,7 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
       hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: engine.session, CLAUDE_PLUGIN_DATA: '/tmp/x', CLAUDE_PID: '4242' }),
       run: async (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) => {
         if (argv[1] === '-c') {
+          ui.ps++
           // ps of the process Claude Code names, which joins its arguments with spaces and drops their quotes.
           if (ui.launched === undefined || !argv[2]!.includes('"$CLAUDE_PID"') || init.env?.CLAUDE_PID !== '4242') throw new Error('no ps here')
           return { exitCode: 0, stdout: `${ui.launched.replaceAll('"', '')}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
@@ -1069,6 +1071,16 @@ test('a first turn that starts before the question is on screen keeps it away fo
   await later.start({ turnId: 'ta', agentId: 'a1', text: 'p' })
   await idle()
   assert.equal(later.ui.asked.length, 1)
+})
+
+test('with session_check or routing off, the session check reads no command line and asks the runtime nothing', async () => {
+  const off = { stdout: JSON.stringify({ ok: true, line: 'off', text: 'off', routing: false }) }
+  for (const [options, status] of [[{ session_check: 'off' }, STATUS], [{ session_check: ' OFF ' }, STATUS], [{ routing_mode: 'off' }, off]] as const) {
+    const mod = load({ 'mod-status': status, 'mod-check': CHECK }, options)
+    await mod.sessionStart(START)
+    await idle()
+    assert.deepEqual([mod.ui.ps, commands(mod).includes('mod-check'), mod.ui.asked], [0, false, []], JSON.stringify(options))
+  }
 })
 
 test('a resumed conversation and an answer with no question ask nothing', async () => {

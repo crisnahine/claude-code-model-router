@@ -350,6 +350,8 @@ async function launchEffort($: EngineInterface): Promise<string | undefined> {
 
 // At most once per session id, which the runtime keeps across the reload a /config change causes.
 async function checkSession($: EngineInterface, opts: Record<string, string>, live: Live): Promise<void> {
+  // session_check as the runtime reads it (settings.resolve): off is off, anything else asks.
+  if ((opts.CLAUDE_PLUGIN_OPTION_SESSION_CHECK ?? '').trim().toLowerCase() === 'off' || !(live.routingOn ?? routing(opts))) return
   // A conversation that already has prompts was resumed or forked, not started.
   if (await $.session.turns() !== 0) return
   const launched = await launchEffort($)
