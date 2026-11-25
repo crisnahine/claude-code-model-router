@@ -46,7 +46,7 @@ The project's own words, and the code behind each.
 
 **Model swap**: a run whose model changed mid-run (`modelsUsed`). It finishes no call and isn't health evidence.
 
-**Order of authority**: where the model comes from, strongest first: the force pin, the workflow pin, the call, the user's rule, a project's rule, the agent, `CLAUDE_CODE_SUBAGENT_MODEL`, then the agent's tools, or the parent under the user's rule `level` (`router.decide`).
+**Order of authority**: where the model comes from, strongest first: the force pin, the workflow pin, the call, the user's rule, a project's rule, the agent, `CLAUDE_CODE_SUBAGENT_MODEL`, then the agent's tools (`router.decide`). An agent's `model: inherit` is its own choice of the parent's model.
 
 **Outcome**: a result, failure or stop coming back for a call (`calls.Outcome`), read by one rule set on both paths (`calls.returned`).
 

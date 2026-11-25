@@ -46,13 +46,13 @@ The first that applies:
 2. `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`, for a workflow stage whose call names no model (effort only)
 3. The model named on the call
 4. A per-agent rule in `model-router.json`
-5. The agent's own `model` field
+5. The agent's own `model` field, where `inherit` means the parent's model
 6. `CLAUDE_CODE_SUBAGENT_MODEL`
-7. The agent's tools: `lookup` for an agent that can't edit, write or run commands (its `tools` or `disallowedTools` leave out Edit, Write, NotebookEdit and Bash, as in Explore and Plan), `standard` for any other. A teammate starts no lower than `standard`. Under your own rule's `level`, the parent's model takes this place.
+7. The agent's tools: `lookup` for an agent that can't edit, write or run commands (its `tools` or `disallowedTools` leave out Edit, Write, NotebookEdit and Bash, as in Explore and Plan), `standard` for any other. A teammate starts no lower than `standard`.
 
-A model from 3, 4, 5 or 7 is held to `max_tier`, `availableModels`, `deniedModels` and model health: one ruled out moves to the next stronger usable model, else the strongest usable. A rule's `level` raises a call below it.
+A model from 3, 4, 5 or 7 is held to `max_tier`, `availableModels`, `deniedModels` and model health: one ruled out moves to the next stronger usable model, else the strongest usable. A rule's `level` raises a call below it, the agent's tools' level included. To keep an agent on its parent's model, set `route: false` for it or `model: inherit` in its own file.
 
-Levels: lookup (Haiku, `medium`), standard (Haiku, `high`), complex (Sonnet, `high`), hardest (Opus, `high`), frontier (Fable, `high`). With no effort set, a model from 1 to 5 or 7, or one Model Router moved the call to, gets an effort from its level. A call left on 6, or on the parent's model, gets none.
+Levels: lookup (Haiku, `medium`), standard (Haiku, `high`), complex (Sonnet, `high`), hardest (Opus, `high`), frontier (Fable, `high`). With no effort set, a model from 1 to 5 or 7, or one Model Router moved the call to, gets an effort from its level. A call left on 6, or on the parent's model through `inherit`, gets none.
 
 ## Redo
 

@@ -84,9 +84,9 @@ class UnnamedCalls(Sandbox):
         self.assertEqual(self.decide("reader", BRIEF, model="opus")["source"], "caller")
         self.override({"agents": {"reader": {"model": "fable"}}}, user=True)
         self.assertEqual(self.decide("reader", BRIEF)["source"], "rule")
-        self.override({"agents": {"reader": {"level": "complex"}}}, user=True)  # a rule's level is the rule's
+        self.override({"agents": {"reader": {"level": "complex"}}}, user=True)  # a rule's level raises the pick
         d = self.decide("reader", BRIEF)
-        self.assertEqual((d["action"], d["model"], d["was"]), ("keep", None, "opus"))  # a floor the parent's opus is above
+        self.assertEqual((d["source"], d["level"], d["model"]), ("rule", "complex", self.at(Level.complex)[0]))
         self.override({})
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         d = self.decide("reader", BRIEF)
@@ -202,3 +202,59 @@ class UnnamedCallNotes(Sandbox):
     def test_the_route_skill_names_the_pick(self):
         skill = (PLUGIN / "skills" / "route" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("the level its tools put it", skill)
+
+
+class InheritingAgents(Sandbox):
+    """`model: inherit` is the agent's own choice, the parent's model, which beats CLAUDE_CODE_SUBAGENT_MODEL
+    (sub-agents.md, "Choose a model"). Only a definition with no model field gets the pick."""
+
+    def setUp(self):
+        super().setUp()
+        self.session_on(OPUS)
+        self.agent("heir", "inherit", extra=READER)
+
+    def test_an_explicit_inherit_is_kept_apart_from_a_missing_model(self):
+        heir = agents.find("heir", self.project)
+        self.assertEqual((heir["model"], heir["inherits"]), (None, True))
+        self.agent("plain")
+        self.assertFalse(agents.find("plain", self.project)["inherits"])
+
+    def test_an_agent_that_inherits_runs_on_the_parents_model_and_gets_no_pick(self):
+        d = self.decide("heir", BRIEF)
+        self.assertEqual((d["action"], d["model"], d["was"], d["level"]), ("keep", None, "opus", "hardest"))
+        self.assertIn("the agent's definition says inherit, so it runs on the parent's model, opus", d["reason"])
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")  # step 2 beats the variable
+        d = self.decide("heir", BRIEF)
+        self.assertEqual((d["action"], d["was"]), ("keep", "opus"))
+
+    def test_an_agent_that_inherits_is_held_to_the_cap_and_raised_to_a_rules_level(self):
+        self.options(max_tier="sonnet")
+        d = self.decide("heir", BRIEF)
+        self.assertEqual((d["action"], d["model"], d["effort"]), ("rewrite", "sonnet", "high"))
+        os.environ.pop("CLAUDE_PLUGIN_OPTION_MAX_TIER")
+        self.session_on(HAIKU)
+        self.override({"agents": {"heir": {"level": "complex"}}}, user=True)
+        d = self.decide("heir", BRIEF)
+        self.assertEqual((d["model"], d["source"], d["level"]), ("sonnet", "rule", "complex"))
+
+    def test_a_redo_of_an_agent_that_inherits_climbs_from_the_parents_model(self):
+        self.pre("heir", BRIEF, description="Find quoting")
+        self.done("heir", BRIEF, OPUS, description="Find quoting")
+        again = self.decide("heir", BRIEF, description="Redo: find quoting")
+        self.assertEqual((again["model"], again["effort"], again["escalated_from"]), ("opus", "high", "hardest"))
+
+
+class RuleLevelsOnThePick(Sandbox):
+    def setUp(self):
+        super().setUp()
+        self.session_on(OPUS)
+        self.agent("reader", extra=READER)
+
+    def test_a_users_level_rule_raises_the_pick_and_never_moves_it_to_the_parents_model(self):
+        for level, model, effort, source in (("lookup", "haiku", "medium", "router"),
+                                             ("standard", "haiku", "high", "rule"),
+                                             ("complex", "sonnet", "high", "rule")):
+            with self.subTest(level):
+                self.override({"agents": {"reader": {"level": level}}}, user=True)
+                d = self.decide("reader", BRIEF)
+                self.assertEqual((d["model"], d["effort"], d["level"], d["source"]), (model, effort, level, source))

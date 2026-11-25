@@ -19,7 +19,7 @@ $ARGUMENTS
 
 ## What the router does
 
-Model Router keeps the `model` and `effort` an Agent call names, within the user's cap, and fills in the effort when a call names only a model. A call that names no model runs on its agent's own model, else on `CLAUDE_CODE_SUBAGENT_MODEL` when it is set, else at the level its tools put it: `lookup` for an agent that can't edit, write or run commands, `standard` for any other. The brief plays no part. A rule in `model-router.json` can set or raise it. So you pick both on each call, from the table below. The Agent tool sets `effort` only when instructions ask for it, and this skill asks for it.
+Model Router keeps the `model` and `effort` an Agent call names, within the user's cap, and fills in the effort when a call names only a model. A call that names no model runs on its agent's own model (the parent's, for `model: inherit`), else on `CLAUDE_CODE_SUBAGENT_MODEL` when it is set, else at the level its tools put it: `lookup` for an agent that can't edit, write or run commands, `standard` for any other. The brief plays no part. A rule in `model-router.json` can set or raise it. So you pick both on each call, from the table below. The Agent tool sets `effort` only when instructions ask for it, and this skill asks for it.
 
 To see what a call would run on, run:
 

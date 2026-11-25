@@ -48,7 +48,7 @@ class Setup:
     cap: str | None = None
     env: tuple = ()
     session_effort: str = DEFAULT_EFFORT
-    agent: str = "general-purpose"  # "reader" can change nothing and "writer" can, so a call naming no model differs
+    agent: str = "general-purpose"  # "reader" can change nothing, "writer" can, and "heir" says model: inherit
 
     def __str__(self) -> str:
         bits = [f"{self.agent} in session {self.session} at {self.session_effort}", f"max_tier {self.cap}"]
@@ -85,6 +85,8 @@ class Walk:
             case.agent("reader", extra="tools: Read, Grep, Glob\n")
         elif setup.agent == "writer":
             case.agent("writer")
+        elif setup.agent == "heir":
+            case.agent("heir", "inherit")
         self.memo: dict = {p: {} for p in paths}
         self.tid = 0
         snap = settings.Snapshot({"session_id": "x", "cwd": str(case.project)})
@@ -115,7 +117,9 @@ class Walk:
         """What Claude Code runs for the input that reaches it (sub-agents.md, model and effort order)."""
         o = self.opts
         forced = self.reg.family(o.subagent_model) if o.force else None
-        model = forced or model or self.reg.family(o.subagent_model) or self.setup.session
+        # An agent's explicit inherit outranks CLAUDE_CODE_SUBAGENT_MODEL.
+        default = None if self.setup.agent == "heir" else self.reg.family(o.subagent_model)
+        model = forced or model or default or self.setup.session
         effort = (o.effort_level or effort or o.subagent_effort
                   or (self.setup.session_effort if model == self.setup.session else DEFAULT_EFFORT))
         return Run(model, effort)
@@ -259,8 +263,10 @@ ENV_CASES = ((("CLAUDE_CODE_SUBAGENT_EFFORT", "high"),), (("CLAUDE_CODE_EFFORT_L
              (("CLAUDE_CODE_SUBAGENT_MODEL", "sonnet"),),
              (("CLAUDE_CODE_SUBAGENT_MODEL", "haiku"), ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "1")),
              (("CLAUDE_CODE_SUBAGENT_MODEL", "opus"), ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "1")))
-# A first call that names no model runs at the level its agent's tools put it: lookup for a reader, standard otherwise.
-AGENTS = [Setup(s, cap, agent=agent) for agent in ("reader", "writer") for s in ("haiku", "opus") for cap in (None, "sonnet")]
+# A first call that names no model runs at the level its agent's tools put it, lookup for a reader and standard
+# otherwise, or on the parent's model for an agent that inherits.
+AGENTS = ([Setup(s, cap, agent=agent) for agent in ("reader", "writer", "heir") for s in ("haiku", "opus")
+           for cap in (None, "sonnet")] + [Setup("opus", None, (("CLAUDE_CODE_SUBAGENT_MODEL", "sonnet"),), agent="heir")])
 # The environment walk, smaller: each variable on a weak and a strong session with no cap, and under a Sonnet cap
 # on the strong one; then the session's level away from the default.
 ENVS = ([Setup(s, None, env) for env in ENV_CASES for s in ("haiku", "opus")]
@@ -300,7 +306,7 @@ class RedoChains(Sandbox):
     def test_every_redo_chain_under_the_environment_variables(self):
         walk(self, ENVS, self.check)
 
-    def test_every_redo_chain_from_a_reader_and_a_writer(self):
+    def test_every_redo_chain_from_a_reader_a_writer_and_an_agent_that_inherits(self):
         walk(self, AGENTS, self.check)
 
 

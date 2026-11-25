@@ -117,11 +117,11 @@ class NestedRedo(Sandbox):
 
     def setUp(self):
         super().setUp()
-        # The user's own level rule turns the router's pick off, so the call runs at its parent's effort.
-        self.override({"agents": {"general-purpose": {"level": "lookup"}}}, user=True)
+        # An agent that inherits runs on its parent's model at its parent's effort.
+        self.agent("heir", "inherit", folder=self.home / "agents")
 
     def spawn(self, description: str, tid: str):
-        return hooks.HANDLERS["mod-spawn"]({**mod_input(self.project, "general-purpose", self.PROMPT,
+        return hooks.HANDLERS["mod-spawn"]({**mod_input(self.project, "heir", self.PROMPT,
                                                         parent="claude-sonnet-5-5", nested=True,
                                                         session_effort="medium", description=description),
                                             "tool_use_id": tid})
@@ -129,7 +129,7 @@ class NestedRedo(Sandbox):
     def test_a_redo_of_a_nested_run_at_its_parents_effort_moves_to_a_stronger_model(self):
         self.assertEqual(self.spawn("Parser tests", "toolu_1"), modpath.OK)
         hooks.post_agent({"session_id": "s1", "agent_id": "sub1", "cwd": str(self.project), "tool_use_id": "toolu_1",
-                          "tool_input": {"subagent_type": "general-purpose", "prompt": self.PROMPT,
+                          "tool_input": {"subagent_type": "heir", "prompt": self.PROMPT,
                                          "description": "Parser tests"},
                           "tool_response": {"resolvedModel": "claude-sonnet-5-5", "status": "completed"}})
         self.assertEqual(self.spawn("Redo: parser tests", "toolu_2")["model"], "opus")
@@ -137,11 +137,11 @@ class NestedRedo(Sandbox):
     def test_a_nested_redo_naming_the_same_model_climbs_unless_it_names_more_than_its_levels_effort(self):
         self.spawn("Parser tests", "toolu_1")
         hooks.post_agent({"session_id": "s1", "agent_id": "sub1", "cwd": str(self.project), "tool_use_id": "toolu_1",
-                          "tool_input": {"subagent_type": "general-purpose", "prompt": self.PROMPT,
+                          "tool_input": {"subagent_type": "heir", "prompt": self.PROMPT,
                                          "description": "Parser tests"},
                           "tool_response": {"resolvedModel": "claude-sonnet-5-5", "status": "completed"}})
         def redo(effort: str):
-            return hooks.HANDLERS["mod-spawn"]({**mod_input(self.project, "general-purpose", self.PROMPT,
+            return hooks.HANDLERS["mod-spawn"]({**mod_input(self.project, "heir", self.PROMPT,
                                                             parent="claude-sonnet-5-5", nested=True, model="sonnet",
                                                             effort=effort, description="Redo: parser tests"),
                                                 "tool_use_id": f"toolu_{effort}"})
@@ -163,12 +163,12 @@ class NestedRedo(Sandbox):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
 
         def named(description: str, tid: str):
-            return hooks.HANDLERS["mod-spawn"]({**mod_input(self.project, "general-purpose", self.PROMPT,
+            return hooks.HANDLERS["mod-spawn"]({**mod_input(self.project, "heir", self.PROMPT,
                                                             parent="claude-sonnet-5-5", nested=True, model="sonnet",
                                                             description=description), "tool_use_id": tid})
         self.assertEqual(named("Parser tests", "toolu_1"), modpath.OK)
         hooks.post_agent({"session_id": "s1", "agent_id": "sub1", "cwd": str(self.project), "tool_use_id": "toolu_1",
-                          "tool_input": {"subagent_type": "general-purpose", "prompt": self.PROMPT,
+                          "tool_input": {"subagent_type": "heir", "prompt": self.PROMPT,
                                          "description": "Parser tests", "model": "sonnet"},
                           "tool_response": {"resolvedModel": "claude-sonnet-5-5", "status": "completed"}})
         for description in ("Redo: parser tests", "Redo: other tests"):  # on record, then nothing on record
@@ -219,7 +219,7 @@ class ProjectFileNeverRunsACallWeaker(Sandbox):
 
     PARENTS = ("haiku", "opus", "fable")
     CONTEXTS = (("main", "low"), ("main", "max"), ("nested", None), ("fallback", None))
-    AGENTS = ("general-purpose", "Explore", "deep", "bedrock-worker")
+    AGENTS = ("general-purpose", "Explore", "deep", "bedrock-worker", "heir")
     MODELS = (None, "haiku", "sonnet", "opus")
     EFFORTS = (None, "low", "max")
 
@@ -227,6 +227,7 @@ class ProjectFileNeverRunsACallWeaker(Sandbox):
         super().setUp()
         self.agent("deep", "opus", folder=self.home / "agents")
         self.agent("bedrock-worker", ARN, folder=self.home / "agents")
+        self.agent("heir", "inherit", folder=self.home / "agents")
         self.shipped = cfg.shipped()
 
     def files(self, agent: str) -> list[dict]:

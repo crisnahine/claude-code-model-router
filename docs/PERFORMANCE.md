@@ -60,6 +60,6 @@ Characters of plugin text Claude gets. Tokens weren't measured.
 | The `route` skill's description | all session | 199 | 200 |
 | A note that the prompt names a model | on such a prompt | about 135 | none |
 | The Stop ask (`gates.unverified_edit`) | once per batch of unchecked edits | 511 | none |
-| The `route` skill and its policy output | when it runs | 5,144 and 1,428 | none |
+| The `route` skill and its policy output | when it runs | 5,181 and 1,484 | none |
 
 With the mod, the model table appears three times: in the session context, in the Agent tool's description and in the Workflow tool's, so a session with no option set carries 1,853 characters of it. `Notes.test_every_note_stays_within_budget` walks the mixes of `max_tier`, `CLAUDE_CODE_SUBAGENT_MODEL`, its FORCE switch and the two effort variables. `Hooks.test_the_text_in_context_every_session_stays_within_budget` holds the descriptions. `models` and `usage` set `disable-model-invocation`, so their descriptions stay out ([skills](https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill)). With `routing_mode` off there is no note and no Stop ask.

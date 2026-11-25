@@ -1432,10 +1432,10 @@ class Router(Sandbox):
             self.assertEqual((d["action"], d["model"], d["effort"], d["source"], d["level"], d["was"]),
                              ("rewrite", "haiku", "high", "router", "standard", "opus"), agent)
             self.assertIn("no model is named, and this agent can change files: standard", d["reason"])
-        self.override({"agents": {"helper": {"level": "lookup"}}}, user=True)  # the user's level rule turns the pick off
-        d = self.decide("helper", LOOKUP)
+        self.agent("heir", "inherit")  # the agent's own choice: the parent's model
+        d = self.decide("heir", LOOKUP)
         self.assertEqual((d["action"], d["model"], d["effort"], d["level"], d["was"]), ("keep", None, None, "hardest", "opus"))
-        self.assertIn("no model is named for this call, so it runs on the parent's model, opus", d["reason"])
+        self.assertIn("the agent's definition says inherit, so it runs on the parent's model, opus", d["reason"])
 
     def test_a_model_named_on_the_call_is_kept_and_gets_its_rungs_effort(self):
         for model, effort in (("haiku", "medium"), ("sonnet", "high"), ("opus", "high"), ("fable", "high")):
@@ -1476,10 +1476,12 @@ class Router(Sandbox):
         snap = settings.Snapshot(hook_input)
         d = router.decide(spawn.facts(hook_input, snap), snap.registry, settings.Settings())
         self.assertEqual((d["action"], d["model"], d["was"]), ("rewrite", "haiku", None))
-        self.override({"agents": {"general-purpose": {"level": "lookup"}}}, user=True)  # the pick off: the user's floor
+        self.agent("heir", "inherit")  # an agent that inherits a model the fallback can't see is left alone
+        hook_input = {**self.call("heir", BUILD), "agent_id": "agent-1", "agent_type": "helper"}
         snap = settings.Snapshot(hook_input)
         d = router.decide(spawn.facts(hook_input, snap), snap.registry, settings.Settings())
-        self.assertEqual((d["action"], d["model"], d["source"], d["level"]), ("rewrite", "haiku", "rule", "lookup"))
+        self.assertEqual((d["action"], d["model"], d["was"]), ("keep", None, None))
+        self.assertIn("Claude Code's own choice", d["reason"])
 
     def test_decide_needs_only_its_facts(self):
         config = cfg.load()
@@ -1600,14 +1602,13 @@ class Router(Sandbox):
         spawned = modpath.spawn({"session_id": "t", "cwd": str(self.project), "parent_model": "claude-haiku-5-5",
                                  "kind": "teammate", "tool_input": {"subagent_type": "reader", "prompt": LOOKUP}})
         self.assertEqual(spawned["model"], "sonnet")
-        # With the user's level rule the pick is off, and a teammate on a weaker parent still starts on standard's model.
-        self.override({"levels": {"standard": {"needs": 2, "effort": "medium"}},
-                       "agents": {"general-purpose": {"level": "lookup"}}}, user=True)
-        out = self.pre("general-purpose", LOOKUP, name="auditor")
+        # A teammate whose agent inherits a weaker parent's model still starts on standard's model.
+        self.agent("heir", "inherit")
+        out = self.pre("heir", LOOKUP, name="auditor")
         self.assertEqual(out["updatedInput"]["model"], "sonnet")
         self.assertIn("a teammate starts no lower than sonnet", out["additionalContext"])
         self.session_on("claude-sonnet-5-5")
-        self.assertIsNone(self.pre("general-purpose", LOOKUP, name="auditor"))
+        self.assertIsNone(self.pre("heir", LOOKUP, name="auditor"))
 
     def test_an_agent_on_the_sessions_own_model_runs_at_least_at_the_sessions_effort(self):
         # Claude Code runs a subagent on the main conversation's model at the session's level (sub-agents docs),
@@ -1852,7 +1853,7 @@ class Router(Sandbox):
 
 class RepeatGuard(Sandbox):
     """A rewrite that didn't run is never repeated, so a refused rewrite can't loop. A call that names no model
-    runs on its parent's, so a redo of one climbs from the level that model stands for."""
+    runs at the level its agent's tools put it, so a redo of one climbs from there."""
 
     def setUp(self):
         super().setUp()
@@ -2175,16 +2176,16 @@ class RepeatGuard(Sandbox):
         self.assertIsNone(self.pre("general-purpose", LOOKUP, model="sonnet"))
 
     def test_a_call_naming_no_model_is_held_to_the_cap_too(self):
-        # The session runs on opus, so the call left untouched would inherit opus. The user's level rule turns the pick off.
-        self.override({"agents": {"general-purpose": {"level": "lookup"}}}, user=True)
+        # The session runs on opus, and an agent that inherits would run on it untouched.
+        self.agent("heir", "inherit")
         self.options(max_tier="sonnet")
-        out = self.pre("general-purpose", LOOKUP)
-        # The parent's model was nobody's level for the work, so Sonnet runs at its own, with no extra step.
+        out = self.pre("heir", LOOKUP)
+        # Inherit names no level, so Sonnet runs at its own, with no extra step.
         self.assertEqual((out["updatedInput"]["model"], out["updatedInput"]["effort"]), ("sonnet", "high"))
         self.assertEqual(self.ledger()[-1]["level"], "complex")
-        self.assertIn("would run on the parent's opus", self.ledger()[-1]["reason"])
+        self.assertIn("the agent's definition says inherit, and the parent's opus", self.ledger()[-1]["reason"])
         self.next_message()
-        again = self.pre("general-purpose", LOOKUP)
+        again = self.pre("heir", LOOKUP)
         self.assertEqual(again["permissionDecision"], "deny")
         self.assertIn('model: "sonnet"', again["permissionDecisionReason"])
 
@@ -2638,12 +2639,12 @@ class Mod(Sandbox):
 
     def test_a_fallback_call_left_on_a_guessed_parent_model_is_no_substitution(self):
         # The parent's model comes from the transcript on this path, and the conversation may have moved on.
-        self.override({"agents": {"general-purpose": {"level": "lookup"}}}, user=True)  # the pick off: left on the parent's
+        self.agent("heir", "inherit")  # it runs on the parent's model, which this path reads from the transcript
         self.session_on("claude-opus-5-5")
         for number in range(2):
             brief = f"{HARD} {number}"
-            self.assertIsNone(self.pre("general-purpose", brief))
-            self.done("general-purpose", brief, "claude-sonnet-5-5")
+            self.assertIsNone(self.pre("heir", brief))
+            self.done("heir", brief, "claude-sonnet-5-5")
         self.assertTrue(health.load().healthy("opus"))
         self.agent("rev", "opus", extra="effort: high\n")  # a pin the router keeps is no guess
         for number in range(2):
@@ -2653,13 +2654,13 @@ class Mod(Sandbox):
         self.assertEqual(health.load().why_routed_around("opus"), "ran as claude-sonnet-5-5 instead")
 
     def test_a_failure_of_a_fallback_call_left_on_a_guessed_parent_model_strikes_nothing(self):
-        self.override({"agents": {"general-purpose": {"level": "lookup"}}}, user=True)  # the pick off: left on the parent's
+        self.agent("heir", "inherit")  # it runs on the parent's model, which this path reads from the transcript
         self.session_on("claude-opus-5-5")
         refused = {"error": "API Error: 404 not_found_error: model: claude-sonnet-5-5"}
         for number in range(2):
             brief = f"{HARD} {number}"
-            self.assertIsNone(self.pre("general-purpose", brief))
-            self.assertIsNone(hooks.agent_failed({**self.call("general-purpose", brief), **refused}))
+            self.assertIsNone(self.pre("heir", brief))
+            self.assertIsNone(hooks.agent_failed({**self.call("heir", brief), **refused}))
         self.assertTrue(health.load().healthy("opus"))
         self.assertNotIn("model_error", [r["event"] for r in self.ledger()])
         self.agent("rev", "opus", extra="effort: high\n")  # a pin the router keeps is no guess

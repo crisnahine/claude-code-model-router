@@ -64,6 +64,8 @@ def parse(path: Path, source: str) -> dict | None:
         "source": source,
         "name": _field(text, "name") or path.stem,
         "model": None if (model or "inherit").lower() == "inherit" else model,
+        # An explicit inherit is the agent's own choice of the parent's model, which a missing field isn't.
+        "inherits": (model or "").lower() == "inherit",
         "effort": _field(text, "effort"),
         "tools": _list(text, "tools"),
         "disallowed": _list(text, "disallowedTools"),

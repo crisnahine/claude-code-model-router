@@ -347,7 +347,7 @@ PRECEDENCE = [
     ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "pins every subagent's model; the router sets effort only", True),
     ("A model named on the call", "by Claude, a skill's instructions or a workflow script", False),
     ("A per-agent rule", "in ~/.claude/model-router.json or .claude/model-router.json", False),
-    ("The agent's own model field", "in its definition's frontmatter", False),
+    ("The agent's own model field", "in its frontmatter; inherit means the parent's model", False),
     ("CLAUDE_CODE_SUBAGENT_MODEL", "your default for agents that name no model", True),
     ("The agent's tools", "lookup if it can't edit, write or run commands, else standard", False),
 ]
@@ -392,8 +392,8 @@ def diagram_precedence() -> str:
                     "raises a model below it.", "mut", 13))
     title = "Who decides the model: the order of authority"
     label = ("Strongest first: CLAUDE_CODE_SUBAGENT_MODEL_FORCE, then a model named on the call, then a per-agent "
-             "rule in model-router.json, then the agent's own model field, then CLAUDE_CODE_SUBAGENT_MODEL, then "
-             "the level the agent's tools put it at: lookup for an agent that can't edit, write or run commands, "
+             "rule in model-router.json, then the agent's own model field, where inherit means the parent's model, then "
+             "CLAUDE_CODE_SUBAGENT_MODEL, then the level the agent's tools put it at: lookup for an agent that can't edit, write or run commands, "
              "standard for any other. For all but the two environment variables, the winner must be usable under the "
              "cap and your settings, else the next stronger usable model runs, or the strongest usable one when "
              "nothing stronger is left. A workflow agent whose script names no model runs on "

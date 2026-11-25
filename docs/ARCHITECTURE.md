@@ -91,20 +91,20 @@ A decision is `keep`, `rewrite` or `deny` (the guard's), with model, effort, lev
 | 3 | The call's `model` | Keeps it |
 | 4 | The user's rule `model` | Applies it |
 | 5 | A project's rule `model` | Applies it only when not weaker than what the call runs on without it, and not a model the project added; else `held` says why |
-| 6 | The agent's own `model` | Keeps it; with no definition found, or a `model` outside the registry, leaves the call alone |
+| 6 | The agent's own `model` | Keeps it, and for `inherit` the parent's model, which outranks row 7; with no definition found, or a `model` outside the registry, leaves the call alone |
 | 7 | `CLAUDE_CODE_SUBAGENT_MODEL` | Leaves the call alone |
-| 8 | Nothing | The level the agent's tools put it at: `lookup` when its `tools` hold none of Edit, Write, NotebookEdit and Bash, or its `disallowedTools` remove them all, as for the built-in Explore and Plan; `standard` otherwise. The user's rule `level` puts the parent's model here instead |
+| 8 | Nothing | The level the agent's tools put it at: `lookup` when its `tools` hold none of Edit, Write, NotebookEdit and Bash, or its `disallowedTools` remove them all, as for the built-in Explore and Plan; `standard` otherwise |
 
 Then, for rows 3 to 6 and 8 (steps 5 and 6 on rows 1 and 2 too):
 
-1. **Floor.** A rule's `level` raises a weaker model to that level's model. On row 8 a project's floor raises the tools' level, and the user's raises the parent's model, or sets that level's model when the parent's is unknown.
-2. **Teammate.** A teammate naming nothing starts no lower than standard: its row 8 level is at least standard, and on the parent's model a parent weaker than standard needs moves to standard's model.
+1. **Floor.** A rule's `level` raises a weaker model to that level's model. On row 8 either file's floor raises the tools' level. On an inherited parent's model the user's floor applies wherever the call stands below it, and a project's only when its model is stronger than the parent's, or no registry model is stronger when the parent's is unknown (`router._floor_lifts`).
+2. **Teammate.** A teammate naming nothing starts no lower than standard: its row 8 level is at least standard, and an inherited parent's model weaker than standard needs moves to standard's model.
 3. **Cap.** `Registry.clamp` keeps a usable model (inside `max_tier`, permitted, healthy), else takes the next stronger usable one, else the strongest. A parent's model it moves runs at the new model's level.
 4. **Effort.** If nobody chose it (the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL`, or `CLAUDE_CODE_SUBAGENT_EFFORT`, which skips teammates), the level's effort.
 5. **Session floor.** On a main-conversation call on the session's own model, an effort the router sets is at least the session's (`router._session_floor`): `session_effort` from the mod, `effort.level` from the hook.
 6. **`maxEffortLevel`.** The lowest cap any settings source sets for that model, a `modelSettings` entry replacing its source's top-level cap (`router.capped`). None without the mod's layers.
 
-The same model with no effort to set is a keep. Where the parent's model is unknown (inside a subagent on the fallback, the built-in Explore and Plan), row 8 still names a model.
+The same model with no effort to set is a keep. Where the parent's model is unknown (inside a subagent on the fallback, the built-in Explore and Plan), row 8 still names a model, and an agent that inherits is left alone unless a floor lifts it.
 
 A full ID or `[1m]` variant the call or agent names is kept while its family is, if permitted and healthy (`mod.exact`). On a provider whose alias runs an older model (`older_aliases`), the mod sends the family's `newest` ID unless `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`, `modelOverrides`, the allowlist or health rules it out (`Registry.newest_id`); without one, the router's own picks move one family up (`Registry.past_lag`). The fallback sends aliases only.
 

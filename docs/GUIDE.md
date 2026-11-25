@@ -39,7 +39,7 @@ Your `~/.claude/model-router.json` (in `$CLAUDE_CONFIG_DIR` when set) applies ev
 Agents are keyed by the name a call uses. Levels are in [the ladder](#the-ladder); efforts are `low`, `medium`, `high`, `xhigh` and `max`.
 
 - `agents.<name>.model`: yours sets it. A project's applies only when not weaker than the call's model without it.
-- `agents.<name>.level`: a floor in either file; a call below it runs on the level's model, unless the environment pins it. A project's also raises the level a call naming no model gets from its agent's tools. Yours replaces that level: such a call runs on its parent's model, raised to yours.
+- `agents.<name>.level`: a floor in either file; a call below it runs on the level's model, unless the environment pins it. It also raises the level a call naming no model gets from its agent's tools. To keep an agent on its parent's model instead, set `route: false` for it in yours, or `model: inherit` in the agent's own file.
 - `agents.<name>.route`: `false` in yours leaves the agent alone, with no level from its tools either. A project's is ignored.
 - `levels.<level>.needs` (the weakest model's strength) and `.effort`: yours sets them; a project's only raises them.
 - `models.<name>.strength` and `.cost`: yours adds or re-ranks a model, named by an alias the Agent tool accepts. A project's adds only new names, used only when named, never under `max_tier`.
@@ -53,13 +53,13 @@ Where your rule sets an agent's `level` or `model`, a project's rule for it is i
 1. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` runs every subagent on `CLAUDE_CODE_SUBAGENT_MODEL`, else the conversation's model. The router sets only effort, and none on a call that names a model.
 2. A model named on the call, by Claude, a skill or a workflow script. A prompt asking for one ("use opus") gets Claude a note to pass it.
 3. A per-agent rule: yours, or a project's when not weaker.
-4. The agent's own `model` field.
+4. The agent's own `model` field. `inherit` there is the agent's choice of the parent's model, and it outranks 5.
 5. `CLAUDE_CODE_SUBAGENT_MODEL`. The router leaves the call alone unless it is a redo.
-6. The agent's tools. An agent whose `tools` hold none of Edit, Write, NotebookEdit and Bash, or whose `disallowedTools` remove them all, as the built-in Explore and Plan, runs at `lookup`; any other at `standard`. The router reads only the agent's definition here, never the brief. A [teammate](#agent-teams) starts no lower than `standard`. Under your own rule's `level`, the parent's model takes this place: the conversation's, or the subagent's for a nested call, changed only for your cap, that level or a teammate.
+6. The agent's tools. An agent whose `tools` hold none of Edit, Write, NotebookEdit and Bash, or whose `disallowedTools` remove them all, as the built-in Explore and Plan, runs at `lookup`; any other at `standard`. The router reads only the agent's definition here, never the brief. A [teammate](#agent-teams) starts no lower than `standard`.
 
 For a workflow agent whose script names no model, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` ranks between 1 and 2, with only effort set. `max_tier` doesn't lower these environment pins; a session-start notice names them. Under 2, 3, 4 and 6, a rule's `level` first raises a weaker model. The model must then be inside `max_tier`, allowed by `availableModels` and `deniedModels`, and not routed around, else the next stronger usable model runs, or the strongest usable one.
 
-Effort set by the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` stays. Otherwise a model from 2, 3, 4 or 6 gets its level's effort, one step more on a model weaker than the level (at most `xhigh`). A call left on its parent's model gets none unless capped. On the session's own model, a main-conversation call gets at least the session's effort.
+Effort set by the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` stays. Otherwise a model from 2, 3, 4 or 6 gets its level's effort, one step more on a model weaker than the level (at most `xhigh`). A call left on its parent's model through `inherit` gets none unless capped. On the session's own model, a main-conversation call gets at least the session's effort.
 
 ## The ladder
 
