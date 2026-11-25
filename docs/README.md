@@ -4,7 +4,7 @@
 
 # Model Router documentation
 
-Every page about Model Router, the Claude Code plugin that keeps the Claude model and effort Claude names for each agent within your cap, fills in a missing effort and runs a marked redo higher. New here? Start with the [README](../README.md) and the [questions](FAQ.md).
+Every page about Model Router, the Claude Code plugin that routes subagents: Claude names each one's model and effort, and the plugin holds them to your cap, fills in what is missing and runs a redo one step higher. New here? Start with the [README](../README.md) and the [questions](FAQ.md).
 
 <!-- Cards, written by tools/docs_assets.py from PAGES in tools/docs_pages.py. -->
 <table>

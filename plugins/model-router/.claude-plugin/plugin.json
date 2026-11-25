@@ -2,7 +2,7 @@
   "name": "model-router",
   "displayName": "Model Router",
   "version": "0.2.0",
-  "description": "Keeps the Claude model and effort Claude names for every subagent, teammate and workflow agent within your cap, fills in the effort when only a model is named, and runs a marked redo with more effort or a stronger model.",
+  "description": "Routes Claude Code subagents, teammates and workflow agents. Claude names each one's model and effort from a short table; the plugin holds them to your cap, fills in what is missing, and runs a redo one step higher.",
   "author": {
     "name": "Cris Nahine",
     "url": "https://github.com/crisnahine"
@@ -33,7 +33,7 @@
     "max_tier": {
       "type": "string",
       "title": "Strongest model allowed",
-      "description": "The most capable model subagents may run on: haiku, sonnet, opus or fable. A stronger model from the call, a rule, the agent's definition or a parent model the router can see is lowered to it. A model set by CLAUDE_CODE_SUBAGENT_MODEL, CLAUDE_CODE_SUBAGENT_MODEL_FORCE or CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL isn't, nor is a model ID the registry can't place, and a fork always runs on its conversation's model. Without Python, only a model the call names is lowered. Leave as none for no cap.",
+      "description": "The most capable model subagents may run on: haiku, sonnet, opus or fable. A stronger model from the call, a rule, the agent's definition or a parent model the router can see is lowered to it. A model set by CLAUDE_CODE_SUBAGENT_MODEL, CLAUDE_CODE_SUBAGENT_MODEL_FORCE or CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL isn't, nor is a model ID the registry can't place, and a fork always runs on its conversation's model. Where Python is missing, only the plugin's mod lowers a model, and only one the call names. Leave as none for no cap.",
       "default": "none",
       "options": [
         "none",
@@ -46,13 +46,13 @@
     "verify_gate": {
       "type": "boolean",
       "title": "Check before finishing",
-      "description": "On by default, as this plugin's own choice, and only while routing_mode is auto. When Claude edited a project file with Edit, Write or NotebookEdit and no check command ran afterwards, Claude is asked once, before it finishes a turn, to run the work's own check: tests, type check or linter for code, a recompute for figures, a reread against the request for a document. A file changed by a shell command doesn't count. There is no ask while background work runs or when the session's transcript can't be read. An ask costs one more turn. Set it to false to skip it.",
+      "description": "On by default, and only while routing_mode is auto. When Claude edited a project file with Edit, Write or NotebookEdit and no check command ran afterwards, Claude is asked once, before it finishes a turn, to run the work's own check: tests, type check or linter for code, a recompute for figures, a reread against the request for a document. A file changed by a shell command doesn't count. There is no ask while background work runs or when the session's transcript can't be read. An ask costs one more turn. Set it to false to skip it.",
       "default": true
     },
     "session_check": {
       "type": "string",
       "title": "Session check",
-      "description": "ask (default): when a new interactive session starts below the setups Model Router recommends for the main session (Opus or Fable at medium effort or higher, Sonnet at xhigh or higher), it asks once whether to switch. Picking a setup runs /model and /effort, which also make that model and effort Claude Code's default for new sessions. off: never asks. Only while routing_mode is auto and the plugin's mod is loaded.",
+      "description": "ask (default): when a new interactive session starts below the setups Model Router recommends for the main session (Opus or Fable at medium effort or higher, Sonnet at xhigh or higher), it asks once whether to switch. Picking a setup runs /model and /effort, which also make that model and effort Claude Code's default for new sessions (max lasts one session). off: never asks. Only while routing_mode is auto, the plugin's mod is loaded and Python runs.",
       "default": "ask",
       "options": [
         "ask",

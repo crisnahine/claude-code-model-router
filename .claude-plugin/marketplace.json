@@ -1,6 +1,6 @@
 {
   "name": "claude-code-model-router",
-  "description": "Marketplace for Model Router, a plugin for Claude Code that keeps the Claude model and effort Claude names for each subagent within your cap.",
+  "description": "Marketplace for Model Router, a plugin for Claude Code that routes subagents: Claude names each one's model and effort, and the plugin holds them to your cap.",
   "owner": {
     "name": "Cris Nahine",
     "url": "https://github.com/crisnahine"

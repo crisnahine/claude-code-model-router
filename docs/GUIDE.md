@@ -34,7 +34,7 @@ Set in `/config`:
 - `verify_gate`: `true` (default) or `false`, the [check before a turn ends](#the-check-before-a-turn-ends).
 - `session_check`: `ask` (default) or `off`, the [session check](#the-session-check). `/model-router check off` and `check on` write it too, unless managed settings own it.
 
-Changing an option reloads Model Router, which drops the effort it set for agents still running, so where the mod runs, `/config` and `/model-router check` refuse a change while Claude is working or such an agent runs, and say why.
+Changing an option reloads Model Router, which drops the effort it set for agents still running, so where the mod runs, `/config` and `/model-router check` refuse a change while Claude is working or such an agent runs, and say why. An idle teammate holds nothing: after a change its later turns run at its own effort.
 
 ### Rules files
 
