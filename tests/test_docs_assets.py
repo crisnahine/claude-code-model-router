@@ -53,6 +53,27 @@ def bench_data(**kwargs):
     return analyze.figures(fixture_results(**kwargs))
 
 
+def without_fences(text: str) -> str:
+    return re.sub(r"^```.*?^```", "", text, flags=re.M | re.S)
+
+
+def links(text: str) -> list:
+    """The relative link targets in a Markdown page, outside code."""
+    found = re.findall(r'\]\(([^)\s]+)\)|(?:href|src)="([^"]+)"', re.sub(r"`[^`\n]*`", "", without_fences(text)))
+    return [t for pair in found for t in pair if t and not re.match(r"[a-z]+:", t)]
+
+
+def anchors(text: str) -> set:
+    """The anchors GitHub gives a Markdown page: one per heading, numbered when repeated, and each <a id>."""
+    found, seen = set(re.findall(r'<a (?:id|name)="([^"]+)"', text)), {}
+    for heading in re.findall(r"^#{1,6} (.+?)#*$", without_fences(text), re.M):
+        heading = re.sub(r"\[([^\]]*)\]\([^)]*\)|<[^>]+>|`", r"\1", heading.strip())
+        slug = re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        found.add(slug if slug not in seen else f"{slug}-{seen[slug]}")
+        seen[slug] = seen.get(slug, 0) + 1
+    return found
+
+
 class DocsAssets(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -78,13 +99,13 @@ class DocsAssets(unittest.TestCase):
 
     def test_build_makes_what_it_is_given_and_reads_no_file(self):
         files = self.build(texts={"README.md": self.snap.texts["README.md"]})
-        self.assertEqual({p for p in files if not p.startswith("docs/assets/")}, {"README.md", "CITATION.cff"})
+        self.assertEqual({p for p in files if not p.startswith("docs/assets/")}, {"README.md"})
 
     def test_a_page_head_comes_from_the_page_index_and_replaces_the_old_one(self):
-        pages = [p if p[0] != "docs/TEST_RESULTS.md" else (p[0], "New title", *p[2:]) for p in docs_pages.PAGES]
+        pages = [p if p[0] != "docs/TESTING.md" else (p[0], "New title", *p[2:]) for p in docs_pages.PAGES]
         old = docs_pages.with_head("docs/BENCHMARKS.md", "# Benchmarks\n")
         page = docs_pages.with_head("docs/BENCHMARKS.md", old, pages)
-        self.assertIn('Next: <a href="TEST_RESULTS.md">New title</a>', page)
+        self.assertIn('Next: <a href="TESTING.md">New title</a>', page)
         self.assertNotIn("<img", page)
         self.assertEqual(page.count("<!-- Page head"), 1)
         self.assertTrue(page.endswith("<!-- End of page head. -->\n\n# Benchmarks\n"))
@@ -106,10 +127,31 @@ class DocsAssets(unittest.TestCase):
         code, err = check()
         self.assertEqual(code, 0, "python3 tools/docs_assets.py --check:\n" + err)
 
-    def test_every_page_under_docs_research_is_in_PAGES(self):
+    def test_every_page_in_the_index_exists_and_carries_its_head(self):
+        for path, *_ in docs_pages.PAGES:
+            text = (ROOT / path).read_text(encoding="utf-8")
+            self.assertTrue(text.startswith(docs_pages.page_head(path)), path)
+
+    def test_every_docs_page_is_in_the_index(self):
         listed = {row[0] for row in docs_pages.PAGES}
-        found = {p.relative_to(ROOT).as_posix() for p in (ROOT / "docs" / "research").glob("*.md")}
+        found = {p.relative_to(ROOT).as_posix() for p in (ROOT / "docs").glob("*.md")}
         self.assertEqual(found - listed, set())
+
+    def test_every_relative_link_and_anchor_resolves(self):
+        # The changelog records each release as it shipped, so it can name files removed since.
+        pages = [p[0] for p in docs_pages.PAGES if p[0] != "CHANGELOG.md"]
+        pages += ["README.md", "plugins/model-router/README.md", "CODE_OF_CONDUCT.md"]
+        broken = []
+        for page in pages:
+            text = (ROOT / page).read_text(encoding="utf-8")
+            for target in links(text):
+                path, _, anchor = target.partition("#")
+                file = (ROOT / page).parent / path if path else ROOT / page
+                if not file.exists():
+                    broken.append(f"{page}: {target}")
+                elif anchor and file.suffix == ".md" and anchor not in anchors(file.read_text(encoding="utf-8")):
+                    broken.append(f"{page}: {target}")
+        self.assertEqual(broken, [])
 
     def test_a_stale_file_fails_the_check_and_a_write_fixes_it(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -161,10 +203,10 @@ class DocsAssets(unittest.TestCase):
 
     def test_a_changed_figure_makes_the_docs_stale(self):
         problems = docs_assets.sync(self.build(bench=self.with_changed_figures()), True)
-        for path in ("README.md", "docs/FAQ.md", "site/index.html", "site/llms.txt", "docs/TRACEABILITY.md"):
+        for path in ("README.md", "docs/FAQ.md", "site/index.html", "site/llms.txt"):
             self.assertIn(f"{path}: out of date, run python3 tools/docs_assets.py", problems)
 
-    def test_renaming_the_router_changes_no_file_but_the_trace_in_traceability(self):
+    def test_renaming_the_router_changes_no_file(self):
         base = analyze.load(analyze.default_paths())
         swap = lambda name: "renamed" if name == "plugin-next" else name  # noqa: E731
         results = dataclasses.replace(
@@ -173,8 +215,7 @@ class DocsAssets(unittest.TestCase):
         with unittest.mock.patch.object(analyze, "LEGACY_ROUTER", "renamed"):
             renamed = analyze.figures(results, legacy=True)
         before, after = self.build(), self.build(bench=renamed)
-        self.assertEqual({p for p in before if before[p] != after[p]}, {"docs/TRACEABILITY.md"})
-        self.assertIn("<!-- bench:opus.router_code -->`renamed`<!-- /bench -->", after["docs/TRACEABILITY.md"])
+        self.assertEqual({p for p in before if before[p] != after[p]}, set())
 
     def test_an_unknown_figure_stops_the_build(self):
         with self.assertRaises(SystemExit) as raised:

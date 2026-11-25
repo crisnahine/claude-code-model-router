@@ -1,5 +1,5 @@
 <!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
-<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="PERFORMANCE.md">Performance</a> &nbsp;&middot;&nbsp; Next: <a href="CLAUDE_CODE_DOCS.md">Built on the docs</a></p>
+<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="GLOSSARY.md">Glossary</a> &nbsp;&middot;&nbsp; Next: <a href="PERFORMANCE.md">Performance</a></p>
 <!-- End of page head. -->
 
 # Security

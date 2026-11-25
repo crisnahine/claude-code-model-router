@@ -24,11 +24,6 @@
 
 Without it, a subagent that names no model runs on its conversation's model ([Claude Code docs](https://code.claude.com/docs/en/sub-agents.md#choose-a-model)), so on an Opus session a file listing runs on Opus too. One model for every agent, set with `CLAUDE_CODE_SUBAGENT_MODEL`, puts lookups on an expensive model or hard design work on a weak one. With Model Router, a note at session start asks Claude, which has read the work, to name the model and effort each call needs, and the plugin holds what it names to your cap and to the models that work here.
 
-<p align="center">
-  <a href="https://crisnahine.github.io/claude-code-model-router/assets/video.mp4"><img src="docs/assets/video-play.jpg" width="720" alt="Play the 22-second video, made for the earlier design: on an Opus session, four agent calls run on Haiku, Sonnet, Opus and Fable instead of all on Opus, and a redo moves a call from Sonnet to Opus."></a><br>
-  <sub><a href="https://crisnahine.github.io/claude-code-model-router/assets/video.mp4"><b>Watch it in 22 seconds</b></a>, with sound. It shows the earlier design: now Claude names each call's model and effort, a redo raises effort on the same model before it moves up, and no benchmark has measured what this design costs. Music: Sascha Ende, ende.app (CC BY 4.0).</sub>
-</p>
-
 ## What it does
 
 - Keeps the model of every subagent, teammate and workflow agent inside your cap as it starts, and fills in the effort from the model's level when only a model is named. A call that nothing names a model for runs on its parent's model, within the same limits, unless a rule's `level` raises it or it is a teammate on a parent weaker than Sonnet. The agent the caller chose stays the same.
@@ -125,7 +120,7 @@ Rules and extra models go in `~/.claude/model-router.json` (yours, applies every
 - Workflows and ultracode: a model the script names is held to your cap like any call's, and on the session's own model a stage never runs below the session's effort, such as `xhigh` under ultracode ([details](docs/GUIDE.md#workflows-and-ultracode)).
 - Permissions: the plugin never approves a tool call. Your permission rules and auto mode still review every spawn.
 - Amazon Bedrock, Google Cloud's Agent Platform (Vertex AI) and Microsoft Foundry: routing uses the aliases `haiku`, `sonnet`, `opus` and `fable`, and where one resolves to an older model the mod sends the family's newest ID. Without the mod the `Agent` call takes only an alias, so a model the router picks itself (a rule's raise, a teammate's start, a redo's next model) moves one family up instead, and a model Claude names runs as its alias resolves ([details](docs/GUIDE.md#third-party-providers)). These providers aren't tested live yet.
-- Versions: Claude Code 2.1.329 or later. The live runs on 2.1.330 and 2.1.331 on macOS, ultracode included, predate the redesign where Claude names each call's model and effort; the unit tests run on Linux, macOS and Windows in CI. [Release readiness](docs/RELEASE_READINESS.md) lists what is still open.
+- Versions: Claude Code 2.1.329 or later. The live runs on 2.1.330 and 2.1.331 on macOS, ultracode included, predate the redesign where Claude names each call's model and effort; the unit tests run on Linux, macOS and Windows in CI.
 - Failure: every hook fails open. A bug can cost routing, never block a tool call, a spawn or a session.
 
 <a id="security"></a>
@@ -153,14 +148,12 @@ Model Router runs on your machine with your user permissions, as every plugin's 
 | [Security](docs/SECURITY.md) | What reaches the network, and who can steer it? |
 | [Changelog](CHANGELOG.md) | What changed in each release? |
 
-The [documentation index](docs/README.md) lists every other page, including performance, the roadmap, the glossary and release readiness. Bugs and questions go to [GitHub issues](https://github.com/crisnahine/claude-code-model-router/issues). For a quick question, or a call it routed wrong, join the [Discord server](https://discord.gg/AHZZ7bABJy). To work on the plugin, see [CONTRIBUTING.md](CONTRIBUTING.md).
+The [documentation index](docs/README.md) lists every other page, including performance, the roadmap and the glossary. Bugs and questions go to [GitHub issues](https://github.com/crisnahine/claude-code-model-router/issues). For a quick question, or a call it routed wrong, join the [Discord server](https://discord.gg/AHZZ7bABJy). To work on the plugin, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
 Apache-2.0. See [LICENSE](LICENSE).
 
 Copyright 2026 Cris Nahine.
-
-The music in the [video](docs/assets/BRAND.md) is by Sascha Ende ([ende.app](https://ende.app/en)) under CC BY 4.0, so the Apache-2.0 license doesn't cover it.
 
 Model Router is an independent project, not made or endorsed by Anthropic.

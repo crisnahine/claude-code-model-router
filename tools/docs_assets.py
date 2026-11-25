@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Writes the docs' diagrams and badges, the docs' page heads and index, the benchmark figures, the site's
-generated parts and CITATION.cff.
+"""Writes the docs' diagrams and badges, the docs' page heads and index, the benchmark figures and the site's
+generated parts.
 
 Run: python3 tools/docs_assets.py            write everything
      python3 tools/docs_assets.py --check    fail if anything on disk differs or breaks a rule
@@ -110,7 +110,7 @@ def frame(w, h, rx=16):
 EXTRA_CARDS = [("README.md", "Model Router", "What does it do, and how do I install it?", 1)]
 GROUPS = {1: ("Start here", "What it is, and the questions people ask first."),
           2: ("How it works", "The design, its words and sources, and what it costs to run."),
-          3: ("Evidence", "What was measured and tested, and what is still open."),
+          3: ("Evidence", "What it follows, and what was measured and tested."),
           4: ("The project", "What comes next, what changed, and how to take part.")}
 CARDS_START, CARDS_END = "<!-- Cards, written by tools/docs_assets.py from PAGES in tools/docs_pages.py. -->", "<!-- End of cards. -->"
 
@@ -432,8 +432,7 @@ def diagram_stop_checks() -> str:
 
 # ---------------------------------------------------------------- the headline figures in the docs
 
-FIGURE_PAGES = ("README.md", "docs/ARCHITECTURE.md", "docs/FAQ.md", "docs/RELEASE_READINESS.md", "docs/ROADMAP.md",
-                "docs/TRACEABILITY.md", "site/llms.txt")
+FIGURE_PAGES = ("README.md", "docs/ARCHITECTURE.md", "docs/FAQ.md", "docs/ROADMAP.md", "site/llms.txt")
 BENCH_SPAN = re.compile(r"<!-- bench:([\w.-]+) -->(.*?)<!-- /bench -->")
 SESSION_NAMES = {"claude-opus-5-5": "opus", "sonnet": "sonnet"}
 CLASS_WORDS = {"security-review": "security review", "root-cause": "root cause"}
@@ -547,7 +546,7 @@ def with_figures(path: str, text: str, figures: dict) -> str:
 
 # ---------------------------------------------------------------- the Claude Code floor
 
-# The pages that state the current floor; the changelog and research pages keep the floor of their day.
+# The pages that state the current floor; the changelog keeps the floor of its day.
 FLOOR_PAGES = ("README.md", "plugins/model-router/README.md", "docs/FAQ.md", "docs/GUIDE.md", "site/llms.txt")
 FLOOR = re.compile(r"Claude Code \d+(?:\.\d+)+ or later")
 
@@ -661,34 +660,6 @@ def release_date(v: str) -> str:
     return m.group(1)
 
 
-def citation(v: str, day: str) -> str:
-    return f"""cff-version: 1.2.0
-message: "If you use Model Router in your work, please cite it with these details."
-type: software
-title: "Model Router"
-abstract: >-
-  Model Router (model-router) is a Claude Code plugin that holds the Claude
-  model and reasoning effort Claude names for every agent Claude Code starts
-  (subagents, agent-team teammates and workflow stages) to the user's limits,
-  fills in the effort when only a model is named, and runs a call Claude marks
-  as a redo with more effort or on a stronger model.
-authors:
-  - given-names: Cris
-    family-names: Nahine
-version: "{v}"
-date-released: "{day}"
-license: Apache-2.0
-repository-code: "{REPO}"
-url: "{REPO}"
-keywords:
-  - Claude Code
-  - Claude Code plugin
-  - model routing
-  - subagents
-  - cost per solved task
-"""
-
-
 @dataclasses.dataclass(frozen=True)
 class Snapshot:
     """Everything `build` reads, taken once: the plugin's version, its release date and its Claude Code floor, the
@@ -743,7 +714,6 @@ def build(snap: Snapshot) -> dict:
     for path in FIGURE_PAGES:
         if path in files:
             files[path] = with_figures(path, files[path], figures)
-    files["CITATION.cff"] = citation(v, snap.released)
     files.update(site_files(files.get("docs/FAQ.md", ""), figures, snap.texts, v, snap.released, snap.claude_code))
     return files
 

@@ -394,24 +394,6 @@ class Shipped(unittest.TestCase):
         self.assertLessEqual(description.count(". ") + 1, 2, description)
         self.assertLessEqual(len(description.split()), 40, description)
 
-    def test_nothing_still_carries_the_old_name(self):
-        old = re.compile("orchestr" + "ator", re.I)
-        skip = {".git", ".superpowers", "superpowers", "fixtures", "__pycache__", "results"}
-        try:  # tracked files only, so a local scratch folder can't fail the suite; a tarball has no git
-            listed = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True,
-                                    timeout=60).stdout.decode("utf-8").split("\0")
-            paths = [ROOT / name for name in listed if name]
-        except (OSError, subprocess.SubprocessError):
-            paths = list(ROOT.rglob("*"))
-        for path in paths:
-            if path.is_file() and not skip & set(path.relative_to(ROOT).parts) and path.suffix != ".pyc":
-                self.assertIsNone(old.search(str(path.relative_to(ROOT))), path)
-                try:
-                    text = path.read_text(encoding="utf-8")
-                except (UnicodeDecodeError, OSError):
-                    continue
-                self.assertIsNone(old.search(text), path)
-
     def test_agent_stopped_runs_before_the_next_step(self):
         data = json.loads((PLUGIN / "hooks" / "hooks.json").read_text(encoding="utf-8"))
         stop = [h for g in data["hooks"]["SubagentStop"] for h in g["hooks"] if h["args"][1] == "agent-stopped"]

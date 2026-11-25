@@ -1,5 +1,5 @@
 <!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
-<p align="center"><a href="README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="docs/README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="docs/ARCHITECTURE.md">Architecture</a> &nbsp;&middot;&nbsp; Next: <a href="docs/research/model-control.md">Research</a></p>
+<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="ARCHITECTURE.md">Architecture</a> &nbsp;&middot;&nbsp; Next: <a href="SECURITY.md">Security</a></p>
 <!-- End of page head. -->
 
 # Glossary
@@ -14,7 +14,7 @@ The words this plugin's code, docs and reviews use for its own domain.
 
 **Path**: how a call reaches the router. The **mod path** runs in `hooks/router.ts` on engine events and calls `mod.py`. The **fallback path** (`fallback.py`) rewrites the `Agent` tool call and stands down for a call the mod's `tool.call` hook marked.
 
-**Documented extension point**: a part of Claude Code that its docs describe for plugins: the plugin manifest, hooks, the mods API, skills and subagents. Model Router is built on these, and relies on a few details no docs page states, such as `agent.spawn` fields that only the type files Claude Code writes for each build list. [Built on the docs](docs/CLAUDE_CODE_DOCS.md) lists each docs rule it follows and where it goes past them.
+**Documented extension point**: a part of Claude Code that its docs describe for plugins: the plugin manifest, hooks, the mods API, skills and subagents. Model Router is built on these, and relies on a few details no docs page states, such as `agent.spawn` fields that only the type files Claude Code writes for each build list. [Built on the docs](CLAUDE_CODE_DOCS.md) lists each docs rule it follows and where it goes past them.
 
 **Session floor**: the lowest effort the router sets on the session's own model for a call the main conversation starts: the session's level, since that call would run at it without the router (`router._session_floor`).
 
