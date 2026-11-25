@@ -69,14 +69,16 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
 
 
 def _usable(tool_input: dict, definition: dict | None, snap: settings.Snapshot) -> list:
-    """The usable models, with the family of an exact ID the call or the agent names inside the cap that the lists
-    permit though not its family, such as a Mythos ID for Fable: Claude Code runs that ID as named."""
+    """The usable models, plus the family of the exact ID that will run (the call's, else the agent's) when only the
+    lists close that family and they permit the ID, such as a Mythos ID for Fable: Claude Code runs that ID as named."""
     reg, usable, cap = snap.registry, snap.usable, snap.options.cap
-    for named in (tool_input.get("model"), (definition or {}).get("model")):
-        family = reg.family(named)
-        if (family and family not in usable and named.lower() != family and not (cap and reg.stronger(family, cap))
-                and snap.allowed.lists_permit(reg, family, named) and snap.health.healthy(named)):
-            usable = reg.by_strength([*usable, family])
+    named = tool_input.get("model") or (definition or {}).get("model")
+    family = reg.family(named)
+    # A family that health or the cap closed stays closed: only the lists' own verdict on the ID can reopen it.
+    if (family and family not in snap.allowed.permitted(reg, snap.sendable) and named.lower() != family
+            and not (cap and reg.stronger(family, cap)) and snap.allowed.lists_permit(reg, family, named)
+            and snap.health.healthy(named)):
+        return reg.by_strength([*usable, family])
     return usable
 
 

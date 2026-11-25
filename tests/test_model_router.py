@@ -1051,6 +1051,19 @@ class Allowlist(Sandbox):
             self.assertEqual(sent(["opus", "sonnet", "haiku", mythos], **named)[0], "opus", named)  # over the cap
             del os.environ["CLAUDE_PLUGIN_OPTION_MAX_TIER"]
 
+    def test_an_exact_id_reopens_only_a_family_the_lists_closed_and_only_for_the_model_that_runs(self):
+        # Health closed opus, not the lists: an exact ID of it moves like the alias.
+        self.route_around("opus")
+        for named in ("claude-opus-5-5", "opus[1m]", "best"):
+            self.assertEqual(self.decide("general-purpose", HARD, model=named)["model"], "fable", named)
+        # The call's model runs, not the agent's: an agent file's permitted ID opens nothing for a call naming another.
+        mythos = "claude-mythos-5-2"
+        self.agent("twin", mythos)
+        out = modpath.spawn({"session_id": "s2", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                             "tool_input": {"subagent_type": "twin", "prompt": HARD, "model": "opus"},
+                             "settings": {"policy": {"availableModels": ["sonnet", "haiku", mythos]}}})
+        self.assertEqual(out["model"], "sonnet")
+
     def test_entries_that_are_not_strings_match_nothing(self):
         self.assertEqual(self.permitted(policy={"availableModels": ["sonnet", {"id": "claude-opus-5-5"}],
                                                 "deniedModels": [{"id": "sonnet"}]}), {"sonnet"})
