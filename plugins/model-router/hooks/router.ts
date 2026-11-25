@@ -337,10 +337,12 @@ function refresh($: EngineInterface, opts: Record<string, string>, live: Live): 
 }
 
 // A --effort flag at launch is in no settings layer and no mod call, so it is read from the session's own command
-// line. Only the level leaves this function.
+// line, of the process Claude Code names. Only the level leaves this function.
 async function launchEffort($: EngineInterface): Promise<string | undefined> {
   try {
-    const run = await $.process.run(['sh', '-c', 'ps -o args= -p $PPID'], { timeoutMs: 2000 })
+    // shortcut: ps joins the arguments with spaces and drops their quotes, so "--effort max" inside another flag's
+    // quoted text reads as the flag; read the arguments one by one if Claude Code ever hands them to a mod.
+    const run = await $.process.run(['sh', '-c', 'ps -o args= -p "$CLAUDE_PID"'], { env: await $.process.hookEnv(), timeoutMs: 2000 })
     const level = /\s--effort[= ](low|medium|high|xhigh|max|ultracode)(?=\s|$)/.exec(run.stdout)?.[1]
     return level === 'ultracode' ? 'xhigh' : level
   } catch {

@@ -84,11 +84,12 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
       set: async ({ key, value }: { key: string; value: unknown }) => { ui.sets.push([key, value]); return ui.setAnswer ?? { value } },
     },
     process: {
-      hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: engine.session, CLAUDE_PLUGIN_DATA: '/tmp/x' }),
+      hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: engine.session, CLAUDE_PLUGIN_DATA: '/tmp/x', CLAUDE_PID: '4242' }),
       run: async (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) => {
         if (argv[1] === '-c') {
-          if (ui.launched === undefined) throw new Error('no ps here')
-          return { exitCode: 0, stdout: `${ui.launched}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+          // ps of the process Claude Code names, which joins its arguments with spaces and drops their quotes.
+          if (ui.launched === undefined || !argv[2]!.includes('"$CLAUDE_PID"') || init.env?.CLAUDE_PID !== '4242') throw new Error('no ps here')
+          return { exitCode: 0, stdout: `${ui.launched.replaceAll('"', '')}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
         }
         const command = argv[2] ?? ''
         calls.push({ command, argv, stdin: JSON.parse(init.stdin), env: init.env })
@@ -838,7 +839,8 @@ test('an interactive start registers the command, shows the status line and asks
 test('an effort flag at launch reaches the session check, and nothing else of the command line does', async () => {
   for (const [launched, effort] of [['claude --model sonnet --effort xhigh "fix the --effort low bug"', 'xhigh'],
     ['claude --effort=max', 'max'], ['claude --effort ultracode', 'xhigh'], ['claude --effort', undefined],
-    ['claude "say --effortless things"', undefined], [undefined, undefined]] as const) {
+    ['claude "say --effortless things"', undefined], [undefined, undefined],
+    ['claude --append-system-prompt "never pass --effort max to tools"', 'max']] as const) { // a known miss: the quotes are gone
     const mod = load({ 'mod-status': STATUS, 'mod-check': { stdout: JSON.stringify({ ok: true }) } })
     mod.ui.launched = launched
     await mod.sessionStart(START)
