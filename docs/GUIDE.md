@@ -30,9 +30,9 @@ It needs Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3
 Set in `/config`:
 
 - `routing_mode`: `auto` (default) or `off`. `off` changes no call and adds no notes or checks, but still keeps records and tells Claude of a model error or a mid-run model swap.
-- `max_tier`: `none` (default), `haiku`, `sonnet`, `opus` or `fable`, the strongest model a subagent may run on. A stronger one is lowered, except an environment pin or a fork.
+- `max_tier`: `none` (default), `haiku`, `sonnet`, `opus` or `fable`, the strongest model a subagent may run on. A stronger one is lowered, except an environment pin or a fork. A Mythos ID counts as Fable; a model ID the registry can't place in a family is left as it is.
 - `verify_gate`: `true` (default) or `false`, the [check before a turn ends](#the-check-before-a-turn-ends).
-- `session_check`: `ask` (default) or `off`, the [session check](#the-session-check). `/model-router check off` and `check on` write it too, unless managed settings own it.
+- `session_check`: `ask` (default) or `off`, the [session check](#the-session-check). `/model-router check off` and `check on` write it too, unless managed settings own it, and only while Claude is idle: changing an option reloads Model Router, which would drop what it set for agents already running.
 
 ### Rules files
 
@@ -73,7 +73,7 @@ It refreshes when the session starts, after each spawn, after each main-loop tur
 
 ### The session check
 
-The session that plans and delegates works best on a strong setup. The recommended ones are in `config/models.json` under `session`, as each model's lowest effort: Opus at `medium`, Fable at `medium` and Sonnet at `xhigh`, each up to `max`. A model left out, such as Haiku, is never recommended.
+The session that plans and delegates works best on a strong setup. The recommended ones are in `config/models.json` under `session`, as each model's lowest effort: Opus at `medium`, Fable at `medium` and Sonnet at `xhigh`, each up to `max`. A model left out, such as Haiku, is never recommended, and neither is an older version of a family: an older full ID, or the alias where the provider runs an older model with it, as `sonnet` on Bedrock. Picking that family again switches to its newest model.
 
 When a new interactive session starts below these, with `routing_mode` on and `session_check` at `ask`, Model Router asks once, after the session has started:
 
@@ -81,9 +81,9 @@ When a new interactive session starts below these, with `routing_mode` on and `s
 2. After a model: "Which effort for Opus? Claude Code keeps this model and effort as your default for new sessions." The efforts run from the lowest recommended one, marked `(Recommended)` and `Claude Code's default` where it is, up to `max (this session only)`, held to `maxEffortLevel`. Under `CLAUDE_CODE_EFFORT_LEVEL`, which `/effort` can't override, a model whose level it already reaches is offered at that level with no second step.
 3. After Stay: "Ask about this again?", with `Ask again next session` first and `Don't ask again (/model-router check on brings this back)`, which sets `session_check` to `off`. With the option owned by managed settings, there is no second step.
 
-Picking a setup runs Claude Code's own `/model` when the model differs, then `/effort` when the effort differs, and one line says where the session is now, as "This session is now on Opus at medium." If Claude Code refuses the model, say for an allowlist, the line says the session stayed and no effort is set, since Claude Code saves effort per model. A dismissal, text typed under the dialog's own rows, or Stay changes nothing.
+Picking a setup runs Claude Code's own `/model` when the model differs, then `/effort` when the effort differs, and one line says where the session is now, as "This session is now on Opus at medium." If Claude Code refuses the model, say for an allowlist, the line says the session stayed and no effort is set, since Claude Code saves effort per model. If it switches the model but doesn't run `/effort`, the line says the session is on the new model without that effort. A dismissal, text typed under the dialog's own rows, or Stay changes nothing.
 
-It asks at most once per session, a plugin reload included, and never once the conversation has a prompt in it: a first prompt given at launch, or typed before the question shows, keeps it away. Before the first request the session's effort is an estimate: `CLAUDE_CODE_EFFORT_LEVEL`, then a `--effort` flag at launch, then the settings files in Claude Code's order (a model's saved level, a top-level `effortLevel`), then the model's default, `medium`, held to `maxEffortLevel`. The flag is read from the session's own command line, which works on macOS and Linux; where it can't be read, and for an organization's default effort, the estimate goes without it. From the first request on, the main loop's own effort is read, and `/model-router` shows it, as `session: opus at medium` or `session: sonnet at medium (below the recommended setups)`. A wrong estimate never brings the question back mid-work.
+It asks at most once per session, a plugin reload included, and never once the conversation has a prompt in it: a first prompt given at launch, or typed before the question shows, keeps it away. Before the first request the session's effort is an estimate: `CLAUDE_CODE_EFFORT_LEVEL`, then a `--effort` flag at launch, then the settings files in Claude Code's order (a model's saved level, a top-level `effortLevel`), then the model's default, `medium`, held to `maxEffortLevel`. The flag is read from the session's own command line, which works on macOS and Linux; where it can't be read, and for an organization's default effort, the estimate goes without it. That line comes back with its quotes gone, so `--effort max` inside another flag's quoted text, as in `--append-system-prompt "never pass --effort max"`, reads as the flag. From the first request on, the main loop's own effort is read, and `/model-router` shows it, as `session: opus at medium` or `session: sonnet at medium (below the recommended setups)`. A wrong estimate never brings the question back mid-work.
 
 ## Who decides the model
 
@@ -167,7 +167,7 @@ Its state is in `~/.claude/plugins/data/model-router-claude-code-model-router/`,
 ## What it can't do
 
 - It never changes the main conversation's model or effort by itself, since a switch re-reads the conversation uncached. The [session check](#the-session-check) offers one before the first prompt, and only a setup you pick runs `/model` and `/effort`. Otherwise use `ultrathink` or `/effort`.
-- It leaves forks, resumed agents and agents whose definition it can't find alone, unless the call or your rule names a model.
+- It leaves forks, resumed agents and agents whose definition it can't find alone, unless the call or your rule names a model. A plugin's agent is found through Claude Code's install record, so one from a plugin loaded with `--plugin-dir` is left alone.
 - It doesn't retry a failed call; set `fallbackModel`. After a model error it suggests a usable model (not under the force variable), and after two errors, or two runs on another model, it routes around that model for a day. With the mod, a run that another mod moved to another model doesn't count.
 - Where Fable bills to usage credits, a background session or teammate with nobody to answer the consent prompt ends its turn, and `claude -p` bills without asking; `max_tier` at `opus` avoids both.
 - Without the mod, as where an organization blocks user mods, it has no dollar figures, workflow routing, settings lists, newest IDs or model table in the Agent and Workflow tools' descriptions, and no status line, `/model-router` or session check: the state is in `/config` and `/model-router:usage`, and nothing asks about the session. With hooks off it does nothing.

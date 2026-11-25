@@ -194,7 +194,7 @@ def post_agent(hook_input: dict) -> dict | None:
     launched = response.get("status") == "async_launched"
     agent_id = response.get("agentId")
     session_id = hook_input.get("session_id")
-    outcome = _outcome("result", hook_input, snap.registry, ran_as=ran_as, ran_family=snap.registry.family(ran_as),
+    outcome = _outcome("result", hook_input, snap.registry, ran_as=ran_as, ran_family=snap.registry.family(ran_as, twins=False),
                        forced=snap.options.force, status=response.get("status"),
                        moved=mod.moved(hook_input.get("tool_use_id")), launched=launched, agent_id=agent_id if launched and isinstance(agent_id, str) else None,
                        models_used=() if launched else tuple(calls.models_used(response)))

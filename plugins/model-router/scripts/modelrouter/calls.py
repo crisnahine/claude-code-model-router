@@ -42,7 +42,6 @@ class Route:
     effort: str | None
     source: str | None
     path: str
-    at: float = 0.0
     was: str | None = None
     version: str | None = None
     ran: dict | None = None  # what the agent's requests carried, when the mod saw it (`observed`)
@@ -80,11 +79,10 @@ class Outcome:
 
 @dataclass(frozen=True)
 class Returned:
-    """What an outcome came to: the model the call was meant to run on, its route, whether it
-    finished the call, and what Claude should be told (`note`, one of the constants above)."""
+    """What an outcome came to: the model the call was meant to run on, its route, and what Claude
+    should be told (`note`, one of the constants above)."""
     asked: str | None
     route: Route | None
-    finished: bool
     note: str | None = None
 
 
@@ -136,11 +134,9 @@ def _text(value: object) -> str | None:
 def _route(record: object) -> Route | None:
     if not isinstance(record, dict):
         return None
-    at = record.get("at")
     return Route(model=_text(record.get("model")), sent=_text(record.get("sent")),
                  level=Level.parse(record.get("level")), effort=_text(record.get("effort")),
                  source=_text(record.get("source")), path=_text(record.get("path")) or "",
-                 at=float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else 0.0,
                  was=_text(record.get("was")), version=_text(record.get("version")),
                  ran=record["ran"] if isinstance(record.get("ran"), dict) else None)
 
@@ -211,7 +207,7 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
     except OSError:
         pass
     ledger.result(session_id, outcome.agent, asked, ran_as, outcome.status, models_used=list(outcome.models_used) or None)
-    return Returned(asked, route, finished, SWAPPED if swapped else None)
+    return Returned(asked, route, SWAPPED if swapped else None)
 
 
 def _wait_or_finish(session_id: str | None, outcome: Outcome, route: Route, finished: bool) -> None:
@@ -226,6 +222,10 @@ def _wait_or_finish(session_id: str | None, outcome: Outcome, route: Route, fini
 def observed(session_id: str | None, spawn_id: str, run: dict) -> None:
     """What a spawn's agent ran at, as its requests carried it: it replaces what the route set at spawn, on the
     route and on a run already waiting or finished, whichever order the result and this arrive in."""
+    route = store.load_entry("routes", session_id).get(spawn_id)
+    if isinstance(route, dict) and route.get("ran") == run:
+        return  # an earlier turn brought the same pair, and every record took it then
+
     def into(records: dict) -> None:
         for record in records.values():
             if isinstance(record, dict) and record.get("spawn") == spawn_id:
@@ -244,23 +244,23 @@ def observed(session_id: str | None, spawn_id: str, run: dict) -> None:
 def _failed(session_id: str | None, outcome: Outcome, route: Route | None, asked: str | None,
             guessed: bool) -> Returned:
     if guessed or not asked or outcome.interrupted or outcome.moved:
-        return Returned(asked, route, False)
+        return Returned(asked, route)
     sent = route.sent if route and route.model == asked and not route.version else None
     if sent and sent.lower() != asked and health.is_refusal(outcome.error):
         # The path sent a full ID in place of the alias and the provider refused it: the ID is routed around,
         # and the alias runs until it is tried again.
         health.failed(sent, outcome.error, newest=True)
         ledger.model_error(session_id, outcome.agent, sent)
-        return Returned(asked, route, False, ID_FAILED)
+        return Returned(asked, route, ID_FAILED)
     if not health.is_model_error(outcome.error):
-        return Returned(asked, route, False)
+        return Returned(asked, route)
     if route and route.version:
         # The caller or the agent chose this exact model, so its failure says nothing of the family.
         ledger.model_error(session_id, outcome.agent, route.version)
-        return Returned(asked, route, False)
+        return Returned(asked, route)
     fails = health.failed(asked, outcome.error)
     ledger.model_error(session_id, outcome.agent, asked)
-    return Returned(asked, route, False, ROUTED_AROUND if fails >= 2 else MODEL_FAILED)
+    return Returned(asked, route, ROUTED_AROUND if fails >= 2 else MODEL_FAILED)
 
 
 def _stopped(session_id: str | None, outcome: Outcome) -> Returned:
@@ -268,7 +268,7 @@ def _stopped(session_id: str | None, outcome: Outcome) -> Returned:
     with an answer. Foreground agents finished at their result and aren't waiting."""
     agent_id = outcome.agent_id
     if not isinstance(agent_id, str) or agent_id not in store.load_entry("launched", session_id):
-        return Returned(None, None, False)
+        return Returned(None, None)
     run: dict = {}
 
     def take(launched: dict) -> None:
@@ -280,7 +280,7 @@ def _stopped(session_id: str | None, outcome: Outcome) -> Returned:
     if finished:
         done = {k: run[k] for k in ("level", "model", "effort", "no_effort", "spawn") if k in run}
         _mutate("done", session_id, lambda records: store.keep(records, run["task"], done))
-    return Returned(run.get("model") if isinstance(run.get("model"), str) else None, None, finished)
+    return Returned(run.get("model") if isinstance(run.get("model"), str) else None, None)
 
 
 def last_run(session_id: str | None, task: str) -> dict | None:

@@ -380,7 +380,7 @@ def checks_ran_since(transcript_path: object, since: float) -> bool | None:
     if tail is None:
         return None
     checks = set()
-    for row, block in session.tool_calls(transcript_path, '"command"'):
+    for row, block in session.tool_calls(tail, '"command"'):
         try:
             stamp = _dt.datetime.fromisoformat(str(row.get("timestamp", "")).replace("Z", "+00:00")).timestamp()
         except ValueError:

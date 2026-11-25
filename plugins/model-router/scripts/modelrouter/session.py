@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
+import re
 from typing import Iterator
 
 from . import router, settings, store
-from .config import EFFORTS
+from .config import DEFAULT_EFFORT, EFFORTS
 from .registry import Registry
 
 HEADER = "Model Router"  # $.ui.ask's chip takes 12 characters at most
@@ -20,6 +21,23 @@ def recommended(reg: Registry, family: str | None, effort: str | None) -> bool:
     return bool(floor) and effort in EFFORTS and EFFORTS.index(effort) >= EFFORTS.index(floor)
 
 
+def _version(model_id: str, family: str) -> tuple[int, ...]:
+    found = re.search(rf"{re.escape(family)}-(\d{{1,2}})(?:-(\d{{1,2}}))?(?!\d)", model_id)
+    return tuple(int(n) for n in found.groups() if n) if found else ()
+
+
+def older(reg: Registry, provider: str | None, model: object) -> bool:
+    """Whether `model` runs an older version than its family's newest: the provider's alias where it lags, or an
+    older full ID. An ID with no version to read counts as current."""
+    family = reg.family(model, twins=False)
+    if family not in reg.newest or not isinstance(model, str):
+        return False
+    name = model.lower().split("[")[0]
+    if name == family:
+        return family in reg.older_aliases.get(provider or "", {})
+    return () < _version(name, family) < _version(reg.newest[family], family)
+
+
 def effort_on(snap: settings.Snapshot, family: str, launched: object = None) -> str | None:
     """The effort the main session runs at on `family` before its first request shows it: CLAUDE_CODE_EFFORT_LEVEL, then
     `launched` (a --effort flag, where the mod could read the session's command line), then the settings files, then
@@ -27,7 +45,7 @@ def effort_on(snap: settings.Snapshot, family: str, launched: object = None) -> 
     (https://code.claude.com/docs/en/model-config.md#adjust-effort-level)."""
     reg, env = snap.registry, snap.options.effort_level
     named = env if env in EFFORTS else launched if launched in EFFORTS else None
-    effort = named or snap.allowed.saved_effort(reg, family) or router.DEFAULT_EFFORT
+    effort = named or snap.allowed.saved_effort(reg, family) or DEFAULT_EFFORT
     return router.capped(effort, snap.allowed.effort_cap(reg, family))[0]
 
 
@@ -51,7 +69,7 @@ def _remarks(*remarks: str | None) -> str:
     return f" ({', '.join(found)})" if found else ""
 
 
-def _model_choice(snap: settings.Snapshot, family: str, name: str, launched: object = None) -> dict | None:
+def _model_choice(snap: settings.Snapshot, family: str | None, name: str, launched: object = None) -> dict | None:
     """Step one's choice of `name` without its label, with step two's efforts, or None when it can't run here at a
     recommended effort."""
     reg, options = snap.registry, snap.options
@@ -66,7 +84,7 @@ def _model_choice(snap: settings.Snapshot, family: str, name: str, launched: obj
     runs = effort_on(snap, name, launched)
     # model-config.md: Claude Code's default effort on the current models, and max lasting one session unless the
     # environment sets it, which a pinned effort never reaches here.
-    picks = [{"label": e + _remarks("Recommended" if not i else None, "Claude Code's default" if e == router.DEFAULT_EFFORT else None,
+    picks = [{"label": e + _remarks("Recommended" if not i else None, "Claude Code's default" if e == DEFAULT_EFFORT else None,
                                     "this session only" if e == "max" else None),
               "done": f"This session is now on {_named(name, e)}.", **({"effort": e} if e != runs else {})}
              for i, e in enumerate(efforts)]
@@ -90,20 +108,23 @@ def check(snap: settings.Snapshot, model: object, locked: bool = False, launched
         return {}
     family = reg.family(model)
     effort = effort_on(snap, family, launched) if family else None
-    fine = recommended(reg, family, effort)
+    stale = older(reg, options.provider, model)
+    fine = recommended(reg, family, effort) and not stale
 
     def mark(entry: dict) -> None:
         entry["checked"] = True
         if family:
             entry["estimate"] = {"model": family, "effort": effort, "recommended": fine}
     store.mutate_entry(settings.SWITCHES, session_id, mark, max_age=settings.SWITCH_KEPT)
-    choices = [c for c in (_model_choice(snap, family, n, launched) for n in reg.session) if c] if family and not fine else []
+    # A session on an older model of its family is offered the newest one, as another family would be.
+    current = None if stale else family
+    choices = [c for c in (_model_choice(snap, current, n, launched) for n in reg.session) if c] if family and not fine else []
     if not choices:
         return {}
     strongest = max(choices, key=lambda c: reg.strength(c["family"]))
     for i, choice in enumerate(choices):
         floor, efforts = reg.session[choice["family"]], choice.pop("efforts")
-        above = EFFORTS.index(floor) > EFFORTS.index(router.DEFAULT_EFFORT)
+        above = EFFORTS.index(floor) > EFFORTS.index(DEFAULT_EFFORT)
         choice["label"] = choice["family"].capitalize() + _remarks(
             "Recommended" if not i else "the strongest model" if choice is strongest else None,
             f"at {floor} effort{' or higher' if len(efforts) > 1 else ''}" if above else None)
@@ -120,7 +141,8 @@ def observe(snap: settings.Snapshot, model: object, effort: object) -> None:
     if not isinstance(snap.session_id, str) or not family:
         return
     level = effort if effort in EFFORTS else None
-    setup = {"model": family, "effort": level, "recommended": recommended(snap.registry, family, level)}
+    setup = {"model": family, "effort": level, "recommended": recommended(snap.registry, family, level)
+             and not older(snap.registry, snap.options.provider, model)}
     store.mutate_entry(settings.SWITCHES, snap.session_id, lambda entry: entry.update(setup=setup), max_age=settings.SWITCH_KEPT)
 
 
@@ -142,10 +164,9 @@ def transcript_tail(transcript_path: object, size: int) -> str | None:
         return None
 
 
-def tool_calls(transcript_path: object, marker: str) -> Iterator[tuple[dict, dict]]:
-    """`(row, block)` for each tool_use block in the transcript's last 1 MiB. Only lines holding
-    `marker` are parsed, and unreadable rows are skipped."""
-    tail = transcript_tail(transcript_path, 1024 * 1024)
+def tool_calls(tail: str | None, marker: str) -> Iterator[tuple[dict, dict]]:
+    """`(row, block)` for each tool_use block in a transcript's tail. Only lines holding `marker` are parsed,
+    and unreadable rows are skipped."""
     for line in (tail or "").splitlines():
         if '"tool_use"' not in line or marker not in line:
             continue
@@ -154,8 +175,6 @@ def tool_calls(transcript_path: object, marker: str) -> Iterator[tuple[dict, dic
             content = row["message"]["content"]
         except (ValueError, KeyError, TypeError):
             continue
-        if not isinstance(row, dict):
-            continue
         for block in content if isinstance(content, list) else []:
             if isinstance(block, dict) and block.get("type") == "tool_use":
                 yield row, block
@@ -163,7 +182,7 @@ def tool_calls(transcript_path: object, marker: str) -> Iterator[tuple[dict, dic
 
 def handed_back(transcript_path: object) -> bool:
     """Did the agent deliver a report through SubagentHandback?"""
-    for _, block in tool_calls(transcript_path, '"SubagentHandback"'):
+    for _, block in tool_calls(transcript_tail(transcript_path, 1024 * 1024), '"SubagentHandback"'):
         message = (block.get("input") or {}).get("message") if isinstance(block.get("input"), dict) else None
         if block.get("name") == "SubagentHandback" and isinstance(message, str) and message.strip():
             return True

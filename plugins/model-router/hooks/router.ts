@@ -9,8 +9,10 @@ const SETTINGS_MS = 2000
 const SOURCES: readonly SettingsSource[] = ['policy', 'user', 'project', 'local', 'flag']
 const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides', 'maxEffortLevel', 'modelSettings', 'effortLevel']
 const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
-// The max_tier ladder, weakest first, for a call the runtime didn't answer.
+// The max_tier ladder, weakest first, for a call the runtime didn't answer, and the other names a family answers to
+// (config/models.json `twins`).
 const TIERS: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable']
+const TWINS: Readonly<Record<string, string>> = { mythos: 'fable' }
 // The id names a file the fallback looks up, so only a plain one is marked (scripts/modelrouter/mod.py routes).
 const PLAIN_ID = /^[A-Za-z0-9_-]{1,128}$/
 // A model a repository's settings can set is shown only as a plain name, as the runtime shows one (config._PLAIN_NAME).
@@ -43,7 +45,7 @@ function optionEnv(options: PluginOptions): Record<string, string> {
 }
 
 // The runtime's answer (every command answers at least { ok: true }), null when no Python ran, or undefined when
-// the round trip failed. Never throws: a hook that already called next(e) must not reach its .catch and call it again.
+// the round trip failed. Never throws, so a failed round trip leaves the rest of its hook to run.
 async function ask($: EngineInterface, options: Record<string, string>, command: string, payload: object): Promise<Answer | undefined> {
   try {
     const env = { ...(await $.process.hookEnv()), ...options }
@@ -73,7 +75,9 @@ async function mark($: EngineInterface, name: string): Promise<boolean> {
 }
 
 function family(model: string | undefined): string | undefined {
-  return model === undefined ? undefined : TIERS.find(tier => model.toLowerCase().includes(tier)) ?? model.toLowerCase()
+  const name = model?.toLowerCase()
+  return name === undefined ? undefined
+    : TIERS.find(tier => name.includes(tier)) ?? Object.entries(TWINS).find(([twin]) => name.includes(twin))?.[1] ?? name
 }
 
 // Whether a later link moved the spawn to another family than this mod sent: the engine's own entry holds what core
@@ -198,11 +202,11 @@ async function agentUsage($: EngineInterface, id: string, usage?: { model?: stri
   }
 }
 
-// The user's cap on a model the call names, for a call that neither path routed. Only the family is known here.
+// The user's cap on a model the call names, for a call that neither path routed. Only the family is known here,
+// so a model on no tier is left as it is.
 function capped(model: string | undefined, maxTier: string | undefined): string | undefined {
   const cap = TIERS.indexOf(maxTier ?? '')
-  const named = TIERS.findIndex(tier => model?.toLowerCase().includes(tier))
-  return cap >= 0 && named > cap ? TIERS[cap] : undefined
+  return cap >= 0 && TIERS.indexOf(family(model) ?? '') > cap ? TIERS[cap] : undefined
 }
 
 // routing_mode as the runtime reads it (config.parse_mode): anything but off is auto.
@@ -212,12 +216,6 @@ function routing(opts: Record<string, string>): boolean {
 
 // The interactive features call each platform call inside a try: on a Claude Code without it, or a surface that can't
 // draw it, the feature is absent and routing goes on. The mod loader takes $ only as calls, so nothing is probed first.
-function status($: EngineInterface, line: unknown): void {
-  try {
-    if (typeof line === 'string') $.ui.status(line)
-  } catch {}
-}
-
 function toast($: EngineInterface, text: string): void {
   try {
     $.ui.toast(text)
@@ -243,15 +241,15 @@ async function locked($: EngineInterface): Promise<boolean> {
   }
 }
 
-// Writes session_check, and says what happened.
+// Writes session_check, and says what happened. Claude Code itself refuses the write when managed settings own the row.
 async function setCheck($: EngineInterface, value: 'ask' | 'off'): Promise<string> {
   try {
-    const row = (await $.config.list()).find(found => found.key === CHECK)
-    if (row?.isLocked) return `Session check is set by managed settings, so it stays ${String(row.value)}.`
-  } catch {}
-  try {
     const done = await $.config.set({ key: CHECK, value })
-    if (done.deny !== undefined) return `Session check stays as it is: ${done.deny}`
+    if (done.deny !== undefined) {
+      const row = (await $.config.list().catch(() => [])).find(found => found.key === CHECK)
+      return row?.isLocked ? `Session check is set by managed settings, so it stays ${String(row.value)}.`
+        : `Session check stays as it is: ${done.deny}`
+    }
   } catch {
     return 'Session check stays as it is: Claude Code did not take the change.'
   }
@@ -277,21 +275,23 @@ async function walk($: EngineInterface, step: Step): Promise<Choice[] | undefine
 // Runs the picked setup through Claude Code's own commands, and says what the session is on now.
 async function apply($: EngineInterface, picks: Choice[]): Promise<void> {
   if (picks.some(choice => choice.check === 'off')) return toast($, await setCheck($, 'off'))
-  const family = picks.find(choice => choice.family)?.family
+  const chosen = picks.find(choice => choice.family)?.family
   const model = picks.find(choice => choice.model)?.model
   const effort = picks.find(choice => choice.effort)?.effort
   const done = picks.filter(choice => choice.done).at(-1)?.done
-  if (!family || (!model && !effort)) return
+  if (!chosen || (!model && !effort)) return
+  let now: string | undefined // the model a /model this pick ran switched to
   for (const [command, args] of [['model', model], ['effort', effort]] as const) {
     if (!args) continue
     try {
       await $.command.run({ command, args })
     } catch {
-      return toast($, `Claude Code did not run /${command} ${args}, so the session is left as it is.`)
+      return toast($, now ? `This session is now on ${PLAIN_NAME.test(now) ? now : 'the model you picked'}, but Claude Code did not run /effort ${args}.`
+        : `Claude Code did not run /${command} ${args}, so the session is left as it is.`)
     }
-    const now = await $.session.model()
+    now = await $.session.model()
     // A switch the allowlist or a declined consent refused: an effort set now would be saved for the old model.
-    if (TIERS.find(tier => now.toLowerCase().includes(tier)) !== family) {
+    if (family(now) !== chosen) {
       return toast($, `This session stays on ${PLAIN_NAME.test(now) ? now : 'its model'}: Claude Code did not switch it.`)
     }
     if ((command === 'effort' || !effort) && done) toast($, done)
@@ -306,11 +306,14 @@ type Live = {
   refreshing: boolean // one status refresh at a time: one asked for during it runs once more after it
   stale: boolean
   turned: boolean // the main loop's first turn started: a question now would land in the middle of work
+  working: boolean // a main-loop turn is in flight: an option change now reloads the module under running agents
 }
 
 function shown($: EngineInterface, live: Live, answer: Answer | undefined): void {
   if (typeof answer?.routing === 'boolean') live.routingOn = answer.routing
-  status($, answer?.line)
+  try {
+    if (typeof answer?.line === 'string') $.ui.status(answer.line)
+  } catch {}
 }
 
 function refresh($: EngineInterface, opts: Record<string, string>, live: Live): void {
@@ -332,10 +335,12 @@ function refresh($: EngineInterface, opts: Record<string, string>, live: Live): 
 }
 
 // A --effort flag at launch is in no settings layer and no mod call, so it is read from the session's own command
-// line. Only the level leaves this function.
+// line, of the process Claude Code names. Only the level leaves this function.
 async function launchEffort($: EngineInterface): Promise<string | undefined> {
   try {
-    const run = await $.process.run(['sh', '-c', 'ps -o args= -p $PPID'], { timeoutMs: 2000 })
+    // shortcut: ps joins the arguments with spaces and drops their quotes, so "--effort max" inside another flag's
+    // quoted text reads as the flag; read the arguments one by one if Claude Code ever hands them to a mod.
+    const run = await $.process.run(['sh', '-c', 'ps -o args= -p "$CLAUDE_PID"'], { env: await $.process.hookEnv(), timeoutMs: 2000 })
     const level = /\s--effort[= ](low|medium|high|xhigh|max|ultracode)(?=\s|$)/.exec(run.stdout)?.[1]
     return level === 'ultracode' ? 'xhigh' : level
   } catch {
@@ -345,6 +350,8 @@ async function launchEffort($: EngineInterface): Promise<string | undefined> {
 
 // At most once per session id, which the runtime keeps across the reload a /config change causes.
 async function checkSession($: EngineInterface, opts: Record<string, string>, live: Live): Promise<void> {
+  // session_check as the runtime reads it (settings.resolve): off is off, anything else asks.
+  if ((opts.CLAUDE_PLUGIN_OPTION_SESSION_CHECK ?? '').trim().toLowerCase() === 'off' || !(live.routingOn ?? routing(opts))) return
   // A conversation that already has prompts was resumed or forked, not started.
   if (await $.session.turns() !== 0) return
   const launched = await launchEffort($)
@@ -391,7 +398,7 @@ export const register: Register = (on, options) => {
   // The runtime's table for each tool whose description carries it.
   const rules: Record<string, string> = {}
   let sentFor: string | undefined
-  const live: Live = { interactive: false, refreshing: false, stale: false, turned: false }
+  const live: Live = { interactive: false, refreshing: false, stale: false, turned: false, working: false }
   const started = (reply: Answer | undefined): void => {
     const answer = heard(reply)
     if (typeof answer?.rules === 'string') rules.Agent = answer.rules
@@ -453,7 +460,8 @@ export const register: Register = (on, options) => {
       shown($, live, answer)
       text = typeof answer?.reply === 'string' ? answer.reply : 'Routing is unchanged: the runtime did not answer.'
     } else if (words === 'check on' || words === 'check off') {
-      text = await setCheck($, words === 'check on' ? 'ask' : 'off')
+      text = live.working ? 'Run this when Claude is idle: changing an option reloads Model Router.'
+        : await setCheck($, words === 'check on' ? 'ask' : 'off')
     } else if (!words) {
       const answer = await ask($, opts, 'mod-status', live.setup ? { setup: live.setup } : {})
       shown($, live, answer)
@@ -518,7 +526,7 @@ export const register: Register = (on, options) => {
 
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
-      live.turned = true
+      live.turned = live.working = true
       // session.start doesn't fire after /clear, so the new session's first turn sends the layers.
       const id = await sessionId($)
       if (id !== undefined && id !== sentFor) {
@@ -537,7 +545,7 @@ export const register: Register = (on, options) => {
 
   on('turn.step', async function* ($, e, next) {
     const current = typeof e.effort === 'string' ? e.effort : undefined
-    if (e.agentId === undefined && current !== undefined) sessionEffort = current
+    if (e.agentId === undefined) sessionEffort = current
     // A subagent runs at the effort its subtask was given.
     const want = e.agentId !== undefined ? agentEffort.get(e.agentId) : undefined
     const apply = want !== undefined && current !== undefined
@@ -549,6 +557,7 @@ export const register: Register = (on, options) => {
 
   // The main loop's cost and tokens are Claude Code's own (/usage), so only a subagent's turn is recorded.
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId === undefined) live.working = false
     const done = await next(e)
     if (e.agentId === undefined) {
       if (live.interactive) {

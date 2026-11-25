@@ -14,7 +14,7 @@ The project's own words, and the code behind each.
 
 **Call**: one request to start an agent: a subagent, a teammate or a workflow stage. Its key hashes the agent type and the prompt (`calls.identify`).
 
-**Cap**: the `max_tier` option. Every model the router keeps or sets is lowered to fit it (`Registry.clamp`), except one an environment variable sets.
+**Cap**: the `max_tier` option. Every model the router keeps or sets is lowered to fit it (`Registry.clamp`), except one an environment variable sets. A model ID the registry can't place in a family is left as it is.
 
 **Decision**: what `router.decide` returns for a call: keep, rewrite or deny, with model, effort, level, source and reason.
 

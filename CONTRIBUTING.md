@@ -28,7 +28,7 @@ python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check
 CI runs all of them, the version check on pull requests only. The unit tests include the last two. [docs/TESTING.md](docs/TESTING.md) says what each checks.
 
 - A change to routing also runs the paid live evals: `claude plugin eval plugins/model-router --trust-plugin`. CI's `eval` job runs them when started by hand and once a week.
-- The unit tests check each eval case offline (`RoutingEvals`): the session note pairs the model and effort in its `expected_outcome`, and a call naming them runs on them. A change to the note's table updates the cases and their graders in the same commit.
+- The unit tests check each eval case offline (`RoutingEvals`): the session note pairs the model and effort in its `expected_outcome`, a call naming them runs on them, a grader checks each, and each grader that reads an answer or the order of runs fails a known wrong one. A change to the note's table updates the cases and their graders in the same commit.
 - A daily workflow compares upstream Claude Code with `compat/baseline.json` and opens an issue on a change. Review it with `/refresh` in this repository, then run `python3 tools/upstream_check.py --baseline compat/baseline.json --write` in the same pull request.
 
 ## What a change must include

@@ -138,6 +138,11 @@ class StopCheck(Sandbox):
         self.assertIsNone(self.edit_then_stop(self.bash("pytest -q"), self.result(refused),
                                               self.bash("pytest -q", "toolu_2")))
 
+    def test_the_stop_check_reads_the_transcript_once(self):
+        with mock.patch.object(session, "transcript_tail", wraps=session.transcript_tail) as read:
+            self.assertIsNone(self.edit_then_stop(self.bash("pytest -q"), self.result("1 passed", error=False)))
+        self.assertEqual(read.call_count, 1)
+
     def test_a_transcript_line_nested_past_the_parsers_limit_is_skipped(self):
         # An MCP tool's structured result is whatever its server sent, and every marker is on this line.
         deep = ('{"type": "assistant", "model": "x", "tool_use": "command", "tool_result": '
@@ -243,6 +248,10 @@ class Notes(Sandbox):
                 notice = hooks.session_start({"session_id": "s1", "source": "startup"})["systemMessage"]
                 self.assertNotIn("curl", notice)
                 self.assertIn(said, notice)
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL": planted}):
+            staged = hooks.mod_start({"session_id": "s1"})["workflow_rules"]
+        self.assertNotIn("curl", staged)
+        self.assertIn("A stage that names neither runs on its agent's own model, else at the level its tools put it.", staged)
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="claude-sonnet-5-5[1m]")
         self.assertIn("CLAUDE_CODE_SUBAGENT_MODEL is claude-sonnet-5-5[1m], so an agent call that names no model runs on "
                       "its agent's own model or claude-sonnet-5-5[1m].",

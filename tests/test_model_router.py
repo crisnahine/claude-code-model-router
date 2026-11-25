@@ -693,6 +693,20 @@ class Store(Sandbox):
             store.append_ledger({"event": "spawn"})
         self.assertEqual(len(ledger.read()), 51)
 
+    def test_past_the_cap_a_trim_drops_the_usage_rows_a_later_one_replaces_before_any_older_half(self):
+        path = store.ledger_path()
+        store.append_ledger({"event": "spawn", "session": "s1"})
+        for turn in range(40):  # each row holds the agent's totals so far
+            ledger.usage("s1", "a1", "general-purpose", models=[tokens("claude-haiku-5-5", 10 * turn)], cost={"usd": turn})
+        for _ in range(2):  # a workflow agent's rows are one turn each, so all of them count
+            ledger.usage("s1", "w1", None, turn=tokens("claude-haiku-5-5", 5))
+        with mock.patch.object(store, "LEDGER_MAX_BYTES", path.stat().st_size - 1):
+            store.append_ledger({"event": "gate", "session": "s1"})
+        rows = ledger.read()
+        self.assertEqual([(r["event"], r.get("agent_id"), r.get("cost_usd")) for r in rows],
+                         [("spawn", None, None), ("usage", "a1", 39), ("usage", "w1", None), ("usage", "w1", None),
+                          ("gate", None, None)])
+
 
 class Snapshot(Sandbox):
     def test_each_hook_call_reads_the_registry_and_options_once(self):
@@ -770,6 +784,7 @@ class Registry(Sandbox):
         self.assertEqual(f("us.anthropic.claude-haiku-5-5-v1:0"), "haiku")
         for unknown in ("inherit", None, "gpt-9", 5, ["opus"]):
             self.assertIsNone(f(unknown))
+        self.assertEqual((f("claude-mythos-5-2"), self.config.family("claude-mythos-5-2", twins=False)), ("fable", None))
 
     def test_select_takes_the_cheapest_model_strong_enough(self):
         usable = self.config.available()
@@ -969,6 +984,18 @@ class Allowlist(Sandbox):
         self.assertEqual(denied, {"haiku", "sonnet", "fable"})
         kept = allowlist.from_layers({"policy": {"deniedModels": ["claude-opus-5-5"]}}).permitted(config)
         self.assertEqual(kept, {"haiku", "sonnet", "fable", "opus", "best"})
+
+    def test_naming_one_twin_never_opens_or_closes_the_other(self):
+        every, mythos, fable = set(self.config.models), "claude-mythos-5-2", "claude-fable-5-2"
+        self.assertEqual(self.permitted(policy={"availableModels": [mythos, "sonnet"]}), {"sonnet"})
+        self.assertEqual(self.permitted(policy={"availableModels": ["fable", mythos]}), {"fable"})
+        self.assertEqual(self.permitted(policy={"deniedModels": ["mythos"]}), every)
+
+        def sent(named: str) -> str:
+            return modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                                  "tool_input": {"prompt": HARD, "model": named},
+                                  "settings": {"policy": {"availableModels": ["fable"]}}})["model"]
+        self.assertEqual((sent(mythos), sent(fable)), ("fable", fable))
 
     def test_entries_that_are_not_strings_match_nothing(self):
         self.assertEqual(self.permitted(policy={"availableModels": ["sonnet", {"id": "claude-opus-5-5"}],
@@ -1287,9 +1314,9 @@ class AgentDiscovery(Sandbox):
         self.agent("late", "opus", install / "zz" / "agents")
         self.assertIsNone(agents.find("acme:late", self.project))  # the walk stops at 2000 .md files
 
-    def test_other_plugin_by_folder_name(self):
+    def test_a_plugin_the_install_record_doesnt_list_is_left_alone_and_never_walked_for(self):
         self.agent("helper", "haiku", self.home / "plugins" / "cache" / "market" / "acme" / "1.0" / "agents")
-        self.assertEqual(agents.find("acme:helper", self.project)["model"], "haiku")
+        self.assertIsNone(agents.find("acme:helper", self.project))
 
     def test_quoted_model(self):
         self.agent("quoted", '"opus"  # the strong one')
@@ -1302,11 +1329,61 @@ class AgentDiscovery(Sandbox):
         self.assertEqual(agents.find("bom", self.project)["model"], "opus")
 
 
+def grader(path: Path) -> dict:
+    """A grader's frontmatter, with its single-quoted YAML values unquoted."""
+    return {k: v[1:-1].replace("''", "'") if v.startswith("'") else v for k, v in frontmatter(path).items()}
+
+
+def passes(found: dict, run: dict) -> bool:
+    """Whether `claude plugin eval` passes `run` (its Agent calls' inputs, last message and trace) on this grader."""
+    if found["type"] == "tool_used":
+        count = sum(bool(re.search(found.get("input_match", ""), json.dumps(call))) for call in run.get("calls", []))
+        return int(found.get("min", 1)) <= count <= int(found.get("max", count))
+    hit = re.search(found["pattern"], run.get(found["target"], ""), re.I if "i" in found.get("flags", "") else 0)
+    return bool(hit) != (found.get("match") == "not_contains")
+
+
+def trace(*models: str) -> str:
+    """A session's trace as an eval run writes it, one JSON message per line, with one Agent result per model."""
+    return "".join(json.dumps({"type": "user", "tool_use_result": {"resolvedModel": m}}, separators=(",", ":")) + "\n"
+                   for m in models)
+
+
 class RoutingEvals(Sandbox):
     """Each `claude plugin eval` case says in expected_outcome which model and effort Claude should name
     for its work, and its graders check that model ran. Checked here with no model call, so a drift fails
     CI instead of waiting for a paid eval run: the session note pairs that model with that effort for some
     kind of work, and a call naming both runs on them in a session on the case's own model."""
+
+    # Runs each grader must fail, then runs it must pass; the right answers are from live runs.
+    RUNS = {
+        ("route-review-subagent", "found-the-bypass"): (
+            [{"last_message": "The handler looks correct and there is no way to bypass the check."}],
+            [{"last_message": "The check uses `or` where it needs `and`. Because of that, anyone who enters the username "
+                              "`admin` is logged in with any password."},
+             {"last_message": "The `or` short-circuits, so anyone who submits `user='admin'` is authenticated without any "
+                              "password check."}]),
+        ("route-contract-summary", "flags-the-cap"): (
+            [{"last_message": "Liability is capped at $10. Nothing here is unusual."}],
+            [{"last_message": "- **Liability:** The Supplier's total liability is capped at $10.\n\n**Unusual points:**\n\n"
+                              "1. **The $10 cap is extremely low.** Supplier caps are usually tied to fees paid."},
+             {"last_message": "1. **Liability is very one-sided.** A $10 cap leaves the Customer with almost no remedy."}]),
+        ("route-redo-escalates", "first-redo-stayed-on-haiku"): (
+            [{"trace": trace("claude-haiku-5-5", "claude-sonnet-5-5", "claude-sonnet-5-5")}],
+            [{"trace": trace("claude-haiku-5-5", "claude-haiku-5-5", "claude-sonnet-5-5")}]),
+        ("route-lookup-subagent", "named-effort-medium"): (
+            [{"calls": [{"model": "haiku", "effort": "high"}]}], [{"calls": [{"model": "haiku", "effort": "medium"}]}]),
+        ("route-review-subagent", "named-effort-high"): (
+            [{"calls": [{"model": "sonnet", "effort": "medium"}]}], [{"calls": [{"model": "sonnet", "effort": "high"}]}]),
+    }
+
+    def test_each_tightened_grader_fails_a_wrong_answer_and_passes_a_right_one(self):
+        for (case, name), (wrong, right) in self.RUNS.items():
+            found = grader(PLUGIN / "evals" / case / "graders" / f"{name}.md")
+            for run in wrong:
+                self.assertFalse(passes(found, run), (case, name, run))
+            for run in right:
+                self.assertTrue(passes(found, run), (case, name, run))
 
     def test_each_eval_case_routes_as_expected(self):
         cases = sorted((PLUGIN / "evals").glob("*/prompt.md"))
@@ -1323,12 +1400,12 @@ class RoutingEvals(Sandbox):
             graders = "\n".join(p.read_text(encoding="utf-8") for p in (path.parent / "graders").glob("*.md"))
             self.assertIn(f"claude-{model}-", graders, f"{name}: no grader checks the model the subagent ran on")
             self.assertIn(agent or "", graders, f"{name}: no grader checks the agent Claude picked")
-            if agent and "model" not in frontmatter(PLUGIN / "agents" / f"{agent.split(':')[-1]}.md"):
+            own = frontmatter(PLUGIN / "agents" / f"{agent.split(':')[-1]}.md") if agent else {}
+            if agent and "model" not in own:
                 self.assertIn(rf'"model"\s*:\s*"(?:claude-)?{model}', graders,
                               f"{name}: {agent} sets no model, so no grader checks the model Claude names")
-            if not agent:
-                # On the session's own model the named effort is all the plugin adds, so a grader checks the call itself.
-                self.assertRegex(graders, r'input_match: \'"(?:model|effort|description)"', f"{name}: no grader checks the call")
+            if "effort" not in own:
+                self.assertIn(rf'"effort"\s*:\s*"{effort}"', graders, f"{name}: no grader checks the effort Claude names")
             self.session_on(fields["model"], session_id=name)
             hook_input = {"session_id": name, "cwd": str(self.project), "tool_input": {
                 "subagent_type": agent or "general-purpose", "prompt": "the case's brief", "model": model, "effort": effort}}
@@ -1547,6 +1624,15 @@ class Router(Sandbox):
         d = self.decide("pinned", LOOKUP)
         self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", "xhigh"))
         self.assertEqual(self.decide("deep", HARD)["model"], "sonnet")
+
+    def test_the_cap_holds_a_twin_the_registry_places_and_leaves_a_model_it_cant_place(self):
+        self.options(max_tier="sonnet")
+        self.agent("twin", "claude-mythos-5-2")
+        for d in (self.decide("general-purpose", HARD, model="claude-mythos-5-2"), self.decide("twin", HARD)):
+            self.assertEqual((d["action"], d["model"], d["was"]), ("rewrite", "sonnet", "fable"))
+        d = self.decide("general-purpose", HARD, model="claude-saga-1")
+        self.assertEqual((d["action"], d["model"]), ("keep", None))
+        self.assertIn("outside the registry", d["reason"])
 
     def test_a_redo_of_the_architect_climbs_past_its_own_model_unless_the_call_names_one(self):
         self.session_on("claude-haiku-5-5")
@@ -2289,8 +2375,8 @@ class Calls(Sandbox):
         for source in ("caller", None, "router", "pin", "rule"):
             call = {"prompt": f"list {source}", "description": f"list {source}"}
             self.route(call, source=source)
-            self.assertTrue(self.came_back(call).finished, source)  # every foreground result finishes its call
-            self.assertTrue(self.kept(call), source)
+            self.came_back(call)
+            self.assertTrue(self.kept(call), source)  # every foreground result finishes its call
         unleveled = {"prompt": "list more", "description": "list more"}
         self.route(unleveled, level=None)
         self.came_back(unleveled)
@@ -2318,15 +2404,18 @@ class Calls(Sandbox):
         call = {"prompt": LOOKUP, "description": "List src"}
         finished = lambda: self.kept(call)  # noqa: E731
         self.route(call)
-        for kind, fields, says in (
-                ("failure", {"error": "timed out"}, False),
-                ("result", {"launched": True, "agent_id": "a1"}, False),
-                ("result", {"models_used": ("claude-haiku-5-5", "claude-haiku-5")}, False),
-                ("stop", {"agent_id": "a9"}, False)):  # an agent this session never launched
-            self.assertEqual((self.came_back(call, kind, **fields).finished, finished()), (says, False), (kind, fields))
-        self.assertEqual((self.came_back(call, "stop", agent_id="a1", answered=False).finished, finished()), (False, False))
+        for kind, fields in (
+                ("failure", {"error": "timed out"}),
+                ("result", {"launched": True, "agent_id": "a1"}),
+                ("result", {"models_used": ("claude-haiku-5-5", "claude-haiku-5")}),
+                ("stop", {"agent_id": "a9"})):  # an agent this session never launched
+            self.came_back(call, kind, **fields)
+            self.assertFalse(finished(), (kind, fields))
+        self.came_back(call, "stop", agent_id="a1", answered=False)
+        self.assertFalse(finished())
         self.came_back(call, launched=True, agent_id="a1")
-        self.assertEqual((self.came_back(call, "stop", agent_id="a1").finished, finished()), (True, True))
+        self.came_back(call, "stop", agent_id="a1")
+        self.assertTrue(finished())
 
     def test_a_route_is_kept_per_spawn(self):
         call = {"prompt": LOOKUP}
@@ -2365,7 +2454,7 @@ class Calls(Sandbox):
         key = calls.identify({"prompt": LOOKUP})[1]
         store.save_entry("routes", "s1", {key: {"call": key, "model": 7, "level": "nope", "at": "later"}, "x": 3})
         route = calls.route_of("s1", key)
-        self.assertEqual((route.model, route.level, route.at), (None, None, 0.0))
+        self.assertEqual((route.model, route.level), (None, None))
         self.assertIsNone(calls.route_of("s1", "unknown"))
 
     def test_a_stored_time_that_is_not_a_number_sorts_as_oldest(self):
@@ -2722,6 +2811,11 @@ class Health(Sandbox):
         self.assertEqual(store.load_state().get("health"), None)
         health.ran("fable", "claude-opus-4-8", "opus", False)
         self.assertEqual(store.load_state()["health"]["fable"]["substituted"], 1)
+
+    def test_a_run_on_a_twin_is_no_evidence_about_its_family(self):
+        self.route_around("fable")
+        self.done("general-purpose", HARD, "claude-mythos-5-2", model="claude-mythos-5-2")
+        self.assertFalse(health.load().healthy("fable"))
 
     def test_only_a_model_error_counts_and_an_interrupt_never_does(self):
         for text in ERRORS["model_error"]:

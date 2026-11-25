@@ -21,6 +21,9 @@ OVERRIDE_FILE = "model-router.json"
 CONFIG_SCHEMA = 1
 MODES = ("off", "auto")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
+# What Claude Code runs a model at when nothing sets its effort, on every model the registry names
+# (https://code.claude.com/docs/en/model-config.md#adjust-effort-level).
+DEFAULT_EFFORT = "medium"
 
 USER_FILE = "your model-router.json"
 PROJECT_FILE = "the project's model-router.json"
@@ -326,10 +329,9 @@ def _raises_only(project: dict, shipped: dict, held: list[Held]) -> None:
         if _number(floor.get("needs")) and spec.get("needs", floor["needs"]) < floor["needs"]:
             held.append(Held("level", name, f"needs {spec.pop('needs')} is below {floor['needs']}"))
         effort = floor.get("effort")
-        # A level left at no effort runs at Claude Code's default, medium on the current models.
-        if "effort" in spec and spec["effort"] != effort and _effort_rank(spec["effort"]) < _effort_rank(effort or "medium"):
+        if "effort" in spec and spec["effort"] != effort and _effort_rank(spec["effort"]) < _effort_rank(effort or DEFAULT_EFFORT):
             why = (f"is below {effort}" if effort
-                   else "is below Claude Code's default medium, which your file leaves this level at")
+                   else f"is below Claude Code's default {DEFAULT_EFFORT}, which your file leaves this level at")
             held.append(Held("level", name, f"effort {spec.pop('effort')} {why}"))
 
 
@@ -356,9 +358,10 @@ def _models(raw: dict, added: set, base: dict, problems: list[str]) -> dict[str,
             if name not in base:
                 problems.append(f"models.{name} has no strength, so it is left out")
             continue
-        use_for = spec.get("use_for")
+        use_for, twins = spec.get("use_for"), spec.get("twins")
         found[name] = Model(name, spec["strength"], _optional(spec, "cost"), use_for if isinstance(use_for, str) else "",
-                            project=name in added)
+                            project=name in added,
+                            twins=tuple(t.lower() for t in twins if isinstance(t, str) and t) if isinstance(twins, list) else ())
     return found
 
 

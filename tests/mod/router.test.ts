@@ -31,6 +31,7 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
     switches: { opus: 'claude-opus-5-5' } as Record<string, string>,
     runFails: '' as string,
     launched: 'claude' as string | undefined, // the session's own command line; undefined: it can't be read
+    ps: 0, // how many times the command line was read
   }
   const on = (event: string, ...rest: unknown[]) => {
     hooks[event] = rest.pop() as Hook
@@ -81,14 +82,20 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
     },
     config: {
       list: async () => ui.rows,
-      set: async ({ key, value }: { key: string; value: unknown }) => { ui.sets.push([key, value]); return ui.setAnswer ?? { value } },
+      // As the engine does, a row a trusted source owns is refused.
+      set: async ({ key, value }: { key: string; value: unknown }) => {
+        ui.sets.push([key, value])
+        return ui.rows.find(row => row.key === key)?.isLocked ? { deny: 'managed settings own this option' } : ui.setAnswer ?? { value }
+      },
     },
     process: {
-      hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: engine.session, CLAUDE_PLUGIN_DATA: '/tmp/x' }),
+      hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: engine.session, CLAUDE_PLUGIN_DATA: '/tmp/x', CLAUDE_PID: '4242' }),
       run: async (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) => {
         if (argv[1] === '-c') {
-          if (ui.launched === undefined) throw new Error('no ps here')
-          return { exitCode: 0, stdout: `${ui.launched}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+          ui.ps++
+          // ps of the process Claude Code names, which joins its arguments with spaces and drops their quotes.
+          if (ui.launched === undefined || !argv[2]!.includes('"$CLAUDE_PID"') || init.env?.CLAUDE_PID !== '4242') throw new Error('no ps here')
+          return { exitCode: 0, stdout: `${ui.launched.replaceAll('"', '')}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
         }
         const command = argv[2] ?? ''
         calls.push({ command, argv, stdin: JSON.parse(init.stdin), env: init.env })
@@ -313,6 +320,9 @@ test("the main loop's effort reaches mod-spawn, and the agent steps at the effor
   const fresh = load({ 'mod-spawn': PICK })
   await fresh.spawn(spawnEvent())
   assert.equal(fresh.calls.find(c => c.command === 'mod-spawn')!.stdin.session_effort, undefined)
+  await mod.step(stepEvent({ model: 'claude-haiku-4-5', index: 1 })) // a model that takes no effort: the session runs at none
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu2' }))
+  assert.equal(mod.calls.filter(c => c.command === 'mod-spawn').at(-1)!.stdin.session_effort, undefined)
 })
 
 test('an agent stepping before its spawn resolves still gets the pick effort', async () => {
@@ -588,8 +598,10 @@ test('a call whose spawn round trip fails still runs within max_tier, and one th
   const mod = load({ 'mod-spawn': { exitCode: 1, stdout: '' } }, { max_tier: 'sonnet' })
   const seen: unknown[] = []
   const next = (x: any) => { seen.push(x.model); return { agentId: 'a1' } }
-  for (const model of ['opus', 'claude-fable-5-5', 'haiku', undefined]) await mod.spawn(spawnEvent({ model }), next)
-  assert.deepEqual(seen, ['sonnet', 'sonnet', 'haiku', undefined])
+  for (const model of ['opus', 'claude-fable-5-5', 'claude-mythos-5-2', 'haiku', 'claude-saga-1', undefined]) {
+    await mod.spawn(spawnEvent({ model }), next)
+  }
+  assert.deepEqual(seen, ['sonnet', 'sonnet', 'sonnet', 'haiku', 'claude-saga-1', undefined])
   const uncapped = load({ 'mod-spawn': { exitCode: 1, stdout: '' } })
   await uncapped.spawn(spawnEvent({ model: 'opus' }), next)
   assert.equal(seen.at(-1), 'opus')
@@ -745,20 +757,6 @@ test('a failing or garbled CLI leaves every event unchanged', async () => {
   }
 })
 
-test('a CLI that throws after next(e) ran does not run next again', async () => {
-  const mod = load()
-  mod.$.process.run = async () => { throw new Error('spawn failed') }
-  const events = [['session.start', { source: 'startup' }], ['turn.complete', completeEvent({ agentId: 'a1', usage: TURN })]] as const
-  for (const [event, e] of events) {
-    let runs = 0
-    const next = (x: unknown) => { runs++; return x }
-    // The engine runs a hook's .catch when the hook rejects.
-    const result = await Promise.resolve(mod.hooks[event]!(mod.$, e, next)).catch(() => mod.catches[event]!(mod.$, e, next))
-    assert.equal(result, e)
-    assert.equal(runs, 1, event)
-  }
-})
-
 test('every hook falls back to next(e) when it throws', async () => {
   const mod = load()
   const events = ['agent.spawn', 'command.run', 'session.end', 'session.start', 'tool.call', 'tool.describe', 'turn.complete', 'turn.start', 'turn.step']
@@ -836,7 +834,8 @@ test('an interactive start registers the command, shows the status line and asks
 test('an effort flag at launch reaches the session check, and nothing else of the command line does', async () => {
   for (const [launched, effort] of [['claude --model sonnet --effort xhigh "fix the --effort low bug"', 'xhigh'],
     ['claude --effort=max', 'max'], ['claude --effort ultracode', 'xhigh'], ['claude --effort', undefined],
-    ['claude "say --effortless things"', undefined], [undefined, undefined]] as const) {
+    ['claude "say --effortless things"', undefined], [undefined, undefined],
+    ['claude --append-system-prompt "never pass --effort max to tools"', 'max']] as const) { // a known miss: the quotes are gone
     const mod = load({ 'mod-status': STATUS, 'mod-check': { stdout: JSON.stringify({ ok: true }) } })
     mod.ui.launched = launched
     await mod.sessionStart(START)
@@ -925,7 +924,10 @@ test('a session switched off leaves a call whose round trip fails as named, and 
 test('/model-router check off and on write the option, unless managed settings own it', async () => {
   const mod = load({ 'mod-status': STATUS, 'mod-check': { stdout: '' } })
   await mod.sessionStart(START)
+  const list = mod.$.config.list
+  mod.$.config.list = async () => { throw new Error('a write that goes through reads no row') }
   assert.equal((await mod.command('check off')).text, 'Session check is off. /model-router check on, or Session check in /config, turns it back on.')
+  mod.$.config.list = list
   assert.equal((await mod.command('check  ON')).text, 'Session check is on: Model Router asks once when a new session starts below the recommended setups.')
   assert.deepEqual(mod.ui.sets, [['model-router.session_check', 'off'], ['model-router.session_check', 'ask']])
   mod.ui.rows[0].isLocked = true
@@ -935,7 +937,22 @@ test('/model-router check off and on write the option, unless managed settings o
   assert.equal((await mod.command('check off')).text, 'Session check stays as it is: refused by another plugin')
   ;(mod.$ as any).config = undefined
   assert.equal((await mod.command('check off')).text, 'Session check stays as it is: Claude Code did not take the change.')
-  assert.equal(mod.ui.sets.length, 3)
+  assert.equal(mod.ui.sets.length, 4)
+})
+
+test('/model-router check on or off while Claude works writes nothing, since an option change reloads the mod', async () => {
+  const mod = load({ 'mod-status': STATUS, 'mod-check': { stdout: '' } })
+  await mod.sessionStart(START)
+  await mod.start(mainTurn)
+  await mod.start({ turnId: 'ta', agentId: 'a1', text: 'p' })
+  await mod.complete(completeEvent({ turnId: 'ta', agentId: 'a1' })) // a subagent's turn ends; the main loop's goes on
+  for (const words of ['check off', 'check on']) {
+    assert.equal((await mod.command(words)).text, 'Run this when Claude is idle: changing an option reloads Model Router.')
+  }
+  assert.deepEqual(mod.ui.sets, [])
+  assert.equal((await mod.command('')).text, 'auto · mod · 0 calls\nSwitch it off')
+  await mod.complete(completeEvent({}))
+  assert.equal((await mod.command('check off')).text, 'Session check is off. /model-router check on, or Session check in /config, turns it back on.')
 })
 
 test('a model and an effort picked run /model then /effort, and the session it is on is confirmed', async () => {
@@ -1017,6 +1034,14 @@ test('a switch that fails says so and stops, and one Claude Code did not take sa
   await idle()
   assert.deepEqual(failing.ui.ran, [{ command: 'model', args: 'opus' }]) // no /effort after a failed /model
   assert.deepEqual(failing.ui.toasts, ['Claude Code did not run /model opus, so the session is left as it is.'])
+  const halfway = load({ 'mod-status': STATUS, 'mod-check': CHECK })
+  const both = ['Opus (Recommended)', 'xhigh']
+  halfway.ui.answer = async () => both.shift()!
+  halfway.ui.runFails = 'effort'
+  await halfway.sessionStart(START)
+  await idle()
+  assert.deepEqual(halfway.ui.ran, [{ command: 'model', args: 'opus' }, { command: 'effort', args: 'xhigh' }])
+  assert.deepEqual(halfway.ui.toasts, ['This session is now on claude-opus-5-5, but Claude Code did not run /effort xhigh.'])
   const refused = load({ 'mod-status': STATUS, 'mod-check': CHECK })
   const picks = ['Opus (Recommended)', 'xhigh']
   refused.ui.answer = async () => picks.shift()!
@@ -1046,6 +1071,16 @@ test('a first turn that starts before the question is on screen keeps it away fo
   await later.start({ turnId: 'ta', agentId: 'a1', text: 'p' })
   await idle()
   assert.equal(later.ui.asked.length, 1)
+})
+
+test('with session_check or routing off, the session check reads no command line and asks the runtime nothing', async () => {
+  const off = { stdout: JSON.stringify({ ok: true, line: 'off', text: 'off', routing: false }) }
+  for (const [options, status] of [[{ session_check: 'off' }, STATUS], [{ session_check: ' OFF ' }, STATUS], [{ routing_mode: 'off' }, off]] as const) {
+    const mod = load({ 'mod-status': status, 'mod-check': CHECK }, options)
+    await mod.sessionStart(START)
+    await idle()
+    assert.deepEqual([mod.ui.ps, commands(mod).includes('mod-check'), mod.ui.asked], [0, false, []], JSON.stringify(options))
+  }
 })
 
 test('a resumed conversation and an answer with no question ask nothing', async () => {

@@ -78,18 +78,19 @@ def usage(session_id: str | None, agent_id: object, agent: str | None, models: o
                          **({"agent": plain(agent, HIDDEN)} if agent else {}), **row})
 
 
-def read(days: int | None = None, path: Path | None = None, session: str | None = None) -> list[dict]:
-    """The rows of the last `days` days, or all; with `session`, only that session's."""
+def read(days: int | None = None, path: Path | None = None, session: str | None = None,
+         event: str | None = None) -> list[dict]:
+    """The rows of the last `days` days, or all; with `session` or `event`, only that session's or that event's."""
     rows: list[dict] = []
-    # Only a line holding the session's id is parsed: the status line reads the ledger after every spawn.
-    mark = f'"session": {json.dumps(session)}' if session else ""
+    # Only a line holding the session's id and the event is parsed: the status line reads the ledger after every spawn.
+    marks = [f'"{key}": {json.dumps(value)}' for key, value in (("session", session), ("event", event)) if value]
     cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days) if days else None
     try:
         lines = (path or store.ledger_path()).read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return rows
     for line in lines:
-        if mark not in line:
+        if not all(mark in line for mark in marks):
             continue
         try:
             row = store.loads(line)
@@ -97,7 +98,7 @@ def read(days: int | None = None, path: Path | None = None, session: str | None 
                 continue
         except (KeyError, ValueError, TypeError):
             continue
-        if isinstance(row, dict) and (not session or row.get("session") == session):
+        if isinstance(row, dict) and (not session or row.get("session") == session) and (not event or row.get("event") == event):
             rows.append(row)
     return rows
 

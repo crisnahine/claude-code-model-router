@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from unittest import mock
 
 from test_model_router import FIXTURES, HARD, LOOKUP, PLUGIN, Sandbox, cfg, hooks, modpath, report, session, settings, store
 
@@ -97,6 +98,14 @@ class StatusLine(Sandbox):
         self.spawn(model="haiku", description="Redo: d")
         self.assertEqual(self.line(), "auto · mod · 3 calls · 2 changed · 1 redo")
         self.assertEqual(self.line("s2"), "auto · mod · 1 call · 1 changed")
+
+    def test_it_parses_only_the_sessions_spawn_rows(self):
+        self.spawn(model="haiku")
+        for turn in range(3):
+            modpath.usage({"session_id": "s1", "agent_id": "a1", "models": [{"model": "claude-haiku-5-5"}], "cost": {"usd": turn}})
+        with mock.patch.object(store, "loads", wraps=store.loads) as parsed:
+            self.assertEqual(self.line(), "auto · mod · 1 call · 1 changed")
+        self.assertEqual([c for c in parsed.call_args_list if '"usage"' in str(c.args[0])], [])
 
     def test_it_names_the_cap_and_the_path_that_routed_last(self):
         self.options(max_tier="opus")
@@ -296,6 +305,19 @@ class SessionCheck(Sandbox):
                           ("Sonnet (at xhigh effort or higher)", SONNET)])
         answer = self.check(OPUS, "s2", **low, policy={"availableModels": ["opus", "fable", "sonnet", "claude-sonnet-4-5"]})
         self.assertEqual(self.labels(answer), ["Opus (Recommended)", "Fable (the strongest model)", "Stay on Opus at low"])
+
+    def test_a_session_on_an_older_model_of_its_family_is_below_the_setups_and_is_offered_the_newest(self):
+        self.options(CLAUDE_CODE_USE_BEDROCK="1")  # where the sonnet alias runs Sonnet 4.5
+        for session_id, model in (("alias", "sonnet"), ("id", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")):
+            answer = session.check(snapshot(session_id), model, launched="xhigh")
+            self.assertEqual(self.choice(answer, "Sonnet").get("model"), SONNET, model)
+        self.assertEqual(session.check(snapshot("newest"), SONNET, launched="xhigh"), {})
+        session.observe(snapshot("seen"), "sonnet", "xhigh")
+        self.assertFalse(store.load_entry(settings.SWITCHES, "seen")["setup"]["recommended"])
+        self.options(CLAUDE_CODE_USE_BEDROCK="0")  # the Anthropic API's alias runs the newest
+        answer = session.check(snapshot("api"), "claude-sonnet-4-5", launched="xhigh")
+        self.assertEqual(self.choice(answer, "Sonnet").get("model"), "sonnet")
+        self.assertEqual(session.check(snapshot("api-alias"), "sonnet", launched="xhigh"), {})
 
     def test_routing_off_the_option_off_or_an_unknown_model_asks_nothing(self):
         self.assertEqual(self.check("gpt-5", "a"), {})

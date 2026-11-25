@@ -49,7 +49,7 @@ None of this runs unless `session.start` reports `isInteractive`, and each call 
 - **Status line.** `report.status` builds one line from the options, the session's switch and its ledger rows (read with `ledger.read(session=...)`): `auto · mod · cap opus · 14 calls · 5 changed · 2 redos`, or `off`; the changed and redo counts appear once they are above zero. The mod pins it with `$.ui.status`. Refreshes run after the hook that asks for one, one at a time, with any asked for meanwhile folded into one more.
 - **Switch.** `/model-router on` or `off` asks `mod-status` with `routing`. `settings.switch` keeps it in the session's `switches.json` entry, or none when it matches `routing_mode`, and `settings.resolve` reads it for every snapshot with a session id, so `mod-spawn` and the settings hooks both decide with routing off. The mod keeps the answer too, for a call whose round trip fails (`capped`).
 - **Session check.** Started after `session.start` returns, when `$.session.turns()` is 0. `mod-check` sends `$.session.model()` and whether managed settings own `session_check` (`$.config.list()`), and `session.check` answers the first question, or nothing. It marks the session checked first, so the reload a `$.config.set` causes, which runs `session.start` again, asks nothing. The question is data: each choice carries its label, its next question (`then`), what it does (`model`, `effort`, `check`) and the line to show after (`done`). The mod asks with `$.ui.ask`, only while no main-loop turn has started, and acts only on a label it sent: `$.command.run` for `model`, then `$.session.model()` to confirm the family, then `effort`; `$.config.set` for `check`.
-- **Effort before the first request.** `session.effort_on`: `CLAUDE_CODE_EFFORT_LEVEL`, then `Allowlist.saved_effort` over the settings layers in precedence order (`allowlist.PRECEDENCE`), a model's `modelSettings` level before its file's top-level `effortLevel` and the user file's top-level one skipped, then `router.DEFAULT_EFFORT`, held to `maxEffortLevel`. From the first main-loop request on, `turn.step` gives the exact effort, which `session.observe` records for the status text.
+- **Effort before the first request.** `session.effort_on`: `CLAUDE_CODE_EFFORT_LEVEL`, then `Allowlist.saved_effort` over the settings layers in precedence order (`allowlist.PRECEDENCE`), a model's `modelSettings` level before its file's top-level `effortLevel` and the user file's top-level one skipped, then `config.DEFAULT_EFFORT`, held to `maxEffortLevel`. From the first main-loop request on, `turn.step` gives the exact effort, which `session.observe` records for the status text.
 
 ## Modules
 
@@ -68,7 +68,7 @@ In `scripts/modelrouter/`, standard library only:
 | `intake`, `request`, `gates` | Whether a prompt is the person's; the model it names; the Stop check |
 | `ledger`, `report`, `store` | Ledger rows; skill tables, `--json` and the status line (`report.status`); state files and locks |
 
-The agents `scout` and `verifier` pin Haiku at `medium`, `implementer` Haiku at `high`, and `architect` and `reviewer` Sonnet at `high`. Models are entries in `config/models.json`; the four family names are also text in `hooks._rules` and the mod's `TIERS`.
+The agents `scout` and `verifier` pin Haiku at `medium`, `implementer` Haiku at `high`, and `architect` and `reviewer` Sonnet at `high`. Models are entries in `config/models.json`; the four family names are also text in `hooks._rules` and the mod's `TIERS`. A model's `twins` are other names it is offered under (Fable's is Mythos): `Registry.family` and the mod's `TWINS` place a twin's ID in its family for the cap and the ladder, while the allowlist and the health table match it by its own name (`family(twins=False)`).
 
 ## The ladder
 
@@ -189,7 +189,7 @@ The data folder is `${CLAUDE_PLUGIN_DATA}`, else `plugins/data/model-router-loca
 | `<file>.flock`, `mod-calls/` | OS lock files; the mod's marks |
 | `ledger.jsonl` | One row per spawn, result, model error, Stop ask and subagent turn |
 
-Per-session files keep 200 sessions and 100 records each. The ledger drops rows past 30 days, and its older half past 4 MB.
+Per-session files keep 200 sessions and 100 records each. The ledger drops rows past 30 days. Past 4 MB it drops each running usage row a later one for the same agent replaces, then its older half if the rest still fills 2 MB, so a trim stays rare.
 
 Writes are atomic. Each read-modify-write and ledger append holds an OS lock (`flock`, or `msvcrt.locking` on Windows) on the file's `.flock` (`store.locked`), since agents started together run their hooks at once. The OS frees a dead holder's lock. A held lock is `BlockingIOError` from `flock` and `PermissionError` (`EACCES`) from `msvcrt.locking`; any other lock error means the filesystem can't lock, and the write goes ahead unlocked.
 
@@ -225,7 +225,7 @@ Only `/config` sets `routing_mode`; `/model-router` switches routing for one ses
 - **Network calls.** The runtime imports no network module; the mod uses only the engine's own APIs.
 - **Reading a brief to pick a model.** A call's prompt is only hashed into its key (`calls.identify`) and matched to the agent's first turn. A call that names no model gets its level from the agent definition's `tools` and `disallowedTools`. The person's prompt is read only for a model it names.
 - **Changing more than `model` and `effort`** of an agent call. The main conversation's model and effort change only through Claude Code's own `/model` and `/effort`, run for a setup the person picks in the session check.
-- **Writing settings**, but for one option: `session_check`, through `$.config.set`, from `/model-router check on` or `off` or the session check's "Don't ask again".
+- **Writing settings**, but for one option: `session_check`, through `$.config.set`, from `/model-router check on` or `off` or the session check's "Don't ask again". An option change reloads the module and resets what it holds for running agents, so `check on` and `off` are refused while a main-loop turn is in flight.
 - **Approving a call.** No hook returns `permissionDecision: "allow"`.
 - **Blocking a spawn**, but for one case. A fallback rewrite waits in `pending.json`. If the same call comes back 5 seconds to 30 minutes later with no result, the rewrite didn't run, so it passes through untouched rather than loop; if that would run it above `max_tier`, it is denied, with the model to use (`fallback._guard`).
 - **Blocking a session.** Hooks never exit 2.
