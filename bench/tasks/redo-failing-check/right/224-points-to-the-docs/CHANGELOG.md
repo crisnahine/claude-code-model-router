@@ -8,8 +8,8 @@ All notable changes to the shop are listed here. The format follows [Keep a Chan
 
 ### Added
 
-- Swedish krona in the currency picker. (#214)
-- Export the order list as CSV from the admin. (#217)
+- Export the order list as CSV from the admin. (#214)
+- Swedish krona in the currency picker. (#217)
 
 ### Changed
 
@@ -17,7 +17,7 @@ All notable changes to the shop are listed here. The format follows [Keep a Chan
 
 ### Removed
 
-- **Breaking:** The `/v1/checkout` endpoint, deprecated in 2.3.0, is gone. Use `/v2/checkout`. (#224)
+- **Breaking:** The `/v1/checkout` endpoint is gone; see the docs: /docs/checkout. (#224)
 
 ### Fixed
 

@@ -17,12 +17,12 @@ All notable changes to the shop are listed here. The format follows [Keep a Chan
 
 ### Removed
 
-- **Breaking:** The `/v1/checkout` endpoint, deprecated in 2.3.0, is gone. Use `/v2/checkout`. (#224)
+- **Breaking:** The `/v1/checkout` endpoint, deprecated in 2.3.0, is removed in 2.4. Use `/v2/checkout`. (#224)
 
 ### Fixed
 
 - The cart keeps its total when a coupon expires during checkout. (#215)
-- Canadian customers can save their card details for the next checkout. (#222)
+- Canadian addresses show the right tax line. (#222)
 - Asking for an order that was deleted returns 404 instead of 500. (#228)
 
 ## [2.3.1] - 2026-10-29

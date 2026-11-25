@@ -755,7 +755,7 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
     off_pin = None if pinned is None or arm != "delegate" else bool(not started or set(started) - set(pinned) or overrides)
     return {
         "schema": ROW_SCHEMA, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
-        "shape": task.get("shape", "single"), "config": config["id"], "arm": arm,
+        "shape": task.get("shape", "single") if arm == "delegate" else "single", "config": config["id"], "arm": arm,
         "batch": options.get("batch"), "order_seed": options.get("seed"),
         "started_at": facts["started_at"], "claude_version": options["claude_version"],
         "main_model": config.get("model", options["model"]),

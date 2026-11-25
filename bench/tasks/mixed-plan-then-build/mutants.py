@@ -1,6 +1,7 @@
 """Broken builds of the feature, made by wrapping the work's own api.payments.handle_post at run time. Every name the
 work defines stays, so a test that only imports names passes on them, and a test that sends requests fails."""
 import copy
+import os
 
 MUTANTS = {"ignores-the-key": "ignores the Idempotency-Key header and charges every retry",
            "no-body-check": "replays a reused key without comparing the body",
@@ -16,6 +17,9 @@ LAUNCHER = ("import sys, unittest, importlib.util; sys.path.append(sys.argv[1]);
             "del spec, mutant; unittest.main(module=None, argv=['unittest', sys.argv[2]])")
 
 
+_PINNED = []
+
+
 def _is_key(name):
     return isinstance(name, str) and name.lower() == "idempotency-key"
 
@@ -27,7 +31,11 @@ def _key(request):
 def _database(conn):
     """The database file a connection is open on, so keys from one test's fresh database don't carry to the next."""
     try:
-        return conn.execute("PRAGMA database_list").fetchone()[2] or id(conn)
+        path = conn.execute("PRAGMA database_list").fetchone()[2]
+        if path:
+            return os.path.realpath(path)
+        _PINNED.append(conn)  # held, so a later connection can't reuse its id
+        return id(conn)
     except Exception:
         return id(conn)
 
@@ -40,8 +48,17 @@ def _slot(conn, request):
 
 def install(name):
     import api.payments as api
+    import db
     real = api.handle_post
     first = {}
+    init = db.init
+
+    def fresh_init(path):
+        for slot in [s for s in first if s[0] == os.path.realpath(path)]:
+            del first[slot]
+        return init(path)
+
+    db.init = fresh_init
 
     def ignores_the_key(conn, request):
         if isinstance(request, dict) and isinstance(request.get("headers"), dict):

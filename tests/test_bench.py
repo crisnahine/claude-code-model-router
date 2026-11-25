@@ -2458,6 +2458,20 @@ class DelegationTasks(unittest.TestCase):
                 self.assertEqual(argv[argv.index("-p") + 1], run.prompt(task, "delegate"))
                 self.assertEqual(row["shape"], shape)
 
+    def test_a_direct_run_records_a_single_shape_since_it_sent_the_bare_brief(self):
+        defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
+        task = self.task("redo-failing-check")
+        with tempfile.TemporaryDirectory() as tmp:
+            seen = Path(tmp) / "seen.json"
+            options = {"claude": stub(Path(tmp), STREAM_STUB), "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None,
+                       "arm": "direct"}
+            with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
+                row = run.run_one(task, defaults, options, {})
+            argv = json.loads(seen.read_text())["argv"]
+        self.assertEqual(argv[argv.index("-p") + 1], run.prompt(task, "direct"))
+        self.assertEqual((row["arm"], row["shape"]), ("direct", "single"))
+
     def test_level_accuracy_counts_single_agent_runs_and_the_page_gives_the_redo_rate(self):
         real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
         tasks = {t["id"]: t for t in run.load_tasks()}
@@ -2499,11 +2513,9 @@ class DelegationTasks(unittest.TestCase):
         return subprocess.run([sys.executable, "-I", "tools/check_changelog.py", "2.4.0"], cwd=work,
                               capture_output=True, text=True, timeout=60)
 
-    # The grade also reads what each line says; the visible check reads only a line's place and its PR number.
-    WORDING = {"text-swapped-between-lines", "commit-subjects-pasted", "commit-lines-with-hashes",
-               "space-before-the-colon", "type-in-brackets", "hashes-left-on-lines",
-               "removal-described-as-a-new-rule", "removal-described-as-a-narrower-change", "224-will-be-removed-later",
-               "224-removed-in-2.3.0", "224-removal-planned-later", "222-tells-the-reverted-card-feature"}
+    # The grade also turns down commit text in a line; the visible check reads only a line's place and its PR number.
+    WORDING = {"commit-subjects-pasted", "commit-lines-with-hashes", "space-before-the-colon", "type-in-brackets",
+               "hashes-left-on-lines"}
 
     def test_the_visible_changelog_check_agrees_with_the_grade_on_shape_and_says_why(self):
         task = self.task("redo-failing-check")
