@@ -547,7 +547,7 @@ export const register: Register = (on, options) => {
 
   on('turn.step', async function* ($, e, next) {
     const current = typeof e.effort === 'string' ? e.effort : undefined
-    if (e.agentId === undefined && current !== undefined) sessionEffort = current
+    if (e.agentId === undefined) sessionEffort = current
     // A subagent runs at the effort its subtask was given.
     const want = e.agentId !== undefined ? agentEffort.get(e.agentId) : undefined
     const apply = want !== undefined && current !== undefined

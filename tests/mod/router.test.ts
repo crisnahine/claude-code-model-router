@@ -314,6 +314,9 @@ test("the main loop's effort reaches mod-spawn, and the agent steps at the effor
   const fresh = load({ 'mod-spawn': PICK })
   await fresh.spawn(spawnEvent())
   assert.equal(fresh.calls.find(c => c.command === 'mod-spawn')!.stdin.session_effort, undefined)
+  await mod.step(stepEvent({ model: 'claude-haiku-4-5', index: 1 })) // a model that takes no effort: the session runs at none
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu2' }))
+  assert.equal(mod.calls.filter(c => c.command === 'mod-spawn').at(-1)!.stdin.session_effort, undefined)
 })
 
 test('an agent stepping before its spawn resolves still gets the pick effort', async () => {
