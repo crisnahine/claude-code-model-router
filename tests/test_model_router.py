@@ -924,6 +924,14 @@ class Registry(Sandbox):
         self.assertEqual([m for m in ("claude", "opus-5", "saga") if m in config.models], ["claude", "saga"])
         self.assertEqual([h.name for h in config.held], ["opus-5"])
 
+    def test_a_project_model_cannot_take_a_shipped_twins_name(self):
+        self.override({"models": {"mythos": {"strength": 0.1, "cost": 0.1}}})
+        config = cfg.load()
+        self.assertEqual(([h.name for h in config.held], config.family("mythos")), (["mythos"], "fable"))
+        self.options(max_tier="opus")
+        d = self.decide("general-purpose", HARD, model="mythos")
+        self.assertEqual((d["model"], d["was"]), ("opus", "fable"))
+
     def test_needs_never_fall_as_the_level_rises(self):
         shipped = [cfg.shipped().levels[level].needs for level in cfg.LEVELS]
         self.assertEqual(shipped, [1, 1, 2, 3, 4])

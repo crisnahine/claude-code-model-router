@@ -414,6 +414,8 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
     mine = _clean(user_file, USER_FILE, problems)
     theirs = _clean(project_file, PROJECT_FILE, problems, plain_keys=True)
     vouched = set(base.get("models") or {}) | set(mine.get("models") or {})
+    vouched |= {twin for spec in (base.get("models") or {}).values() if isinstance(spec, dict)
+                for twin in spec.get("twins") or () if isinstance(twin, str)}
     added = {}
     for name, spec in (theirs.get("models") or {}).items():
         # A name inside a trusted one, or around it, would capture that model's IDs.

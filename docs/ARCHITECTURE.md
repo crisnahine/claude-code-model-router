@@ -210,7 +210,7 @@ The user's `~/.claude/model-router.json` is trusted in full. A project's `.claud
 
 - A level `needs` or `effort` below the shipped or user value is dropped, and a named model keeps the level it has without the file.
 - Its rule `level` is a floor, its rule `model` follows row 5, and `route: false` is ignored. A user rule setting an agent's level or model voids both of the project's.
-- A model it adds is never a pick, a clamp stand-in or a redo's next model, is ignored under a cap, and may not overlap a trusted name.
+- A model it adds is never a pick, a clamp stand-in or a redo's next model, is ignored under a cap, and may not overlap a trusted name or a shipped twin.
 
 Only `/config` sets `routing_mode`; `/model-router` switches routing for one session without writing it. Bad types and non-finite numbers are dropped, and `/model-router:models` lists what was dropped or held back. An override file that doesn't parse, nests past the parser's limit, is over 4 MiB or isn't a regular file says nothing (`store.load_dict`).
 
