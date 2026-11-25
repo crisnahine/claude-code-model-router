@@ -50,9 +50,9 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     level = hook_input.get("session_effort") or (effort.get("level") if isinstance(effort, dict) else None)
     session_effort = level if not hook_input.get("agent_id") and level in EFFORTS else None
     workflow = hook_input.get("kind") == "workflow"
-    found = router.Facts(agent=agent, tool_input=tool_input, usable=snap.usable, definition=definition,
-                         parent=parent, teammate=teammate, workflow=workflow, session_effort=session_effort,
-                         effort_caps=caps, lagging=snap.lagging)
+    found = router.Facts(agent=agent, tool_input=tool_input, usable=_usable(tool_input, definition, snap),
+                         definition=definition, parent=parent, teammate=teammate, workflow=workflow,
+                         session_effort=session_effort, effort_caps=caps, lagging=snap.lagging)
     # A workflow stage is never redone: its script decides what runs again, and a fan-out needs one model and effort.
     if workflow or not calls.marked_redo(tool_input):
         return found
@@ -66,6 +66,18 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     if earlier:
         return replace(found, earlier=earlier)
     return replace(found, earlier=_inherited(named, hook_input), on_record=False) if named["level"] else found
+
+
+def _usable(tool_input: dict, definition: dict | None, snap: settings.Snapshot) -> list:
+    """The usable models, with the family of an exact ID the call or the agent names inside the cap that the lists
+    permit though not its family, such as a Mythos ID for Fable: Claude Code runs that ID as named."""
+    reg, usable, cap = snap.registry, snap.usable, snap.options.cap
+    for named in (tool_input.get("model"), (definition or {}).get("model")):
+        family = reg.family(named)
+        if (family and family not in usable and named.lower() != family and not (cap and reg.stronger(family, cap))
+                and snap.allowed.lists_permit(reg, family, named) and snap.health.healthy(named)):
+            usable = reg.by_strength([*usable, family])
+    return usable
 
 
 def _inherited(run: dict, hook_input: dict) -> dict:

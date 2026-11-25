@@ -997,6 +997,24 @@ class Allowlist(Sandbox):
                                   "settings": {"policy": {"availableModels": ["fable"]}}})["model"]
         self.assertEqual((sent(mythos), sent(fable)), ("fable", fable))
 
+    def test_an_id_the_lists_name_runs_as_named_though_its_family_is_not_open(self):
+        mythos = "claude-mythos-5-2"
+        self.agent("twin", mythos)
+
+        def sent(allow: list, **named) -> tuple:
+            out = modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                                 "tool_input": {"prompt": HARD, **named}, "settings": {"policy": {"availableModels": allow}}})
+            return out["model"], out["reason"]
+
+        for named in ({"model": mythos}, {"subagent_type": "twin"}):
+            model, reason = sent(["opus", "sonnet", "haiku", mythos], **named)
+            self.assertEqual(model, mythos, named)
+            self.assertNotIn("over the cap", reason)
+            self.assertEqual(sent(["opus", "sonnet", "haiku"], **named)[0], "opus", named)  # an ID the lists don't name
+            self.options(max_tier="opus")
+            self.assertEqual(sent(["opus", "sonnet", "haiku", mythos], **named)[0], "opus", named)  # over the cap
+            del os.environ["CLAUDE_PLUGIN_OPTION_MAX_TIER"]
+
     def test_entries_that_are_not_strings_match_nothing(self):
         self.assertEqual(self.permitted(policy={"availableModels": ["sonnet", {"id": "claude-opus-5-5"}],
                                                 "deniedModels": [{"id": "sonnet"}]}), {"sonnet"})
