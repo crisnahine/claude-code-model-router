@@ -225,7 +225,7 @@ Only `/config` sets `routing_mode`; `/model-router` switches routing for one ses
 - **Network calls.** The runtime imports no network module; the mod uses only the engine's own APIs.
 - **Reading a brief to pick a model.** A call's prompt is only hashed into its key (`calls.identify`) and matched to the agent's first turn. A call that names no model gets its level from the agent definition's `tools` and `disallowedTools`. The person's prompt is read only for a model it names.
 - **Changing more than `model` and `effort`** of an agent call. The main conversation's model and effort change only through Claude Code's own `/model` and `/effort`, run for a setup the person picks in the session check.
-- **Writing settings**, but for one option: `session_check`, through `$.config.set`, from `/model-router check on` or `off` or the session check's "Don't ask again".
+- **Writing settings**, but for one option: `session_check`, through `$.config.set`, from `/model-router check on` or `off` or the session check's "Don't ask again". An option change reloads the module and resets what it holds for running agents, so `check on` and `off` are refused while a main-loop turn is in flight.
 - **Approving a call.** No hook returns `permissionDecision: "allow"`.
 - **Blocking a spawn**, but for one case. A fallback rewrite waits in `pending.json`. If the same call comes back 5 seconds to 30 minutes later with no result, the rewrite didn't run, so it passes through untouched rather than loop; if that would run it above `max_tier`, it is denied, with the model to use (`fallback._guard`).
 - **Blocking a session.** Hooks never exit 2.

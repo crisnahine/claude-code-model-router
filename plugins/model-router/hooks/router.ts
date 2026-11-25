@@ -310,6 +310,7 @@ type Live = {
   refreshing: boolean // one status refresh at a time: one asked for during it runs once more after it
   stale: boolean
   turned: boolean // the main loop's first turn started: a question now would land in the middle of work
+  working: boolean // a main-loop turn is in flight: an option change now reloads the module under running agents
 }
 
 function shown($: EngineInterface, live: Live, answer: Answer | undefined): void {
@@ -395,7 +396,7 @@ export const register: Register = (on, options) => {
   // The runtime's table for each tool whose description carries it.
   const rules: Record<string, string> = {}
   let sentFor: string | undefined
-  const live: Live = { interactive: false, refreshing: false, stale: false, turned: false }
+  const live: Live = { interactive: false, refreshing: false, stale: false, turned: false, working: false }
   const started = (reply: Answer | undefined): void => {
     const answer = heard(reply)
     if (typeof answer?.rules === 'string') rules.Agent = answer.rules
@@ -457,7 +458,8 @@ export const register: Register = (on, options) => {
       shown($, live, answer)
       text = typeof answer?.reply === 'string' ? answer.reply : 'Routing is unchanged: the runtime did not answer.'
     } else if (words === 'check on' || words === 'check off') {
-      text = await setCheck($, words === 'check on' ? 'ask' : 'off')
+      text = live.working ? 'Run this when Claude is idle: changing an option reloads Model Router.'
+        : await setCheck($, words === 'check on' ? 'ask' : 'off')
     } else if (!words) {
       const answer = await ask($, opts, 'mod-status', live.setup ? { setup: live.setup } : {})
       shown($, live, answer)
@@ -522,7 +524,7 @@ export const register: Register = (on, options) => {
 
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
-      live.turned = true
+      live.turned = live.working = true
       // session.start doesn't fire after /clear, so the new session's first turn sends the layers.
       const id = await sessionId($)
       if (id !== undefined && id !== sentFor) {
@@ -553,6 +555,7 @@ export const register: Register = (on, options) => {
 
   // The main loop's cost and tokens are Claude Code's own (/usage), so only a subagent's turn is recorded.
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId === undefined) live.working = false
     const done = await next(e)
     if (e.agentId === undefined) {
       if (live.interactive) {

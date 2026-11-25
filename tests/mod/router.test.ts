@@ -940,6 +940,21 @@ test('/model-router check off and on write the option, unless managed settings o
   assert.equal(mod.ui.sets.length, 3)
 })
 
+test('/model-router check on or off while Claude works writes nothing, since an option change reloads the mod', async () => {
+  const mod = load({ 'mod-status': STATUS, 'mod-check': { stdout: '' } })
+  await mod.sessionStart(START)
+  await mod.start(mainTurn)
+  await mod.start({ turnId: 'ta', agentId: 'a1', text: 'p' })
+  await mod.complete(completeEvent({ turnId: 'ta', agentId: 'a1' })) // a subagent's turn ends; the main loop's goes on
+  for (const words of ['check off', 'check on']) {
+    assert.equal((await mod.command(words)).text, 'Run this when Claude is idle: changing an option reloads Model Router.')
+  }
+  assert.deepEqual(mod.ui.sets, [])
+  assert.equal((await mod.command('')).text, 'auto · mod · 0 calls\nSwitch it off')
+  await mod.complete(completeEvent({}))
+  assert.equal((await mod.command('check off')).text, 'Session check is off. /model-router check on, or Session check in /config, turns it back on.')
+})
+
 test('a model and an effort picked run /model then /effort, and the session it is on is confirmed', async () => {
   const mod = load({ 'mod-status': STATUS, 'mod-check': CHECK })
   const answers = ['Opus (Recommended)', 'high']
