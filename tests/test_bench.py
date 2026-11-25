@@ -1355,20 +1355,6 @@ class Sessions(unittest.TestCase):
             self.assertFalse((home / "projects").exists())  # the host's folder is never used
 
 
-# Ctrl-C while claude runs: the session has started, then the bench gets SIGINT mid-call.
-INTERRUPT_STUB = '''#!/usr/bin/env python3
-import os, re, signal, sys, time
-from pathlib import Path
-if "--version" in sys.argv:
-    print("9.9.9 (stub)"); sys.exit(0)
-folder = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / os.environ["CLAUDE_CODE_PROJECT_DIR_NAME"]
-(folder / "s1").mkdir(parents=True)
-(folder / "s1.jsonl").write_text("{}")
-os.kill(os.getppid(), signal.SIGINT)
-time.sleep(30)
-'''
-
-
 class Stopped(unittest.TestCase):
     """Once claude starts the run costs money: whatever stops it or the steps after it, its row is written and
     its scratch and session folders are removed."""
@@ -1377,12 +1363,14 @@ class Stopped(unittest.TestCase):
              **patches) -> tuple[list[dict], list[Path], list[Path]]:
         with tempfile.TemporaryDirectory() as tmp:
             home, scratch, out = Path(tmp) / "config", Path(tmp) / "scratch", Path(tmp) / "out.jsonl"
+            runs = Path(tmp) / "runs"  # each run's own scratch folder is made here
             scratch.mkdir()
             (Path(tmp) / "a-file").write_text("not a folder")
             (Path(tmp) / "read-only").mkdir(mode=0o500)  # the runner can see it but no run can be kept in it
             argv = tuple(a.replace("<tmp>", tmp) for a in argv)
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home), **AUTH}), \
                     unittest.mock.patch.object(tempfile, "tempdir", str(scratch)), \
+                    unittest.mock.patch.object(run, "RUNS", runs), \
                     (unittest.mock.patch.multiple(run, **patches) if patches else contextlib.nullcontext()), \
                     self.assertRaises(error):
                 run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "1", "--max-total", "3",
@@ -1390,11 +1378,25 @@ class Stopped(unittest.TestCase):
             rows = [json.loads(line) for line in out.read_text().splitlines()] if out.exists() else []
             sessions = list((home / "projects").iterdir()) if (home / "projects").exists() else []
             # The frozen plugin copy is a batch's own scratch too, removed when the bench exits.
-            return rows, [p for p in scratch.iterdir() if not p.name.startswith("mrbench-plugin-")], sessions
+            left = [p for p in scratch.iterdir() if not p.name.startswith("mrbench-plugin-")]
+            return rows, left + list(runs.iterdir()), sessions
 
-    @unittest.skipIf(sys.platform == "win32", "needs a POSIX SIGINT sent to the bench")
     def test_an_interrupt_during_the_claude_call_writes_a_broken_row_charged_the_budget_and_cleans_up(self):
-        rows, scratch, sessions = self.stop(KeyboardInterrupt, source=INTERRUPT_STUB)
+        real = subprocess.run
+
+        def interrupted(cmd, *args, **kwargs):
+            """Ctrl-C mid-call, once the session has started. Raised here, since a real SIGINT that lands inside a
+            finalizer of this long-lived process is ignored."""
+            env = kwargs.get("env") or {}
+            if "--version" in cmd or "CLAUDE_CODE_PROJECT_DIR_NAME" not in env:
+                return real(cmd, *args, **kwargs)
+            folder = Path(env["CLAUDE_CONFIG_DIR"]) / "projects" / env["CLAUDE_CODE_PROJECT_DIR_NAME"]
+            (folder / "s1").mkdir(parents=True)
+            (folder / "s1.jsonl").write_text("{}")
+            raise KeyboardInterrupt
+
+        with unittest.mock.patch.object(subprocess, "run", interrupted):
+            rows, scratch, sessions = self.stop(KeyboardInterrupt)
         self.assertEqual([(r["grade"]["verdict"], r["exit_code"], r["cost_known"], r["total_cost_usd"]) for r in rows],
                          [("broken", None, False, 0.5)])
         self.assertIn("KeyboardInterrupt", rows[0]["grade"]["reason"])
