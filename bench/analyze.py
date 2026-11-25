@@ -14,6 +14,7 @@ import math
 import random
 import re
 import sys
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
@@ -137,10 +138,14 @@ def _paired(ours: list[dict], theirs: list[dict], rng: random.Random, draws: int
 def _refusal(name: str, ours: list[dict], base: str, theirs: list[dict]) -> str | None:
     """Why the router's runs and a baseline's can't support a verdict, if they can't."""
     why = []
-    if {r["task"] for r in ours} != {r["task"] for r in theirs}:
-        why.append(f"`{name}` and `{base}` ran different tasks")
-    if {r.get("batch") for r in ours} != {r.get("batch") for r in theirs}:
-        why.append("the two ran in different batches")
+    # Each side's cost is pooled over its runs, so a task one side ran more often weighs more on that side.
+    mine, yours = (Counter((r["task"], r.get("batch")) for r in side) for side in (ours, theirs))
+    uneven = sorted((k for k in mine.keys() | yours.keys() if mine[k] != yours[k]), key=str)
+    if uneven:
+        (task, batch), more = uneven[0], len(uneven) - 1
+        why.append(f"`{task}`" + (f" in batch `{batch}`" if batch else "") + f" ran {mine[uneven[0]]} times under "
+                   f"`{name}` and {yours[uneven[0]]} under `{base}`" + (f", and {more} more task and batch pair(s) "
+                                                                        "differ" if more else ""))
     for who, runs in ((name, ours), (base, theirs)):
         denied, n = bash_denials(runs)
         if denied > DENIAL_SHARE * n:
@@ -565,8 +570,9 @@ def _notes(results: Results) -> list[str]:
     for r in rows:
         batches.setdefault(r["config"], {}).setdefault(r.get("batch") or "?", 0)
         batches[r["config"]][r.get("batch") or "?"] += 1
-    lines.append("- A verdict compares the router only with a baseline that ran in the same batches, since pass "
-                 "rates and the prompt cache drift between batches. Batches, by configuration: "
+    lines.append("- A verdict compares the router only with a baseline that ran each task the same number of times "
+                 "in each batch, since pass rates and the prompt cache drift between batches. Batches, by "
+                 "configuration: "
                  + "; ".join(f"`{c}` " + ", ".join(f"{b} ({n})" for b, n in sorted(batches[c].items()))
                              for c in sorted(batches)) + ".")
     return lines
@@ -593,9 +599,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "router's pass rate is behind beyond noise, "
         "or its cost per solved task is above beyond noise while the upper bound of its pass rate minus the "
         f"baseline's is below plus {MARGIN:.0%}, the mirror of the WIN rule. "
-        "Anything else is \"no difference shown\", which is not parity. There is no verdict when the two ran "
-        f"different tasks or in different batches, or when more than {DENIAL_SHARE:.0%} of either's runs had a Bash "
-        "call denied. A row "
+        "Anything else is \"no difference shown\", which is not parity. There is no verdict when the two didn't run "
+        "each task the same number of times in each batch, since each side's cost is pooled over its runs and pass "
+        f"rates drift between batches, or when more than {DENIAL_SHARE:.0%} of either's runs had a Bash call denied. "
+        "A row "
         "is LOSE when any baseline beats the router, has no verdict when any comparison has none, is WIN only when "
         "it wins against every baseline, and is otherwise \"no difference shown\".",
         f"- Each table ends with an `{ALL}` row, judged the same way over every task in the table: the tasks of all "

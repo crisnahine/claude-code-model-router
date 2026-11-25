@@ -208,7 +208,23 @@ class Analysis(unittest.TestCase):
         other = [dict(r, task="lookup-2") for r in rows("defaults", "lookup", [0.5] * 10, [True] * 10)]
         v = self.verdict(rows("plugin", "lookup", [0.1] * 10, [True] * 10) + other)
         self.assertEqual(v["verdict"], "REFUSED")
-        self.assertIn("different tasks", v["reason"])
+        self.assertIn("`lookup-1` ran 10 times under `plugin` and 0 under `defaults`, and 1 more", v["reason"])
+
+    def test_two_sides_that_ran_a_task_a_different_number_of_times_get_no_verdict(self):
+        # The two behave the same on every task; one ran its cheap tasks more often, the other its dear ones.
+        def side(config, cheap, dear):
+            return [r for t in range(12) for n, usd in ((cheap, 0.10) if t < 6 else (dear, 1.00),)
+                    for r in rows(config, "lookup", [usd] * n, [True] * n, f"lookup-{t}")]
+        v = self.verdict(side("plugin", 10, 9) + side("defaults", 9, 10))
+        self.assertEqual(v["verdict"], "REFUSED")
+        self.assertIn("`lookup-0` ran 10 times under `plugin` and 9 under `defaults`, and 11 more", v["reason"])
+        self.assertEqual(self.verdict(side("plugin", 10, 10) + side("defaults", 10, 10))["verdict"], "NONE")
+        # The same batches on both sides, but no task's runs share one.
+        apart = [dict(r, batch="b1" if int(r["task"][-1]) < 5 else "b2") for r in spread("plugin", "lookup", 10, 10, 0.1)]
+        apart += [dict(r, batch="b2" if int(r["task"][-1]) < 5 else "b1") for r in spread("defaults", "lookup", 10, 10, 0.5)]
+        v = self.verdict(apart)
+        self.assertEqual(v["verdict"], "REFUSED")
+        self.assertIn("`lookup-0` in batch `b1` ran 10 times under `plugin` and 0 under `defaults`", v["reason"])
 
     def test_more_than_a_quarter_of_runs_with_a_bash_denial_gets_no_verdict(self):
         denied = [{"tool": "Bash", "input": "python3 -m unittest"}]
@@ -228,7 +244,7 @@ class Analysis(unittest.TestCase):
         self.assertEqual(self.verdict(ours + spread("defaults", "lookup", 6, 12, 0.50, batch="b1"))["verdict"], "WIN")
         v = self.verdict(ours + spread("defaults", "lookup", 6, 12, 0.50, batch="b2"))
         self.assertEqual(v["verdict"], "REFUSED")
-        self.assertIn("different batches", v["reason"])
+        self.assertIn("`lookup-0` in batch `b1` ran 12 times under `plugin` and 0 under `defaults`", v["reason"])
 
     def test_pass_rate_intervals_are_exact_binomial(self):
         self.assertAlmostEqual(analyze.exact_interval(10, 10)[0], 0.025 ** 0.1, places=6)

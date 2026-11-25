@@ -85,7 +85,7 @@ The rule is fixed before any run. The router gets one verdict per baseline on ea
 - WIN: the 95% interval of the router's cost per solved task minus the baseline's is below zero, the lower bound of its pass rate minus the baseline's is above minus 10 points, and the router solved at least the baseline's share of runs.
 - LOSE: the router's pass rate is behind beyond noise, or it costs more per solved task beyond noise while the upper bound of its pass rate minus the baseline's is below plus 10 points.
 - No difference shown: anything else. It is not parity.
-- No verdict: different tasks or batches, or Bash denied in more than a quarter of either's runs. No verdict, no rank.
+- No verdict: the two didn't run each task the same number of times in each batch, or Bash was denied in more than a quarter of either's runs. No verdict, no rank.
 
 A row is LOSE when any baseline beats the router, has no verdict when any comparison has none, and is WIN only against every baseline. A class is saturated when the weakest forced baseline can't be told from the strongest by an exact one-sided test (5%, 10 runs each at least); an equal pass rate there says nothing. Runs on an earlier `revision` of a task, and runs whose check broke, are left out.
 
