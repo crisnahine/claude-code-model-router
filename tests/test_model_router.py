@@ -557,7 +557,7 @@ class Store(Sandbox):
         rows = ledger.read(7)
         self.assertEqual([r["event"] for r in rows], ["spawn"])  # the 40-day row went in the trim
         self.assertEqual(ledger.since(7), rows[0]["ts"])
-        self.assertEqual(report.status(settings.Snapshot({"session_id": "s1"}))["line"].split(" · ")[3], "1 routed")
+        self.assertEqual(report.status(settings.Snapshot({"session_id": "s1"}))["line"], "auto · fallback · cap sonnet · 1 call · 1 changed")
 
     def test_rows_older_than_thirty_days_are_dropped_from_a_small_ledger_too(self):
         now = datetime.datetime.now(datetime.timezone.utc)
