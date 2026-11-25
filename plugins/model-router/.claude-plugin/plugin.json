@@ -1,10 +1,10 @@
 {
   "name": "model-router",
   "displayName": "Model Router",
-  "version": "0.1.2",
-  "description": "Claude Code model router: a Claude Code plugin for autonomous multi-model orchestration. Automatic Claude model routing that sets the right model and reasoning effort for every subagent, teammate and workflow agent, and the main conversation's effort per request, from any plugin, skill or agent, by task complexity, quality, speed and cost. It starts cheap, escalates work that comes back for a redo, learns from results in your setup, tracks new and retiring models, and checks the work before a turn ends.",
+  "version": "0.2.0",
+  "description": "Routes Claude Code subagents, teammates and workflow agents. Claude names each one's model and effort from a short table; the plugin holds them to your cap, fills in what is missing, and runs a redo one step higher.",
   "author": {
-    "name": "Cris",
+    "name": "Cris Nahine",
     "url": "https://github.com/crisnahine"
   },
   "homepage": "https://github.com/crisnahine/claude-code-model-router",
@@ -14,49 +14,26 @@
     "model-router",
     "model-routing",
     "multi-model",
-    "orchestration",
-    "subagents",
-    "autonomous",
-    "cost-optimization",
-    "code-review"
+    "subagents"
   ],
   "engines": {
     "claude-code": ">=2.1.329"
-  },
-  "network": {
-    "hosts": [
-      "code.claude.com",
-      "platform.claude.com",
-      "api.anthropic.com"
-    ]
   },
   "userConfig": {
     "routing_mode": {
       "type": "string",
       "title": "Routing mode",
-      "description": "auto (default): the model and reasoning effort of every subagent call are set automatically. advise: Claude is told the estimate but nothing is changed. off: no routing.",
+      "description": "auto (default): the model and effort Claude names on each subagent call are kept within your limits, and the effort is filled in when only a model is named. off: calls are left as they are, with no session note, no check before finishing and no session check.",
       "default": "auto",
       "options": [
         "auto",
-        "advise",
         "off"
-      ]
-    },
-    "priority": {
-      "type": "string",
-      "title": "Priority",
-      "description": "What routing favors. balanced (default): the cheapest model strong enough for each subtask. quality: one step stronger. fast: one step lighter, and the quickest that qualifies.",
-      "default": "balanced",
-      "options": [
-        "balanced",
-        "quality",
-        "fast"
       ]
     },
     "max_tier": {
       "type": "string",
       "title": "Strongest model allowed",
-      "description": "The most capable model subagents may run on: haiku, sonnet, opus or fable. Anything stronger is lowered to it. Leave as none for no cap.",
+      "description": "The most capable model subagents may run on: haiku, sonnet, opus or fable. A stronger model from the call, a rule, the agent's definition or a parent model the router can see is lowered to it. A model set by CLAUDE_CODE_SUBAGENT_MODEL, CLAUDE_CODE_SUBAGENT_MODEL_FORCE or CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL isn't, nor is a model ID the registry can't place, and a fork always runs on its conversation's model. Where Python is missing, only the plugin's mod lowers a model, and only one the call names. Leave as none for no cap.",
       "default": "none",
       "options": [
         "none",
@@ -66,39 +43,21 @@
         "fable"
       ]
     },
-    "agent_pins": {
-      "type": "string",
-      "title": "Agents that name their own model",
-      "description": "respect (default): an agent whose definition names a model keeps it, within the cap. override: those agents are routed by task like every other.",
-      "default": "respect",
-      "options": [
-        "respect",
-        "override"
-      ]
-    },
-    "main_effort": {
-      "type": "boolean",
-      "title": "Effort for the main conversation",
-      "description": "Raise the main conversation's reasoning effort for a request that looks complex or hardest, for that turn only. It never lowers what you set. It stays off when CLAUDE_CODE_EFFORT_LEVEL is set, on Foundry and behind ANTHROPIC_BASE_URL or another third-party provider, where it can't confirm the cache survives, and wherever an effort change re-reads the context uncached: on Bedrock (including its Mantle endpoint), Vertex or a Claude apps gateway, with CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS set, with prompt caching turned off (DISABLE_PROMPT_CACHING or a per-model variant), and on a session model other than Fable 5.1 or later, Opus 5.5, Sonnet 5.5 or Haiku 5.5. The router doesn't detect a HIPAA organization, and in the Claude Desktop app it can't tell a gateway sign-in from a subscription, so leave this off in a HIPAA organization, or if Claude Desktop reaches Claude through a Claude apps gateway.",
-      "default": false
-    },
-    "update_check": {
-      "type": "boolean",
-      "title": "Check for Claude Code updates",
-      "description": "Once a day, fetch the Claude Code changelog, the docs index and the model deprecations page from code.claude.com and platform.claude.com, and, with an Anthropic API key in the environment and no gateway, the account's model list from api.anthropic.com. Mention changes that affect this plugin, including models it routes to that are retiring.",
-      "default": true
-    },
     "verify_gate": {
       "type": "boolean",
-      "title": "Test run before finishing",
-      "description": "On by default. Claude is asked once, before it finishes a turn, to run the verifier when code in the project changed and no test, lint or build ran afterwards. This check is the failure signal that lets the router start cheap and re-run what fails. Turn it off to skip the ask.",
+      "title": "Check before finishing",
+      "description": "On by default, and only while routing_mode is auto. When Claude edited a project file with Edit, Write or NotebookEdit and no check command ran afterwards, Claude is asked once, before it finishes a turn, to run the work's own check: tests, type check or linter for code, a recompute for figures, a reread against the request for a document. A file changed by a shell command doesn't count. There is no ask while background work runs or when the session's transcript can't be read. An ask costs one more turn. Set it to false to skip it.",
       "default": true
     },
-    "strong_agent_gate": {
-      "type": "boolean",
-      "title": "Stronger agent's check on hard requests",
-      "description": "On by default. When a hard request was answered by a session model weaker than it needs, with no agent of the needed strength started, Claude is asked once, before it finishes, to have a stronger agent check the result. It rarely fires on a strong session model. Turn it off to never be asked.",
-      "default": true
+    "session_check": {
+      "type": "string",
+      "title": "Session check",
+      "description": "ask (default): when a new interactive session starts below the setups Model Router recommends for the main session (Opus or Fable at medium effort or higher, Sonnet at xhigh or higher), it asks once whether to switch. Picking a setup runs /model and /effort, which also make that model and effort Claude Code's default for new sessions (max lasts one session). off: never asks. Only while routing_mode is auto, the plugin's mod is loaded and Python runs.",
+      "default": "ask",
+      "options": [
+        "ask",
+        "off"
+      ]
     }
   }
 }

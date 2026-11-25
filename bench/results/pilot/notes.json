@@ -1,0 +1,5 @@
+{
+  "calibration-1": "Eleven tasks under the two baselines, to look for tasks that tell a strong subagent from a cheap one. None did: both solved every run. The table counts seven of them, since `bugfix-statement-queries`, `impl-merge-customers`, `ops-inbox-triage` and `rootcause-wallet-race` have changed since it ran.",
+  "calibration-2": "The four hard coding tasks and the redo, fan-out and plan-then-build tasks under the same two baselines. The table counts six of them, since `mixed-plan-then-build` has changed since it ran. Each baseline solved 11 of those 12 runs: the one it missed was a `perf-nlogn-rewrite` run the 900-second timeout stopped.",
+  "release-1": "Sixteen tasks under the plugin and the two baselines, with the ladder and the table the plugin ships. The table counts the eleven that haven't changed since it ran. It stays exploratory for two reasons: the plugin has changed since the commit it ran, and each run had a $0.50 cap, which stopped four of the runs counted before they finished."
+}

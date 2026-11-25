@@ -1,0 +1,5 @@
+From: GranitePay IT <it@granitepay.test>
+Date: 2026-11-23 10:05 UTC
+Subject: Our API key ended up in a public repo
+
+One of our developers pushed a config file with our production Northpeak API key to a public GitHub repository about two hours ago. We've made the repo private but the key was public for a while. Please revoke it and tell us how to issue a new one. We don't know yet whether anyone used it.

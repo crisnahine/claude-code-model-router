@@ -1,0 +1,1 @@
+after a product added to a cached category, listing c1

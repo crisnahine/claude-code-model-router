@@ -14,7 +14,7 @@
   "result": "Invalid API key · Fix external API key",
   "result_index": 0,
   "safety_stops": 0,
-  "session_id": "ea0402d5-4e58-4370-b61a-54ba43a1ddab",
+  "session_id": "00000000-0000-0000-0000-000000000000",
   "stop_reason": "stop_sequence",
   "subagent_stats": {
     "by_type": {},
@@ -66,5 +66,5 @@
     "service_tier": "standard",
     "speed": "standard"
   },
-  "uuid": "db8053ad-fbb3-44ca-909b-54070d7bc2a0"
+  "uuid": "00000000-0000-0000-0000-000000000000"
 }

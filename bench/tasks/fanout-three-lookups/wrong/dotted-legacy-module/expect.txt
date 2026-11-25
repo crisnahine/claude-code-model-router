@@ -1,0 +1,1 @@
+refund_email is 'shop.notify.legacy:send_refund_receipt'

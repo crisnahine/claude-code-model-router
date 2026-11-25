@@ -1,0 +1,1 @@
+on a header with spaces around its names, reports.render raised ReportError

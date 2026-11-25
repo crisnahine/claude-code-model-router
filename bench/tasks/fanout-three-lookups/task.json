@@ -1,0 +1,14 @@
+{
+  "class": "lookup",
+  "shape": "fanout",
+  "revision": 7,
+  "revisions": {
+    "2": "max_retries in base.ini is 6, so reading it as retries or as attempts both give a wrong answer",
+    "3": "refund_email takes a dotted module path or a path from inside the repo, as long as it names the one file",
+    "4": "ANSWERS.json written with a UTF-8 byte order mark is read",
+    "5": "refund_email takes path::function, the pytest node id form",
+    "6": "refund_email takes a space after the colon, and a path with a prefix that starts with one of the repo's own folders fails",
+    "7": "a refund_email path from a folder above the root fails when that prefix names another file or joins two answers"
+  },
+  "brief": "Answer three questions about this repository by reading it, and don't change any files. Take the settings as the repository ships them, with no environment variables set. 1. What page size does GET /orders use when the request gives no limit? 2. Which function sends the customer an email when an order is refunded? 3. When every attempt fails with a server error, how many times in all is a webhook delivery tried before it is given up? Write the answers to ANSWERS.json as {\"page_size\": <int>, \"refund_email\": \"<file path>:<function name>\", \"webhook_attempts\": <int>}."
+}

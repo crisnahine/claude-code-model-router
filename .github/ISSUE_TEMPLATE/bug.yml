@@ -1,0 +1,48 @@
+name: Bug report
+description: Model Router did something it shouldn't, or didn't do something it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Don't put a security problem here. docs/SECURITY.md says how to report one.
+  - type: input
+    id: claude-code
+    attributes:
+      label: Claude Code version
+      description: The output of `claude --version`.
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: The output of `python3 --version`, or `python --version` if that is the one on your PATH.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15, Ubuntu 24.04, Windows 11
+    validations:
+      required: true
+  - type: textarea
+    id: models
+    attributes:
+      label: Output of /model-router:models
+      description: Run it in the session where the problem happened and paste what it prints. It shows file paths, so edit out anything private.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true

@@ -7,29 +7,31 @@ import datetime as _dt
 import json
 import math
 import os
+import stat
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
 LEDGER_MAX_BYTES = 4 * 1024 * 1024
+LEDGER_MAX_DAYS = 30  # Claude Code's own default cleanupPeriodDays, which never reaches plugin data
 KEEP_ENTRIES = 200
 KEEP_SET_ASIDE = 3  # copies of an unreadable state file kept for a person to look at
 LOCK_WAIT_SECONDS = 1.0
 LOCK_POLL_MAX = 0.01  # the longest sleep between tries, so a waiter isn't starved by newcomers
-LOCK_STALE_SECONDS = 10.0
 KEPT_RECORDS = 100  # calls kept per record file
-# The version written into every state file. MIGRATIONS[n] turns a version-n file into
-# version n + 1. A file with no version is version 0, which already has today's shape.
+FILE_MAX_BYTES = 4 * 1024 * 1024  # an override file or plugin record over this says nothing
+# The version written into each shared file (state.json, locks.json), which
+# several releases can write at once. A file with no version has today's shape.
 SCHEMA = 1
-MIGRATIONS: dict[int, Callable[[dict], dict]] = {0: lambda data: data}
+DURABLE = ("state.json", "locks.json")
 
 
 _clock: Callable[[], float] | None = None
 
 
 def now() -> float:
-    """The wall-clock time stamped into state and compared with it. Lock waits and stale-lock
-    checks read the real clocks, so a frozen clock never stalls a lock."""
+    """The wall-clock time stamped into state and compared with it. Lock waits read the
+    real clock, so a frozen clock never stalls a lock."""
     return (_clock or time.time)()
 
 
@@ -52,30 +54,71 @@ def claude_home() -> Path:
     return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
 
 
+_private: set[Path] = set()
+
+
 def data_dir() -> Path:
     env = os.environ.get("CLAUDE_PLUGIN_DATA")
     path = Path(env) if env else claude_home() / "plugins" / "data" / "model-router-local"
     path.mkdir(parents=True, exist_ok=True)
+    if path not in _private:
+        # Claude Code creates the folder itself, so a mode on mkdir would not apply.
+        with contextlib.suppress(OSError):
+            os.chmod(path, 0o700)
+        _private.add(path)
     return path
 
 
-def load_dict(path: Path) -> dict:
+def loads(raw: str | bytes, **options: Any) -> Any:
+    """json.loads, with the RecursionError that deep nesting raises turned into the ValueError every caller handles."""
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(raw, **options)
+    except RecursionError as exc:
+        raise ValueError("nested too deeply") from exc
+
+
+def read_head(path: Path, size: int) -> bytes | None:
+    """At most `size` bytes from the start of a regular file, else None. The open doesn't block, so a FIFO a
+    repository's symlink points at can't hang a hook."""
+    try:
+        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
     except (OSError, ValueError):
+        return None
+    try:
+        with open(fd, "rb") as fh:
+            return fh.read(size) if stat.S_ISREG(os.fstat(fd).st_mode) else None
+    except OSError:
+        return None
+
+
+def _short_int(digits: str) -> float:
+    # Python turns digits into an int in quadratic time, so a megabyte of them would stall the hook. Longer reads as
+    # infinite, which every reader already drops as not a finite number.
+    return int(digits) if len(digits) <= 64 else math.inf
+
+
+def load_dict(path: Path) -> dict:
+    """A JSON object file, or {} when it is missing, unreadable, malformed, nested too deeply or over FILE_MAX_BYTES."""
+    raw = read_head(path, FILE_MAX_BYTES + 1)
+    if raw is None or len(raw) > FILE_MAX_BYTES:
+        return {}
+    try:
+        value = loads(raw, parse_int=_short_int)
+    except ValueError:
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def save_json(path: Path, value: Any) -> None:
-    write_atomic(path, json.dumps(value, indent=2, sort_keys=True))
 
 
 def write_atomic(path: Path, text: str) -> None:
     # A unique temp name per process, then an atomic rename: a reader never sees a
     # half-written file.
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{time.monotonic_ns()}.tmp")
-    tmp.write_text(text, encoding="utf-8")
+    try:
+        with _private_file(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL) as fh:
+            fh.write(text)
+    except OSError:  # a full disk: nothing else ever sweeps the temp file
+        tmp.unlink(missing_ok=True)
+        raise
     for _ in range(40):
         try:
             tmp.replace(path)
@@ -89,6 +132,12 @@ def write_atomic(path: Path, text: str) -> None:
     raise OSError(f"could not replace {path.name}")
 
 
+def _private_file(path: Path, flags: int) -> Any:
+    # Without O_BINARY a Windows descriptor translates newlines a second time, so each row would end in \r\r\n.
+    fd = os.open(str(path), flags | getattr(os, "O_BINARY", 0), 0o600)
+    return os.fdopen(fd, "a" if flags & os.O_APPEND else "w", encoding="utf-8")
+
+
 # The session whose hook is running, written into the lock files it holds, so a wait can
 # tell another session's lock from its own.
 owner: str | None = None
@@ -99,7 +148,7 @@ class Busy(OSError):
 
 
 def lock_counts() -> dict:
-    """Lock waits, waits on another session's lock, skipped writes and stale locks broken, per file."""
+    """Lock waits, waits on another session's lock and skipped writes, per file."""
     return _read_state(data_dir() / "locks.json")[0]
 
 
@@ -109,7 +158,7 @@ def _count(path: Path, *events: str) -> None:
     counts_path = path.with_name("locks.json")
     try:
         counts, status = _read_state(counts_path)
-        if status != "ok":
+        if status not in ("ok", "corrupt"):  # counts that no longer parse start over: they are only figures
             return
         entry = counts.get(path.name)
         entry = entry if isinstance(entry, dict) else {}
@@ -128,69 +177,88 @@ def locked(path: Path) -> Iterator[None]:
     issued together run their hooks at the same moment, and each would otherwise
     overwrite what the other just recorded. A lock still held after LOCK_WAIT_SECONDS
     raises Busy, so the caller skips its write: a hook must never hang a session, and
-    a write without the lock could drop another hook's update."""
-    lock = path.with_name(path.name + ".lock")
+    a write without the lock could drop another hook's update. The lock is the OS's, on a
+    file that stays on disk, so a process that dies lets go of it at once. On a filesystem
+    that can't lock at all, the write goes ahead without one."""
+    lock = path.with_name(path.name + ".flock")
     deadline = time.monotonic() + LOCK_WAIT_SECONDS
     delay = 0.001
-    handle = None
     events: list[str] = []
     holder = ""
-    while True:
-        try:
-            handle = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            break
-        except FileExistsError:
-            try:
-                # The lock file's mtime is the filesystem's real time, not the state clock.
-                if time.time() - lock.stat().st_mtime > LOCK_STALE_SECONDS:
-                    lock.unlink()  # left behind by a process that died
-                    events.append("broken")
-                    continue
-            except OSError:
-                pass
-        except PermissionError:
-            # Windows reports a lock file that is mid-deletion this way, so wait for it
-            # there. Anywhere else the directory isn't writable and waiting won't help.
-            if os.name != "nt":
-                raise
-        if "waits" not in events:
-            events.append("waits")
-        if owner and not holder:
-            try:
-                holder = lock.read_text(encoding="utf-8")  # empty until the holder writes its name
-            except OSError:
-                pass
-            if holder and holder != owner:
-                events.append("other_session")
-        if time.monotonic() >= deadline:
-            events[events.index("waits")] = "skipped"
-            _count(path, *events)
-            raise Busy(f"{lock.name} is held by another process")
-        time.sleep(delay)
-        delay = min(delay * 2, LOCK_POLL_MAX)
-    if owner:
-        with contextlib.suppress(OSError):
-            os.write(handle, owner.encode("utf-8"))
+    handle = os.open(str(lock), os.O_CREAT | os.O_RDWR, 0o600)
     try:
-        yield
-    finally:
-        if handle is not None:
-            os.close(handle)
-            for _ in range(20):
+        while True:
+            try:
+                _try_lock(handle)
+                break
+            except _HELD:
+                pass
+            except OSError:
+                break  # this filesystem can't lock: a write without one beats no routing
+            if "waits" not in events:
+                events.append("waits")
+            if owner and not holder:
                 try:
-                    lock.unlink()
-                    break
-                except PermissionError:  # Windows: something has the lock file open
-                    time.sleep(0.01)
+                    # Byte 0 is the locked byte, which Windows won't let a waiter read.
+                    with open(lock, "rb") as fh:
+                        fh.seek(1)
+                        holder = fh.read().decode("utf-8", "replace")  # empty until the holder writes its name
                 except OSError:
-                    break
-        if events:
-            _count(path, *events)
+                    pass
+                if holder and holder != owner:
+                    events.append("other_session")
+            if time.monotonic() >= deadline:
+                events[events.index("waits")] = "skipped"
+                _count(path, *events)
+                raise Busy(f"{lock.name} is held by another process")
+            time.sleep(delay)
+            delay = min(delay * 2, LOCK_POLL_MAX)
+        with contextlib.suppress(OSError):
+            os.ftruncate(handle, 0)  # a holder that was killed left its name
+            if owner:
+                os.write(handle, b" " + owner.encode("utf-8"))
+        try:
+            yield
+        finally:
+            with contextlib.suppress(OSError):
+                os.ftruncate(handle, 0)
+            with contextlib.suppress(OSError):
+                _unlock(handle)
+            if events:
+                _count(path, *events)
+    finally:
+        os.close(handle)
 
 
-def _read_state(path: Path) -> tuple[dict, str]:
-    """One state file, migrated to SCHEMA, without its version key, and how it read:
-    ok, corrupt, newer (written by a later release) or unreadable."""
+if os.name == "nt":
+    import msvcrt
+
+    # The CRT's _locking sets EACCES (PermissionError) for a held range; a filesystem that can't lock fails otherwise.
+    _HELD = PermissionError
+
+    def _try_lock(handle: int) -> None:
+        os.lseek(handle, 0, os.SEEK_SET)
+        msvcrt.locking(handle, msvcrt.LK_NBLCK, 1)
+
+    def _unlock(handle: int) -> None:
+        os.lseek(handle, 0, os.SEEK_SET)
+        msvcrt.locking(handle, msvcrt.LK_UNLCK, 1)
+else:
+    import fcntl
+
+    # Anything else, such as ENOLCK on a mount without flock, means this filesystem can't lock, so `locked` writes without one.
+    _HELD = BlockingIOError
+
+    def _try_lock(handle: int) -> None:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _unlock(handle: int) -> None:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def _read_state(path: Path, durable: bool = True) -> tuple[dict, str]:
+    """One state file without its version key, and how it read: ok, corrupt, newer (a shared
+    file written by a later release) or unreadable. A per-session file has no version to check."""
     try:
         raw = path.read_bytes()
     except FileNotFoundError:
@@ -198,24 +266,21 @@ def _read_state(path: Path) -> tuple[dict, str]:
     except OSError:
         return {}, "unreadable"
     try:
-        data = json.loads(raw)
+        data = loads(raw)
     except ValueError:
         return {}, "corrupt"
     if not isinstance(data, dict):
         return {}, "corrupt"
     version = data.pop("schema", 0)
+    if not durable:
+        return data, "ok"
     if type(version) is not int or version < 0:
         return {}, "corrupt"
-    if version > SCHEMA:
-        return data, "newer"
-    while version < SCHEMA:
-        data = MIGRATIONS[version](data)
-        version += 1
-    return data, "ok"
+    return data, "newer" if version > SCHEMA else "ok"
 
 
-def load_state_file(path: Path) -> dict:
-    return _read_state(path)[0]
+def load_state_file(path: Path, durable: bool = True) -> dict:
+    return _read_state(path, durable)[0]
 
 
 def _set_aside(path: Path) -> bool:
@@ -247,49 +312,30 @@ def set_aside() -> list[Path]:
 
 
 def newer_files() -> list[Path]:
-    """State files a later release wrote, which this one reads but never updates."""
-    return [p for p in sorted(data_dir().glob("*.json")) if _read_state(p)[1] == "newer"]
+    """Shared files a later release wrote, which this one reads but never updates."""
+    return [p for p in (data_dir() / name for name in DURABLE) if _read_state(p)[1] == "newer"]
 
 
-def try_update(path: Path, change: Callable[[dict], Any]) -> tuple[dict, str]:
-    """Load one state file, let `change` edit it in place, and save it, under its lock.
-    A file that fails to parse is moved aside first; one from a newer release, or one
-    that can't be read or moved, is never written. Saved compact, with its version.
-    Returns the data and "saved", or why it wasn't: newer, unreadable, corrupt, or busy
-    (the lock stayed held, so `change` edited a copy and nothing was written)."""
+def try_update(path: Path, change: Callable[[dict], Any], durable: bool = True) -> tuple[dict, str]:
+    """Load one state file, let `change` edit it in place, and save it, under its lock, compact.
+    A shared (`durable`) file is saved with its version; one that fails to parse is moved aside
+    first, and one from a newer release, or one that can't be read or moved, is never written.
+    A per-session file that fails to parse is replaced. Returns the data and "saved", or why it
+    wasn't: newer, unreadable, corrupt, or busy (the lock stayed held, so `change` edited a copy
+    and nothing was written)."""
     try:
         with locked(path):
-            data, status = _read_state(path)
-            writable = status == "ok" or (status == "corrupt" and _set_aside(path))
+            data, status = _read_state(path, durable)
+            writable = status == "ok" or (status == "corrupt" and (not durable or _set_aside(path)))
             change(data)
             if writable:
-                write_atomic(path, json.dumps({**data, "schema": SCHEMA}, separators=(",", ":"), sort_keys=True))
+                saved = {**data, "schema": SCHEMA} if durable else data
+                write_atomic(path, json.dumps(saved, separators=(",", ":"), sort_keys=True))
             return data, "saved" if writable else status
     except Busy:
-        data = _read_state(path)[0]
+        data = _read_state(path, durable)[0]
         change(data)
         return data, "busy"
-
-
-def remove_state_file(path: Path) -> str:
-    """Delete one state file under its lock: removed, missing, or why it was left (newer,
-    unreadable, busy). A file that fails to parse is moved aside, as a write would."""
-    try:
-        with locked(path):
-            status = _read_state(path)[1]
-            if status in ("newer", "unreadable"):
-                return status
-            if status == "corrupt":
-                return "removed" if _set_aside(path) else "unreadable"
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                return "missing"
-            except OSError:
-                return "unreadable"
-            return "removed"
-    except Busy:
-        return "busy"
 
 
 def update_dict(path: Path, change: Callable[[dict], Any]) -> dict:
@@ -313,7 +359,7 @@ def _keyed(name: str) -> Path:
 
 
 def load_entry(name: str, key: str | None) -> dict:
-    entry = load_state_file(_keyed(name)).get(key) if key else None
+    entry = load_state_file(_keyed(name), durable=False).get(key) if key else None
     return entry if isinstance(entry, dict) else {}
 
 
@@ -341,7 +387,7 @@ def mutate_entry(name: str, key: str | None, change: Callable[[dict], Any], max_
             for old in sorted(data, key=written)[:len(data) - KEEP_ENTRIES]:
                 del data[old]
 
-    return try_update(_keyed(name), apply)[1]
+    return try_update(_keyed(name), apply, durable=False)[1]
 
 
 def save_entry(name: str, key: str | None, entry: dict) -> None:
@@ -353,6 +399,11 @@ def save_entry(name: str, key: str | None, entry: dict) -> None:
 
 def update_entry(name: str, key: str | None, **changes: Any) -> None:
     mutate_entry(name, key, lambda entry: entry.update(changes))
+
+
+def drop_entry(name: str, key: str | None) -> None:
+    if key:
+        try_update(_keyed(name), lambda data: data.pop(key, None), durable=False)
 
 
 def keep(records: dict, key: str, record: dict, kept: int | None = None) -> None:
@@ -368,17 +419,57 @@ def ledger_path() -> Path:
     return data_dir() / "ledger.jsonl"
 
 
+def _older(line: str, cutoff: _dt.datetime) -> bool | None:
+    """Whether a ledger line's row is older than `cutoff`, or None when it has no readable time.
+    A time with no zone is read as UTC."""
+    try:
+        ts = _dt.datetime.fromisoformat(loads(line)["ts"])
+        return (ts if ts.tzinfo else ts.replace(tzinfo=_dt.timezone.utc)) < cutoff
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def _replaced(lines: list[str]) -> list[str]:
+    """`lines` without each running usage row a later one for the same agent replaces: each holds the agent's totals."""
+    seen, kept = set(), []
+    for line in reversed(lines):
+        try:
+            row = loads(line)
+            agent = json.dumps([row["session"], row["agent_id"]]) if row["event"] == "usage" and row.get("running") else None
+        except (KeyError, ValueError, TypeError, AttributeError):
+            agent = None
+        if agent is None or agent not in seen:
+            kept.append(line)
+        seen.add(agent)
+    return kept[::-1]
+
+
 def append_ledger(entry: dict) -> None:
-    entry = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"), **entry}
+    """Append one row. Rows older than LEDGER_MAX_DAYS go once the oldest one is a day older, so an age trim runs about
+    once a day. Past LEDGER_MAX_BYTES the usage rows a later one replaces go, then the older half if the rest still
+    fills half the cap, so trims stay rare."""
+    now = _dt.datetime.now(_dt.timezone.utc)
+    entry = {"ts": now.isoformat(timespec="seconds"), **entry}
+    cutoff = now - _dt.timedelta(days=LEDGER_MAX_DAYS)
     path = ledger_path()
     try:
         # The append takes the lock too: a row written between a trim's read and its
         # replace would land in the file the trim throws away.
         with locked(path):
-            with path.open("a", encoding="utf-8") as fh:
+            with _private_file(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND) as fh:
                 fh.write(json.dumps(entry) + "\n")
-            if path.stat().st_size > LEDGER_MAX_BYTES:
-                lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-                write_atomic(path, "".join(lines[len(lines) // 2:]))
+            # A bad byte reads as U+FFFD, so its line is one more that doesn't parse.
+            with path.open(encoding="utf-8", errors="replace") as fh:
+                oldest = next((found for found in map(lambda line: _older(line, cutoff - _dt.timedelta(days=1)), fh)
+                               if found is not None), False)
+            big = path.stat().st_size > LEDGER_MAX_BYTES
+            if oldest or big:
+                lines = [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
+                         if line.strip() and not _older(line, cutoff)]
+                if big:
+                    lines = _replaced(lines)
+                    if sum(len(line.encode("utf-8")) for line in lines) > LEDGER_MAX_BYTES // 2:
+                        lines = lines[len(lines) // 2:]
+                write_atomic(path, "".join(lines))
     except OSError:
         pass

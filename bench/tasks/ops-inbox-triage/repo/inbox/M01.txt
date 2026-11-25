@@ -1,0 +1,5 @@
+From: Priya Raman <ops@acmerobotics.test>
+Date: 2026-11-24 08:50 UTC
+Subject: Dashboard down for everyone
+
+Since about 08:40 none of our 140 users can load the dashboard. Every page spins and then shows "Something went wrong". We tried three networks and two browsers. Our floor team can't see today's work orders at all. Please treat this as urgent.

@@ -17,7 +17,6 @@
   "mod-spawn": {
     "session_id": "s1",
     "tool_use_id": "tu1",
-    "cwd": "/work/project",
     "parent_agent_id": "a0",
     "parent_model": "claude-opus-5-5",
     "kind": "subagent",
@@ -41,49 +40,49 @@
       "flag": {}
     }
   },
-  "mod-turn": {
-    "session_id": "s1",
-    "text": "fix the auth migration across every service",
-    "model": "claude-opus-5-5",
-    "first_party": true,
-    "settings": {
-      "policy": {},
-      "user": {
-        "availableModels": [
-          "haiku",
-          "sonnet"
-        ]
-      },
-      "project": {},
-      "local": {},
-      "flag": {}
-    }
-  },
   "mod-usage": {
     "session_id": "s1",
     "agent_id": "a1",
-    "usage": {
-      "model": "claude-opus-5-5",
-      "input_tokens": 1000000,
-      "output_tokens": 100000,
-      "cache_read_input_tokens": 0,
-      "cache_creation_input_tokens": 0
-    },
-    "requests": [
+    "tool_use_id": "tu1",
+    "subagent_type": "general-purpose",
+    "models": [
       {
         "model": "claude-opus-5-5",
-        "input_tokens": 400000,
-        "output_tokens": 40000,
+        "input_tokens": 1000000,
+        "output_tokens": 100000,
         "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 0
       },
       {
-        "model": "claude-opus-5-5",
-        "input_tokens": 600000,
-        "output_tokens": 60000,
+        "model": "claude-haiku-5-5",
+        "input_tokens": 20000,
+        "output_tokens": 1000,
         "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 0
       }
-    ]
+    ],
+    "cost": {
+      "usd": 6.0
+    },
+    "subscription": true,
+    "ran": {
+      "model": "claude-haiku-5-5",
+      "effort": "low"
+    }
+  },
+  "mod-status": {
+    "session_id": "s1",
+    "setup": {
+      "model": "claude-opus-5-5",
+      "effort": "medium"
+    }
+  },
+  "mod-check": {
+    "session_id": "s1",
+    "model": "claude-sonnet-5-5",
+    "locked": true
+  },
+  "mod-end": {
+    "session_id": "s1"
   }
 }

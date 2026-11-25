@@ -1,0 +1,1 @@
+max_upload_mb is '25', expected 25

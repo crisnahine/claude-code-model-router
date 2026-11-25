@@ -1,110 +1,66 @@
 <!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
-<p align="center"><img src="assets/banner-performance.svg" width="880" alt="Performance: What does the router cost in time and disk?"></p>
-
-<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="research/quality-first-routing.md">Quality research</a> &nbsp;&middot;&nbsp; Next: <a href="SECURITY.md">Security</a></p>
+<p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; <a href="README.md">Documentation</a> &nbsp;&middot;&nbsp; Previous: <a href="SECURITY.md">Security</a> &nbsp;&middot;&nbsp; Next: <a href="CLAUDE_CODE_DOCS.md">Built on the docs</a></p>
 <!-- End of page head. -->
 
 # Performance
 
-What the router costs in time and disk, measured with no paid calls on one machine. Yours will differ. To reproduce:
+Times and sizes come from `python3 bench/overhead.py` (`--json` for JSON), which makes no paid call and works in throwaway folders.
 
-```bash
-python3 bench/overhead.py --runs 30 --calls 1000        # tables
-python3 bench/overhead.py --runs 30 --calls 1000 --json # the same as JSON
-```
+Measured on an Apple M3 Pro (11 cores), macOS 27.2.1, Node 22.22.3 and Claude Code 2.1.332, with other work running (load average about 5), once with Apple's Python 3.9.6 as `python3` and once with Homebrew's Python 3.13.14.
 
-It uses throwaway folders and turns the daily check off, so it never touches your plugin state or the network.
+## Hook time
 
-Measured on 2026-11-22: macOS 27.2.1 on arm64 (11 cores), Python 3.9.6, Node 22.22.3, Claude Code 2.1.330.
+Warm p50 milliseconds per call over 30 runs, each through `sh scripts/model-router.sh`:
 
-## Settings hooks
+| Command | 3.9.6 | 3.13 |
+| :- | -: | -: |
+| Each of the nine settings hooks in `hooks.json` | 80 to 93 | 60 to 64 |
+| `mod-start`, at the mod's `session.start` and the first main-loop turn after `/clear` | 84 | 61 |
+| `mod-spawn`, at `agent.spawn` | 86 | 63 |
+| `mod-usage`, at each subagent turn's `turn.complete` | 83 | 63 |
 
-Each hook runs as `hooks/hooks.json` runs it: `sh scripts/model-router.sh <command>` with the hook's JSON on stdin ([hook input](https://code.claude.com/docs/en/hooks.md)), a different brief each run so repeats don't read as redos. Cold is an empty bytecode cache and no state, so even the standard library compiles from source (a real first hook lands between the two). Warm is bytecode in place after one seeded session, with a 1 MB transcript.
+p95 ran 84 to 221 ms on 3.9.6 and 62 to 93 ms on 3.13. The launcher's loop with no router code after it (`sh` and one `python3 -c pass`) takes 40 and 48 ms. Apple's 3.9.6 writes no bytecode under the launcher's `-I` and ships none for its standard library, so the launcher gives it a private cache in `~/.cache/model-router/pycache`. Without the cache, a hook took about twice as long in a side-by-side run (189 to 222 ms against 97 to 100 ms).
 
-Wall milliseconds per call over 30 runs, from a `--runs 30 --calls 200` run (its bytes per 1,000 calls agree with the state table below within 1%). `stop` (asks for a check once) and `agent-stopped` (finds no background agent waiting) take a quick path on most warm runs.
+The routing decision itself (`config.load`, `spawn.facts`, `router.decide`) takes about 1.1 ms in process, and the mod's `agent.spawn` handler 0.05 to 0.07 ms in Node. So nearly all of each figure is starting Python and loading the plugin. Not timed: the mod's settings reads, which wait at most 2 s (`SETTINGS_MS` in `hooks/router.ts`).
 
-| Command | Event | Cold p50 | Cold p95 | Warm p50 | Warm p95 |
-| :- | :- | -: | -: | -: | -: |
-| `session-start` | SessionStart | 182 | 231 | 59 | 82 |
-| `user-prompt` | UserPromptSubmit | 187 | 208 | 58 | 64 |
-| `pre-agent` | PreToolUse (Agent) | 188 | 208 | 60 | 63 |
-| `post-agent` | PostToolUse (Agent) | 183 | 204 | 54 | 62 |
-| `post-edit` | PostToolUse (Edit, Write, NotebookEdit) | 183 | 207 | 55 | 57 |
-| `agent-failed` | PostToolUseFailure (Agent) | 187 | 203 | 55 | 57 |
-| `agent-stopped` | SubagentStop | 185 | 203 | 54 | 66 |
-| `stop` | Stop | 179 | 197 | 54 | 77 |
-| `model-switch` | PostModelSwitch | 184 | 218 | 55 | 68 |
+No hook runs async, and the mod waits for each answer it routes by. In a session with a person at the prompt, the mod also runs `mod-status` (the status line) after each spawn and each main-loop turn, `ps` and `mod-check` once at the start, and `mod-end` at the end, and `/model-router` waits on one `mod-status`. Each starts a process like the commands above, and they weren't timed. The status refresh and the session check run after the hook that asks for them has returned, so no spawn or turn waits on them, and a spawn during a refresh adds one more refresh, not one each. Summed at p50:
 
-`refresh-cache` isn't timed: it is async and it fetches. Every hook stays far under its `hooks.json` timeout (5 seconds for `user-prompt`, 10 for the other timed ones). Warm p95 moves by 10 to 40 ms between runs, so read it as a range. Starting `sh` and one interpreter with no router code takes 43 ms (p50) and 48 ms (p95), the floor under every hook; the router adds about 11 to 17 ms.
-
-### What changed the numbers
-
-The first measurement had warm hooks at 88 to 94 ms (p50), now 54 to 60. Two changes cut 30 to 40 ms from each. `model-router.py` checks its own version and exits 87 when it is too old, so a working run starts Python once (only a failed run pays for a version probe; the floor used to drift between 45 and 79 ms at p50). And `urllib.request` and `xml.etree`, about 20 ms of imports, load only for the daily fetch and the changelog parser; a test fails if the hook path imports them. Cold fell 80 to 100 ms too (it was 264 to 276 ms at p50), mostly because the bench's empty cache no longer compiles `urllib`, `http.client`, `email` and `xml`, so a real first hook gains less.
-
-## Mod path
-
-The mod (`hooks/router.ts`) asks the runtime through the same launcher, one run per question, and waits for the answer:
-
-| What | When the mod waits for it | Cold p50 | Cold p95 | Warm p50 | Warm p95 |
-| :- | :- | -: | -: | -: | -: |
-| `mod-start` | `session.start`, once per process | 183 | 197 | 54 | 64 |
-| `mod-spawn` | `agent.spawn`, before each agent starts | 187 | 197 | 58 | 70 |
-| `mod-turn` | `turn.start`, before each main-loop prompt runs | 186 | 202 | 56 | 59 |
-| `mod-usage` | `turn.complete`, after the turn, before the handler returns | 182 | 194 | 54 | 56 |
-
-In process, loading the config, gathering the facts and running `router.decide` take 0.26 ms (p50) and 0.29 ms (p95). The mod's own handlers, timed in Node with the runtime's answer returned at once, take 0.001 to 0.004 ms (p50) and at most 0.005 ms (p95) for `agent.spawn`, `turn.start` and `turn.step`, so almost all of the time is starting Python. Not timed: before `mod-start`, `mod-spawn` and `mod-turn` the mod reads the five settings sources, waiting at most 2 seconds (`SETTINGS_MS` in `hooks/router.ts`).
-
-## Context the plugin adds
-
-Measured 2026-11-23 on Claude Code 2.1.330 with a headless Sonnet run that only says "ok" (`--setting-sources project`, a plugins root of its own): the first request's prompt (input plus cache read and write) was 19,286 tokens without the plugin, 20,013 with it before the latest cut, and 19,969 after. The plugin now adds 683 tokens, down from 728; an earlier cut, measured on Haiku, took it from 1,215 to 728. Each source was measured with that source removed (no `agents/` folder, no `skills/` folder, or no session-start hook).
-
-| Source | When it's paid | Before | After |
+| What | Commands | 3.9.6 | 3.13 |
 | :- | :- | -: | -: |
-| Session-start note (`hooks.session_start`) | At session start, resume, clear, compact and fork | 147 tokens | 128 |
-| The seven role agents' names, descriptions and tools in the agent list | Once per session | 493 | 493 |
-| The `route` skill's listing (the other four skills set `disable-model-invocation`, so theirs aren't in context, https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill) | Once per session | 84 | 61 |
-| The hard-request note | Per prompt, only when the request needs more than the session's model | about 88 | about 106 |
-| The stronger-agent check at `Stop` | Once per request, only when that check fires | about 97 | about 95 |
+| A prompt | `user-prompt`, `stop` | 164 | 123 |
+| An `Agent` call through the mod, one subagent turn | `pre-agent`, `mod-spawn`, `post-agent`, `agent-stopped`, `mod-usage` | 418 | 316 |
+| An `Agent` call with no mod | `pre-agent`, `post-agent`, `agent-stopped` | 250 | 189 |
+| An edit | `post-edit` | 82 | 60 |
 
-The first three are measured, the last two are rendered text at about 4 characters a token. On the fallback path each routed spawn also gets a one-line note.
+## State on disk
 
-A once-per-session source is cached on the first request and read from the cache on later ones, until it lapses or the conversation is compacted (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md). On Sonnet 5.5 the 683 tokens cost about $0.0027 to write at the one-hour price (a Claude subscription's main conversation, within its plan) or $0.0017 at the five-minute price (an API key, usage credits or a cloud provider), then $0.00007 per later request (https://code.claude.com/docs/en/prompt-caching.md#which-ttl-each-request-gets, https://platform.claude.com/docs/en/about-claude/pricing.md). No subagent gets them: in kept benchmark transcripts the main loop's first request was 730 tokens bigger with the plugin and the subagents' first requests weren't. In the benchmark of commit `27b94e6` on a Sonnet session, the router lost by $0.009 to $0.012 a run in implementation, bugfix, cross-module and security review, and this text is about $0.003 of that. In the kept security-review pair, the router's subagent at `high` effort cost $0.0064 more than `defaults`' at the session's default.
+After 1,000 routed calls through the real hook functions, half the sessions on each path (the 3.9.6 run; the 3.13 run is within 10 bytes per file):
 
-## State locks a spawn takes
+| File | Bytes | Bounded by |
+| :- | -: | :- |
+| `ledger.jsonl` | 799,299 | 30 days, trimmed once a day; past 4 MiB, replaced usage rows go, then the older half (about 5,200 calls) |
+| `routes.json`, `done.json`, `launched.json` | 184,869, 96,289, 1,597 | 200 sessions, a day idle, 100 records each |
+| `allowlist.json`, `edits.json`, `sessions.json` | 5,510, 3,119, 2,901 | 200 sessions |
+| `pending.json` | 801 | 200 sessions, 100 calls each |
+| `state.json` | 383 | one entry per model or failed full ID |
 
-Every read-modify-write of a state file takes that file's lock ([State](ARCHITECTURE.md#state)), which is one more wait for agents started in one message and one more chance for a skipped write. `bench/overhead.py` counts them in the 1,000-call simulation (`locks` in `--json`), measured 2026-11-24 on the machine above:
+The script also lowers the caps and runs past them twice. Every file stayed bounded, and `OverheadBench.test_the_overhead_bench_reports_every_hook_and_state_file` holds `ledger.jsonl` and `state.json` to it. A spawn takes one lock per file it writes: 2 through the mod, 3 without it (`SpawnPaths.test_a_spawn_takes_one_lock_per_state_file_it_writes`).
 
-| Path | Locks per spawn before | After | Files after |
-| :- | -: | -: | :- |
-| Mod (`mod-spawn`) | 3.1 | 3.0 | `ledger.jsonl`, `routes.json`, `learned.json` |
-| Fallback (`PreToolUse`) | 4.1 | 4.0 | the same, and `pending.json` for the rewrite waiting for its result |
+## Context
 
-The simulation sends one prompt per 20 calls, so only one spawn in ten was the request's strongest so far; a real request starts with that spawn, which used to lock `prompts.json`. Counted on single spawns in a test:
+Characters of plugin text Claude gets. Tokens weren't measured.
 
-| Spawn | Mod before | Mod after | Fallback before | Fallback after |
-| :- | -: | -: | -: | -: |
-| The first of a request, or stronger than its siblings | 4 | 3 | 5 | 4 |
-| A redo the router chose (its count and its vote) | 5 | 3 | 6 | 4 |
-| Weaker than or as strong as a sibling already routed | 3 | 3 | 4 | 4 |
+| Text | When | Characters | Test budget |
+| :- | :- | -: | -: |
+| Session-start note (`hooks._rules`) | each start, resume, clear, compact and fork | 634 with no option set, 206 to 653 over 32 option mixes | 720 |
+| The same note, after two newlines, in the Agent tool's description (mod only) | all session | 636 with no option set, at most 655 | 720, the note's |
+| The table for a script's stages (`hooks._workflow_rules`), after two newlines, in the Workflow tool's description (mod only) | all session | 472 with no option set | 540 |
+| The fallback's note on a call it rewrites (`fallback._note`) | with that call's result, no mod | 84 to 181 | none |
+| A redo with no step left (`spawn.redo_note`) | after that call's result | 106 to 118 | none |
+| The five agents' descriptions | all session | 765 | 930 |
+| The `route` skill's description | all session | 199 | 200 |
+| A note that the prompt names a model (`hooks.user_prompt`) | on such a prompt | 135 to 139 | none |
+| The Stop ask (`gates.unverified_edit`) | once per batch of unchecked edits | 516 | none |
+| The `route` skill's text and its policy output | when it runs | about 4,940 and 1,483 | none |
 
-The strongest spawn is no longer written (`calls.strongest` reads it from the routes), and a spawn's count and vote are one write to `learned.json`. What is left is one lock per file a spawn writes. Folding `pending.json` into the route would take the fallback to three, and waits until `locks.json` shows it matters.
-
-## State size
-
-1,000 routed calls were simulated with the real hook functions, 20 per session, even sessions on the fallback path and odd ones on the mod path. One call in four is a background agent finished by `SubagentStop`, every call adds a usage row, every fifth an edit and every fiftieth a model error.
-
-| File | Bytes after 1,000 calls | Bounded | What bounds it |
-| :- | -: | :- | :- |
-| `ledger.jsonl` | 798,174 | yes | Halved when it passes 4 MiB (`store.LEDGER_MAX_BYTES`), so it reaches the cap after about 5,000 calls |
-| `routes.json` | 206,970 | yes | Sessions written in the last day (`calls.KEPT_FOR`), at most the 200 most recently written (`store.KEEP_ENTRIES`), and 100 spawns per session (`store.KEPT_RECORDS`) |
-| `done.json` | 114,486 | yes | Same as `routes.json` |
-| `prompts.json` | 5,140 | yes | The 200 most recently written sessions |
-| `edits.json` | 3,120 | yes | Same |
-| `sessions.json` | 2,911 | yes | Same |
-| `mod.json` | 1,738 | yes | Same |
-| `launched.json` | 1,619 | yes | Same as `routes.json` |
-| `pending.json` | 816 | yes | The 200 most recently written sessions, 100 calls each |
-| `state.json` | 713 | yes | The plugin's options and one health entry per model |
-| `learned.json` | 144 | yes | One entry per level |
-
-The "Bounded" column comes from a run of the script. The script lowers three caps (the ledger to 16 KiB, sessions to 5, calls per session to 10) and runs past them in two rounds, the second with twice the calls, once with one call per session (`max(40, calls // 5)` sessions, then twice as many: 200, then 400 at `--calls 1000`) and once with one long session (`max(50, calls // 5)` calls, then twice as many). A file is bounded when its second-round peak is at most 25% plus 256 bytes above its first. Removing each trim in turn, rerun 2026-11-24 with `--calls 1000`, proved the check: without the session cap all eight per-session files report unbounded, without the per-session call cap `routes.json` and `done.json` do, and without the ledger's halving `ledger.jsonl` does.
+With the mod, the model table appears three times: in the session context, in the Agent tool's description and in the Workflow tool's, so a session with no option set carries 1,742 characters of it. `Notes.test_every_note_stays_within_budget` walks the mixes of `max_tier`, `CLAUDE_CODE_SUBAGENT_MODEL`, its FORCE switch and the two effort variables. `Hooks.test_the_text_in_context_every_session_stays_within_budget` holds the descriptions. `models` and `usage` set `disable-model-invocation`, so their descriptions stay out ([skills](https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill)). With `routing_mode` off there is no note and no Stop ask.

@@ -1,9 +1,9 @@
 ---
 name: route
-description: Explains which model Model Router gives a task and why, and how to split the work. Use when the user asks which model should do something, why an agent ran on a model, or whether it's routed right.
+description: Says which model and effort fit a task, how to brief and split it, and when to redo. Use when the user asks which model should do something, why an agent ran on a model, or whether it's routed right.
 argument-hint: "[task description]"
 allowed-tools:
-  - Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" policy)
+  - Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" policy *)
   - Bash(sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" explain *)
 ---
 
@@ -15,38 +15,46 @@ $ARGUMENTS
 
 ## Current policy
 
-!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" policy`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" policy --routing-mode='${user_config.routing_mode}' --max-tier='${user_config.max_tier}' --verify-gate='${user_config.verify_gate}' --session-check='${user_config.session_check}'`
 
-## What the router does on its own
+## What the router does
 
-Every subagent, teammate and workflow agent gets its model and reasoning effort set automatically from its brief, starting on the cheapest that should do the job. You don't choose a model per call. Your part is the split and the briefs.
+Model Router keeps the `model` and `effort` an Agent call names, within the user's cap, and fills in the effort when a call names only a model. A call that names no model runs on its agent's own model (the parent's, for `model: inherit`), else on `CLAUDE_CODE_SUBAGENT_MODEL` when it is set, else at the level its tools put it: `lookup` for an agent that can't edit, write or run commands, `standard` for any other. A rule in `model-router.json` can set the model or raise the level. The router never reads the brief. So name both on each call, from the table below. The Agent tool sets `effort` only when instructions ask for it, and this skill asks for it.
 
-To see what the router makes of a piece of work, run:
+To see what a call would run on, run:
 
-`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" explain <the brief>`
+`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" explain --routing-mode='${user_config.routing_mode}' --max-tier='${user_config.max_tier}' --verify-gate='${user_config.verify_gate}' --session-check='${user_config.session_check}'`
 
-Add `--agent <name>` before the brief to see it for a specific agent.
+Add `--agent <name>`, `--model <model>` or `--effort <effort>` for a call that names them.
+
+## Which model and effort fit the work
+
+Judge the work by whether it has a check to run (tests, a recompute, a reread against the brief) and how open-ended it is. A contract and a code change can sit on the same row.
+
+| Work | `model` | `effort` | For example |
+| :- | :- | :- | :- |
+| Finding, reading and listing, where a wrong answer is easy to spot | `haiku` | `medium` | the files that import a module, the open invoices in a sheet, the dates in a letter |
+| Writing and fixing code, figures and documents to a brief | `haiku` | `high` | a function to its spec, a bug fixed against a failing test, a refactor inside one module, a contract summarized, an email drafted from an outline |
+| A judgment call with no check to run: a design or a review | `sonnet` | `high` | two designs compared, a diff reviewed for security, a bug's cause with no reproduction |
+
+`opus` and `fable` have no row: they are for the session itself. A subagent runs on one when a redo climbs there, a rule sets its level, or the call names it.
+
+The policy above lists the role agents' own models. Leave `model` off a call to an agent that sets its own, unless the work needs a stronger one. Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` a `model` on a call has no effect, so name only `effort`.
 
 ## How to split the work
 
-Judge the task on these signals. The router reads them from each brief's wording, and also performance or capacity limits the brief asks it to design against.
-
-| Signal | Low | High |
-| :- | :- | :- |
-| Ambiguity | Spec is clear, one obvious approach | Requirements unclear, several valid designs |
-| Scope | One file or function | Several modules, services or repositories |
-| Risk | Easy to revert, covered by tests | Security, data, money, public API, migrations |
-
-A brief that fixes or hunts a defect routes at complex or above, however small the fix, except for search and check agents, which stop at standard.
-
 - Don't delegate what takes you one or two tool calls.
 - Split into independent pieces and start them in one message so they run in parallel, when they don't touch the same files.
-- Give each agent a complete brief: goal, files, constraints, how to verify, what to report. The brief is what the model is chosen from, so say what makes a piece hard (the security angle, the cross-service reach) in the brief itself.
-- Use the agent that fits the work, from any plugin or the project. When none fits, the role agents in the policy above cover search, build, verify, plan, review and research-grade problems.
-- If the estimate is wrong for a reason only you can see, pass `model` on that call. It is kept, within the cap.
-- If a result isn't good enough, re-issue the same call unchanged: it runs one level higher, on a stronger model or, when it stays on the same one, at more effort. Name a `model` only when you need that exact one. The router learns from both.
-- Have code changes verified, and reviewed when they are more than trivial.
+- Use the agent that fits the work, from any plugin or the project. When none fits, the role agents in the policy above cover search, build, verify, plan and review.
+- The agent starts without your context, so its brief carries the objective and what done looks like, the output to report and its shape, the files, documents, pages or commands to use, the boundaries (what is out of scope, what not to change, any rule to keep), and how to verify the result, with the check it ran and its output in the report.
+- Have code changes verified, and reviewed when they are risky or cross-module. `model-router:reviewer` can't run git, so it reads the change from a diff file the brief names, such as one `git diff > review.diff` wrote. Other work gets a check that fits it, such as figures recomputed or a document read against the request.
+
+## Redo or continue
+
+- Mark a redo only when a check failed or the report shows a gap, such as a part left out or no output from the check it was asked to run. Put "Redo:" in front of the same `description`, on the same agent, so the redo is found however its brief is rewritten. Workflow stages are never redone.
+- A redo runs above the run it redoes. If you name a `model` or `effort` that asks for more than that run, it runs as named; if you name the same or less, or nothing, it climbs from the run it redoes, the one of the same agent and `description` that finished in this session in the last 30 minutes, or what the call would run at unmarked when there is none: one `effort` step up while that run was below `high`, else the next stronger `model`, else one more `effort` step. When `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` sets the effort, it goes straight to the next stronger `model`. To pick the lever yourself, name it: `effort` one step up for work that was skipped (a file not read, a check not run), a stronger `model` for work that tried and was wrong.
+- Continue a run cut short by its turn limit or an API error with `SendMessage` to its agent ID, which keeps its history. Don't send it again.
 
 ## Output
 
-When the user asked which model to use or why one was used, answer with the level, the model, and the signals that decided it. Otherwise go straight to delegating.
+When the user asked which model to use or why one was used, answer with the row of the table the work fits, the model and effort it gives, and what `explain` says the call runs on. Otherwise go straight to delegating.

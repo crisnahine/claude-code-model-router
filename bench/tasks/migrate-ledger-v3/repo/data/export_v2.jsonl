@@ -1,0 +1,126 @@
+{"id": "t-1001", "rev": 1, "account": "acc-ny", "kind": "credit", "amount": "2500.00", "currency": "USD", "ts": "2023-01-02T09:00:00-05:00", "memo": "opening deposit", "exported_at": "2023-01-03T01:00:00Z"}
+{"id": "t-1002", "rev": 1, "account": "acc-ny", "kind": "debit", "amount": "12.30", "currency": "USD", "ts": "2023-01-02T10:15:00-05:00", "memo": "coffee beans", "exported_at": "2023-01-03T01:00:00Z"}
+{"id": "t-1003", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "800", "currency": "EUR", "ts": "2023-01-02T08:30:00+01:00", "memo": "Einzahlung", "exported_at": "2023-01-03T01:00:00Z"}
+{"id": "t-1004", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "1200.50", "currency": "GBP", "ts": "2023-01-02T11:00:00Z", "memo": "", "exported_at": "2023-01-03T01:00:00Z"}
+{"id": "t-1005", "rev": 1, "account": "acc-ber", "kind": "fee", "amount": "4.90", "currency": "EUR", "ts": "2023-01-03T00:10:00+01:00", "memo": "Kontoführung", "exported_at": "2023-01-04T01:00:00Z"}
+{"id": "t-1006", "rev": 1, "account": "acc-ny", "kind": "debit", "amount": "310.00", "currency": "USD", "ts": "2023-01-03T16:45:00-05:00", "memo": "rent share", "exported_at": "2023-01-04T01:00:00Z"}
+{"id": "t-1007", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "75.00", "currency": "GBP", "ts": "2023-01-03T12:00:00+00:00", "memo": "paper", "exported_at": "2023-01-04T01:00:00Z"}
+{"id": "t-1008", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "129.99", "currency": "EUR", "ts": "2023-01-04T14:20:00+01:00", "memo": "Ersatzteile", "exported_at": "2023-01-05T01:00:00Z"}
+{"id": "t-1009", "rev": 1, "account": "acc-ny", "kind": "refund", "amount": "12.30", "currency": "USD", "ts": "2023-01-04T09:05:00-05:00", "memo": "beans returned", "exported_at": "2023-01-05T01:00:00Z"}
+{"id": "t-1010", "rev": 1, "account": "acc-lon", "kind": "fee", "amount": "2.00", "currency": "GBP", "ts": "2023-01-04T18:00:00Z", "memo": "card fee", "exported_at": "2023-01-05T01:00:00Z"}
+{"id": "t-1007", "rev": 2, "account": "acc-lon", "kind": "debit", "amount": "57.00", "currency": "GBP", "ts": "2023-01-03T12:00:00+00:00", "memo": "paper (corrected)", "exported_at": "2023-01-05T01:00:00Z"}
+{"id": "t-1011", "rev": 1, "account": "acc-ber", "kind": "chargeback", "amount": "60.00", "currency": "EUR", "ts": "2023-01-05T10:00:00+01:00", "memo": "disputed repair", "exported_at": "2023-01-06T01:00:00Z"}
+{"id": "t-1012", "rev": 1, "account": "acc-ny", "kind": "credit", "amount": "940.25", "currency": "USD", "ts": "2023-01-05T13:30:00-05:00", "memo": "wholesale order 88", "exported_at": "2023-01-06T01:00:00Z"}
+{"id": "t-1013", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "360.00", "currency": "GBP", "ts": "2023-01-05T15:10:00Z", "memo": "flyers", "exported_at": "2023-01-06T01:00:00Z"}
+{"id": "t-0412", "rev": 1, "account": "acc-ny", "kind": "DR", "amount": "45.00", "currency": "USD", "ts": "2020-11-03T21:30:00", "memo": "2020 backlog: delivery", "exported_at": "2023-01-06T01:00:00Z"}
+{"id": "t-1014", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "215.00", "currency": "EUR", "ts": "2023-01-06T09:45:00+01:00", "memo": "Inspektion", "exported_at": "2023-01-07T01:00:00Z"}
+{"id": "t-1015", "rev": 1, "account": "acc-ny", "kind": "fee", "amount": "3.00", "currency": null, "ts": "2023-01-06T17:00:00-05:00", "memo": "wire fee", "exported_at": "2023-01-07T01:00:00Z"}
+{"id": "t-1016", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "19.99", "currency": "GBP", "ts": "2023-01-06T20:00:00Z", "memo": "ink", "exported_at": "2023-01-07T01:00:00Z"}
+{"id": "t-1017", "rev": 1, "account": "acc-ber", "kind": "refund", "amount": "60.00", "currency": "EUR", "ts": "2023-01-07T11:00:00+01:00", "memo": "Gutschrift", "exported_at": "2023-01-08T01:00:00Z"}
+{"id": "t-1018", "rev": 1, "account": "acc-ny", "kind": "debit", "amount": "88.40", "currency": "USD", "ts": "2023-01-07T08:00:00-05:00", "memo": "milk", "exported_at": "2023-01-08T01:00:00Z"}
+{"id": "t-1019", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "95.00", "currency": "GBP", "ts": "2023-01-07T10:30:00+00:00", "memo": "posters", "exported_at": "2023-01-08T01:00:00Z"}
+{"id": "t-1020", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "38.50", "currency": "EUR", "ts": "2023-01-08T23:30:00+01:00", "memo": "Werkzeug", "exported_at": "2023-01-09T01:00:00Z"}
+{"id": "t-1021", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "516.39", "currency": "GBP", "ts": "2023-01-09T11:45:00Z", "memo": "paper", "exported_at": "2023-01-10T01:00:00Z"}
+{"id": "t-1022", "rev": 1, "account": "acc-ny", "kind": "credit", "amount": "184.46", "currency": "USD", "ts": "2023-01-09T11:45:00-05:00", "memo": "coffee beans", "exported_at": "2023-01-10T01:00:00Z"}
+{"id": "t-1023", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "304.49", "currency": "EUR", "ts": "2023-01-10T21:30:00+01:00", "memo": "Werkzeug", "exported_at": "2023-01-11T01:00:00Z"}
+{"id": "t-1024", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "123.54", "currency": "EUR", "ts": "2023-01-10T10:00:00+01:00", "memo": "Werkzeug", "exported_at": "2023-01-11T01:00:00Z"}
+{"id": "t-1025", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "271.41", "currency": "GBP", "ts": "2023-01-10T17:20:00Z", "memo": "ink", "exported_at": "2023-01-11T01:00:00Z"}
+{"id": "t-1026", "rev": 1, "account": "acc-ber", "kind": "fee", "amount": "285.82", "currency": "EUR", "ts": "2023-01-10T20:30:00+01:00", "memo": "Schläuche", "exported_at": "2023-01-11T01:00:00Z"}
+{"id": "t-1027", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "237.28", "currency": "EUR", "ts": "2023-01-11T18:05:00+01:00", "memo": "Reparatur", "exported_at": "2023-01-12T01:00:00Z"}
+{"id": "t-1028", "rev": 1, "account": "acc-ber", "kind": "refund", "amount": "494.87", "currency": "EUR", "ts": "2023-01-11T07:00:00+01:00", "memo": "Schläuche", "exported_at": "2023-01-12T01:00:00Z"}
+{"id": "t-1029", "rev": 1, "account": "acc-ny", "kind": "refund", "amount": "576.48", "currency": "USD", "ts": "2023-01-11T13:05:00-05:00", "memo": "wholesale order", "exported_at": "2023-01-12T01:00:00Z"}
+{"id": "t-1030", "rev": 1, "account": "acc-ny", "kind": "debit", "amount": "255.53", "currency": "USD", "ts": "2023-01-11T17:45:00-05:00", "memo": "milk", "exported_at": "2023-01-12T01:00:00Z"}
+{"id": "t-1031", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "441.91", "currency": "EUR", "ts": "2023-01-12T16:15:00+01:00", "memo": "Miete", "exported_at": "2023-01-13T01:00:00Z"}
+{"id": "t-1032", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "849.22", "currency": "GBP", "ts": "2023-01-12T17:05:00+00:00", "memo": "paper", "exported_at": "2023-01-13T01:00:00Z"}
+{"id": "t-1033", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "735.35", "currency": "GBP", "ts": "2023-01-12T16:00:00Z", "memo": "paper", "exported_at": "2023-01-13T01:00:00Z"}
+{"id": "t-1034", "rev": 1, "account": "acc-lon", "kind": "fee", "amount": "126.86", "currency": "GBP", "ts": "2023-01-13T19:15:00+00:00", "memo": "binding", "exported_at": "2023-01-14T01:00:00Z"}
+{"id": "t-1035", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "597.61", "currency": "EUR", "ts": "2023-01-13T13:50:00+01:00", "memo": "Inspektion", "exported_at": "2023-01-14T01:00:00Z"}
+{"id": "t-1036", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "65.10", "currency": "GBP", "ts": "2023-01-13T10:15:00Z", "memo": "binding", "exported_at": "2023-01-14T01:00:00Z"}
+{"id": "t-1037", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "265.09", "currency": "EUR", "ts": "2023-01-13T17:05:00+01:00", "memo": "Schläuche", "exported_at": "2023-01-14T01:00:00Z"}
+{"id": "t-1038", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "654.43", "currency": "GBP", "ts": "2023-01-14T15:50:00Z", "memo": "courier", "exported_at": "2023-01-15T01:00:00Z"}
+{"id": "t-1039", "rev": 1, "account": "acc-lon", "kind": "fee", "amount": "775.72", "currency": "GBP", "ts": "2023-01-14T08:50:00Z", "memo": "ink", "exported_at": "2023-01-15T01:00:00Z"}
+{"id": "t-1040", "rev": 1, "account": "acc-ny", "kind": "fee", "amount": "653.79", "currency": "USD", "ts": "2023-01-15T07:15:00-05:00", "memo": "wholesale order", "exported_at": "2023-01-16T01:00:00Z"}
+{"id": "t-1041", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "312.71", "currency": "GBP", "ts": "2023-01-15T07:00:00Z", "memo": "flyers", "exported_at": "2023-01-16T01:00:00Z"}
+{"id": "t-1042", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "60.60", "currency": "GBP", "ts": "2023-01-15T11:00:00+00:00", "memo": "courier", "exported_at": "2023-01-16T01:00:00Z"}
+{"id": "t-1043", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "272.17", "currency": "EUR", "ts": "2023-01-15T13:50:00+01:00", "memo": "Inspektion", "exported_at": "2023-01-16T01:00:00Z"}
+{"id": "t-1044", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "597.68", "currency": "EUR", "ts": "2023-01-16T19:05:00+01:00", "memo": "Miete", "exported_at": "2023-01-17T01:00:00Z"}
+{"id": "t-1045", "rev": 1, "account": "acc-ber", "kind": "fee", "amount": "806.98", "currency": "EUR", "ts": "2023-01-16T21:15:00+01:00", "memo": "Schläuche", "exported_at": "2023-01-17T01:00:00Z"}
+{"id": "t-1046", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "176.65", "currency": "GBP", "ts": "2023-01-16T18:00:00+00:00", "memo": "flyers", "exported_at": "2023-01-17T01:00:00Z"}
+{"id": "t-1047", "rev": 1, "account": "acc-ny", "kind": "credit", "amount": "385.15", "currency": "USD", "ts": "2023-01-16T19:30:00-05:00", "memo": "milk", "exported_at": "2023-01-17T01:00:00Z"}
+{"id": "t-1048", "rev": 1, "account": "acc-ny", "kind": "credit", "amount": "558.39", "currency": "USD", "ts": "2023-01-17T13:05:00-05:00", "memo": "milk", "exported_at": "2023-01-18T01:00:00Z"}
+{"id": "t-1049", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "269.97", "currency": "GBP", "ts": "2023-01-17T20:45:00Z", "memo": "courier", "exported_at": "2023-01-18T01:00:00Z"}
+{"id": "t-1050", "rev": 1, "account": "acc-lon", "kind": "fee", "amount": "51.04", "currency": "GBP", "ts": "2023-01-18T08:20:00+00:00", "memo": "flyers", "exported_at": "2023-01-19T01:00:00Z"}
+{"id": "t-1051", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "266.47", "currency": "GBP", "ts": "2023-01-18T20:50:00+00:00", "memo": "ink", "exported_at": "2023-01-19T01:00:00Z"}
+{"id": "t-1052", "rev": 1, "account": "acc-ber", "kind": "refund", "amount": "582.91", "currency": "EUR", "ts": "2023-01-19T19:45:00+01:00", "memo": "Reparatur", "exported_at": "2023-01-20T01:00:00Z"}
+{"id": "t-1053", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "423.55", "currency": "EUR", "ts": "2023-01-19T18:15:00+01:00", "memo": "Schläuche", "exported_at": "2023-01-20T01:00:00Z"}
+{"id": "t-1054", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "284.62", "currency": "GBP", "ts": "2023-01-19T09:05:00+00:00", "memo": "binding", "exported_at": "2023-01-20T01:00:00Z"}
+{"id": "t-1055", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "856.23", "currency": "GBP", "ts": "2023-01-20T15:45:00Z", "memo": "paper", "exported_at": "2023-01-21T01:00:00Z"}
+{"id": "t-1056", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "203.36", "currency": "EUR", "ts": "2023-01-20T16:50:00+01:00", "memo": "Werkzeug", "exported_at": "2023-01-21T01:00:00Z"}
+{"id": "t-1057", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "364.87", "currency": "EUR", "ts": "2023-01-20T19:15:00+01:00", "memo": "Inspektion", "exported_at": "2023-01-21T01:00:00Z"}
+{"id": "t-1058", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "404.50", "currency": "EUR", "ts": "2023-01-21T19:50:00+01:00", "memo": "Reparatur", "exported_at": "2023-01-22T01:00:00Z"}
+{"id": "t-1059", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "188.21", "currency": "EUR", "ts": "2023-01-21T17:50:00+01:00", "memo": "Ersatzteile", "exported_at": "2023-01-22T01:00:00Z"}
+{"id": "t-1060", "rev": 1, "account": "acc-ny", "kind": "debit", "amount": "247.37", "currency": "USD", "ts": "2023-01-21T07:15:00-05:00", "memo": "delivery", "exported_at": "2023-01-22T01:00:00Z"}
+{"id": "t-1061", "rev": 1, "account": "acc-lon", "kind": "fee", "amount": "616.19", "currency": "GBP", "ts": "2023-01-22T15:15:00+00:00", "memo": "posters", "exported_at": "2023-01-23T01:00:00Z"}
+{"id": "t-1062", "rev": 1, "account": "acc-ny", "kind": "credit", "amount": "727.95", "currency": "USD", "ts": "2023-01-22T14:50:00-05:00", "memo": "wholesale order", "exported_at": "2023-01-23T01:00:00Z"}
+{"id": "t-1063", "rev": 1, "account": "acc-ber", "kind": "refund", "amount": "749.36", "currency": "EUR", "ts": "2023-01-22T14:45:00+01:00", "memo": "Reparatur", "exported_at": "2023-01-23T01:00:00Z"}
+{"id": "t-1064", "rev": 1, "account": "acc-lon", "kind": "fee", "amount": "425.79", "currency": "GBP", "ts": "2023-01-23T15:00:00+00:00", "memo": "paper", "exported_at": "2023-01-24T01:00:00Z"}
+{"id": "t-1065", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "645.97", "currency": "GBP", "ts": "2023-01-23T20:05:00+00:00", "memo": "flyers", "exported_at": "2023-01-24T01:00:00Z"}
+{"id": "t-1066", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "296.90", "currency": "EUR", "ts": "2023-01-24T21:30:00+01:00", "memo": "Reparatur", "exported_at": "2023-01-25T01:00:00Z"}
+{"id": "t-1067", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "648.32", "currency": "EUR", "ts": "2023-01-24T22:20:00+01:00", "memo": "Inspektion", "exported_at": "2023-01-25T01:00:00Z"}
+{"id": "t-1068", "rev": 1, "account": "acc-lon", "kind": "refund", "amount": "628.09", "currency": "GBP", "ts": "2023-01-24T07:45:00+00:00", "memo": "binding", "exported_at": "2023-01-25T01:00:00Z"}
+{"id": "t-1069", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "222.69", "currency": "GBP", "ts": "2023-01-25T09:20:00+00:00", "memo": "paper", "exported_at": "2023-01-26T01:00:00Z"}
+{"id": "t-1070", "rev": 1, "account": "acc-ny", "kind": "debit", "amount": "423.88", "currency": "USD", "ts": "2023-01-25T19:05:00-05:00", "memo": "wholesale order", "exported_at": "2023-01-26T01:00:00Z"}
+{"id": "t-1071", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "898.24", "currency": "EUR", "ts": "2023-01-25T21:00:00+01:00", "memo": "Schläuche", "exported_at": "2023-01-26T01:00:00Z"}
+{"id": "t-1072", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "527.72", "currency": "GBP", "ts": "2023-01-25T11:50:00+00:00", "memo": "binding", "exported_at": "2023-01-26T01:00:00Z"}
+{"id": "t-1073", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "315.29", "currency": "GBP", "ts": "2023-01-26T15:50:00Z", "memo": "paper", "exported_at": "2023-01-27T01:00:00Z"}
+{"id": "t-1074", "rev": 1, "account": "acc-ber", "kind": "refund", "amount": "768.86", "currency": "EUR", "ts": "2023-01-26T16:50:00+01:00", "memo": "Schläuche", "exported_at": "2023-01-27T01:00:00Z"}
+{"id": "t-1075", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "846.51", "currency": "EUR", "ts": "2023-01-26T19:20:00+01:00", "memo": "Reparatur", "exported_at": "2023-01-27T01:00:00Z"}
+{"id": "t-1076", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "448.07", "currency": "GBP", "ts": "2023-01-26T20:50:00Z", "memo": "flyers", "exported_at": "2023-01-27T01:00:00Z"}
+{"id": "t-1077", "rev": 1, "account": "acc-lon", "kind": "refund", "amount": "879.29", "currency": "GBP", "ts": "2023-01-27T20:15:00Z", "memo": "binding", "exported_at": "2023-01-28T01:00:00Z"}
+{"id": "t-1078", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "223.58", "currency": "EUR", "ts": "2023-01-27T10:50:00+01:00", "memo": "Ersatzteile", "exported_at": "2023-01-28T01:00:00Z"}
+{"id": "t-1079", "rev": 1, "account": "acc-ny", "kind": "refund", "amount": "408.13", "currency": "USD", "ts": "2023-01-27T15:45:00-05:00", "memo": "wholesale order", "exported_at": "2023-01-28T01:00:00Z"}
+{"id": "t-1080", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "104.01", "currency": "GBP", "ts": "2023-01-27T10:15:00+00:00", "memo": "courier", "exported_at": "2023-01-28T01:00:00Z"}
+{"id": "t-1081", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "189.28", "currency": "GBP", "ts": "2023-01-28T20:20:00Z", "memo": "flyers", "exported_at": "2023-01-29T01:00:00Z"}
+{"id": "t-1082", "rev": 1, "account": "acc-ny", "kind": "debit", "amount": "412.62", "currency": "USD", "ts": "2023-01-28T16:30:00-05:00", "memo": "coffee beans", "exported_at": "2023-01-29T01:00:00Z"}
+{"id": "t-1083", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "801.67", "currency": "GBP", "ts": "2023-01-28T14:30:00+00:00", "memo": "courier", "exported_at": "2023-01-29T01:00:00Z"}
+{"id": "t-1084", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "715.73", "currency": "GBP", "ts": "2023-01-29T16:50:00Z", "memo": "posters", "exported_at": "2023-01-30T01:00:00Z"}
+{"id": "t-1085", "rev": 1, "account": "acc-ny", "kind": "debit", "amount": "795.71", "currency": "USD", "ts": "2023-01-29T15:45:00-05:00", "memo": "coffee beans", "exported_at": "2023-01-30T01:00:00Z"}
+{"id": "t-1086", "rev": 1, "account": "acc-ny", "kind": "credit", "amount": "196.11", "currency": "USD", "ts": "2023-01-30T11:20:00-05:00", "memo": "delivery", "exported_at": "2023-01-31T01:00:00Z"}
+{"id": "t-1087", "rev": 1, "account": "acc-ny", "kind": "refund", "amount": "188.03", "currency": "USD", "ts": "2023-01-30T20:20:00-05:00", "memo": "milk", "exported_at": "2023-01-31T01:00:00Z"}
+{"id": "t-1088", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "672.95", "currency": "EUR", "ts": "2023-01-30T11:45:00+01:00", "memo": "Miete", "exported_at": "2023-01-31T01:00:00Z"}
+{"id": "t-1089", "rev": 1, "account": "acc-lon", "kind": "refund", "amount": "511.68", "currency": "GBP", "ts": "2023-01-30T22:05:00+00:00", "memo": "flyers", "exported_at": "2023-01-31T01:00:00Z"}
+{"id": "t-1090", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "398.81", "currency": "EUR", "ts": "2023-02-01T14:20:00+01:00", "memo": "Ersatzteile", "exported_at": "2023-02-02T01:00:00Z"}
+{"id": "t-1091", "rev": 1, "account": "acc-ny", "kind": "credit", "amount": "132.88", "currency": "USD", "ts": "2023-02-01T17:30:00-05:00", "memo": "cups", "exported_at": "2023-02-02T01:00:00Z"}
+{"id": "t-1092", "rev": 1, "account": "acc-ny", "kind": "fee", "amount": "615.92", "currency": "USD", "ts": "2023-02-02T18:30:00-05:00", "memo": "coffee beans", "exported_at": "2023-02-03T01:00:00Z"}
+{"id": "t-1093", "rev": 1, "account": "acc-ny", "kind": "refund", "amount": "167.18", "currency": "USD", "ts": "2023-02-02T07:20:00-05:00", "memo": "repairs", "exported_at": "2023-02-03T01:00:00Z"}
+{"id": "t-1094", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "586.41", "currency": "GBP", "ts": "2023-02-03T09:15:00Z", "memo": "courier", "exported_at": "2023-02-04T01:00:00Z"}
+{"id": "t-1095", "rev": 1, "account": "acc-ber", "kind": "fee", "amount": "210.61", "currency": "EUR", "ts": "2023-02-03T21:00:00+01:00", "memo": "Werkzeug", "exported_at": "2023-02-04T01:00:00Z"}
+{"id": "t-1096", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "464.22", "currency": "EUR", "ts": "2023-02-04T14:05:00+01:00", "memo": "Werkzeug", "exported_at": "2023-02-05T01:00:00Z"}
+{"id": "t-1097", "rev": 1, "account": "acc-lon", "kind": "fee", "amount": "646.88", "currency": "GBP", "ts": "2023-02-04T12:30:00+00:00", "memo": "binding", "exported_at": "2023-02-05T01:00:00Z"}
+{"id": "t-1098", "rev": 1, "account": "acc-ny", "kind": "debit", "amount": "756.07", "currency": "USD", "ts": "2023-02-05T09:50:00-05:00", "memo": "coffee beans", "exported_at": "2023-02-06T01:00:00Z"}
+{"id": "t-1099", "rev": 1, "account": "acc-ny", "kind": "debit", "amount": "302.04", "currency": "USD", "ts": "2023-02-05T16:15:00-05:00", "memo": "coffee beans", "exported_at": "2023-02-06T01:00:00Z"}
+{"id": "t-1100", "rev": 1, "account": "acc-ber", "kind": "fee", "amount": "526.63", "currency": "EUR", "ts": "2023-02-05T16:20:00+01:00", "memo": "Schläuche", "exported_at": "2023-02-06T01:00:00Z"}
+{"id": "t-1101", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "237.61", "currency": "GBP", "ts": "2023-02-06T21:05:00+00:00", "memo": "paper", "exported_at": "2023-02-07T01:00:00Z"}
+{"id": "t-1102", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "868.86", "currency": "EUR", "ts": "2023-02-06T15:00:00+01:00", "memo": "Miete", "exported_at": "2023-02-07T01:00:00Z"}
+{"id": "t-1103", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "74.81", "currency": "EUR", "ts": "2023-02-07T13:30:00+01:00", "memo": "Ersatzteile", "exported_at": "2023-02-08T01:00:00Z"}
+{"id": "t-1104", "rev": 1, "account": "acc-lon", "kind": "credit", "amount": "662.58", "currency": "GBP", "ts": "2023-02-07T17:15:00Z", "memo": "ink", "exported_at": "2023-02-08T01:00:00Z"}
+{"id": "t-1105", "rev": 1, "account": "acc-ny", "kind": "debit", "amount": "689.83", "currency": "USD", "ts": "2023-02-07T14:05:00-05:00", "memo": "wholesale order", "exported_at": "2023-02-08T01:00:00Z"}
+{"id": "t-1106", "rev": 1, "account": "acc-ny", "kind": "fee", "amount": "487.46", "currency": "USD", "ts": "2023-02-08T13:50:00-05:00", "memo": "delivery", "exported_at": "2023-02-09T01:00:00Z"}
+{"id": "t-1107", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "898.47", "currency": "EUR", "ts": "2023-02-08T18:45:00+01:00", "memo": "Inspektion", "exported_at": "2023-02-09T01:00:00Z"}
+{"id": "t-1108", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "326.23", "currency": "EUR", "ts": "2023-02-08T07:20:00+01:00", "memo": "Ersatzteile", "exported_at": "2023-02-09T01:00:00Z"}
+{"id": "t-1109", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "220.22", "currency": "EUR", "ts": "2023-02-09T17:50:00+01:00", "memo": "Werkzeug", "exported_at": "2023-02-10T01:00:00Z"}
+{"id": "t-1110", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "526.64", "currency": "EUR", "ts": "2023-02-09T09:15:00+01:00", "memo": "Werkzeug", "exported_at": "2023-02-10T01:00:00Z"}
+{"id": "t-1111", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "109.66", "currency": "GBP", "ts": "2023-02-10T13:05:00+00:00", "memo": "courier", "exported_at": "2023-02-11T01:00:00Z"}
+{"id": "t-1112", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "893.31", "currency": "GBP", "ts": "2023-02-10T18:20:00Z", "memo": "paper", "exported_at": "2023-02-11T01:00:00Z"}
+{"id": "t-1113", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "64.76", "currency": "EUR", "ts": "2023-02-11T13:45:00+01:00", "memo": "Miete", "exported_at": "2023-02-12T01:00:00Z"}
+{"id": "t-1114", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "290.68", "currency": "GBP", "ts": "2023-02-11T10:20:00Z", "memo": "binding", "exported_at": "2023-02-12T01:00:00Z"}
+{"id": "t-1115", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "813.74", "currency": "EUR", "ts": "2023-02-11T21:00:00+01:00", "memo": "Werkzeug", "exported_at": "2023-02-12T01:00:00Z"}
+{"id": "t-1116", "rev": 1, "account": "acc-ny", "kind": "credit", "amount": "8.74", "currency": "USD", "ts": "2023-02-11T21:50:00-05:00", "memo": "cups", "exported_at": "2023-02-12T01:00:00Z"}
+{"id": "t-1117", "rev": 1, "account": "acc-ny", "kind": "credit", "amount": "170.71", "currency": "USD", "ts": "2023-02-12T18:00:00-05:00", "memo": "repairs", "exported_at": "2023-02-13T01:00:00Z"}
+{"id": "t-1118", "rev": 1, "account": "acc-ber", "kind": "debit", "amount": "292.92", "currency": "EUR", "ts": "2023-02-12T17:50:00+01:00", "memo": "Schläuche", "exported_at": "2023-02-13T01:00:00Z"}
+{"id": "t-1119", "rev": 1, "account": "acc-lon", "kind": "debit", "amount": "239.44", "currency": "GBP", "ts": "2023-02-13T14:30:00+00:00", "memo": "paper", "exported_at": "2023-02-14T01:00:00Z"}
+{"id": "t-1120", "rev": 1, "account": "acc-ber", "kind": "credit", "amount": "23.51", "currency": "EUR", "ts": "2023-02-13T14:15:00+01:00", "memo": "Inspektion", "exported_at": "2023-02-14T01:00:00Z"}
+{"id": "t-1121", "rev": 1, "account": "acc-ny", "kind": "debit", "amount": "458.59", "currency": "USD", "ts": "2023-02-14T12:30:00-05:00", "memo": "coffee beans", "exported_at": "2023-02-15T01:00:00Z"}
+{"id": "t-1122", "rev": 1, "account": "acc-ny", "kind": "fee", "amount": "480.11", "currency": "USD", "ts": "2023-02-14T07:00:00-05:00", "memo": "delivery", "exported_at": "2023-02-15T01:00:00Z"}
+{"id": "t-1123", "rev": 1, "account": "acc-ny", "kind": "credit", "amount": "234.62", "currency": "USD", "ts": "2023-02-14T10:00:00-05:00", "memo": "repairs", "exported_at": "2023-02-15T01:00:00Z"}
+{"id": "t-1124", "rev": 1, "account": "acc-ny", "kind": "fee", "amount": "298.15", "currency": "USD", "ts": "2023-02-14T19:30:00-05:00", "memo": "wholesale order", "exported_at": "2023-02-15T01:00:00Z"}

@@ -1,0 +1,5 @@
+From: A. Researcher <sec.research@example.net>
+Date: 2026-11-23 19:30 UTC
+Subject: Stored XSS in shared report pages
+
+Hello, I found a stored cross-site scripting issue in your shared report pages: a report title containing a script tag runs in the viewer's browser. I have a proof of concept and haven't shared it. Is there a security contact I should send details to?

@@ -1,0 +1,1 @@
+{"page_size": 100, "webhook_attempts": 4, "refund_email": "/work/shop/notify/legacy.py:email_refund_notice or /work/shop/notify/emails.py:send_refund_receipt"}

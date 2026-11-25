@@ -1,0 +1,5 @@
+From: Anna Kowalski <anna@bluefin-health.test>
+Date: 2026-11-23 14:30 UTC
+Subject: Exports page error
+
+The Exports page shows "Error 500" whenever I open it. I can still get the files through the API export endpoint, so we're not blocked, but our analysts prefer the page.

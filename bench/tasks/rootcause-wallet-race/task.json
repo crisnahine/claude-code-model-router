@@ -1,5 +1,8 @@
 {
   "class": "root-cause",
-  "revision": 1,
+  "revision": 2,
+  "revisions": {
+    "2": "the store keeps a copy of each value, as a shared service would, so a lock object put in it is shared by no other worker"
+  },
   "brief": "Payout workers lose money and sometimes hang; INCIDENT.md has the logs. The workers are separate processes that share nothing but the store in ledger/store.py. Find the cause and fix ledger/wallet.py so that credits and transfers running at the same time never lose or create money and never hang, a transfer never takes a wallet below zero, a transfer to the same wallet changes nothing, and work on different wallets never waits for other wallets. Keep the functions' signatures and the store's interface."
 }

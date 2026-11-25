@@ -1,0 +1,5 @@
+From: Privacy Team <privacy@ironvale.test>
+Date: 2026-11-23 12:15 UTC
+Subject: GDPR erasure request for a former employee
+
+A former employee has asked us to erase their personal data under Article 17 GDPR. Their Northpeak user is t.engel@ironvale.test. Please delete the user's personal data from your systems and confirm in writing. We have one month to respond to them.

@@ -1,0 +1,14 @@
+{
+  "liability_cap_usd": 1800000,
+  "termination_notice_days": {
+    "customer": 45,
+    "provider": 90
+  },
+  "governing_law": "England and Wales",
+  "renewal": {
+    "automatic": true,
+    "renewal_term_months": 24,
+    "non_renewal_notice_days": 60
+  },
+  "appliance_risk_at_site": "customer"
+}

@@ -1,0 +1,1 @@
+on an empty sales file, reports.render gave {'error': 'StopIteration: '}

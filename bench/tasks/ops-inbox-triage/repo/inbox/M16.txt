@@ -1,0 +1,5 @@
+From: Lee Morgan <lee@juniper-ai.test>
+Date: 2026-11-23 11:00 UTC
+Subject: I can't log in
+
+I've forgotten my password and I can't see a reset link on the login page. Can you reset it for me? My login is lee@juniper-ai.test.

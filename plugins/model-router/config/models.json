@@ -1,34 +1,37 @@
 {
-  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength, speed and cost are relative ranks. A model's name must be an alias the Agent tool accepts (haiku, sonnet, opus, fable). The crew lists the plugin's role agents and their roles. A crew model must match the agent's own frontmatter, which the tests check: the always-cheap agents keep theirs, and the others carry none, so the router routes each by its brief. Levels pair a strength with an effort: on current models effort is the cheaper lever, so standard runs on Sonnet at medium, complex on Opus at high, and hardest differs from complex in effort on the same model: Opus at xhigh. Prices are USD per million tokens on the Anthropic API, used only to report spend: a key is one model version, or ends in -* to cover every version of a family, and a version with no entry is reported as unpriced. Prices can be added or changed in your own ~/.claude/model-router.json only, not a project's file. cache_write is the five-minute cache write price and cache_write_1h the one-hour one, which is twice input when left out. A shipped long_prompt block holds the prices a request pays when its prompt (input, cache reads and cache writes) is over its `over` tokens; each request is priced on its own (https://platform.claude.com/docs/en/about-claude/pricing.md, Long context pricing). `schema` is the version of this shape; an override may carry it too, and docs/ARCHITECTURE.md \"Compatibility\" says what changes it.",
+  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength and cost are relative ranks. A model's name must be an alias the Agent tool accepts (haiku, sonnet, opus, fable); `twins` are other names the same model is offered under, so an ID with one is held to the cap as that model, while availableModels and deniedModels match it by its own name. Levels pair a strength with an effort: a level runs on the cheapest model at or above its strength, so lookup and standard both run on Haiku, at medium and high, complex on Sonnet at high, hardest on Opus at high and frontier on Fable at high. A model named on a call stands for its lowest level, or the level its named effort reaches, and gets that level's effort when nobody chose one. A model weaker than a level needs runs it one effort step higher, up to xhigh. Model Router prices nothing: /model-router:usage shows Claude Code's own estimate. `schema` is the version of this shape; an override may carry it too, and docs/ARCHITECTURE.md \"Compatibility\" says what changes it.",
   "schema": 1,
   "models": {
     "haiku": {
       "strength": 1,
-      "speed": 4,
       "cost": 1,
-      "use_for": "Lookups, file search, summarizing known code, running a command and reporting, formatting, trivial edits."
+      "use_for": "Finding, reading and listing at medium effort; writing and fixing code, figures and documents to a brief at high."
     },
     "sonnet": {
       "strength": 2,
-      "speed": 3,
       "cost": 2,
-      "use_for": "Everyday implementation at medium effort: features with a clear spec, tests, refactors inside one module."
+      "use_for": "A judgment call with no check to run, such as a design or a review."
     },
     "opus": {
       "strength": 3,
-      "speed": 2,
       "cost": 3,
-      "use_for": "Defect fixes, migrations and performance work, design and planning, cross-module changes, subtle bugs, security-sensitive code, adversarial review. On coding it came within a point of Fable at the same effort for under a quarter of the cost."
+      "use_for": "The hardest level: a redo of work Sonnet fell short on, or a level a rule raises to it."
     },
     "fable": {
       "strength": 4,
-      "speed": 1,
       "cost": 4,
-      "use_for": "Research-grade and open-ended work: ambiguous multi-system problems with no known approach, long investigations, and retries after Opus fell short."
+      "twins": ["mythos"],
+      "use_for": "The top level: a redo of work Opus fell short on, or a level a rule raises to it."
     }
   },
   "aliases": {
     "best": "opus"
+  },
+  "session": {
+    "$comment": "The main session's recommended setups: each family's lowest effort for the session that plans and delegates. A family left out is never recommended. The session check offers them in this order. Read from this file only.",
+    "opus": "medium",
+    "fable": "medium",
+    "sonnet": "xhigh"
   },
   "newest": {
     "$comment": "The newest full model ID of each family that some provider's alias lags behind. Every provider in older_aliases takes this Claude API form: Bedrock and Agent Platform map it to their own ID, Foundry sends it as the deployment name, and Claude Platform on AWS and Claude Models on Google Cloud use it as is (https://platform.claude.com/docs/en/about-claude/models/overview.md).",
@@ -37,12 +40,12 @@
     "haiku": "claude-haiku-5-5"
   },
   "older_aliases": {
-    "$comment": "Per provider, the families whose alias resolves to an older model than newest names (the alias table in https://code.claude.com/docs/en/model-config.md). The mod sends the newest ID for these instead of the alias.",
-    "anthropic_aws": ["sonnet", "haiku"],
-    "anthropic_google_cloud": ["haiku"],
-    "bedrock": ["sonnet", "haiku"],
-    "vertex": ["sonnet", "haiku"],
-    "foundry": ["opus", "sonnet", "haiku"]
+    "$comment": "Per provider, each family whose alias resolves to an older model than newest names, and the ID of that model (the alias table in https://code.claude.com/docs/en/model-config.md). The mod sends the newest ID for these instead of the alias.",
+    "anthropic_aws": {"sonnet": "claude-sonnet-4-6", "haiku": "claude-haiku-4-5"},
+    "anthropic_google_cloud": {"haiku": "claude-haiku-4-5"},
+    "bedrock": {"sonnet": "claude-sonnet-4-5", "haiku": "claude-haiku-4-5"},
+    "vertex": {"sonnet": "claude-sonnet-4-5", "haiku": "claude-haiku-4-5"},
+    "foundry": {"opus": "claude-opus-4-6", "sonnet": "claude-sonnet-4-5", "haiku": "claude-haiku-4-5"}
   },
   "levels": {
     "lookup": {
@@ -50,191 +53,20 @@
       "effort": "medium"
     },
     "standard": {
-      "needs": 2,
-      "effort": "medium"
+      "needs": 1,
+      "effort": "high"
     },
     "complex": {
-      "needs": 3,
+      "needs": 2,
       "effort": "high"
     },
     "hardest": {
       "needs": 3,
-      "effort": "xhigh"
+      "effort": "high"
     },
     "frontier": {
       "needs": 4,
       "effort": "high"
     }
-  },
-  "main": {
-    "$comment": "Effort for the main conversation per turn, by the request's level. Only raises: a level below what the session already runs at is left alone.",
-    "effort": {
-      "complex": "high",
-      "hardest": "xhigh",
-      "frontier": "xhigh"
-    },
-    "effort_keeps_cache": {
-      "$comment": "Families whose prompt cache survives an effort change, with an API key or a subscription (https://code.claude.com/docs/en/prompt-caching.md#changing-effort-level). A '>=' prefix means that version or later; a bare version means that version only.",
-      "fable": ">=5.1",
-      "opus": "5.5",
-      "sonnet": "5.5",
-      "haiku": "5.5"
-    }
-  },
-  "prices": {
-    "claude-fable-5-2": {
-      "input": 8,
-      "output": 40,
-      "cache_read": 0.2,
-      "cache_write": 10,
-      "cache_write_1h": 16
-    },
-    "claude-fable-5-1": {
-      "input": 10,
-      "output": 50,
-      "cache_read": 0.25,
-      "cache_write": 12.5,
-      "cache_write_1h": 20
-    },
-    "claude-fable-5": {
-      "input": 10,
-      "output": 50,
-      "cache_read": 1,
-      "cache_write": 12.5,
-      "cache_write_1h": 20
-    },
-    "claude-mythos-5-2": {
-      "input": 8,
-      "output": 40,
-      "cache_read": 0.2,
-      "cache_write": 10,
-      "cache_write_1h": 16
-    },
-    "claude-mythos-5-1": {
-      "input": 10,
-      "output": 50,
-      "cache_read": 0.25,
-      "cache_write": 12.5,
-      "cache_write_1h": 20
-    },
-    "claude-mythos-5": {
-      "input": 10,
-      "output": 50,
-      "cache_read": 1,
-      "cache_write": 12.5,
-      "cache_write_1h": 20
-    },
-    "claude-opus-5-5": {
-      "input": 4,
-      "output": 20,
-      "cache_read": 0.2,
-      "cache_write": 5,
-      "cache_write_1h": 8
-    },
-    "claude-opus-5": {
-      "input": 5,
-      "output": 25,
-      "cache_read": 0.5,
-      "cache_write": 6.25,
-      "cache_write_1h": 10
-    },
-    "claude-opus-4-1": {
-      "input": 15,
-      "output": 75,
-      "cache_read": 1.5,
-      "cache_write": 18.75,
-      "cache_write_1h": 30
-    },
-    "claude-opus-4-0": {
-      "input": 15,
-      "output": 75,
-      "cache_read": 1.5,
-      "cache_write": 18.75,
-      "cache_write_1h": 30
-    },
-    "claude-opus-4": {
-      "input": 15,
-      "output": 75,
-      "cache_read": 1.5,
-      "cache_write": 18.75,
-      "cache_write_1h": 30
-    },
-    "claude-opus-4-*": {
-      "input": 5,
-      "output": 25,
-      "cache_read": 0.5,
-      "cache_write": 6.25,
-      "cache_write_1h": 10
-    },
-    "claude-sonnet-5-5": {
-      "input": 2,
-      "output": 10,
-      "cache_read": 0.1,
-      "cache_write": 2.5,
-      "cache_write_1h": 4
-    },
-    "claude-sonnet-5": {
-      "input": 2,
-      "output": 10,
-      "cache_read": 0.2,
-      "cache_write": 2.5,
-      "cache_write_1h": 4
-    },
-    "claude-sonnet-4-*": {
-      "input": 3,
-      "output": 15,
-      "cache_read": 0.3,
-      "cache_write": 3.75,
-      "cache_write_1h": 6
-    },
-    "claude-haiku-5-5": {
-      "input": 0.1,
-      "output": 0.5,
-      "cache_read": 0.01,
-      "cache_write": 0.125,
-      "cache_write_1h": 0.2,
-      "long_prompt": {
-        "over": 100000,
-        "input": 0.5,
-        "output": 2.5,
-        "cache_read": 0.05,
-        "cache_write": 0.625,
-        "cache_write_1h": 1
-      }
-    },
-    "claude-haiku-4-5": {
-      "input": 1,
-      "output": 5,
-      "cache_read": 0.1,
-      "cache_write": 1.25,
-      "cache_write_1h": 2
-    }
-  },
-  "crew": {
-    "scout": {
-      "model": "haiku",
-      "role": "Read-only search and summary"
-    },
-    "verifier": {
-      "model": "haiku",
-      "role": "Runs tests, lint and type checks and reports results"
-    },
-    "docs-researcher": {
-      "model": "haiku",
-      "role": "Reads current Claude Code docs and changelog"
-    },
-    "implementer": {
-      "role": "Writes code and tests to a clear spec"
-    },
-    "architect": {
-      "role": "Plans changes and designs systems, read-only"
-    },
-    "reviewer": {
-      "role": "Adversarial review of a diff"
-    },
-    "deep-solver": {
-      "role": "Research-grade, open-ended tasks with no known approach"
-    }
-  },
-  "agents": {}
+  }
 }

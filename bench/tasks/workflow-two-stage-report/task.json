@@ -1,0 +1,6 @@
+{
+  "class": "cross-module",
+  "shape": "workflow",
+  "revision": 1,
+  "brief": "Find two facts about this package as its code ships them, with no environment variables set: the version it reports, and the largest upload it accepts, in megabytes. Write them to REPORT.json as {\"version\": \"<x.y.z>\", \"max_upload_mb\": <int>}, and change no other file."
+}

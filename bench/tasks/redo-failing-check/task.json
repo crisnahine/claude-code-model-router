@@ -1,0 +1,15 @@
+{
+  "class": "redo",
+  "shape": "redo",
+  "revision": 8,
+  "revisions": {
+    "2": "the check reads what each line says and turns down commit subjects, and #224 is a breaking change the visible check wants marked",
+    "3": "the check turns down a commit type, hash or subject anywhere in a line, and needs each line to name what its PR did, so #224 must say the endpoint is gone",
+    "4": "the #224 line must say the endpoint itself is gone, a line that is otherwise right isn't failed for saying callers will stop or for naming the deprecation, more wordings for #214, #218 and #228 pass, and a #218 or #228 line that gets the change backwards fails",
+    "5": "a line that states its change the wrong way round fails for every PR, read through the negations and framings before its words, #224 fails when it names another version or endpoint as removed, and more right wordings of #218, #222, #224 and #228 pass",
+    "6": "the check grades each line's topic and that #224 says /v1/checkout is gone, and no longer reads what a line says beyond that, since each word reading misgraded right lines",
+    "7": "a line names its PR's topic on its words, hyphens and punctuation aside, with more ways to name #214, #215, #218 and #228 and #222 needing its tax change, and the #224 line fails when it says the endpoint will be removed later or was removed in another release",
+    "8": "what a line says is no longer graded: the shipped check must accept the section, and a line fails only for a commit hash, a pasted commit subject or a commit-type prefix at its start"
+  },
+  "brief": "We release 2.4.0 today, 2026-11-20. Write its section in CHANGELOG.md from the commits listed in commits.txt, following CONTRIBUTING.md. When the section is written, run python3 tools/check_changelog.py 2.4.0. If it reports problems, send the work back once with what it printed, then run it again. Reply with the check's last line."
+}

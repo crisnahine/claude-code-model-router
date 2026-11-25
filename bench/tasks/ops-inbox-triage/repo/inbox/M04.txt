@@ -1,0 +1,5 @@
+From: Liam Becker <liam@juniper-ai.test>
+Date: 2026-11-23 09:30 UTC
+Subject: Exporting reports
+
+Quick one: where is the option to export a report to CSV? The help page says it's under Share, but I can't find it. Thanks!

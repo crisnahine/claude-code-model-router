@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import calls, fallback, gates, health, intake, mod, profile, request, session, settings, upstream
+from . import calls, fallback, gates, health, intake, ladder, ledger, mod, request, session, settings
 from . import config as cfg
 from .registry import Registry
 
@@ -16,113 +16,156 @@ def _context(event: str, text: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
 
 
+_HARD = "a judgment call with no check to run"
+_PICKED = "at the level its tools put it"
+_SUCH = "a design or a review"
+
+
+_WORK = ((cfg.Level.lookup, "finding, reading and listing"), (cfg.Level.standard, "writing and fixing code, figures and documents to a brief"),
+         (cfg.Level.complex, f"{_HARD} ({_SUCH})"))
+
+
+def _rows(reg: Registry, efforts: bool) -> str:
+    """One line per kind of work: the level's model, and its effort unless the environment sets every effort."""
+    at = {level: (ladder.model_for(reg, level), ladder.effort(reg, level)) for level, _ in _WORK}
+    return "".join(f"- {at[level][0]}{f' at {at[level][1]}' if efforts and at[level][1] else ''}: {what}\n"
+                   for level, what in _WORK if at[level][0])
+
+
+def _workflow_rules(options: settings.Settings, reg: Registry) -> str | None:
+    """The table for a workflow script's stages, which the mod adds to the Workflow tool's description.
+    None under the force pin, where a script can't set one."""
+    if options.force:
+        return None
+    efforts = not options.effort_level
+    runs_on = cfg.plain(options.workflow_model, None) or f"its agent's own model, else {_PICKED}"
+    return (f"Model Router keeps the {'`model` and `effort`' if efforts else '`model`'} a workflow script names on an "
+            f"`agent()` call, within the user's cap. Here every `agent()` call in a script names "
+            f"{'both' if efforts else 'a model'}, by the work:\n{_rows(reg, efforts)}"
+            f"A stage that names {'neither' if efforts else 'no model'} runs on {runs_on}.")
+
+
+def _rules(options: settings.Settings, reg: Registry) -> str:
+    """The level rule for Claude, written as facts: the Agent tool sets `effort` only when instructions ask.
+    Each level's model and effort come from the registry, so a rules file that moves a level moves the note."""
+    at = {level: (ladder.model_for(reg, level), ladder.effort(reg, level)) for level in cfg.Level}
+    redo = ("A redo after a failed check or a gap in the report keeps its `description` with \"Redo:\" in front "
+            "and runs {above}.")
+    # CLAUDE_CODE_EFFORT_LEVEL wins over a call's effort (sub-agents.md), and either variable keeps a redo's effort.
+    fixed = ("CLAUDE_CODE_EFFORT_LEVEL sets every subagent's effort, so an `effort` on a call has no effect."
+             if options.effort_level else "")
+    if options.force:
+        # Claude can't pass a model under FORCE (sub-agents.md), so only the effort half applies.
+        lead = (f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE runs every subagent on {cfg.plain(options.subagent_model, 'one model')},"
+                " so a `model` on an Agent call has no effect.")
+        if fixed:
+            return f"{lead} {fixed}"
+        work = {**dict(_WORK), cfg.Level.complex: f"{_HARD}, such as {_SUCH}"}
+        groups: list[tuple[str | None, list[str]]] = []
+        for level in (cfg.Level.lookup, cfg.Level.standard, cfg.Level.complex):
+            if groups and groups[-1][0] == at[level][1]:
+                groups[-1][1].append(work[level])
+            else:
+                groups.append((at[level][1], [work[level]]))
+        plain = "; ".join(f"{effort} for {' and '.join(whats)}" for effort, whats in groups)
+        return (lead + f" Model Router keeps the `effort` a call names, by the work: {plain}."
+                + ("" if options.subagent_effort else " " + redo.format(above="one effort step higher")))
+    if options.subagent_model:
+        # The cap doesn't lower CLAUDE_CODE_SUBAGENT_MODEL, only a model the agent names.
+        neither = f"its agent's own model{', capped,' if options.cap else ''} or CLAUDE_CODE_SUBAGENT_MODEL"
+    else:
+        neither = f"its agent's own model, else {_PICKED}{', within the cap' if options.cap else ''}"
+    if fixed:
+        lead, efforts = (f"Model Router keeps the `model` an Agent call names, within the user's cap. {fixed} "
+                         "Here every Agent call names a model, by the work:\n"), False
+    else:
+        fills = "" if options.subagent_effort else ", and fills in `effort` when a call names only a model"
+        lead, efforts = (f"Model Router keeps the `model` and `effort` an Agent call names, within the user's "
+                         f"cap{fills}. Here every Agent call names both, by the work:\n"), True
+    above = ("on a stronger model than the run it redoes" if fixed or options.subagent_effort
+             else "above the run it redoes, effort before model")
+    return f"{lead}{_rows(reg, efforts)}A call that names neither runs on {neither}. " + redo.format(above=above)
+
+
 def session_start(hook_input: dict) -> dict | None:
+    """The level rule goes to Claude. The notices go to the user (`systemMessage`), only when a session
+    opens, since a clear or a compaction continues one they already saw."""
     snap = settings.Snapshot(hook_input)
     options = snap.options
-    settings.record(options)
     session.record(hook_input.get("session_id"), hook_input.get("model"))
-    parts = []
+    note, notices = None, []
     mode = options.mode
-    name = cfg.PLUGIN_NAME
+    opens = hook_input.get("source") not in ("clear", "compact")
     if mode == "auto":
-        # Only what Claude must act on: every word here is in context for the whole session.
-        parts.append(
-            "Model Router sets each subagent's, teammate's and workflow agent's model and effort from its brief. "
-            "Agent calls here omit `model` and `effort` unless the user named one; either overrides the router. "
-            "A brief naming what makes it hard (security, several modules, an unclear cause) routes higher. "
-            "A weak result's call, re-issued unchanged, runs one level higher."
-        )
+        note = _rules(options, snap.registry)
+        pin = cfg.plain(options.subagent_model, None)
         if options.force:
-            pinned = options.subagent_model or "one model"
-            parts.append(
-                f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent to {pinned}, so Model Router sets only "
-                "their effort. Without it in the user's settings, the router would put each subtask on the "
-                "cheapest model strong enough for it. Worth telling the user once."
-            )
+            notices.append(
+                f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent to {pin or 'one model'}, "
+                "so Model Router sets only their effort. Without it, an agent call would run on the model it names, "
+                "within your cap.")
+        elif options.subagent_model:
+            notices.append(
+                f"CLAUDE_CODE_SUBAGENT_MODEL {f'is {pin}' if pin else 'is set'}, so an agent call that names no model "
+                f"runs on its agent's own model or {pin or 'the one it sets'}. Model Router keeps the model a call names, "
+                "within your cap.")
         if options.workflow_model:
-            parts.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model}, "
-                         "so the router sets only their effort. Worth telling the user once.")
-    elif mode == "advise":
-        parts.append(
-            "Model Router is in advise mode: it estimates the model each request needs and changes no call. "
-            "Agents keep the model their definition sets, which a model passed on a call would override."
-        )
-    if options.update_check:
-        changes = upstream.pending()
-        running = [hook_input.get("model")] + snap.health.seen_running()
-        for model_id, latest in upstream.behind(running):
-            parts.append(
-                f"{model_id} is running here and {latest} is the newest of its family. A model setting that names a "
-                "full version stays on it; the alias (opus, sonnet, haiku, fable) follows new versions once Claude "
-                "Code is updated. Worth telling the user once.")
-        if changes and changes["new_model_families"]:
-            parts.append("New Claude model alias in the docs that isn't in Model Router's registry yet: "
-                         + ", ".join(changes["new_model_families"]) + f". /{name}:refresh reviews it; "
-                         "worth telling the user once.")
-        if changes and changes.get("deprecated_in_use"):
-            parts.append("Models this setup routes to are deprecated or retiring: " + "; ".join(
-                f"{m['model']} retires {m['retires']}" for m in changes["deprecated_in_use"])
-                + ". The model aliases move on by themselves; a pinned full ID doesn't. Worth telling the user once.")
-        if upstream.has_pending(changes):
-            parts.append(
-                f"Upstream: {len(changes['new_releases'])} Claude Code release(s) and "
-                f"{len(changes['watched_pages_touched'])} plugin-relevant docs page change(s) since the last "
-                f"review. /{name}:refresh reviews them; worth mentioning to the user once."
-            )
-    return _context("SessionStart", " ".join(parts)) if parts else None
+            notices.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on "
+                           f"{cfg.plain(options.workflow_model, 'one model')} when its script names no model, so the "
+                           "router sets only their effort.")
+    out = _context("SessionStart", note) if note else {}
+    if notices and opens:
+        out["systemMessage"] = "Model Router: " + " ".join(notices)
+    return out or None
 
 
 def user_prompt(hook_input: dict) -> dict | None:
-    """Size up the request against the conversation's own model. Says nothing when there
-    is nothing Claude needs to do differently, so an ordinary prompt costs no tokens."""
+    """Says something only when the person's request names a model."""
     snap = settings.Snapshot(hook_input)
     reg, options = snap.registry, snap.options
-    mode = options.mode
-    if mode == "off":
+    if options.mode == "off":
         return None
     prompt = hook_input.get("prompt")
-    prompt = prompt if isinstance(prompt, str) else ""
-    session_id = hook_input.get("session_id")
-    seen = intake.from_prompt(prompt, snap.project)
-    if seen.delivered:
-        # Work for someone else's message isn't the user's request, so it doesn't get its floor.
-        # A task notification continues the user's request and keeps it.
-        try:
-            request.deliver(session_id)
-        except OSError:
-            pass
-    if not seen.person:
-        return None
-    model = session.model(session_id, hook_input.get("transcript_path"))
-    started = request.start(session_id, seen, reg, model, snap.usable, snap.raises, priority=options.priority,
-                            prompt_id=hook_input.get("prompt_id"), named=request.named_model(reg, prompt))
-    level, need, current, wanted = started.level, started.need, started.session_tier, started.named
-    below = started.below(reg, model)
-    why = f" (wording suggests: {', '.join(seen.signals)})" if seen.signals else ""
-    notes = []
-    if mode == "advise":
-        if need:
-            notes.append(f"Routing estimate for this request: {level}{why}, about {need}-level reasoning, "
-                         "from its wording alone.")
-    elif below:
-        agent = gates.strong_agent(reg, need, level)
-        asked = " A stop before a stronger agent has looked is held once." if options.strong_agent_gate else ""
-        writes = "; it writes nothing, so the change stays here" if gates.writes_nothing(agent) else ""
-        notes.append(
-            f"This request looks {level}{why}: about {need}-level reasoning, and this conversation runs on "
-            f"{current}. If the design, root cause or risky choice can't be settled from the code in a few reads, "
-            f"{agent} can give the plan or decision{writes}. Otherwise this conversation works directly.{asked}"
-        )
-    if wanted and mode == "auto":
-        notes.append(f"The request mentions the {wanted} model. If it asks for that model, an Agent call with "
-                     f"model: \"{wanted}\" runs on it, and Model Router keeps it.")
-    return _context("UserPromptSubmit", " ".join(notes)) if notes else None
+    if not intake.is_user_prompt(prompt):
+        return None  # a task notification or a delivered message isn't the person asking for a model
+    wanted = request.named_model(reg, prompt)
+    if not wanted or options.mode != "auto" or options.force or not snap.usable:
+        return None  # with no registry model usable, Claude Code's allowlist decides where the call runs
+    final = reg.clamp(wanted, snap.usable)
+    if final == wanted:
+        runs = "runs on it, and Model Router keeps it"
+    elif options.cap and reg.stronger(wanted, options.cap):
+        runs = (f"runs within the cap the user set, {options.cap}" if final == options.cap
+                else f"runs on {final}, within the cap the user set ({options.cap})")
+    else:
+        runs = f"runs on {final}, since {wanted} isn't available here"
+    return _context("UserPromptSubmit", f"The request mentions the {wanted} model. If it asks for that model, an "
+                                        f"Agent call with model: \"{wanted}\" {runs}.")
+
+
+def mod_start(hook_input: dict) -> dict:
+    """The mod's session start. The answer carries the session note and its form for a workflow script's stages,
+    which the mod adds to the Agent and Workflow tools' descriptions."""
+    answer = mod.start(hook_input)
+    snap = settings.Snapshot(hook_input)
+    if snap.options.mode != "auto":
+        return answer
+    staged = _workflow_rules(snap.options, snap.registry)
+    return {**answer, "rules": _rules(snap.options, snap.registry), **({"workflow_rules": staged} if staged else {})}
 
 
 def pre_agent(hook_input: dict) -> dict | None:
-    if mod.active(hook_input.get("session_id")):
+    if mod.routes(hook_input.get("tool_use_id")):
         return None  # the plugin's mod routes this call when it spawns
-    return fallback.route(hook_input, settings.Snapshot(hook_input))
+    if not cfg.tool_input(hook_input):
+        return None  # an input that didn't parse: updatedInput would replace the call with only a model
+    return fallback.route(hook_input, settings.Snapshot(hook_input, sends_ids=False))
+
+
+def mod_spawn(hook_input: dict) -> dict | None:
+    """A spawn left as it is still answers OK, so an empty answer means the runtime didn't run, and the mod holds the cap.
+    A spawn whose input didn't parse gets that empty answer too."""
+    return (mod.spawn(hook_input) or mod.OK) if cfg.tool_input(hook_input) else None
 
 
 def _outcome(kind: str, hook_input: dict, reg: Registry, **fields: Any) -> calls.Outcome:
@@ -130,7 +173,7 @@ def _outcome(kind: str, hook_input: dict, reg: Registry, **fields: Any) -> calls
     tool_input = cfg.tool_input(hook_input)
     agent, key = calls.identify(tool_input)
     spawn_id = hook_input.get("tool_use_id")
-    return calls.Outcome(kind, key=key, agent=agent, named=reg.family(tool_input.get("model")),
+    return calls.Outcome(kind, key=key, agent=agent, task=calls.task(tool_input), named=reg.family(tool_input.get("model")),
                          spawn_id=spawn_id if isinstance(spawn_id, str) and spawn_id else None, **fields)
 
 
@@ -143,7 +186,6 @@ def _settled(session_id: str | None, key: str) -> None:
 
 def post_agent(hook_input: dict) -> dict | None:
     snap = settings.Snapshot(hook_input)
-    tool_input = cfg.tool_input(hook_input)
     response = hook_input.get("tool_response")
     response = response if isinstance(response, dict) else {}
     ran_as = response.get("resolvedModel")
@@ -152,20 +194,17 @@ def post_agent(hook_input: dict) -> dict | None:
     launched = response.get("status") == "async_launched"
     agent_id = response.get("agentId")
     session_id = hook_input.get("session_id")
-    outcome = _outcome("result", hook_input, snap.registry, ran_as=ran_as, ran_family=snap.registry.family(ran_as),
-                       forced=snap.options.force, status=response.get("status"), tokens=response.get("totalTokens"),
-                       launched=launched, agent_id=agent_id if launched and isinstance(agent_id, str) else None,
-                       models_used=() if launched else tuple(calls.models_used(response)),
-                       cut_off=not launched and calls.cut_off(response))
+    outcome = _outcome("result", hook_input, snap.registry, ran_as=ran_as, ran_family=snap.registry.family(ran_as, twins=False),
+                       forced=snap.options.force, status=response.get("status"),
+                       moved=mod.moved(hook_input.get("tool_use_id")), launched=launched, agent_id=agent_id if launched and isinstance(agent_id, str) else None,
+                       models_used=() if launched else tuple(calls.models_used(response)))
     _settled(session_id, outcome.key)
     returned = calls.returned(session_id, outcome)
     if returned.note != calls.SWAPPED:
         return None
-    if "risk" in profile.profile_call(tool_input, outcome.agent)["signals"]:
-        return _context("PostToolUse", (
-            f"Model Router: this agent switched models mid-run ({outcome.models_used[0]} to {outcome.models_used[-1]}), "
-            "so its result needs a check before it is relied on."))
-    return None
+    return _context("PostToolUse", (
+        f"Model Router: this agent switched models mid-run ({outcome.models_used[0]} to {outcome.models_used[-1]}), "
+        "so its result needs a check before it is relied on."))
 
 
 def agent_failed(hook_input: dict) -> dict | None:
@@ -175,7 +214,7 @@ def agent_failed(hook_input: dict) -> dict | None:
     reg = snap.registry
     session_id = hook_input.get("session_id")
     outcome = _outcome("failure", hook_input, reg, error=str(hook_input.get("error") or ""),
-                       interrupted=bool(hook_input.get("is_interrupt")))
+                       interrupted=bool(hook_input.get("is_interrupt")), moved=mod.moved(hook_input.get("tool_use_id")))
     _settled(session_id, outcome.key)
     returned = calls.returned(session_id, outcome)
     if returned.note == calls.ID_FAILED and returned.route:
@@ -184,17 +223,18 @@ def agent_failed(hook_input: dict) -> dict | None:
         return _context("PostToolUseFailure", (
             f"{returned.route.sent} isn't available here. The '{returned.asked}' alias runs from now on, as Claude Code "
             "resolves it for this provider; the same agent call re-issued unchanged uses it."))
-    if returned.note not in (calls.MODEL_FAILED, calls.ROUTED_AROUND) or not returned.asked:
-        return None
+    if snap.options.force or returned.note not in (calls.MODEL_FAILED, calls.ROUTED_AROUND) or not returned.asked:
+        return None  # under FORCE neither a named model nor a route-around moves the call
     asked = returned.asked
     # snap.health may predate the strike just written, so the list reads the table again.
-    usable = [n for n in reg.available(snap.options.cap, allowed=snap.allowed, table=health.load()) if n != asked]
+    usable = [n for n in reg.available(snap.options.cap, allowed=snap.allowed, table=health.load(),
+                                       sendable=snap.sendable) if n != asked]
     if not usable:
         return None
     return _context("PostToolUseFailure", (
         f"The '{asked}' model looks unavailable here. This agent call re-issued with model: "
-        f"\"{reg.clamp(asked, usable)}\" runs on the nearest usable one."
-        + (" Model Router will route around it for now." if returned.note == calls.ROUTED_AROUND else "")))
+        f"\"{reg.clamp(asked, usable)}\" runs on a usable model."
+        + (" Model Router will route around it for up to a day." if returned.note == calls.ROUTED_AROUND else "")))
 
 
 def agent_stopped(hook_input: dict) -> dict | None:
@@ -223,8 +263,11 @@ def post_edit(hook_input: dict) -> dict | None:
 
 def stop(hook_input: dict) -> dict | None:
     snap = settings.Snapshot(hook_input)
-    reason = gates.before_stop(hook_input, snap.registry, snap.options)
-    return {"decision": "block", "reason": reason} if reason else None
+    ask = gates.before_stop(hook_input, snap.options)
+    if not ask:
+        return None
+    ledger.gate(hook_input.get("session_id"), "verify")
+    return _context("Stop", ask)
 
 
 def model_switch(hook_input: dict) -> dict | None:
@@ -232,17 +275,11 @@ def model_switch(hook_input: dict) -> dict | None:
     return None
 
 
-def refresh_cache(hook_input: dict) -> dict | None:
-    options = settings.resolve()
-    if options.update_check:
-        upstream.refresh(options, force=False)
-    return None
-
-
 HANDLERS = {
-    "mod-start": mod.start, "mod-spawn": mod.spawn, "mod-turn": mod.turn, "mod-usage": mod.usage,
+    "mod-start": mod_start, "mod-spawn": mod_spawn, "mod-usage": mod.usage,
+    "mod-status": mod.status, "mod-check": mod.check, "mod-end": mod.end,
     "session-start": session_start, "user-prompt": user_prompt, "pre-agent": pre_agent,
     "post-agent": post_agent, "agent-failed": agent_failed, "agent-stopped": agent_stopped,
     "post-edit": post_edit, "stop": stop,
-    "model-switch": model_switch, "refresh-cache": refresh_cache,
+    "model-switch": model_switch,
 }

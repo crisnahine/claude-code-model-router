@@ -1,0 +1,5 @@
+From: GranitePay Finance <finance@granitepay.test>
+Date: 2026-11-24 07:45 UTC
+Subject: Double charge and invoices page error
+
+We were charged twice for November (two charges of $2,950.00 on 1 November). Also the Invoices page in the admin area throws an error, so we can't download invoices there; we can still get them from the monthly email.

@@ -1,0 +1,1 @@
+the writes loaded page B-2 into the cache again, though no change touched it

@@ -1,8 +1,9 @@
 {
   "class": "design",
-  "revision": 2,
+  "revision": 3,
   "revisions": {
-    "2": "SPEC.md says the bus never drops an event (62e2a9c)"
+    "2": "SPEC.md says the bus never drops an event (62e2a9c)",
+    "3": "max_staleness_seconds can't be under the bus's 1 second delivery, and DESIGN.json must hold exactly the four keys the brief names"
   },
   "brief": "Read SPEC.md and design how the catalog servers cache prices. Write DESIGN.json in the repository root with exactly these keys: \"strategy\" (one of \"no_cache\", \"ttl_only\", \"event_invalidation\", \"write_through_from_admin\"), \"ttl_seconds\" (a number, or null for none), \"max_staleness_seconds\" (the longest a changed price can still be served, a number) and \"reasons\" (a list of short strings)."
 }

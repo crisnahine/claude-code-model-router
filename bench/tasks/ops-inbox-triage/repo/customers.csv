@@ -1,0 +1,11 @@
+domain,company,plan,status
+acmerobotics.test,Acme Robotics,enterprise,active
+bluefin-health.test,Bluefin Health,enterprise,active
+copperleaf.test,Copperleaf,team,active
+dunmore.test,Dunmore College,enterprise,trial
+everlane-studio.test,Everlane Studio,starter,active
+fjordbank.test,Fjord Bank,enterprise,cancelled
+granitepay.test,GranitePay,enterprise,active
+hollis-law.test,Hollis & Partners,team,active
+ironvale.test,Ironvale,enterprise,active
+juniper-ai.test,Juniper AI,starter,active

@@ -1,0 +1,8 @@
+{
+  "class": "operations",
+  "revision": 2,
+  "revisions": {
+    "2": "every address is on a reserved domain (example.org, example.net or .test)"
+  },
+  "brief": "Triage the support inbox: give every message in inbox/ a priority and an owner by POLICY.md, using customers.csv for the customer plans. Write TRIAGE.json in the repository root: an object with one key per message id (the file name without .txt, such as \"M01\"), each mapping to exactly {\"priority\": one of \"P1\", \"P2\", \"P3\", \"P4\", \"owner\": one of \"security\", \"legal\", \"engineering\", \"billing\", \"support\", \"sales\", \"none\"}."
+}

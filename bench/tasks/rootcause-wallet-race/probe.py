@@ -34,6 +34,11 @@ PLANS = {
 }
 
 
+def wire(value):
+    """What crosses the store: a copy, as a deployment's shared service gives, so no object is shared through it."""
+    return json.loads(json.dumps(value))
+
+
 class Store:
     # Slots, so work-dir code can't hang a shared lock on the store itself.
     __slots__ = ("data", "mutex", "locks", "kind", "seconds", "barrier", "seen", "met", "deadlock")
@@ -61,13 +66,15 @@ class Store:
         with self.mutex:
             value = self.data.get(key)
         self.rendezvous("get", key)  # the read is done, the caller doesn't have it yet
-        return value
+        return wire(value)
 
     def put(self, key, value):
+        value = wire(value)
         with self.mutex:
             self.data[key] = value
 
     def compare_and_put(self, key, expected, value):
+        value = wire(value)
         with self.mutex:
             if self.data.get(key) != expected:
                 return False
