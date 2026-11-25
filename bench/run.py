@@ -207,7 +207,7 @@ def command(prompt: str, config: dict, options: dict, base_env: dict, shape: str
 
 LIMIT_RETRIES = 5
 LIMIT_PAUSE = 60  # seconds before the first retry; each later pause is twice as long
-API_ERROR_STOP = 3  # API errors before any spend, in a row, that stop the bench: the key or the account is wrong
+API_ERROR_STOP = 3  # account errors, in a row, that stop the bench: the key or the account is wrong
 # The messages Claude Code prints when the API refuses for a limit (https://code.claude.com/docs/en/errors.md).
 _LIMIT_MESSAGE = (r"API Error: (?:Repeated )?(?:429|529)\b|API Error: Repeated 529 Overloaded|Request rejected \(429\)|"
                   r"Server is temporarily limiting requests|You've hit your (?:session|weekly|Opus|Sonnet) limit")
@@ -219,17 +219,30 @@ _NETWORK_MESSAGE = (r"API Error: [^\n]*\((?:ENOTFOUND|ENETUNREACH|ECONNRESET|ECO
                     r"API Error: (?:Can't reach the API server|No internet route)|Connection lost")
 
 
+# What ends a run when the account can't pay or may not use the model, before or part-way through the task
+# (https://code.claude.com/docs/en/errors.md, https://platform.claude.com/docs/en/api/errors.md).
+_ACCOUNT_MESSAGE = (r"(?:API Error: \d{3}\b[^\n]*?)?(?:Credit balance (?:is )?too low|Usage credits ran out|"
+                    r"You've hit your [^\n·]*?(?:spend limit|usage limit|shared budget)|"
+                    r"You have reached your (?:specified )?(?:workspace )?API usage limits|Invalid API key|"
+                    r"Failed to authenticate|OAuth token (?:revoked|has expired)|Your account is on hold|"
+                    r"Your ANTHROPIC_API_KEY belongs to a disabled organization|This organization has been disabled|"
+                    r"Your organization has disabled|There's an issue with the selected model|Model '[^'\n]*' not found)")
+
+
 def refusal(row: dict) -> str | None:
-    """Why the API never got to the task: "limit" or "network", "api_error" for any other error before a cent was
-    spent (a bad key, no credit, a model the account can't use), else None. Only an errored run counts, and a limit
-    or network only on the API's status or Claude Code's own message, at the start of the answer (which is then that
-    message) or in stderr. Task text that talks about limits or network codes is never read as one."""
+    """Why the API didn't serve the task: "limit" or "network", "api_error" for an account error whatever was spent (a
+    bad key, no credit, a spend limit, a model the account may not use) or for any other error before a cent was
+    spent, else None. Only an errored run counts, and a limit, network or account error only on the API's status or
+    Claude Code's own message, at the start of the answer (which is then that message) or in stderr. Task text that
+    talks about limits, credit or network codes is never read as one."""
     if not (row.get("is_error") or row.get("exit_code")):
         return None
     if row.get("api_error_status") in (429, 529):
         return "limit"
+    if row.get("api_error_status") in (401, 402, 403):  # authentication, billing, permission
+        return "api_error"
     answer, stderr = str(row.get("answer") or ""), str(row.get("stderr") or "")
-    for reason, message in (("limit", _LIMIT_MESSAGE), ("network", _NETWORK_MESSAGE)):
+    for reason, message in (("limit", _LIMIT_MESSAGE), ("network", _NETWORK_MESSAGE), ("api_error", _ACCOUNT_MESSAGE)):
         if re.match(rf"\s*(?:{message})", answer) or re.search(message, stderr):
             return reason
     # No spend means no model reply, so no tool ran. error_during_execution's zero cost may have been zeroed.
@@ -768,9 +781,10 @@ def record(task: dict, config: dict, options: dict, result: dict, facts: dict) -
                        "api_error_status": result.get("api_error_status"), "answer": result.get("result"),
                        "subtype": result.get("subtype"), "total_cost_usd": cost})
     # A cost of 0 on error_during_execution "may be zeroed" (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md),
-    # except when the API refused the run or it never started: nothing was spent.
+    # except when a limit or the network stopped the run or it never started: nothing was spent. An account error can
+    # come part-way.
     known = unstarted or isinstance(cost, (int, float)) and not (
-        result.get("subtype") == "error_during_execution" and cost == 0 and not refused)
+        result.get("subtype") == "error_during_execution" and cost == 0 and refused not in ("limit", "network"))
     priced = facts.get("transcript_cost")
     source = "result" if known else "transcripts" if priced is not None else "budget"
     started, overrides = facts.get("agents_started") or {}, facts.get("agent_overrides") or 0
@@ -845,7 +859,7 @@ def set_aside(row: dict) -> str | None:
 
 
 # Set-aside reasons a pause can't fix; this many in a row stop the bench.
-NO_RETRY = {"api_error": "API error before any spend", "no_start": "claude stopped before the session began",
+NO_RETRY = {"api_error": "the API refused the account", "no_start": "claude stopped before the session began",
             "plugin_not_loaded": "the plugin did not load",
             "router_silent": "the router logged no spawn though a subagent ran"}
 

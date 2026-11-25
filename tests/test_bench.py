@@ -717,9 +717,10 @@ class Analysis(unittest.TestCase):
             out = Path(tmp) / "page.md"
             analyze.main([str(p) for p in sorted(res.glob("*.jsonl"))] + ["--out", str(out)])
             page = out.read_text(encoding="utf-8")
-        self.assertIn("4 run(s) are set aside, outside the results, because the API never got to the task: "
-                      "2 lost the network, 1 hit a rate or usage limit, 1 got an API error before any spend (a bad "
-                      "key, no credit or a model the account can't use). 2 of them were run again later", page)
+        self.assertIn("4 run(s) are set aside, outside the results, because the API stopped serving them, before or "
+                      "during the task: 2 lost the network, 1 hit a rate or usage limit, 1 got an account error (a bad "
+                      "or revoked key, no credit, a spend limit or a model the account can't use), whatever was "
+                      "spent. 2 of them were run again later", page)
         self.assertIn("`plugin` on `sonnet` (2 runs): main loop $0.0600 (75%), `model-router:implementer` $0.0200 "
                       "(25%)", page)
         self.assertIn("`defaults` old (3); `plugin` new (2)", page)
@@ -1858,7 +1859,7 @@ class Limits(unittest.TestCase):
                                       "stderr": "Error: API Error: Repeated 529 Overloaded errors", "answer": ""}),
                          "limit")
 
-    def test_an_api_error_before_any_spend_is_set_aside_not_retried(self):
+    def test_an_account_error_is_set_aside_not_retried(self):
         # What Claude Code 2.1.330 printed for an invalid API key: an error, nothing spent, no model usage.
         result = json.loads(API_ERROR.read_text(encoding="utf-8"))
         row = run.record({"id": "t", "class": "lookup"}, {"id": "defaults"}, Recorder.options,
@@ -1869,6 +1870,29 @@ class Limits(unittest.TestCase):
         # The messages for the other two at https://code.claude.com/docs/en/errors.md.
         for answer in ("Credit balance is too low", "Model 'claude-fable-5-2' not found"):
             self.assertEqual(run.refusal(dict(errored, answer=answer, total_cost_usd=0)), "api_error", answer)
+        # What ends a run part-way when the account can't pay or may not use the model, at
+        # https://code.claude.com/docs/en/errors.md and https://platform.claude.com/docs/en/api/errors.md: it is set
+        # aside whatever it spent.
+        spent = dict(errored, total_cost_usd=0.41, api_error_status=400)
+        for answer in ("Credit balance is too low", "Credit balance too low · Add funds: https://x",
+                       "Usage credits ran out before the response was finished.",
+                       "You've hit your org's monthly spend limit · visit https://x to raise it",
+                       "You've hit your individual usage limit", "You've hit your team's shared budget · ask your admin",
+                       'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"You have '
+                       'reached your specified API usage limits. You will regain access on 2026-12-01"}}',
+                       "Failed to authenticate: OAuth token revoked. Please log in again or contact your administrator.",
+                       "Your ANTHROPIC_API_KEY belongs to a disabled organization · Update or unset the environment variable",
+                       "There's an issue with the selected model (claude-x). It may not exist or you may not have access "
+                       "to it. Run --model to pick a different model.", "Model 'claude-fable-5-2' not found"):
+            self.assertEqual(run.refusal(dict(spent, answer=answer)), "api_error", answer)
+        for status in (401, 402, 403):  # authentication, billing, permission
+            self.assertEqual(run.refusal(dict(spent, answer="", api_error_status=status)), "api_error", status)
+        self.assertEqual(run.refusal(dict(spent, answer="You've hit your session limit · resets 3pm")), "limit")
+        # Task text that talks about credit or keys, or a run that didn't error, is a task's own answer.
+        for row in (dict(spent, answer="The credit balance is too low to cover the refund, so it fails."),
+                    dict(spent, answer="Draft: Invalid API key handling returns 401."),
+                    dict(spent, is_error=False, exit_code=0, answer="Credit balance is too low")):
+            self.assertIsNone(run.refusal(row), row["answer"])
         # A run that spent tried the task, and a zero cost on error_during_execution may have been zeroed.
         self.assertIsNone(run.refusal(dict(errored, answer="The fix is incomplete.", total_cost_usd=0.02)))
         self.assertIsNone(run.refusal(dict(errored, answer="", subtype="error_during_execution", total_cost_usd=0)))
@@ -1886,6 +1910,22 @@ class Limits(unittest.TestCase):
                                  "--seed", "0", "--max-total", "3", "--claude", *claude, "--out", str(out)])
             read = lambda p: [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []  # noqa: E731
             return code, read(out), read(Path(tmp) / "limited" / "out.jsonl"), [p for p in pauses if p >= run.LIMIT_PAUSE]
+
+    def test_an_account_error_part_way_is_set_aside_with_its_spend_and_run_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.jsonl"
+            argv = ["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", str(run.API_ERROR_STOP + 1),
+                    "--max-total", "9", "--claude", *stub(tmp, CREDIT_STUB), "--out", str(out)]
+            limited = Path(tmp) / "limited" / "out.jsonl"
+            for again in (1, 2):
+                with unittest.mock.patch.dict("os.environ", AUTH), contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertEqual(run.main(argv), 2)
+                self.assertIn(f"stopped: {run.API_ERROR_STOP} runs in a row set aside", err.getvalue())
+                rows = [json.loads(line) for line in limited.read_text().splitlines()]
+                # None is on record as a failed task, so the same command runs them again.
+                self.assertFalse(out.exists())
+                self.assertEqual([(r["limited_reason"], r["total_cost_usd"], r["passed"]) for r in rows],
+                                 [("api_error", 0.41, False)] * run.API_ERROR_STOP * again)
 
     def test_api_errors_in_a_row_stop_the_bench_without_a_failed_task(self):
         code, rows, limited, pauses = self.refused("every run", ["defaults"], runs=run.API_ERROR_STOP + 2)
@@ -1915,6 +1955,19 @@ if os.environ["STUB_REFUSED"] in ("every run", os.environ.get("CLAUDE_CODE_SUBAG
     sys.exit(1)
 print(json.dumps({"type": "result", "is_error": False, "subtype": "success", "api_error_status": None, "total_cost_usd": 0.01,
                   "result": "read_retry_limit in app/settings.py", "modelUsage": {}}))
+'''
+
+
+# The account runs dry part-way: $0.41 spent, then the API refuses for credit.
+CREDIT_STUB = '''#!/usr/bin/env python3
+import json, sys
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+print(json.dumps({"type": "system", "subtype": "init", "apiKeySource": "ANTHROPIC_API_KEY", "plugins": []}))
+print(json.dumps({"type": "result", "subtype": "success", "is_error": True, "api_error_status": 400,
+                  "terminal_reason": "api_error", "total_cost_usd": 0.41, "num_turns": 4,
+                  "result": "Credit balance is too low", "permission_denials": [], "modelUsage": {}}))
+sys.exit(1)
 '''
 
 
