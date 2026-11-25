@@ -12,6 +12,7 @@ import math
 import os
 import re
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -1011,10 +1012,44 @@ class Runner(unittest.TestCase):
                     self.fail(f"the run's child {pid} outlived the run")
 
 
+    @unittest.skipIf(sys.platform == "win32", "Windows ends a process without running its signal handlers")
+    def test_a_runner_sent_sigterm_leaves_no_child_no_scratch_and_writes_the_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            child, cwd, out, temp = (Path(tmp) / n for n in ("child.pid", "cwd.txt", "out.jsonl", "temp"))
+            temp.mkdir()
+            env = {**os.environ, **AUTH, "STUB_CHILD": str(child), "STUB_CWD": str(cwd), "TMPDIR": str(temp)}
+            runner = subprocess.Popen([sys.executable, str(run.BENCH / "run.py"), "--tasks", "lookup-retry-limit",
+                                       "--configs", "defaults", "--max-total", "3", "--claude", *stub(tmp, ORPHAN_STUB),
+                                       "--out", str(out)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for _ in range(600):
+                if child.is_file() and child.read_text():
+                    break
+                time.sleep(0.05)
+            runner.send_signal(signal.SIGTERM)
+            runner.wait(timeout=60)
+            pid = int(child.read_text())
+            for _ in range(100):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                os.kill(pid, 9)
+                self.fail(f"the run's child {pid} outlived the runner")
+            self.assertFalse(Path(cwd.read_text()).parent.exists())  # the run's scratch folder
+            self.assertEqual(list(temp.iterdir()), [])  # the frozen plugin copy
+            [row] = [json.loads(line) for line in out.read_text().splitlines()]
+            self.assertIn("KeyboardInterrupt", row["grade"]["reason"])
+
+
 ORPHAN_STUB = '''#!/usr/bin/env python3
 import os, subprocess, sys, time
 if "--version" in sys.argv:
     print("9.9.9 (stub)"); sys.exit(0)
+if os.environ.get("STUB_CWD"):
+    with open(os.environ["STUB_CWD"], "w") as fh:
+        fh.write(os.getcwd())
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
 with open(os.environ["STUB_CHILD"], "w") as fh:
     fh.write(str(child.pid))
@@ -1491,9 +1526,8 @@ class Stopped(unittest.TestCase):
                           "--claude", *stub(tmp, source), "--out", str(out), *argv])
             rows = [json.loads(line) for line in out.read_text().splitlines()] if out.exists() else []
             sessions = list((home / "projects").iterdir()) if (home / "projects").exists() else []
-            # The frozen plugin copy is a batch's own scratch too, removed when the bench exits.
-            left = [p for p in scratch.iterdir() if not p.name.startswith("mrbench-plugin-")]
-            return rows, left + list(runs.iterdir()), sessions
+            # The frozen plugin copy is made there too, and goes however the bench stops.
+            return rows, list(scratch.iterdir()) + list(runs.iterdir()), sessions
 
     def test_an_interrupt_during_the_claude_call_writes_a_broken_row_charged_the_budget_and_cleans_up(self):
         def interrupted(cmd, work, env, timeout):
@@ -3064,12 +3098,16 @@ class Harness(unittest.TestCase):
         shutil.copytree(run.PLUGIN, source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         (source / "scripts" / "__pycache__").mkdir(exist_ok=True)
         (source / "scripts" / "__pycache__" / "x.pyc").write_bytes(b"cache")
-        frozen, digest = run.freeze_plugin(source)
-        self.assertEqual(run.freeze_plugin(source)[1], digest)
+        def freeze():
+            frozen, digest = run.freeze_plugin(source)
+            self.addCleanup(shutil.rmtree, Path(frozen).parent)
+            return frozen, digest
+        frozen, digest = freeze()
+        self.assertEqual(freeze()[1], digest)
         self.assertFalse(list(Path(frozen).rglob("*.pyc")))
         (source / "hooks" / "hooks.json").write_text("{}")  # an edit after the batch starts
         self.assertNotEqual((Path(frozen) / "hooks" / "hooks.json").read_text(), "{}")
-        self.assertNotEqual(run.freeze_plugin(source)[1], digest)
+        self.assertNotEqual(freeze()[1], digest)
         loaded = json.dumps([{"name": "model-router", "path": "/p"}])
         code, rows, _ = self.main("--configs", "plugin", "plugin-nogate", "defaults", "--runs", "2", "--seed", "5",
                                   env={"STUB_PLUGINS": loaded})

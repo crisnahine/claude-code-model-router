@@ -7,7 +7,6 @@ Example:
 from __future__ import annotations
 
 import argparse
-import atexit
 import datetime
 import filecmp
 import functools
@@ -120,9 +119,8 @@ def plugin_hash(folder: Path) -> str:
 
 def freeze_plugin(source: Path = PLUGIN) -> tuple[str, str]:
     """A copy of the plugin made once at the start of a batch, so an edit or a checkout during it can't reach later
-    runs, and the hash of what was copied."""
+    runs, and the hash of what was copied. The caller removes the copy's folder, the parent of the path given."""
     target = Path(tempfile.mkdtemp(prefix="mrbench-plugin-")) / "model-router"
-    atexit.register(shutil.rmtree, target.parent, ignore_errors=True)
     shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     return str(target), plugin_hash(target)
 
@@ -876,6 +874,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--keep", type=Path, help="copy each run's scratch folder and transcripts here")
     args = parser.parse_args(argv)
+    if hasattr(signal, "SIGTERM"):  # else Python exits on it at once, leaving claude running and the paid run unwritten
+        signal.signal(signal.SIGTERM, signal.default_int_handler)
 
     tasks = [t for t in load_tasks() if not args.tasks or t["id"] in args.tasks]
     configs = [c for c in load_configs() if not args.configs or c["id"] in args.configs]
@@ -895,78 +895,81 @@ def main(argv: list[str] | None = None) -> int:
     version = subprocess.run([*args.claude, "--version"], capture_output=True, text=True).stdout.strip()
     registry_config = mrconfig.shipped()
     frozen, digest = freeze_plugin()
-    options = {"claude": args.claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,
-               "plugin_dir": frozen, "plugin_hash": digest, "claude_version": version, "commit": _git_head(),
-               "dirty": _git_dirty(), "managed": managed_settings(), "seed": seed, "batch": batch,
-               "keep": str(args.keep) if args.keep else None,
-               # Earlier rows and kept runs hold graded answers: the results folder holds transcripts/ and limited/.
-               "hidden": answer_paths(str(args.out.parent), args.keep and str(args.keep)),
-               "transcripts": str(args.out.parent / "transcripts" / args.out.stem)}
-    print(f"batch {batch}, seed {seed}", file=sys.stderr)
-    limited = args.out.parent / "limited" / args.out.name
-    # A run is paid for before its row is written, so every place a row or a kept run goes must take a write first.
     try:
-        for target in (args.out, limited):
-            target.parent.mkdir(parents=True, exist_ok=True)
-            new = not target.exists()
-            with target.open("a", encoding="utf-8"):
-                pass
-            if new:  # an empty results file would read as a batch with no runs
-                target.unlink()
-        if args.keep:
-            args.keep.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        parser.error(f"can't write the results or --keep: {exc}")
-    spent, errors = 0.0, 0
-    for run_index, task, config in schedule(tasks, configs, args.runs, args.first_run, seed):
-        begin = time.time()
-        for attempt in range(LIMIT_RETRIES + 1):
-            if not can_start(spent, args.budget, args.max_total):  # a retry spends too
-                print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
-                return 1
-            try:
-                row = run_one(task, config, options, registry_config)
-            except BaseException as exc:
-                row = getattr(exc, "row", None)
-                if row is not None:  # the run was paid for, so it goes on record where the loop would put it
-                    row["run"], reason = run_index, set_aside(row)
-                    if reason:
-                        row["limited_reason"] = reason
-                    _write(limited if reason else args.out, row)
-                raise
-            row["run"] = run_index
-            spent += row["total_cost_usd"]
-            reason = set_aside(row)
-            if reason is None:
-                break
-            row["limited_reason"] = reason
-            # Kept apart, outside results/*.jsonl, so the spend is on record but never a failed task.
-            _write(limited, row)
-            if reason in NO_RETRY:
-                break
-            if attempt == LIMIT_RETRIES:
-                print(f"stopped: still rate or usage limited after {LIMIT_RETRIES} pauses, "
-                      f"${spent:.4f} spent", file=sys.stderr)
-                return 2
-            print(f"{task['id']} {config['id']}: rate or usage limited, pausing", file=sys.stderr)
-            time.sleep(LIMIT_PAUSE * 2 ** attempt)
-        if row.get("limited_reason") in NO_RETRY:
-            errors += 1
-            print(f"{task['id']} {config['id']}: {NO_RETRY[row['limited_reason']]}, set aside: "
-                  f"{(row['answer'] or row['stderr'])[:200]}", file=sys.stderr)
-            if errors == API_ERROR_STOP:
-                print(f"stopped: {errors} runs in a row set aside; check the key, the credit balance, the account's "
-                      "model access, whether the sandbox can start and the plugin's load errors", file=sys.stderr)
-                return 2
-            continue
-        errors = 0
-        _write(args.out, row)
-        print(f"{task['id']} {config['id']} run {run_index}: passed={row['passed']} "
-              f"${row['total_cost_usd']:.4f} {time.time() - begin:.0f}s, total ${spent:.4f}")
-        if row["grade"]["verdict"] == "broken":
-            print(f"{task['id']}: its pass check broke ({row['grade']['reason']}); analyze sets this run aside",
-                  file=sys.stderr)
-    return 0
+        options = {"claude": args.claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,
+                   "plugin_dir": frozen, "plugin_hash": digest, "claude_version": version, "commit": _git_head(),
+                   "dirty": _git_dirty(), "managed": managed_settings(), "seed": seed, "batch": batch,
+                   "keep": str(args.keep) if args.keep else None,
+                   # Earlier rows and kept runs hold graded answers: the results folder holds transcripts/ and limited/.
+                   "hidden": answer_paths(str(args.out.parent), args.keep and str(args.keep)),
+                   "transcripts": str(args.out.parent / "transcripts" / args.out.stem)}
+        print(f"batch {batch}, seed {seed}", file=sys.stderr)
+        limited = args.out.parent / "limited" / args.out.name
+        # A run is paid for before its row is written, so every place a row or a kept run goes must take a write first.
+        try:
+            for target in (args.out, limited):
+                target.parent.mkdir(parents=True, exist_ok=True)
+                new = not target.exists()
+                with target.open("a", encoding="utf-8"):
+                    pass
+                if new:  # an empty results file would read as a batch with no runs
+                    target.unlink()
+            if args.keep:
+                args.keep.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            parser.error(f"can't write the results or --keep: {exc}")
+        spent, errors = 0.0, 0
+        for run_index, task, config in schedule(tasks, configs, args.runs, args.first_run, seed):
+            begin = time.time()
+            for attempt in range(LIMIT_RETRIES + 1):
+                if not can_start(spent, args.budget, args.max_total):  # a retry spends too
+                    print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
+                    return 1
+                try:
+                    row = run_one(task, config, options, registry_config)
+                except BaseException as exc:
+                    row = getattr(exc, "row", None)
+                    if row is not None:  # the run was paid for, so it goes on record where the loop would put it
+                        row["run"], reason = run_index, set_aside(row)
+                        if reason:
+                            row["limited_reason"] = reason
+                        _write(limited if reason else args.out, row)
+                    raise
+                row["run"] = run_index
+                spent += row["total_cost_usd"]
+                reason = set_aside(row)
+                if reason is None:
+                    break
+                row["limited_reason"] = reason
+                # Kept apart, outside results/*.jsonl, so the spend is on record but never a failed task.
+                _write(limited, row)
+                if reason in NO_RETRY:
+                    break
+                if attempt == LIMIT_RETRIES:
+                    print(f"stopped: still rate or usage limited after {LIMIT_RETRIES} pauses, "
+                          f"${spent:.4f} spent", file=sys.stderr)
+                    return 2
+                print(f"{task['id']} {config['id']}: rate or usage limited, pausing", file=sys.stderr)
+                time.sleep(LIMIT_PAUSE * 2 ** attempt)
+            if row.get("limited_reason") in NO_RETRY:
+                errors += 1
+                print(f"{task['id']} {config['id']}: {NO_RETRY[row['limited_reason']]}, set aside: "
+                      f"{(row['answer'] or row['stderr'])[:200]}", file=sys.stderr)
+                if errors == API_ERROR_STOP:
+                    print(f"stopped: {errors} runs in a row set aside; check the key, the credit balance, the account's "
+                          "model access, whether the sandbox can start and the plugin's load errors", file=sys.stderr)
+                    return 2
+                continue
+            errors = 0
+            _write(args.out, row)
+            print(f"{task['id']} {config['id']} run {run_index}: passed={row['passed']} "
+                  f"${row['total_cost_usd']:.4f} {time.time() - begin:.0f}s, total ${spent:.4f}")
+            if row["grade"]["verdict"] == "broken":
+                print(f"{task['id']}: its pass check broke ({row['grade']['reason']}); analyze sets this run aside",
+                      file=sys.stderr)
+        return 0
+    finally:
+        shutil.rmtree(Path(frozen).parent, ignore_errors=True)
 
 
 if __name__ == "__main__":
