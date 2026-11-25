@@ -1657,8 +1657,9 @@ class Router(Sandbox):
     def test_the_users_environment_settings_win(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         self.assertEqual(self.decide("general-purpose", LOOKUP)["action"], "keep")
-        self.assertEqual(self.decide("Explore", LOOKUP)["action"], "keep")
+        self.assertEqual(self.decide("Explore", LOOKUP)["source"], "router")  # unforced, the variable doesn't move Explore
         self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+        self.assertIn("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", self.decide("Explore", LOOKUP)["reason"])
         self.agent("pinned", "opus")
         self.assertEqual(self.decide("pinned", LOOKUP, model="fable")["action"], "keep")
 

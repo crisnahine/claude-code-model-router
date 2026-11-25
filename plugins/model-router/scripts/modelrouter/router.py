@@ -64,16 +64,17 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     requested = reg.family(tool_input.get("model"))
     own_model = (definition or {}).get("model")
     pinned = reg.family(own_model)
-    env_default = reg.family(settings.subagent_model)
+    env_model = reg.family(settings.subagent_model)
     # The built-in Explore and Plan have had their own default model in some versions,
     # so what they would run on isn't assumed.
     special = bool(definition) and definition["source"] == "builtin" and agent in ("Explore", "Plan")
     inherits = bool(definition and definition.get("inherits"))
+    # Unforced, CLAUDE_CODE_SUBAGENT_MODEL moves neither Explore and Plan nor an agent that says inherit (sub-agents.md).
+    env_default = None if special or inherits else env_model
     if requested or pinned:
         out["was"] = requested or pinned
     elif definition is not None and not own_model and not special:
-        # An explicit inherit outranks CLAUDE_CODE_SUBAGENT_MODEL (sub-agents.md, "Choose a model").
-        out["was"] = facts.parent if inherits else env_default or facts.parent
+        out["was"] = env_default or facts.parent
 
     if settings.mode != "auto":
         out["reason"] = f"routing is {settings.mode}"
@@ -98,7 +99,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     keeps = bool(settings.subagent_effort and not settings.effort_level and not facts.teammate)
 
     if settings.force:
-        model = env_default or facts.parent
+        model = env_model or facts.parent
         level = ladder.rung(reg, model, named_effort)
         effort = None if decided or tool_input.get("model") or not level else ladder.effort(reg, level)
         step = ""
@@ -160,7 +161,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
             why = f"the agent names a model outside the registry ({shown})"
         elif pinned:
             target, source, why = pinned, "pin", "the agent names its own model"
-        elif env_default and not redo and not inherits:
+        elif env_default and not redo:
             why = "CLAUDE_CODE_SUBAGENT_MODEL sets the model for agents without one"
     level = ladder.rung(reg, target or out["was"], named_effort)
     if target is None and why:

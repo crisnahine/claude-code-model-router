@@ -91,6 +91,11 @@ class UnnamedCalls(Sandbox):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         d = self.decide("reader", BRIEF)
         self.assertEqual((d["action"], d["model"]), ("keep", None))
+        # The variable alone doesn't move the built-in Explore and Plan (sub-agents.md), so they keep the pick.
+        for builtin in ("Explore", "Plan"):
+            d = self.decide(builtin, BRIEF)
+            self.assertEqual((d["source"], d["level"], d["model"]), ("router", "lookup", self.at(Level.lookup)[0]), builtin)
+            self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL", d["reason"])
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         self.assertIn("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", self.decide("reader", BRIEF)["reason"])
 
