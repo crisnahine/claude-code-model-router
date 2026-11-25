@@ -3847,6 +3847,7 @@ class Launcher(Sandbox):
         cache.symlink_to(self.tmp.name)  # a link could point at a folder someone else fills
         self.assertIsNone(entry.private_cache(str(home), uid))
 
+    @unittest.skipUnless(hasattr(os, "getuid"), "the cache folder comes from the password database, POSIX only")
     def test_a_python_that_writes_no_bytecode_under_isolation_gets_the_private_cache(self):
         # Apple's Python 3.9 writes none under -I and ships none for its library: each hook compiled both again.
         entry = self.entry()
