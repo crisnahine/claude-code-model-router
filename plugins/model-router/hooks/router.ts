@@ -10,9 +10,9 @@ const SOURCES: readonly SettingsSource[] = ['policy', 'user', 'project', 'local'
 const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides', 'maxEffortLevel', 'modelSettings', 'effortLevel']
 const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
 // The max_tier ladder, weakest first, for a call the runtime didn't answer, and the other names a family answers to
-// (config/models.json `twins`).
+// (config/models.json `twins` and `aliases`).
 const TIERS: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable']
-const TWINS: Readonly<Record<string, string>> = { mythos: 'fable' }
+const NAMES: Readonly<Record<string, string>> = { mythos: 'fable', best: 'opus' }
 // The id names a file the fallback looks up, so only a plain one is marked (scripts/modelrouter/mod.py routes).
 const PLAIN_ID = /^[A-Za-z0-9_-]{1,128}$/
 // A model a repository's settings can set is shown only as a plain name, as the runtime shows one (config._PLAIN_NAME).
@@ -77,7 +77,7 @@ async function mark($: EngineInterface, name: string): Promise<boolean> {
 function family(model: string | undefined): string | undefined {
   const name = model?.toLowerCase()
   return name === undefined ? undefined
-    : TIERS.find(tier => name.includes(tier)) ?? Object.entries(TWINS).find(([twin]) => name.includes(twin))?.[1] ?? name
+    : TIERS.find(tier => name.includes(tier)) ?? Object.entries(NAMES).find(([other]) => name.includes(other))?.[1] ?? name
 }
 
 // Whether a later link moved the spawn to another family than this mod sent: the engine's own entry holds what core

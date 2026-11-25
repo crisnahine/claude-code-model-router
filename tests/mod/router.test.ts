@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import type { On, PluginOptions } from 'claude-code'
 import { register } from '../../plugins/model-router/hooks/router.ts'
 import payloads from '../fixtures/mod-payloads.json' with { type: 'json' }
+import registry from '../../plugins/model-router/config/models.json' with { type: 'json' }
 
 type Hook = (...args: any[]) => any
 type Reply = { exitCode?: number; stdout: string }
@@ -605,6 +606,21 @@ test('a call whose spawn round trip fails still runs within max_tier, and one th
   const uncapped = load({ 'mod-spawn': { exitCode: 1, stdout: '' } })
   await uncapped.spawn(spawnEvent({ model: 'opus' }), next)
   assert.equal(seen.at(-1), 'opus')
+})
+
+test('every name the registry gives a family is held to the cap as that family when the round trip fails', async () => {
+  const families = Object.entries(registry.models as Record<string, { strength: number; twins?: string[] }>)
+    .sort(([, a], [, b]) => a.strength - b.strength)
+  const names: [string, string][] = [...families.flatMap(([family, spec]) => [family, ...(spec.twins ?? [])].map(n => [n, family] as [string, string])),
+    ...Object.entries(registry.aliases as Record<string, string>)]
+  for (const [name, family] of names) {
+    const below = families[families.findIndex(([f]) => f === family) - 1]?.[0]
+    if (!below) continue
+    const mod = load({ 'mod-spawn': { exitCode: 1, stdout: '' } }, { max_tier: below })
+    let sent: unknown
+    await mod.spawn(spawnEvent({ model: name }), (x: any) => { sent = x.model; return { agentId: 'a1' } })
+    assert.equal(sent, below, name)
+  }
 })
 
 test('a spawn round trip that fails once is asked again, and the second answer routes the call', async () => {
