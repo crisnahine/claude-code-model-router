@@ -16,6 +16,7 @@ READ_ONLY_BUILTINS = ("Explore", "Plan")
 # The tools that change files or run commands: an agent with none of them can only read.
 CHANGES = frozenset(("Edit", "Write", "NotebookEdit", "Bash"))
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---", re.S)
+HEAD_CHARS = 6000  # the frontmatter is read from this much of a file
 
 
 def _field(block: str, name: str) -> str | None:
@@ -121,12 +122,10 @@ def read_only(definition: dict) -> bool:
 
 
 def parse(path: Path, source: str) -> dict | None:
-    try:
-        with path.open("r", encoding="utf-8-sig", errors="replace") as fh:  # -sig drops a leading BOM
-            head = fh.read(6000)
-    except OSError:
+    raw = store.read_head(path, 4 * HEAD_CHARS)  # however large the file, and never a FIFO in its place
+    if raw is None:
         return None
-    block = _FRONTMATTER.match(head)
+    block = _FRONTMATTER.match(raw.decode("utf-8-sig", "replace")[:HEAD_CHARS])  # -sig drops a leading BOM
     if not block:
         return None
     text = block.group(1)
@@ -145,11 +144,7 @@ def parse(path: Path, source: str) -> dict | None:
 
 def _search(folders: list[tuple[str, Path]], name: str) -> dict | None:
     for source, folder in folders:
-        try:
-            files = sorted(folder.rglob("*.md"))[:500]
-        except OSError:
-            continue
-        for path in files:
+        for path in islice(_markdown_files(folder), 500):
             found = parse(path, source)
             if found and found["name"] == name:
                 return found
@@ -157,11 +152,27 @@ def _search(folders: list[tuple[str, Path]], name: str) -> dict | None:
 
 
 _SKIP_DIRS = ("node_modules", ".git", "__pycache__")
+# A walk's bounds. A repository's .claude/agents can be a symlink to /, which the walk follows (sub-agents.md says
+# nothing of symlinks); os.walk recurses before Python 3.12, so depth also keeps it inside the recursion limit.
+WALK_ENTRIES = 20000
+WALK_DEPTH = 10
+
+
+def _shallow_walk(root: Path):
+    """os.walk from `root`, top down, at most WALK_DEPTH folders deep and WALK_ENTRIES entries in all."""
+    seen, top = 0, len(Path(root).parts)
+    for current, dirs, files in os.walk(root):
+        seen += len(dirs) + len(files)
+        if seen > WALK_ENTRIES:
+            return
+        if len(Path(current).parts) - top >= WALK_DEPTH:
+            dirs[:] = []
+        yield current, dirs, files
 
 
 def _markdown_files(root: Path):
     """The .md files under `root` in a stable order, skipping dependency and VCS trees."""
-    for current, dirs, files in os.walk(root):
+    for current, dirs, files in _shallow_walk(root):
         dirs[:] = sorted(d for d in dirs if d not in _SKIP_DIRS)
         for name in sorted(files):
             if name.lower().endswith(".md"):
@@ -206,9 +217,16 @@ def _listed(plugin: str, root: Path) -> list[Path]:
         value = source.get("agents")
         for item in [value] if isinstance(value, str) else value if isinstance(value, list) else []:
             # Claude Code doesn't load a listed path that escapes the plugin root.
-            if isinstance(item, str) and (root / item).resolve().is_relative_to(root.resolve()):
+            if isinstance(item, str) and _inside(root / item, root):
                 listed.append(root / item)
     return listed
+
+
+def _inside(path: Path, root: Path) -> bool:
+    try:
+        return path.resolve().is_relative_to(root.resolve())
+    except (OSError, RuntimeError, ValueError):  # a symlink loop, or a NUL in a marketplace file's path
+        return False
 
 
 def _plugin_roots(plugin: str) -> list[Path]:
@@ -216,13 +234,8 @@ def _plugin_roots(plugin: str) -> list[Path]:
     roots = installed_roots(plugin)
     if roots:
         return roots
-    base = store.claude_home() / "plugins"
-    seen = 0
-    for current, dirs, files in os.walk(base):
+    for current, dirs, files in _shallow_walk(store.claude_home() / "plugins"):
         dirs[:] = [d for d in dirs if d not in _SKIP_DIRS + ("data",)]
-        seen += len(files) + 1
-        if seen > 20000:
-            break
         if Path(current).name == plugin:
             roots.append(Path(current))
             dirs[:] = []

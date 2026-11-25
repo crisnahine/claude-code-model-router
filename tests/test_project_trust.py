@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -12,7 +13,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from test_model_router import BUILD, HARD, LOOKUP, Sandbox
+from test_model_router import BUILD, HARD, LOOKUP, SCRIPTS, Sandbox
 from modelrouter import agents, calls, cli, health, hooks, request, store
 from modelrouter import config as cfg
 from modelrouter import mod as modpath
@@ -215,6 +216,64 @@ class UnreadableProjectFiles(Sandbox):
             return real(path)
         with mock.patch.object(Path, "is_file", is_file):
             self.assertEqual(cfg.load().levels, cfg.shipped().levels)
+
+
+class AgentFoldersARepositoryControls(Sandbox):
+    """Agent lookups run in every Agent hook, so a planted folder or file can't stall them or make them raise."""
+
+    def test_an_agents_folder_symlinked_to_the_root_is_walked_within_the_hook_timeout(self):
+        # Claude Code's docs say nothing of symlinks here, so the folder is still followed, within bounds.
+        (self.project / ".git").mkdir()
+        (self.project / ".claude").mkdir()
+        os.symlink("/", self.project / ".claude" / "agents")
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); from pathlib import Path; from modelrouter import agents; "
+                "print(agents.find('general-purpose', Path(sys.argv[2]))['source'])")
+        try:
+            out = subprocess.run([sys.executable, "-c", code, str(SCRIPTS), str(self.project)], capture_output=True,
+                                 text=True, timeout=10, env={**os.environ})
+        except subprocess.TimeoutExpired:
+            self.fail("the lookup for general-purpose ran past the 10 s hook timeout")
+        self.assertEqual(out.stdout.strip(), "builtin", out.stderr)
+
+    def test_the_walk_stops_at_its_depth_and_its_entry_count(self):
+        folder = self.project / ".claude" / "agents"
+        self.agent("shallow", "opus", folder / Path(*["d"] * (agents.WALK_DEPTH - 1)))
+        self.agent("deep", "opus", folder / Path(*["d"] * (agents.WALK_DEPTH + 1)))
+        self.assertEqual(agents.find("shallow", self.project)["model"], "opus")
+        self.assertIsNone(agents.find("deep", self.project))
+        for n in range(30):
+            (folder / f"{n:02}.txt").write_text("")
+        with mock.patch.object(agents, "WALK_ENTRIES", 20):
+            self.assertIsNone(agents.find("shallow", self.project))
+
+    def test_a_huge_agent_file_is_read_only_at_its_head(self):
+        self.agent("big", "opus")
+        path = self.project / ".claude" / "agents" / "big.md"
+        with path.open("a") as fh:
+            fh.write("x" * (8 * 1024 * 1024))
+        with mock.patch.object(store, "read_head", wraps=store.read_head) as read:
+            self.assertEqual(agents.find("big", self.project)["model"], "opus")
+        self.assertLessEqual(max(call.args[1] for call in read.call_args_list), 4 * agents.HEAD_CHARS)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs FIFOs")
+    def test_an_agent_file_that_is_a_fifo_is_skipped(self):
+        self.agent("after", "opus")
+        os.mkfifo(self.project / ".claude" / "agents" / "a-pipe.md")
+        done = threading.Event()
+        threading.Thread(target=lambda: (agents.find("after", self.project), done.set()), daemon=True).start()
+        self.assertTrue(done.wait(5), "the lookup blocked on the FIFO")
+        self.assertEqual(agents.find("after", self.project)["model"], "opus")
+
+    def test_a_listed_agent_path_with_a_nul_or_a_symlink_loop_is_skipped(self):
+        root = self.home / "plugins" / "cache" / "acme"
+        self.agent("helper", "haiku", root / "agents")
+        (root / ".claude-plugin").mkdir(parents=True)
+        os.symlink("loop", root / "loop")
+        (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"agents": ["a\u0000b.md", "loop/x.md",
+                                                                                   "agents/helper.md"]}))
+        (self.home / "plugins" / "installed_plugins.json").write_text(json.dumps(
+            {"plugins": {"acme@market": [{"installPath": str(root)}]}}))
+        self.assertEqual(agents.find("acme:helper", self.project)["model"], "haiku")
 
 
 class TextARepositoryChooses(Sandbox):
