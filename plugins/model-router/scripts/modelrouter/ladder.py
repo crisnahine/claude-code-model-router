@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from .config import EFFORTS, LEVELS, Level
+from .config import DEFAULT_EFFORT, EFFORTS, LEVELS, Level
 from .registry import Registry
 
 
@@ -39,7 +39,7 @@ def rung(reg: Registry, model: str | None, named_effort: str | None = None) -> L
         own = [level for level in LEVELS if levels[level].needs <= reg.strength(model)][-1:] or [LEVELS[0]]
     if named_effort in EFFORTS:
         wanted = EFFORTS.index(named_effort)
-        return next((level for level in own if EFFORTS.index(effort(reg, level) or "medium") >= wanted), own[-1])
+        return next((level for level in own if EFFORTS.index(effort(reg, level) or DEFAULT_EFFORT) >= wanted), own[-1])
     return own[0]
 
 

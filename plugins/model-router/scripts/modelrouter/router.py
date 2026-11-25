@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Mapping, Optional, TypedDict
 
 from . import agents, ladder
-from .config import EFFORTS, HIDDEN, Level, plain
+from .config import DEFAULT_EFFORT, EFFORTS, HIDDEN, Level, plain
 from .registry import Registry, Rule
 from .settings import Settings
 
@@ -315,11 +315,6 @@ def capped(effort: str | None, cap: str | None) -> tuple[str | None, str]:
     if effort in EFFORTS and cap in EFFORTS and EFFORTS.index(effort) > EFFORTS.index(cap):
         return cap, f"; effort held to {cap} by maxEffortLevel"
     return effort, ""
-
-
-# What Claude Code runs a subagent at when nothing sets its effort, on every model the registry names
-# (https://code.claude.com/docs/en/model-config.md#adjust-effort-level).
-DEFAULT_EFFORT = "medium"
 
 
 def _ran_at(done: dict) -> str:

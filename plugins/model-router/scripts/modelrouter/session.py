@@ -8,7 +8,7 @@ import re
 from typing import Iterator
 
 from . import router, settings, store
-from .config import EFFORTS
+from .config import DEFAULT_EFFORT, EFFORTS
 from .registry import Registry
 
 HEADER = "Model Router"  # $.ui.ask's chip takes 12 characters at most
@@ -45,7 +45,7 @@ def effort_on(snap: settings.Snapshot, family: str, launched: object = None) -> 
     (https://code.claude.com/docs/en/model-config.md#adjust-effort-level)."""
     reg, env = snap.registry, snap.options.effort_level
     named = env if env in EFFORTS else launched if launched in EFFORTS else None
-    effort = named or snap.allowed.saved_effort(reg, family) or router.DEFAULT_EFFORT
+    effort = named or snap.allowed.saved_effort(reg, family) or DEFAULT_EFFORT
     return router.capped(effort, snap.allowed.effort_cap(reg, family))[0]
 
 
@@ -84,7 +84,7 @@ def _model_choice(snap: settings.Snapshot, family: str | None, name: str, launch
     runs = effort_on(snap, name, launched)
     # model-config.md: Claude Code's default effort on the current models, and max lasting one session unless the
     # environment sets it, which a pinned effort never reaches here.
-    picks = [{"label": e + _remarks("Recommended" if not i else None, "Claude Code's default" if e == router.DEFAULT_EFFORT else None,
+    picks = [{"label": e + _remarks("Recommended" if not i else None, "Claude Code's default" if e == DEFAULT_EFFORT else None,
                                     "this session only" if e == "max" else None),
               "done": f"This session is now on {_named(name, e)}.", **({"effort": e} if e != runs else {})}
              for i, e in enumerate(efforts)]
@@ -124,7 +124,7 @@ def check(snap: settings.Snapshot, model: object, locked: bool = False, launched
     strongest = max(choices, key=lambda c: reg.strength(c["family"]))
     for i, choice in enumerate(choices):
         floor, efforts = reg.session[choice["family"]], choice.pop("efforts")
-        above = EFFORTS.index(floor) > EFFORTS.index(router.DEFAULT_EFFORT)
+        above = EFFORTS.index(floor) > EFFORTS.index(DEFAULT_EFFORT)
         choice["label"] = choice["family"].capitalize() + _remarks(
             "Recommended" if not i else "the strongest model" if choice is strongest else None,
             f"at {floor} effort{' or higher' if len(efforts) > 1 else ''}" if above else None)
