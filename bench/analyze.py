@@ -837,7 +837,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "Defined under `bench/tasks/` with no counted run: "
         + (", ".join(f"`{t['id']}`" for t in tasks if t["id"] not in counted) or "none") + ".", "",
         "Each task's files and pass check are under `bench/tasks/<id>/`. Each check fails on the files as shipped "
-        "and passes on a reference answer (`tests/test_bench.py`).", "",
+        "and passes on a reference answer (`tests/test_bench.py`). A check runs in the OS sandbox a run's own "
+        "commands get, with no network, the credential files unreadable and writes only to its scratch folder, "
+        "where one can start; each raw line's `grade.sandbox` names it, and is null where none could.", "",
         "## Raw data and commands", "",
         *[f"- [`bench/results/{f.name}`](../bench/results/{f.name})" for f in files], "",
         *commands,
