@@ -1609,19 +1609,22 @@ class Stopped(unittest.TestCase):
             # The frozen plugin copy is made there too, and goes however the bench stops.
             return rows, list(scratch.iterdir()) + list(runs.iterdir()), sessions
 
-    def test_an_interrupt_during_the_claude_call_writes_a_stopped_row_charged_the_budget_and_cleans_up(self):
+    def test_an_interrupt_during_the_claude_call_writes_a_stopped_row_priced_from_its_transcripts_and_cleans_up(self):
         def interrupted(cmd, work, env, timeout):
             """Ctrl-C mid-call, once the session has started. Raised here, since a real SIGINT that lands inside a
             finalizer of this long-lived process is ignored."""
             folder = Path(env["CLAUDE_CONFIG_DIR"]) / "projects" / env["CLAUDE_CODE_PROJECT_DIR_NAME"]
             (folder / "s1").mkdir(parents=True)
-            (folder / "s1.jsonl").write_text("{}")
+            usage = {"input_tokens": 0, "output_tokens": 20000}  # $0.10 on Haiku 4.5
+            (folder / "s1.jsonl").write_text(json.dumps({"message": {"id": "m", "model": "claude-haiku-4-5",
+                                                                     "usage": usage}}) + "\n")
             raise KeyboardInterrupt
 
         with unittest.mock.patch.object(run, "run_claude", interrupted):
             rows, scratch, sessions = self.stop(KeyboardInterrupt)
-        self.assertEqual([(r["grade"]["verdict"], r["exit_code"], r["cost_known"], r["total_cost_usd"]) for r in rows],
-                         [("stopped", None, False, 0.5)])
+        # A SIGTERM reaches the run the same way, so neither is charged the whole budget.
+        self.assertEqual([(r["grade"]["verdict"], r["exit_code"], r["cost_known"], r["cost_source"], r["total_cost_usd"])
+                          for r in rows], [("stopped", None, False, "transcripts", 0.1)])
         self.assertIn("KeyboardInterrupt", rows[0]["grade"]["reason"])
         self.assertEqual((scratch, sessions), ([], []))
 

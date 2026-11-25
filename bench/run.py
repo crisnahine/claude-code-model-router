@@ -686,7 +686,8 @@ def run_one(task: dict, config: dict, options: dict) -> dict:
     ledger, types, final, graded, kept, stopped, priced, transcripts = None, {}, None, None, None, None, None, None
     stopped_by = None
     # Once claude starts the run costs money: whatever stops it or the steps after it, its row is still built and its
-    # scratch removed. With no result the row is priced from its transcripts, or charged the whole budget.
+    # scratch removed. With no result the row is priced from its transcripts, or charged the whole budget, whether a
+    # timeout, an interrupt or SIGTERM stopped it.
     try:
         try:
             stdout, stderr, code = run_claude(cmd, work, env, options["timeout"])
@@ -722,6 +723,8 @@ def run_one(task: dict, config: dict, options: dict) -> dict:
             kept = target
     except BaseException as exc:
         stopped = exc
+        if priced is None:
+            priced = transcript_cost(session_dir(env))
     if wall_ms is None:
         wall_ms = round((time.monotonic() - clock) * 1000)
     shutil.rmtree(scratch, ignore_errors=True)

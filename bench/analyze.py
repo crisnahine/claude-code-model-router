@@ -807,7 +807,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "results file, its raw line naming the folder in `transcripts`.",
         "- Cost is Claude Code's `total_cost_usd`, which includes subagents and is a client-side estimate at list "
         "price, not a bill (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md). A run with no result (a "
-        "timeout or a crash) is priced from its saved transcripts at list price, each message once, or charged the "
+        "timeout, an interrupt, SIGTERM or a crash) is priced from its saved transcripts at list price, each message once, or charged the "
         "whole budget when they hold no usage or a model with no price; `cost_source` says which. Every run is "
         "capped with "
         "`--max-budget-usd`, which a run can pass by up to the cost of one response plus anything that subagents "
