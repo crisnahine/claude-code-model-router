@@ -286,14 +286,16 @@ async function apply($: EngineInterface, picks: Choice[]): Promise<void> {
   const effort = picks.find(choice => choice.effort)?.effort
   const done = picks.filter(choice => choice.done).at(-1)?.done
   if (!family || (!model && !effort)) return
+  let now: string | undefined // the model a /model this pick ran switched to
   for (const [command, args] of [['model', model], ['effort', effort]] as const) {
     if (!args) continue
     try {
       await $.command.run({ command, args })
     } catch {
-      return toast($, `Claude Code did not run /${command} ${args}, so the session is left as it is.`)
+      return toast($, now ? `This session is now on ${PLAIN_NAME.test(now) ? now : 'the model you picked'}, but Claude Code did not run /effort ${args}.`
+        : `Claude Code did not run /${command} ${args}, so the session is left as it is.`)
     }
-    const now = await $.session.model()
+    now = await $.session.model()
     // A switch the allowlist or a declined consent refused: an effort set now would be saved for the old model.
     if (TIERS.find(tier => now.toLowerCase().includes(tier)) !== family) {
       return toast($, `This session stays on ${PLAIN_NAME.test(now) ? now : 'its model'}: Claude Code did not switch it.`)

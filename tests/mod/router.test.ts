@@ -1036,6 +1036,14 @@ test('a switch that fails says so and stops, and one Claude Code did not take sa
   await idle()
   assert.deepEqual(failing.ui.ran, [{ command: 'model', args: 'opus' }]) // no /effort after a failed /model
   assert.deepEqual(failing.ui.toasts, ['Claude Code did not run /model opus, so the session is left as it is.'])
+  const halfway = load({ 'mod-status': STATUS, 'mod-check': CHECK })
+  const both = ['Opus (Recommended)', 'xhigh']
+  halfway.ui.answer = async () => both.shift()!
+  halfway.ui.runFails = 'effort'
+  await halfway.sessionStart(START)
+  await idle()
+  assert.deepEqual(halfway.ui.ran, [{ command: 'model', args: 'opus' }, { command: 'effort', args: 'xhigh' }])
+  assert.deepEqual(halfway.ui.toasts, ['This session is now on claude-opus-5-5, but Claude Code did not run /effort xhigh.'])
   const refused = load({ 'mod-status': STATUS, 'mod-check': CHECK })
   const picks = ['Opus (Recommended)', 'xhigh']
   refused.ui.answer = async () => picks.shift()!
