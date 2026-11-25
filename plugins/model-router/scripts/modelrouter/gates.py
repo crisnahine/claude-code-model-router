@@ -13,16 +13,24 @@ from .settings import Settings
 # A script named for a check: test_api.py, _scratch_check.py, run_tests.sh, cart.spec.js.
 _SCRIPT = re.compile(r"(?:\S*/)?(?:(?:tests?|checks?|spec)(?:[_.-][\w.-]*)?|[\w.-]*[_.-](?:tests?|check|spec))"
                      r"\.(?:py|[cm]?js|ts|rb|sh)")
-_TASK = re.compile(r"(?:tests?|lint|type-?check|check|vet|verify|spec|clippy|nextest|analyze)(?:[:_-][\w:.-]*)?")
+_TASK = re.compile(r"(?:tests?|lint|type-?check|check|vet|verify|validate|spec|clippy|nextest|analyze|credo|dialyzer"
+                   r"|detekt)(?:[:_-][\w:.-]*)?")
 _RUNNERS = {"pytest", "py.test", "unittest", "tox", "nox", "jest", "vitest", "mocha", "rspec", "phpunit", "ctest",
-            "tsc", "mypy", "pyright", "ruff", "eslint", "flake8", "pylint", "clippy", "golangci-lint", "rubocop"}
-_SUBCOMMAND = {"playwright": "test", "cypress": "run"}  # `playwright install` and `cypress open` check nothing
+            "tsc", "mypy", "pyright", "ruff", "eslint", "flake8", "pylint", "clippy", "golangci-lint", "rubocop",
+            "basedpyright", "bandit", "behave", "ava", "jasmine", "oxlint", "stylelint", "vue-tsc", "svelte-check",
+            "staticcheck", "gotestsum", "ginkgo", "govulncheck", "standardrb", "brakeman", "cucumber", "phpstan",
+            "psalm", "phpcs", "pest", "ktlint", "detekt", "clang-tidy", "cppcheck", "swiftlint", "hlint", "shellcheck",
+            "bats", "tflint", "hadolint", "actionlint", "yamllint", "markdownlint", "markdownlint-cli2"}
+# The subcommands that check: `playwright install`, `cypress open`, `pre-commit install` and `biome format` don't.
+_SUBCOMMAND = {"playwright": ("test",), "cypress": ("run",), "pre-commit": ("run",), "biome": ("check", "lint", "ci"),
+               "ty": ("check",), "srb": ("tc", "typecheck"), "pyre": ("check",)}
 _FORMATTERS = {"black", "prettier", "isort", "rustfmt", "cargo fmt", "ruff format", "terraform fmt", "dotnet format",
                "mix format", "deno fmt"}
 _FORMAT_CHECKS = {"--check", "-check", "--check-only", "--check-formatted", "--verify-no-changes"}
 _TASK_FIRST = {"cargo", "go", "dotnet", "swift", "mix", "deno", "bazel", "bazelisk", "flutter", "dart", "rails",
-               "manage.py", "artisan"}  # the first argument names the task
-_TASK_ANY = {"make", "gmake", "just", "mvn", "mvnw", "gradle", "gradlew", "rake", "sbt", "zig", "turbo", "nx", "lerna"}
+               "manage.py", "artisan", "hatch", "stack", "cabal", "meson", "terraform"}  # the first argument names the task
+_TASK_ANY = {"make", "gmake", "just", "mvn", "mvnw", "gradle", "gradlew", "rake", "sbt", "zig", "turbo", "nx", "lerna",
+             "xcodebuild", "ninja"}
 _PACKAGE_MANAGERS = {"npm", "pnpm", "yarn", "bun"}
 _SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 # The short flag that takes inline code, last in a cluster as in `ruby -pe`, and its long forms.
@@ -315,7 +323,7 @@ def _runs_check(words: list[str], i: int) -> bool:
             return True
         if name in _SUBCOMMAND:
             k = _find(words, i + 1, 0, _known)
-            return k < len(words) and words[k] == _SUBCOMMAND[name]
+            return k < len(words) and words[k] in _SUBCOMMAND[name]
         if name in _TASK_FIRST:
             k = _find(words, i + 1, 0, _TASK.fullmatch)
             return k < len(words) and bool(_TASK.fullmatch(words[k]))

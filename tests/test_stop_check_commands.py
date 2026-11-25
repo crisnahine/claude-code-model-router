@@ -40,6 +40,18 @@ CHECKS = [
     "pytest -q <<< y", "grep x <<< bar\npytest -q", "cat > f <<-EOF\n\tpytest\n\tEOF\npytest -q",
     "git commit -m \"$(cat <<EOF\nmsg\nEOF)\" && pytest -q", "echo $((1<<3))\npytest -q",
     "git commit -m 'parse <<EOF blocks'\npytest -q", "git commit -m \"a\n<<EOF\nb\"\npytest -q",
+    # everyday checks across languages: shell, PHP, Python, JS and CSS, Go, Ruby, JVM, C and C++, Apple, Haskell,
+    # infrastructure, and the hooks and task runners that run them
+    "shellcheck scripts/*.sh", "bats tests/", "phpstan analyse src", "vendor/bin/psalm", "phpcs src", "./vendor/bin/pest",
+    "hatch test", "basedpyright", "bandit -r src", "ty check", "pyre check", "behave", "biome check .", "biome ci",
+    "npx biome lint src", "oxlint", "stylelint '**/*.css'", "vue-tsc --noEmit", "svelte-check", "ava", "jasmine",
+    "staticcheck ./...", "gotestsum -- ./...", "ginkgo -r", "govulncheck ./...", "standardrb", "srb tc", "brakeman",
+    "bundle exec cucumber", "ktlint", "./gradlew detekt", "detekt", "clang-tidy src/main.cpp", "cppcheck src",
+    "xcodebuild test -scheme App", "xcodebuild -scheme App -destination 'platform=iOS Simulator' test",
+    "xcodebuild analyze -scheme App", "swiftlint", "stack test", "cabal test", "hlint src", "terraform validate",
+    "tflint", "hadolint Dockerfile", "actionlint", "yamllint .", "markdownlint '**/*.md'", "pre-commit run --all-files",
+    "uvx pre-commit run", "meson test -C build", "ninja -C build test", "mix credo --strict", "mix dialyzer",
+    "npm run validate",
     # known misses: a flag value that reads as a task, and a tool named after `--` to a command that reads
     "pnpm --filter test build", "grep -rn -- pytest .",
 ]
@@ -62,7 +74,11 @@ MENTIONS = [
     "make -n test", "make --dry-run test", "tsc --init", "eslint --init", "mypy --install-types",
     "rubocop --auto-gen-config", "rspec --dry-run",
     # formatters that rewrite
-    "black -l 100 .", "cargo fmt", "ruff format .",
+    "black -l 100 .", "cargo fmt", "ruff format .", "biome format --write .",
+    # the same tools' installs, builds and plans, which check nothing
+    "pre-commit install", "pre-commit autoupdate", "xcodebuild build -scheme App", "xcodebuild -scheme App build-for-testing",
+    "hatch build", "stack build", "cabal build", "terraform plan", "terraform apply", "ninja -C build", "srb init",
+    "phpstan --version", "npm ci", "go build ./...", "cargo build --release",
     # a known miss: the tool's name comes from a command substitution
     "$(which pytest) -q",
 ]
