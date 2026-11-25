@@ -356,9 +356,10 @@ def _models(raw: dict, added: set, base: dict, problems: list[str]) -> dict[str,
             if name not in base:
                 problems.append(f"models.{name} has no strength, so it is left out")
             continue
-        use_for = spec.get("use_for")
+        use_for, twins = spec.get("use_for"), spec.get("twins")
         found[name] = Model(name, spec["strength"], _optional(spec, "cost"), use_for if isinstance(use_for, str) else "",
-                            project=name in added)
+                            project=name in added,
+                            twins=tuple(t.lower() for t in twins if isinstance(t, str) and t) if isinstance(twins, list) else ())
     return found
 
 

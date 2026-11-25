@@ -770,6 +770,7 @@ class Registry(Sandbox):
         self.assertEqual(f("us.anthropic.claude-haiku-5-5-v1:0"), "haiku")
         for unknown in ("inherit", None, "gpt-9", 5, ["opus"]):
             self.assertIsNone(f(unknown))
+        self.assertEqual((f("claude-mythos-5-2"), self.config.family("claude-mythos-5-2", twins=False)), ("fable", None))
 
     def test_select_takes_the_cheapest_model_strong_enough(self):
         usable = self.config.available()
@@ -969,6 +970,18 @@ class Allowlist(Sandbox):
         self.assertEqual(denied, {"haiku", "sonnet", "fable"})
         kept = allowlist.from_layers({"policy": {"deniedModels": ["claude-opus-5-5"]}}).permitted(config)
         self.assertEqual(kept, {"haiku", "sonnet", "fable", "opus", "best"})
+
+    def test_naming_one_twin_never_opens_or_closes_the_other(self):
+        every, mythos, fable = set(self.config.models), "claude-mythos-5-2", "claude-fable-5-2"
+        self.assertEqual(self.permitted(policy={"availableModels": [mythos, "sonnet"]}), {"sonnet"})
+        self.assertEqual(self.permitted(policy={"availableModels": ["fable", mythos]}), {"fable"})
+        self.assertEqual(self.permitted(policy={"deniedModels": ["mythos"]}), every)
+
+        def sent(named: str) -> str:
+            return modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                                  "tool_input": {"prompt": HARD, "model": named},
+                                  "settings": {"policy": {"availableModels": ["fable"]}}})["model"]
+        self.assertEqual((sent(mythos), sent(fable)), ("fable", fable))
 
     def test_entries_that_are_not_strings_match_nothing(self):
         self.assertEqual(self.permitted(policy={"availableModels": ["sonnet", {"id": "claude-opus-5-5"}],
@@ -1547,6 +1560,15 @@ class Router(Sandbox):
         d = self.decide("pinned", LOOKUP)
         self.assertEqual((d["action"], d["model"], d["source"], d["effort"]), ("rewrite", "sonnet", "pin", "xhigh"))
         self.assertEqual(self.decide("deep", HARD)["model"], "sonnet")
+
+    def test_the_cap_holds_a_twin_the_registry_places_and_leaves_a_model_it_cant_place(self):
+        self.options(max_tier="sonnet")
+        self.agent("twin", "claude-mythos-5-2")
+        for d in (self.decide("general-purpose", HARD, model="claude-mythos-5-2"), self.decide("twin", HARD)):
+            self.assertEqual((d["action"], d["model"], d["was"]), ("rewrite", "sonnet", "fable"))
+        d = self.decide("general-purpose", HARD, model="claude-saga-1")
+        self.assertEqual((d["action"], d["model"]), ("keep", None))
+        self.assertIn("outside the registry", d["reason"])
 
     def test_a_redo_of_the_architect_climbs_past_its_own_model_unless_the_call_names_one(self):
         self.session_on("claude-haiku-5-5")
@@ -2722,6 +2744,11 @@ class Health(Sandbox):
         self.assertEqual(store.load_state().get("health"), None)
         health.ran("fable", "claude-opus-4-8", "opus", False)
         self.assertEqual(store.load_state()["health"]["fable"]["substituted"], 1)
+
+    def test_a_run_on_a_twin_is_no_evidence_about_its_family(self):
+        self.route_around("fable")
+        self.done("general-purpose", HARD, "claude-mythos-5-2", model="claude-mythos-5-2")
+        self.assertFalse(health.load().healthy("fable"))
 
     def test_only_a_model_error_counts_and_an_interrupt_never_does(self):
         for text in ERRORS["model_error"]:

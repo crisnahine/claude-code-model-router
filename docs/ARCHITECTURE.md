@@ -68,7 +68,7 @@ In `scripts/modelrouter/`, standard library only:
 | `intake`, `request`, `gates` | Whether a prompt is the person's; the model it names; the Stop check |
 | `ledger`, `report`, `store` | Ledger rows; skill tables, `--json` and the status line (`report.status`); state files and locks |
 
-The agents `scout` and `verifier` pin Haiku at `medium`, `implementer` Haiku at `high`, and `architect` and `reviewer` Sonnet at `high`. Models are entries in `config/models.json`; the four family names are also text in `hooks._rules` and the mod's `TIERS`.
+The agents `scout` and `verifier` pin Haiku at `medium`, `implementer` Haiku at `high`, and `architect` and `reviewer` Sonnet at `high`. Models are entries in `config/models.json`; the four family names are also text in `hooks._rules` and the mod's `TIERS`. A model's `twins` are other names it is offered under (Fable's is Mythos): `Registry.family` and the mod's `TWINS` place a twin's ID in its family for the cap and the ladder, while the allowlist and the health table match it by its own name (`family(twins=False)`).
 
 ## The ladder
 

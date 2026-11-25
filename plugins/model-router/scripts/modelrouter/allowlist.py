@@ -92,7 +92,7 @@ def _blocked_family(reg: Registry, entry: str) -> str | None:
         return None
     if e in reg.models:
         return e
-    return None if any(c.isdigit() for c in e) else reg.family(e)
+    return None if any(c.isdigit() for c in e) else reg.family(e, twins=False)
 
 
 def _effective(reg: Registry, entries: tuple[str, ...]) -> tuple[str, ...]:
@@ -105,7 +105,7 @@ def _effective(reg: Registry, entries: tuple[str, ...]) -> tuple[str, ...]:
     def bare(entry: str) -> str:
         return entry.strip().lower().split("[")[0]
 
-    specific = {reg.family(e) for e in entries
+    specific = {reg.family(e, twins=False) for e in entries
                 if bare(e) not in plain and re.search(r"\d|^claude-|^[\w-]+[./]", bare(e))} - {None}
     return tuple(e for e in entries if bare(e) not in specific)
 
@@ -127,7 +127,7 @@ class Allowlist:
         permitted, unless it is in `sendable` (`Snapshot.sendable`): its newest ID is sent instead."""
         names = set(reg.models)
         if self.allow is not None:
-            found = {reg.family(e) for e in _effective(reg, self.allow)}
+            found = {reg.family(e, twins=False) for e in _effective(reg, self.allow)}
             names = {n for n in names if n in found}
         if self.deny is not None:
             blocked = {_blocked_family(reg, e) for e in self.deny} - {None}
@@ -140,8 +140,10 @@ class Allowlist:
                 or self._lists_permit(reg, n, runs.get(n, reg.newest[n]))}
 
     def _lists_permit(self, reg: Registry, name: str, model_id: str) -> bool:
+        own = reg.family(model_id, twins=False) == name  # a twin's ID isn't in its family's name to Claude Code
+
         def names(entries: tuple[str, ...], prefix: bool) -> bool:
-            return any(e.lower() in (name, model_id) or prefix and model_id.startswith(e.lower() + "-")
+            return any(e.lower() == model_id or own and e.lower() == name or prefix and model_id.startswith(e.lower() + "-")
                        for e in entries)
 
         if self.allow is not None and not names(_effective(reg, self.allow), not self.exact):

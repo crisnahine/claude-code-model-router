@@ -9,8 +9,10 @@ const SETTINGS_MS = 2000
 const SOURCES: readonly SettingsSource[] = ['policy', 'user', 'project', 'local', 'flag']
 const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides', 'maxEffortLevel', 'modelSettings', 'effortLevel']
 const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
-// The max_tier ladder, weakest first, for a call the runtime didn't answer.
+// The max_tier ladder, weakest first, for a call the runtime didn't answer, and the other names a family answers to
+// (config/models.json `twins`).
 const TIERS: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable']
+const TWINS: Readonly<Record<string, string>> = { mythos: 'fable' }
 // The id names a file the fallback looks up, so only a plain one is marked (scripts/modelrouter/mod.py routes).
 const PLAIN_ID = /^[A-Za-z0-9_-]{1,128}$/
 // A model a repository's settings can set is shown only as a plain name, as the runtime shows one (config._PLAIN_NAME).
@@ -73,7 +75,9 @@ async function mark($: EngineInterface, name: string): Promise<boolean> {
 }
 
 function family(model: string | undefined): string | undefined {
-  return model === undefined ? undefined : TIERS.find(tier => model.toLowerCase().includes(tier)) ?? model.toLowerCase()
+  const name = model?.toLowerCase()
+  return name === undefined ? undefined
+    : TIERS.find(tier => name.includes(tier)) ?? Object.entries(TWINS).find(([twin]) => name.includes(twin))?.[1] ?? name
 }
 
 // Whether a later link moved the spawn to another family than this mod sent: the engine's own entry holds what core
@@ -198,11 +202,11 @@ async function agentUsage($: EngineInterface, id: string, usage?: { model?: stri
   }
 }
 
-// The user's cap on a model the call names, for a call that neither path routed. Only the family is known here.
+// The user's cap on a model the call names, for a call that neither path routed. Only the family is known here,
+// so a model on no tier is left as it is.
 function capped(model: string | undefined, maxTier: string | undefined): string | undefined {
   const cap = TIERS.indexOf(maxTier ?? '')
-  const named = TIERS.findIndex(tier => model?.toLowerCase().includes(tier))
-  return cap >= 0 && named > cap ? TIERS[cap] : undefined
+  return cap >= 0 && TIERS.indexOf(family(model) ?? '') > cap ? TIERS[cap] : undefined
 }
 
 // routing_mode as the runtime reads it (config.parse_mode): anything but off is auto.

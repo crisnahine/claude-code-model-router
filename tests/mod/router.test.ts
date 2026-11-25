@@ -588,8 +588,10 @@ test('a call whose spawn round trip fails still runs within max_tier, and one th
   const mod = load({ 'mod-spawn': { exitCode: 1, stdout: '' } }, { max_tier: 'sonnet' })
   const seen: unknown[] = []
   const next = (x: any) => { seen.push(x.model); return { agentId: 'a1' } }
-  for (const model of ['opus', 'claude-fable-5-5', 'haiku', undefined]) await mod.spawn(spawnEvent({ model }), next)
-  assert.deepEqual(seen, ['sonnet', 'sonnet', 'haiku', undefined])
+  for (const model of ['opus', 'claude-fable-5-5', 'claude-mythos-5-2', 'haiku', 'claude-saga-1', undefined]) {
+    await mod.spawn(spawnEvent({ model }), next)
+  }
+  assert.deepEqual(seen, ['sonnet', 'sonnet', 'sonnet', 'haiku', 'claude-saga-1', undefined])
   const uncapped = load({ 'mod-spawn': { exitCode: 1, stdout: '' } })
   await uncapped.spawn(spawnEvent({ model: 'opus' }), next)
   assert.equal(seen.at(-1), 'opus')

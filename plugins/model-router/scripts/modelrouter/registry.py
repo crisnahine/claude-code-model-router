@@ -27,6 +27,7 @@ class Model:
     cost: float | None = None
     use_for: str = ""
     project: bool = False  # added by a project's override file, so its rank is only that file's claim
+    twins: tuple[str, ...] = ()  # other names the same model is offered under, which family() places here
 
     @property
     def trusted(self) -> bool:
@@ -85,8 +86,9 @@ class Registry:
         names = self.models if names is None else names
         return sorted(names, key=lambda n: (self.strength(n), n))
 
-    def family(self, model: Any) -> str | None:
-        """Map an alias or full model ID to a registry name, or None if unknown or inherit."""
+    def family(self, model: Any, twins: bool = True) -> str | None:
+        """Map an alias or full model ID to a registry name, or None if unknown or inherit. Without `twins`, a
+        model only another name places, such as Mythos for Fable, is unknown: Claude Code's lists match by name."""
         if not model or not isinstance(model, str):
             return None
         m = model.lower().split("[")[0]
@@ -94,10 +96,9 @@ class Registry:
         if m in self.models:
             return m
         # A project's own names match only exactly, so they can't capture an ID outside the registry.
-        for name in sorted((n for n in self.models if self.models[n].trusted), key=len, reverse=True):
-            if name in m:
-                return name
-        return None
+        names = [(n, n) for n in self.models if self.models[n].trusted]
+        names += [(t, n) for n, _ in names for t in self.models[n].twins] if twins else []
+        return next((name for text, name in sorted(names, key=lambda pair: len(pair[0]), reverse=True) if text in m), None)
 
     def newest_id(self, name: str | None, provider: str | None, allowed: allowlist.Allowlist,
                   table: health.Health) -> str | None:

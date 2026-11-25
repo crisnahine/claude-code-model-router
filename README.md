@@ -31,7 +31,7 @@ Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `pyt
 In `/config`:
 
 - `routing_mode`: `auto` (default), or `off` to leave every call as it is, with no notes, no check and no session check.
-- `max_tier`: the strongest model subagents may run on, except one an environment variable sets: `none` (default), `haiku`, `sonnet`, `opus` or `fable`.
+- `max_tier`: the strongest model subagents may run on, except one an environment variable sets or a model ID the registry can't place: `none` (default), `haiku`, `sonnet`, `opus` or `fable`.
 - `verify_gate`: `true` (default) turns on the check before a turn ends.
 - `session_check`: `ask` (default) offers a stronger setup when a new session starts below the recommended ones, or `off`.
 
