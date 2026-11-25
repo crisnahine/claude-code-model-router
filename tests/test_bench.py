@@ -323,6 +323,19 @@ class Analysis(unittest.TestCase):
                          self.FORCED)
         self.assertIs(q["saturated"], False)
 
+    def test_with_one_forced_model_defaults_is_the_strong_end(self):
+        forced = analyze.forced_ranks(run.load_configs(), analyze.mrconfig.shipped())
+        data = [r for c, usd in (("plugin", 0.1), ("defaults", 0.3), ("haiku-high", 0.1))
+                for r in spread(c, "lookup", 6, analyze.MIN_RUNS, usd)]
+        q = self.quality(data, forced)
+        self.assertEqual((q["saturated"], q["weakest"], q["strongest"]), (True, "haiku-high", "defaults"))
+        rows = [full_row(task=r["task"], config=r["config"], total_cost_usd=r["total_cost_usd"], **{"class": "lookup"})
+                for r in data]
+        page = analyze.build_page(dataclasses.replace(analyze.load([]), rows=rows))
+        self.assertIn("1 of 1 class rows below are saturated", page)
+        self.assertIn("an equal pass rate there says nothing about quality", page)
+        self.assertIn("- lookup: saturated, haiku-high solved 60 of 60, defaults 60 of 60", page)
+
     def test_forced_baselines_on_one_model_cannot_show_saturation(self):
         n = analyze.MIN_RUNS
         data = (rows("plugin", "lookup", [0.1] * n, [True] * n) + rows("opus", "lookup", [0.4] * n, [True] * n)
@@ -340,13 +353,14 @@ class Analysis(unittest.TestCase):
 
     def test_a_task_splits_the_models_when_the_strong_one_solves_most_and_the_weak_one_few(self):
         def task_rows(task, strong, weak):
-            return [{"task": task, "config": c, "passed": p} for c, ps in (("opus", strong), ("sonnet", weak)) for p in ps]
+            return [{"task": task, "config": c, "passed": p} for c, ps in (("defaults", strong), ("haiku-high", weak))
+                    for p in ps]
         data = (task_rows("a", [True, True, False], [False, True, False])   # 2 of 3 and 1 of 3: splits
                 + task_rows("b", [True, True, True], [True, False, False])  # 1 of 3: splits
                 + task_rows("c", [True, False, False], [False, False, False])  # strong under 2 of 3
                 + task_rows("d", [True, True, True], [True, True, False]))  # weak over 1 of 3
         self.assertEqual(analyze.splitting_tasks(data), ["a", "b"])
-        self.assertIsNone(analyze.splitting_tasks([r for r in data if r["config"] == "opus"]))
+        self.assertIsNone(analyze.splitting_tasks([r for r in data if r["config"] == "defaults"]))
 
     def test_forced_baselines_rank_by_model_strength_then_effort(self):
         def forced(name, model, effort=None):

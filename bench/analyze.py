@@ -36,7 +36,7 @@ ALPHA = 0.05  # the 95% intervals, and the one-sided level of the exact comparis
 MARGIN = 0.10  # the non-inferiority margin on pass rate, fixed before any run
 DENIAL_SHARE = 0.25  # a cell with more of its runs denied a Bash call than this gets no verdict
 LABELS = {"WIN": "WIN", "LOSE": "LOSE", "NONE": "no difference shown", "REFUSED": "no verdict"}
-SPLIT_STRONG, SPLIT_WEAK = "opus", "sonnet"  # the pair a task must split to count as telling models apart
+SPLIT_STRONG, SPLIT_WEAK = "defaults", "haiku-high"  # the pair a task must split to count as telling models apart
 ALL = "all tasks"  # the row whose verdicts pair every task in a table, whatever its class
 
 
@@ -218,13 +218,16 @@ def splitting_tasks(runs: list[dict], strong: str = SPLIT_STRONG, weak: str = SP
 
 def _quality(cells: dict, runs: list[dict], forced: dict) -> dict:
     """Whether a class's tasks tell models apart: when the weakest forced baseline can't be told from the strongest
-    by an exact one-sided test, the class is `saturated` and an equal pass rate there says nothing."""
+    by an exact one-sided test, the class is `saturated` and an equal pass rate there says nothing. With every forced
+    baseline on one model, `defaults`, on the session model, is the strong end."""
     ladder = sorted((n for n in cells if n in forced), key=lambda n: (forced[n], n))
     weak, strong = (ladder[0], ladder[-1]) if ladder else (None, None)
+    if ladder and forced[weak][0] == forced[strong][0] and SPLIT_STRONG in cells:
+        strong = SPLIT_STRONG
     out = {"saturated": None, "weakest": weak, "strongest": strong, "splits": splitting_tasks(runs)}
-    if not ladder or forced[weak][0] == forced[strong][0]:
-        return {**out, "reason": "forced baselines on fewer than 2 models, so the class can't show whether the "
-                                 "tasks tell models apart"}
+    if not ladder or strong != SPLIT_STRONG and forced[weak][0] == forced[strong][0]:
+        return {**out, "reason": f"no forced baseline, or forced baselines on one model and no `{SPLIT_STRONG}`, so "
+                                 "the class can't show whether the tasks tell models apart"}
     w, s = cells[weak], cells[strong]
     if min(w["runs"], s["runs"]) < MIN_RUNS:
         return {**out, "reason": f"too few runs ({MIN_RUNS} needed) to say whether the tasks tell models apart"}
@@ -639,7 +642,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "its classes are paired and resampled together. A class with one task can't show the margin, so a plan "
         f"with a few tasks per class is judged on its `{ALL}` row.",
         "- A class is saturated when the weakest forced baseline (every subagent on the weakest model) can't be told "
-        f"from the strongest by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an equal pass rate "
+        f"from the strongest, or from `{SPLIT_STRONG}` (subagents on the session model) when every forced baseline "
+        f"is on one model, by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an equal pass rate "
         "says nothing about quality. Runs on an earlier revision of a task are left out of every table. A run on a "
         "task's current revision that a check other than today's graded stops the page from being built, since the "
         "check changed without a raise of the revision.",
@@ -703,8 +707,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         if summary and all(row["status"] == "REFUSED" for row in summary) else
         "Claim \"cheaper\" only against a baseline the router has a WIN against, and link its raw data.",
         *(["", f"{saturated} of {len(summary)} class rows below are saturated: the weakest forced baseline solved "
-              "as many runs as the strongest, within noise, so these tasks can't tell models apart, and an equal "
-              "pass rate there says nothing about quality."] if saturated else []),
+              f"as many runs as the strongest, or as `{SPLIT_STRONG}` when every forced baseline is on one model, "
+              "within noise, so these tasks can't tell models apart, and an equal pass rate there says nothing "
+              "about quality."] if saturated else []),
     ])
     body = "\n".join([
         *read,

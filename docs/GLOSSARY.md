@@ -104,7 +104,7 @@ The project's own words, and the code behind each.
 
 **Pass check**: a task's script that grades a run: exit 0 solved, 1 not solved, 2 broken (`run.grade`).
 
-**Saturated**: a class where an exact one-sided test at 5% can't tell the weakest forced baseline from the strongest, with 10 or more runs each (`analyze._quality`).
+**Saturated**: a class where an exact one-sided test at 5% can't tell the weakest forced baseline from the strongest, or from `defaults` when every forced baseline is on one model, with 10 or more runs each (`analyze._quality`).
 
 **Task revision**: the `revision` in a task's `task.json`, kept on each row as `task_revision`. Rows on an earlier revision are left out of the tables.
 
