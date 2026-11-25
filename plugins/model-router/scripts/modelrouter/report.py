@@ -55,7 +55,7 @@ def status(snap: settings.Snapshot) -> dict:
     /model-router reply: the line, the session's setup once known, and how to switch."""
     options, session_id = snap.options, snap.session_id
     mode = f"{options.mode}{' (this session)' if options.switched else ''}"
-    rows = [r for r in ledger.read(session=session_id) if r.get("event") == "spawn"] if isinstance(session_id, str) else []
+    rows = ledger.read(session=session_id, event="spawn") if isinstance(session_id, str) else []
     changed, redos = sum(r.get("action") == "rewrite" for r in rows), sum(1 for r in rows if r.get("escalated_from"))
     # Every call counts, kept as named or not: a subagent that ran beside "0 routed" read as a plugin that slept.
     line = mode if options.mode == "off" else " · ".join(

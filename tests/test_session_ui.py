@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from unittest import mock
 
 from test_model_router import FIXTURES, HARD, LOOKUP, PLUGIN, Sandbox, cfg, hooks, modpath, report, session, settings, store
 
@@ -97,6 +98,14 @@ class StatusLine(Sandbox):
         self.spawn(model="haiku", description="Redo: d")
         self.assertEqual(self.line(), "auto · mod · 3 calls · 2 changed · 1 redo")
         self.assertEqual(self.line("s2"), "auto · mod · 1 call · 1 changed")
+
+    def test_it_parses_only_the_sessions_spawn_rows(self):
+        self.spawn(model="haiku")
+        for turn in range(3):
+            modpath.usage({"session_id": "s1", "agent_id": "a1", "models": [{"model": "claude-haiku-5-5"}], "cost": {"usd": turn}})
+        with mock.patch.object(store, "loads", wraps=store.loads) as parsed:
+            self.assertEqual(self.line(), "auto · mod · 1 call · 1 changed")
+        self.assertEqual([c for c in parsed.call_args_list if '"usage"' in str(c.args[0])], [])
 
     def test_it_names_the_cap_and_the_path_that_routed_last(self):
         self.options(max_tier="opus")
