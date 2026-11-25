@@ -165,9 +165,9 @@ def _under(path: str, folder: str) -> bool:
     return Path(path) == Path(folder) or Path(folder) in Path(path).parents
 
 
-def settings(config: dict, env: dict, hidden: list[str] | None = None, own: str | None = None) -> dict:
+def settings(env: dict, hidden: list[str] | None = None, own: str | None = None) -> dict:
     """The one --settings JSON a run gets: credentials, the answers and other runs' scratch folders kept from
-    sandboxed commands, the answers kept from the file tools, and a router variant's plugin options."""
+    sandboxed commands, and the answers kept from the file tools."""
     hidden = answer_paths() if hidden is None else hidden
     sandbox = {**SANDBOX,
                # The narrower allowRead re-opens the run's own folder under RUNS (https://code.claude.com/docs/en/sandboxing).
@@ -180,11 +180,7 @@ def settings(config: dict, env: dict, hidden: list[str] | None = None, own: str 
     # re-opens a denied path (https://code.claude.com/docs/en/permissions).
     rules = [f"{tool}(//{path.lstrip('/')}/**)" for path in hidden if not (own and _under(own, path))
              for tool in ("Read", "Edit")]
-    out: dict = {"sandbox": sandbox, "permissions": {"deny": rules}}
-    if config.get("plugin_options"):
-        # A --plugin-dir plugin's id is <name>@inline; project settings can't set plugin options.
-        out["pluginConfigs"] = {f"{_plugin_name()}@inline": {"options": config["plugin_options"]}}
-    return out
+    return {"sandbox": sandbox, "permissions": {"deny": rules}}
 
 
 def command(prompt: str, config: dict, options: dict, base_env: dict, shape: str = "single") -> tuple[list[str], dict]:
@@ -202,7 +198,7 @@ def command(prompt: str, config: dict, options: dict, base_env: dict, shape: str
            "--model", options["model"],
            "--max-budget-usd", str(options["budget"]), "--setting-sources", "project", "--strict-mcp-config",
            "--permission-mode", "dontAsk",
-           "--settings", json.dumps(settings(config, env, options.get("hidden"), options.get("scratch")))]
+           "--settings", json.dumps(settings(env, options.get("hidden"), options.get("scratch")))]
     if config.get("plugin"):
         cmd += ["--plugin-dir", options["plugin_dir"]]
     tools = TOOLS + (WORKFLOW_TOOLS if shape == "workflow" else ())
@@ -532,18 +528,6 @@ def ledger_rows(env: dict) -> list[dict] | None:
     return read_ledger(path=path)
 
 
-def options_applied(config: dict, ledger: list[dict] | None) -> bool | None:
-    """False when the run's ledger holds a row a plugin option the configuration sets rules out: a `gate` row with
-    verify_gate off. True when it holds none, which doesn't prove the options arrived, since the plugin keeps no copy
-    of them. None when the configuration sets none or there is no ledger."""
-    asked = config.get("plugin_options")
-    if not asked or ledger is None:
-        return None
-    said = {k: str(v).strip().lower() for k, v in asked.items()}  # a JSON false reaches the plugin as "false"
-    return not (said.get("verify_gate") in ("false", "0", "no", "off")
-                and any(r.get("event") == "gate" for r in ledger))
-
-
 def agent_types(env: dict) -> dict[str, str]:
     """Each subagent's type by id, from the saved session's subagents/agent-<id>.meta.json, a layout no page documents
     (Claude Code 2.1.330 writes it). Only the ledger spend join reads it."""
@@ -802,7 +786,6 @@ def record(task: dict, config: dict, options: dict, result: dict, facts: dict) -
         "claude_started": not unstarted, "startup_failure_reason": result.get("startup_failure_reason"),
         # With no init event the stream never began, so it can't say whether the plugin loaded.
         "plugin_loaded": (plugin_loaded(facts["init"]) if facts.get("init") else None) if config.get("plugin") else None,
-        "options_applied": options_applied(config, ledger) if config.get("plugin") else None,
         "agent_costs": None if ledger is None else spend_by_agent(ledger, facts["agent_types"], cost if known else None),
         "routed": None if ledger is None else spawns(ledger),
         # shortcut: a fork leaves no spawn row and isn't told apart; key on its fork flag if a fork-only run shows up.
@@ -854,19 +837,17 @@ def _write(path: Path, row: dict) -> None:
 
 def set_aside(row: dict) -> str | None:
     """Why a row stays out of the results: claude stopped before the session began (so no API call was made), the
-    API never got to the task, a router run's plugin didn't load, its router logged nothing for a subagent that ran,
-    or it didn't get its options."""
+    API never got to the task, a router run's plugin didn't load, or its router logged nothing for a subagent that
+    ran."""
     return (("no_start" if row.get("claude_started") is False else None) or refusal(row)
             or ("plugin_not_loaded" if row.get("plugin_loaded") is False else None)
-            or ("router_silent" if row.get("router_silent") else None)
-            or ("options_not_applied" if row.get("options_applied") is False else None))
+            or ("router_silent" if row.get("router_silent") else None))
 
 
 # Set-aside reasons a pause can't fix; this many in a row stop the bench.
 NO_RETRY = {"api_error": "API error before any spend", "no_start": "claude stopped before the session began",
             "plugin_not_loaded": "the plugin did not load",
-            "router_silent": "the router logged no spawn though a subagent ran",
-            "options_not_applied": "the ledger holds a row the configuration's plugin options rule out"}
+            "router_silent": "the router logged no spawn though a subagent ran"}
 
 
 def main(argv: list[str] | None = None) -> int:

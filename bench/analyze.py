@@ -550,9 +550,7 @@ def _notes(results: Results) -> list[str]:
            "no_start": "run(s) are set aside, outside the results, because `claude` stopped before its stream began "
                        "(no `system/init` event and no result), as when the sandbox can't start",
            "router_silent": "router run(s) are set aside, outside the results, because a subagent ran but the "
-                            "router's ledger holds no spawn row, so its hooks never acted",
-           "options_not_applied": "router run(s) are set aside, outside the results, because their ledger holds a row "
-                                  "their configuration's plugin options rule out"}
+                            "router's ledger holds no spawn row, so its hooks never acted"}
     aside = [row for row in found if row.get("limited_reason") not in own]
     lines = []
     for reason, text in own.items():
@@ -794,10 +792,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "empty list doesn't prove no policy applied (https://code.claude.com/docs/en/managed-settings.md). Only a "
         "router configuration passes `--plugin-dir`, from a copy of `plugins/model-router` made once when the "
         "batch starts. Each raw line records the hash of the plugin "
-        "it loaded in `plugin_hash`, null with no plugin. The plugin keeps no copy of its options, so a run of a "
-        "router variant is set aside only when its ledger holds a row an option rules out (a `gate` row with "
-        "`verify_gate` off); `options_applied` true means no such row, "
-        "not proof.",
+        "it loaded in `plugin_hash`, null with no plugin.",
         "- The router keeps state (model health and its ledger) in its plugin data folder, inside the run's own "
         "config folder, so every router run starts from an empty one and its data goes when the scratch copy does. "
         "For a router run the raw line records the count of ledger rows with event `gate` in `gate_events`.",

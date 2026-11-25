@@ -202,13 +202,13 @@ class Analysis(unittest.TestCase):
 
     def test_the_judged_router_comes_from_configs_json_not_file_order(self):
         data = [dict(r, main_model=OPUS) for r in spread("plugin", "lookup", 2, 4, 0.1)
-                + spread("plugin-nogate", "lookup", 2, 4, 0.1) + spread("defaults", "lookup", 2, 4, 0.1)]
+                + spread("plugin-variant", "lookup", 2, 4, 0.1) + spread("defaults", "lookup", 2, 4, 0.1)]
         base = analyze.load([])
         self.assertEqual([c["id"] for c in base.configs if c.get("judged")], ["plugin"])
-        nogate_first = sorted(base.configs, key=lambda c: c["id"] != "plugin-nogate")
-        results = dataclasses.replace(base, rows=data, configs=nogate_first)
+        variant_first = [{"id": "plugin-variant", "plugin": True}, *base.configs]
+        results = dataclasses.replace(base, rows=data, configs=variant_first)
         self.assertEqual([part[1] for part in analyze.sessions(results)], ["plugin"])
-        self.assertEqual([part[1] for part in analyze.sessions(results, "plugin-nogate")], ["plugin-nogate"])
+        self.assertEqual([part[1] for part in analyze.sessions(results, "plugin-variant")], ["plugin-variant"])
 
     def test_behind_beyond_noise_loses_however_cheap(self):
         v = self.verdict(rows("plugin", "lookup", [0.01] * 10, [True] * 2 + [False] * 8)
@@ -248,12 +248,12 @@ class Analysis(unittest.TestCase):
         self.assertEqual(self.summary(data), self.summary(data))
 
     def test_another_router_configuration_is_never_a_baseline(self):
-        data = (rows("plugin", "bugfix", [0.3] * 10, [True] * 10) + rows("plugin-nogate", "bugfix", [0.1] * 10, [True] * 10)
+        data = (rows("plugin", "bugfix", [0.3] * 10, [True] * 10) + rows("plugin-variant", "bugfix", [0.1] * 10, [True] * 10)
                 + rows("defaults", "bugfix", [0.2] * 10, [True] * 10))
-        row = {s["class"]: s for s in analyze.summarize(data, routers=frozenset({"plugin", "plugin-nogate"}),
+        row = {s["class"]: s for s in analyze.summarize(data, routers=frozenset({"plugin", "plugin-variant"}),
                                                        draws=200)}["bugfix"]
         self.assertEqual((row["rank"], set(row["verdicts"])), (2, {"defaults"}))
-        self.assertIn("plugin-nogate", row["configs"])  # still shown on the page
+        self.assertIn("plugin-variant", row["configs"])  # still shown on the page
 
     def test_cells_on_different_tasks_get_no_verdict(self):
         other = [dict(r, task="lookup-2") for r in rows("defaults", "lookup", [0.5] * 10, [True] * 10)]
@@ -619,7 +619,7 @@ class Analysis(unittest.TestCase):
         sonnet = [dict(real, main_model="sonnet", config=c, total_cost_usd=usd, passed=True)
                   for c, usd in (("plugin", 0.3), ("defaults", 0.2)) for _ in range(n)]
         opus = [dict(real, main_model="claude-opus-5-5", config=c, total_cost_usd=usd, passed=True)
-                for c, usd in (("plugin", 0.5), ("plugin-nogate", 0.4), ("defaults", 0.9)) for _ in range(n)]
+                for c, usd in (("plugin", 0.5), ("plugin-variant", 0.4), ("defaults", 0.9)) for _ in range(n)]
         with tempfile.TemporaryDirectory() as tmp:
             res = Path(tmp) / "results"
             res.mkdir()
@@ -627,7 +627,7 @@ class Analysis(unittest.TestCase):
             out = Path(tmp) / "page.md"
             analyze.main([str(res / "a-bugfix-2026-11-22.jsonl"), "--out", str(out)])
             page = out.read_text(encoding="utf-8")
-            analyze.main([str(res / "a-bugfix-2026-11-22.jsonl"), "--out", str(out), "--router", "plugin-nogate"])
+            analyze.main([str(res / "a-bugfix-2026-11-22.jsonl"), "--out", str(out), "--router", "plugin-variant"])
             chosen = out.read_text(encoding="utf-8")
         opus_part = page.split("## Results: session model `claude-opus-5-5`")[1].split("## Results: session model")[0]
         sonnet_part = page.split("## Results: session model `sonnet`")[1].split("## How to read it")[0]
@@ -637,7 +637,7 @@ class Analysis(unittest.TestCase):
         self.assertIn("router: `plugin`", sonnet_part)
         self.assertIn("bugfix: no difference shown against `defaults`", sonnet_part)
         self.assertNotIn("$0.9000", sonnet_part)
-        self.assertIn("router: `plugin-nogate`", chosen.split("## Results: session model `claude-opus-5-5`")[1])
+        self.assertIn("router: `plugin-variant`", chosen.split("## Results: session model `claude-opus-5-5`")[1])
 
     def test_the_page_says_each_run_has_its_own_config_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -682,8 +682,7 @@ class Analysis(unittest.TestCase):
                       "on 0, not routed", row)
         self.assertIn("- Runs with a Bash denial, by configuration: `defaults` 0 of 2; `plugin` 1 of 3.", page)
         never = next(line for line in page.splitlines() if line.startswith("Defined in `bench/configs.json` but"))
-        for name in ("`haiku-high`", "`plugin-nogate`"):
-            self.assertIn(name, never)
+        self.assertIn("`haiku-high`", never)
         self.assertNotIn("`defaults`", never)
 
     def test_the_page_names_set_aside_runs_agent_spend_and_batches(self):
@@ -1669,7 +1668,7 @@ class SuiteCoverage(unittest.TestCase):
                           env["CLAUDE_CODE_SUBAGENT_EFFORT"]), ("haiku", "1", "high"))
         self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)  # that one would move the main loop too
         self.assertNotIn("--plugin-dir", cmd)
-        self.assertEqual(sorted(configs), ["defaults", "haiku-high", "plugin", "plugin-nogate"])
+        self.assertEqual(sorted(configs), ["defaults", "haiku-high", "plugin"])
 
 
 LIMIT_STUB = '''#!/usr/bin/env python3
@@ -1688,39 +1687,6 @@ if n < int(os.environ["STUB_LIMITED"]):
 print(json.dumps({"type": "result", "is_error": False, "subtype": "success", "api_error_status": None, "total_cost_usd": 0.01,
                   "result": "read_retry_limit in app/settings.py; a rate limit design is off topic", "modelUsage": {}}))
 '''
-
-
-VARIANT_STUB = '''#!/usr/bin/env python3
-import json, os, sys
-from pathlib import Path
-if "--version" in sys.argv:
-    print("9.9.9 (stub)"); sys.exit(0)
-Path(os.environ["STUB_SEEN"]).write_text(json.dumps({"argv": sys.argv[1:]}))
-print(json.dumps({"type": "result", "result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.01, "modelUsage": {}}))
-'''
-
-
-class RouterVariants(unittest.TestCase):
-    """A router variant is the shipped plugin with plugin option values."""
-
-    def test_a_variant_gets_its_options_and_nothing_else_does(self):
-        variant = next(c for c in run.load_configs() if c["id"] == "plugin-nogate")
-        with tempfile.TemporaryDirectory() as tmp:
-            claude = stub(tmp, VARIANT_STUB)
-            seen = Path(tmp) / "seen.json"
-            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
-            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
-                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
-            with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
-                row = run.run_one(task, variant, options)
-                got = json.loads(seen.read_text())
-                run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
-                plain = json.loads(seen.read_text())
-        settings = json.loads(got["argv"][got["argv"].index("--settings") + 1])
-        self.assertEqual(settings["pluginConfigs"], {"model-router@inline": {"options": {"verify_gate": False}}})
-        self.assertTrue(settings["sandbox"]["enabled"])
-        self.assertTrue(row["passed"])
-        self.assertNotIn("pluginConfigs", json.loads(plain["argv"][plain["argv"].index("--settings") + 1]))
 
 
 COST_STUB = '''#!/usr/bin/env python3
@@ -3013,7 +2979,7 @@ class Harness(unittest.TestCase):
 
     def test_bash_runs_in_the_sandbox_with_one_settings_json(self):
         options = {"claude": ["claude"], "model": "sonnet", "budget": 0.5, "plugin_dir": "/p"}
-        cmd, env = run.command("x", self.configs["plugin-nogate"], options,
+        cmd, env = run.command("x", self.configs["plugin"], options,
                                {"ANTHROPIC_API_KEY": "k", "GITHUB_TOKEN": "g", "PATH": "/bin"})
         self.assertEqual(cmd.count("--settings"), 1)
         settings = json.loads(cmd[cmd.index("--settings") + 1])
@@ -3026,13 +2992,12 @@ class Harness(unittest.TestCase):
                                                              {"name": "GITHUB_TOKEN", "mode": "deny"}])
         denied = {f["path"] for f in sandbox["credentials"]["files"]}
         self.assertTrue({"~/.ssh", "~/.aws", "~/.claude", "~/.claude.json"} <= denied)
-        self.assertEqual(settings["pluginConfigs"], {"model-router@inline": {"options": {"verify_gate": False}}})
         tools = cmd[cmd.index("--allowedTools") + 1:]
         self.assertEqual(tools, list(run.TOOLS))
         self.assertIn("Bash", tools)
 
     def test_where_no_sandbox_can_start_the_run_stops_and_the_readme_says_what_happens(self):
-        settings = run.settings({}, {}, hidden=[])
+        settings = run.settings({}, hidden=[])
         self.assertIs(settings["sandbox"]["failIfUnavailable"], True)
         readme = (ROOT / "bench" / "README.md").read_text(encoding="utf-8")
         self.assertIn("Where no sandbox can start", readme)
@@ -3182,9 +3147,9 @@ class Harness(unittest.TestCase):
         self.assertNotEqual((Path(frozen) / "hooks" / "hooks.json").read_text(), "{}")
         self.assertNotEqual(freeze()[1], digest)
         loaded = json.dumps([{"name": "model-router", "path": "/p"}])
-        code, rows, _ = self.main("--configs", "plugin", "plugin-nogate", "defaults", "--runs", "2", "--seed", "5",
+        code, rows, _ = self.main("--configs", "plugin", "defaults", "--runs", "2", "--seed", "5",
                                   env={"STUB_PLUGINS": loaded})
-        self.assertEqual(sorted({r["config"] for r in rows}), ["defaults", "plugin", "plugin-nogate"])
+        self.assertEqual(sorted({r["config"] for r in rows}), ["defaults", "plugin"])
         self.assertEqual(len({r["plugin_hash"] for r in rows if r["config"] != "defaults"}), 1)
         self.assertTrue(next(r["plugin_hash"] for r in rows if r["config"] == "plugin"))
         self.assertEqual({r["plugin_hash"] for r in rows if r["config"] == "defaults"}, {None})
@@ -3211,7 +3176,7 @@ class Harness(unittest.TestCase):
         self.assertEqual((code, written, [r["limited_reason"] for r in limited]), (2, False, ["no_start"] * 3))
 
     def test_a_documented_startup_failure_is_no_start_under_every_configuration(self):
-        for config in ("defaults", "haiku-high", "plugin", "plugin-nogate"):
+        for config in ("defaults", "haiku-high", "plugin"):
             row = run.record(Recorder.task, self.configs[config], Recorder.options,
                              STARTUP_FAILURE, dict(Recorder.facts, init={}, exit_code=1))
             self.assertEqual((run.set_aside(row), row["claude_started"], row["total_cost_usd"], row["cost_known"]),
@@ -3314,24 +3279,6 @@ class Harness(unittest.TestCase):
         (folder / "s.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
         self.assertIsNone(run.transcript_cost(folder))
 
-    def test_a_router_run_whose_ledger_rules_out_its_options_is_set_aside(self):
-        # The plugin keeps no copy of its options, so only a row an option forbids can show it didn't apply.
-        loaded = json.dumps([{"name": "model-router", "path": "/p"}])
-        gate = json.dumps({"event": "gate", "session": "s", "kind": "verify"})
-        spawn = json.dumps({"event": "spawn", "agent": "Explore", "action": "keep", "level": "lookup"})
-        row, _ = self.one("plugin-nogate", env={"STUB_PLUGINS": loaded, "STUB_LEDGER": spawn})
-        self.assertTrue(row["options_applied"])
-        self.assertIsNone(run.set_aside(row))
-        self.assertNotIn("plugin_options", row)
-        asked, _ = self.one("plugin-nogate", env={"STUB_PLUGINS": loaded, "STUB_LEDGER": spawn + "\n" + gate})
-        self.assertFalse(asked["options_applied"])  # the Stop check asked although verify_gate is off
-        self.assertEqual(run.set_aside(asked), "options_not_applied")
-        self.assertIsNone(self.one("plugin-nogate", env={"STUB_PLUGINS": loaded})[0]["options_applied"])  # no ledger
-        gated, _ = self.one("plugin", env={"STUB_PLUGINS": loaded, "STUB_LEDGER": gate})
-        self.assertIsNone(gated["options_applied"])
-        self.assertIsNone(run.set_aside(gated))
-        self.assertTrue(run.options_applied({"plugin_options": {"verify_gate": "on"}}, [{"event": "gate"}]))
-
     def test_each_agent_call_records_what_it_named_and_what_it_ran_on(self):
         stream = "\n".join(json.dumps(e) for e in (
             {"type": "assistant", "parent_tool_use_id": None, "message": {"model": "claude-opus-5-5", "content": [
@@ -3392,18 +3339,12 @@ class Configurations(unittest.TestCase):
             self.assertIn(name, agents)
 
     def test_no_configuration_sets_an_option_the_plugin_drops(self):
-        sys.path.insert(0, str(run.PLUGIN / "scripts"))
-        from modelrouter import settings
         for config in self.configs.values():
-            self.assertLessEqual(set(config.get("plugin_options", {})), set(settings.OPTIONS), config["id"])
+            self.assertNotIn("plugin_options", config, config["id"])  # run.py passes no plugin options
             self.assertNotIn("router_config", config, config["id"])
         for gone in ("plugin-cheap", "plugin-cheap-nomain", "plugin-cheap-nomain-nogate", "plugin-m6-08-b",
-                     "plugin-m6-08-b-nogate", "plugin-m6-10", "opusplan"):
+                     "plugin-m6-08-b-nogate", "plugin-m6-10", "opusplan", "plugin-nogate"):
             self.assertNotIn(gone, self.configs)
-
-    def test_the_router_arms_are_todays_defaults_and_no_gate(self):
-        self.assertNotIn("plugin_options", self.configs["plugin"])
-        self.assertEqual(self.configs["plugin-nogate"]["plugin_options"], {"verify_gate": False})
 
 
 class RunEdges(unittest.TestCase):
@@ -3509,7 +3450,7 @@ class RunEdges(unittest.TestCase):
         self.assertEqual(graded.verdict, "pass", graded.reason)
         for path in json.loads(graded.reason):
             self.assertTrue(run._under(str(Path(path).resolve()), str(run.RUNS.resolve())), path)
-        hidden = run.settings({}, {}, hidden=[], own=str(run.RUNS / "tmpx"))["sandbox"]["filesystem"]
+        hidden = run.settings({}, hidden=[], own=str(run.RUNS / "tmpx"))["sandbox"]["filesystem"]
         self.assertIn(str(run.RUNS), hidden["denyRead"])
 
     def test_a_model_written_agent_type_that_is_not_a_plain_name_counts_as_invalid(self):
