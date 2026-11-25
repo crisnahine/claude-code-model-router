@@ -370,11 +370,17 @@ def _metric_text(cell: list[dict], routed: bool) -> str:
     parts.append(f"model named on {sum(bool(c.get('named_model')) for c in calls)} of {len(calls)} Agent calls and "
                  f"effort on {sum(bool(c.get('named_effort')) for c in calls)}"
                  + (f" ({len(told)} of {len(cell)} runs)" if len(told) < len(cell) else "") if told else "named n/a")
+    # A redo starts the same agent type again; a worker plus a verifier is two types, not a redo.
+    redo = [max(r["agents_started"].values(), default=0) for r in cell
+            if r.get("shape") == "redo" and isinstance(r.get("agents_started"), dict)]
+    if redo:
+        parts.append(f"redo {sum(n > 1 for n in redo)} of {len(redo)} runs")
     if not routed:
         return ", ".join(parts + ["not routed"])
     known = [r for r in cell if isinstance(r.get("routed"), list)]
-    # A run's level is the one its first subagent got: the bench hands each task to one subagent.
-    first = [(r["routed"][0]["level"], bool(r.get("passed"))) for r in known if r["routed"] and r["routed"][0].get("level")]
+    # A run's level is the one its first subagent got, which holds only where one subagent does the whole task.
+    first = [(r["routed"][0]["level"], bool(r.get("passed"))) for r in known
+             if r.get("shape", "single") == "single" and r["routed"] and r["routed"][0].get("level")]
     levels: dict[str, list[int]] = {}
     for level, ok in first:
         levels.setdefault(level, [0, 0])
@@ -695,6 +701,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         for name, count in (started or {}).items():
             agents.setdefault(era, {}).setdefault(name, 0)
             agents[era][name] += count
+    shapes = {r.get("shape", "single") for r in rows}
+    uncovered = [name for shape, name in (("fanout", "fan-out"), ("plan-build", "plan-then-build"), ("redo", "redo"))
+                 if shape not in shapes] + ["workflow", "team"]
     predate = sum(1 for r in rows if _lacks(r, "plugin_state"))
     unsaved = sum(1 for r in rows if _lacks(r, "sessions_saved"))
     borrowed = sum(1 for r in rows if r.get("plugin_state") is not None and _lacks(r, "plugin_data_own"))
@@ -758,8 +767,11 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "every model that ran. Bash denied counts the runs whose result lists a denied Bash call. Model named counts "
         "the Agent calls in the runs' streams that set their own `model`, and effort the ones that set `effort` "
         "(`agent_calls`, which also holds the model each call's first message ran on): Model Router keeps what a "
-        "call names, and a call that names no model stays on its parent's. For a router "
-        "configuration, accuracy by level is the pass rate of its runs grouped by "
+        "call names, and a call that names no model stays on its parent's. Redo, for a task with the redo shape, "
+        "counts the runs that started one agent type twice or more (`agents_started`). It is an estimate: a second "
+        "agent of that type that only ran the check counts too, and work sent back as a message to the same "
+        "subagent doesn't. For a router "
+        "configuration, accuracy by level is the pass rate of its single-agent runs grouped by "
         "the level the router gave the run's first subagent. Escalated counts the spawns whose ledger row names the "
         "level of a run they redo (`escalated_from`, unless `on_record` is false, since then no run at that level is "
         "on record), over the spawns whose row says either way. Both "
@@ -783,7 +795,11 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "pins its agents with `--agents` the prompt names them, and a run that used none of them, another agent, "
         "or set a model or effort on the Agent call, which outranks the agent's own "
         "(https://code.claude.com/docs/en/sub-agents), is set aside as `off_pin`. In the `direct` arm the "
-        "prompt is the brief alone, as a person would type it; its rows get their own table.",
+        "prompt is the brief alone, as a person would type it; its rows get their own table. A task with a "
+        "`shape` in its task.json gets another `delegate` prompt (`run.SHAPES`): `redo` runs the check the brief "
+        "names and sends the work back, `fanout` gives each question its own subagent, all started at once, and "
+        "`plan-build` hands out the steps in order. Each row records its `shape`; a row without one ran a single "
+        "agent.",
         "- Each run starts in a fresh copy of the task's files, outside any repository. From row schema 3 it has a "
         "Claude Code config folder of its own inside that copy (`CLAUDE_CONFIG_DIR`, with "
         "`CLAUDE_CODE_PROJECT_DIR_NAME=run`; https://code.claude.com/docs/en/env-vars), so `~/.claude.json`, user "
@@ -868,7 +884,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "```", "",
         "Defined in `bench/configs.json` but not run here: "
         + (", ".join(f"`{c['id']}`" for c in results.configs if c["id"] not in used) or "none") + ".", "",
-        "Not covered yet: the fan-out, workflow, team and redo shapes; a cold and a warm prompt cache measured "
+        "Not covered yet: the " + ", ".join(uncovered[:-1]) + f" and {uncovered[-1]} shapes; a cold and a warm "
+        "prompt cache measured "
         "apart; and router overhead per spawn and per turn. `sonnet-via-opusplan` runs `--model opusplan`, which "
         "in a headless `dontAsk` run never enters plan mode, so it runs Sonnet throughout "
         "(https://code.claude.com/docs/en/model-config.md#opusplan-model-setting, "

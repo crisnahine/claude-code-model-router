@@ -1,8 +1,10 @@
 """Tests for the cost and quality benchmark under bench/. Run: python3 -m unittest discover -s tests"""
 from __future__ import annotations
 
+import configparser
 import contextlib
 import dataclasses
+import fnmatch
 import importlib.util
 import io
 import json
@@ -1356,7 +1358,7 @@ class SuiteCoverage(unittest.TestCase):
     def test_every_task_class_has_two_tasks(self):
         tasks = run.load_tasks()
         for cls in run.CLASSES:
-            least = 1 if cls in ("document", "operations") else 2  # one task each so far
+            least = 1 if cls in ("document", "operations", "redo") else 2  # one task each so far
             self.assertGreaterEqual(sum(t["class"] == cls for t in tasks), least, cls)
 
     def test_work_dir_code_cannot_exit_the_check_with_success(self):
@@ -2058,7 +2060,7 @@ class HardTier(unittest.TestCase):
                 "security-prefix-check", "rootcause-cached-rates", "design-event-partitions",
                 "research-yanked-release"}
         tasks = {t["id"]: t for t in run.load_tasks()}
-        self.assertEqual({tasks[t]["class"] for t in hard}, set(run.CLASSES) - {"document", "analysis", "operations"})
+        self.assertEqual({tasks[t]["class"] for t in hard}, set(run.CLASSES) - {"document", "analysis", "operations", "redo"})
 
 
 class ProbeHelper(unittest.TestCase):
@@ -2405,6 +2407,231 @@ class WorkTasks(unittest.TestCase):
                 graded = run.grade(copy / "check.py", work, answer, timeout=60)
                 self.assertEqual(graded.verdict, "fail", graded.reason)
                 self.assertIn(reason, graded.reason)
+
+
+class DelegationTasks(unittest.TestCase):
+    """Tasks that measure how work is handed out: a redo after a failing check, calls started together, a plan
+    and then a build. Each one's prompt lets the session start more than one subagent."""
+    WANT = {"redo-failing-check": ("redo", "redo"), "fanout-three-lookups": ("lookup", "fanout"),
+            "mixed-plan-then-build": ("cross-module", "plan-build")}
+
+    def task(self, task_id):
+        return next(t for t in run.load_tasks() if t["id"] == task_id)
+
+    def test_each_delegation_task_has_its_class_and_shape(self):
+        tasks = {t["id"]: t for t in run.load_tasks()}
+        self.assertEqual({i: (tasks[i]["class"], tasks[i].get("shape")) for i in self.WANT}, self.WANT)
+
+    def test_a_task_without_a_shape_gets_the_one_subagent_prompt(self):
+        self.assertEqual(run.prompt({"brief": "Do x."}, "delegate"), run.PROMPTS["delegate"].format(brief="Do x.", pick=""))
+
+    def test_each_shape_keeps_the_brief_and_lets_the_session_start_more_than_one_subagent(self):
+        self.assertEqual(set(run.SHAPES), {"redo", "fanout", "plan-build"})
+        pinned = {"args": ["--agents", json.dumps({"a": {}, "b": {}})]}
+        for shape in run.SHAPES:
+            task = {"brief": "Do x.", "shape": shape}
+            with self.subTest(shape=shape):
+                prompt = run.prompt(task, "delegate", pinned)
+                self.assertTrue(prompt.endswith("\n\nTask: Do x."))
+                self.assertIn("Use one of these agents: a or b.", prompt)
+                self.assertNotIn("one subagent", prompt)
+                self.assertNotRegex(prompt, "[\u2013\u2014]")
+                self.assertEqual(run.prompt(task, "direct"), "Do x.")
+
+    def test_an_unknown_shape_is_an_error(self):
+        with self.assertRaises(KeyError):
+            run.prompt({"brief": "Do x.", "shape": "swarm"}, "delegate")
+        for task in run.load_tasks():
+            run.prompt(task, "delegate")
+
+    def test_a_run_sends_its_tasks_shape_prompt_and_its_row_records_the_shape(self):
+        defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
+        for task_id, shape in (("redo-failing-check", "redo"), ("lookup-retry-limit", "single")):
+            task = self.task(task_id)
+            with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
+                seen = Path(tmp) / "seen.json"
+                options = {"claude": stub(Path(tmp), STREAM_STUB), "model": "sonnet", "budget": 0.5, "timeout": 60,
+                           "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+                with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
+                    row = run.run_one(task, defaults, options, {})
+                argv = json.loads(seen.read_text())["argv"]
+                self.assertEqual(argv[argv.index("-p") + 1], run.prompt(task, "delegate"))
+                self.assertEqual(row["shape"], shape)
+
+    def test_a_direct_run_records_a_single_shape_since_it_sent_the_bare_brief(self):
+        defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
+        task = self.task("redo-failing-check")
+        with tempfile.TemporaryDirectory() as tmp:
+            seen = Path(tmp) / "seen.json"
+            options = {"claude": stub(Path(tmp), STREAM_STUB), "model": "sonnet", "budget": 0.5, "timeout": 60,
+                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None,
+                       "arm": "direct"}
+            with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
+                row = run.run_one(task, defaults, options, {})
+            argv = json.loads(seen.read_text())["argv"]
+        self.assertEqual(argv[argv.index("-p") + 1], run.prompt(task, "direct"))
+        self.assertEqual((row["arm"], row["shape"]), ("direct", "single"))
+
+    def test_level_accuracy_counts_single_agent_runs_and_the_page_gives_the_redo_rate(self):
+        real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
+        tasks = {t["id"]: t for t in run.load_tasks()}
+
+        def row(task_id, config, passed, spawned, started=None, **extra):
+            task = tasks[task_id]
+            return dict(real, main_model="sonnet", config=config, passed=passed, task=task_id, wall_ms=1000,
+                        task_revision=task.get("revision", 1),
+                        agents_started={"general-purpose": spawned} if started is None else started,
+                        **{"class": task["class"]}, **extra)
+        first = {"agent": "general-purpose", "level": "standard", "escalated_from": None}
+        design = {"agent": "general-purpose", "level": "lookup", "escalated_from": None}
+        rows = [row("cross-amount-cents", "plugin", True, 1, routed=[first]),  # recorded before `shape`
+                row("mixed-plan-then-build", "plugin", False, 2, routed=[design, first], shape="plan-build"),
+                row("redo-failing-check", "plugin", True, 2, routed=[first, first], shape="redo"),
+                row("redo-failing-check", "plugin", True, 1, routed=[first], shape="redo"),
+                # A worker and a verifier is two agents, not the work sent back.
+                row("redo-failing-check", "plugin", True, 2, {"model-router:implementer": 1, "model-router:verifier": 1},
+                    routed=[first, first], shape="redo"),
+                row("redo-failing-check", "plugin", True, 2, routed=[first, first], shape="redo"),
+                row("redo-failing-check", "defaults", False, 1, shape="redo")]
+        rows[-2].pop("agents_started")
+        rows[0].pop("shape", None)
+        with tempfile.TemporaryDirectory() as tmp:
+            res = Path(tmp) / "a-2026-11-24.jsonl"
+            res.write_text("".join(json.dumps(r) + "\n" for r in rows))
+            out = Path(tmp) / "page.md"
+            analyze.main([str(res), "--out", str(out)])
+            page = out.read_text(encoding="utf-8")
+        metrics = page.split("### Run metrics")[1].split("##")[0]
+        cross = next(line for line in metrics.splitlines() if line.startswith("| cross-module "))
+        self.assertIn("accuracy by level: standard 1/1 (1 of 2 runs)", cross)
+        self.assertNotIn("redo", cross)
+        redo = next(line for line in metrics.splitlines() if line.startswith("| redo "))
+        self.assertIn("redo 1 of 3 runs, accuracy by level n/a", redo)
+        self.assertIn("redo 0 of 1 runs, not routed", redo)
+
+    def lint(self, work):
+        return subprocess.run([sys.executable, "-I", "tools/check_changelog.py", "2.4.0"], cwd=work,
+                              capture_output=True, text=True, timeout=60)
+
+    # The grade also turns down commit text in a line; the visible check reads only a line's place and its PR number.
+    WORDING = {"commit-subjects-pasted", "commit-lines-with-hashes", "space-before-the-colon", "type-in-brackets",
+               "hashes-left-on-lines"}
+
+    def test_the_visible_changelog_check_agrees_with_the_grade_on_shape_and_says_why(self):
+        task = self.task("redo-failing-check")
+        self.assertLessEqual(self.WORDING, {o.name for o in overlay_dirs(task, "wrong")})
+        for overlay in [None, *overlay_dirs(task, "wrong"), *overlay_dirs(task, "right")]:
+            with self.subTest(answer=overlay and overlay.name), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp) / "work"
+                build_work(task, overlay, work)
+                answer = Path(tmp) / "answer.txt"
+                answer.write_text("", encoding="utf-8")
+                graded = run.grade(task["dir"] / "check.py", work, answer, timeout=60)
+                linted = self.lint(work)
+                if overlay is not None and overlay.name in self.WORDING:
+                    self.assertEqual((linted.returncode, graded.verdict), (0, "fail"), linted.stdout + graded.reason)
+                    continue
+                self.assertEqual(linted.returncode == 0, graded.passed, linted.stdout + graded.reason)
+                if not graded.passed:
+                    self.assertTrue(linted.stdout.strip(), "the visible check printed no reason")
+
+    def test_the_first_answer_contributing_md_leads_to_fails_the_visible_check_with_the_fix(self):
+        task = self.task("redo-failing-check")
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "work"
+            build_work(task, task["dir"] / "wrong" / "breaking-change-not-marked", work)
+            res = self.lint(work)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("**Breaking:**", res.stdout)
+        self.assertNotIn("breaking", (task["dir"] / "repo" / "CONTRIBUTING.md").read_text(encoding="utf-8").lower())
+
+    # A retry, then the key reused with another amount, through the solution's handle_post with a mutant installed.
+    SCENARIO = """import importlib.util, json, os, sys, tempfile
+sys.path.append(sys.argv[1])
+if sys.argv[3]:
+    spec = importlib.util.spec_from_file_location("_mutant", sys.argv[2])
+    mutant = importlib.util.module_from_spec(spec); spec.loader.exec_module(mutant); mutant.install(sys.argv[3])
+import db
+from api.payments import handle_post
+path = os.path.join(tempfile.mkdtemp(), "shop.db"); db.init(path); conn = db.connect(path)
+conn.execute("INSERT INTO customers (id, email) VALUES (1, 'ana@example.com')"); conn.commit()
+got = [handle_post(conn, {"headers": {"Idempotency-Key": "k"}, "body": {"customer_id": 1, "cents": c}}) for c in (5, 5, 7)]
+print(json.dumps([got, *(conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("gateway_log", "payments"))]))
+"""
+
+    def test_each_mutant_breaks_the_feature_without_breaking_the_work(self):
+        task = self.task("mixed-plan-then-build")
+        mutants = task["dir"] / "mutants.py"
+        spec = importlib.util.spec_from_file_location("plan_build_mutants", mutants)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        names = list(module.MUTANTS)
+        self.assertEqual(names, ["ignores-the-key", "no-body-check", "charges-the-retry", "charges-every-repeat",
+                                 "charges-without-a-payment", "replays-another-answer"])
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp) / "work"
+            build_work(task, None, work)
+            outcomes = {}
+            for name in ("", *names):
+                res = subprocess.run([sys.executable, "-I", "-c", self.SCENARIO, str(work), str(mutants), name],
+                                     cwd=work, capture_output=True, text=True, timeout=60)
+                self.assertEqual(res.returncode, 0, res.stderr)
+                (first, retry, reused), charges, payments = json.loads(res.stdout)
+                outcomes[name] = (first[0], retry == first, reused[0], charges, payments)
+        self.assertEqual(outcomes, {"": (201, True, 409, 1, 1), "ignores-the-key": (201, False, 201, 3, 3),
+                                    "no-body-check": (201, True, 201, 1, 1),
+                                    "charges-the-retry": (201, False, 409, 2, 2),
+                                    "charges-every-repeat": (201, True, 409, 3, 3),
+                                    "charges-without-a-payment": (201, True, 409, 3, 1),
+                                    "replays-another-answer": (201, False, 409, 1, 1)})
+        self.assertFalse((task["dir"] / "mutants").exists())
+
+    def test_the_fanout_ini_decoy_is_wrong_read_as_retries_or_as_attempts(self):
+        task = self.task("fanout-three-lookups")
+        ini = configparser.ConfigParser()
+        ini.read(task["dir"] / "repo" / "config" / "base.ini")
+        decoy = ini.getint("webhooks", "max_retries")
+        want = json.loads((task["dir"] / "solution" / "ANSWERS.json").read_text())["webhook_attempts"]
+        self.assertNotIn(want, (decoy, decoy + 1))
+
+    def test_the_visible_changelog_check_fails_the_shipped_changelog_with_a_reason(self):
+        task = self.task("redo-failing-check")
+        with tempfile.TemporaryDirectory() as tmp:
+            shutil.copytree(task["dir"] / "repo", Path(tmp) / "work")
+            res = self.lint(Path(tmp) / "work")
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("2.4.0", res.stdout)
+
+    # Per task, the brief or a glob of shipped files, and the words that would give an answer away there.
+    LEAKS = {
+        "redo-failing-check": {"brief": ["save card", "#220", "revert", "breaking", "link"],
+                               "CHANGELOG.md": ["save card", "#220", "revert", "breaking"],
+                               "CONTRIBUTING.md": ["revert", "breaking", "link", "!:"]},
+        "fanout-three-lookups": {"brief": ["send_refund_receipt", "emails.py", "100"],
+                                 "README.md": ["send_refund_receipt", "emails.py", "DEFAULT_RETRIES", "retries"],
+                                 "docs/*": ["send_refund_receipt", "emails.py", "DEFAULT_RETRIES", "retries"],
+                                 "*": ["4 attempts", "attempts = 4", "four attempts", "tried 4 times"]},
+        "mixed-plan-then-build": {"brief": ["choose b", "option b is", "pick b", "architecture", "worker", "host"],
+                                  "*": ["choose b", "option b is", "pick b", "recommend", "prefer"],
+                                  "docs/PROPOSAL.md": ["worker", "process", "host"],
+                                  "test_payments.py": ["idempotency"]},
+    }
+
+    def test_no_shipped_file_names_an_answer(self):
+        for task_id, places in self.LEAKS.items():
+            task = self.task(task_id)
+            files = {p.relative_to(task["dir"] / "repo").as_posix(): p
+                     for p in (task["dir"] / "repo").rglob("*") if p.is_file() and "__pycache__" not in p.parts}
+            with self.subTest(task=task_id):
+                self.assertFalse({Path(f).name for f in files} & {"ANSWERS.json", "DESIGN.json", "test_idempotency.py"})
+            for where, words in places.items():
+                texts = {"brief": task["brief"]} if where == "brief" else {
+                    f: p.read_text(encoding="utf-8") for f, p in files.items() if fnmatch.fnmatch(f, where)}
+                with self.subTest(task=task_id, where=where):
+                    self.assertTrue(texts, "the pattern matches no shipped file")
+                    for name, text in texts.items():
+                        for word in words:
+                            self.assertNotIn(word.lower(), text.lower(), name)
 
 
 if __name__ == "__main__":

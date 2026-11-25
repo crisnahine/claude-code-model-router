@@ -1,0 +1,6 @@
+{
+  "choice": "Option A",
+  "reasons": [
+    "No schema change and no extra query on the hot path."
+  ]
+}

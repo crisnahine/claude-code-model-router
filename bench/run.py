@@ -35,7 +35,7 @@ from modelrouter.registry import Registry  # noqa: E402
 from modelrouter.ledger import read as read_ledger  # noqa: E402
 ROW_SCHEMA = 3  # a row's schema says which harness wrote it; analyze reads a missing key as old only below this
 CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research",
-           "document", "analysis", "operations")
+           "document", "analysis", "operations", "redo")
 
 # Every run starts from the same environment: nothing a parent Claude Code session, its plugins or the shell's
 # subagent and effort settings put there, except the provider switches and token auth. A configuration adds its
@@ -74,6 +74,18 @@ PROMPTS = {
                  "yourself.{pick} When it returns, reply with its final answer.\n\nTask: {brief}"),
     "direct": "{brief}",
 }
+# A task.json "shape" replaces the delegate prompt with one that lets the session start more than one subagent.
+SHAPES = {
+    "redo": ("Hand the task below to a subagent with the Agent tool and wait for its answer; don't do the work "
+             "yourself, but do run any check the task names and send the work back when the task says to.{pick} When "
+             "the work is done, reply with its final answer.\n\nTask: {brief}"),
+    "fanout": ("Give each question in the task below to its own subagent with the Agent tool, all started at once, and "
+               "wait for their answers; don't look up the answers yourself.{pick} Then write the answer file the task "
+               "asks for from what they found, and reply with its contents.\n\nTask: {brief}"),
+    "plan-build": ("Hand each step of the task below to a subagent with the Agent tool, one step at a time and in "
+                   "order, giving each one what the steps before it decided; don't do the work yourself.{pick} When "
+                   "the last step returns, reply with its final answer.\n\nTask: {brief}"),
+}
 
 
 def load_tasks() -> list[dict]:
@@ -95,11 +107,12 @@ def pins(config: dict) -> list[str] | None:
 
 
 def prompt(task: dict, arm: str, config: dict | None = None) -> str:
-    """The prompt for an arm: `delegate` hands the task to one subagent, naming a configuration's pinned agents,
-    and `direct` is the brief as a person types it."""
+    """The prompt for an arm: `delegate` hands the task to one subagent, or as the task's `shape` says, naming a
+    configuration's pinned agents, and `direct` is the brief as a person types it."""
     names = pins(config or {})
     pick = f" Use one of these agents: {', '.join(names[:-1])} or {names[-1]}." if names else ""
-    return PROMPTS[arm].format(brief=task["brief"], pick=pick)
+    text = SHAPES[task["shape"]] if arm == "delegate" and "shape" in task else PROMPTS[arm]
+    return text.format(brief=task["brief"], pick=pick)
 
 
 def _plugin_files(folder: Path) -> list[Path]:
@@ -742,7 +755,7 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
     off_pin = None if pinned is None or arm != "delegate" else bool(not started or set(started) - set(pinned) or overrides)
     return {
         "schema": ROW_SCHEMA, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
-        "config": config["id"], "arm": arm,
+        "shape": task.get("shape", "single") if arm == "delegate" else "single", "config": config["id"], "arm": arm,
         "batch": options.get("batch"), "order_seed": options.get("seed"),
         "started_at": facts["started_at"], "claude_version": options["claude_version"],
         "main_model": config.get("model", options["model"]),

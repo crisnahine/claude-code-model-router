@@ -1,0 +1,5 @@
+{
+  "page_size": "100",
+  "refund_email": "shop/notify/emails.py:send_refund_receipt",
+  "webhook_attempts": 4
+}

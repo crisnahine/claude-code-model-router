@@ -1,0 +1,16 @@
+Commits on main since v2.3.1, newest first (git log --oneline v2.3.1..main).
+
+c41d9e0 fix(api): return 404 instead of 500 for an order that was deleted (#228)
+7ab03f2 docs: fix the install steps in README (#227)
+e19c5d4 Revert "feat: save card details for the next checkout (#220)" (#226)
+5d2a8b1 remove!: drop the /v1/checkout endpoint (#224)
+0f6e3c9 test: cover coupon expiry during checkout (#223)
+b88a1d7 fix: show the right tax line for Canadian addresses (#222)
+93c0e5f refactor: split the checkout service into steps (#221)
+2e7f4a6 feat: save card details for the next checkout (#220)
+d05b9c3 ci: cache pip downloads between jobs (#219)
+6a1f2e8 perf: load the order history page in one query (#218)
+f3c7d10 feat: add Swedish krona to the currency picker (#217)
+a9e4b52 chore: bump pytest to 8.3 (#216)
+1c8d7f4 fix: keep the cart total when a coupon expires mid-checkout (#215)
+8e2b6a3 feat(admin): export the order list as CSV (#214)

@@ -65,9 +65,9 @@ def raises(fn, *args) -> bool:
     return False
 
 
-def answer(work: Path, name: str) -> dict:
+def answer(work: Path, name: str, encoding: str = "utf-8") -> dict:
     try:
-        data = json.loads((Path(work) / name).read_text(encoding="utf-8"))
+        data = json.loads((Path(work) / name).read_text(encoding=encoding))
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
