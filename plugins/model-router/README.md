@@ -12,4 +12,6 @@ Options, in `/config`: `routing_mode` (`auto`), `max_tier` (`none`), `verify_gat
 
 What it runs: the hooks in `hooks/hooks.json` and the mod `hooks/router.ts`, which start `sh` and Python on your machine, and, for a setup you pick when a session starts below the recommended ones, Claude Code's `/model` and `/effort`. It writes one option, `session_check`, when you ask it to. What it keeps: a ledger and state files in the plugin's data folder, private to your user on macOS and Linux, never a prompt, brief or description. It makes no network call of its own.
 
+`evals/` holds the cases `claude plugin eval` runs; `tsconfig.json` points an editor at the types Claude Code writes into `.claude-plugin/types/`. Neither runs in a session.
+
 How it decides, every option and every limit are in the [main README](https://github.com/crisnahine/claude-code-model-router#readme). Apache-2.0.

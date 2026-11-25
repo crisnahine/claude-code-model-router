@@ -9,7 +9,7 @@
   },
   {
     "id": "plugin-nogate",
-    "description": "Model Router with the Stop check's verifier request off (`verify_gate: false`)",
+    "description": "Model Router with the Stop check off (`verify_gate: false`)",
     "plugin": true,
     "env": {},
     "plugin_options": {

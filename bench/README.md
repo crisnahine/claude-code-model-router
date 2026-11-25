@@ -6,7 +6,7 @@ Measures Model Router's cost per solved task and pass rate against Claude Code w
 - `run.py`: runs tasks under configurations with `claude -p`, grades each run and appends one JSON row per run to `--out`.
 - `analyze.py`: writes `docs/BENCHMARKS.md` from the rows and gives `tools/docs_assets.py` the figures for the `<!-- bench:KEY -->` spans. A row below `run.ROW_SCHEMA` (3) stops it, naming the file and line.
 - `overhead.py`: hook time, mod path and state growth, with no paid call: `python3 bench/overhead.py [--runs 30] [--calls 1000] [--json]`.
-- `results/`: the `*.jsonl` rows the page reads, `limited/` for runs set aside, and `transcripts/`, which git ignores.
+- `results/`: the `*.jsonl` rows the page judges, `pilot/` for exploratory rounds with a note per batch in `pilot/notes.json`, `limited/` for runs set aside, and `transcripts/`, which git ignores.
 
 ## What a run is
 
@@ -55,7 +55,7 @@ python3 bench/run.py --tasks rootcause-cart --configs plugin --runs 2 --seed 1 -
     --max-total 4 --model claude-opus-5-5 --out "$HOME/mrb-smoke/smoke.jsonl" --keep "$HOME/mrb-smoke/keep"
 ```
 
-A calibration round finds the tasks that tell models apart: the five tasks of work that isn't code and six harder coding tasks, under `haiku-high` and `defaults`, 2 runs each, 44 runs. Rows under `results/pilot/` stay out of the page, which reads `results/*.jsonl`.
+A calibration round finds the tasks that tell models apart: the five tasks of work that isn't code and six harder coding tasks, under `haiku-high` and `defaults`, 2 runs each, 44 runs. Rows under `results/pilot/` get no verdict; the page shows each batch as an exploratory round.
 
 ```bash
 python3 bench/run.py --tasks legal-services-agreement finance-ledger-reconcile finance-runway-forecast \
@@ -120,12 +120,12 @@ What a row holds for a workflow: its calls in `workflow_calls`, and its agents' 
 
 ## The hard tasks
 
-`cachefix-stale-across-services` (root-cause), `perf-nlogn-rewrite` and `migrate-ledger-v3` (implementation) and `security-tar-symlink-chain` (security-review) tell a small model from a strong one: 1,000 lines or more over 10 or more files, a brief that gives the goal but not the cause, and a test the agent can run. The check runs that test unchanged and far more, so a wrong answer can pass it and still fail (`HardTasks` in `tests/test_bench.py`). Calibrate them before they count; the $2 cap is a guess, and read `permission_denials` first, since each expects its test to run.
+`cachefix-stale-across-services` (root-cause), `perf-nlogn-rewrite` and `migrate-ledger-v3` (implementation) and `security-tar-symlink-chain` (security-review) tell a small model from a strong one: 1,000 lines or more over 10 or more files, a brief that gives the goal but not the cause, and a test the agent can run. The check runs that test unchanged and far more, so a wrong answer can pass it and still fail (`HardTasks` in `tests/test_bench.py`). In `calibration-2`, at a $2 cap, both baselines solved every run and the dearest cost $0.99. Read `permission_denials` before a verdict, since each expects its test to run.
 
 ```bash
 python3 bench/run.py --tasks cachefix-stale-across-services perf-nlogn-rewrite migrate-ledger-v3 \
-    security-tar-symlink-chain --configs defaults haiku-high --runs 3 --budget 2 --max-total 60 \
-    --model claude-opus-5-5 --out "bench/results/pilot/hard-calibration-$(date +%F).jsonl"
+    security-tar-symlink-chain --configs defaults haiku-high --runs 3 --seed 5 --batch calibration-3 --budget 2 \
+    --max-total 60 --model claude-opus-5-5 --out bench/results/pilot/calibration-3.jsonl
 ```
 
 - Cache: the report blames the order service; the cause is the shared cache's invalidation. Fourteen write orders, each followed by reads that no change touched, which must not reach the database, while the cache is watched during the writes. Limit: one thread, so dropping the cache just before the commit passes.

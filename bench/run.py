@@ -2,7 +2,7 @@
 
 Example:
   python3 bench/run.py --tasks lookup-retry-limit bugfix-pagination --configs plugin defaults haiku-high \\
-      --runs 1 --budget 0.5 --max-total 3 --out bench/results/pilot/pilot-2026-11-22.jsonl
+      --runs 1 --budget 0.5 --max-total 3 --batch pilot-1 --out bench/results/pilot/pilot-1.jsonl
 """
 from __future__ import annotations
 
@@ -292,12 +292,6 @@ def refusal(row: dict) -> str | None:
     if row.get("total_cost_usd") == 0 and row.get("subtype") != "error_during_execution":
         return "api_error"
     return None
-
-
-def rate_limited(row: dict) -> bool:
-    """A run refused for a rate or usage limit or a lost network, which waiting can lift: no measurement, not a
-    failed task."""
-    return refusal(row) in ("limit", "network")
 
 
 SECRET_NAMES = ("TOKEN", "KEY", "SECRET", "PASSWORD", "AUTH", "CREDENTIAL")

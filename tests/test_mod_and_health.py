@@ -1,4 +1,4 @@
-"""Regression tests for the mod's answers and for what counts as a model error."""
+"""Tests for the mod's answers and for what counts as a model error."""
 from __future__ import annotations
 
 import io

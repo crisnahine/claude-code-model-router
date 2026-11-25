@@ -1,14 +1,7 @@
 name: Upstream watch
 
-# Checks the Claude Code changelog, the docs index, the full text of the docs
-# pages the plugin is built on, the model aliases and the model status table
-# against compat/baseline.json, and keeps one open issue listing what changed,
-# so nothing is missed between reviews. It never edits the plugin itself: a
-# person (or /refresh run inside this repo) reviews the changes and updates the
-# baseline in a PR. A page that fails to load, or parses as empty, fails the
-# job instead of opening an issue.
-# The newest job fails when the newest Claude Code release or the newest
-# published mod types reject the plugin; ci.yml runs the pinned type-check.
+# Compares upstream Claude Code docs, changelog and models with compat/baseline.json and keeps one open issue
+# listing what changed; it never edits the plugin. A page that fails to load or parses empty fails the job.
 
 on:
   schedule:
@@ -25,6 +18,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
@@ -64,6 +59,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"

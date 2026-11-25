@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/crisnahine/claude-code-model-router/security/advisories/new
+    about: A private report that only the maintainer sees.

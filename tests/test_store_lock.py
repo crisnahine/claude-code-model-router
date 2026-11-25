@@ -1,7 +1,8 @@
-"""State-file lock regressions."""
+"""The state-file lock."""
 from __future__ import annotations
 
 import errno
+import json
 import os
 import subprocess
 import sys
@@ -18,7 +19,7 @@ class StoreLock(Sandbox):
     def test_two_waiters_on_a_lock_left_by_a_dead_hook_never_both_hold_it(self):
         self.data.mkdir(exist_ok=True)
         path = self.data / "sample.json"
-        store.save_json(path, {"n": 0})
+        store.write_atomic(path, json.dumps({"n": 0}))
         lock = self.data / "sample.json.flock"
         lock.write_text("dead")
         os.utime(lock, (time.time() - 60, time.time() - 60))
@@ -46,7 +47,7 @@ class StoreLock(Sandbox):
                 if name == "A":
                     a_inside.set()
                     time.sleep(0.3)
-                store.save_json(path, {"n": n + 1})
+                store.write_atomic(path, json.dumps({"n": n + 1}))
                 with guard:
                     inside[0] -= 1
 

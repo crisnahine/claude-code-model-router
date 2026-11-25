@@ -43,7 +43,7 @@ CI runs all of them, the version check on pull requests only. The unit tests inc
 - The runtime is Python 3.9 or later on the standard library only. No dependencies.
 - The mod forwards events to the runtime and picks no model or effort itself.
 - Every hook fails open: a bug may cost routing, never a tool call, a spawn or a session.
-- A claim about Claude Code or a model cites the newest official docs (`code.claude.com/docs`, `platform.claude.com/docs`) or the installed binary. Without a primary source it is marked UNCONFIRMED, and nothing is built on it.
+- A claim about Claude Code or a model cites the newest official docs (`code.claude.com/docs`, `platform.claude.com/docs`) or the installed binary. Behaviour with no primary source is marked as observed, with the Claude Code version it was seen on.
 - `tools/docs_assets.py` writes the diagrams, badges, page heads, the docs index cards and the site's FAQ, so hand edits there are lost. Change the script or `PAGES` in `tools/docs_pages.py` (a new docs page needs a row), run it, and keep `--check` passing.
 - A code comment gives a reason the code can't show, in one line, with no ticket number and no history.
 

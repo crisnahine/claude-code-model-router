@@ -150,7 +150,7 @@ Five agents carry their own models, which hold with routing off: `model-router:s
 
 Agents from any plugin, skill or project are routed. The router never changes which agent runs and never approves a tool call, so other plugins' hooks, your permission rules and auto mode still apply.
 
-<a id="refused-rewrites"></a>Without the mod, the router rewrites the Agent call's `model` and `effort` and tells Claude. If a rewritten call comes back unrun, its repeat passes through unchanged, or is refused with the model to use if it exceeds `max_tier`.
+Without the mod, the router rewrites the Agent call's `model` and `effort` and tells Claude. If a rewritten call comes back unrun, its repeat passes through unchanged, or is refused with the model to use if it exceeds `max_tier`.
 
 ### Organization allowlists
 
