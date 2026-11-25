@@ -28,7 +28,7 @@ def email_index(conn):
     for _, name, unique, origin, _ in conn.execute("PRAGMA index_list(customers)").fetchall():
         keys = [c for c in conn.execute(f"PRAGMA index_xinfo({name})").fetchall() if c[5]]
         if unique and [c[2] for c in keys] == ["email"]:
-            found.append([origin, keys[0][4]])
+            found.append([origin, keys[0][4].upper()])  # SQLite ignores case in a collation name; index_xinfo keeps it
     return sorted(found)[-1] if found else None  # "u" sorts after "c" and "pk"
 
 

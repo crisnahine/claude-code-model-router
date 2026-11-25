@@ -1,5 +1,8 @@
 {
   "class": "implementation",
-  "revision": 1,
+  "revision": 2,
+  "revisions": {
+    "2": "the email column's collation name is compared without regard to case, so COLLATE nocase passes as SQLite reads it"
+  },
   "brief": "Write the database migration in store/migrations/m0002_merge_customers.py exactly as its docstring specifies. Use the standard library only, and don't change the other files in store/."
 }
