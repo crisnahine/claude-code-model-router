@@ -2502,7 +2502,8 @@ class DelegationTasks(unittest.TestCase):
     # The grade also reads what each line says; the visible check reads only a line's place and its PR number.
     WORDING = {"text-swapped-between-lines", "commit-subjects-pasted", "commit-lines-with-hashes",
                "space-before-the-colon", "type-in-brackets", "hashes-left-on-lines",
-               "removal-described-as-a-new-rule", "removal-described-as-a-narrower-change"}
+               "removal-described-as-a-new-rule", "removal-described-as-a-narrower-change", "224-will-be-removed-later",
+               "224-removed-in-2.3.0", "224-removal-planned-later", "222-tells-the-reverted-card-feature"}
 
     def test_the_visible_changelog_check_agrees_with_the_grade_on_shape_and_says_why(self):
         task = self.task("redo-failing-check")
@@ -2554,7 +2555,7 @@ print(json.dumps([got, *(conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
         spec.loader.exec_module(module)
         names = list(module.MUTANTS)
         self.assertEqual(names, ["ignores-the-key", "no-body-check", "charges-the-retry", "charges-every-repeat",
-                                 "charges-without-a-payment"])
+                                 "charges-without-a-payment", "replays-another-answer"])
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp) / "work"
             build_work(task, None, work)
@@ -2569,7 +2570,8 @@ print(json.dumps([got, *(conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
                                     "no-body-check": (201, True, 201, 1, 1),
                                     "charges-the-retry": (201, False, 409, 2, 2),
                                     "charges-every-repeat": (201, True, 409, 3, 3),
-                                    "charges-without-a-payment": (201, True, 409, 3, 1)})
+                                    "charges-without-a-payment": (201, True, 409, 3, 1),
+                                    "replays-another-answer": (201, False, 409, 1, 1)})
         self.assertFalse((task["dir"] / "mutants").exists())
 
     def test_the_fanout_ini_decoy_is_wrong_read_as_retries_or_as_attempts(self):

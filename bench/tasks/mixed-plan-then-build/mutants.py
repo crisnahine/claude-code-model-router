@@ -6,7 +6,8 @@ MUTANTS = {"ignores-the-key": "ignores the Idempotency-Key header and charges ev
            "no-body-check": "replays a reused key without comparing the body",
            "charges-the-retry": "charges a retry again and answers it as a new payment",
            "charges-every-repeat": "charges a repeated key again but sends back the right response",
-           "charges-without-a-payment": "charges a repeated key again without recording a payment"}
+           "charges-without-a-payment": "charges a repeated key again without recording a payment",
+           "replays-another-answer": "answers a retry without a charge but not with the first response"}
 # Runs a work dir's test module with one mutant installed: argv is work dir, test module, this file, mutant name.
 LAUNCHER = ("import sys, unittest, importlib.util; sys.path.append(sys.argv[1]); "
             "spec = importlib.util.spec_from_file_location('_mutant', sys.argv[3]); "
@@ -81,6 +82,16 @@ def install(name):
             conn.commit()
         return remember(slot, request, real(conn, request))
 
+    def replays_another_answer(conn, request):
+        slot = _slot(conn, request)
+        got = real(conn, request)
+        if slot in first and request.get("body") == first[slot] and isinstance(got, tuple) and len(got) == 2 \
+                and isinstance(got[1], dict):
+            got = (got[0], {**got[1], "id": got[1]["id"] + 1000} if isinstance(got[1].get("id"), int)
+                   else {**got[1], "replayed": True})
+        return remember(slot, request, got)
+
     api.handle_post = {"ignores-the-key": ignores_the_key, "no-body-check": no_body_check,
                        "charges-the-retry": charges_the_retry, "charges-every-repeat": charges_every_repeat,
-                       "charges-without-a-payment": charges_without_a_payment}[name]
+                       "charges-without-a-payment": charges_without_a_payment,
+                       "replays-another-answer": replays_another_answer}[name]

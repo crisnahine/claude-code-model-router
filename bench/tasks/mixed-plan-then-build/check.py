@@ -98,7 +98,8 @@ design = passcheck.answer(work, "DESIGN.json", "utf-8-sig")
 choice = design.get("choice")
 if set(design) != {"choice", "reasons"} or not passcheck.reasons(design) or not isinstance(choice, str):
     passcheck.finish(False, 'DESIGN.json must be {"choice": "<A or B>", "reasons": ["..."]}')
-if re.sub(r"^option\s+", "", choice.strip(), flags=re.I).upper() != "B":
+picked = re.match(r"\s*(?:option\s+)?([AB])\b", choice, re.I)
+if not picked or picked.group(1).upper() != "B":
     passcheck.finish(False, f"DESIGN.json picks {choice!r}, expected B")
 if not passcheck.tests_pass(work, HERE / "repo", "test_payments.py"):
     passcheck.finish(False, "test_payments.py was changed or no longer passes")
