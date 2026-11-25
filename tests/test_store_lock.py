@@ -18,6 +18,12 @@ from test_model_router import SCRIPTS, Sandbox, store
 
 
 class StoreLock(Sandbox):
+    def test_lock_counts_that_no_longer_parse_start_over(self):
+        self.data.mkdir(exist_ok=True)
+        (self.data / "locks.json").write_text("{half a file")
+        store._count(self.data / "state.json", "waits")
+        self.assertEqual(store.lock_counts()["state.json"]["waits"], 1)
+
     def test_a_write_that_fails_leaves_no_temp_file_behind(self):
         self.data.mkdir(exist_ok=True)
         path = self.data / "sample.json"

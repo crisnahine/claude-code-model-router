@@ -158,7 +158,7 @@ def _count(path: Path, *events: str) -> None:
     counts_path = path.with_name("locks.json")
     try:
         counts, status = _read_state(counts_path)
-        if status != "ok":
+        if status not in ("ok", "corrupt"):  # counts that no longer parse start over: they are only figures
             return
         entry = counts.get(path.name)
         entry = entry if isinstance(entry, dict) else {}
