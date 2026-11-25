@@ -177,6 +177,19 @@ class SessionCheck(Sandbox):
                               (SONNET, {"user": {"modelSettings": {SONNET: {"effortLevel": "xhigh"}}}})):
             self.assertEqual(self.check(model, session_id=model, **layers), {}, model)
 
+    def test_an_effort_flag_at_launch_counts_ahead_of_the_settings_files(self):
+        # --effort is in no settings file, so the mod passes on what the session's own command line named.
+        self.assertEqual(session.check(snapshot("flag"), SONNET, launched="xhigh"), {})
+        low = session.check(snapshot("low"), OPUS, launched="low")
+        self.assertIn("This session is on Opus at low.", low["question"])
+        # The flag holds on whichever model is picked, so the effort command runs or not by it.
+        self.assertEqual(self.choice(self.choice(low, "Opus")["then"], "medium").get("effort"), "medium")
+        high = session.check(snapshot("high"), "claude-haiku-5-5", launched="xhigh")
+        self.assertNotIn("effort", self.choice(self.choice(high, "Sonnet")["then"], "xhigh"))
+        self.assertIn("Sonnet at medium", session.check(snapshot("junk"), SONNET, launched="--model")["question"])
+        self.options(CLAUDE_CODE_EFFORT_LEVEL="medium")  # the variable outranks the flag
+        self.assertIn("Sonnet at medium", session.check(snapshot("env"), SONNET, launched="xhigh")["question"])
+
     def test_step_one_offers_each_usable_model_then_stay(self):
         answer = self.check("claude-haiku-5-5")
         self.assertEqual(self.labels(answer), self.HAIKU)

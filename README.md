@@ -76,7 +76,7 @@ The session that plans and delegates works best on a strong setup: Opus or Fable
 
 After Stay, it asks whether to ask again next session or never; `/model-router check on` brings it back.
 
-A dismissal or typed text changes nothing. It never asks in `claude -p` or the Agent SDK, once the conversation has a prompt in it, with routing off, or with `session_check` off, and at most once per session. Before the first request, the effort is an estimate from `CLAUDE_CODE_EFFORT_LEVEL`, your settings files and the model's default; a `--effort` flag isn't visible to it.
+A dismissal or typed text changes nothing. It never asks in `claude -p` or the Agent SDK, once the conversation has a prompt in it, with routing off, or with `session_check` off, and at most once per session. Before the first request, the effort is an estimate from `CLAUDE_CODE_EFFORT_LEVEL`, a `--effort` flag at launch, your settings files and the model's default; an organization's default effort isn't visible to it.
 
 ## Commands
 

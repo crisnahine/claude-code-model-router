@@ -320,11 +320,25 @@ function refresh($: EngineInterface, opts: Record<string, string>, live: Live): 
   })
 }
 
+// A --effort flag at launch is in no settings layer and no mod call, so it is read from the session's own command
+// line. Only the level leaves this function.
+async function launchEffort($: EngineInterface): Promise<string | undefined> {
+  try {
+    const run = await $.process.run(['sh', '-c', 'ps -o args= -p $PPID'], { timeoutMs: 2000 })
+    const level = /\s--effort[= ](low|medium|high|xhigh|max|ultracode)(?=\s|$)/.exec(run.stdout)?.[1]
+    return level === 'ultracode' ? 'xhigh' : level
+  } catch {
+    return undefined
+  }
+}
+
 // At most once per session id, which the runtime keeps across the reload a /config change causes.
 async function checkSession($: EngineInterface, opts: Record<string, string>, live: Live): Promise<void> {
   // A conversation that already has prompts was resumed or forked, not started.
   if (await $.session.turns() !== 0) return
-  const step = await ask($, opts, 'mod-check', { model: await $.session.model(), locked: await locked($) })
+  const launched = await launchEffort($)
+  const step = await ask($, opts, 'mod-check', { model: await $.session.model(), locked: await locked($),
+    ...(launched ? { launch_effort: launched } : {}) })
   if (typeof step?.question !== 'string' || !Array.isArray(step.options) || live.turned) return
   const picks = await walk($, step as Step)
   if (picks) await apply($, picks)

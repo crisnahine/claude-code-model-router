@@ -123,7 +123,8 @@ def status(hook_input: dict) -> dict:
 
 def check(hook_input: dict) -> dict:
     """The session check's question for the model the session started on, or OK alone to ask nothing."""
-    return {**OK, **session.check(settings.Snapshot(hook_input), hook_input.get("model"), hook_input.get("locked") is True)}
+    return {**OK, **session.check(settings.Snapshot(hook_input), hook_input.get("model"), hook_input.get("locked") is True,
+                                   hook_input.get("launch_effort"))}
 
 
 def end(hook_input: dict) -> dict:

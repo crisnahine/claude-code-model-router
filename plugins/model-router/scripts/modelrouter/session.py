@@ -21,12 +21,14 @@ def recommended(reg: Registry, family: str | None, effort: str | None) -> bool:
     return bool(floor) and effort in EFFORTS and EFFORTS.index(effort) >= EFFORTS.index(floor)
 
 
-def effort_on(snap: settings.Snapshot, family: str) -> str | None:
+def effort_on(snap: settings.Snapshot, family: str, launched: object = None) -> str | None:
     """The effort the main session runs at on `family` before its first request shows it: CLAUDE_CODE_EFFORT_LEVEL, then
-    the settings files, then Claude Code's default, held to maxEffortLevel. A --effort flag and an organization's
-    default are not visible here (https://code.claude.com/docs/en/model-config.md#adjust-effort-level)."""
+    `launched` (a --effort flag, where the mod could read the session's command line), then the settings files, then
+    Claude Code's default, held to maxEffortLevel. An organization's default is not visible here
+    (https://code.claude.com/docs/en/model-config.md#adjust-effort-level)."""
     reg, env = snap.registry, snap.options.effort_level
-    effort = env if env in EFFORTS else snap.allowed.saved_effort(reg, family) or router.DEFAULT_EFFORT
+    named = env if env in EFFORTS else launched if launched in EFFORTS else None
+    effort = named or snap.allowed.saved_effort(reg, family) or router.DEFAULT_EFFORT
     return router.capped(effort, snap.allowed.effort_cap(reg, family))[0]
 
 
@@ -50,7 +52,7 @@ def _remarks(*remarks: str | None) -> str:
     return f" ({', '.join(found)})" if found else ""
 
 
-def _model_choice(snap: settings.Snapshot, family: str, name: str) -> dict | None:
+def _model_choice(snap: settings.Snapshot, family: str, name: str, launched: object = None) -> dict | None:
     """Step one's choice of `name` without its label, with step two's efforts, or None when it can't run here at a
     recommended effort."""
     reg, options = snap.registry, snap.options
@@ -62,7 +64,7 @@ def _model_choice(snap: settings.Snapshot, family: str, name: str) -> dict | Non
     model = None if name == family else reg.newest_id(name, options.provider, snap.allowed, snap.health) if lagging else name
     if name != family and not model:
         return None
-    runs = effort_on(snap, name)
+    runs = effort_on(snap, name, launched)
     # model-config.md: Claude Code's default effort on the current models, and max lasting one session unless the
     # environment sets it, which a pinned effort never reaches here.
     picks = [{"label": e + _remarks("Recommended" if not i else None, "Claude Code's default" if e == router.DEFAULT_EFFORT else None,
@@ -77,7 +79,7 @@ def _model_choice(snap: settings.Snapshot, family: str, name: str) -> dict | Non
         "header": HEADER, "options": picks}}
 
 
-def check(snap: settings.Snapshot, model: object, locked: bool = False) -> dict:
+def check(snap: settings.Snapshot, model: object, locked: bool = False, launched: object = None) -> dict:
     """The session check for a session that starts below the recommended setups, or {} to ask nothing: a question whose
     options may carry the next question (`then`), what picking them does (`model`, `effort`, `check`) and the line
     that says so after (`done`). Asks once per session: a plugin reload, as a don't-ask-again write causes, runs it
@@ -88,7 +90,7 @@ def check(snap: settings.Snapshot, model: object, locked: bool = False) -> dict:
     if store.load_entry(settings.SWITCHES, session_id).get("checked"):
         return {}
     family = reg.family(model)
-    effort = effort_on(snap, family) if family else None
+    effort = effort_on(snap, family, launched) if family else None
     fine = recommended(reg, family, effort)
 
     def mark(entry: dict) -> None:
@@ -96,7 +98,7 @@ def check(snap: settings.Snapshot, model: object, locked: bool = False) -> dict:
         if family:
             entry["estimate"] = {"model": family, "effort": effort, "recommended": fine}
     store.mutate_entry(settings.SWITCHES, session_id, mark, max_age=settings.SWITCH_KEPT)
-    choices = [c for c in (_model_choice(snap, family, n) for n in reg.session) if c] if family and not fine else []
+    choices = [c for c in (_model_choice(snap, family, n, launched) for n in reg.session) if c] if family and not fine else []
     if not choices:
         return {}
     strongest = max(choices, key=lambda c: reg.strength(c["family"]))

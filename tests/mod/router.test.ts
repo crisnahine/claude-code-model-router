@@ -30,6 +30,7 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
     setAnswer: undefined as object | undefined,
     switches: { opus: 'claude-opus-5-5' } as Record<string, string>,
     runFails: '' as string,
+    launched: 'claude' as string | undefined, // the session's own command line; undefined: it can't be read
   }
   const on = (event: string, ...rest: unknown[]) => {
     hooks[event] = rest.pop() as Hook
@@ -85,6 +86,10 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
     process: {
       hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: engine.session, CLAUDE_PLUGIN_DATA: '/tmp/x' }),
       run: async (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) => {
+        if (argv[1] === '-c') {
+          if (ui.launched === undefined) throw new Error('no ps here')
+          return { exitCode: 0, stdout: `${ui.launched}\n`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+        }
         const command = argv[2] ?? ''
         calls.push({ command, argv, stdin: JSON.parse(init.stdin), env: init.env })
         const given = replies[command] ?? RAN
@@ -808,6 +813,19 @@ test('an interactive start registers the command, shows the status line and asks
   assert.deepEqual(mod.ui.asked[0], [QUESTION.question, { options: QUESTION.options.map(o => o.label), header: 'Model Router' }])
   assert.deepEqual(picks, QUESTION.options.map(o => o.label))
   assert.deepEqual(mod.calls.find(c => c.command === 'mod-check')!.stdin, { session_id: 's1', model: 'claude-sonnet-5-5', locked: false })
+})
+
+test('an effort flag at launch reaches the session check, and nothing else of the command line does', async () => {
+  for (const [launched, effort] of [['claude --model sonnet --effort xhigh "fix the --effort low bug"', 'xhigh'],
+    ['claude --effort=max', 'max'], ['claude --effort ultracode', 'xhigh'], ['claude --effort', undefined],
+    ['claude "say --effortless things"', undefined], [undefined, undefined]] as const) {
+    const mod = load({ 'mod-status': STATUS, 'mod-check': { stdout: JSON.stringify({ ok: true }) } })
+    mod.ui.launched = launched
+    await mod.sessionStart(START)
+    await idle()
+    const sent = mod.calls.find(c => c.command === 'mod-check')!.stdin
+    assert.deepEqual(sent, { session_id: 's1', model: 'claude-sonnet-5-5', locked: false, ...(effort ? { launch_effort: effort } : {}) }, String(launched))
+  }
 })
 
 test('a headless run registers, draws and asks nothing, and routes as before', async () => {
