@@ -24,7 +24,7 @@ The plugin is free and makes no model call of its own. The models it runs bill t
 
 ## What does it add to the context?
 
-A session-start note of about 700 characters holding the table above, which the mod also appends to the Agent tool's description, and the descriptions Claude Code lists for its skills and five agents. Claude also gets one line when your prompt names a model, when a check is due before a turn ends, after a model error, a mid-run model swap or a redo with nothing stronger left, and, without the mod, on each call it rewrites. It adds nothing to a subagent's brief, and `claude plugin details model-router` shows what it adds to every session.
+A session-start note of about 700 characters holding the table above, which the mod also appends to the Agent tool's description, with a 520-character form of it in the Workflow tool's, and the descriptions Claude Code lists for its skills and five agents. Claude also gets one line when your prompt names a model, when a check is due before a turn ends, after a model error, a mid-run model swap or a redo with nothing stronger left, and, without the mod, on each call it rewrites. It adds nothing to a subagent's brief, and `claude plugin details model-router` shows what it adds to every session.
 
 ## Does anything leave my machine?
 

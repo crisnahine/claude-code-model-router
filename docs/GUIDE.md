@@ -91,7 +91,7 @@ A check is a test runner, linter or type checker run through Bash (`pytest`, `np
 
 ## Workflows and ultracode
 
-Workflow agents are routed only where the mod runs. A model the script names is capped and gets its level's effort, and a stage naming none runs on its parent's model. The router only raises a stage's effort, since it can't see the script's, and never redoes a stage. Under ultracode the session's effort is the floor on the session's model.
+Workflow agents are routed only where the mod runs. The Workflow tool's description carries the same table as the session note, so a script Claude writes names a model and effort for each stage. A model the script names is capped and gets its level's effort, and a stage naming none, as in a saved script written without them, runs on its parent's model. The router only raises a stage's effort, since it can't see the script's, and never redoes a stage. Under ultracode the session's effort is the floor on the session's model.
 
 ## Agent teams
 
@@ -126,4 +126,4 @@ Its state is in `~/.claude/plugins/data/model-router-claude-code-model-router/`,
 - It leaves forks, resumed agents and agents whose definition it can't find alone, unless the call or your rule names a model.
 - It doesn't retry a failed call; set `fallbackModel`. After a model error it suggests a usable model (not under the force variable), and after two errors, or two runs on another model, it routes around that model for a day. With the mod, a run that another mod moved to another model doesn't count.
 - Where Fable bills to usage credits, a background session or teammate with nobody to answer the consent prompt ends its turn, and `claude -p` bills without asking; `max_tier` at `opus` avoids both.
-- Without the mod, as where an organization blocks user mods, it has no dollar figures, workflow routing, settings lists, newest IDs or model table in the Agent tool's description. With hooks off it does nothing.
+- Without the mod, as where an organization blocks user mods, it has no dollar figures, workflow routing, settings lists, newest IDs or model table in the Agent and Workflow tools' descriptions. With hooks off it does nothing.

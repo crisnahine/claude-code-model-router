@@ -20,6 +20,31 @@ _HARD = "work that is hard to check, high-stakes, ambiguous or broad"
 _SUCH = "a bug's cause, a design, a review, a contract or financial figures"
 
 
+_WORK = ((cfg.Level.lookup, "finding, reading and listing"), (cfg.Level.standard, "everyday work to a clear brief"),
+         (cfg.Level.complex, f"{_HARD} ({_SUCH})"), (cfg.Level.frontier, "open-ended research"))
+
+
+def _rows(reg: Registry, efforts: bool) -> str:
+    """One line per kind of work: the level's model, and its effort unless the environment sets every effort."""
+    at = {level: (ladder.model_for(reg, level), ladder.effort(reg, level)) for level, _ in _WORK}
+    return "".join(f"- {at[level][0]}{f' at {at[level][1]}' if efforts and at[level][1] else ''}: {what}\n"
+                   for level, what in _WORK if at[level][0])
+
+
+def _workflow_rules(options: settings.Settings, reg: Registry) -> str | None:
+    """The table for a workflow script's stages, which the mod adds to the Workflow tool's description: a stage
+    that names no model is left on the conversation's. None under the force pin, where a script can't set one."""
+    if options.force:
+        return None
+    efforts = not options.effort_level
+    pin = options.workflow_model if cfg._PLAIN_NAME.fullmatch(options.workflow_model or "") else None
+    runs_on = pin or "the conversation's model"
+    return (f"Model Router keeps the {'`model` and `effort`' if efforts else '`model`'} a workflow script names on an "
+            f"`agent()` call, within the user's cap. Here every `agent()` call in a script names "
+            f"{'both' if efforts else 'a model'}, by the work:\n{_rows(reg, efforts)}"
+            f"A stage that names {'neither' if efforts else 'no model'} runs on {runs_on}.")
+
+
 def _rules(options: settings.Settings, reg: Registry) -> str:
     """The level rule for Claude, written as facts: the Agent tool sets `effort` only when instructions ask.
     Each level's model and effort come from the registry, so a rules file that moves a level moves the note."""
@@ -56,11 +81,7 @@ def _rules(options: settings.Settings, reg: Registry) -> str:
                          f"cap{fills}. Here every Agent call names both, by the work:\n"), True
     above = ("on a stronger model than the run it redoes" if fixed or options.subagent_effort
              else "above the run it redoes, effort before model")
-    work = ((cfg.Level.lookup, "finding, reading and listing"), (cfg.Level.standard, "everyday work to a clear brief"),
-            (cfg.Level.complex, f"{_HARD} ({_SUCH})"), (cfg.Level.frontier, "open-ended research"))
-    rows = "".join(f"- {at[level][0]}{f' at {at[level][1]}' if efforts and at[level][1] else ''}: {what}\n"
-                   for level, what in work if at[level][0])
-    return f"{lead}{rows}A call that names neither runs on {neither}. " + redo.format(above=above)
+    return f"{lead}{_rows(reg, efforts)}A call that names neither runs on {neither}. " + redo.format(above=above)
 
 
 def session_start(hook_input: dict) -> dict | None:
@@ -118,10 +139,14 @@ def user_prompt(hook_input: dict) -> dict | None:
 
 
 def mod_start(hook_input: dict) -> dict:
-    """The mod's session start. The answer carries the session note, which the mod adds to the Agent tool's description."""
+    """The mod's session start. The answer carries the session note and its form for a workflow script's stages,
+    which the mod adds to the Agent and Workflow tools' descriptions."""
     answer = mod.start(hook_input)
     snap = settings.Snapshot(hook_input)
-    return {**answer, "rules": _rules(snap.options, snap.registry)} if snap.options.mode == "auto" else answer
+    if snap.options.mode != "auto":
+        return answer
+    staged = _workflow_rules(snap.options, snap.registry)
+    return {**answer, "rules": _rules(snap.options, snap.registry), **({"workflow_rules": staged} if staged else {})}
 
 
 def pre_agent(hook_input: dict) -> dict | None:

@@ -54,7 +54,7 @@ It reads no settings file. The mod asks Claude Code for each settings source and
 
 All of it goes to the model provider with the conversation:
 
-- the session-start note, which names `CLAUDE_CODE_SUBAGENT_MODEL` under FORCE only when it is a short plain name (`Notes.test_an_environment_model_reaches_claude_only_as_a_plain_name`), and, where the mod runs, the same note in the Agent tool's description (`tool.describe` in `hooks/router.ts`);
+- the session-start note, which names `CLAUDE_CODE_SUBAGENT_MODEL` under FORCE only when it is a short plain name (`Notes.test_an_environment_model_reaches_claude_only_as_a_plain_name`), and, where the mod runs, the same note in the Agent tool's description and its form for a workflow script in the Workflow tool's (`tool.describe` in `hooks/router.ts`);
 - a note when the user's prompt names a shipped or user model (`hooks.user_prompt`);
 - the fallback's note on each call it rewrites, and its deny reason (`fallback.route`);
 - a sentence after a redo that had no step left, naming only a registry model and an effort (`spawn.redo_note`);

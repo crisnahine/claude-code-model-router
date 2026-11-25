@@ -229,6 +229,21 @@ class ModStartRules(Sandbox):
             with self.subTest(env=env):
                 self.options(**env)
                 note = hooks.session_start({"session_id": "s1"})["hookSpecificOutput"]["additionalContext"]
-                self.assertEqual(hooks.HANDLERS["mod-start"]({"session_id": "s1"}), {"ok": True, "rules": note})
+                answer = hooks.HANDLERS["mod-start"]({"session_id": "s1"})
+                self.assertEqual({k: answer[k] for k in ("ok", "rules")}, {"ok": True, "rules": note})
         self.options(routing_mode="off")
         self.assertEqual(hooks.HANDLERS["mod-start"]({"session_id": "s1"}), {"ok": True})
+
+    def test_mod_start_answers_the_same_table_for_a_workflow_scripts_stages(self):
+        # A stage that names no model stays on the conversation's, so the Workflow tool's text carries the table too.
+        text = hooks.HANDLERS["mod-start"]({"session_id": "s1"})["workflow_rules"]
+        self.assertTrue(text.startswith("Model Router keeps the `model` and `effort` a workflow script names on an "
+                                        "`agent()` call, within the user's cap. Here every `agent()` call in a script "
+                                        "names both, by the work:\n- haiku at medium: finding, reading and listing\n"))
+        self.assertIn("- fable at high: open-ended research\nA stage that names neither runs on the conversation's "
+                      "model.", text)
+        self.assertLessEqual(len(text), 540)  # it sits in the Workflow tool's description all session
+        self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="haiku")
+        self.assertIn("A stage that names neither runs on haiku.", hooks.HANDLERS["mod-start"]({"session_id": "s1"})["workflow_rules"])
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
+        self.assertNotIn("workflow_rules", hooks.HANDLERS["mod-start"]({"session_id": "s1"}))  # a script can't set a model

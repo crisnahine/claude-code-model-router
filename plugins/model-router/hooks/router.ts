@@ -15,7 +15,7 @@ const TIERS: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable']
 const PLAIN_ID = /^[A-Za-z0-9_-]{1,128}$/
 
 // `note` is for Claude after the Agent call's result; `rules` is the session note, for the Agent tool's description.
-type Pick = { model?: string; effort?: ModelEffort; note?: unknown; rules?: unknown } | null
+type Pick = { model?: string; effort?: ModelEffort; note?: unknown; rules?: unknown; workflow_rules?: unknown } | null
 // The effort a routed agent steps at. A workflow script can set a stage's effort, which agent.spawn doesn't carry,
 // so a workflow agent's is only ever raised.
 type Want = { effort: ModelEffort; raiseOnly: boolean }
@@ -201,11 +201,13 @@ export const register: Register = (on, options) => {
   // What the runtime has Claude read after an Agent call's result, by tool_use_id.
   const notes = new Map<string, string>()
   // The session note the last mod-start answer carried, and the session id the layers last went to.
-  let rules: string | undefined
+  // The runtime's table for each tool whose description carries it.
+  const rules: Record<string, string> = {}
   let sentFor: string | undefined
   const started = (reply: Pick | undefined): void => {
-    const text = heard(reply)?.rules
-    if (typeof text === 'string') rules = text
+    const answer = heard(reply)
+    if (typeof answer?.rules === 'string') rules.Agent = answer.rules
+    if (typeof answer?.workflow_rules === 'string') rules.Workflow = answer.workflow_rules
   }
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
@@ -219,11 +221,12 @@ export const register: Register = (on, options) => {
     return { ...done, context: [...(Array.isArray(done.context) ? done.context : []), note] }
   }).catch(($, e, next) => next(e))
 
-  on('tool.describe', { tool: 'Agent' }, async ($, e, next) => {
+  on('tool.describe', async ($, e, next) => {
     const described = await next(e)
     // Claude reads the table where it fills in the call, and the tool's own text sets `effort` only when asked to.
-    return rules && typeof described?.description === 'string'
-      ? { ...described, description: `${described.description}\n\n${rules}` } : described
+    const text = Object.hasOwn(rules, e.tool) ? rules[e.tool] : undefined
+    return text && typeof described?.description === 'string'
+      ? { ...described, description: `${described.description}\n\n${text}` } : described
   }).catch(($, e, next) => next(e))
 
   on('session.start', async ($, e, next) => {

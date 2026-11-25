@@ -15,7 +15,7 @@ Both paths run one launcher, `scripts/model-router.sh`, and one procedure, `spaw
 | Event | What the mod does |
 | :- | :- |
 | `tool.call` (`Agent`) | Keeps the call's `effort`, which `agent.spawn` lacks, and writes the mark. After the result, adds the spawn answer's `note` to its `context` |
-| `tool.describe` (`Agent`) | Appends the session-start note the latest `mod-start` answer carried (`rules`) to the tool's description |
+| `tool.describe` | Appends to the Agent tool's description the session-start note the latest `mod-start` answer carried (`rules`), and to the Workflow tool's the same table for a script's stages (`workflow_rules`). Every other tool is passed on |
 | `session.start` | Sends the settings layers; the runtime stores them, clears day-old marks and answers the session-start note |
 | `session.end` | At `/clear`, forgets the session id the layers went to |
 | `agent.spawn` | Sends the call, `parent_model`, `kind` and the session's effort; passes the answer's `model` on. Marks a spawn a later mod moved to another family. Forks and resumed runs pass untouched |
@@ -139,7 +139,7 @@ A redo is left alone wherever a plain call is. It misses its record after a skip
 
 `hooks._rules` writes it while routing is `auto`. It says the plugin keeps the `model` and `effort` a call names within the cap and fills in `effort` when a call names only a model, then "Here every Agent call names both, by the work": haiku at medium for finding, reading and listing; sonnet at medium for everyday work to a clear brief; opus at high for work that is hard to check, high-stakes, ambiguous or broad; fable at high for open-ended research. It ends with where a call naming neither runs, and how to mark a redo.
 
-The `mod-start` answer carries the same text as `rules`, and the mod's `tool.describe` hook appends it to the Agent tool's description, so Claude reads the table where it fills in the call. The description keeps the text of the latest answer that had one, and is left as it is before any.
+The `mod-start` answer carries the same text as `rules`, and the mod's `tool.describe` hook appends it to the Agent tool's description, so Claude reads the table where it fills in the call. It also carries `workflow_rules` (`hooks._workflow_rules`), the same table worded for the `agent()` calls of a workflow script, which goes into the Workflow tool's description: a stage that names no model stays on the conversation's model, so the table is what gets a stage its own. Under the force pin there is none, since a script can't set a model then. The description keeps the text of the latest answer that had one, and is left as it is before any.
 
 It is written as facts because, as `hooks._rules` records, the Agent tool sets `effort` only when instructions ask. Each pairing is the level's model and effort from the registry (`ladder.model_for`, `ladder.effort`), so a rules file that moves a level moves the note. The force pin, either effort variable, `max_tier` and `CLAUDE_CODE_SUBAGENT_MODEL` each trim or reword it to what still applies: under an effort variable, for one, a redo goes to a stronger model.
 

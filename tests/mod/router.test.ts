@@ -462,10 +462,19 @@ test('a keep the runtime answers with a note still runs the call as named, and t
 const RULES = 'Model Router keeps the `model` and `effort` an Agent call names, within the user\'s cap.'
 const agentTool = { tool: 'Agent', description: 'Launch a new agent.', provider: { plugin: 'engine', tier: 'core' } }
 
+test("the Workflow tool's description gains the runtime's text for a script's stages, and other tools are left alone", async () => {
+  const mod = load({ 'mod-start': { stdout: JSON.stringify({ ok: true, rules: RULES, workflow_rules: 'stages name both' }) } })
+  const workflowTool = { tool: 'Workflow', description: 'Run a workflow.', provider: { plugin: 'engine', tier: 'core' } }
+  const bash = { tool: 'Bash', description: 'Run a command.', provider: { plugin: 'engine', tier: 'core' } }
+  assert.equal(await mod.describe(workflowTool), workflowTool) // no text yet
+  await mod.sessionStart({ source: 'startup' })
+  assert.equal((await mod.describe(workflowTool)).description, 'Run a workflow.\n\nstages name both')
+  assert.equal(await mod.describe(bash), bash)
+})
+
 test("the Agent tool's description gains the runtime's table once an answer brings one, and keeps it steady", async () => {
   const replies: Record<string, Reply> = { 'mod-start': { stdout: JSON.stringify({ ok: true, rules: RULES }) } }
   const mod = load(replies)
-  assert.deepEqual(mod.matchers['tool.describe'], { tool: 'Agent' })
   assert.equal(await mod.describe(agentTool), agentTool) // no text yet
   await mod.sessionStart({ source: 'startup' })
   const described = await mod.describe(agentTool)
