@@ -47,6 +47,9 @@ ISOLATION = {"CLAUDE_CODE_DISABLE_CLAUDE_MDS": "1", "CLAUDE_CODE_DISABLE_AUTO_ME
 # dontAsk lets the file tools read the work dir without a rule and denies the rest; Edit rules cover Write too
 # (https://code.claude.com/docs/en/permissions). A bare Read or Edit would approve them anywhere on the machine.
 TOOLS = ("Bash", "Edit(./**)")
+# A workflow task's script runs through the Workflow tool, which needs Read for a script given by path
+# (https://code.claude.com/docs/en/workflows.md); scoped like Edit, so the file tools still reach only the work dir.
+WORKFLOW_TOOLS = ("Workflow", "Read(./**)")
 # Bash runs in the OS sandbox and is approved there without a prompt (https://code.claude.com/docs/en/sandboxing).
 SANDBOX = {"enabled": True, "autoAllowBashIfSandboxed": True, "allowUnsandboxedCommands": False, "failIfUnavailable": True}
 # The sandbox reads most of the machine by default and has no built-in credential list.
@@ -85,6 +88,9 @@ SHAPES = {
     "plan-build": ("Hand each step of the task below to a subagent with the Agent tool, one step at a time and in "
                    "order, giving each one what the steps before it decided; don't do the work yourself.{pick} When "
                    "the last step returns, reply with its final answer.\n\nTask: {brief}"),
+    "workflow": ("Run the task below with the Workflow tool: start the workflow saved in this folder as `{workflow}`, by "
+                 "that name, and wait for it to finish; don't do the work yourself.{pick} When it returns, reply with "
+                 "what it returned.\n\nTask: {brief}"),
 }
 
 
@@ -112,7 +118,12 @@ def prompt(task: dict, arm: str, config: dict | None = None) -> str:
     names = pins(config or {})
     pick = f" Use one of these agents: {', '.join(names[:-1])} or {names[-1]}." if names else ""
     text = SHAPES[task["shape"]] if arm == "delegate" and "shape" in task else PROMPTS[arm]
-    return text.format(brief=task["brief"], pick=pick)
+    return text.format(brief=task["brief"], pick=pick, workflow=task.get("workflow", ""))
+
+
+def shape_of(task: dict, arm: str) -> str:
+    """The prompt shape a run sent: the task's own in the delegate arm, else `single`."""
+    return task.get("shape", "single") if arm == "delegate" else "single"
 
 
 def _plugin_files(folder: Path) -> list[Path]:
@@ -228,7 +239,7 @@ def settings(config: dict, env: dict, hidden: list[str] | None = None, own: str 
     return out
 
 
-def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[list[str], dict]:
+def command(prompt: str, config: dict, options: dict, base_env: dict, shape: str = "single") -> tuple[list[str], dict]:
     env = {k: v for k, v in base_env.items()
            if k not in DROPPED and (k in KEPT_EXACT or k.startswith(KEPT) or not k.startswith(CLEARED))}
     env.update(ISOLATION)
@@ -246,7 +257,8 @@ def command(prompt: str, config: dict, options: dict, base_env: dict) -> tuple[l
            "--settings", json.dumps(settings(config, env, options.get("hidden"), options.get("scratch")))]
     if config.get("plugin"):
         cmd += ["--plugin-dir", plugin_dir_for(config, options)]
-    return cmd + list(config.get("args", [])) + ["--allowedTools", *TOOLS], env
+    tools = TOOLS + (WORKFLOW_TOOLS if shape == "workflow" else ())
+    return cmd + list(config.get("args", [])) + ["--allowedTools", *tools], env
 
 
 LIMIT_RETRIES = 5
@@ -402,13 +414,15 @@ def session_dir(env: dict) -> Path:
     return Path(env["CLAUDE_CONFIG_DIR"]) / "projects" / env["CLAUDE_CODE_PROJECT_DIR_NAME"]
 
 
-def read_stream(stdout: str) -> tuple[dict, dict, dict[str, int], list[dict]]:
-    """The system/init event, the last result line, the subagents started by type, and each Agent call in order:
+def read_stream(stdout: str) -> tuple[dict, dict, dict[str, int], list[dict], list[dict]]:
+    """The system/init event, the last result line, the subagents started by type, each Agent call in order:
     its agent, the model and effort the call named itself, which outrank a definition's
     (https://code.claude.com/docs/en/sub-agents), and the model of the first message the stream shows the subagent
-    sending (`parent_tool_use_id`), None when it shows none. A line that isn't a JSON object is skipped, as is a
-    tool_use id seen before."""
-    init, result, started, calls = {}, {}, {}, {}
+    sending (`parent_tool_use_id`), None when it shows none; and each Workflow call in order: the saved workflow it
+    named (None for a script or a path, `invalid` for a name that isn't a plain one) and its tool_result block's
+    `is_error`, None when none came back. A line that isn't a JSON object is skipped, as is a tool_use id seen
+    before."""
+    init, result, started, calls, workflows = {}, {}, {}, {}, {}
     for line in stdout.splitlines():
         try:
             event = json.loads(line)
@@ -427,6 +441,12 @@ def read_stream(stdout: str) -> tuple[dict, dict, dict[str, int], list[dict]]:
             if mine and mine["ran_on"] is None and isinstance(message.get("model"), str):
                 mine["ran_on"] = message["model"]
             for block in message.get("content") or []:
+                if (isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "Workflow"
+                        and block.get("id") not in workflows):
+                    named = (block.get("input") if isinstance(block.get("input"), dict) else {}).get("name")
+                    workflows[block.get("id")] = {
+                        "name": None if named is None else named if isinstance(named, str) and AGENT_NAME.fullmatch(named)
+                        else "invalid", "is_error": None}
                 if (isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") in ("Agent", "Task")
                         and block.get("id") not in calls):
                     call = block.get("input") if isinstance(block.get("input"), dict) else {}
@@ -436,7 +456,15 @@ def read_stream(stdout: str) -> tuple[dict, dict, dict[str, int], list[dict]]:
                     started[kind] = started.get(kind, 0) + 1
                     calls[block.get("id")] = {"agent": kind, "named_model": call.get("model") or None,
                                               "named_effort": call.get("effort") or None, "ran_on": None}
-    return init, result, started, list(calls.values())
+        elif event.get("type") == "user":
+            # What a workflow's result holds isn't documented, so only the block's own error flag is read.
+            message = event.get("message") if isinstance(event.get("message"), dict) else {}
+            content = message.get("content") if isinstance(message.get("content"), list) else []
+            for block in content:
+                mine = workflows.get(block.get("tool_use_id")) if isinstance(block, dict) else None
+                if mine and block.get("type") == "tool_result":
+                    mine["is_error"] = block.get("is_error") is True
+    return init, result, started, list(calls.values()), list(workflows.values())
 
 
 def plugin_loaded(init: dict) -> bool:
@@ -558,7 +586,7 @@ def spend_by_agent(ledger: list[dict], types: dict[str, str], total: object) -> 
     return spend
 
 
-ROUTED_KEYS = ("agent", "level", "model", "effort", "source", "escalated_from", "on_record")  # on_record only when false
+ROUTED_KEYS = ("agent", "kind", "level", "model", "effort", "source", "escalated_from", "on_record")  # on_record only when false
 
 
 def spawns(ledger: list[dict]) -> list[dict]:
@@ -651,11 +679,13 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
         (work / ".claude" / "model-router.json").write_text(json.dumps(config["router_config"]), encoding="utf-8")
     arm = options.get("arm", "delegate")
     cmd, env = command(prompt(task, arm, config), config,
-                       {**options, "config_dir": str(scratch / "config"), "scratch": str(scratch)}, dict(os.environ))
+                       {**options, "config_dir": str(scratch / "config"), "scratch": str(scratch)}, dict(os.environ),
+                       shape_of(task, arm))
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     plugin_state = state_hashes(plugin_data_dir(env)) if config.get("plugin") else None
     clock = time.monotonic()
     stdout, stderr, code, wall_ms, result, init, started_agents, calls = "", "interrupted", None, None, {}, {}, {}, []
+    workflows: list[dict] = []
     ledger, types, final, graded, kept, stopped, priced, transcripts = None, {}, None, None, None, None, None, None
     # Once claude starts the run costs money: whatever stops it or the steps after it, its row is still built and its
     # scratch removed. With no result the row is priced from its transcripts, or charged the whole budget.
@@ -667,7 +697,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
             stdout, stderr, code = _text(exc.stdout), "timed out", None
         # The run's wall time: Claude Code's own duration_ms can fall short of it.
         wall_ms = round((time.monotonic() - clock) * 1000)
-        init, result, started_agents, calls = read_stream(stdout)
+        init, result, started_agents, calls, workflows = read_stream(stdout)
         answer = result.get("result") or ""
         (scratch / "answer.txt").write_text(answer, encoding="utf-8")
         if not isinstance(result.get("total_cost_usd"), (int, float)) or result.get("subtype") == "error_during_execution":
@@ -701,7 +731,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
                   "grade": graded._asdict(), "final_answer": final,
                   "plugin_state": plugin_state, "ledger": ledger, "agent_types": types,
                   "kept": kept and str(kept), "init": init, "agents_started": started_agents,
-                  "agent_calls": calls,
+                  "agent_calls": calls, "workflow_calls": workflows,
                   "agent_overrides": sum(bool(c["named_model"] or c["named_effort"]) for c in calls),
                   "transcript_cost": priced, "transcripts": transcripts and str(transcripts)})
     if stopped is not None:
@@ -734,6 +764,11 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
     models = {name: {k: usage.get(k) for k in ("inputTokens", "outputTokens", "cacheReadInputTokens",
                                                 "cacheCreationInputTokens", "costUSD", "costBasis")}
               for name, usage in (result.get("modelUsage") or {}).items()}
+    # modelUsage counts subagents and workflow agents too; result.usage counts only the main loop.
+    usage = result.get("modelUsage")
+    cache = {field: sum(u.get(key) or 0 for u in usage.values() if isinstance(u, dict)) if isinstance(usage, dict) else None
+             for field, key in (("cache_read_tokens", "cacheReadInputTokens"),
+                                ("cache_write_tokens", "cacheCreationInputTokens"), ("fresh_input_tokens", "inputTokens"))}
     cost = result.get("total_cost_usd")
     ledger, code = facts["ledger"], facts["exit_code"]
     stderr = facts["stderr"][-300:] if code else ""
@@ -755,7 +790,7 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
     off_pin = None if pinned is None or arm != "delegate" else bool(not started or set(started) - set(pinned) or overrides)
     return {
         "schema": ROW_SCHEMA, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
-        "shape": task.get("shape", "single") if arm == "delegate" else "single", "config": config["id"], "arm": arm,
+        "shape": shape_of(task, arm), "config": config["id"], "arm": arm,
         "batch": options.get("batch"), "order_seed": options.get("seed"),
         "started_at": facts["started_at"], "claude_version": options["claude_version"],
         "main_model": config.get("model", options["model"]),
@@ -781,8 +816,9 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         "cost_known": known, "cost_source": source,
         "duration_ms": result.get("duration_ms"), "duration_api_ms": result.get("duration_api_ms"),
         "wall_ms": facts["wall_ms"], "num_turns": result.get("num_turns"),
-        "models": models, "prices": {name: registry_config.price(name) for name in models},
+        "models": models, "prices": {name: registry_config.price(name) for name in models}, **cache,
         "agents_started": started, "agent_calls": facts.get("agent_calls") or [], "agent_overrides": overrides,
+        "workflow_calls": facts.get("workflow_calls") or [],
         "off_pin": off_pin,
         "permission_denials": [_denial(d) for d in result.get("permission_denials") or [] if isinstance(d, dict)],
         "passed": facts["grade"]["verdict"] == "pass", "grade": facts["grade"],

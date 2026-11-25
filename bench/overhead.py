@@ -4,8 +4,8 @@
     python3 bench/overhead.py [--runs 30] [--calls 1000] [--json]
 
 Every run uses throwaway CLAUDE_PLUGIN_DATA, CLAUDE_CONFIG_DIR and project folders, so the
-real plugin state is never read or written, and the daily check is off, so nothing goes
-over the network. Standard library only.
+real plugin state is never read or written. The plugin makes no network call. Standard
+library only.
 """
 from __future__ import annotations
 
@@ -138,8 +138,9 @@ def seed(box: Sandbox) -> None:
 
 
 def hook_latency(base: Path, inputs: dict, runs: int) -> list[dict]:
-    """Cold: no bytecode cache and no state, as on the first hook after installing or updating.
-    Warm: bytecode and a seeded session in place, as on every later hook."""
+    """Cold: no state, as on a session's first hook. Bytecode the launcher's Python wrote on an earlier
+    hook is still used, since its -I ignores PYTHONPYCACHEPREFIX, so the first hook after installing or
+    updating is slower than this. Warm: a seeded session in place, as on every later hook."""
     rows = []
     for command, payload in inputs.items():
         cold = []
