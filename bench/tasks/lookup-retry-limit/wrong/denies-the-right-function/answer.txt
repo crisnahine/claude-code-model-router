@@ -1,0 +1,1 @@
+It is not read_retry_limit in app/settings.py; the limit is read by fetch in app/client.py.

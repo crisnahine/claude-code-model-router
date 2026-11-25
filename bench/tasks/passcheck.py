@@ -68,7 +68,7 @@ def raises(fn, *args) -> bool:
 def answer(work: Path, name: str, encoding: str = "utf-8") -> dict:
     try:
         data = json.loads((Path(work) / name).read_text(encoding=encoding))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):  # JSON nested too deep raises RecursionError
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -96,7 +96,7 @@ def finding(work: Path, target: str, lines: set) -> bool:
     """FINDING.json is one finding, exactly {"file", "line"} plus an optional "why" string, naming target at one of lines."""
     try:
         d = json.loads((Path(work) / "FINDING.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         d = None
     return bool(isinstance(d, dict) and set(d) - {"why"} == {"file", "line"} and isinstance(d.get("why", ""), str)
                 and isinstance(d["file"], str) and ("/" + d["file"].replace("\\", "/")).endswith("/" + target)
@@ -131,5 +131,5 @@ def probe(work: Path, script: Path, payload, timeout: int = 45):
         return None
     try:
         return json.loads(lines[-1])
-    except ValueError:
+    except (ValueError, RecursionError):
         return None

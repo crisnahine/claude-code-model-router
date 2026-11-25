@@ -38,10 +38,17 @@ OPUS = "claude-opus-5-5"
 
 
 def full_row(**changes):
-    """A row as run.record writes it, from a real result line, with `changes` applied."""
+    """A row as run.record writes it, from a real result line, with `changes` applied. A row of a task in bench/tasks
+    carries today's check hash, as a run of it would."""
     result = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    return dict(run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}), result,
-                           Recorder.facts), **changes)
+    row = dict(run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}), result,
+                          Recorder.facts), **changes)
+    return graded_today(row) if "grade" not in changes else row
+
+
+def graded_today(row):
+    check = run.BENCH / "tasks" / row["task"] / "check.py"
+    return dict(row, grade=dict(row["grade"], check_hash=run.check_hash(check))) if check.is_file() else row
 
 
 def rows(config, cls, costs, passes, task=None, **extra):
@@ -79,7 +86,7 @@ class Analysis(unittest.TestCase):
                 + spread("haiku-high", "lookup", 6, 12, 0.05))
         row = self.summary(data)["lookup"]
         self.assertEqual({b: v["verdict"] for b, v in row["verdicts"].items()}, {"defaults": "WIN", "haiku-high": "LOSE"})
-        self.assertEqual((row["status"], row["best_baseline"], row["rank"]), ("LOSE", "haiku-high", 2))
+        self.assertEqual((row["status"], row["rank"]), ("LOSE", 2))
 
     def test_a_win_needs_cost_below_and_the_pass_rate_within_the_margin(self):
         v = self.verdict(spread("plugin", "lookup", 6, 12, 0.10) + spread("defaults", "lookup", 6, 12, 0.50))
@@ -110,7 +117,15 @@ class Analysis(unittest.TestCase):
         self.assertEqual(analyze._status({"a": {"verdict": "WIN"}, "b": {"verdict": "WIN"}}), "WIN")
 
     def test_behind_beyond_noise_loses_even_inside_the_margin(self):
-        self.assertEqual(analyze._judge("defaults", (-0.08, -0.01), (-0.05, -0.01), False)[0], "LOSE")
+        self.assertEqual(analyze._judge("defaults", (-0.08, -0.01), (-0.05, -0.01), False, (9, 10, 9, 10))[0], "LOSE")
+
+    def test_a_pass_rate_the_exact_test_puts_behind_loses_where_the_added_runs_hide_it(self):
+        # The solved and failed runs added per task shrink every pass-rate gap by n / (n + 2).
+        v = self.verdict(spread("plugin", "lookup", 5, 3, 0.1, solved=2) + spread("defaults", "lookup", 5, 3, 0.5))
+        self.assertGreaterEqual(v["pass_ci"][1], 0)
+        self.assertEqual(v["verdict"], "LOSE")
+        self.assertIn("solved 10 of 15 runs against 15 of 15 (exact one-sided p = 0.021)", v["reason"])
+        self.assertIn("an exact one-sided test", analyze.build_page(analyze.load([])))
 
     def test_a_baseline_with_more_than_a_quarter_of_runs_denied_gets_no_verdict(self):
         theirs = spread("defaults", "lookup", 6, 12, 0.50)
@@ -201,14 +216,30 @@ class Analysis(unittest.TestCase):
                 + rows("defaults", "bugfix", [0.2] * 10, [True] * 10))
         row = {s["class"]: s for s in analyze.summarize(data, routers=frozenset({"plugin", "plugin-nogate"}),
                                                        draws=200)}["bugfix"]
-        self.assertEqual((row["best_baseline"], row["rank"], set(row["verdicts"])), ("defaults", 2, {"defaults"}))
+        self.assertEqual((row["rank"], set(row["verdicts"])), (2, {"defaults"}))
         self.assertIn("plugin-nogate", row["configs"])  # still shown on the page
 
     def test_cells_on_different_tasks_get_no_verdict(self):
         other = [dict(r, task="lookup-2") for r in rows("defaults", "lookup", [0.5] * 10, [True] * 10)]
         v = self.verdict(rows("plugin", "lookup", [0.1] * 10, [True] * 10) + other)
         self.assertEqual(v["verdict"], "REFUSED")
-        self.assertIn("different tasks", v["reason"])
+        self.assertIn("`lookup-1` ran 10 times under `plugin` and 0 under `defaults`, and 1 more", v["reason"])
+
+    def test_two_sides_that_ran_a_task_a_different_number_of_times_get_no_verdict(self):
+        # The two behave the same on every task; one ran its cheap tasks more often, the other its dear ones.
+        def side(config, cheap, dear):
+            return [r for t in range(12) for n, usd in ((cheap, 0.10) if t < 6 else (dear, 1.00),)
+                    for r in rows(config, "lookup", [usd] * n, [True] * n, f"lookup-{t}")]
+        v = self.verdict(side("plugin", 10, 9) + side("defaults", 9, 10))
+        self.assertEqual(v["verdict"], "REFUSED")
+        self.assertIn("`lookup-0` ran 10 times under `plugin` and 9 under `defaults`, and 11 more", v["reason"])
+        self.assertEqual(self.verdict(side("plugin", 10, 10) + side("defaults", 10, 10))["verdict"], "NONE")
+        # The same batches on both sides, but no task's runs share one.
+        apart = [dict(r, batch="b1" if int(r["task"][-1]) < 5 else "b2") for r in spread("plugin", "lookup", 10, 10, 0.1)]
+        apart += [dict(r, batch="b2" if int(r["task"][-1]) < 5 else "b1") for r in spread("defaults", "lookup", 10, 10, 0.5)]
+        v = self.verdict(apart)
+        self.assertEqual(v["verdict"], "REFUSED")
+        self.assertIn("`lookup-0` in batch `b1` ran 10 times under `plugin` and 0 under `defaults`", v["reason"])
 
     def test_more_than_a_quarter_of_runs_with_a_bash_denial_gets_no_verdict(self):
         denied = [{"tool": "Bash", "input": "python3 -m unittest"}]
@@ -223,12 +254,85 @@ class Analysis(unittest.TestCase):
         self.assertIn("Bash denied in 19 of 72 `plugin` runs", v["reason"])
         self.assertEqual(analyze.bash_denials(ours), (19, 72))
 
+    def test_a_verdict_never_mixes_plugin_builds_budgets_versions_or_uncommitted_code(self):
+        ours, theirs = spread("plugin", "lookup", 6, 12, 0.10), spread("defaults", "lookup", 6, 12, 0.50)
+        self.assertEqual(self.verdict(ours + theirs)["verdict"], "WIN")
+        # A task may run at its own budget, as long as both sides ran it at that one.
+        dear = lambda side: [dict(r, budget_usd=2.0 if r["task"] == "lookup-3" else 0.5) for r in side]  # noqa: E731
+        self.assertEqual(self.verdict(dear(ours) + dear(theirs))["verdict"], "WIN")
+        cases = (([dict(r, plugin_hash=f"h{i % 2}") for i, r in enumerate(ours)], theirs,
+                  "`plugin`'s runs loaded 2 plugin builds (`plugin_hash`)"),
+                 (dear(ours), [dict(r, budget_usd=0.5) for r in theirs],
+                  "`lookup-3` ran at budget 2.0 under `plugin` and 0.5 under `defaults` (`budget_usd`)"),
+                 (ours, [dict(r, claude_version="2.1.333" if r["task"] == "lookup-0" else None) for r in theirs],
+                  "`lookup-0` ran at Claude Code None under `plugin` and 2.1.333 under `defaults` (`claude_version`)"),
+                 (ours, [dict(r, bench_dirty=i < 2) for i, r in enumerate(theirs)],
+                  "2 of the runs ran from code with uncommitted changes (`bench_dirty`)"))
+        for mine, yours, why in cases:
+            with self.subTest(why=why):
+                v = self.verdict(mine + yours)
+                self.assertEqual(v["verdict"], "REFUSED")
+                self.assertIn(why, v["reason"])
+
+    def test_a_run_the_harness_stopped_counts_as_failed_and_the_page_counts_them(self):
+        base = full_row(task="bugfix-median", main_model="sonnet", passed=True, **{"class": "bugfix"})
+        older = {k: v for k, v in base.items() if k != "stopped_by"}  # a row from before the field
+        data = [dict(older, config="defaults", exit_code=None, subtype=None),
+                dict(older, config="defaults", exit_code=1, subtype="error_max_budget_usd"),
+                dict(older, config="defaults"), dict(base, config="plugin", stopped_by="budget"), dict(base, config="plugin")]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.jsonl"
+            path.write_text("".join(json.dumps(r) + "\n" for r in data), encoding="utf-8")
+            loaded = analyze.load([path])
+            page = analyze.build_page(loaded)
+        self.assertEqual([(r["config"], r["passed"], r.get("stopped_by")) for r in loaded.rows],
+                         [("defaults", False, "timeout"), ("defaults", False, "budget"), ("defaults", True, None),
+                          ("plugin", False, "budget"), ("plugin", True, None)])
+        self.assertIn("- Runs the harness stopped, by configuration: `defaults` 2 of 3 (1 by the budget cap, 1 by the "
+                      "timeout); `plugin` 1 of 2 (1 by the budget cap).", page)
+        self.assertIn("A run the harness stopped, by the timeout or by the budget cap", page)
+
+    def test_a_baseline_whose_stopped_runs_decide_the_verdict_gets_no_verdict(self):
+        # Half the baseline's runs hit the cap: as failures they make the dearer router the cheaper per solved task.
+        theirs = spread("defaults", "lookup", 6, 12, 0.20)
+        for r in theirs[::2]:
+            r.update(passed=False, stopped_by="budget")
+        v = self.verdict(spread("plugin", "lookup", 6, 12, 0.30) + theirs)
+        self.assertEqual(v["verdict"], "REFUSED")
+        self.assertIn("36 of `defaults`'s 72 runs were stopped by the harness (36 by the budget cap); counted as "
+                      "solved, the verdict would be LOSE", v["reason"])
+        # A few stopped runs that don't decide it leave the verdict, and the router's own count against it.
+        dear = spread("defaults", "lookup", 6, 12, 0.50)
+        dear[0].update(passed=False, stopped_by="timeout")
+        self.assertEqual(self.verdict(spread("plugin", "lookup", 6, 12, 0.10) + dear)["verdict"], "WIN")
+        ours = spread("plugin", "lookup", 6, 12, 0.10, solved=6)
+        for r in ours:
+            r.update(stopped_by=None if r["passed"] else "budget")
+        self.assertEqual(self.verdict(ours + spread("defaults", "lookup", 6, 12, 0.50))["verdict"], "LOSE")
+
+    def test_a_current_row_graded_by_another_check_stops_the_page(self):
+        task = next(t for t in run.load_tasks() if t["id"] == "lookup-todo-count")
+        today = {"verdict": "pass", "reason": "solved", "check_hash": run.check_hash(task["dir"] / "check.py")}
+        good = full_row(task=task["id"], task_revision=task["revision"], grade=today)
+        other = dict(good, grade=dict(today, check_hash="f" * 16))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.jsonl"
+            path.write_text(json.dumps(good) + "\n", encoding="utf-8")
+            self.assertEqual(len(analyze.load([path]).rows), 1)
+            path.write_text(json.dumps(other) + "\n", encoding="utf-8")
+            with self.assertRaises(SystemExit) as raised:
+                analyze.load([path])
+            self.assertIn(f"`lookup-todo-count`: a row graded by check ffffffffffffffff, today's is {today['check_hash']}",
+                          str(raised.exception))
+            path.write_text(json.dumps(dict(other, task_revision=0)) + "\n", encoding="utf-8")
+            self.assertEqual(len(analyze.load([path]).stale), 1)  # an earlier revision is left out, not checked
+
     def test_batches_that_did_not_run_together_get_no_verdict(self):
         ours = spread("plugin", "lookup", 6, 12, 0.10, batch="b1")
         self.assertEqual(self.verdict(ours + spread("defaults", "lookup", 6, 12, 0.50, batch="b1"))["verdict"], "WIN")
         v = self.verdict(ours + spread("defaults", "lookup", 6, 12, 0.50, batch="b2"))
         self.assertEqual(v["verdict"], "REFUSED")
-        self.assertIn("different batches", v["reason"])
+        self.assertIn("`lookup-0` in batch `b1` ran 12 times under `plugin` and 0 under `defaults`", v["reason"])
 
     def test_pass_rate_intervals_are_exact_binomial(self):
         self.assertAlmostEqual(analyze.exact_interval(10, 10)[0], 0.025 ** 0.1, places=6)
@@ -255,6 +359,19 @@ class Analysis(unittest.TestCase):
                          self.FORCED)
         self.assertIs(q["saturated"], False)
 
+    def test_with_one_forced_model_defaults_is_the_strong_end(self):
+        forced = analyze.forced_ranks(run.load_configs(), analyze.mrconfig.shipped())
+        data = [r for c, usd in (("plugin", 0.1), ("defaults", 0.3), ("haiku-high", 0.1))
+                for r in spread(c, "lookup", 6, analyze.MIN_RUNS, usd)]
+        q = self.quality(data, forced)
+        self.assertEqual((q["saturated"], q["weakest"], q["strongest"]), (True, "haiku-high", "defaults"))
+        rows = [full_row(task=r["task"], config=r["config"], total_cost_usd=r["total_cost_usd"], **{"class": "lookup"})
+                for r in data]
+        page = analyze.build_page(dataclasses.replace(analyze.load([]), rows=rows))
+        self.assertIn("1 of 1 class rows below are saturated", page)
+        self.assertIn("an equal pass rate there says nothing about quality", page)
+        self.assertIn("- lookup: saturated, haiku-high solved 60 of 60, defaults 60 of 60", page)
+
     def test_forced_baselines_on_one_model_cannot_show_saturation(self):
         n = analyze.MIN_RUNS
         data = (rows("plugin", "lookup", [0.1] * n, [True] * n) + rows("opus", "lookup", [0.4] * n, [True] * n)
@@ -272,27 +389,33 @@ class Analysis(unittest.TestCase):
 
     def test_a_task_splits_the_models_when_the_strong_one_solves_most_and_the_weak_one_few(self):
         def task_rows(task, strong, weak):
-            return [{"task": task, "config": c, "passed": p} for c, ps in (("opus", strong), ("sonnet", weak)) for p in ps]
+            return [{"task": task, "config": c, "passed": p} for c, ps in (("defaults", strong), ("haiku-high", weak))
+                    for p in ps]
         data = (task_rows("a", [True, True, False], [False, True, False])   # 2 of 3 and 1 of 3: splits
                 + task_rows("b", [True, True, True], [True, False, False])  # 1 of 3: splits
                 + task_rows("c", [True, False, False], [False, False, False])  # strong under 2 of 3
                 + task_rows("d", [True, True, True], [True, True, False]))  # weak over 1 of 3
         self.assertEqual(analyze.splitting_tasks(data), ["a", "b"])
-        self.assertIsNone(analyze.splitting_tasks([r for r in data if r["config"] == "opus"]))
+        self.assertIsNone(analyze.splitting_tasks([r for r in data if r["config"] == "defaults"]))
 
     def test_forced_baselines_rank_by_model_strength_then_effort(self):
-        ranks = analyze.forced_ranks(run.load_configs(), analyze.mrconfig.shipped())
-        self.assertLess(ranks["haiku"], ranks["haiku-high"])
-        self.assertLess(ranks["haiku-low"], ranks["haiku-medium"])
+        def forced(name, model, effort=None):
+            env = {"CLAUDE_CODE_SUBAGENT_MODEL": model, "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}
+            return {"id": name, "env": {**env, **({"CLAUDE_CODE_SUBAGENT_EFFORT": effort} if effort else {})}}
+        configs = [forced("haiku", "haiku"), forced("haiku-low", "haiku", "low"), forced("haiku-high", "haiku", "high"),
+                   forced("sonnet-low", "sonnet", "low"), forced("opus", "opus"), {"id": "unforced", "env": {}}]
+        ranks = analyze.forced_ranks(configs, analyze.mrconfig.shipped())
+        self.assertLess(ranks["haiku"], ranks["haiku-low"])
+        self.assertLess(ranks["haiku-low"], ranks["haiku-high"])
         self.assertLess(ranks["haiku-high"], ranks["sonnet-low"])
-        self.assertLess(ranks["sonnet-high"], ranks["opus"])
-        self.assertLess(ranks["opus-high"], ranks["fable"])
-        for name in ("defaults", "sonnet-via-opusplan", "pinned", "session-haiku-low"):
-            self.assertNotIn(name, ranks)
+        self.assertLess(ranks["sonnet-low"], ranks["opus"])
+        self.assertNotIn("unforced", ranks)
+        shipped = analyze.forced_ranks(run.load_configs(), analyze.mrconfig.shipped())
+        self.assertEqual(set(shipped), {"haiku-high"})
 
     def test_a_class_with_no_router_or_baseline_has_no_verdict(self):
         row = self.summary(rows("defaults", "lookup", [0.3], [True]))["lookup"]
-        self.assertEqual((row["verdicts"], row["differences"], row["status"]), ({}, {}, "REFUSED"))
+        self.assertEqual((row["verdicts"], row["status"]), ({}, "REFUSED"))
 
     @staticmethod
     def page_args(tmp, name="page.md"):
@@ -437,10 +560,19 @@ class Analysis(unittest.TestCase):
             pilot = Path(tmp) / "pilot"
             pilot.mkdir()
             batch = dict(batch="ladder-1", main_model="claude-opus-5-5")
-            lines = [full_row(config="plugin-cheap", plugin_ref="f" * 40, total_cost_usd=0.25, passed=True, **batch),
-                     full_row(config="plugin-cheap", plugin_ref="f" * 40, total_cost_usd=0.27, passed=True, **batch),
-                     full_row(config="defaults", plugin_ref=None, plugin_loaded=None, total_cost_usd=0.4, passed=False, **batch),
-                     full_row(config="defaults", plugin_ref=None, plugin_loaded=None, total_cost_usd=0.2, passed=True,
+            loaded = dict(bench_commit="f" * 40, plugin_loaded=True, passed=True)
+            lines = [full_row(config="plugin-cheap", total_cost_usd=0.25, **loaded, **batch),
+                     full_row(config="plugin-cheap", total_cost_usd=0.27, **loaded, **batch),
+                     full_row(config="defaults", plugin_loaded=None, total_cost_usd=0.4, passed=False, **batch),
+                     # An older row a timeout stopped, graded on what it had written by then.
+                     {k: v for k, v in full_row(config="defaults", plugin_loaded=None, total_cost_usd=0.2, passed=True,
+                                                exit_code=None, subtype=None, **batch).items() if k != "stopped_by"},
+                     # Neither a run on an earlier revision nor one whose check broke is counted.
+                     full_row(config="defaults", task="ops-inbox-triage", task_revision=1, total_cost_usd=0.5,
+                              passed=True, **batch),
+                     dict(full_row(config="defaults", total_cost_usd=0.75, passed=False, **batch),
+                          grade={"verdict": "broken", "reason": "NameError: x", "check_hash": "b" * 16}),
+                     full_row(config="defaults", plugin_loaded=None, total_cost_usd=0.2, passed=True,
                               batch="calibration-1", main_model="claude-opus-5-5", started_at="2020-01-01T00:00:00+00:00")]
             (pilot / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in lines), encoding="utf-8")
             (pilot / "notes.json").write_text(json.dumps({"ladder-1": "Two ladders beside the defaults."}), encoding="utf-8")
@@ -454,10 +586,14 @@ class Analysis(unittest.TestCase):
         self.assertIn("No judged round has been recorded yet", page.split("\n\n")[1])
         section = page.split("## Exploratory rounds", 1)[1]
         self.assertLess(section.index("`calibration-1`"), section.index("`ladder-1`"))  # oldest first
-        self.assertIn("### `ladder-1`: 3 runs", section)
+        self.assertIn("### `ladder-1`: 4 runs", section)
         self.assertIn("Two ladders beside the defaults.", section)
-        self.assertIn("| `plugin-cheap` | 2 | 2 | $0.260 | `fffffff` |", section)
-        self.assertIn("| `defaults` | 1 | 0 | $0.400 |  |", section)  # a set-aside run is not counted
+        self.assertIn("| `plugin-cheap` | 2 | 2 | none | $0.260 | `fffffff` |", section)
+        self.assertIn("| `defaults` | 2 | 0 | 1 by the timeout | $0.300 |  |", section)  # a set-aside run is not counted
+        self.assertIn("A run the harness stopped, by the timeout or the budget cap, counts as failed", section)
+        self.assertIn("Left out of the table: 1 run(s) ($0.50) on an earlier revision of `ops-inbox-triage` and 1 "
+                      "run(s) ($0.75) whose pass check broke.", section)
+        self.assertIn("### `calibration-1`: 1 runs", section)
         self.assertNotRegex(section, r"WIN|LOSE|no difference shown")
         self.assertNotIn("## Results", page)  # a pilot row is never a judged row
 
@@ -494,29 +630,6 @@ class Analysis(unittest.TestCase):
         self.assertIn("bugfix: no difference shown against `defaults`", sonnet_part)
         self.assertNotIn("$0.9000", sonnet_part)
         self.assertIn("router: `plugin-nogate`", chosen.split("## Results: session model `claude-opus-5-5`")[1])
-
-    def test_a_configuration_with_its_own_session_model_joins_every_table(self):
-        # opusplan sets its own --model, so its runs are the same whichever session the batch used.
-        real = full_row(task="bugfix-median", batch="b1", **{"class": "bugfix"})
-        n = analyze.MIN_RUNS
-        rows = [dict(real, main_model=m, config=c, total_cost_usd=usd, passed=True)
-                for m, c, usd in (("claude-opus-5-5", "plugin", 0.5), ("claude-opus-5-5", "defaults", 0.9),
-                                  ("sonnet", "plugin", 0.3), ("sonnet", "defaults", 0.2),
-                                  ("opusplan", "sonnet-via-opusplan", 0.1)) for _ in range(n)]
-        with tempfile.TemporaryDirectory() as tmp:
-            res = Path(tmp) / "results"
-            res.mkdir()
-            (res / "a-bugfix.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-            out = Path(tmp) / "page.md"
-            analyze.main([str(res / "a-bugfix.jsonl"), "--out", str(out)])
-            page = out.read_text(encoding="utf-8")
-        self.assertNotIn("## Results: session model `opusplan`", page)
-        for model in ("claude-opus-5-5", "sonnet"):
-            part = page.split(f"## Results: session model `{model}`")[1].split("## ")[0]
-            self.assertIn("| sonnet-via-opusplan |", part)
-        self.assertIn("Session models: claude-opus-5-5, sonnet (`--model`), one results table each", page)
-        self.assertIn("A configuration that sets its own model is shown in every table of its arm.", page)
-        self.assertIn(f"`sonnet-via-opusplan` b1 ({n})", page)
 
     def test_the_page_says_each_run_has_its_own_config_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -561,7 +674,7 @@ class Analysis(unittest.TestCase):
                       "on 0, not routed", row)
         self.assertIn("- Runs with a Bash denial, by configuration: `defaults` 0 of 2; `plugin` 1 of 3.", page)
         never = next(line for line in page.splitlines() if line.startswith("Defined in `bench/configs.json` but"))
-        for name in ("`haiku-high`", "`opus-high`", "`fable-high`", "`sonnet-high`", "`pinned`"):
+        for name in ("`haiku-high`", "`plugin-nogate`"):
             self.assertIn(name, never)
         self.assertNotIn("`defaults`", never)
 
@@ -651,7 +764,7 @@ class Recorder(unittest.TestCase):
     facts = {"started_at": "2026-11-23T00:00:00+00:00", "wall_ms": 7000, "exit_code": 0, "stderr": "",
              "grade": {"verdict": "pass", "reason": "solved", "check_hash": "0123456789abcdef"},
              "final_answer": {"reply": "DONE", "files": {}, "removed": [], "omitted": []},
-             "plugin_state": None, "ledger": None, "agent_types": {}, "kept": None}
+             "ledger": None, "agent_types": {}, "kept": None}
 
     def row(self, result, **facts):
         return run.record(self.task, self.config, self.options, run.mrconfig.build({}), result, {**self.facts, **facts})
@@ -756,13 +869,11 @@ class Recorder(unittest.TestCase):
     def test_the_schedule_is_shuffled_by_its_seed_and_numbers_runs(self):
         tasks, configs = [{"id": "t"}, {"id": "u"}], [{"id": "a"}, {"id": "b"}, {"id": "c"}]
 
-        def order(seed, arms=("delegate",)):
-            return [(i, t["id"], c["id"], arm) for i, t, c, arm in run.schedule(tasks, configs, 2, 1, seed, arms)]
+        def order(seed):
+            return [(i, t["id"], c["id"]) for i, t, c in run.schedule(tasks, configs, 2, 1, seed)]
         self.assertEqual(order(3), order(3))
         self.assertNotEqual(order(3), order(4))
-        self.assertEqual(sorted(order(3)), sorted((i, t, c, "delegate") for i in (1, 2) for t in "tu" for c in "abc"))
-        self.assertEqual({arm for *_, arm in order(3, ("delegate", "direct"))}, {"delegate", "direct"})
-        self.assertEqual(len(order(3, ("delegate", "direct"))), 24)
+        self.assertEqual(sorted(order(3)), sorted((i, t, c) for i in (1, 2) for t in "tu" for c in "abc"))
 
     def test_a_claude_prefix_passes_through_whole(self):
         options = {"claude": ["C:/Program Files/Python313/python.exe", "stub.py"], "model": "sonnet", "budget": 0.5}
@@ -778,9 +889,10 @@ class Runner(unittest.TestCase):
                 "CLAUDE_PLUGIN_ROOT": "/elsewhere", "CLAUDE_CODE_USE_BEDROCK": "1"}
         configs = {c["id"]: c for c in run.load_configs()}
         options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
-        cmd, env = run.command("do it", configs["haiku"], options, base)
-        self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]), ("haiku", "1"))
-        for name in ("CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_EFFORT", "CLAUDECODE", "CLAUDE_CODE_SESSION_ID",
+        cmd, env = run.command("do it", configs["haiku-high"], options, base)
+        self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"],
+                          env["CLAUDE_CODE_SUBAGENT_EFFORT"]), ("haiku", "1", "high"))
+        for name in ("CLAUDE_CODE_EFFORT_LEVEL", "CLAUDECODE", "CLAUDE_CODE_SESSION_ID",
                      "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_PLUGIN_ROOT"):
             self.assertNotIn(name, env)
         self.assertEqual((env["PATH"], env["CLAUDE_CODE_USE_BEDROCK"]), ("/bin", "1"))
@@ -833,12 +945,93 @@ class Runner(unittest.TestCase):
         self.assertGreaterEqual(row["wall_ms"], 1000)
 
 
+    def test_a_run_the_harness_stopped_is_not_solved_whatever_its_files_hold(self):
+        task = next(t for t in run.load_tasks() if t["id"] == "security-sql-injection")
+        defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
+        for how, stopped in (("hang", "timeout"), ("cap", "budget"), ("finish", None)):
+            with self.subTest(how=how), tempfile.TemporaryDirectory() as tmp:
+                options = {"claude": stub(tmp, STOPPED_STUB), "model": "sonnet", "budget": 0.5, "timeout": 2,
+                           "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
+                with unittest.mock.patch.dict("os.environ", {"STUB_HOW": how}):
+                    row = run.run_one(task, defaults, options, {})
+                self.assertEqual((row["stopped_by"], row["passed"]), (stopped, stopped is None), row["grade"])
+                self.assertIn("FINDING.json", row["final_answer"]["files"])  # the files would have passed
+                if stopped:
+                    self.assertIn(f"the harness stopped the run ({stopped})", row["grade"]["reason"])
+
+
+    @unittest.skipIf(sys.platform == "win32", "Windows has no process group for the harness to kill")
+    def test_a_run_stopped_by_a_timeout_or_an_interrupt_leaves_no_process_behind(self):
+        task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+        defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
+        real = subprocess.Popen.communicate
+
+        def interrupted(proc, *args, **kwargs):
+            """Ctrl-C once the stub has started its child."""
+            if "--output-format" not in proc.args:
+                return real(proc, *args, **kwargs)
+            for _ in range(200):
+                if child.is_file() and child.read_text():
+                    break
+                time.sleep(0.05)
+            raise KeyboardInterrupt
+
+        for how in ("timeout", "interrupt"):
+            with self.subTest(how=how), tempfile.TemporaryDirectory() as tmp:
+                child = Path(tmp) / "child.pid"
+                options = {"claude": stub(tmp, ORPHAN_STUB), "model": "sonnet", "budget": 0.5,
+                           "timeout": 3 if how == "timeout" else 60, "plugin_dir": str(run.PLUGIN),
+                           "claude_version": "9.9.9 (stub)", "commit": None}
+                with unittest.mock.patch.dict("os.environ", {"STUB_CHILD": str(child)}), \
+                        (unittest.mock.patch.object(subprocess.Popen, "communicate", interrupted) if how == "interrupt"
+                         else contextlib.nullcontext()), \
+                        (self.assertRaises(KeyboardInterrupt) if how == "interrupt" else contextlib.nullcontext()):
+                    run.run_one(task, defaults, options, {})
+                pid = int(child.read_text())
+                for _ in range(100):
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.05)
+                else:
+                    os.kill(pid, 9)
+                    self.fail(f"the run's child {pid} outlived the run")
+
+
+ORPHAN_STUB = '''#!/usr/bin/env python3
+import os, subprocess, sys, time
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+with open(os.environ["STUB_CHILD"], "w") as fh:
+    fh.write(str(child.pid))
+time.sleep(60)
+'''
+
+
 HANGING_STUB = '''#!/usr/bin/env python3
 import sys, time
 if "--version" in sys.argv:
     print("9.9.9 (stub)"); sys.exit(0)
 print('{"result": "half an ans', flush=True)
 time.sleep(30)
+'''
+
+# Leaves a passing FINDING.json, then hangs, stops at the budget cap as Claude Code does, or finishes.
+STOPPED_STUB = '''#!/usr/bin/env python3
+import json, os, sys, time
+from pathlib import Path
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+Path("FINDING.json").write_text(json.dumps({"file": "db/users.py", "line": 6}))
+how = os.environ["STUB_HOW"]
+if how == "hang":
+    time.sleep(30)
+capped = how == "cap"
+print(json.dumps({"type": "result", "subtype": "error_max_budget_usd" if capped else "success", "is_error": capped,
+                  "result": "", "total_cost_usd": 0.5 if capped else 0.1, "modelUsage": {}}))
+sys.exit(1 if capped else 0)
 '''
 
 
@@ -1052,6 +1245,20 @@ class KnownAnswers(unittest.TestCase):
                         elif kind == "wrong":  # a check that gives reasons pins each wrong answer's
                             self.assertEqual(graded.reason, "the check exited 1", "add an expect.txt")
 
+    def test_a_json_answer_nested_too_deep_to_parse_fails_and_never_breaks_the_check(self):
+        nested = "[" * 100_000 + "]" * 100_000
+        for task in gradable_tasks():
+            answers = sorted((task["dir"] / "solution").glob("*.json")) if (task["dir"] / "solution").is_dir() else []
+            for name in [a.name for a in answers]:
+                with self.subTest(task=task["id"], file=name), tempfile.TemporaryDirectory() as tmp:
+                    work = Path(tmp) / "work"
+                    build_work(task, None, work)
+                    (work / name).write_text(nested, encoding="utf-8")
+                    answer = Path(tmp) / "answer.txt"
+                    answer.write_text(task.get("reference_answer", ""), encoding="utf-8")
+                    graded = run.grade(task["dir"] / "check.py", work, answer, timeout=60)
+                    self.assertEqual(graded.verdict, "fail", graded.reason)
+
     def test_an_answer_folder_changes_something(self):
         for task in run.load_tasks():
             for kind in ("wrong", "right"):
@@ -1173,22 +1380,19 @@ class PluginState(unittest.TestCase):
             self.assertTrue(first["passed"])
             self.assertIn("(fresh)", first["answer"])
             self.assertIn("(fresh)", second["answer"])
-            self.assertEqual(first["plugin_state"], {"state.json": None})
-            self.assertIsNone(baseline["plugin_state"])
+            self.assertTrue(baseline["passed"])
             self.assertIn("bench_dirty", first)
 
     def test_every_run_gets_its_own_config_folder_and_project_name(self):
         options = {"claude": ["claude"], "model": "sonnet", "budget": 0.5, "plugin_dir": "/p", "config_dir": "/s/config"}
         host = {"CLAUDE_CONFIG_DIR": "/home/me/.claude", "CLAUDE_CODE_PLUGIN_CACHE_DIR": "/elsewhere"}
-        # A plugin_ref export needs that commit in the clone, which a shallow CI checkout lacks.
-        with unittest.mock.patch.object(run, "plugin_dir_for", return_value="/p"):
-            for config in run.load_configs():
-                _, env = run.command("do it", config, options, host)
-                self.assertEqual((env["CLAUDE_CONFIG_DIR"], env["CLAUDE_CODE_PROJECT_DIR_NAME"]), ("/s/config", "run"),
-                                 config["id"])
-                self.assertNotIn("CLAUDE_CODE_PLUGIN_CACHE_DIR", env)
-                # It would strip CLAUDE_CONFIG_DIR from the router's hooks and turn sandbox auto-allow off.
-                self.assertNotIn("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", env)
+        for config in run.load_configs():
+            _, env = run.command("do it", config, options, host)
+            self.assertEqual((env["CLAUDE_CONFIG_DIR"], env["CLAUDE_CODE_PROJECT_DIR_NAME"]), ("/s/config", "run"),
+                             config["id"])
+            self.assertNotIn("CLAUDE_CODE_PLUGIN_CACHE_DIR", env)
+            # It would strip CLAUDE_CONFIG_DIR from the router's hooks and turn sandbox auto-allow off.
+            self.assertNotIn("CLAUDE_CODE_SUBPROCESS_ENV_SCRUB", env)
 
     def test_the_data_folder_is_named_from_the_manifest(self):
         self.assertEqual(run.plugin_data_dir({"CLAUDE_CONFIG_DIR": "/c"}),
@@ -1280,20 +1484,15 @@ class Stopped(unittest.TestCase):
             return rows, left + list(runs.iterdir()), sessions
 
     def test_an_interrupt_during_the_claude_call_writes_a_broken_row_charged_the_budget_and_cleans_up(self):
-        real = subprocess.run
-
-        def interrupted(cmd, *args, **kwargs):
+        def interrupted(cmd, work, env, timeout):
             """Ctrl-C mid-call, once the session has started. Raised here, since a real SIGINT that lands inside a
             finalizer of this long-lived process is ignored."""
-            env = kwargs.get("env") or {}
-            if "--version" in cmd or "CLAUDE_CODE_PROJECT_DIR_NAME" not in env:
-                return real(cmd, *args, **kwargs)
             folder = Path(env["CLAUDE_CONFIG_DIR"]) / "projects" / env["CLAUDE_CODE_PROJECT_DIR_NAME"]
             (folder / "s1").mkdir(parents=True)
             (folder / "s1.jsonl").write_text("{}")
             raise KeyboardInterrupt
 
-        with unittest.mock.patch.object(subprocess, "run", interrupted):
+        with unittest.mock.patch.object(run, "run_claude", interrupted):
             rows, scratch, sessions = self.stop(KeyboardInterrupt)
         self.assertEqual([(r["grade"]["verdict"], r["exit_code"], r["cost_known"], r["total_cost_usd"]) for r in rows],
                          [("broken", None, False, 0.5)])
@@ -1348,33 +1547,15 @@ class SuiteCoverage(unittest.TestCase):
                 (work / f"{module}.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
                 self.assertFalse(self.check(task, work))
 
-    def test_each_new_baseline_sets_what_its_name_says(self):
+    def test_the_forced_baseline_sets_what_its_name_says(self):
         configs = {c["id"]: c for c in run.load_configs()}
         options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
-        cmd, env = run.command("x", configs["sonnet-via-opusplan"], options, {})
-        self.assertEqual(cmd[cmd.index("--model") + 1], "opusplan")
-        cmd, env = run.command("x", configs["advisor"], options, {})
-        self.assertEqual((cmd[cmd.index("--model") + 1], cmd[cmd.index("--advisor") + 1]), ("sonnet", "opus"))
-        for name, model, effort in (("sonnet-medium", "sonnet", "medium"), ("sonnet-high", "sonnet", "high"),
-                                    ("haiku-high", "haiku", "high"), ("opus-high", "opus", "high"),
-                                    ("fable-high", "fable", "high")):
-            cmd, env = run.command("x", configs[name], options, {})
-            self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"],
-                              env["CLAUDE_CODE_SUBAGENT_EFFORT"]), (model, "1", effort), name)
-            self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)  # that one would move the main loop too
-            self.assertNotIn("--plugin-dir", cmd)
-            self.assertEqual(configs[name]["price_model"], model)
-        for name in ("haiku", "sonnet", "opus"):
-            cmd, env = run.command("x", configs[name], options, {})
-            self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]),
-                             (name, "1"), name)
-            self.assertNotIn("CLAUDE_CODE_SUBAGENT_EFFORT", env)
-            self.assertNotIn("--plugin-dir", cmd)
-            self.assertEqual(configs[name]["price_model"], name)
-        cmd, env = run.command("x", configs["fable"], options, {})
-        self.assertEqual(env["CLAUDE_CODE_SUBAGENT_MODEL"], "fable")
-        for config in configs.values():
-            self.assertIn(config.get("price_model"), ("haiku", "sonnet", "opus", "fable"), config["id"])
+        cmd, env = run.command("x", configs["haiku-high"], options, {})
+        self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"],
+                          env["CLAUDE_CODE_SUBAGENT_EFFORT"]), ("haiku", "1", "high"))
+        self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)  # that one would move the main loop too
+        self.assertNotIn("--plugin-dir", cmd)
+        self.assertEqual(sorted(configs), ["defaults", "haiku-high", "plugin", "plugin-nogate"])
 
 
 LIMIT_STUB = '''#!/usr/bin/env python3
@@ -1400,21 +1581,16 @@ import json, os, sys
 from pathlib import Path
 if "--version" in sys.argv:
     print("9.9.9 (stub)"); sys.exit(0)
-seen = {"argv": sys.argv[1:], "project": None}
-project = Path.cwd() / ".claude" / "model-router.json"
-if project.is_file():
-    seen["project"] = json.loads(project.read_text())
-Path(os.environ["STUB_SEEN"]).write_text(json.dumps(seen))
+Path(os.environ["STUB_SEEN"]).write_text(json.dumps({"argv": sys.argv[1:]}))
 print(json.dumps({"type": "result", "result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.01, "modelUsage": {}}))
 '''
 
 
 class RouterVariants(unittest.TestCase):
-    """A router variant is the shipped plugin plus a project model-router.json and plugin option values."""
+    """A router variant is the shipped plugin with plugin option values."""
 
-    def test_a_variant_gets_its_router_file_and_options_and_nothing_else_does(self):
-        variant = {"id": "v", "plugin": True, "env": {}, "router_config": {"levels": {"standard": {"effort": "medium"}}},
-                   "plugin_options": {"verify_gate": False}}
+    def test_a_variant_gets_its_options_and_nothing_else_does(self):
+        variant = next(c for c in run.load_configs() if c["id"] == "plugin-nogate")
         with tempfile.TemporaryDirectory() as tmp:
             claude = stub(tmp, VARIANT_STUB)
             seen = Path(tmp) / "seen.json"
@@ -1426,12 +1602,10 @@ class RouterVariants(unittest.TestCase):
                 got = json.loads(seen.read_text())
                 run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
                 plain = json.loads(seen.read_text())
-        self.assertEqual(got["project"], {"levels": {"standard": {"effort": "medium"}}})
         settings = json.loads(got["argv"][got["argv"].index("--settings") + 1])
         self.assertEqual(settings["pluginConfigs"], {"model-router@inline": {"options": {"verify_gate": False}}})
         self.assertTrue(settings["sandbox"]["enabled"])
         self.assertTrue(row["passed"])
-        self.assertIsNone(plain["project"])
         self.assertNotIn("pluginConfigs", json.loads(plain["argv"][plain["argv"].index("--settings") + 1]))
 
 
@@ -1462,30 +1636,6 @@ time.sleep(0.3)  # Claude Code's own duration_ms can leave time out
 print(json.dumps({"type": "result", "result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.11, "modelUsage": {},
                   "duration_ms": 1}))
 '''
-
-
-class PluginRef(unittest.TestCase):
-    def test_a_configuration_can_run_the_plugin_from_a_commit(self):
-        options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
-        cmd, _ = run.command("x", {"id": "r", "plugin": True, "env": {}, "plugin_ref": "HEAD"}, options, {})
-        exported = Path(cmd[cmd.index("--plugin-dir") + 1])
-        self.assertNotEqual(exported, Path("/p/model-router"))
-        self.assertTrue((exported / ".claude-plugin" / "plugin.json").is_file())
-        again, _ = run.command("x", {"id": "r", "plugin": True, "env": {}, "plugin_ref": "HEAD"}, options, {})
-        self.assertEqual(again[again.index("--plugin-dir") + 1], str(exported))  # exported once
-        plain, _ = run.command("x", next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
-        self.assertEqual(plain[plain.index("--plugin-dir") + 1], "/p/model-router")
-
-    def test_the_exported_plugin_is_removed_when_the_bench_exits(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            env = {**os.environ, "TMPDIR": tmp, "TMP": tmp, "TEMP": tmp}
-            script = ("import sys, pathlib; sys.path.insert(0, sys.argv[1]); import run; "
-                      "p = pathlib.Path(run.plugin_dir_for({'plugin_ref': 'HEAD'}, {})); "
-                      "print((p / '.claude-plugin' / 'plugin.json').is_file())")
-            out = subprocess.run([sys.executable, "-c", script, str(ROOT / "bench")], env=env, capture_output=True,
-                                 text=True, check=True).stdout
-            self.assertEqual(out.strip(), "True")
-            self.assertEqual([p.name for p in Path(tmp).iterdir() if p.name.startswith("mrbench-plugin-")], [])
 
 
 class AgentCosts(unittest.TestCase):
@@ -1639,7 +1789,7 @@ class Limits(unittest.TestCase):
             pauses: list[float] = []
             with unittest.mock.patch.dict("os.environ", {"STUB_ERROR": str(API_ERROR), "STUB_REFUSED": refuse, **AUTH}), \
                     unittest.mock.patch.object(run.time, "sleep", pauses.append):
-                # Seed 0 never puts three fable runs in a row, so the streak of errors stays under the stop.
+                # Seed 0 never puts three haiku-high runs in a row, so the streak of errors stays under the stop.
                 code = run.main(["--tasks", "lookup-retry-limit", "--configs", *configs, "--runs", str(runs),
                                  "--seed", "0", "--max-total", "3", "--claude", *claude, "--out", str(out)])
             read = lambda p: [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []  # noqa: E731
@@ -1653,10 +1803,11 @@ class Limits(unittest.TestCase):
         self.assertEqual(pauses, [])
 
     def test_a_configuration_the_account_cannot_run_does_not_stop_the_others(self):
-        code, rows, limited, pauses = self.refused("fable", ["defaults", "fable"], runs=run.API_ERROR_STOP)
+        code, rows, limited, pauses = self.refused("haiku", ["defaults", "haiku-high"], runs=run.API_ERROR_STOP)
         self.assertEqual(code, 0)
         self.assertEqual([(r["config"], r["passed"]) for r in rows], [("defaults", True)] * run.API_ERROR_STOP)
-        self.assertEqual([(r["config"], r["limited_reason"]) for r in limited], [("fable", "api_error")] * run.API_ERROR_STOP)
+        self.assertEqual([(r["config"], r["limited_reason"]) for r in limited],
+                         [("haiku-high", "api_error")] * run.API_ERROR_STOP)
         self.assertEqual(pauses, [])
 
 
@@ -1711,7 +1862,7 @@ class TaskIdentity(unittest.TestCase):
         old = full_row(task_revision=1, **{"class": "design"})
         rows = [dict(old, task="design-cache-invalidation", config="plugin"),
                 dict(old, task="design-cache-invalidation", config="defaults"),
-                dict(old, task="design-rate-limiter", config="plugin", total_cost_usd=0.5)]
+                graded_today(dict(old, task="design-rate-limiter", config="plugin", total_cost_usd=0.5))]
         with tempfile.TemporaryDirectory() as tmp:
             results = Path(tmp) / "results"
             results.mkdir()
@@ -1800,6 +1951,62 @@ class Isolation(unittest.TestCase):
             with unittest.mock.patch.dict("os.environ", {**secret, **kept}):
                 self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt").passed)
                 self.assertEqual(sorted(set(secret) & set(run.grading_env(dict(os.environ)))), [])
+
+    def test_a_check_runs_with_no_network_no_credential_files_and_writes_only_to_its_scratch(self):
+        import socket
+        server = socket.socket()
+        self.addCleanup(server.close)
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        with tempfile.TemporaryDirectory() as tmp:
+            secret, outside = Path(tmp) / "netrc", Path(tmp) / "outside.txt"
+            secret.write_text("machine example.test password p", encoding="utf-8")
+            check = Path(tmp) / "check.py"
+            check.write_text(f"""import socket, tempfile
+from pathlib import Path
+blocked = []
+for name, act in (("credentials", lambda: Path({str(secret)!r}).read_text()),
+                  ("network", lambda: socket.create_connection(("127.0.0.1", {server.getsockname()[1]}), 5).close()),
+                  ("write", lambda: Path({str(outside)!r}).write_text("x")),
+                  ("scratch", lambda: Path(tempfile.mkdtemp(), "x").write_text("x"))):
+    try:
+        act()
+    except OSError:
+        blocked.append(name)
+print(" ".join(blocked) or "nothing")
+""", encoding="utf-8")
+            with unittest.mock.patch.object(run, "CREDENTIAL_FILES", (*run.CREDENTIAL_FILES, str(secret))):
+                graded = run.grade(check, Path(tmp), Path(tmp) / "answer.txt")
+                wrote = outside.exists()
+                with unittest.mock.patch.object(run, "_can_sandbox", return_value=False):
+                    bare = run.grade(check, Path(tmp), Path(tmp) / "answer.txt")
+            if graded.sandbox is None:  # Windows, or a Linux host where bwrap can't start
+                self.assertNotEqual(sys.platform, "darwin")
+            else:
+                self.assertEqual((graded.sandbox, graded.reason, wrote),
+                                 ({"darwin": "sandbox-exec"}.get(sys.platform, "bwrap"), "credentials network write", False))
+        # Where no sandbox can start the check still runs, and the row says it ran without one.
+        self.assertEqual((bare.verdict, bare.sandbox, bare.reason), ("pass", None, "nothing"))
+        self.assertIn("graded without a sandbox", (ROOT / "bench" / "README.md").read_text(encoding="utf-8"))
+
+    def test_bwrap_hides_the_credential_files_and_the_network_and_binds_only_the_scratch_writable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder, file = Path(tmp) / "ssh", Path(tmp) / "netrc"
+            folder.mkdir()
+            file.write_text("x", encoding="utf-8")
+            with unittest.mock.patch.object(run.sys, "platform", "linux"), \
+                    unittest.mock.patch.object(run, "_can_sandbox", return_value=True), \
+                    unittest.mock.patch.object(run, "CREDENTIAL_FILES", (str(folder), str(file), str(Path(tmp) / "gone"))):
+                argv, name = run.grade_sandbox(Path(tmp) / "scratch")
+        own = os.path.realpath(Path(tmp) / "scratch")
+        self.assertEqual((name, argv[0], argv[-1]), ("bwrap", "bwrap", "--"))
+        self.assertEqual(argv[1:4], ["--ro-bind", "/", "/"])
+        self.assertIn("--unshare-net", argv)
+        joined = " ".join(argv)
+        self.assertIn(f"--bind {own} {own}", joined)
+        self.assertIn(f"--tmpfs {os.path.realpath(folder)}", joined)
+        self.assertIn(f"--ro-bind /dev/null {os.path.realpath(file)}", joined)
+        self.assertNotIn("gone", joined)
 
     def test_credential_names_are_matched_in_any_case(self):
         # A plain dict: environment names are upper-cased on Windows, so os.environ can't hold these there.
@@ -1929,10 +2136,8 @@ class Grading(unittest.TestCase):
                 first = changed
 
     def test_analyze_sets_aside_a_run_whose_check_broke(self):
-        good = full_row(config="defaults", task="design-rate-limiter", task_revision=1, passed=True,
-                        grade={"verdict": "pass", "reason": "solved", "check_hash": "a" * 16}, **{"class": "design"})
-        bad = dict(good, passed=False, total_cost_usd=0.25,
-                   grade={"verdict": "broken", "reason": "NameError: x", "check_hash": "b" * 16})
+        good = full_row(config="defaults", task="design-rate-limiter", task_revision=1, passed=True, **{"class": "design"})
+        bad = dict(good, passed=False, total_cost_usd=0.25, grade=dict(good["grade"], verdict="broken", reason="NameError: x"))
         with tempfile.TemporaryDirectory() as tmp:
             results = Path(tmp) / "results"
             results.mkdir()
@@ -2020,6 +2225,7 @@ class ProbeHelper(unittest.TestCase):
         ('import os\nos._exit(0)', None),
         ('import time\ntime.sleep(30)', None),
         ('import sys, json\nprint(json.dumps(sys.flags.isolated))', 1),
+        ('print("[" * 100000 + "]" * 100000)', None),  # too deep for json.loads
     )
 
     def test_probe_returns_the_last_json_line_and_none_on_anything_else(self):
@@ -2373,43 +2579,35 @@ class DelegationTasks(unittest.TestCase):
         self.assertEqual({i: (tasks[i]["class"], tasks[i].get("shape")) for i in self.WANT}, self.WANT)
 
     def test_a_task_without_a_shape_gets_the_one_subagent_prompt(self):
-        self.assertEqual(run.prompt({"brief": "Do x."}, "delegate"), run.PROMPTS["delegate"].format(brief="Do x.", pick=""))
+        self.assertEqual(run.prompt({"brief": "Do x."}), run.PROMPT.format(brief="Do x."))
 
     def test_each_shape_keeps_the_brief_and_lets_the_session_start_more_than_one_subagent(self):
         self.assertEqual(set(run.SHAPES), {"redo", "fanout", "plan-build", "workflow"})
-        pinned = {"args": ["--agents", json.dumps({"a": {}, "b": {}})]}
         for shape in run.SHAPES:
             task = {"brief": "Do x.", "shape": shape}
             with self.subTest(shape=shape):
-                prompt = run.prompt(task, "delegate", pinned)
+                prompt = run.prompt(task)
                 self.assertTrue(prompt.endswith("\n\nTask: Do x."))
-                self.assertIn("Use one of these agents: a or b.", prompt)
                 self.assertNotIn("one subagent", prompt)
                 self.assertNotRegex(prompt, "[\u2013\u2014]")
-                self.assertEqual(run.prompt(task, "direct"), "Do x.")
 
     def test_the_workflow_prompt_has_the_session_write_and_run_a_script_of_stages(self):
         task = self.task("workflow-two-stage-report")
-        pinned = {"args": ["--agents", json.dumps({"a": {}, "b": {}})]}
-        prompt = run.prompt(task, "delegate", pinned)
+        prompt = run.prompt(task)
         self.assertIn("one Workflow tool call", prompt)
         self.assertIn("one `agent()` stage for each step", prompt)
-        head = prompt.split("\n\nTask: ")[0].replace("Use one of these agents: a or b.", "")
+        head = prompt.split("\n\nTask: ")[0]
         self.assertNotRegex(head, r"haiku|sonnet|opus|fable|model|effort")  # which model a stage names is measured
-        self.assertIn("Use one of these agents: a or b.", prompt)
         self.assertTrue(prompt.endswith(f"\n\nTask: {task['brief']}"))
-        self.assertEqual(run.prompt(task, "direct"), task["brief"])
         self.assertFalse((task["dir"] / "repo" / ".claude").exists())  # a saved script would fix the stages' models
 
-    def test_only_a_workflow_task_in_the_delegate_arm_may_call_workflow_and_read(self):
+    def test_only_a_workflow_task_may_call_workflow_and_read(self):
         defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
-        for task_id, arm, extra in (("workflow-two-stage-report", "delegate", ["Workflow", "Read(./**)"]),
-                                    ("workflow-two-stage-report", "direct", []),
-                                    ("fanout-three-lookups", "delegate", [])):
-            with self.subTest(task=task_id, arm=arm), tempfile.TemporaryDirectory() as tmp:
+        for task_id, extra in (("workflow-two-stage-report", ["Workflow", "Read(./**)"]), ("fanout-three-lookups", [])):
+            with self.subTest(task=task_id), tempfile.TemporaryDirectory() as tmp:
                 seen = Path(tmp) / "seen.json"
                 options = {"claude": stub(Path(tmp), STREAM_STUB), "model": "sonnet", "budget": 0.5, "timeout": 60,
-                           "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None, "arm": arm}
+                           "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
                 with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
                     run.run_one(self.task(task_id), defaults, options, {})
                 argv = json.loads(seen.read_text())["argv"]
@@ -2418,9 +2616,9 @@ class DelegationTasks(unittest.TestCase):
 
     def test_an_unknown_shape_is_an_error(self):
         with self.assertRaises(KeyError):
-            run.prompt({"brief": "Do x.", "shape": "swarm"}, "delegate")
+            run.prompt({"brief": "Do x.", "shape": "swarm"})
         for task in run.load_tasks():
-            run.prompt(task, "delegate")
+            run.prompt(task)
 
     def test_a_run_sends_its_tasks_shape_prompt_and_its_row_records_the_shape(self):
         defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
@@ -2433,22 +2631,8 @@ class DelegationTasks(unittest.TestCase):
                 with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
                     row = run.run_one(task, defaults, options, {})
                 argv = json.loads(seen.read_text())["argv"]
-                self.assertEqual(argv[argv.index("-p") + 1], run.prompt(task, "delegate"))
+                self.assertEqual(argv[argv.index("-p") + 1], run.prompt(task))
                 self.assertEqual(row["shape"], shape)
-
-    def test_a_direct_run_records_a_single_shape_since_it_sent_the_bare_brief(self):
-        defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
-        task = self.task("redo-failing-check")
-        with tempfile.TemporaryDirectory() as tmp:
-            seen = Path(tmp) / "seen.json"
-            options = {"claude": stub(Path(tmp), STREAM_STUB), "model": "sonnet", "budget": 0.5, "timeout": 60,
-                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None,
-                       "arm": "direct"}
-            with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
-                row = run.run_one(task, defaults, options, {})
-            argv = json.loads(seen.read_text())["argv"]
-        self.assertEqual(argv[argv.index("-p") + 1], run.prompt(task, "direct"))
-        self.assertEqual((row["arm"], row["shape"]), ("direct", "single"))
 
     def test_level_accuracy_counts_single_agent_runs_and_the_page_gives_the_redo_rate(self):
         real = full_row()
@@ -2456,10 +2640,10 @@ class DelegationTasks(unittest.TestCase):
 
         def row(task_id, config, passed, spawned, started=None, **extra):
             task = tasks[task_id]
-            return dict(real, main_model="sonnet", config=config, passed=passed, task=task_id, wall_ms=1000,
-                        task_revision=task.get("revision", 1),
-                        agents_started={"general-purpose": spawned} if started is None else started,
-                        **{"class": task["class"]}, **extra)
+            return graded_today(dict(real, main_model="sonnet", config=config, passed=passed, task=task_id,
+                                     wall_ms=1000, task_revision=task.get("revision", 1),
+                                     agents_started={"general-purpose": spawned} if started is None else started,
+                                     **{"class": task["class"]}, **extra))
         first = {"agent": "general-purpose", "level": "standard", "escalated_from": None}
         design = {"agent": "general-purpose", "level": "lookup", "escalated_from": None}
         rows = [row("cross-amount-cents", "plugin", True, 1, routed=[first]),
@@ -2792,6 +2976,16 @@ class Harness(unittest.TestCase):
         self.assertFalse(self.one("plugin", env={"STUB_PLUGINS": loaded, "STUB_PLUGIN_ERRORS": "1"})[0]["plugin_loaded"])
         self.assertIsNone(self.one("defaults")[0]["plugin_loaded"])
 
+    def test_a_router_run_with_no_stream_is_not_filed_as_a_plugin_that_did_not_load(self):
+        stopped = run.record(Recorder.task, self.configs["plugin"], Recorder.options, run.mrconfig.build({}), {},
+                             dict(Recorder.facts, init={}, exit_code=None))
+        self.assertIsNone(stopped["plugin_loaded"])
+        self.assertNotEqual(run.set_aside(stopped), "plugin_not_loaded")
+        (self.dir / "hang").mkdir()
+        hang = stub(self.dir / "hang", HANGING_STUB)
+        row = run.run_one(self.task, self.configs["plugin"], self.options(timeout=1, claude=hang), run.mrconfig.shipped())
+        self.assertEqual((row["plugin_loaded"], row["stopped_by"]), (None, "timeout"))
+
     def test_a_router_run_whose_plugin_did_not_load_is_set_aside(self):
         code, rows, limited = self.main("--configs", "plugin", "defaults")
         self.assertEqual(code, 0)
@@ -2873,17 +3067,6 @@ class Harness(unittest.TestCase):
         self.assertTrue(next(r["plugin_hash"] for r in rows if r["config"] == "plugin"))
         self.assertEqual({r["plugin_hash"] for r in rows if r["config"] == "defaults"}, {None})
 
-    def test_a_plugin_ref_row_carries_the_hash_of_the_plugin_it_ran(self):
-        ref = {"id": "r", "plugin": True, "env": {}, "plugin_ref": "HEAD"}
-        options = {"claude": ["claude"], "model": "sonnet", "budget": 0.5, "plugin_dir": "/p", "plugin_hash": "frozen"}
-        cmd, _ = run.command("x", ref, options, {})
-        exported = run.plugin_hash(Path(cmd[cmd.index("--plugin-dir") + 1]))
-        record = lambda config: run.record(Recorder.task, config, {**Recorder.options, **options},  # noqa: E731
-                                           run.mrconfig.build({}), {}, Recorder.facts)["plugin_hash"]
-        self.assertEqual(record(ref), exported)
-        self.assertEqual(record(self.configs["plugin"]), "frozen")
-        self.assertIsNone(record(self.configs["defaults"]))
-
     def never_started(self, source, configs, runs="4"):
         out = self.dir / f"never-{len(configs)}.jsonl"
         with unittest.mock.patch.dict("os.environ", AUTH), contextlib.redirect_stdout(io.StringIO()), \
@@ -2894,7 +3077,7 @@ class Harness(unittest.TestCase):
         return code, out.exists(), limited, err.getvalue()
 
     def test_a_run_that_never_started_is_set_aside_and_three_in_a_row_stop_the_bench(self):
-        code, written, limited, err = self.never_started(NO_START_STUB, ["defaults", "haiku-high", "plugin", "pinned"])
+        code, written, limited, err = self.never_started(NO_START_STUB, ["defaults", "haiku-high", "plugin"])
         self.assertEqual((code, written), (2, False))
         self.assertEqual([r["limited_reason"] for r in limited], ["no_start"] * 3)
         self.assertEqual({r["startup_failure_reason"] for r in limited}, {"sandbox_required_unavailable"})
@@ -2906,7 +3089,7 @@ class Harness(unittest.TestCase):
         self.assertEqual((code, written, [r["limited_reason"] for r in limited]), (2, False, ["no_start"] * 3))
 
     def test_a_documented_startup_failure_is_no_start_under_every_configuration(self):
-        for config in ("defaults", "haiku-high", "plugin", "pinned", "plugin-nogate"):
+        for config in ("defaults", "haiku-high", "plugin", "plugin-nogate"):
             row = run.record(Recorder.task, self.configs[config], Recorder.options, run.mrconfig.shipped(),
                              STARTUP_FAILURE, dict(Recorder.facts, init={}, exit_code=1))
             self.assertEqual((run.set_aside(row), row["claude_started"], row["total_cost_usd"], row["cost_known"]),
@@ -3030,26 +3213,6 @@ class Harness(unittest.TestCase):
         self.assertTrue(run.options_applied(off, [{"event": "spawn", "action": "keep"}, {"event": "gate"}]))
         self.assertTrue(run.options_applied({"plugin_options": {"verify_gate": "on"}}, [{"event": "gate"}]))
 
-    def test_pinned_names_its_agents_and_a_run_off_its_pins_is_set_aside(self):
-        pinned = self.configs["pinned"]
-        self.assertEqual(run.pins(pinned), ["reviewer", "searcher", "worker"])
-        self.assertIsNone(run.pins(self.configs["defaults"]))
-        asked = run.prompt(self.task, "delegate", pinned)
-        self.assertIn("reviewer, searcher or worker", asked)
-        self.assertEqual(run.prompt(self.task, "delegate", self.configs["defaults"]), run.prompt(self.task, "delegate"))
-        self.assertEqual(run.prompt(self.task, "direct", pinned), self.task["brief"])
-
-        def row(started, overrides=0, arm="delegate", config=pinned):
-            return run.record(Recorder.task, config, {**Recorder.options, "arm": arm}, run.mrconfig.build({}), {},
-                              dict(Recorder.facts, agents_started=started, agent_overrides=overrides,
-                                   init={"type": "system", "subtype": "init"}))
-        self.assertFalse(row({"worker": 1})["off_pin"])
-        for off in (row({"general-purpose": 1}), row({"worker": 1}, overrides=1), row({})):
-            self.assertTrue(off["off_pin"])
-            self.assertEqual(run.set_aside(off), "off_pin")
-        self.assertIsNone(row({"general-purpose": 1}, arm="direct")["off_pin"])  # a person's prompt picks freely
-        self.assertIsNone(row({"general-purpose": 1}, config=self.configs["defaults"])["off_pin"])
-
     def test_each_agent_call_records_what_it_named_and_what_it_ran_on(self):
         stream = "\n".join(json.dumps(e) for e in (
             {"type": "assistant", "parent_tool_use_id": None, "message": {"model": "claude-opus-5-5", "content": [
@@ -3077,22 +3240,13 @@ class Harness(unittest.TestCase):
             res = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", path])
             self.assertEqual(res.returncode, 0, path)
 
-    def test_every_row_records_the_seed_the_batch_and_the_arm(self):
-        code, rows, _ = self.main("--configs", "defaults", "haiku-high", "--runs", "2", "--seed", "5",
-                                  "--arms", "delegate", "direct", "--batch", "b1")
+    def test_every_row_records_the_seed_and_the_batch(self):
+        code, rows, _ = self.main("--configs", "defaults", "haiku-high", "--runs", "2", "--seed", "5", "--batch", "b1")
         self.assertEqual(code, 0)
         self.assertEqual({(r["order_seed"], r["batch"]) for r in rows}, {(5, "b1")})
-        self.assertEqual(sorted({r["arm"] for r in rows}), ["delegate", "direct"])
         code, again, _ = self.main("--configs", "defaults", "haiku-high", "--runs", "2", "--seed", "5")
         self.assertEqual(len({r["batch"] for r in again}), 1)
         self.assertNotEqual(again[0]["batch"], "b1")
-
-    def test_the_direct_arm_sends_the_brief_as_a_person_would(self):
-        self.assertEqual(run.prompt(self.task, "direct"), self.task["brief"])
-        self.assertIn("Agent tool", run.prompt(self.task, "delegate"))
-        self.assertIn(self.task["brief"], run.prompt(self.task, "delegate"))
-        _, seen = self.one(arm="direct")
-        self.assertEqual(seen["argv"][seen["argv"].index("-p") + 1], self.task["brief"])
 
     def test_gate_rows_in_the_ledger_are_counted(self):
         ledger = [{"event": "gate"}, {"event": "spawn"}, {"event": "gate", "kind": "verify"}]
@@ -3129,30 +3283,8 @@ class Configurations(unittest.TestCase):
             self.assertNotIn(gone, self.configs)
 
     def test_the_router_arms_are_todays_defaults_and_no_gate(self):
-        self.assertEqual({k: v for k, v in self.configs["plugin"].items() if k in ("plugin_options", "plugin_ref")}, {})
+        self.assertNotIn("plugin_options", self.configs["plugin"])
         self.assertEqual(self.configs["plugin-nogate"]["plugin_options"], {"verify_gate": False})
-
-    def test_pinned_gives_each_inline_agent_a_fixed_model_and_effort(self):
-        config = self.configs["pinned"]
-        self.assertFalse(config.get("plugin"))
-        cmd, env = run.command("x", config, self.options, {})
-        agents = json.loads(cmd[cmd.index("--agents") + 1])
-        self.assertEqual({name: (a["model"], a["effort"]) for name, a in agents.items()},
-                         {"searcher": ("haiku", "medium"), "worker": ("sonnet", "medium"), "reviewer": ("opus", "high")})
-        for a in agents.values():
-            self.assertTrue(a["description"] and a["prompt"])
-        self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL", env)
-
-    def test_the_single_model_grid_covers_every_model_at_every_effort(self):
-        for model in ("haiku", "sonnet", "opus"):
-            for effort in ("low", "medium", "high"):
-                with self.subTest(model=model, effort=effort):
-                    cmd, env = run.command("x", self.configs[f"{model}-{effort}"], self.options, {})
-                    self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"],
-                                      env["CLAUDE_CODE_SUBAGENT_EFFORT"]), (model, "1", effort))
-                    cmd, env = run.command("x", self.configs[f"session-{model}-{effort}"], self.options, {})
-                    self.assertEqual((cmd[cmd.index("--model") + 1], cmd[cmd.index("--effort") + 1]), (model, effort))
-                    self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL", env)
 
 
 class RunEdges(unittest.TestCase):
@@ -3200,8 +3332,8 @@ class RunEdges(unittest.TestCase):
 
     def test_the_cost_lose_rule_is_the_mirror_of_the_win_rule_and_the_docs_say_so(self):
         # Dearer beyond noise: LOSE only once the pass rate's upper bound is below +10 points.
-        self.assertEqual(analyze._judge("defaults", (-0.08, 0.09), (0.1, 0.2), False)[0], "LOSE")
-        self.assertEqual(analyze._judge("defaults", (-0.12, 0.11), (0.1, 0.2), False)[0], "NONE")
+        self.assertEqual(analyze._judge("defaults", (-0.08, 0.09), (0.1, 0.2), False, (9, 10, 9, 10))[0], "LOSE")
+        self.assertEqual(analyze._judge("defaults", (-0.12, 0.11), (0.1, 0.2), False, (9, 10, 9, 10))[0], "NONE")
         stated = "the upper bound of its pass rate minus the baseline's is below plus 10 points"
         self.assertIn(stated, (ROOT / "bench" / "README.md").read_text(encoding="utf-8"))
         page = analyze.build_page(analyze.load([]))
@@ -3279,7 +3411,6 @@ class RunEdges(unittest.TestCase):
                             (["--tasks", "lookup-retry-limit", "lookup-retry-limit"], "lookup-retry-limit"),
                             (["--tasks", "lookup-retry-limit", "--configs", "defaults", "plugn"], "plugn"),
                             (["--tasks", "lookup-retry-limit", "--configs", "defaults", "defaults"], "defaults"),
-                            (["--tasks", "lookup-retry-limit", "--arms", "delegate", "delegate"], "delegate"),
                             (["--configs", "defaults", "--tasks"], "--tasks"),
                             (["--tasks", "lookup-retry-limit", "--configs"], "--configs")):
             with self.subTest(argv=argv):

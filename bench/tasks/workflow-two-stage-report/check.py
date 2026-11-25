@@ -23,7 +23,7 @@ for rel in sorted(p.relative_to(HERE / "repo") for p in (HERE / "repo").rglob("*
 
 try:
     data = json.loads((work / "REPORT.json").read_text(encoding="utf-8-sig"))
-except (OSError, ValueError):
+except (OSError, ValueError, RecursionError):
     passcheck.finish(False, "REPORT.json is missing or isn't JSON")
 if not isinstance(data, dict) or set(data) != {"version", "max_upload_mb"}:
     passcheck.finish(False, "REPORT.json must be an object with exactly version and max_upload_mb")

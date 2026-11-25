@@ -94,7 +94,7 @@ The project's own words, and the code behind each.
 
 ## The benchmark
 
-**Baseline**: a way of running Claude Code without the router, in `bench/configs.json`. By role: `defaults` (no plugin, no forced model), `best` (lowest cost per solved task), `strongest` (strongest forced model) (`analyze.roles`).
+**Baseline**: a way of running Claude Code without the router, in `bench/configs.json`: `defaults` (no plugin, subagents on the session model) and `haiku-high` (every subagent forced onto Haiku at high effort).
 
 **Broken run**: a run whose pass check exited 2. It is left out of the tables and counted in a note.
 
@@ -104,7 +104,7 @@ The project's own words, and the code behind each.
 
 **Pass check**: a task's script that grades a run: exit 0 solved, 1 not solved, 2 broken (`run.grade`).
 
-**Saturated**: a class where an exact one-sided test at 5% can't tell the weakest forced baseline from the strongest, with 10 or more runs each (`analyze._quality`).
+**Saturated**: a class where an exact one-sided test at 5% can't tell the weakest forced baseline from the strongest, or from `defaults` when every forced baseline is on one model, with 10 or more runs each (`analyze._quality`).
 
 **Task revision**: the `revision` in a task's `task.json`, kept on each row as `task_revision`. Rows on an earlier revision are left out of the tables.
 
