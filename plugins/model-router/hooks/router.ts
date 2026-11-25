@@ -23,8 +23,9 @@ const CHECK = 'model-router.session_check'
 const OPTIONS = /^model-router\./
 // A change to an option reloads this module, which then forgets the effort it set for each agent still running.
 const BUSY = 'Model Router is setting the effort of agents that are still running. Change this when they finish.'
-// An agent the engine lists in any other state may take another turn, an idle teammate on its next message.
-const ENDED: readonly string[] = ['completed', 'failed', 'killed']
+// An agent in any other state is working. A teammate can sit idle for the life of its team, so it holds nothing.
+const ENDED: readonly string[] = ['idle', 'completed', 'failed', 'killed']
+const NO_PYTHON = 'Model Router needs Python 3.9 or later on PATH.'
 
 // What the runtime answers. A spawn's: `note` is for Claude after the Agent call's result; `rules` is the session note,
 // for the Agent tool's description. mod-status: `line`, `text`, `reply`, `routing`. mod-check: a Step's fields.
@@ -158,7 +159,7 @@ async function modelSettings($: EngineInterface, reads: Reads): Promise<Layers |
   }
 }
 
-// The settings layers, as session.start sends them, and the runtime's answer. Never throws, like ask.
+// The settings layers, as session.start and, after /clear, turn.start send them, and the runtime's answer. Never throws, like ask.
 async function sendLayers($: EngineInterface, opts: Record<string, string>, reads: Reads): Promise<Answer | undefined> {
   const layers = await modelSettings($, reads)
   return await ask($, opts, 'mod-start', { ...(layers ? { settings: layers } : {}) })
@@ -412,11 +413,14 @@ export const register: Register = (on, options) => {
   const inFlight = new Map<string, (Want | null)[]>()
   // What the runtime has Claude read after an Agent call's result, by tool_use_id.
   const notes = new Map<string, string>()
-  // The session note the last mod-start answer carried, and the session id the layers last went to.
   // The runtime's table for each tool whose description carries it.
   const rules: Record<string, string> = {}
+  // The session id the settings layers last went to.
   let sentFor: string | undefined
   const live: Live = { interactive: false, refreshing: false, stale: false, turned: false, working: false }
+  // The cap alone, for a call no path routed, and only while routing.
+  const cap = (model: string | undefined): string | undefined =>
+    (live.routingOn ?? routing(opts)) ? capped(model, opts.CLAUDE_PLUGIN_OPTION_MAX_TIER) : undefined
   const started = (reply: Answer | undefined): void => {
     const answer = heard(reply)
     if (typeof answer?.rules === 'string') rules.Agent = answer.rules
@@ -476,15 +480,18 @@ export const register: Register = (on, options) => {
     if (words === 'on' || words === 'off') {
       const answer = await ask($, opts, 'mod-status', { routing: words, ...(live.setup ? { setup: live.setup } : {}) })
       shown($, live, answer)
-      text = typeof answer?.reply === 'string' ? answer.reply : 'Routing is unchanged: the runtime did not answer.'
+      text = typeof answer?.reply === 'string' ? answer.reply
+        : `Routing is unchanged: ${answer === null ? NO_PYTHON : 'the runtime did not answer.'}`
     } else if (words === 'check on' || words === 'check off') {
       // This plugin's own $.config.set skips its config.set hook.
       text = await busy($, live.working, agentEffort) ? `Session check stays as it is: ${BUSY}`
         : await setCheck($, words === 'check on' ? 'ask' : 'off')
+      if (silent && words === 'check on' && text.startsWith('Session check is on')) text = `Session check is on, but it can't ask: ${NO_PYTHON}`
     } else if (!words) {
       const answer = await ask($, opts, 'mod-status', live.setup ? { setup: live.setup } : {})
       shown($, live, answer)
-      text = typeof answer?.text === 'string' ? answer.text : 'The runtime did not answer, so the state is unknown.'
+      text = typeof answer?.text === 'string' ? answer.text
+        : answer === null ? `${NO_PYTHON} Without it, only max_tier is held.` : 'The runtime did not answer, so the state is unknown.'
     }
     return { text, isTextDisplayOnly: true }
   }).catch(($, e, next) => next(e))
@@ -499,7 +506,7 @@ export const register: Register = (on, options) => {
     if (unmarked) {
       refresh($, opts, live)
       // The fallback routed it, unless no Python ran it either.
-      const held = silent && (live.routingOn ?? routing(opts)) ? capped(e.model, opts.CLAUDE_PLUGIN_OPTION_MAX_TIER) : undefined
+      const held = silent ? cap(e.model) : undefined
       return next(held ? { ...e, model: held } : e)
     }
     const effort = callerEffort.get(e.tool_use_id)
@@ -526,7 +533,7 @@ export const register: Register = (on, options) => {
     const pick = heard(reply)
     if (typeof pick?.note === 'string' && e.tool_use_id) remember(notes, e.tool_use_id, pick.note)
     // Without an answer neither path routed this call, so only the cap can still be held, and only while routing.
-    const model = pick ? pick.model : (live.routingOn ?? routing(opts)) ? capped(e.model, opts.CLAUDE_PLUGIN_OPTION_MAX_TIER) : undefined
+    const model = pick ? pick.model : cap(e.model)
     const mine: Want | null = pick?.effort ? { effort: pick.effort, raiseOnly: !!e.workflow } : null
     const efforts = inFlight.get(e.prompt) ?? []
     efforts.push(mine)
@@ -572,9 +579,9 @@ export const register: Register = (on, options) => {
     if (e.agentId === undefined) sessionEffort = current
     // A subagent runs at the effort its subtask was given.
     const want = e.agentId !== undefined ? agentEffort.get(e.agentId) : undefined
-    const apply = want !== undefined && current !== undefined
+    const rewrite = want !== undefined && current !== undefined
       && (want.raiseOnly ? raises(want.effort, current) : want.effort !== current)
-    return yield* next(apply ? { ...e, effort: want.effort } : e)
+    return yield* next(rewrite ? { ...e, effort: want.effort } : e)
   }).catch(async function* ($, e, next) {
     return yield* next(e)
   })

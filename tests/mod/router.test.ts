@@ -931,6 +931,16 @@ test('/model-router prints the runtime state for the person alone', async () => 
   assert.deepEqual(await failing.command(' '), { text: 'The runtime did not answer, so the state is unknown.', isTextDisplayOnly: true })
 })
 
+test('with no Python, /model-router says what is missing and promises no question', async () => {
+  const mod = load({ 'mod-start': { stdout: '' }, 'mod-status': { stdout: '' }, 'mod-check': { stdout: '' } })
+  await mod.sessionStart(START)
+  await idle()
+  const needs = 'Model Router needs Python 3.9 or later on PATH.'
+  assert.deepEqual(await mod.command(''), { text: `${needs} Without it, only max_tier is held.`, isTextDisplayOnly: true })
+  assert.deepEqual(await mod.command('off'), { text: `Routing is unchanged: ${needs}`, isTextDisplayOnly: true })
+  assert.deepEqual(await mod.command('check on'), { text: `Session check is on, but it can't ask: ${needs}`, isTextDisplayOnly: true })
+})
+
 test('/model-router off and on switch routing for this session and redraw the line', async () => {
   const off = { stdout: JSON.stringify({ ok: true, line: 'off (this session)', text: 'off', routing: false,
     reply: 'Routing is off for this session. To keep it off, set Routing mode in /config.' }) }
@@ -1009,11 +1019,11 @@ test("a change to this plugin's options in /config is refused while Claude works
   assert.deepEqual(await set('model-router.routing_mode'), { deny: BUSY })
   await mod.spawn(spawnEvent())
   await mod.complete(completeEvent({}))
-  for (const status of ['pending', 'running', 'waiting', 'idle']) { // an idle teammate takes another turn on a message
+  for (const status of ['pending', 'running', 'waiting']) {
     mod.engine.agents = [{ id: 'a1', status }]
     assert.deepEqual(await set('model-router.max_tier'), { deny: BUSY }, status)
   }
-  for (const status of ['completed', 'failed', 'killed']) {
+  for (const status of ['idle', 'completed', 'failed', 'killed']) { // a teammate can sit idle for the life of its team
     mod.engine.agents = [{ id: 'a1', status }, { id: 'a3', status: 'running' }] // a3: no effort of the router's
     assert.deepEqual(await set('model-router.max_tier'), { value: 'off' }, status)
   }
