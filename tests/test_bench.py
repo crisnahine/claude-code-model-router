@@ -3509,6 +3509,31 @@ class RunEdges(unittest.TestCase):
                 self.assertEqual((code, ran), (2, False))
                 self.assertIn(named, err)
 
+    def test_the_same_command_after_a_stop_runs_only_what_is_not_on_record_and_counts_its_spend(self):
+        out, limited = self.dir / "out.jsonl", self.dir / "limited" / "out.jsonl"
+        limited.parent.mkdir()
+
+        def row(n, config, verdict="pass", cost=0.01, **extra):
+            return json.dumps({"run": n, "task": "lookup-retry-limit", "config": config, "total_cost_usd": cost,
+                               "grade": {"verdict": verdict}, **extra}) + "\n"
+        out.write_text(row(0, "defaults") + row(0, "haiku-high", "stopped", 0.5))
+        limited.write_text(row(1, "defaults", cost=0.0, limited_reason="network"))
+        argv = ("--tasks", "lookup-retry-limit", "--configs", "defaults", "haiku-high", "--runs", "2", "--seed", "1")
+
+        def triples(kept=2):
+            return [(r["run"], r["config"]) for r in map(json.loads, out.read_text().splitlines())][kept:]
+        self.assertEqual(self.main(*argv)[0], 0)
+        self.assertEqual(sorted(triples()), [(0, "haiku-high"), (1, "defaults"), (1, "haiku-high")])
+        code, err, _ = self.main(*argv)
+        self.assertEqual(code, 0)
+        self.assertIn("skipped 4 runs already in the results", err)
+        self.assertEqual(len(triples()), 3)
+        # What the rows on record cost counts toward --max-total: room for one more $0.50 run, not two.
+        out.write_text(row(0, "defaults", cost=2.0))
+        limited.write_text("")
+        self.assertEqual(self.main(*argv, "--budget", "0.5")[0], 1)
+        self.assertEqual(len(triples(kept=1)), 1)
+
     def test_a_results_or_keep_folder_that_cannot_be_written_stops_the_runner_before_any_run(self):
         (self.dir / "a-file").write_text("not a folder")
         for argv, out in ((["--keep", str(self.dir / "a-file")], None), ([], self.dir / "a-file" / "out.jsonl")):

@@ -835,6 +835,11 @@ def schedule(tasks: list[dict], configs: list[dict], runs: int, first_run: int =
     return out
 
 
+def _rows(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()] \
+        if path.is_file() else []
+
+
 def _write(path: Path, row: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as fh:
@@ -920,8 +925,20 @@ def main(argv: list[str] | None = None) -> int:
                 args.keep.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             parser.error(f"can't write the results or --keep: {exc}")
-        spent, errors = 0.0, 0
-        for run_index, task, config in schedule(tasks, configs, args.runs, args.first_run, seed):
+        try:
+            before, aside = (_rows(path) for path in (args.out, limited))
+        except ValueError as exc:
+            parser.error(f"can't read the rows already in the results: {exc}")
+        # The same command after a stop goes on from there: a run on record is skipped, one the bench stopped isn't.
+        done = {(r.get("run"), r.get("task"), r.get("config")) for r in before
+                if (r.get("grade") or {}).get("verdict") != "stopped"}
+        spent, errors = sum(r.get("total_cost_usd") or 0 for r in before + aside), 0
+        todo = [(n, task, config) for n, task, config in schedule(tasks, configs, args.runs, args.first_run, seed)
+                if (n, task["id"], config["id"]) not in done]
+        skipped = args.runs * len(tasks) * len(configs) - len(todo)
+        if skipped:
+            print(f"skipped {skipped} runs already in the results", file=sys.stderr)
+        for run_index, task, config in todo:
             begin = time.time()
             for attempt in range(LIMIT_RETRIES + 1):
                 if not can_start(spent, args.budget, args.max_total):  # a retry spends too
