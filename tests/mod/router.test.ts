@@ -81,7 +81,11 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
     },
     config: {
       list: async () => ui.rows,
-      set: async ({ key, value }: { key: string; value: unknown }) => { ui.sets.push([key, value]); return ui.setAnswer ?? { value } },
+      // As the engine does, a row a trusted source owns is refused.
+      set: async ({ key, value }: { key: string; value: unknown }) => {
+        ui.sets.push([key, value])
+        return ui.rows.find(row => row.key === key)?.isLocked ? { deny: 'managed settings own this option' } : ui.setAnswer ?? { value }
+      },
     },
     process: {
       hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: engine.session, CLAUDE_PLUGIN_DATA: '/tmp/x', CLAUDE_PID: '4242' }),
@@ -932,7 +936,10 @@ test('a session switched off leaves a call whose round trip fails as named, and 
 test('/model-router check off and on write the option, unless managed settings own it', async () => {
   const mod = load({ 'mod-status': STATUS, 'mod-check': { stdout: '' } })
   await mod.sessionStart(START)
+  const list = mod.$.config.list
+  mod.$.config.list = async () => { throw new Error('a write that goes through reads no row') }
   assert.equal((await mod.command('check off')).text, 'Session check is off. /model-router check on, or Session check in /config, turns it back on.')
+  mod.$.config.list = list
   assert.equal((await mod.command('check  ON')).text, 'Session check is on: Model Router asks once when a new session starts below the recommended setups.')
   assert.deepEqual(mod.ui.sets, [['model-router.session_check', 'off'], ['model-router.session_check', 'ask']])
   mod.ui.rows[0].isLocked = true
@@ -942,7 +949,7 @@ test('/model-router check off and on write the option, unless managed settings o
   assert.equal((await mod.command('check off')).text, 'Session check stays as it is: refused by another plugin')
   ;(mod.$ as any).config = undefined
   assert.equal((await mod.command('check off')).text, 'Session check stays as it is: Claude Code did not take the change.')
-  assert.equal(mod.ui.sets.length, 3)
+  assert.equal(mod.ui.sets.length, 4)
 })
 
 test('/model-router check on or off while Claude works writes nothing, since an option change reloads the mod', async () => {

@@ -216,12 +216,6 @@ function routing(opts: Record<string, string>): boolean {
 
 // The interactive features call each platform call inside a try: on a Claude Code without it, or a surface that can't
 // draw it, the feature is absent and routing goes on. The mod loader takes $ only as calls, so nothing is probed first.
-function status($: EngineInterface, line: unknown): void {
-  try {
-    if (typeof line === 'string') $.ui.status(line)
-  } catch {}
-}
-
 function toast($: EngineInterface, text: string): void {
   try {
     $.ui.toast(text)
@@ -247,15 +241,15 @@ async function locked($: EngineInterface): Promise<boolean> {
   }
 }
 
-// Writes session_check, and says what happened.
+// Writes session_check, and says what happened. Claude Code itself refuses the write when managed settings own the row.
 async function setCheck($: EngineInterface, value: 'ask' | 'off'): Promise<string> {
   try {
-    const row = (await $.config.list()).find(found => found.key === CHECK)
-    if (row?.isLocked) return `Session check is set by managed settings, so it stays ${String(row.value)}.`
-  } catch {}
-  try {
     const done = await $.config.set({ key: CHECK, value })
-    if (done.deny !== undefined) return `Session check stays as it is: ${done.deny}`
+    if (done.deny !== undefined) {
+      const row = (await $.config.list().catch(() => [])).find(found => found.key === CHECK)
+      return row?.isLocked ? `Session check is set by managed settings, so it stays ${String(row.value)}.`
+        : `Session check stays as it is: ${done.deny}`
+    }
   } catch {
     return 'Session check stays as it is: Claude Code did not take the change.'
   }
@@ -281,11 +275,11 @@ async function walk($: EngineInterface, step: Step): Promise<Choice[] | undefine
 // Runs the picked setup through Claude Code's own commands, and says what the session is on now.
 async function apply($: EngineInterface, picks: Choice[]): Promise<void> {
   if (picks.some(choice => choice.check === 'off')) return toast($, await setCheck($, 'off'))
-  const family = picks.find(choice => choice.family)?.family
+  const chosen = picks.find(choice => choice.family)?.family
   const model = picks.find(choice => choice.model)?.model
   const effort = picks.find(choice => choice.effort)?.effort
   const done = picks.filter(choice => choice.done).at(-1)?.done
-  if (!family || (!model && !effort)) return
+  if (!chosen || (!model && !effort)) return
   let now: string | undefined // the model a /model this pick ran switched to
   for (const [command, args] of [['model', model], ['effort', effort]] as const) {
     if (!args) continue
@@ -297,7 +291,7 @@ async function apply($: EngineInterface, picks: Choice[]): Promise<void> {
     }
     now = await $.session.model()
     // A switch the allowlist or a declined consent refused: an effort set now would be saved for the old model.
-    if (TIERS.find(tier => now.toLowerCase().includes(tier)) !== family) {
+    if (family(now) !== chosen) {
       return toast($, `This session stays on ${PLAIN_NAME.test(now) ? now : 'its model'}: Claude Code did not switch it.`)
     }
     if ((command === 'effort' || !effort) && done) toast($, done)
@@ -317,7 +311,9 @@ type Live = {
 
 function shown($: EngineInterface, live: Live, answer: Answer | undefined): void {
   if (typeof answer?.routing === 'boolean') live.routingOn = answer.routing
-  status($, answer?.line)
+  try {
+    if (typeof answer?.line === 'string') $.ui.status(answer.line)
+  } catch {}
 }
 
 function refresh($: EngineInterface, opts: Record<string, string>, live: Live): void {
