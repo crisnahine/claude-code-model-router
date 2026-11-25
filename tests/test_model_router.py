@@ -1329,11 +1329,61 @@ class AgentDiscovery(Sandbox):
         self.assertEqual(agents.find("bom", self.project)["model"], "opus")
 
 
+def grader(path: Path) -> dict:
+    """A grader's frontmatter, with its single-quoted YAML values unquoted."""
+    return {k: v[1:-1].replace("''", "'") if v.startswith("'") else v for k, v in frontmatter(path).items()}
+
+
+def passes(found: dict, run: dict) -> bool:
+    """Whether `claude plugin eval` passes `run` (its Agent calls' inputs, last message and trace) on this grader."""
+    if found["type"] == "tool_used":
+        count = sum(bool(re.search(found.get("input_match", ""), json.dumps(call))) for call in run.get("calls", []))
+        return int(found.get("min", 1)) <= count <= int(found.get("max", count))
+    hit = re.search(found["pattern"], run.get(found["target"], ""), re.I if "i" in found.get("flags", "") else 0)
+    return bool(hit) != (found.get("match") == "not_contains")
+
+
+def trace(*models: str) -> str:
+    """A session's trace as an eval run writes it, one JSON message per line, with one Agent result per model."""
+    return "".join(json.dumps({"type": "user", "tool_use_result": {"resolvedModel": m}}, separators=(",", ":")) + "\n"
+                   for m in models)
+
+
 class RoutingEvals(Sandbox):
     """Each `claude plugin eval` case says in expected_outcome which model and effort Claude should name
     for its work, and its graders check that model ran. Checked here with no model call, so a drift fails
     CI instead of waiting for a paid eval run: the session note pairs that model with that effort for some
     kind of work, and a call naming both runs on them in a session on the case's own model."""
+
+    # Runs each grader must fail, then runs it must pass; the right answers are from live runs.
+    RUNS = {
+        ("route-review-subagent", "found-the-bypass"): (
+            [{"last_message": "The handler looks correct and there is no way to bypass the check."}],
+            [{"last_message": "The check uses `or` where it needs `and`. Because of that, anyone who enters the username "
+                              "`admin` is logged in with any password."},
+             {"last_message": "The `or` short-circuits, so anyone who submits `user='admin'` is authenticated without any "
+                              "password check."}]),
+        ("route-contract-summary", "flags-the-cap"): (
+            [{"last_message": "Liability is capped at $10. Nothing here is unusual."}],
+            [{"last_message": "- **Liability:** The Supplier's total liability is capped at $10.\n\n**Unusual points:**\n\n"
+                              "1. **The $10 cap is extremely low.** Supplier caps are usually tied to fees paid."},
+             {"last_message": "1. **Liability is very one-sided.** A $10 cap leaves the Customer with almost no remedy."}]),
+        ("route-redo-escalates", "first-redo-stayed-on-haiku"): (
+            [{"trace": trace("claude-haiku-5-5", "claude-sonnet-5-5", "claude-sonnet-5-5")}],
+            [{"trace": trace("claude-haiku-5-5", "claude-haiku-5-5", "claude-sonnet-5-5")}]),
+        ("route-lookup-subagent", "named-effort-medium"): (
+            [{"calls": [{"model": "haiku", "effort": "high"}]}], [{"calls": [{"model": "haiku", "effort": "medium"}]}]),
+        ("route-review-subagent", "named-effort-high"): (
+            [{"calls": [{"model": "sonnet", "effort": "medium"}]}], [{"calls": [{"model": "sonnet", "effort": "high"}]}]),
+    }
+
+    def test_each_tightened_grader_fails_a_wrong_answer_and_passes_a_right_one(self):
+        for (case, name), (wrong, right) in self.RUNS.items():
+            found = grader(PLUGIN / "evals" / case / "graders" / f"{name}.md")
+            for run in wrong:
+                self.assertFalse(passes(found, run), (case, name, run))
+            for run in right:
+                self.assertTrue(passes(found, run), (case, name, run))
 
     def test_each_eval_case_routes_as_expected(self):
         cases = sorted((PLUGIN / "evals").glob("*/prompt.md"))
@@ -1350,12 +1400,12 @@ class RoutingEvals(Sandbox):
             graders = "\n".join(p.read_text(encoding="utf-8") for p in (path.parent / "graders").glob("*.md"))
             self.assertIn(f"claude-{model}-", graders, f"{name}: no grader checks the model the subagent ran on")
             self.assertIn(agent or "", graders, f"{name}: no grader checks the agent Claude picked")
-            if agent and "model" not in frontmatter(PLUGIN / "agents" / f"{agent.split(':')[-1]}.md"):
+            own = frontmatter(PLUGIN / "agents" / f"{agent.split(':')[-1]}.md") if agent else {}
+            if agent and "model" not in own:
                 self.assertIn(rf'"model"\s*:\s*"(?:claude-)?{model}', graders,
                               f"{name}: {agent} sets no model, so no grader checks the model Claude names")
-            if not agent:
-                # On the session's own model the named effort is all the plugin adds, so a grader checks the call itself.
-                self.assertRegex(graders, r'input_match: \'"(?:model|effort|description)"', f"{name}: no grader checks the call")
+            if "effort" not in own:
+                self.assertIn(rf'"effort"\s*:\s*"{effort}"', graders, f"{name}: no grader checks the effort Claude names")
             self.session_on(fields["model"], session_id=name)
             hook_input = {"session_id": name, "cwd": str(self.project), "tool_input": {
                 "subagent_type": agent or "general-purpose", "prompt": "the case's brief", "model": model, "effort": effort}}
