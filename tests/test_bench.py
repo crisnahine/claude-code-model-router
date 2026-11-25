@@ -401,7 +401,9 @@ class Analysis(unittest.TestCase):
                           "apart.", quality)
         self.assertNotIn("could be chance", page)
         # The margin and the intervals are points of pass rate, never a share of it.
-        self.assertIn("pass rate within 10 points of it", page)
+        self.assertIn("its pass rate shown no more than 10 points behind", page)
+        self.assertIn("is saturated when an exact one-sided test (5%, at least 10 runs of each) doesn't show "
+                      "`haiku-high` (every subagent on Haiku) solving fewer runs than `defaults`", page)
         self.assertRegex(page, r"pass rate -\d+ to \+\d+ points \(95% intervals")
         self.assertNotRegex(page, r"[+-]\d+% to")
         n = analyze.MIN_RUNS

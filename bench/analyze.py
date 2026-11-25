@@ -205,8 +205,8 @@ def _judge(base: str, pass_ci: tuple, cost_ci: tuple, fewer: bool, solved: tuple
     if math.isfinite(c_hi) and c_hi < 0 and p_lo > -MARGIN:
         if fewer:  # a saving counts only at an equal or higher pass rate
             return "NONE", f"cheaper per solved task beyond noise, but it solved a smaller share of the runs; {seen}"
-        return "WIN", (f"cheaper per solved task beyond noise, at an equal or higher share of runs solved, pass rate "
-                       f"within {MARGIN_TEXT} of it; {seen}")
+        return "WIN", (f"cheaper per solved task beyond noise, at an equal or higher share of runs solved, its pass "
+                       f"rate shown no more than {MARGIN_TEXT} behind; {seen}")
     if math.isfinite(c_lo) and c_lo > 0 and p_hi < MARGIN:
         return "LOSE", f"dearer per solved task beyond noise, pass rate shown under {MARGIN_TEXT} ahead; {seen}"
     return "NONE", seen
@@ -252,7 +252,7 @@ def _quality(cells: dict, runs: list[dict]) -> dict:
                                  "models apart"}
     w, s = cells[weak], cells[strong]
     if min(w["runs"], s["runs"]) < MIN_RUNS:
-        return {**out, "reason": f"too few runs ({MIN_RUNS} needed) to say whether the tasks tell models apart"}
+        return {**out, "reason": f"too few runs ({MIN_RUNS} of each needed) to say whether the tasks tell models apart"}
     p = _lower_p(w["solved"], w["runs"], s["solved"], s["runs"])
     seen = (f"`{weak}` solved {w['solved']} of {w['runs']} and `{strong}` {s['solved']} of {s['runs']} (exact "
             f"one-sided p = {p:.3f})")
@@ -682,9 +682,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
         f"- Each table ends with an `{ALL}` row, judged the same way over every task in the table: the tasks of all "
         "its classes are paired and resampled together. A class with one task can't show the margin, so a plan "
         f"with a few tasks per class is judged on its `{ALL}` row.",
-        f"- A row, the `{ALL}` row too, is saturated when `{SPLIT_WEAK}` (every subagent on Haiku) can't be told from `{SPLIT_STRONG}` "
-        f"(subagents on the session model) by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an "
-        "equal pass rate says nothing about quality. Runs on an earlier revision of a task are left out of every table. A run on a "
+        f"- A row, the `{ALL}` row too, is saturated when an exact one-sided test (5%, at least {MIN_RUNS} runs of each) "
+        f"doesn't show `{SPLIT_WEAK}` (every subagent on Haiku) solving fewer runs than `{SPLIT_STRONG}` (subagents on "
+        "the session model). Then an equal pass rate says nothing about quality: the tasks can't tell a small model "
+        "from a strong one. Runs on an earlier revision of a task are left out of every table. A run on a "
         "task's current revision that a check other than today's graded stops the page from being built, since the "
         "check changed without a raise of the revision.",
         "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest, and n/a on a "
