@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import errno
+import importlib
 import os
 import subprocess
 import sys
 import threading
 import time
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -102,6 +104,31 @@ class StoreLock(Sandbox):
         self.assertEqual({k: v for k, v in store.load_state_file(path).items() if k.isdigit()},
                          {str(errno.ENOLCK): 1, str(errno.EOPNOTSUPP): 1})
         self.assertEqual(store.lock_counts(), {})
+
+    def test_on_windows_a_held_range_is_busy_and_a_filesystem_without_locks_writes_without_one(self):
+        # The binding os.name "nt" installs, with a stand-in msvcrt. The CRT's _locking sets EACCES for a range another
+        # process holds, and EINVAL where the filesystem can't lock (learn.microsoft.com, _locking).
+        self.data.mkdir(exist_ok=True)
+        path = self.data / "state.json"
+        failure: list = []
+
+        def locking(handle, mode, size):
+            if failure and mode == fake.LK_NBLCK:
+                raise OSError(failure[0], os.strerror(failure[0]))
+
+        fake = types.SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=locking)
+        try:
+            with mock.patch.dict(sys.modules, {"msvcrt": fake}), mock.patch.object(os, "name", "nt"):
+                importlib.reload(store)
+            self.assertIs(store._HELD, PermissionError)
+            with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.05):
+                for code, status in ((None, "saved"), (errno.EINVAL, "saved"), (errno.EACCES, "busy")):
+                    failure[:] = [code] if code else []
+                    with self.subTest(errno=code):
+                        self.assertEqual(store.try_update(path, lambda data: data.update(n=1))[1], status)
+        finally:
+            importlib.reload(store)
+            store.set_clock(lambda: self.clock)
 
 
 if __name__ == "__main__":

@@ -233,7 +233,8 @@ def locked(path: Path) -> Iterator[None]:
 if os.name == "nt":
     import msvcrt
 
-    _HELD = OSError  # msvcrt raises PermissionError for a held range
+    # The CRT's _locking sets EACCES (PermissionError) for a held range; a filesystem that can't lock fails otherwise.
+    _HELD = PermissionError
 
     def _try_lock(handle: int) -> None:
         os.lseek(handle, 0, os.SEEK_SET)
