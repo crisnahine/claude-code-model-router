@@ -101,6 +101,12 @@ class PluginVersion(unittest.TestCase):
 
 
 class Workflows(unittest.TestCase):
+    def test_the_type_check_also_runs_the_mod_field_check_on_the_types_it_downloads(self):
+        # No CI job has Claude Code's own types installed, so without this the field check skips everywhere.
+        script = (ROOT / "tests" / "mod" / "typecheck.sh").read_text(encoding="utf-8")
+        self.assertIn('MODEL_ROUTER_MOD_TYPES="$work/claude-code.d.ts" python3 -m unittest test_model_router.ModApiTypes',
+                      script)
+
     def test_validate_runs_on_the_engines_floor_and_latest(self):
         manifest = json.loads((ROOT / "plugins/model-router/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
         floor = re.fullmatch(r">=(\S+)", manifest["engines"]["claude-code"]).group(1)

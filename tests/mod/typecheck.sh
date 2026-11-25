@@ -19,3 +19,5 @@ cat > "$work/tsconfig.json" <<EOF
 }
 EOF
 "$work/node_modules/.bin/tsc" -p "$work/tsconfig.json"
+# The field check reads the same types: no CI job has Claude Code's own copy, so it would skip there.
+(cd "$here/.." && MODEL_ROUTER_MOD_TYPES="$work/claude-code.d.ts" python3 -m unittest test_model_router.ModApiTypes)

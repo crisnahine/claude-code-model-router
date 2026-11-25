@@ -33,7 +33,7 @@ Checked 2026-11-25 on `6b93b5f`, the 0.2.0 commit on top of the five merges of t
 
 - On the mod path, a spawn another plugin's mod moves to another family counts as a substitution against the decided model, so two such calls route a healthy model around for a day. The code shows it: `calls.returned` passes `untouched=route.was` to `health.ran`, which counts any third family as a substitution (S12.14).
 - Hooks are about three times slower on Apple's Python 3.9.6, the macOS system `python3`: 164 to 171 ms per hook and 168 to 176 ms per mod question at p50, against 54 to 60 ms before the launcher ran Python with `-I`. That Python writes no bytecode under `-I`, so every hook compiles the plugin again, and an `Agent` call on the mod path waits about 848 ms in all. Python 3.13 takes 45 to 50 ms. All stay far under the hook timeouts ([PERFORMANCE.md](PERFORMANCE.md), S4.10).
-- No check on a pull request fails when a Claude Code release renames a mod event or field: `ModApiTypes` skips wherever the installed mod types aren't found, which is every CI job and this machine on 2026-11-25 (S12.26).
+- A Claude Code release that renames a mod event or field fails the daily `newest` job of `upstream-watch.yml`, which type-checks the mod and runs `ModApiTypes` on the newest published mod types. A pull request runs the same two on the pinned types (`tests/mod/typecheck.sh`), so it learns of a rename only when the pin moves (S12.26).
 - Only tests read `Health.seen_running` in `scripts/modelrouter/health.py` and the `Settings.cloud` field in `scripts/modelrouter/settings.py` (S5.5).
 
 ### Decisions needed
