@@ -13,7 +13,7 @@ Checked 2026-11-24 against Claude Code 2.1.331 (`claude --version`), with each p
 - A caller-named `model` turns the redo off (`redo = ... and not tool_input.get("model")`); a caller-named `effort` keeps its effort but the model still climbs.
 - Workflow stages never redo (`spawn.facts`: `marked = not workflow and ...`, `earlier = None if workflow`). The mod passes resumed runs through untouched (`hooks/router.ts`, `if (e.fork || e.resume) return next(e)`).
 - Claude is taught the mark in three places: `hooks.session_start`, `fallback._note` and `skills/route/SKILL.md`.
-- In the 12-run pilot under `bench/results/pilot/redo-mark/` (untracked), every `routed` row has `escalated_from: null`. No redo fired there, but every run passed first time, so this says nothing either way.
+- In the 12-run pilot under `bench/results/pilot/redo-mark/`, every `routed` row has `escalated_from: null`. No redo fired there, but every run passed first time, so this says nothing either way.
 
 ## What the sources say
 
