@@ -37,6 +37,11 @@ try:
                         os.write(1, ("\n" + json.dumps(out) + "\n").encode())
                         os._exit(0)
 
+                def __exit__(self, kind, *rest):
+                    if kind is None:
+                        self.commit()  # Python 3.12 and later commit a with block without calling commit()
+                    return super().__exit__(kind, *rest)
+
             def crashing(*args, _connect=sqlite3.connect, **kwargs):
                 kwargs.setdefault("factory", Crash)
                 return _connect(*args, **kwargs)
