@@ -18,6 +18,28 @@ from test_model_router import SCRIPTS, Sandbox, store
 
 
 class StoreLock(Sandbox):
+    def test_a_write_that_fails_leaves_no_temp_file_behind(self):
+        self.data.mkdir(exist_ok=True)
+        path = self.data / "sample.json"
+
+        class Full:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def write(self, text):
+                raise OSError(28, "No space left on device")
+
+        def private_file(tmp, flags):
+            tmp.touch()
+            return Full()
+
+        with mock.patch.object(store, "_private_file", private_file), self.assertRaises(OSError):
+            store.write_atomic(path, "{}")
+        self.assertEqual(list(self.data.glob("*.tmp")), [])
+
     def test_two_waiters_on_a_lock_left_by_a_dead_hook_never_both_hold_it(self):
         self.data.mkdir(exist_ok=True)
         path = self.data / "sample.json"

@@ -15,8 +15,6 @@ from .config import EFFORTS, project_dir
 from .registry import Registry
 
 SOURCES = ("policy", "user", "project", "local", "flag")
-KEYS = ("availableModels", "deniedModels", "availableModelsMatch", "modelOverrides", "maxEffortLevel", "modelSettings",
-        "effortLevel")
 # Settings precedence, highest first (https://code.claude.com/docs/en/settings.md#settings-precedence).
 PRECEDENCE = ("policy", "flag", "local", "project", "user")
 # Where a blocked family alias moves to the newest permitted version (https://code.claude.com/docs/en/model-config.md).
@@ -46,7 +44,7 @@ def _caps(raw: object) -> dict[str, dict]:
 
 
 def _layer(raw: object, policy: bool = False) -> dict:
-    """One source cut to KEYS, each with the right shape; a bad key counts as unset.
+    """One source cut to the keys the mod sends, each with the right shape; a bad key counts as unset.
     modelOverrides keeps only whether it holds anything, and modelSettings only its effort fields. A deny list over the cap, or in the
     policy a list key that isn't a list, marks the layer "unreadable", which from_layers turns
     into no model open: dropping it would drop a deny."""

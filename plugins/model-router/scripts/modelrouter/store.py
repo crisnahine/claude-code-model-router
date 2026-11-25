@@ -113,8 +113,12 @@ def write_atomic(path: Path, text: str) -> None:
     # A unique temp name per process, then an atomic rename: a reader never sees a
     # half-written file.
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{time.monotonic_ns()}.tmp")
-    with _private_file(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL) as fh:
-        fh.write(text)
+    try:
+        with _private_file(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL) as fh:
+            fh.write(text)
+    except OSError:  # a full disk: nothing else ever sweeps the temp file
+        tmp.unlink(missing_ok=True)
+        raise
     for _ in range(40):
         try:
             tmp.replace(path)
