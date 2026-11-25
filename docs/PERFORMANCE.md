@@ -38,7 +38,7 @@ After 1,000 routed calls through the real hook functions, half the sessions on e
 
 | File | Bytes | Bounded by |
 | :- | -: | :- |
-| `ledger.jsonl` | 800,298 | 30 days; past 4 MiB, replaced usage rows go, then the older half (about 5,200 calls) |
+| `ledger.jsonl` | 800,298 | 30 days, trimmed once a day; past 4 MiB, replaced usage rows go, then the older half (about 5,200 calls) |
 | `routes.json`, `done.json`, `launched.json` | 185,849, 97,222, 1,603 | 200 sessions, a day idle, 100 records each |
 | `allowlist.json`, `edits.json`, `sessions.json` | 5,510, 3,109, 2,910 | 200 sessions |
 | `pending.json` | 796 | 200 sessions, 100 calls each |

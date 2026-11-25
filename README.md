@@ -89,7 +89,7 @@ It ships five agents, under `model-router:`: `scout` and `verifier` on Haiku at 
 
 ## What it stores
 
-Its files stay in the plugin's data folder, private to your user on macOS and Linux. The ledger keeps each call's agent, level, model, effort and reason, and each subagent's tokens and cost estimate, for up to 30 days and 4 MB. It stores no prompt, brief or description, and makes no network call of its own.
+Its files stay in the plugin's data folder, private to your user on macOS and Linux. The ledger keeps each call's agent, level, model, effort and reason, and each subagent's tokens and cost estimate, for 30 days, trimmed once a day, and up to 4 MB. It stores no prompt, brief or description, and makes no network call of its own.
 
 ## What it can't do
 

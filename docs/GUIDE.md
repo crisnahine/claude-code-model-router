@@ -164,7 +164,7 @@ Where a provider's alias runs an older model, as on Bedrock, Vertex AI and Found
 
 ## What it stores
 
-Its state is in `~/.claude/plugins/data/model-router-claude-code-model-router/`, readable only by you on macOS and Linux, and holds no prompt, brief or description. `ledger.jsonl` has a row per spawn, result, model error, check and subagent turn (agent, level, model, effort, reason, tokens, cost estimate) for 30 days, at most 4 MiB. `state.json` holds model health until `reset`. The rest track routes, redos, edits, locks and each session's switch and session check for a day or the newest 200 sessions. Delete the folder to remove it all. On a Python that writes no bytecode under the launcher, as the macOS system Python does, compiled code is cached in `~/.cache/model-router/pycache`, which you can delete at any time and which uninstalling leaves behind.
+Its state is in `~/.claude/plugins/data/model-router-claude-code-model-router/`, readable only by you on macOS and Linux, and holds no prompt, brief or description. `ledger.jsonl` has a row per spawn, result, model error, check and subagent turn (agent, level, model, effort, reason, tokens, cost estimate) for 30 days, trimmed once a day, at most 4 MiB. `state.json` holds model health until `reset`. The rest track routes, redos, edits, locks and each session's switch and session check for a day or the newest 200 sessions. Delete the folder to remove it all. On a Python that writes no bytecode under the launcher, as the macOS system Python does, compiled code is cached in `~/.cache/model-router/pycache`, which you can delete at any time and which uninstalling leaves behind.
 
 ## What it can't do
 

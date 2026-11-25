@@ -567,6 +567,18 @@ class Store(Sandbox):
         store.append_ledger({"event": "spawn"})
         self.assertEqual([r.get("n") for r in ledger.read()], [29, 1, None])
 
+    def test_the_age_trim_waits_until_the_oldest_row_is_a_day_past_thirty_days(self):
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        def kept(*days: float) -> list:
+            rows = [{"ts": (now - datetime.timedelta(days=d)).isoformat(timespec="seconds"), "n": d} for d in days]
+            store.ledger_path().write_text("".join(json.dumps(r) + "\n" for r in rows))
+            store.append_ledger({"event": "spawn"})
+            return [r.get("n") for r in ledger.read()]
+
+        self.assertEqual(kept(30.5, 29), [30.5, 29, None])  # else each append past day 30 rewrites the whole file
+        self.assertEqual(kept(31.5, 30.5, 29), [29, None])
+
     def test_a_trim_drops_blank_lines_and_reads_a_time_with_no_zone_as_utc(self):
         now = datetime.datetime.now(datetime.timezone.utc)
         old = (now - datetime.timedelta(days=40)).replace(tzinfo=None).isoformat(timespec="seconds")

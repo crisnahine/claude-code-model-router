@@ -441,8 +441,9 @@ def _replaced(lines: list[str]) -> list[str]:
 
 
 def append_ledger(entry: dict) -> None:
-    """Append one row. Rows older than LEDGER_MAX_DAYS go once the oldest one is. Past LEDGER_MAX_BYTES the usage
-    rows a later one replaces go, then the older half if the rest still fills half the cap, so trims stay rare."""
+    """Append one row. Rows older than LEDGER_MAX_DAYS go once the oldest one is a day older, so an age trim runs about
+    once a day. Past LEDGER_MAX_BYTES the usage rows a later one replaces go, then the older half if the rest still
+    fills half the cap, so trims stay rare."""
     now = _dt.datetime.now(_dt.timezone.utc)
     entry = {"ts": now.isoformat(timespec="seconds"), **entry}
     cutoff = now - _dt.timedelta(days=LEDGER_MAX_DAYS)
@@ -455,7 +456,8 @@ def append_ledger(entry: dict) -> None:
                 fh.write(json.dumps(entry) + "\n")
             # A bad byte reads as U+FFFD, so its line is one more that doesn't parse.
             with path.open(encoding="utf-8", errors="replace") as fh:
-                oldest = next((found for found in map(lambda line: _older(line, cutoff), fh) if found is not None), False)
+                oldest = next((found for found in map(lambda line: _older(line, cutoff - _dt.timedelta(days=1)), fh)
+                               if found is not None), False)
             big = path.stat().st_size > LEDGER_MAX_BYTES
             if oldest or big:
                 lines = [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
