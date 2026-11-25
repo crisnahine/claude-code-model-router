@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 
-from . import allowlist, health, ladder
+from . import allowlist, health, ladder, store
 from . import config as cfg
 from .config import Level, parse_mode
 from .registry import Registry
@@ -18,13 +18,18 @@ from .registry import Registry
 CLOUDS = ("bedrock", "vertex", "foundry")
 PROVIDERS = (*CLOUDS, "anthropic_aws", "anthropic_google_cloud", "mantle")
 # The userConfig keys in plugin.json.
-OPTIONS = ("routing_mode", "max_tier", "verify_gate")
+OPTIONS = ("routing_mode", "max_tier", "verify_gate", "session_check")
+# Per session: the /model-router switch, and what the session check found. Dropped at session end, or a day unwritten.
+SWITCHES = "switches"
+SWITCH_KEPT = 86400
 UNKNOWN = "unknown"  # a provider whose aliases aren't documented: only aliases are sent, and none counts as moving
 
 
 @dataclass(frozen=True)
 class Settings:
-    mode: str = "auto"  # routing_mode
+    mode: str = "auto"  # routing_mode, or this session's /model-router switch
+    switched: bool = False  # the session's switch, not the saved option, sets `mode`
+    session_check: str = "ask"  # session_check: "ask" or "off"
     cap: str | None = None  # max_tier, when it names a registry model
     verify_gate: bool = True
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
@@ -59,8 +64,24 @@ def _provider(on: set) -> str | None:
     return next(iter(on)) if len(on) == 1 else UNKNOWN
 
 
-def resolve(reg: Registry | None = None) -> Settings:
-    """`reg` validates the cap."""
+def switch(session_id: str | None, mode: str) -> None:
+    """Set routing for one session; a mode equal to the saved option keeps no switch."""
+    saved = resolve().mode
+
+    def apply(entry: dict) -> None:
+        entry.pop("routing", None)
+        if mode != saved:
+            entry["routing"] = mode
+    store.mutate_entry(SWITCHES, session_id, apply, max_age=SWITCH_KEPT)
+
+
+def forget(session_id: str | None) -> None:
+    """The session ended: its switch and its check go with it."""
+    store.drop_entry(SWITCHES, session_id)
+
+
+def resolve(reg: Registry | None = None, session_id: str | None = None) -> Settings:
+    """`reg` validates the cap; `session_id` reads that session's routing switch."""
 
     def option(name: str) -> str | None:
         value = os.environ.get(f"CLAUDE_PLUGIN_OPTION_{name.upper()}")
@@ -70,8 +91,12 @@ def resolve(reg: Registry | None = None) -> Settings:
         return os.environ.get(name) or None
 
     cap = option("max_tier")
+    saved = parse_mode(option("routing_mode")) or "auto"
+    mode = parse_mode(store.load_entry(SWITCHES, session_id).get("routing")) if session_id else None
     return Settings(
-        mode=parse_mode(option("routing_mode")) or "auto",
+        mode=mode or saved,
+        switched=bool(mode) and mode != saved,
+        session_check="off" if option("session_check") == "off" else "ask",
         cap=cap if reg and cap in reg.models else None,
         verify_gate=_on(option("verify_gate")),
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),
@@ -95,7 +120,7 @@ class Snapshot:
         self.hook_input = hook_input
         self.session_id = (hook_input or {}).get("session_id")
         self.registry = cfg.load(hook_input)
-        self.options = resolve(self.registry)
+        self.options = resolve(self.registry, self.session_id if isinstance(self.session_id, str) else None)
         self.project: Path = cfg.project_dir(hook_input)
         self.sends_ids = sends_ids  # False on the Agent call fallback, whose `model` takes only an alias
 

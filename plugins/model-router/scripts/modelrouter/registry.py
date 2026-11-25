@@ -68,6 +68,7 @@ class Registry:
     prices: Mapping[str, Any] = field(default_factory=dict)  # the shipped list prices, which the benchmark reads
     newest: Mapping[str, str] = field(default_factory=dict)
     older_aliases: Mapping[str, Mapping[str, str]] = field(default_factory=dict)  # provider: family: the ID its alias runs
+    session: Mapping[str, str] = field(default_factory=dict)  # family: its lowest effort for a recommended main session
     rules: Mapping[str, Rule] = field(default_factory=dict)
     problems: tuple[str, ...] = ()  # keys an override file had wrong and the registry dropped
     held: tuple[Held, ...] = ()

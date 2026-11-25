@@ -224,7 +224,7 @@ class Shipped(unittest.TestCase):
         manifest = json.loads((ROOT / "plugins/model-router/.claude-plugin/plugin.json").read_text(encoding="utf-8"))
         fields = manifest["userConfig"]
         models = list(json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8"))["models"])
-        accepted = {"routing_mode": set(cfg.MODES), "max_tier": {"none", *models}}
+        accepted = {"routing_mode": set(cfg.MODES), "max_tier": {"none", *models}, "session_check": {"ask", "off"}}
         for name, values in accepted.items():
             field = fields[name]
             self.assertIn(field["default"], field["options"], name)

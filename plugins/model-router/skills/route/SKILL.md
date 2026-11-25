@@ -15,7 +15,7 @@ $ARGUMENTS
 
 ## Current policy
 
-!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" policy --routing-mode='${user_config.routing_mode}' --max-tier='${user_config.max_tier}' --verify-gate='${user_config.verify_gate}'`
+!`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" policy --routing-mode='${user_config.routing_mode}' --max-tier='${user_config.max_tier}' --verify-gate='${user_config.verify_gate}' --session-check='${user_config.session_check}'`
 
 ## What the router does
 
@@ -23,7 +23,7 @@ Model Router keeps the `model` and `effort` an Agent call names, within the user
 
 To see what a call would run on, run:
 
-`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" explain --routing-mode='${user_config.routing_mode}' --max-tier='${user_config.max_tier}' --verify-gate='${user_config.verify_gate}'`
+`sh "${CLAUDE_PLUGIN_ROOT}/scripts/model-router.sh" --data-dir "${CLAUDE_PLUGIN_DATA}" explain --routing-mode='${user_config.routing_mode}' --max-tier='${user_config.max_tier}' --verify-gate='${user_config.verify_gate}' --session-check='${user_config.session_check}'`
 
 Add `--agent <name>` to see it for a specific agent, and `--model <model>` or `--effort <effort>` to see it for a call that names them. The brief doesn't change the answer: the router never reads it.
 

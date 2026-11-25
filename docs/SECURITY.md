@@ -16,6 +16,7 @@ Everything goes in one data folder: `CLAUDE_PLUGIN_DATA`, else `~/.claude/plugin
 
 - `ledger.jsonl`: session and agent ids, agent names, levels, reasons, model names, token counts and Claude Code's dollar estimate. Rows older than 30 days go, and past 4 MiB the older half goes (`store.append_ledger`).
 - `routes.json`, `done.json`, `launched.json`, `pending.json`: where each call went and what came back. A call is known by a hash of its agent and prompt (`calls.identify`), its task by a hash of its agent and description (`calls.task`). No brief, prompt or description is stored (`SecurityClaims.test_no_brief_or_description_is_stored`).
+- `switches.json`: per session, the `/model-router` switch, whether the session check ran, and the model family and effort it found (`settings.switch`, `session.check`). Dropped at session end (`settings.forget`) or after a day unwritten.
 - `sessions.json`, `edits.json`, `allowlist.json` (the model settings the mod read, and the project path), `state.json` (model health), `locks.json`, a `.flock` file per state file, empty marks under `mod-calls/`, and up to three `.corrupt-<time>` copies of a file that failed to parse.
 
 Per-session files keep their 200 most recently written sessions (`store.KEEP_ENTRIES`), and `routes.json`, `done.json` and `launched.json` drop a session after a day with no write (`calls.KEPT_FOR`).
@@ -32,7 +33,7 @@ The plugin opens no connection. No shipped Python module imports `urllib`, `http
 
 The Python runtime starts no process and runs no code from the repository. It reads hook and mod payloads, its own state, `config/models.json`, the user's and a project's `model-router.json`, agent frontmatter (`name`, `model`, `effort`, `tools` and `disallowedTools`) and Claude Code's plugin install records (`agents.find`), the tail of the session's and a subagent's transcript (`session.transcript_tail`), and the plugin's options and model variables from the environment (`settings.resolve`).
 
-It reads no settings file. The mod asks Claude Code for each settings source and passes on only `availableModels`, `deniedModels`, `availableModelsMatch`, `modelOverrides`, `maxEffortLevel` and each `modelSettings` entry's `maxEffortLevel`, never `env` (`KEYS` and `effortCaps` in `hooks/router.ts`; Node test "mod-start and mod-spawn carry the allowlist and effort cap keys of each settings source, and only the caps of modelSettings").
+It reads no settings file. The mod asks Claude Code for each settings source and passes on only `availableModels`, `deniedModels`, `availableModelsMatch`, `modelOverrides`, `maxEffortLevel`, `effortLevel` and each `modelSettings` entry's `maxEffortLevel` and `effortLevel`, never `env` (`KEYS` and `effortFields` in `hooks/router.ts`; Node test "mod-start and mod-spawn carry the allowlist and effort keys of each settings source, and only the effort fields of modelSettings").
 
 **The user's file and options.** Its `models`, `levels` and `agents` apply as written. `routing_mode` comes only from `/config`, and a `routing_mode` in either file is dropped (`config._clean`).
 
@@ -70,6 +71,13 @@ It never approves a tool call (`SecurityClaims.test_it_never_approves_a_tool_cal
 ## The mod
 
 `hooks/router.ts` runs `sh <plugin root>/scripts/model-router.sh <command>` as an argument array, so no shell parses the input, and sends the event as JSON on stdin with an 8-second timeout (`ask`). Every hook passes the event on unchanged when anything fails (Node test "every hook falls back to next(e) when it throws"). It never changes a prompt. Its only file writes are empty marks under `mod-calls/`: one per `Agent` call, and `<tool_use_id>.moved` for a spawn a later mod moved. Each is named by the call's `tool_use_id` only when that id is 1 to 128 letters, digits, `_` or `-` (`PLAIN_ID`), and the settings hooks check the same pattern before they remove one (`Mod.test_only_a_plain_tool_use_id_is_looked_up`, `MovedByAnotherMod.test_only_a_plain_tool_use_id_is_looked_up`).
+
+## What the mod runs on your choice
+
+Only in a session with a person at the prompt (`isInteractive`), never in `claude -p` or the Agent SDK (Node test "a headless run registers, draws and asks nothing, and routes as before"):
+
+- **`/model` and `/effort`.** The session check runs Claude Code's own commands through `$.command.run` only after you pick a setup in its dialog, and only for a label it sent: a dismissal or typed text runs nothing (Node test "a dismissal or free text at either step changes nothing"). The arguments come from the runtime: a registry family alias or its newest ID, and an effort level (`session._model_choice`). Claude Code then saves the model in your user settings and the effort under `modelSettings`, as it does for a typed `/model` or `/effort`, and applies its own allowlist and organization rules. A refused `/model` stops the switch before `/effort` (Node test "a switch that fails says so and stops, and one Claude Code did not take says the session stayed").
+- **One option.** The mod writes `session_check` through `$.config.set`, from `/model-router check on` or `off` or the check's "Don't ask again", and never when `$.config.list()` says managed settings own it (Node test "/model-router check off and on write the option, unless managed settings own it"). It never writes `routing_mode`: `/model-router on` and `off` keep the switch in `switches.json` for that session only.
 
 ## Skills
 

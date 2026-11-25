@@ -75,7 +75,9 @@
         "A call marked as a redo runs with more effort or on a stronger model",
         "A cap on the strongest model subagents may run on",
         "Asks once before a turn ends for the work's own check when Claude edited project files and no check ran after",
-        "Claude Code's cost estimate per subagent in /model-router:usage"
+        "Claude Code's cost estimate per subagent in /model-router:usage",
+        "A status line under the prompt, and /model-router to switch routing for one session",
+        "Offers a stronger main-session model and effort once, when a session starts below the recommended setups"
       ],
       "sameAs": ["https://github.com/crisnahine/claude-code-model-router"],
       "author": {"@id": "https://crisnahine.github.io/claude-code-model-router/#author"}
@@ -290,7 +292,7 @@ footer nav a { display: inline-flex; align-items: center; min-height: 44px; padd
     <h2>Built on the Claude Code docs</h2>
     <p class="intro">Model Router is built from the extension points Claude Code documents: the plugin manifest, hooks, the mods API, skills and subagents.</p>
     <ul>
-      <li>It never switches the main conversation's model or effort.</li>
+      <li>It switches the main conversation's model or effort only for a setup you pick when a session starts, through Claude Code's own <code>/model</code> and <code>/effort</code>.</li>
       <li>Its hooks fail open: an error in the plugin never blocks a tool call, a spawn or a session.</li>
       <li>It never approves a tool call, so your permission rules still review every spawn.</li>
     </ul>
@@ -308,7 +310,7 @@ footer nav a { display: inline-flex; align-items: center; min-height: 44px; padd
 <section id="install">
   <div class="wrap">
     <h2>How do I install Model Router?</h2>
-    <p class="intro">Run this in a Claude Code session. The three options in <code>/config</code> start at their defaults, so nothing needs setting first.</p>
+    <p class="intro">Run this in a Claude Code session. The four options in <code>/config</code> start at their defaults, so nothing needs setting first.</p>
 <pre><code>/plugin install model-router --marketplace crisnahine/claude-code-model-router</code></pre>
     <p>Or add the marketplace first:</p>
 <pre><code>/plugin marketplace add crisnahine/claude-code-model-router
@@ -325,9 +327,10 @@ footer nav a { display: inline-flex; align-items: center; min-height: 44px; padd
       <table>
         <thead><tr><th scope="col">Option</th><th scope="col">Default</th><th scope="col">What it does</th></tr></thead>
         <tbody>
-          <tr><td><code>routing_mode</code></td><td><code>auto</code></td><td><code>auto</code> keeps every agent's model within your limits and fills in the effort when only a model is named. <code>off</code> leaves every call as it is, with no session note and no check before a turn ends.</td></tr>
+          <tr><td><code>routing_mode</code></td><td><code>auto</code></td><td><code>auto</code> keeps every agent's model within your limits and fills in the effort when only a model is named. <code>off</code> leaves every call as it is, with no session note, no check before a turn ends and no session check.</td></tr>
           <tr><td><code>max_tier</code></td><td>none</td><td>The strongest model subagents may run on. A stronger model from the call, a rule, the agent's definition or a parent model the router can see is lowered to it. A model set by <code>CLAUDE_CODE_SUBAGENT_MODEL</code>, <code>CLAUDE_CODE_SUBAGENT_MODEL_FORCE</code> or <code>CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL</code> isn't, and neither is a fork.</td></tr>
           <tr><td><code>verify_gate</code></td><td>on</td><td>Asks once, before a turn ends, for the work's own check when Claude edited a project file with Edit, Write or NotebookEdit and no check ran after it. Only while <code>routing_mode</code> is <code>auto</code>, and not while background work runs. An ask costs one more turn. <code>false</code> turns it off.</td></tr>
+          <tr><td><code>session_check</code></td><td><code>ask</code></td><td>When a new interactive session starts below the recommended main-session setups (Opus or Fable at medium effort or higher, Sonnet at xhigh or higher), asks once which model and effort to switch to. A pick runs Claude Code's <code>/model</code> and <code>/effort</code>, which also keep it as the default for new sessions. <code>off</code> never asks. Only where the plugin's mod runs.</td></tr>
         </tbody>
       </table>
     </div>
@@ -347,9 +350,9 @@ footer nav a { display: inline-flex; align-items: center; min-height: 44px; padd
 <details><summary><h3>Does anything leave my machine?</h3></summary><p>No. It makes no network call and sends no prompt, brief or code anywhere. Its state stays in its own data folder, and its ledger keeps model names, levels, tokens and cost estimates, never a prompt or description (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/SECURITY.md">SECURITY.md</a>).</p></details>
 <details><summary><h3>Which models does it use?</h3></summary><p>The aliases <code>haiku</code>, <code>sonnet</code>, <code>opus</code> and <code>fable</code>, which Claude Code resolves for your provider. <code>max_tier</code> caps the strongest one, though not a model <code>CLAUDE_CODE_SUBAGENT_MODEL</code>, <code>CLAUDE_CODE_SUBAGENT_MODEL_FORCE</code> or <code>CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL</code> pins. <code>/model-router:models</code> shows which are usable here and which are capped, blocked or routed around (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/GUIDE.md#configuration">guide</a>).</p></details>
 <details><summary><h3>What happens without Python, or on an older Claude Code?</h3></summary><p>Without Python 3.9 or later on <code>PATH</code>, its hooks do nothing and its commands print one line saying why. Claude Code still runs the role agents on the models their definitions name, and the mod still lowers a model a call names above <code>max_tier</code>. Claude Code 2.1.323 to 2.1.328 refuse to load it, and older versions may load it without that check, so update Claude Code first.</p></details>
-<details><summary><h3>How do I turn it off?</h3></summary><p>Set <code>routing_mode</code> to <code>off</code> in <code>/config</code>: it changes no call and adds no session-start note or check, but still keeps its records. Set <code>verify_gate</code> to <code>false</code> to drop only the check before a turn ends, or give one agent <code>"route": false</code> in your own <code>~/.claude/model-router.json</code>. To unload it, run <code>claude plugin disable model-router@claude-code-model-router</code> (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/GUIDE.md#configuration">guide</a>).</p></details>
-<details><summary><h3>How do I see what it did?</h3></summary><p><code>/model-router:usage</code> shows the calls per agent, how many the router changed, their levels, the models they ran on and, where the mod runs, Claude Code's cost estimate. <code>/model-router:models</code> shows each model's state, and <code>/model-router:route &lt;task&gt;</code> says what a call would run on and why before you run it (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/GUIDE.md#commands">guide</a>).</p></details>
-<details><summary><h3>Does it change the main conversation's model?</h3></summary><p>No. Each model keeps its own prompt cache, so a switch would re-read the whole conversation uncached. It leaves the main conversation's effort alone too: for a hard request, type <code>ultrathink</code> or use <code>/effort</code> (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/GUIDE.md#what-it-cant-do">guide</a>).</p></details>
+<details><summary><h3>How do I turn it off?</h3></summary><p>Set <code>routing_mode</code> to <code>off</code> in <code>/config</code>: it changes no call and adds no session-start note or check, but still keeps its records. <code>/model-router off</code> does the same for this session only, where the mod runs. Set <code>verify_gate</code> to <code>false</code> to drop only the check before a turn ends, or give one agent <code>"route": false</code> in your own <code>~/.claude/model-router.json</code>. To unload it, run <code>claude plugin disable model-router@claude-code-model-router</code> (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/GUIDE.md#configuration">guide</a>).</p></details>
+<details><summary><h3>How do I see what it did?</h3></summary><p>Where the mod runs, a line under the prompt shows the mode, the cap and this session's routed calls and redos, and <code>/model-router</code> prints it with no model turn. <code>/model-router:usage</code> shows the calls per agent, how many the router changed, their levels, the models they ran on and, where the mod runs, Claude Code's cost estimate. <code>/model-router:models</code> shows each model's state, and <code>/model-router:route &lt;task&gt;</code> says what a call would run on and why before you run it (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/GUIDE.md#commands">guide</a>).</p></details>
+<details><summary><h3>Does it change the main conversation's model?</h3></summary><p>Only when you pick a setup. The session that plans and delegates works best on Opus or Fable at <code>medium</code> effort or higher, or Sonnet at <code>xhigh</code> or higher, so when a new session starts below these, the mod asks once, before your first prompt. Picking a model and an effort runs Claude Code's <code>/model</code> and <code>/effort</code>, which also keep them as your default for new sessions. It never switches by itself mid-conversation, since each model keeps its own prompt cache and a switch re-reads the whole conversation uncached. <code>Don't ask again</code>, <code>/model-router check off</code> or <code>session_check</code> set to <code>off</code> in <code>/config</code> stops the question (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/GUIDE.md#the-session-check">guide</a>).</p></details>
 <!-- End of FAQ. -->
   </div>
 </section>

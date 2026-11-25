@@ -366,6 +366,11 @@ def update_entry(name: str, key: str | None, **changes: Any) -> None:
     mutate_entry(name, key, lambda entry: entry.update(changes))
 
 
+def drop_entry(name: str, key: str | None) -> None:
+    if key:
+        try_update(_keyed(name), lambda data: data.pop(key, None), durable=False)
+
+
 def keep(records: dict, key: str, record: dict, kept: int | None = None) -> None:
     """Store a record stamped with the time, and drop the oldest past `kept` (KEPT_RECORDS)."""
     kept = KEPT_RECORDS if kept is None else kept

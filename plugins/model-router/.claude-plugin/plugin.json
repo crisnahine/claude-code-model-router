@@ -23,7 +23,7 @@
     "routing_mode": {
       "type": "string",
       "title": "Routing mode",
-      "description": "auto (default): the model and effort Claude names on each subagent call are kept within your limits, and the effort is filled in when only a model is named. off: calls are left as they are, with no session note and no check before finishing.",
+      "description": "auto (default): the model and effort Claude names on each subagent call are kept within your limits, and the effort is filled in when only a model is named. off: calls are left as they are, with no session note, no check before finishing and no session check.",
       "default": "auto",
       "options": [
         "auto",
@@ -48,6 +48,16 @@
       "title": "Check before finishing",
       "description": "On by default, as this plugin's own choice, and only while routing_mode is auto. When Claude edited a project file with Edit, Write or NotebookEdit and no check command ran afterwards, Claude is asked once, before it finishes a turn, to run the work's own check: tests, type check or linter for code, a recompute for figures, a reread against the request for a document. A file changed by a shell command doesn't count. There is no ask while background work runs or when the session's transcript can't be read. An ask costs one more turn. Set it to false to skip it.",
       "default": true
+    },
+    "session_check": {
+      "type": "string",
+      "title": "Session check",
+      "description": "ask (default): when a new interactive session starts below the setups Model Router recommends for the main session (Opus or Fable at medium effort or higher, Sonnet at xhigh or higher), it asks once whether to switch. Picking a setup runs /model and /effort, which also make that model and effort Claude Code's default for new sessions. off: never asks. Only while routing_mode is auto and the plugin's mod is loaded.",
+      "default": "ask",
+      "options": [
+        "ask",
+        "off"
+      ]
     }
   }
 }

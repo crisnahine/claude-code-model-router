@@ -40,12 +40,12 @@ Without Python 3.9 or later on `PATH`, its hooks do nothing and its commands pri
 
 ## How do I turn it off?
 
-Set `routing_mode` to `off` in `/config`: it changes no call and adds no session-start note or check, but still keeps its records. Set `verify_gate` to `false` to drop only the check before a turn ends, or give one agent `"route": false` in your own `~/.claude/model-router.json`. To unload it, run `claude plugin disable model-router@claude-code-model-router` ([guide](GUIDE.md#configuration)).
+Set `routing_mode` to `off` in `/config`: it changes no call and adds no session-start note or check, but still keeps its records. `/model-router off` does the same for this session only, where the mod runs. Set `verify_gate` to `false` to drop only the check before a turn ends, or give one agent `"route": false` in your own `~/.claude/model-router.json`. To unload it, run `claude plugin disable model-router@claude-code-model-router` ([guide](GUIDE.md#configuration)).
 
 ## How do I see what it did?
 
-`/model-router:usage` shows the calls per agent, how many the router changed, their levels, the models they ran on and, where the mod runs, Claude Code's cost estimate. `/model-router:models` shows each model's state, and `/model-router:route <task>` says what a call would run on and why before you run it ([guide](GUIDE.md#commands)).
+Where the mod runs, a line under the prompt shows the mode, the cap and this session's routed calls and redos, and `/model-router` prints it with no model turn. `/model-router:usage` shows the calls per agent, how many the router changed, their levels, the models they ran on and, where the mod runs, Claude Code's cost estimate. `/model-router:models` shows each model's state, and `/model-router:route <task>` says what a call would run on and why before you run it ([guide](GUIDE.md#commands)).
 
 ## Does it change the main conversation's model?
 
-No. Each model keeps its own prompt cache, so a switch would re-read the whole conversation uncached. It leaves the main conversation's effort alone too: for a hard request, type `ultrathink` or use `/effort` ([guide](GUIDE.md#what-it-cant-do)).
+Only when you pick a setup. The session that plans and delegates works best on Opus or Fable at `medium` effort or higher, or Sonnet at `xhigh` or higher, so when a new session starts below these, the mod asks once, before your first prompt. Picking a model and an effort runs Claude Code's `/model` and `/effort`, which also keep them as your default for new sessions. It never switches by itself mid-conversation, since each model keeps its own prompt cache and a switch re-reads the whole conversation uncached. `Don't ask again`, `/model-router check off` or `session_check` set to `off` in `/config` stops the question ([guide](GUIDE.md#the-session-check)).
