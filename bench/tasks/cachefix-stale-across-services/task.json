@@ -1,0 +1,5 @@
+{
+  "class": "root-cause",
+  "revision": 1,
+  "brief": "Customers can't check out after some product edits; BUG.md has the report. Find the cause and fix it so that after any change, made through any service in any order, every read shows what the database holds, and the cache still serves everything no change touched without going back to the database. Keep every service's interface as it is. test_checkout.py must pass, unchanged."
+}

@@ -1,0 +1,125 @@
+{"account":"acc-ber","amount_minor":80000,"currency":"EUR","id":"t-1003","memo":"Einzahlung","posted_at":"2023-01-02T07:30:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":-490,"currency":"EUR","id":"t-1005","memo":"Kontoführung","posted_at":"2023-01-02T23:10:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-ber","amount_minor":-12999,"currency":"EUR","id":"t-1008","memo":"Ersatzteile","posted_at":"2023-01-04T13:20:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":-6000,"currency":"EUR","id":"t-1011","memo":"disputed repair","posted_at":"2023-01-05T09:00:00Z","source_rev":1,"type":"chargeback"}
+{"account":"acc-ber","amount_minor":21500,"currency":"EUR","id":"t-1014","memo":"Inspektion","posted_at":"2023-01-06T08:45:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":6000,"currency":"EUR","id":"t-1017","memo":"Gutschrift","posted_at":"2023-01-07T10:00:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-ber","amount_minor":-3850,"currency":"EUR","id":"t-1020","memo":"Werkzeug","posted_at":"2023-01-08T22:30:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":-12354,"currency":"EUR","id":"t-1024","memo":"Werkzeug","posted_at":"2023-01-10T09:00:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":-28582,"currency":"EUR","id":"t-1026","memo":"Schläuche","posted_at":"2023-01-10T19:30:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-ber","amount_minor":30449,"currency":"EUR","id":"t-1023","memo":"Werkzeug","posted_at":"2023-01-10T20:30:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":49487,"currency":"EUR","id":"t-1028","memo":"Schläuche","posted_at":"2023-01-11T06:00:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-ber","amount_minor":23728,"currency":"EUR","id":"t-1027","memo":"Reparatur","posted_at":"2023-01-11T17:05:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":-44191,"currency":"EUR","id":"t-1031","memo":"Miete","posted_at":"2023-01-12T15:15:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":59761,"currency":"EUR","id":"t-1035","memo":"Inspektion","posted_at":"2023-01-13T12:50:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":26509,"currency":"EUR","id":"t-1037","memo":"Schläuche","posted_at":"2023-01-13T16:05:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":-27217,"currency":"EUR","id":"t-1043","memo":"Inspektion","posted_at":"2023-01-15T12:50:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":-59768,"currency":"EUR","id":"t-1044","memo":"Miete","posted_at":"2023-01-16T18:05:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":-80698,"currency":"EUR","id":"t-1045","memo":"Schläuche","posted_at":"2023-01-16T20:15:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-ber","amount_minor":42355,"currency":"EUR","id":"t-1053","memo":"Schläuche","posted_at":"2023-01-19T17:15:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":58291,"currency":"EUR","id":"t-1052","memo":"Reparatur","posted_at":"2023-01-19T18:45:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-ber","amount_minor":-20336,"currency":"EUR","id":"t-1056","memo":"Werkzeug","posted_at":"2023-01-20T15:50:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":36487,"currency":"EUR","id":"t-1057","memo":"Inspektion","posted_at":"2023-01-20T18:15:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":-18821,"currency":"EUR","id":"t-1059","memo":"Ersatzteile","posted_at":"2023-01-21T16:50:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":-40450,"currency":"EUR","id":"t-1058","memo":"Reparatur","posted_at":"2023-01-21T18:50:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":74936,"currency":"EUR","id":"t-1063","memo":"Reparatur","posted_at":"2023-01-22T13:45:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-ber","amount_minor":-29690,"currency":"EUR","id":"t-1066","memo":"Reparatur","posted_at":"2023-01-24T20:30:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":64832,"currency":"EUR","id":"t-1067","memo":"Inspektion","posted_at":"2023-01-24T21:20:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":89824,"currency":"EUR","id":"t-1071","memo":"Schläuche","posted_at":"2023-01-25T20:00:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":76886,"currency":"EUR","id":"t-1074","memo":"Schläuche","posted_at":"2023-01-26T15:50:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-ber","amount_minor":84651,"currency":"EUR","id":"t-1075","memo":"Reparatur","posted_at":"2023-01-26T18:20:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":-22358,"currency":"EUR","id":"t-1078","memo":"Ersatzteile","posted_at":"2023-01-27T09:50:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":-67295,"currency":"EUR","id":"t-1088","memo":"Miete","posted_at":"2023-01-30T10:45:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":39881,"currency":"EUR","id":"t-1090","memo":"Ersatzteile","posted_at":"2023-02-01T13:20:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":-21061,"currency":"EUR","id":"t-1095","memo":"Werkzeug","posted_at":"2023-02-03T20:00:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-ber","amount_minor":-46422,"currency":"EUR","id":"t-1096","memo":"Werkzeug","posted_at":"2023-02-04T13:05:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":-52663,"currency":"EUR","id":"t-1100","memo":"Schläuche","posted_at":"2023-02-05T15:20:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-ber","amount_minor":86886,"currency":"EUR","id":"t-1102","memo":"Miete","posted_at":"2023-02-06T14:00:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":-7481,"currency":"EUR","id":"t-1103","memo":"Ersatzteile","posted_at":"2023-02-07T12:30:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":-32623,"currency":"EUR","id":"t-1108","memo":"Ersatzteile","posted_at":"2023-02-08T06:20:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":-89847,"currency":"EUR","id":"t-1107","memo":"Inspektion","posted_at":"2023-02-08T17:45:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":-52664,"currency":"EUR","id":"t-1110","memo":"Werkzeug","posted_at":"2023-02-09T08:15:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":-22022,"currency":"EUR","id":"t-1109","memo":"Werkzeug","posted_at":"2023-02-09T16:50:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":6476,"currency":"EUR","id":"t-1113","memo":"Miete","posted_at":"2023-02-11T12:45:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":81374,"currency":"EUR","id":"t-1115","memo":"Werkzeug","posted_at":"2023-02-11T20:00:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ber","amount_minor":-29292,"currency":"EUR","id":"t-1118","memo":"Schläuche","posted_at":"2023-02-12T16:50:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ber","amount_minor":2351,"currency":"EUR","id":"t-1120","memo":"Inspektion","posted_at":"2023-02-13T13:15:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":120050,"currency":"GBP","id":"t-1004","memo":"","posted_at":"2023-01-02T11:00:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":-5700,"currency":"GBP","id":"t-1007","memo":"paper (corrected)","posted_at":"2023-01-03T12:00:00Z","source_rev":2,"type":"debit"}
+{"account":"acc-lon","amount_minor":-200,"currency":"GBP","id":"t-1010","memo":"card fee","posted_at":"2023-01-04T18:00:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-lon","amount_minor":36000,"currency":"GBP","id":"t-1013","memo":"flyers","posted_at":"2023-01-05T15:10:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":-1999,"currency":"GBP","id":"t-1016","memo":"ink","posted_at":"2023-01-06T20:00:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":9500,"currency":"GBP","id":"t-1019","memo":"posters","posted_at":"2023-01-07T10:30:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":51639,"currency":"GBP","id":"t-1021","memo":"paper","posted_at":"2023-01-09T11:45:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":27141,"currency":"GBP","id":"t-1025","memo":"ink","posted_at":"2023-01-10T17:20:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":73535,"currency":"GBP","id":"t-1033","memo":"paper","posted_at":"2023-01-12T16:00:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":-84922,"currency":"GBP","id":"t-1032","memo":"paper","posted_at":"2023-01-12T17:05:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":-6510,"currency":"GBP","id":"t-1036","memo":"binding","posted_at":"2023-01-13T10:15:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":-12686,"currency":"GBP","id":"t-1034","memo":"binding","posted_at":"2023-01-13T19:15:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-lon","amount_minor":-77572,"currency":"GBP","id":"t-1039","memo":"ink","posted_at":"2023-01-14T08:50:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-lon","amount_minor":65443,"currency":"GBP","id":"t-1038","memo":"courier","posted_at":"2023-01-14T15:50:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":-31271,"currency":"GBP","id":"t-1041","memo":"flyers","posted_at":"2023-01-15T07:00:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":6060,"currency":"GBP","id":"t-1042","memo":"courier","posted_at":"2023-01-15T11:00:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":-17665,"currency":"GBP","id":"t-1046","memo":"flyers","posted_at":"2023-01-16T18:00:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":-26997,"currency":"GBP","id":"t-1049","memo":"courier","posted_at":"2023-01-17T20:45:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":-5104,"currency":"GBP","id":"t-1050","memo":"flyers","posted_at":"2023-01-18T08:20:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-lon","amount_minor":-26647,"currency":"GBP","id":"t-1051","memo":"ink","posted_at":"2023-01-18T20:50:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":28462,"currency":"GBP","id":"t-1054","memo":"binding","posted_at":"2023-01-19T09:05:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":-85623,"currency":"GBP","id":"t-1055","memo":"paper","posted_at":"2023-01-20T15:45:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":-61619,"currency":"GBP","id":"t-1061","memo":"posters","posted_at":"2023-01-22T15:15:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-lon","amount_minor":-42579,"currency":"GBP","id":"t-1064","memo":"paper","posted_at":"2023-01-23T15:00:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-lon","amount_minor":64597,"currency":"GBP","id":"t-1065","memo":"flyers","posted_at":"2023-01-23T20:05:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":62809,"currency":"GBP","id":"t-1068","memo":"binding","posted_at":"2023-01-24T07:45:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-lon","amount_minor":22269,"currency":"GBP","id":"t-1069","memo":"paper","posted_at":"2023-01-25T09:20:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":-52772,"currency":"GBP","id":"t-1072","memo":"binding","posted_at":"2023-01-25T11:50:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":-31529,"currency":"GBP","id":"t-1073","memo":"paper","posted_at":"2023-01-26T15:50:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":-44807,"currency":"GBP","id":"t-1076","memo":"flyers","posted_at":"2023-01-26T20:50:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":10401,"currency":"GBP","id":"t-1080","memo":"courier","posted_at":"2023-01-27T10:15:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":87929,"currency":"GBP","id":"t-1077","memo":"binding","posted_at":"2023-01-27T20:15:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-lon","amount_minor":80167,"currency":"GBP","id":"t-1083","memo":"courier","posted_at":"2023-01-28T14:30:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":-18928,"currency":"GBP","id":"t-1081","memo":"flyers","posted_at":"2023-01-28T20:20:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":71573,"currency":"GBP","id":"t-1084","memo":"posters","posted_at":"2023-01-29T16:50:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":51168,"currency":"GBP","id":"t-1089","memo":"flyers","posted_at":"2023-01-30T22:05:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-lon","amount_minor":58641,"currency":"GBP","id":"t-1094","memo":"courier","posted_at":"2023-02-03T09:15:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":-64688,"currency":"GBP","id":"t-1097","memo":"binding","posted_at":"2023-02-04T12:30:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-lon","amount_minor":23761,"currency":"GBP","id":"t-1101","memo":"paper","posted_at":"2023-02-06T21:05:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":66258,"currency":"GBP","id":"t-1104","memo":"ink","posted_at":"2023-02-07T17:15:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-lon","amount_minor":-10966,"currency":"GBP","id":"t-1111","memo":"courier","posted_at":"2023-02-10T13:05:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":-89331,"currency":"GBP","id":"t-1112","memo":"paper","posted_at":"2023-02-10T18:20:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":-29068,"currency":"GBP","id":"t-1114","memo":"binding","posted_at":"2023-02-11T10:20:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-lon","amount_minor":-23944,"currency":"GBP","id":"t-1119","memo":"paper","posted_at":"2023-02-13T14:30:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":-4500,"currency":"USD","id":"t-0412","memo":"2020 backlog: delivery","posted_at":"2020-11-04T02:30:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":250000,"currency":"USD","id":"t-1001","memo":"opening deposit","posted_at":"2023-01-02T14:00:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ny","amount_minor":-1230,"currency":"USD","id":"t-1002","memo":"coffee beans","posted_at":"2023-01-02T15:15:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":-31000,"currency":"USD","id":"t-1006","memo":"rent share","posted_at":"2023-01-03T21:45:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":1230,"currency":"USD","id":"t-1009","memo":"beans returned","posted_at":"2023-01-04T14:05:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-ny","amount_minor":94025,"currency":"USD","id":"t-1012","memo":"wholesale order 88","posted_at":"2023-01-05T18:30:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ny","amount_minor":-300,"currency":"USD","id":"t-1015","memo":"wire fee","posted_at":"2023-01-06T22:00:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-ny","amount_minor":-8840,"currency":"USD","id":"t-1018","memo":"milk","posted_at":"2023-01-07T13:00:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":18446,"currency":"USD","id":"t-1022","memo":"coffee beans","posted_at":"2023-01-09T16:45:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ny","amount_minor":57648,"currency":"USD","id":"t-1029","memo":"wholesale order","posted_at":"2023-01-11T18:05:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-ny","amount_minor":-25553,"currency":"USD","id":"t-1030","memo":"milk","posted_at":"2023-01-11T22:45:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":-65379,"currency":"USD","id":"t-1040","memo":"wholesale order","posted_at":"2023-01-15T12:15:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-ny","amount_minor":38515,"currency":"USD","id":"t-1047","memo":"milk","posted_at":"2023-01-17T00:30:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ny","amount_minor":55839,"currency":"USD","id":"t-1048","memo":"milk","posted_at":"2023-01-17T18:05:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ny","amount_minor":-24737,"currency":"USD","id":"t-1060","memo":"delivery","posted_at":"2023-01-21T12:15:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":72795,"currency":"USD","id":"t-1062","memo":"wholesale order","posted_at":"2023-01-22T19:50:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ny","amount_minor":-42388,"currency":"USD","id":"t-1070","memo":"wholesale order","posted_at":"2023-01-26T00:05:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":40813,"currency":"USD","id":"t-1079","memo":"wholesale order","posted_at":"2023-01-27T20:45:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-ny","amount_minor":-41262,"currency":"USD","id":"t-1082","memo":"coffee beans","posted_at":"2023-01-28T21:30:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":-79571,"currency":"USD","id":"t-1085","memo":"coffee beans","posted_at":"2023-01-29T20:45:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":19611,"currency":"USD","id":"t-1086","memo":"delivery","posted_at":"2023-01-30T16:20:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ny","amount_minor":18803,"currency":"USD","id":"t-1087","memo":"milk","posted_at":"2023-01-31T01:20:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-ny","amount_minor":13288,"currency":"USD","id":"t-1091","memo":"cups","posted_at":"2023-02-01T22:30:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ny","amount_minor":16718,"currency":"USD","id":"t-1093","memo":"repairs","posted_at":"2023-02-02T12:20:00Z","source_rev":1,"type":"refund"}
+{"account":"acc-ny","amount_minor":-61592,"currency":"USD","id":"t-1092","memo":"coffee beans","posted_at":"2023-02-02T23:30:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-ny","amount_minor":-75607,"currency":"USD","id":"t-1098","memo":"coffee beans","posted_at":"2023-02-05T14:50:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":-30204,"currency":"USD","id":"t-1099","memo":"coffee beans","posted_at":"2023-02-05T21:15:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":-68983,"currency":"USD","id":"t-1105","memo":"wholesale order","posted_at":"2023-02-07T19:05:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":-48746,"currency":"USD","id":"t-1106","memo":"delivery","posted_at":"2023-02-08T18:50:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-ny","amount_minor":874,"currency":"USD","id":"t-1116","memo":"cups","posted_at":"2023-02-12T02:50:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ny","amount_minor":17071,"currency":"USD","id":"t-1117","memo":"repairs","posted_at":"2023-02-12T23:00:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ny","amount_minor":-48011,"currency":"USD","id":"t-1122","memo":"delivery","posted_at":"2023-02-14T12:00:00Z","source_rev":1,"type":"fee"}
+{"account":"acc-ny","amount_minor":23462,"currency":"USD","id":"t-1123","memo":"repairs","posted_at":"2023-02-14T15:00:00Z","source_rev":1,"type":"credit"}
+{"account":"acc-ny","amount_minor":-45859,"currency":"USD","id":"t-1121","memo":"coffee beans","posted_at":"2023-02-14T17:30:00Z","source_rev":1,"type":"debit"}
+{"account":"acc-ny","amount_minor":-29815,"currency":"USD","id":"t-1124","memo":"wholesale order","posted_at":"2023-02-15T00:30:00Z","source_rev":1,"type":"fee"}

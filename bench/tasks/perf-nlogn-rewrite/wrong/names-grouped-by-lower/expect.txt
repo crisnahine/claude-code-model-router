@@ -1,0 +1,1 @@
+on spellings that casefold together

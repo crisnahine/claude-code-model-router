@@ -1,0 +1,5 @@
+{
+  "class": "implementation",
+  "revision": 1,
+  "brief": "The monthly sales report (reports.render, and python3 -m reports) gives the right numbers but is far too slow for a real month. Make it build the report for 200,000 sales rows in under 10 seconds, with output byte for byte the same as now for every input. Keep reports.render(sales_path, regions_path) returning the report as a string, and keep the command line as it is. test_report.py must pass, unchanged; make_sales.py writes test data of any size."
+}

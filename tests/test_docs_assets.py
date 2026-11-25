@@ -140,7 +140,7 @@ class DocsAssets(unittest.TestCase):
         self.assertEqual((f["opus.pooled.best"], f["opus.pooled.strongest"], f["opus.solved.best"]),
                          (f["opus.pooled.sonnet-via-opusplan"], f["opus.pooled.fable-high"], "69 of 70"))
         self.assertEqual((f["opus.saturated"], f["sonnet.saturated"], f["opus.router_code"]), ("5", "0", "`plugin-next`"))
-        self.assertEqual((f["tasks"], f["tasks_total"]), ("14", "38"))
+        self.assertEqual((f["tasks"], f["tasks_total"]), ("14", "42"))
         self.assertFalse([k for k in f if "plugin-next" in k])
 
     def test_the_figures_do_not_read_the_wording_of_a_reason(self):

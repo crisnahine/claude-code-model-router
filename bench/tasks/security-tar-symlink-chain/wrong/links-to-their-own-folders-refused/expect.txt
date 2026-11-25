@@ -1,0 +1,1 @@
+a link made through another link: extracted instead of being refused

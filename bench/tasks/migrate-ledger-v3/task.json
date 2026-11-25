@@ -1,0 +1,5 @@
+{
+  "class": "implementation",
+  "revision": 1,
+  "brief": "Write the v2 to v3 migration in ledger/migrate_v3.py: migrate(src, accounts, dst) reads the v2 export at src and the accounts file at accounts, writes the v3 file at dst as docs/FORMAT_V3.md describes, and returns the number of records written. It will run once on the full export, which is far bigger than the sample in data/. Use the standard library only. test_migrate.py must pass, unchanged."
+}

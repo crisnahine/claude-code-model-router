@@ -1,0 +1,1 @@
+a link to . and a link under it: extracted instead of being refused
