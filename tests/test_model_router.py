@@ -529,6 +529,14 @@ class Intake(Sandbox):
             self.assertTrue(intake.is_user_prompt(text))
             self.assertLess(time.monotonic() - started, 0.5, text[:8])
 
+    def test_a_long_prompt_of_markup_with_hyphenated_tags_is_read_quickly(self):
+        item = '<mat-list-item class="row">\n  <span>Item text here</span>\n</mat-list-item>\n'
+        text = item * (100_000 // len(item)) + "Why does this list not scroll?"
+        self.assertGreater(len(text), 99_000)
+        started = time.monotonic()
+        self.assertTrue(intake.is_user_prompt(text))
+        self.assertLess(time.monotonic() - started, 0.5)
+
 
 class Store(Sandbox):
     def test_keyed_files_drop_the_least_recently_written(self):

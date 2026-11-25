@@ -13,8 +13,8 @@ PASTED = "<pasted_content"
 MACHINE_TAG = re.compile(r"<(?:task-notification|command-[\w-]+|bash-[\w-]+|local-command-[\w-]+|system-reminder)\b")
 # Nothing but tag elements is framing too, when every tag name is hyphenated, as each framing seen so far is:
 # a person's prompt written in XML tags (<task>, <instructions>) has plain names. Each element ends at its first
-# closing tag and the name's parts are capped, so a long prompt can't make the match backtrack.
-ELEMENTS = re.compile(r"(?:\s*<([A-Za-z0-9_]{1,32}(?:-\w{1,32}){1,8})[^>]*>(?:(?!</\1\s*>).)*</\1\s*>)+\s*", re.S)
+# closing tag, and a name ends only where the tag's does, so a failed match never rescans the prompt for a shorter one.
+ELEMENTS = re.compile(r"(?:\s*<([A-Za-z0-9_]{1,32}(?:-\w{1,32}){1,8})(?![\w-])[^>]*>(?:(?!</\1\s*>).)*</\1\s*>)+\s*", re.S)
 
 
 def is_delivered(text: object) -> bool:
