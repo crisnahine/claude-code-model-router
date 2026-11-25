@@ -75,7 +75,7 @@ class ProjectFloorsOnAnUnknownModel(Sandbox):
     def test_a_floor_that_can_only_raise_still_applies(self):
         self.override({"agents": {"Plan": {"level": "frontier"}}})
         self.assertEqual(self.spawn("Plan")["model"], "fable")
-        self.override({"agents": {"Plan": {"level": "standard"}}}, user=True)
+        self.override({"agents": {"Plan": {"level": "complex"}}}, user=True)
         self.override({})
         self.assertEqual(self.spawn("Plan")["model"], "sonnet")  # the user's own floor is trusted
 
@@ -173,7 +173,7 @@ class ProjectFloorsSayWhyTheyDidNothing(Sandbox):
         self.assertIsNone(modpath.spawn(mod_input(self.project, "Plan")))
         self.assertIn("a project rule raises Plan to complex", self.ledger()[-1]["held"])
         self.options(max_tier="sonnet")
-        self.override({"agents": {"general-purpose": {"level": "complex"}}})
+        self.override({"agents": {"general-purpose": {"level": "hardest"}}})
         self.assertIsNone(modpath.spawn(mod_input(self.project, "general-purpose", parent="sonnet")))
         self.assertIn("no stronger than the parent's sonnet", self.ledger()[-1]["held"])
         self.override({"agents": {"general-purpose": {"level": "lookup"}}})

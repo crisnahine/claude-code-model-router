@@ -29,7 +29,7 @@ def model_for(reg: Registry, level: Level) -> str | None:
 
 def rung(reg: Registry, model: str | None, named_effort: str | None = None) -> Level | None:
     """The level `model` stands for: its lowest rung, or the lowest whose effort reaches `named_effort`
-    (Opus at xhigh or max is hardest). A model on no rung stands for the highest level it is strong enough for.
+    (Haiku at high is standard). A model on no rung stands for the highest level it is strong enough for.
     Rungs are read from the ladder without a project's file, whose raised `needs` would move a model down one."""
     if not model:
         return None

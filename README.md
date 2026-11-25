@@ -50,9 +50,9 @@ The first that applies:
 6. `CLAUDE_CODE_SUBAGENT_MODEL`
 7. The parent's model
 
-A model from 3, 4, 5 or 7 is held to `max_tier`, `availableModels`, `deniedModels` and model health: one ruled out moves to the next stronger usable model, else the strongest usable. A rule's `level` raises a call below it, and a teammate left on a Haiku parent's model starts on Sonnet.
+A model from 3, 4, 5 or 7 is held to `max_tier`, `availableModels`, `deniedModels` and model health: one ruled out moves to the next stronger usable model, else the strongest usable. A rule's `level` raises a call below it, and a teammate left on a parent's model weaker than the standard level's starts on that level's model.
 
-Levels: lookup (Haiku, `medium`), standard (Sonnet, `medium`), complex (Opus, `high`), hardest (Opus, `xhigh`), frontier (Fable, `high`). With no effort set, a model from 1 to 5, or one Model Router moved the call to, gets an effort from its level. A call left on 6 or 7 gets none.
+Levels: lookup (Haiku, `medium`), standard (Haiku, `high`), complex (Sonnet, `high`), hardest (Opus, `high`), frontier (Fable, `high`). With no effort set, a model from 1 to 5, or one Model Router moved the call to, gets an effort from its level. A call left on 6 or 7 gets none.
 
 ## Redo
 
@@ -68,7 +68,7 @@ When Claude changed a project file with Edit, Write or NotebookEdit and no check
 - `/model-router:models [reset]`: which models are in use, capped, blocked or routed around. `reset` clears model health.
 - `/model-router:usage [days]`: agents, levels, models, tokens, redos and Claude Code's cost estimate per subagent (default 7 days).
 
-It ships five agents, under `model-router:`: `scout` and `verifier` on Haiku, `architect` and `reviewer` on Opus, and `implementer` on its call's model.
+It ships five agents, under `model-router:`: `scout` and `verifier` on Haiku at `medium`, `implementer` on Haiku at `high`, and `architect` and `reviewer` on Sonnet at `high`.
 
 ## What it stores
 

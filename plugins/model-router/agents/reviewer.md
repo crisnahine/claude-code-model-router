@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Reviews a risky or cross-module diff (security, data, a public API, concurrency) or one the user names; reports and writes nothing. A small, tested change doesn't need one.
-model: opus
+model: sonnet
 effort: high
 tools: Read, Grep, Glob
 color: red

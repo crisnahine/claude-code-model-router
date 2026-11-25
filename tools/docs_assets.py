@@ -174,9 +174,9 @@ def badge_assets(version: str, floor: str) -> dict:
 
 LADDER = [  # level, model, effort, needs, subtask
     ("lookup", "Haiku", "medium", 1, "Finding, reading and listing"),
-    ("standard", "Sonnet", "medium", 2, "Everyday work to a clear brief"),
-    ("complex", "Opus", "high", 3, "Hard to check, high-stakes or broad"),
-    ("hardest", "Opus", "xhigh", 3, "When a call or a rule names it"),
+    ("standard", "Haiku", "high", 1, "Code, figures and documents to a brief"),
+    ("complex", "Sonnet", "high", 2, "A judgment call: a design or a review"),
+    ("hardest", "Opus", "high", 3, "When a redo, a call or a rule names it"),
     ("frontier", "Fable", "high", 4, "Open-ended research"),
 ]
 
@@ -216,12 +216,12 @@ def diagram_ladder() -> str:
         room("ladder.svg: subtask", 590 + width_of(sub, 12.5), 900)
         room("ladder.svg: level", 180 + width_of(lv, 15, bold=True), 290 - 5 - 6)
         room("ladder.svg: model", 300 + width_of(model, 15), 392 - 8)
-    # a call redone from standard, more effort on Sonnet first, now on complex
+    # a call redone from lookup, more effort on Haiku first, now on complex
     cy = ys["complex"]
     out.append(f'<circle cx="124" cy="{cy}" r="13" class="halo" fill="none" stroke-width="5"/>'
                f'<circle cx="124" cy="{cy}" r="11" class="rt"/>'
                + pill(30, cy - 12, "redo", cls="rt", tcls="tag", size=12)[0])
-    out.append(f'<path class="rts" d="M124 {ys["standard"] - 4}V{cy + 18}" stroke-width="2.5" '
+    out.append(f'<path class="rts" d="M124 {ys["lookup"] - 4}V{cy + 18}" stroke-width="2.5" '
                f'stroke-dasharray="4 4" fill="none" stroke-linecap="round"/>')
     out.append(text(32, 432, "A model named on a call stands for its lowest level. When the cap, "
                     "availableModels, deniedModels or failures", "mut", 13))
@@ -229,8 +229,8 @@ def diagram_ladder() -> str:
                     "strongest one left. A redo adds effort first.", "mut", 13))
     out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh.", "mut", 13))
     title = "The ladder: five levels to a model and an effort"
-    label = ("Lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on Opus at high, hardest "
-             "on Opus at xhigh, and frontier on Fable at high. A model named on a call stands for its lowest level. "
+    label = ("Lookup runs on Haiku at medium effort, standard on Haiku at high, complex on Sonnet at high, hardest "
+             "on Opus at high, and frontier on Fable at high. A model named on a call stands for its lowest level. "
              "A call Claude marks as a redo runs one effort step higher on its model while it ran below high, and "
              "after that on the next stronger model: Haiku, Sonnet, Opus, then Fable. When the cap, the availableModels or "
              "deniedModels settings, or failures rule a model out, the pick moves to the nearest usable model above "
@@ -244,10 +244,10 @@ def diagram_redo() -> str:
     out = [frame(w, h), text(32, 42, "Redo escalation", "ink b", 17),
            text(32, 66, "A call Claude marks as a redo climbs from the run it redoes.", "mut", 13.5)]
     steps = [
-        ("1. Agent call", ["Runs at its level:"], "standard, Sonnet, medium", 2),
+        ("1. Agent call", ["Runs at its level:"], "lookup, Haiku, medium", 1),
         ("2. Claude marks it", ["The result fell short:", 'its description gets "Redo:"'], None, -1),
-        ("3. Effort first", ["Below high, the same", "model, one step up:"], "Sonnet, high", 2),
-        ("4. Then the model", ["From high, the next", "stronger model:"], "complex, Opus, high", 3),
+        ("3. Effort first", ["Below high, the same", "model, one step up:"], "Haiku, high", 2),
+        ("4. Then the model", ["From high, the next", "stronger model:"], "complex, Sonnet, high", 3),
     ]
     cw, gap, top = 196, 28, 92
     for k, (head, body, code, accent) in enumerate(steps):
@@ -278,10 +278,10 @@ def diagram_redo() -> str:
             "call counts as finished when the agent stops with an answer."]
     out.append(lines(32, 264, note, "mut", 13, 20))
     title = "Redo escalation: effort first, then the model"
-    label = ("A call runs at its level, for example standard on Sonnet at medium effort. When its result falls short, "
+    label = ("A call runs at its level, for example lookup on Haiku at medium effort. When its result falls short, "
              "Claude marks a redo by starting the call's description with Redo. Below high effort, the redo runs the "
-             "same model one effort step up, Sonnet at high. From high, the next redo runs the next stronger model at "
-             "its own level's effort, complex on Opus at high.")
+             "same model one effort step up, Haiku at high. From high, the next redo runs the next stronger model at "
+             "its own level's effort, complex on Sonnet at high.")
     return svg(w, h, title, label, "".join(out))
 
 
@@ -388,7 +388,7 @@ def diagram_precedence() -> str:
     out.append(lines(652, ey + 117, ["CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_EFFORT"], "mono ink", 11.5, 18))
     out.append(text(32, 476, "A workflow agent whose script names no model runs on CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL "
                     "when it is set.", "mut", 13))
-    out.append(text(32, 496, "Example: a call that names sonnet and no effort runs on Sonnet at medium. A rule's level "
+    out.append(text(32, 496, "Example: a call that names sonnet and no effort runs on Sonnet at high. A rule's level "
                     "raises a model below it.", "mut", 13))
     title = "Who decides the model: the order of authority"
     label = ("Strongest first: CLAUDE_CODE_SUBAGENT_MODEL_FORCE, then a model named on the call, then a per-agent "

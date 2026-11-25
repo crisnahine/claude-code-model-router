@@ -1,26 +1,26 @@
 {
-  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength and cost are relative ranks. A model's name must be an alias the Agent tool accepts (haiku, sonnet, opus, fable). Levels pair a strength with an effort: a level runs on the cheapest model at or above its strength, so standard runs on Sonnet at medium, complex on Opus at high, and hardest differs from complex in effort on the same model: Opus at xhigh. A model named on a call stands for its lowest level, and gets that level's effort when nobody chose one. A model weaker than a level needs runs it one effort step higher, up to xhigh. Prices are USD per million tokens on the Anthropic API, read only by the benchmark's cost estimate: Model Router prices nothing, and /model-router:usage shows Claude Code's own estimate. A key is one model version, or ends in -* to cover every version of a family. cache_write is the five-minute cache write price and cache_write_1h the one-hour one. `schema` is the version of this shape; an override may carry it too, and docs/ARCHITECTURE.md \"Compatibility\" says what changes it.",
+  "$comment": "The model registry and routing policy. Models are data: add or adjust one in your own ~/.claude/model-router.json, or per project in .claude/model-router.json (same shape, merged key by key). strength and cost are relative ranks. A model's name must be an alias the Agent tool accepts (haiku, sonnet, opus, fable). Levels pair a strength with an effort: a level runs on the cheapest model at or above its strength, so lookup and standard both run on Haiku, at medium and high, complex on Sonnet at high and hardest on Opus at high. A model named on a call stands for its lowest level, or the level its named effort reaches, and gets that level's effort when nobody chose one. A model weaker than a level needs runs it one effort step higher, up to xhigh. Prices are USD per million tokens on the Anthropic API, read only by the benchmark's cost estimate: Model Router prices nothing, and /model-router:usage shows Claude Code's own estimate. A key is one model version, or ends in -* to cover every version of a family. cache_write is the five-minute cache write price and cache_write_1h the one-hour one. `schema` is the version of this shape; an override may carry it too, and docs/ARCHITECTURE.md \"Compatibility\" says what changes it.",
   "schema": 1,
   "models": {
     "haiku": {
       "strength": 1,
       "cost": 1,
-      "use_for": "Lookups, file search, summarizing known code, running a command and reporting, formatting, trivial edits."
+      "use_for": "Finding, reading and listing at medium effort; writing and fixing code, figures and documents to a brief at high."
     },
     "sonnet": {
       "strength": 2,
       "cost": 2,
-      "use_for": "Everyday implementation at medium effort: features with a clear spec, tests, refactors inside one module."
+      "use_for": "A judgment call with no check to run, such as a design or a review."
     },
     "opus": {
       "strength": 3,
       "cost": 3,
-      "use_for": "Defect fixes, migrations and performance work, design and planning, cross-module changes, subtle bugs, security-sensitive code, adversarial review."
+      "use_for": "The hardest level: a redo of work Sonnet fell short on, or a level a rule raises to it."
     },
     "fable": {
       "strength": 4,
       "cost": 4,
-      "use_for": "Research-grade and open-ended work: ambiguous multi-system problems with no known approach, long investigations, and retries after Opus fell short."
+      "use_for": "Open-ended research with no known approach, and a redo of work Opus fell short on."
     }
   },
   "aliases": {

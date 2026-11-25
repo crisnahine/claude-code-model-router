@@ -29,13 +29,13 @@ Add `--agent <name>` to see it for a specific agent, and `--model <model>` or `-
 
 ## Which model and effort fit the work
 
-Judge the work by how easy its result is to check, what a mistake costs, how open-ended it is and how much there is to read. A contract and a code change can sit on the same row.
+Judge the work by whether it has a check to run (tests, a recompute, a reread against the brief) and how open-ended it is. A contract and a code change can sit on the same row.
 
 | Work | `model` | `effort` | For example |
 | :- | :- | :- | :- |
 | Finding, reading and listing, where a wrong answer is easy to spot | `haiku` | `medium` | the files that import a module, the open invoices in a sheet, the dates in a letter |
-| Everyday work to a clear brief | `sonnet` | `medium` | a function to its spec, a refactor inside one module, notes turned into a summary, an email drafted from an outline |
-| Hard to check, high-stakes, ambiguous or broad | `opus` | `high` | a bug's cause, a design, a review, a migration, a contract, financial figures, anything published or sent out |
+| Writing and fixing code, figures and documents to a brief | `haiku` | `high` | a function to its spec, a bug fixed against a failing test, a refactor inside one module, a contract summarized, an email drafted from an outline |
+| A judgment call with no check to run: a design or a review | `sonnet` | `high` | two designs compared, a diff reviewed for security, a bug's cause with no reproduction |
 | Open-ended research with no known approach | `fable` | `high` | a literature survey weighed for evidence, a question spread over many sources |
 
 An agent whose definition sets its own model runs on it when the call names none, and the policy above shows which role agents do. Leave `model` off those calls unless the work needs a stronger model. Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` a `model` on a call has no effect, so name only `effort`.

@@ -1,6 +1,6 @@
 ---
-description: From a Haiku session, Claude names Opus for a contract summary, as the session note gives a contract. Without the plugin it inherits Haiku unless Claude names a model on its own.
-expected_outcome: "model opus, effort high"
+description: From a Haiku session, Claude names effort high for a contract summary on Haiku, as the session note gives writing documents to a brief. Without the plugin it runs on the session's Haiku at the effort Claude Code gives a subagent, unless Claude names one on its own.
+expected_outcome: "model haiku, effort high"
 tags: [routing, quality, any-work]
 model: haiku
 max_turns: 4

@@ -154,11 +154,11 @@ class Notes(Sandbox):
                       text)
         self.assertNotIn("fills in", text)
         self.assertNotIn(" at medium", text)
-        self.assertIn("- opus: work that is hard to check", text)
+        self.assertIn("- sonnet: a judgment call with no check to run", text)
         self.assertIn("runs on a stronger model than the run it redoes.", text)
         self.assertIsNone(self.decide("general-purpose", "list src", model="opus")["effort"])
         self.assertEqual(note(subagent_effort="low").count("fills in"), 0)
-        self.assertIn("- opus at high: ", note(subagent_effort="low"))  # a call's own effort still wins over it
+        self.assertIn("- sonnet at high: ", note(subagent_effort="low"))  # a call's own effort still wins over it
         forced = note(force=True, subagent_model="opus", effort_level="low")
         self.assertIn("so an `effort` on a call has no effect.", forced)
         self.assertNotIn("Redo:", forced)
@@ -220,7 +220,7 @@ class PassedThroughRedo(Sandbox):
         self.next_message()
         self.assertIsNone(hooks.pre_agent(call("Redo: parser change")))  # the rewrite was refused: passed through
         row = self.ledger()[-1]
-        self.assertEqual((row["action"], row["level"], row["effort"]), ("keep", "standard", None))
+        self.assertEqual((row["action"], row["level"], row["effort"]), ("keep", "complex", None))
         finished("Redo: parser change")
         ran = calls.last_run("s1", task)
         self.assertEqual((ran["model"], ran["effort"]), ("sonnet", "medium"))

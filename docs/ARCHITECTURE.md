@@ -58,21 +58,21 @@ In `scripts/modelrouter/`, standard library only:
 | `intake`, `request`, `gates` | Whether a prompt is the person's; the model it names; the Stop check |
 | `ledger`, `report`, `store` | Ledger rows; skill tables and `--json`; state files and locks |
 
-The agents `architect` and `reviewer` pin Opus at `high`, `scout` and `verifier` Haiku at `medium`; `implementer` names no model. Models are entries in `config/models.json`; the four family names are also text in `hooks._rules` and the mod's `TIERS`.
+The agents `scout` and `verifier` pin Haiku at `medium`, `implementer` Haiku at `high`, and `architect` and `reviewer` Sonnet at `high`. Models are entries in `config/models.json`; the four family names are also text in `hooks._rules` and the mod's `TIERS`.
 
 ## The ladder
 
-![The ladder: lookup on Haiku at medium, standard on Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh, frontier on Fable at high.](assets/ladder.svg)
+![The ladder: lookup on Haiku at medium, standard on Haiku at high, complex on Sonnet at high, hardest on Opus at high, frontier on Fable at high.](assets/ladder.svg)
 
 | Level | `needs` | Model | Effort |
 | :- | -: | :- | :- |
 | lookup | 1 | Haiku | medium |
-| standard | 2 | Sonnet | medium |
-| complex | 3 | Opus | high |
-| hardest | 3 | Opus | xhigh |
+| standard | 1 | Haiku | high |
+| complex | 2 | Sonnet | high |
+| hardest | 3 | Opus | high |
 | frontier | 4 | Fable | high |
 
-A level runs on the cheapest usable model whose strength meets its `needs` (`Registry.select`). A model stands for the lowest level it is the model of (`ladder.rung`), and a named effort lifts it on the same model: Opus at `xhigh` or `max` is hardest.
+A level runs on the cheapest usable model whose strength meets its `needs` (`Registry.select`). A model stands for the lowest level it is the model of (`ladder.rung`), and a named effort lifts it on the same model: Haiku at `high` or above is standard.
 
 The router's effort is the level's own, one step more (at most `xhigh`) on a model weaker than the level needs (`ladder.effort_on`).
 
@@ -98,7 +98,7 @@ A decision is `keep`, `rewrite` or `deny` (the guard's), with model, effort, lev
 Then, for rows 3 to 6 and 8 (steps 5 and 6 on rows 1 and 2 too):
 
 1. **Floor.** A rule's `level` raises a weaker model to that level's model. On a call naming no model, a project's floor applies only when it moves to a model stronger than the parent's (`router._floor_lifts`).
-2. **Teammate.** A teammate naming nothing, on a parent weaker than standard needs, starts on standard's model, Sonnet.
+2. **Teammate.** A teammate naming nothing, on a parent weaker than standard needs, starts on standard's model.
 3. **Cap.** `Registry.clamp` keeps a usable model (inside `max_tier`, permitted, healthy), else takes the next stronger usable one, else the strongest. A parent's model it moves runs at the new model's level.
 4. **Effort.** If nobody chose it (the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL`, or `CLAUDE_CODE_SUBAGENT_EFFORT`, which skips teammates), the level's effort.
 5. **Session floor.** On a main-conversation call on the session's own model, an effort the router sets is at least the session's (`router._session_floor`): `session_effort` from the mod, `effort.level` from the hook.
@@ -112,7 +112,7 @@ A full ID or `[1m]` variant the call or agent names is kept while its family is,
 
 ## Redo escalation
 
-![Redo escalation: a call runs on Sonnet at medium. Its redo runs on Sonnet at high, and a redo of a run at high moves to Opus at high.](assets/redo-escalation.svg)
+![Redo escalation: a call runs on Haiku at medium. Its redo runs on Haiku at high, and a redo of a run at high moves to Sonnet at high.](assets/redo-escalation.svg)
 
 | Step | How |
 | :- | :- |
@@ -137,7 +137,7 @@ A redo is left alone wherever a plain call is. It misses its record after a skip
 
 ## The session-start note
 
-`hooks._rules` writes it while routing is `auto`. It says the plugin keeps the `model` and `effort` a call names within the cap and fills in `effort` when a call names only a model, then "Here every Agent call names both, by the work": haiku at medium for finding, reading and listing; sonnet at medium for everyday work to a clear brief; opus at high for work that is hard to check, high-stakes, ambiguous or broad; fable at high for open-ended research. It ends with where a call naming neither runs, and how to mark a redo.
+`hooks._rules` writes it while routing is `auto`. It says the plugin keeps the `model` and `effort` a call names within the cap and fills in `effort` when a call names only a model, then "Here every Agent call names both, by the work": haiku at medium for finding, reading and listing; haiku at high for writing and fixing code, figures and documents to a brief; sonnet at high for a judgment call with no check to run (a design or a review); fable at high for open-ended research. It ends with where a call naming neither runs, and how to mark a redo.
 
 The `mod-start` answer carries the same text as `rules`, and the mod's `tool.describe` hook appends it to the Agent tool's description, so Claude reads the table where it fills in the call. It also carries `workflow_rules` (`hooks._workflow_rules`), the same table worded for the `agent()` calls of a workflow script, which goes into the Workflow tool's description: a stage that names no model stays on the conversation's model, so the table is what gets a stage its own. Under the force pin there is none, since a script can't set a model then. The description keeps the text of the latest answer that had one, and is left as it is before any.
 

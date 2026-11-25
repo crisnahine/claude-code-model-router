@@ -100,7 +100,7 @@ class ExactModelKept(Sandbox):
                 self.assertNotIn("model", self.pre("pinned", "design the store", session_id=f"o{n}")["updatedInput"])
 
     def test_a_redo_on_the_same_family_keeps_the_exact_model(self):
-        self.agent("reader", "sonnet[1m]")
+        self.agent("reader", "sonnet[1m]", extra="effort: medium\n")  # below high, so the redo stays on the family
         self.spawn("reader", tool_use_id="x1")
         hooks.post_agent({**self.call("reader", "design the store"), "tool_use_id": "x1",
                           "tool_response": {"resolvedModel": "claude-sonnet-5-5[1m]", "status": "completed",

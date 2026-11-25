@@ -313,15 +313,15 @@ class RedoChainCases(Sandbox):
 
     def test_a_redo_naming_the_same_model_again_climbs(self):
         self.assertEqual(self.chain(Setup("opus"), *[("haiku", None)] * 4),
-                         ["haiku@medium", "haiku@high", "sonnet@medium", "sonnet@high"])
+                         ["haiku@medium", "haiku@high", "sonnet@high", "opus@high"])
 
     def test_a_redo_naming_the_same_model_and_effort_again_climbs_each_time(self):
         self.assertEqual(self.chain(Setup("opus"), *[("haiku", "medium")] * 4),
-                         ["haiku@medium", "haiku@high", "sonnet@medium", "sonnet@high"])
+                         ["haiku@medium", "haiku@high", "sonnet@high", "opus@high"])
 
     def test_a_redo_naming_more_effort_on_haiku_runs_as_named(self):
         self.assertEqual(self.chain(Setup("opus"), ("haiku", "high"), ("haiku", "xhigh"), ("haiku", "xhigh")),
-                         ["haiku@high", "haiku@xhigh", "sonnet@medium"])
+                         ["haiku@high", "haiku@xhigh", "sonnet@high"])
 
     def test_under_a_haiku_cap_a_redo_climbs_to_max_and_stays(self):
         self.assertEqual(self.chain(Setup("opus", "haiku"), *[(None, None)] * 5),
@@ -357,7 +357,7 @@ class RedoChainCases(Sandbox):
         # On a provider where haiku is Haiku 4.5, which takes no effort, an effort step gains nothing.
         self.mod_run("t1", "Parser fix", {"model": "claude-haiku-4-5", "effort": None}, model="haiku", effort="medium")
         redo = self.mod_run("t2", "Redo: parser fix", None, model="haiku", effort="medium")
-        self.assertEqual((redo["model"], redo["effort"]), ("sonnet", "medium"))
+        self.assertEqual((redo["model"], redo["effort"]), ("sonnet", "high"))
         self.assertIn("(haiku at no effort)", redo["reason"])
 
     def test_an_observation_without_its_spawn_or_with_a_bad_pair_changes_nothing(self):

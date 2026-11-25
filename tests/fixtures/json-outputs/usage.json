@@ -7,7 +7,7 @@
       "calls": 2,
       "routed": 0,
       "levels": {
-        "complex": 2
+        "hardest": 2
       },
       "ran_on": {
         "claude-haiku-5-5": 1,
@@ -19,7 +19,7 @@
       "calls": 1,
       "routed": 1,
       "levels": {
-        "standard": 1
+        "complex": 1
       },
       "ran_on": {
         "claude-sonnet-5-5": 1

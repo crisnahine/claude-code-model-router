@@ -1,7 +1,7 @@
 ---
 name: architect
 description: "Plans cross-module or system design, an unclear root cause, a security, data or performance choice. Writes nothing, so not for a task that must make a file, or a clear change."
-model: opus
+model: sonnet
 effort: high
 tools: Read, Grep, Glob, WebFetch
 color: purple
@@ -22,4 +22,4 @@ Output a plan with these sections:
 3. Steps: an ordered list. Each step names the files, the change, and how to verify it. Mark which steps are independent and can run in parallel.
 4. Test plan.
 5. Risks and how each is mitigated.
-6. For each step, the `model` and `effort` its Agent call should name, by the work: `haiku` at `medium` for finding, reading and listing; `sonnet` at `medium` for everyday work to a clear brief; `opus` at `high` for work that is hard to check, high-stakes, ambiguous or broad; `fable` at `high` for open-ended research.
+6. For each step, the `model` and `effort` its Agent call should name, by the work: `haiku` at `medium` for finding, reading and listing; `haiku` at `high` for writing and fixing code, figures and documents to a brief; `sonnet` at `high` for a judgment call with no check to run (a design or a review); `fable` at `high` for open-ended research.

@@ -8,13 +8,13 @@
 
 Model Router manages the Claude model and effort that each subagent, teammate and workflow agent runs on.
 
-- Claude names the `model` and `effort` on each Agent call, from a table in the session-start note: Haiku at `medium` for finding, reading and listing, Sonnet at `medium` for everyday work to a clear brief, Opus at `high` for work that is hard to check, high-stakes, ambiguous or broad, and Fable at `high` for open-ended research.
+- Claude names the `model` and `effort` on each Agent call, from a table in the session-start note: Haiku at `medium` for finding, reading and listing, Haiku at `high` for writing and fixing code, figures and documents to a brief, Sonnet at `high` for a judgment call with no check to run (a design or a review), and Fable at `high` for open-ended research.
 - The plugin keeps each call within your cap and the models usable here, fills in the effort when a call names only a model, and raises an agent's calls to the `level` a rule in `model-router.json` sets.
 - A call whose `description` starts with "Redo:" runs higher than the run it redoes: more effort first, then a stronger model.
 - When Claude edited a project file and no check ran after it, the Stop check asks Claude once to run the work's own check before it finishes.
 - Options, in `/config`: `routing_mode` (`auto` or `off`), `max_tier` (the strongest model a subagent may run on, `none` for no cap) and `verify_gate` (the Stop check, on by default).
 - Commands: `/model-router:route` says which model and effort fit a task, `/model-router:models` shows the models usable here (`reset` clears learned availability), and `/model-router:usage` shows recent routing, tokens per model and Claude Code's cost estimate per subagent.
-- Agents: `architect` and `reviewer` on Opus at `high`, `scout` and `verifier` on Haiku at `medium`, and `implementer` on the model the call names.
+- Agents: `scout` and `verifier` on Haiku at `medium`, `implementer` on Haiku at `high`, and `architect` and `reviewer` on Sonnet at `high`.
 - Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python`. The plugin makes no network call.
 - If you installed from `main` on 2026-11-22 or 2026-11-23, delete `~/.claude/plugins/cache/claude-code-model-router/model-router/0.2.0` first. That older copy has the same version number, and Claude Code keeps running it.
 

@@ -63,19 +63,25 @@ Effort set by the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SU
 
 ## The ladder
 
-Each model stands for its lowest level; Opus named at `xhigh` or `max` stands for `hardest`.
+Each model stands for its lowest level; Haiku named at `high` or above stands for `standard`.
 
 | Level | Model | Effort |
 | :- | :- | :- |
 | `lookup` | Haiku | `medium` |
-| `standard` | Sonnet | `medium` |
-| `complex` | Opus | `high` |
-| `hardest` | Opus | `xhigh` |
+| `standard` | Haiku | `high` |
+| `complex` | Sonnet | `high` |
+| `hardest` | Opus | `high` |
 | `frontier` | Fable | `high` |
+
+To run a level on a stronger model, raise its `needs` to that model's strength (Haiku 1, Sonnet 2, Opus 3, Fable 4) in your `~/.claude/model-router.json`. This puts `complex`, and with it the table's design and review row, on Opus:
+
+```json
+{"levels": {"complex": {"needs": 3}}}
+```
 
 ## Redo
 
-Claude marks a redo by starting the `description` with "Redo:" after a failed check or a gap in a report. It climbs from the latest run of the same agent and description (case and spacing aside) that finished in this session in the last 30 minutes, else from what the call would run at unmarked: one effort step while that run was below `high`, else the next stronger usable model at its level's effort, else one more step. From Haiku at `medium`: Haiku `high`, Sonnet `medium`, Sonnet `high`, Opus `high`, Fable `high`, `xhigh`, `max`. With no step left, the redo runs as before, and Claude reads that nothing stronger is usable.
+Claude marks a redo by starting the `description` with "Redo:" after a failed check or a gap in a report. It climbs from the latest run of the same agent and description (case and spacing aside) that finished in this session in the last 30 minutes, else from what the call would run at unmarked: one effort step while that run was below `high`, else the next stronger usable model at its level's effort, else one more step. From Haiku at `medium`: Haiku `high`, Sonnet `high`, Opus `high`, Fable `high`, `xhigh`, `max`. With no step left, the redo runs as before, and Claude reads that nothing stronger is usable.
 
 A redo naming more than that run runs as named; naming the same or less climbs anyway. It climbs past a rule's model, the agent's model and effort, and `CLAUDE_CODE_SUBAGENT_MODEL`, inside `max_tier`. When `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_EFFORT` or `maxEffortLevel` holds the effort, it moves to the next model; under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` it only gets the effort step, up to `max`. Where the mod runs, a redo climbs from the model and effort the run's requests carried, after any cap.
 
@@ -95,11 +101,11 @@ Workflow agents are routed only where the mod runs. The Workflow tool's descript
 
 ## Agent teams
 
-A teammate keeps one model for all its tasks, so one that nothing names a model for starts on Sonnet when its parent is weaker. Its effort is set even under `CLAUDE_CODE_SUBAGENT_EFFORT`, which doesn't reach teammates. Without the mod, a named call counts as a teammate only while `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is on.
+A teammate keeps one model for all its tasks, so one that nothing names a model for starts no lower than the `standard` level's model. Its effort is set even under `CLAUDE_CODE_SUBAGENT_EFFORT`, which doesn't reach teammates. Without the mod, a named call counts as a teammate only while `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is on.
 
 ## Role agents
 
-Five agents carry their own models, which hold with routing off: `model-router:scout` (search) and `verifier` (checks) on Haiku at `medium`, `architect` (plans) and `reviewer` (risky diffs) on Opus at `high`, and `implementer` (code to a plan) on the call's model. Only the implementer has Edit and Write.
+Five agents carry their own models, which hold with routing off: `model-router:scout` (search) and `verifier` (checks) on Haiku at `medium`, `implementer` (code to a plan) on Haiku at `high`, and `architect` (plans) and `reviewer` (risky diffs) on Sonnet at `high`. Only the implementer has Edit and Write.
 
 ## Compatibility
 

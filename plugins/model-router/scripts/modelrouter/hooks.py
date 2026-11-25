@@ -61,11 +61,15 @@ def _rules(options: settings.Settings, reg: Registry) -> str:
                 "no effect.")
         if fixed:
             return f"{lead} {fixed}"
-        light, everyday, hard = (at[level][1] for level in (cfg.Level.lookup, cfg.Level.standard, cfg.Level.complex))
-        plain = (f"{light} for finding, reading, listing and everyday work to a clear brief" if light == everyday
-                 else f"{light} for finding, reading and listing; {everyday} for everyday work to a clear brief")
-        return (lead + f" Model Router keeps the `effort` a call names, by the work: {plain}; {hard} for {_HARD}, "
-                f"such as {_SUCH}."
+        work = {**dict(_WORK), cfg.Level.complex: f"{_HARD}, such as {_SUCH}"}
+        groups: list[tuple[str | None, list[str]]] = []
+        for level in (cfg.Level.lookup, cfg.Level.standard, cfg.Level.complex):
+            if groups and groups[-1][0] == at[level][1]:
+                groups[-1][1].append(work[level])
+            else:
+                groups.append((at[level][1], [work[level]]))
+        plain = "; ".join(f"{effort} for {' and '.join(whats)}" for effort, whats in groups)
+        return (lead + f" Model Router keeps the `effort` a call names, by the work: {plain}."
                 + ("" if options.subagent_effort else " " + redo.format(above="one effort step higher")))
     if options.subagent_model:
         # The cap doesn't lower CLAUDE_CODE_SUBAGENT_MODEL, only a model the agent names.

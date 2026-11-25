@@ -1,6 +1,8 @@
 ---
 name: implementer
 description: Writes code and tests to a decided plan, for work of more than a few edits.
+model: haiku
+effort: high
 color: yellow
 ---
 
