@@ -3556,7 +3556,8 @@ class RunEdges(unittest.TestCase):
 
         def row(n, config, verdict="pass", cost=0.01, **extra):
             return json.dumps({"run": n, "task": "lookup-retry-limit", "task_revision": revision, "config": config,
-                               "total_cost_usd": cost, "grade": {"verdict": verdict}, **extra}) + "\n"
+                               "total_cost_usd": cost, "grade": {"verdict": verdict}, "claude_version": "9.9.9 (stub)",
+                               **extra}) + "\n"
         out.write_text(row(0, "defaults") + row(0, "haiku-high", "stopped", 0.5)
                        + row(1, "haiku-high", task_revision=revision - 1))
         limited.write_text(row(1, "defaults", cost=0.0, limited_reason="network"))
@@ -3575,6 +3576,48 @@ class RunEdges(unittest.TestCase):
         limited.write_text("")
         self.assertEqual(self.main(*argv, "--budget", "0.5")[0], 1)
         self.assertEqual(len(triples(kept=1)), 1)
+
+    def test_a_rerun_on_another_claude_code_or_plugin_build_stops_before_any_run(self):
+        out = self.dir / "out.jsonl"
+        revision = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")["revision"]
+
+        def row(n=0, config="defaults", **extra):
+            return json.dumps({"run": n, "task": "lookup-retry-limit", "task_revision": revision, "config": config,
+                               "total_cost_usd": 0.01, "grade": {"verdict": "pass"}, "claude_version": "9.9.9 (stub)",
+                               "plugin_hash": None, **extra}) + "\n"
+        argv = ("--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "2", "--seed", "1")
+        # Rows on two versions or two plugin builds get no verdict, so the rerun that would add them never starts.
+        out.write_text(row(claude_version="2.1.331 (Claude Code)"))
+        code, err, ran = self.main(*argv)
+        self.assertEqual((code, ran), (2, False))
+        self.assertIn("runs on Claude Code `2.1.331 (Claude Code)` (`claude_version`)", err)
+        self.assertIn("--claude ~/.local/share/claude/versions/2.1.331", err)
+        out.write_text(row(config="plugin", plugin_hash="0" * 16, bench_commit="abc1234"))
+        code, err, ran = self.main(*argv)
+        self.assertEqual((code, ran), (2, False))
+        self.assertIn(f"plugin build {'0' * 16} (`plugin_hash`)", err)
+        self.assertIn("abc1234", err)
+        # A stopped run is run again and left out of the page, so its version doesn't matter, nor does any when
+        # nothing is left to run.
+        out.write_text(row(claude_version="2.1.331 (Claude Code)", grade={"verdict": "stopped"}))
+        self.assertEqual(self.main(*argv)[0], 0)
+        out.write_text(row(0, claude_version="2.1.331 (Claude Code)") + row(1, claude_version="2.1.331 (Claude Code)"))
+        (self.dir / "seen.json").unlink()
+        code, err, ran = self.main(*argv)
+        self.assertEqual((code, ran), (0, False))
+        self.assertIn("skipped 2 runs already in the results", err)
+
+    def test_uncommitted_code_is_one_warning_at_the_start_and_no_stop(self):
+        warned = {}
+        for dirty in (True, False):
+            with unittest.mock.patch.object(run, "_git_dirty", return_value=dirty):
+                code, err, ran = self.main("--tasks", "lookup-retry-limit", "--configs", "defaults",
+                                           out=self.dir / f"out-{dirty}.jsonl")
+            self.assertEqual((code, ran), (0, True))
+            warned[dirty] = [line for line in err.splitlines() if "uncommitted" in line]
+        self.assertEqual(warned[False], [])
+        [line] = warned[True]
+        self.assertIn("the page gives no verdict on rows from uncommitted code (`bench_dirty`)", line)
 
     def test_a_results_or_keep_folder_that_cannot_be_written_stops_the_runner_before_any_run(self):
         (self.dir / "a-file").write_text("not a folder")

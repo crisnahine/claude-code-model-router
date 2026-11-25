@@ -914,6 +914,9 @@ def main(argv: list[str] | None = None) -> int:
                    "hidden": answer_paths(str(args.out.parent), args.keep and str(args.keep)),
                    "transcripts": str(args.out.parent / "transcripts" / args.out.stem)}
         print(f"batch {batch}, seed {seed}", file=sys.stderr)
+        if options["dirty"]:  # a hard stop would break local test runs
+            print("warning: bench/ or plugins/ has uncommitted changes, and the page gives no verdict on rows from "
+                  "uncommitted code (`bench_dirty`)", file=sys.stderr)
         limited = args.out.parent / "limited" / args.out.name
         # A run is paid for before its row is written, so every place a row or a kept run goes must take a write first.
         try:
@@ -935,12 +938,26 @@ def main(argv: list[str] | None = None) -> int:
         # The same command after a stop goes on from there: a run on record is skipped, but not one the bench stopped
         # or one on an earlier revision of its task, which the page leaves out.
         revision = {t["id"]: t.get("revision", 1) for t in tasks}
-        done = {(r.get("run"), r.get("task"), r.get("config")) for r in before
-                if (r.get("grade") or {}).get("verdict") != "stopped"
-                and r.get("task_revision") == revision.get(r.get("task"))}
+        counted = [r for r in before if (r.get("grade") or {}).get("verdict") != "stopped"
+                   and r.get("task_revision") == revision.get(r.get("task"))]
+        done = {(r.get("run"), r.get("task"), r.get("config")) for r in counted}
         spent, errors = sum(r.get("total_cost_usd") or 0 for r in before + aside), 0
         todo = [(n, task, config) for n, task, config in schedule(tasks, configs, args.runs, args.first_run, seed)
                 if (n, task["id"], config["id"]) not in done]
+        # The page gives no verdict over two Claude Code versions or two plugin builds, so a rerun mustn't mix them.
+        versions = sorted({str(r.get("claude_version")) for r in counted} - {version})
+        builds = sorted({r["plugin_hash"] for r in counted if r.get("plugin_hash") not in (None, digest)})
+        if todo and versions:
+            parser.error(f"{args.out} holds runs on Claude Code {', '.join(f'`{v}`' for v in versions)} "
+                         f"(`claude_version`) and this process resolved `{version}`, and the page gives no verdict over "
+                         "two versions. Finish the batch on the version on record with --claude "
+                         f"~/.local/share/claude/versions/{versions[0].partition(' ')[0]}, or write to a new --out")
+        if todo and builds:
+            commits = ", ".join(sorted({str(r.get("bench_commit"))[:7] for r in counted if r.get("plugin_hash") in builds}))
+            parser.error(f"{args.out} holds router runs that loaded plugin build {', '.join(builds)} (`plugin_hash`) "
+                         f"and this process froze {digest}: plugins/model-router changed since, and the page gives no "
+                         f"verdict over two builds. Check out the commit those runs ran from ({commits}) and run the "
+                         "same command again, or write to a new --out")
         skipped = args.runs * len(tasks) * len(configs) - len(todo)
         if skipped:
             print(f"skipped {skipped} runs already in the results", file=sys.stderr)
