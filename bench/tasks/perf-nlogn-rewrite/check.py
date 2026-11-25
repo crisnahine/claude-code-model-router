@@ -1,10 +1,11 @@
 """Pass when reports.render, python3 -m reports with --out, --standings and --verify, and python3 -m reports printing
 to stdout, run in a child that rewrites the same two input files for every case, write byte for byte what the
-shipped code writes on awkward inputs (ties, regions with no sales, spellings that casefold
-together, decomposed accents, half cents, reused ids, quoted fields, padded headers), refuse what it refuses (an
-empty file, a wrong header, a region listed twice) with the same error, or the same exit code, stderr and files,
-render builds the report for 20,000 rows in a few seconds, test_report.py passes unchanged, and each of them
-writes the right output for 200,000 rows, with every awkward row above spread through them, in at most 10 seconds."""
+shipped code writes on awkward inputs (ties, regions with no sales, spellings that casefold together, decomposed
+accents, half cents, reused ids, quoted fields, padded headers, an amount too big for a float), refuse what it
+refuses (an empty file, a wrong header, a region listed twice) with the same error, or the same exit code, stderr
+and files, render builds the report for 20,000 rows in a few seconds, test_report.py passes unchanged, and each
+of them writes the right output for 200,000 rows, with every awkward row above spread through them, in at most 10
+seconds of CPU time."""
 import csv
 import datetime
 import hashlib
@@ -72,6 +73,8 @@ HAND = [
      " txn_id , date,region ,customer,  product,amount \n" + sales(row(1, "Ana", "3.00")).split("\n", 1)[1]),
     ("region names with extra spaces", "code,name\n N ,  North   Side \nE,East\t\n S,\tSouth \n",
      sales(row(1, "Ana", "3.00"), row(2, "Bo", "2.00", "E"), row(3, "Cy", "1.00", "S"))),
+    # Past 2**53 cents a float can't hold every cent, so round(float(text) * 100) is a cent off.
+    ("an amount of nearly 100 trillion", REGIONS, sales(row(1, "Ana", "99999999999999.99"), row(2, "Bo", "1.00"))),
 ]
 
 CUSTOMERS = ["Straße", "STRASSE", "strasse", "José", "José", "  Ana   Lima ", "ana lima", "ANA LIMA", "Zoë",
@@ -322,7 +325,7 @@ if not gate:
     passcheck.finish(False, "too slow: 20,000 rows took more than 4 seconds")
 text = with_edges(big(200_000, 11), 13)
 full = passcheck.probe(work, PROBE, {"cases": [{"sales": text, "regions": REGIONS}], "digest": True},
-                       timeout=int(BUDGET) + 5)
+                       timeout=3 * int(BUDGET))
 if not full:
     passcheck.finish(False, f"too slow: 200,000 rows took far more than {BUDGET:g} seconds")
 if full[0]["error"]:
@@ -334,7 +337,7 @@ if full[0]["sha256"] != hashlib.sha256(report.encode("utf-8")).hexdigest():
     passcheck.finish(False, "the report for 200,000 rows differs from the shipped code's")
 # The standings export reads the sales again, so a rewrite that only speeds up render leaves it as slow as it was.
 full = passcheck.probe(work, PROBE, {"cases": [{"sales": text, "regions": REGIONS}], "digest": True, "via": "command"},
-                       timeout=int(BUDGET) + 5)
+                       timeout=3 * int(BUDGET))
 COMMAND = "python3 -m reports --standings on 200,000 rows"
 if not full:
     passcheck.finish(False, f"too slow: {COMMAND} took far more than {BUDGET:g} seconds")

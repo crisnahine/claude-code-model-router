@@ -53,7 +53,8 @@ def entry(rng, n, account):
     kind = rng.choice(["credit", "debit", "fee", "refund", "chargeback"])
     roll = rng.random()
     own = currency if roll > 0.12 else rng.choice([c for c in FOREIGN if c != currency])
-    local = datetime.datetime(2020, 12, 31, 18) + datetime.timedelta(minutes=rng.randint(0, 60 * 24 * 20))
+    # In 2020 even after an edit moves it, since FORMAT_V2 puts offset-less times in the 2020 backlog.
+    local = datetime.datetime(2020, 12, 1, 18) + datetime.timedelta(minutes=rng.randint(0, 60 * 24 * 20))
     if rng.random() < 0.25:
         stamp = local.strftime("%Y-%m-%dT%H:%M:%S")
     else:

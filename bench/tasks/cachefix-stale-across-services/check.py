@@ -51,6 +51,8 @@ SCENARIOS = [
      "steps": [{"restock": ["D-4", 3]}, {"reprice": {"A-1": 800, "D-4": 3900}}]},
     {"name": "move twice", "untouched": "B-2", "quiet": "c4",
      "steps": [{"unit": [["move", "A-1", "c2"], ["move", "A-1", "c3"]]}]},
+    {"name": "a product added to a cached category", "untouched": "C-3", "quiet": "c2",
+     "steps": [{"add": ["E-5", "Echo", "c1", 500, 2]}]},
 ]
 OPS = {"price": "price", "name": "name", "move": "category", "stock": "units"}
 
@@ -66,6 +68,9 @@ def expected(scenario):
         elif "reprice" in s:
             for sku, cents in s["reprice"].items():
                 shop[sku]["price"] = cents
+        elif "add" in s:
+            sku, name, category, price, units = s["add"]
+            shop[sku] = {"sku": sku, "name": name, "category": category, "price": price, "units": units}
         elif not s.get("fail"):
             for kind, sku, value in (op for op in s["unit"] if op[0] in OPS):
                 shop[sku][OPS[kind]] = shop[sku][OPS[kind]] + value if kind == "stock" else value

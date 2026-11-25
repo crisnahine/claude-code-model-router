@@ -94,9 +94,9 @@ try:
             out.append(refusal(sales, regions))
             continue
         try:
-            start = time.perf_counter()
+            start = time.process_time()  # CPU time, so a busy machine doesn't fail a fast answer
             text = render(sales, regions)
-            seconds = time.perf_counter() - start
+            seconds = time.process_time() - start
         except Exception as e:
             out.append({"error": f"{type(e).__name__}: {e}"[:300]})
             continue

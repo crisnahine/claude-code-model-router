@@ -182,7 +182,9 @@ def run(case, scratch):
             watch(os.path.join(base, "restored"))
             importlib.import_module("backups.restore").restore_backup(tar, os.path.join(base, "restored"))
     except Exception as e:
-        error = type(e).__name__
+        # A subclass of the documented error is still that error.
+        error = next((c.__name__ for c in type(e).__mro__ if c.__name__ in ("UnsafeArchive", "BundleRejected")),
+                     type(e).__name__)
     finally:
         outside, leaked = watch(None)
     return {"error": error, "tree": tree(box), "outside": outside, "leaked": leaked}

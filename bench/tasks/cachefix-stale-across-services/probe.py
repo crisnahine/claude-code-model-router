@@ -44,6 +44,8 @@ def step(app, s):
         app.admin.restock(*s["restock"])
     elif "reprice" in s:
         app.admin.bulk_reprice(s["reprice"])
+    elif "add" in s:
+        app.admin.add_product(*s["add"])
     else:
         try:
             with app.unit() as uow:
@@ -95,6 +97,7 @@ def run(scenario):
         before = reads(app)
         read()
         other.append(reads(app) - before)
+    skus += [s["add"][0] for s in scenario["steps"] if "add" in s]
     seen = everything(app, skus, categories)
     before = reads(app)
     everything(app, skus, categories)
