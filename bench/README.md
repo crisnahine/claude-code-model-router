@@ -76,7 +76,7 @@ python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check
 
 Run five rounds on at least two days, 240 runs; rounds 2 to 5 change only `--first-run` (2, 4, 6, 8), `--seed`, `--batch measure-<n>` and `--out bench/results/measure-<n>.jsonl`. Read the `all tasks` verdicts after round 3 (6 runs per task and configuration) and round 5 (10) only, since each look is another chance for noise to pass. With every run solved, a cost verdict can't show before the second look. Read class rows for a LOSE only. Undecided after round 5 is "no difference shown".
 
-`--timeout` kills a run after that many seconds (default 900), `--model` is the session model where a configuration sets none (default `sonnet`), and `--claude` takes an argv prefix for a stub. Without `--tasks` or `--configs` it runs all. An unknown or repeated id, or a results, `limited/` or `--keep` folder it can't write, exits 2 before any run.
+`--timeout` kills a run after that many seconds (default 900), with every process it started: `claude` runs in a session of its own and a timeout or Ctrl-C kills its process group (on Windows, which has none, `claude` alone), `--model` is the session model where a configuration sets none (default `sonnet`), and `--claude` takes an argv prefix for a stub. Without `--tasks` or `--configs` it runs all. An unknown or repeated id, or a results, `limited/` or `--keep` folder it can't write, exits 2 before any run.
 
 ## How a verdict is decided
 

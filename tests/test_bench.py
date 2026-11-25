@@ -960,6 +960,56 @@ class Runner(unittest.TestCase):
                     self.assertIn(f"the harness stopped the run ({stopped})", row["grade"]["reason"])
 
 
+    @unittest.skipIf(sys.platform == "win32", "Windows has no process group for the harness to kill")
+    def test_a_run_stopped_by_a_timeout_or_an_interrupt_leaves_no_process_behind(self):
+        task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
+        defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
+        real = subprocess.Popen.communicate
+
+        def interrupted(proc, *args, **kwargs):
+            """Ctrl-C once the stub has started its child."""
+            if "--output-format" not in proc.args:
+                return real(proc, *args, **kwargs)
+            for _ in range(200):
+                if child.is_file() and child.read_text():
+                    break
+                time.sleep(0.05)
+            raise KeyboardInterrupt
+
+        for how in ("timeout", "interrupt"):
+            with self.subTest(how=how), tempfile.TemporaryDirectory() as tmp:
+                child = Path(tmp) / "child.pid"
+                options = {"claude": stub(tmp, ORPHAN_STUB), "model": "sonnet", "budget": 0.5,
+                           "timeout": 3 if how == "timeout" else 60, "plugin_dir": str(run.PLUGIN),
+                           "claude_version": "9.9.9 (stub)", "commit": None}
+                with unittest.mock.patch.dict("os.environ", {"STUB_CHILD": str(child)}), \
+                        (unittest.mock.patch.object(subprocess.Popen, "communicate", interrupted) if how == "interrupt"
+                         else contextlib.nullcontext()), \
+                        (self.assertRaises(KeyboardInterrupt) if how == "interrupt" else contextlib.nullcontext()):
+                    run.run_one(task, defaults, options, {})
+                pid = int(child.read_text())
+                for _ in range(100):
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.05)
+                else:
+                    os.kill(pid, 9)
+                    self.fail(f"the run's child {pid} outlived the run")
+
+
+ORPHAN_STUB = '''#!/usr/bin/env python3
+import os, subprocess, sys, time
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+with open(os.environ["STUB_CHILD"], "w") as fh:
+    fh.write(str(child.pid))
+time.sleep(60)
+'''
+
+
 HANGING_STUB = '''#!/usr/bin/env python3
 import sys, time
 if "--version" in sys.argv:
@@ -1420,20 +1470,15 @@ class Stopped(unittest.TestCase):
             return rows, left + list(runs.iterdir()), sessions
 
     def test_an_interrupt_during_the_claude_call_writes_a_broken_row_charged_the_budget_and_cleans_up(self):
-        real = subprocess.run
-
-        def interrupted(cmd, *args, **kwargs):
+        def interrupted(cmd, work, env, timeout):
             """Ctrl-C mid-call, once the session has started. Raised here, since a real SIGINT that lands inside a
             finalizer of this long-lived process is ignored."""
-            env = kwargs.get("env") or {}
-            if "--version" in cmd or "CLAUDE_CODE_PROJECT_DIR_NAME" not in env:
-                return real(cmd, *args, **kwargs)
             folder = Path(env["CLAUDE_CONFIG_DIR"]) / "projects" / env["CLAUDE_CODE_PROJECT_DIR_NAME"]
             (folder / "s1").mkdir(parents=True)
             (folder / "s1.jsonl").write_text("{}")
             raise KeyboardInterrupt
 
-        with unittest.mock.patch.object(subprocess, "run", interrupted):
+        with unittest.mock.patch.object(run, "run_claude", interrupted):
             rows, scratch, sessions = self.stop(KeyboardInterrupt)
         self.assertEqual([(r["grade"]["verdict"], r["exit_code"], r["cost_known"], r["total_cost_usd"]) for r in rows],
                          [("broken", None, False, 0.5)])

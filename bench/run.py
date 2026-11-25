@@ -16,6 +16,7 @@ import os
 import random
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -612,6 +613,29 @@ def runs_folder() -> Path:
     return RUNS
 
 
+def run_claude(cmd: list[str], work: Path, env: dict, timeout: float) -> tuple[str, str, int]:
+    """claude's output and exit code. It runs in a session of its own, so a timeout or an interrupt also stops what it
+    started, which killing claude alone leaves running. A timeout raises with the output read by then."""
+    proc = subprocess.Popen(cmd, cwd=work, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except BaseException as exc:
+        if hasattr(os, "killpg"):
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:  # the group has already gone
+                pass
+            proc.wait()  # the timeout already holds the output read so far
+        else:  # Windows has no process group to kill, so this stops claude alone
+            proc.kill()
+            output = proc.communicate()
+            if isinstance(exc, subprocess.TimeoutExpired):
+                exc.stdout, exc.stderr = output
+        raise
+    return out, err, proc.returncode
+
+
 def run_one(task: dict, config: dict, options: dict, registry_config: Registry) -> dict:
     # No task or configuration name: a brief that quotes its working directory would tell the model what it is graded on.
     scratch = Path(tempfile.mkdtemp(dir=runs_folder()))
@@ -630,8 +654,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
     # scratch removed. With no result the row is priced from its transcripts, or charged the whole budget.
     try:
         try:
-            proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=options["timeout"])
-            stdout, stderr, code = proc.stdout, proc.stderr, proc.returncode
+            stdout, stderr, code = run_claude(cmd, work, env, options["timeout"])
         except subprocess.TimeoutExpired as exc:
             stdout, stderr, code, stopped_by = _text(exc.stdout), "timed out", None, "timeout"
         # The run's wall time: Claude Code's own duration_ms can fall short of it.
