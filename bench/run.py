@@ -934,9 +934,12 @@ def main(argv: list[str] | None = None) -> int:
             before, aside = (_rows(path) for path in (args.out, limited))
         except ValueError as exc:
             parser.error(f"can't read the rows already in the results: {exc}")
-        # The same command after a stop goes on from there: a run on record is skipped, one the bench stopped isn't.
+        # The same command after a stop goes on from there: a run on record is skipped, but not one the bench stopped
+        # or one on an earlier revision of its task, which the page leaves out.
+        revision = {t["id"]: t.get("revision", 1) for t in tasks}
         done = {(r.get("run"), r.get("task"), r.get("config")) for r in before
-                if (r.get("grade") or {}).get("verdict") != "stopped"}
+                if (r.get("grade") or {}).get("verdict") != "stopped"
+                and r.get("task_revision") == revision.get(r.get("task"))}
         spent, errors = sum(r.get("total_cost_usd") or 0 for r in before + aside), 0
         todo = [(n, task, config) for n, task, config in schedule(tasks, configs, args.runs, args.first_run, seed)
                 if (n, task["id"], config["id"]) not in done]

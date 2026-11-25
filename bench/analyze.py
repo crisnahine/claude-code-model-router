@@ -667,8 +667,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         f"baseline's is below plus {MARGIN:.0%}, the mirror of the WIN rule. A cost bound that is n/a decides "
         "nothing: it comes from resamples in which one side solved none of the runs drawn, so it has no cost per "
         "solved task, and a row where a side solved nothing, or nearly nothing, gets its verdict from the pass rate "
-        "alone. Anything else is \"no difference shown\", which is not parity. There is no verdict when the two didn't run "
-        "each task the same number of times in each batch, since each side's cost is pooled over its runs and pass "
+        "alone. Anything else is \"no difference shown\", which is not parity. There is no verdict when the two "
+        "didn't run each task the same number of times in each batch, since each side's cost is pooled over its runs and pass "
         f"rates drift between batches, when more than {DENIAL_SHARE:.0%} of either's runs had a Bash call denied, "
         "when the router's runs loaded more than one plugin build (`plugin_hash`), when the two ran a task at "
         "different budgets (`budget_usd`) or on different Claude Code versions (`claude_version`), or when any of "
@@ -679,13 +679,13 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "its classes are paired and resampled together. A class with one task can't show the margin, so a plan "
         f"with a few tasks per class is judged on its `{ALL}` row.",
         f"- A class is saturated when `{SPLIT_WEAK}` (every subagent on Haiku) can't be told from `{SPLIT_STRONG}` "
-        f"(subagents on the session model) by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an equal pass rate "
-        "says nothing about quality. Runs on an earlier revision of a task are left out of every table. A run on a "
+        f"(subagents on the session model) by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an "
+        "equal pass rate says nothing about quality. Runs on an earlier revision of a task are left out of every table. A run on a "
         "task's current revision that a check other than today's graded stops the page from being built, since the "
         "check changed without a raise of the revision.",
         "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest, and n/a on a "
-        "row with no verdict; a configuration that solved none of the row's runs counts as the dearest. A router variant (another configuration that loads the plugin) has its own column "
-        "but is never a baseline.",
+        "row with no verdict; a configuration that solved none of the row's runs counts as the dearest. A router "
+        "variant (another configuration that loads the plugin) has its own column but is never a baseline.",
         "- Run metrics, per class and configuration: p50 and p90 are nearest-rank percentiles of each run's wall "
         "time (`wall_ms`, the runner's clock around the `claude` process). Cache is cache-read tokens over all input tokens, which are input plus cache reads "
         "plus cache writes (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md), summed over "

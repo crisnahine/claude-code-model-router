@@ -3541,14 +3541,17 @@ class RunEdges(unittest.TestCase):
         out, limited = self.dir / "out.jsonl", self.dir / "limited" / "out.jsonl"
         limited.parent.mkdir()
 
+        revision = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")["revision"]
+
         def row(n, config, verdict="pass", cost=0.01, **extra):
-            return json.dumps({"run": n, "task": "lookup-retry-limit", "config": config, "total_cost_usd": cost,
-                               "grade": {"verdict": verdict}, **extra}) + "\n"
-        out.write_text(row(0, "defaults") + row(0, "haiku-high", "stopped", 0.5))
+            return json.dumps({"run": n, "task": "lookup-retry-limit", "task_revision": revision, "config": config,
+                               "total_cost_usd": cost, "grade": {"verdict": verdict}, **extra}) + "\n"
+        out.write_text(row(0, "defaults") + row(0, "haiku-high", "stopped", 0.5)
+                       + row(1, "haiku-high", task_revision=revision - 1))
         limited.write_text(row(1, "defaults", cost=0.0, limited_reason="network"))
         argv = ("--tasks", "lookup-retry-limit", "--configs", "defaults", "haiku-high", "--runs", "2", "--seed", "1")
 
-        def triples(kept=2):
+        def triples(kept=3):
             return [(r["run"], r["config"]) for r in map(json.loads, out.read_text().splitlines())][kept:]
         self.assertEqual(self.main(*argv)[0], 0)
         self.assertEqual(sorted(triples()), [(0, "haiku-high"), (1, "defaults"), (1, "haiku-high")])
