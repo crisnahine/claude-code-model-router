@@ -165,9 +165,9 @@ def _under(path: str, folder: str) -> bool:
     return Path(path) == Path(folder) or Path(folder) in Path(path).parents
 
 
-def settings(config: dict, env: dict, hidden: list[str] | None = None, own: str | None = None) -> dict:
+def settings(env: dict, hidden: list[str] | None = None, own: str | None = None) -> dict:
     """The one --settings JSON a run gets: credentials, the answers and other runs' scratch folders kept from
-    sandboxed commands, the answers kept from the file tools, and a router variant's plugin options."""
+    sandboxed commands, and the answers kept from the file tools."""
     hidden = answer_paths() if hidden is None else hidden
     sandbox = {**SANDBOX,
                # The narrower allowRead re-opens the run's own folder under RUNS (https://code.claude.com/docs/en/sandboxing).
@@ -180,11 +180,7 @@ def settings(config: dict, env: dict, hidden: list[str] | None = None, own: str 
     # re-opens a denied path (https://code.claude.com/docs/en/permissions).
     rules = [f"{tool}(//{path.lstrip('/')}/**)" for path in hidden if not (own and _under(own, path))
              for tool in ("Read", "Edit")]
-    out: dict = {"sandbox": sandbox, "permissions": {"deny": rules}}
-    if config.get("plugin_options"):
-        # A --plugin-dir plugin's id is <name>@inline; project settings can't set plugin options.
-        out["pluginConfigs"] = {f"{_plugin_name()}@inline": {"options": config["plugin_options"]}}
-    return out
+    return {"sandbox": sandbox, "permissions": {"deny": rules}}
 
 
 def command(prompt: str, config: dict, options: dict, base_env: dict, shape: str = "single") -> tuple[list[str], dict]:
@@ -202,7 +198,7 @@ def command(prompt: str, config: dict, options: dict, base_env: dict, shape: str
            "--model", options["model"],
            "--max-budget-usd", str(options["budget"]), "--setting-sources", "project", "--strict-mcp-config",
            "--permission-mode", "dontAsk",
-           "--settings", json.dumps(settings(config, env, options.get("hidden"), options.get("scratch")))]
+           "--settings", json.dumps(settings(env, options.get("hidden"), options.get("scratch")))]
     if config.get("plugin"):
         cmd += ["--plugin-dir", options["plugin_dir"]]
     tools = TOOLS + (WORKFLOW_TOOLS if shape == "workflow" else ())
@@ -211,7 +207,7 @@ def command(prompt: str, config: dict, options: dict, base_env: dict, shape: str
 
 LIMIT_RETRIES = 5
 LIMIT_PAUSE = 60  # seconds before the first retry; each later pause is twice as long
-API_ERROR_STOP = 3  # API errors before any spend, in a row, that stop the bench: the key or the account is wrong
+API_ERROR_STOP = 3  # account errors, in a row, that stop the bench: the key or the account is wrong
 # The messages Claude Code prints when the API refuses for a limit (https://code.claude.com/docs/en/errors.md).
 _LIMIT_MESSAGE = (r"API Error: (?:Repeated )?(?:429|529)\b|API Error: Repeated 529 Overloaded|Request rejected \(429\)|"
                   r"Server is temporarily limiting requests|You've hit your (?:session|weekly|Opus|Sonnet) limit")
@@ -223,17 +219,30 @@ _NETWORK_MESSAGE = (r"API Error: [^\n]*\((?:ENOTFOUND|ENETUNREACH|ECONNRESET|ECO
                     r"API Error: (?:Can't reach the API server|No internet route)|Connection lost")
 
 
+# What ends a run when the account can't pay or may not use the model, before or part-way through the task
+# (https://code.claude.com/docs/en/errors.md, https://platform.claude.com/docs/en/api/errors.md).
+_ACCOUNT_MESSAGE = (r"(?:API Error: \d{3}\b[^\n]*?)?(?:Credit balance (?:is )?too low|Usage credits ran out|"
+                    r"You've hit your [^\n·]*?(?:spend limit|usage limit|shared budget)|"
+                    r"You have reached your (?:specified )?(?:workspace )?API usage limits|Invalid API key|"
+                    r"Failed to authenticate|OAuth token (?:revoked|has expired)|Your account is on hold|"
+                    r"Your ANTHROPIC_API_KEY belongs to a disabled organization|This organization has been disabled|"
+                    r"Your organization has disabled|There's an issue with the selected model|Model '[^'\n]*' not found)")
+
+
 def refusal(row: dict) -> str | None:
-    """Why the API never got to the task: "limit" or "network", "api_error" for any other error before a cent was
-    spent (a bad key, no credit, a model the account can't use), else None. Only an errored run counts, and a limit
-    or network only on the API's status or Claude Code's own message, at the start of the answer (which is then that
-    message) or in stderr. Task text that talks about limits or network codes is never read as one."""
+    """Why the API didn't serve the task: "limit" or "network", "api_error" for an account error whatever was spent (a
+    bad key, no credit, a spend limit, a model the account may not use) or for any other error before a cent was
+    spent, else None. Only an errored run counts, and a limit, network or account error only on the API's status or
+    Claude Code's own message, at the start of the answer (which is then that message) or in stderr. Task text that
+    talks about limits, credit or network codes is never read as one."""
     if not (row.get("is_error") or row.get("exit_code")):
         return None
     if row.get("api_error_status") in (429, 529):
         return "limit"
+    if row.get("api_error_status") in (401, 402, 403):  # authentication, billing, permission
+        return "api_error"
     answer, stderr = str(row.get("answer") or ""), str(row.get("stderr") or "")
-    for reason, message in (("limit", _LIMIT_MESSAGE), ("network", _NETWORK_MESSAGE)):
+    for reason, message in (("limit", _LIMIT_MESSAGE), ("network", _NETWORK_MESSAGE), ("api_error", _ACCOUNT_MESSAGE)):
         if re.match(rf"\s*(?:{message})", answer) or re.search(message, stderr):
             return reason
     # No spend means no model reply, so no tool ran. error_during_execution's zero cost may have been zeroed.
@@ -532,18 +541,6 @@ def ledger_rows(env: dict) -> list[dict] | None:
     return read_ledger(path=path)
 
 
-def options_applied(config: dict, ledger: list[dict] | None) -> bool | None:
-    """False when the run's ledger holds a row a plugin option the configuration sets rules out: a `gate` row with
-    verify_gate off. True when it holds none, which doesn't prove the options arrived, since the plugin keeps no copy
-    of them. None when the configuration sets none or there is no ledger."""
-    asked = config.get("plugin_options")
-    if not asked or ledger is None:
-        return None
-    said = {k: str(v).strip().lower() for k, v in asked.items()}  # a JSON false reaches the plugin as "false"
-    return not (said.get("verify_gate") in ("false", "0", "no", "off")
-                and any(r.get("event") == "gate" for r in ledger))
-
-
 def agent_types(env: dict) -> dict[str, str]:
     """Each subagent's type by id, from the saved session's subagents/agent-<id>.meta.json, a layout no page documents
     (Claude Code 2.1.330 writes it). Only the ledger spend join reads it."""
@@ -689,7 +686,8 @@ def run_one(task: dict, config: dict, options: dict) -> dict:
     ledger, types, final, graded, kept, stopped, priced, transcripts = None, {}, None, None, None, None, None, None
     stopped_by = None
     # Once claude starts the run costs money: whatever stops it or the steps after it, its row is still built and its
-    # scratch removed. With no result the row is priced from its transcripts, or charged the whole budget.
+    # scratch removed. With no result the row is priced from its transcripts, or charged the whole budget, whether a
+    # timeout, an interrupt or SIGTERM stopped it.
     try:
         try:
             stdout, stderr, code = run_claude(cmd, work, env, options["timeout"])
@@ -725,6 +723,8 @@ def run_one(task: dict, config: dict, options: dict) -> dict:
             kept = target
     except BaseException as exc:
         stopped = exc
+        if priced is None:
+            priced = transcript_cost(session_dir(env))
     if wall_ms is None:
         wall_ms = round((time.monotonic() - clock) * 1000)
     shutil.rmtree(scratch, ignore_errors=True)
@@ -784,25 +784,28 @@ def record(task: dict, config: dict, options: dict, result: dict, facts: dict) -
                        "api_error_status": result.get("api_error_status"), "answer": result.get("result"),
                        "subtype": result.get("subtype"), "total_cost_usd": cost})
     # A cost of 0 on error_during_execution "may be zeroed" (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md),
-    # except when the API refused the run or it never started: nothing was spent.
+    # except when a limit or the network stopped the run or it never started: nothing was spent. An account error can
+    # come part-way.
     known = unstarted or isinstance(cost, (int, float)) and not (
-        result.get("subtype") == "error_during_execution" and cost == 0 and not refused)
+        result.get("subtype") == "error_during_execution" and cost == 0 and refused not in ("limit", "network"))
     priced = facts.get("transcript_cost")
     source = "result" if known else "transcripts" if priced is not None else "budget"
     started, overrides = facts.get("agents_started") or {}, facts.get("agent_overrides") or 0
+    # Which credential paid: with both ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN set, the key does.
+    auth = (facts.get("init") or {}).get("apiKeySource")
     return {
         "schema": ROW_SCHEMA, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
         "shape": task.get("shape", "single"), "config": config["id"],
         "batch": options.get("batch"), "order_seed": options.get("seed"),
         "started_at": facts["started_at"], "claude_version": options["claude_version"],
         "main_model": options["model"],
+        "auth": auth if isinstance(auth, str) else None,
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
         "plugin_hash": options.get("plugin_hash") if config.get("plugin") else None,
         "managed_settings": options.get("managed"),
         "claude_started": not unstarted, "startup_failure_reason": result.get("startup_failure_reason"),
         # With no init event the stream never began, so it can't say whether the plugin loaded.
         "plugin_loaded": (plugin_loaded(facts["init"]) if facts.get("init") else None) if config.get("plugin") else None,
-        "options_applied": options_applied(config, ledger) if config.get("plugin") else None,
         "agent_costs": None if ledger is None else spend_by_agent(ledger, facts["agent_types"], cost if known else None),
         "routed": None if ledger is None else spawns(ledger),
         # shortcut: a fork leaves no spawn row and isn't told apart; key on its fork flag if a fork-only run shows up.
@@ -854,19 +857,17 @@ def _write(path: Path, row: dict) -> None:
 
 def set_aside(row: dict) -> str | None:
     """Why a row stays out of the results: claude stopped before the session began (so no API call was made), the
-    API never got to the task, a router run's plugin didn't load, its router logged nothing for a subagent that ran,
-    or it didn't get its options."""
+    API never got to the task, a router run's plugin didn't load, or its router logged nothing for a subagent that
+    ran."""
     return (("no_start" if row.get("claude_started") is False else None) or refusal(row)
             or ("plugin_not_loaded" if row.get("plugin_loaded") is False else None)
-            or ("router_silent" if row.get("router_silent") else None)
-            or ("options_not_applied" if row.get("options_applied") is False else None))
+            or ("router_silent" if row.get("router_silent") else None))
 
 
 # Set-aside reasons a pause can't fix; this many in a row stop the bench.
-NO_RETRY = {"api_error": "API error before any spend", "no_start": "claude stopped before the session began",
+NO_RETRY = {"api_error": "the API refused the account", "no_start": "claude stopped before the session began",
             "plugin_not_loaded": "the plugin did not load",
-            "router_silent": "the router logged no spawn though a subagent ran",
-            "options_not_applied": "the ledger holds a row the configuration's plugin options rule out"}
+            "router_silent": "the router logged no spawn though a subagent ran"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -916,6 +917,9 @@ def main(argv: list[str] | None = None) -> int:
                    "hidden": answer_paths(str(args.out.parent), args.keep and str(args.keep)),
                    "transcripts": str(args.out.parent / "transcripts" / args.out.stem)}
         print(f"batch {batch}, seed {seed}", file=sys.stderr)
+        if options["dirty"]:  # a hard stop would break local test runs
+            print("warning: bench/ or plugins/ has uncommitted changes, and the page gives no verdict on rows from "
+                  "uncommitted code (`bench_dirty`)", file=sys.stderr)
         limited = args.out.parent / "limited" / args.out.name
         # A run is paid for before its row is written, so every place a row or a kept run goes must take a write first.
         try:
@@ -937,12 +941,26 @@ def main(argv: list[str] | None = None) -> int:
         # The same command after a stop goes on from there: a run on record is skipped, but not one the bench stopped
         # or one on an earlier revision of its task, which the page leaves out.
         revision = {t["id"]: t.get("revision", 1) for t in tasks}
-        done = {(r.get("run"), r.get("task"), r.get("config")) for r in before
-                if (r.get("grade") or {}).get("verdict") != "stopped"
-                and r.get("task_revision") == revision.get(r.get("task"))}
+        counted = [r for r in before if (r.get("grade") or {}).get("verdict") != "stopped"
+                   and r.get("task_revision") == revision.get(r.get("task"))]
+        done = {(r.get("run"), r.get("task"), r.get("config")) for r in counted}
         spent, errors = sum(r.get("total_cost_usd") or 0 for r in before + aside), 0
         todo = [(n, task, config) for n, task, config in schedule(tasks, configs, args.runs, args.first_run, seed)
                 if (n, task["id"], config["id"]) not in done]
+        # The page gives no verdict over two Claude Code versions or two plugin builds, so a rerun mustn't mix them.
+        versions = sorted({str(r.get("claude_version")) for r in counted} - {version})
+        builds = sorted({r["plugin_hash"] for r in counted if r.get("plugin_hash") not in (None, digest)})
+        if todo and versions:
+            parser.error(f"{args.out} holds runs on Claude Code {', '.join(f'`{v}`' for v in versions)} "
+                         f"(`claude_version`) and this process resolved `{version}`, and the page gives no verdict over "
+                         "two versions. Finish the batch on the version on record with --claude "
+                         f"~/.local/share/claude/versions/{versions[0].partition(' ')[0]}, or write to a new --out")
+        if todo and builds:
+            commits = ", ".join(sorted({str(r.get("bench_commit"))[:7] for r in counted if r.get("plugin_hash") in builds}))
+            parser.error(f"{args.out} holds router runs that loaded plugin build {', '.join(builds)} (`plugin_hash`) "
+                         f"and this process froze {digest}: plugins/model-router changed since, and the page gives no "
+                         f"verdict over two builds. Check out the commit those runs ran from ({commits}) and run the "
+                         "same command again, or write to a new --out")
         skipped = args.runs * len(tasks) * len(configs) - len(todo)
         if skipped:
             print(f"skipped {skipped} runs already in the results", file=sys.stderr)

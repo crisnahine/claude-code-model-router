@@ -202,13 +202,13 @@ class Analysis(unittest.TestCase):
 
     def test_the_judged_router_comes_from_configs_json_not_file_order(self):
         data = [dict(r, main_model=OPUS) for r in spread("plugin", "lookup", 2, 4, 0.1)
-                + spread("plugin-nogate", "lookup", 2, 4, 0.1) + spread("defaults", "lookup", 2, 4, 0.1)]
+                + spread("plugin-variant", "lookup", 2, 4, 0.1) + spread("defaults", "lookup", 2, 4, 0.1)]
         base = analyze.load([])
         self.assertEqual([c["id"] for c in base.configs if c.get("judged")], ["plugin"])
-        nogate_first = sorted(base.configs, key=lambda c: c["id"] != "plugin-nogate")
-        results = dataclasses.replace(base, rows=data, configs=nogate_first)
+        variant_first = [{"id": "plugin-variant", "plugin": True}, *base.configs]
+        results = dataclasses.replace(base, rows=data, configs=variant_first)
         self.assertEqual([part[1] for part in analyze.sessions(results)], ["plugin"])
-        self.assertEqual([part[1] for part in analyze.sessions(results, "plugin-nogate")], ["plugin-nogate"])
+        self.assertEqual([part[1] for part in analyze.sessions(results, "plugin-variant")], ["plugin-variant"])
 
     def test_behind_beyond_noise_loses_however_cheap(self):
         v = self.verdict(rows("plugin", "lookup", [0.01] * 10, [True] * 2 + [False] * 8)
@@ -248,12 +248,12 @@ class Analysis(unittest.TestCase):
         self.assertEqual(self.summary(data), self.summary(data))
 
     def test_another_router_configuration_is_never_a_baseline(self):
-        data = (rows("plugin", "bugfix", [0.3] * 10, [True] * 10) + rows("plugin-nogate", "bugfix", [0.1] * 10, [True] * 10)
+        data = (rows("plugin", "bugfix", [0.3] * 10, [True] * 10) + rows("plugin-variant", "bugfix", [0.1] * 10, [True] * 10)
                 + rows("defaults", "bugfix", [0.2] * 10, [True] * 10))
-        row = {s["class"]: s for s in analyze.summarize(data, routers=frozenset({"plugin", "plugin-nogate"}),
+        row = {s["class"]: s for s in analyze.summarize(data, routers=frozenset({"plugin", "plugin-variant"}),
                                                        draws=200)}["bugfix"]
         self.assertEqual((row["rank"], set(row["verdicts"])), (2, {"defaults"}))
-        self.assertIn("plugin-nogate", row["configs"])  # still shown on the page
+        self.assertIn("plugin-variant", row["configs"])  # still shown on the page
 
     def test_cells_on_different_tasks_get_no_verdict(self):
         other = [dict(r, task="lookup-2") for r in rows("defaults", "lookup", [0.5] * 10, [True] * 10)]
@@ -389,9 +389,23 @@ class Analysis(unittest.TestCase):
         recorded = [full_row(task=r["task"], config=r["config"], total_cost_usd=r["total_cost_usd"],
                              **{"class": "lookup"}) for r in data]
         page = analyze.build_page(dataclasses.replace(analyze.load([]), rows=recorded))
-        self.assertIn("1 of 1 class rows below are saturated: `haiku-high` solved as many runs as `defaults`", page)
-        self.assertIn("an equal pass rate there says nothing about quality", page)
-        self.assertIn("- lookup: saturated, haiku-high solved 60 of 60, defaults 60 of 60", page)
+        # The all-tasks row is the one a verdict is read from, so its saturation is printed and counted too.
+        self.assertIn("2 of 2 rows below are saturated (1 of 1 `all tasks` rows): on their tasks the cheapest forced "
+                      "baseline, `haiku-high` (every subagent on Haiku), wasn't shown to solve fewer runs than Claude "
+                      "Code's defaults (`defaults`), so an equal pass rate there says nothing about quality.", page)
+        quality = page.split("### Do the tasks tell models apart")[1].split("###")[0]
+        # The test is one-sided: it asks only whether haiku-high solved fewer, never whether the gap is chance.
+        for row in ("lookup", "all tasks"):
+            self.assertIn(f"- {row}: saturated, `haiku-high` solved 60 of 60 and `defaults` 60 of 60 (exact one-sided "
+                          "p = 1.000), so `haiku-high` wasn't shown to solve fewer and these tasks can't tell models "
+                          "apart.", quality)
+        self.assertNotIn("could be chance", page)
+        # The margin and the intervals are points of pass rate, never a share of it.
+        self.assertIn("its pass rate shown no more than 10 points behind", page)
+        self.assertIn("is saturated when an exact one-sided test (5%, at least 10 runs of each) doesn't show "
+                      "`haiku-high` (every subagent on Haiku) solving fewer runs than `defaults`", page)
+        self.assertRegex(page, r"pass rate -\d+ to \+\d+ points \(95% intervals")
+        self.assertNotRegex(page, r"[+-]\d+% to")
         n = analyze.MIN_RUNS
         behind = (rows("plugin", "lookup", [0.3] * n, [True] * n) + rows("defaults", "lookup", [0.4] * n, [True] * n)
                   + rows("haiku-high", "lookup", [0.2] * n, [True] * 4 + [False] * 6))
@@ -619,7 +633,7 @@ class Analysis(unittest.TestCase):
         sonnet = [dict(real, main_model="sonnet", config=c, total_cost_usd=usd, passed=True)
                   for c, usd in (("plugin", 0.3), ("defaults", 0.2)) for _ in range(n)]
         opus = [dict(real, main_model="claude-opus-5-5", config=c, total_cost_usd=usd, passed=True)
-                for c, usd in (("plugin", 0.5), ("plugin-nogate", 0.4), ("defaults", 0.9)) for _ in range(n)]
+                for c, usd in (("plugin", 0.5), ("plugin-variant", 0.4), ("defaults", 0.9)) for _ in range(n)]
         with tempfile.TemporaryDirectory() as tmp:
             res = Path(tmp) / "results"
             res.mkdir()
@@ -627,7 +641,7 @@ class Analysis(unittest.TestCase):
             out = Path(tmp) / "page.md"
             analyze.main([str(res / "a-bugfix-2026-11-22.jsonl"), "--out", str(out)])
             page = out.read_text(encoding="utf-8")
-            analyze.main([str(res / "a-bugfix-2026-11-22.jsonl"), "--out", str(out), "--router", "plugin-nogate"])
+            analyze.main([str(res / "a-bugfix-2026-11-22.jsonl"), "--out", str(out), "--router", "plugin-variant"])
             chosen = out.read_text(encoding="utf-8")
         opus_part = page.split("## Results: session model `claude-opus-5-5`")[1].split("## Results: session model")[0]
         sonnet_part = page.split("## Results: session model `sonnet`")[1].split("## How to read it")[0]
@@ -637,7 +651,7 @@ class Analysis(unittest.TestCase):
         self.assertIn("router: `plugin`", sonnet_part)
         self.assertIn("bugfix: no difference shown against `defaults`", sonnet_part)
         self.assertNotIn("$0.9000", sonnet_part)
-        self.assertIn("router: `plugin-nogate`", chosen.split("## Results: session model `claude-opus-5-5`")[1])
+        self.assertIn("router: `plugin-variant`", chosen.split("## Results: session model `claude-opus-5-5`")[1])
 
     def test_the_page_says_each_run_has_its_own_config_folder(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -682,8 +696,7 @@ class Analysis(unittest.TestCase):
                       "on 0, not routed", row)
         self.assertIn("- Runs with a Bash denial, by configuration: `defaults` 0 of 2; `plugin` 1 of 3.", page)
         never = next(line for line in page.splitlines() if line.startswith("Defined in `bench/configs.json` but"))
-        for name in ("`haiku-high`", "`plugin-nogate`"):
-            self.assertIn(name, never)
+        self.assertIn("`haiku-high`", never)
         self.assertNotIn("`defaults`", never)
 
     def test_the_page_names_set_aside_runs_agent_spend_and_batches(self):
@@ -706,15 +719,26 @@ class Analysis(unittest.TestCase):
             out = Path(tmp) / "page.md"
             analyze.main([str(p) for p in sorted(res.glob("*.jsonl"))] + ["--out", str(out)])
             page = out.read_text(encoding="utf-8")
-        self.assertIn("4 run(s) are set aside, outside the results, because the API never got to the task: "
-                      "2 lost the network, 1 hit a rate or usage limit, 1 got an API error before any spend (a bad "
-                      "key, no credit or a model the account can't use). 2 of them were run again later", page)
+        self.assertIn("4 run(s) are set aside, outside the results, because the API stopped serving them, before or "
+                      "during the task: 2 lost the network, 1 hit a rate or usage limit, 1 got an account error (a bad "
+                      "or revoked key, no credit, a spend limit or a model the account can't use), whatever was "
+                      "spent. 2 of them were run again later", page)
         self.assertIn("`plugin` on `sonnet` (2 runs): main loop $0.0600 (75%), `model-router:implementer` $0.0200 "
                       "(25%)", page)
         self.assertIn("`defaults` old (3); `plugin` new (2)", page)
         self.assertIn("1 router run(s) are set aside, outside the results, because the plugin did not load", page)
         self.assertIn("1 router run(s) are set aside, outside the results, because a subagent ran but the router's "
                       "ledger holds no spawn row", page)
+
+    def test_the_page_says_per_session_model_how_the_runs_were_paid_for(self):
+        base = full_row(task="bugfix-median", config="defaults", **{"class": "bugfix"})
+        older = {k: v for k, v in base.items() if k != "auth"}  # a row from before the field was written
+        data = ([dict(base, main_model="sonnet", auth="ANTHROPIC_API_KEY")] * 3
+                + [dict(base, main_model=OPUS, auth="none")] * 2 + [dict(older, main_model=OPUS)])
+        page = analyze.build_page(dataclasses.replace(analyze.load([]), rows=data))
+        self.assertIn(f"- How the runs were paid for, by session model (`auth`, the `apiKeySource` of the run's "
+                      f"`system/init` event): `{OPUS}`: no API key, so a login token, a bearer token or a cloud provider (`none`) in 2 "
+                      "runs; not recorded in 1 run; `sonnet`: an API key (`ANTHROPIC_API_KEY`) in 3 runs.", page)
 
     def test_the_page_gives_each_configurations_cache_read_share_and_never_reads_a_missing_field_as_zero(self):
         base = full_row(task="bugfix-median", main_model="sonnet", **{"class": "bugfix"})
@@ -776,6 +800,12 @@ class Recorder(unittest.TestCase):
 
     def row(self, result, **facts):
         return run.record(self.task, self.config, self.options, result, {**self.facts, **facts})
+
+    def test_a_row_records_which_credential_paid(self):
+        init = {"type": "system", "subtype": "init", "apiKeySource": "ANTHROPIC_API_KEY"}
+        self.assertEqual(self.row({}, init=init)["auth"], "ANTHROPIC_API_KEY")
+        self.assertIsNone(self.row({}, init={})["auth"])  # the stream never began
+        self.assertIsNone(self.row({})["auth"])
 
     def test_a_real_2_1_330_result_becomes_a_row(self):
         row = self.row(json.loads(FIXTURE.read_text(encoding="utf-8")))
@@ -1597,19 +1627,22 @@ class Stopped(unittest.TestCase):
             # The frozen plugin copy is made there too, and goes however the bench stops.
             return rows, list(scratch.iterdir()) + list(runs.iterdir()), sessions
 
-    def test_an_interrupt_during_the_claude_call_writes_a_stopped_row_charged_the_budget_and_cleans_up(self):
+    def test_an_interrupt_during_the_claude_call_writes_a_stopped_row_priced_from_its_transcripts_and_cleans_up(self):
         def interrupted(cmd, work, env, timeout):
             """Ctrl-C mid-call, once the session has started. Raised here, since a real SIGINT that lands inside a
             finalizer of this long-lived process is ignored."""
             folder = Path(env["CLAUDE_CONFIG_DIR"]) / "projects" / env["CLAUDE_CODE_PROJECT_DIR_NAME"]
             (folder / "s1").mkdir(parents=True)
-            (folder / "s1.jsonl").write_text("{}")
+            usage = {"input_tokens": 0, "output_tokens": 20000}  # $0.10 on Haiku 4.5
+            (folder / "s1.jsonl").write_text(json.dumps({"message": {"id": "m", "model": "claude-haiku-4-5",
+                                                                     "usage": usage}}) + "\n")
             raise KeyboardInterrupt
 
         with unittest.mock.patch.object(run, "run_claude", interrupted):
             rows, scratch, sessions = self.stop(KeyboardInterrupt)
-        self.assertEqual([(r["grade"]["verdict"], r["exit_code"], r["cost_known"], r["total_cost_usd"]) for r in rows],
-                         [("stopped", None, False, 0.5)])
+        # A SIGTERM reaches the run the same way, so neither is charged the whole budget.
+        self.assertEqual([(r["grade"]["verdict"], r["exit_code"], r["cost_known"], r["cost_source"], r["total_cost_usd"])
+                          for r in rows], [("stopped", None, False, "transcripts", 0.1)])
         self.assertIn("KeyboardInterrupt", rows[0]["grade"]["reason"])
         self.assertEqual((scratch, sessions), ([], []))
 
@@ -1669,7 +1702,7 @@ class SuiteCoverage(unittest.TestCase):
                           env["CLAUDE_CODE_SUBAGENT_EFFORT"]), ("haiku", "1", "high"))
         self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)  # that one would move the main loop too
         self.assertNotIn("--plugin-dir", cmd)
-        self.assertEqual(sorted(configs), ["defaults", "haiku-high", "plugin", "plugin-nogate"])
+        self.assertEqual(sorted(configs), ["defaults", "haiku-high", "plugin"])
 
 
 LIMIT_STUB = '''#!/usr/bin/env python3
@@ -1688,39 +1721,6 @@ if n < int(os.environ["STUB_LIMITED"]):
 print(json.dumps({"type": "result", "is_error": False, "subtype": "success", "api_error_status": None, "total_cost_usd": 0.01,
                   "result": "read_retry_limit in app/settings.py; a rate limit design is off topic", "modelUsage": {}}))
 '''
-
-
-VARIANT_STUB = '''#!/usr/bin/env python3
-import json, os, sys
-from pathlib import Path
-if "--version" in sys.argv:
-    print("9.9.9 (stub)"); sys.exit(0)
-Path(os.environ["STUB_SEEN"]).write_text(json.dumps({"argv": sys.argv[1:]}))
-print(json.dumps({"type": "result", "result": "read_retry_limit in app/settings.py", "total_cost_usd": 0.01, "modelUsage": {}}))
-'''
-
-
-class RouterVariants(unittest.TestCase):
-    """A router variant is the shipped plugin with plugin option values."""
-
-    def test_a_variant_gets_its_options_and_nothing_else_does(self):
-        variant = next(c for c in run.load_configs() if c["id"] == "plugin-nogate")
-        with tempfile.TemporaryDirectory() as tmp:
-            claude = stub(tmp, VARIANT_STUB)
-            seen = Path(tmp) / "seen.json"
-            task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
-            options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
-                       "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
-            with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
-                row = run.run_one(task, variant, options)
-                got = json.loads(seen.read_text())
-                run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
-                plain = json.loads(seen.read_text())
-        settings = json.loads(got["argv"][got["argv"].index("--settings") + 1])
-        self.assertEqual(settings["pluginConfigs"], {"model-router@inline": {"options": {"verify_gate": False}}})
-        self.assertTrue(settings["sandbox"]["enabled"])
-        self.assertTrue(row["passed"])
-        self.assertNotIn("pluginConfigs", json.loads(plain["argv"][plain["argv"].index("--settings") + 1]))
 
 
 COST_STUB = '''#!/usr/bin/env python3
@@ -1880,7 +1880,7 @@ class Limits(unittest.TestCase):
                                       "stderr": "Error: API Error: Repeated 529 Overloaded errors", "answer": ""}),
                          "limit")
 
-    def test_an_api_error_before_any_spend_is_set_aside_not_retried(self):
+    def test_an_account_error_is_set_aside_not_retried(self):
         # What Claude Code 2.1.330 printed for an invalid API key: an error, nothing spent, no model usage.
         result = json.loads(API_ERROR.read_text(encoding="utf-8"))
         row = run.record({"id": "t", "class": "lookup"}, {"id": "defaults"}, Recorder.options,
@@ -1891,6 +1891,29 @@ class Limits(unittest.TestCase):
         # The messages for the other two at https://code.claude.com/docs/en/errors.md.
         for answer in ("Credit balance is too low", "Model 'claude-fable-5-2' not found"):
             self.assertEqual(run.refusal(dict(errored, answer=answer, total_cost_usd=0)), "api_error", answer)
+        # What ends a run part-way when the account can't pay or may not use the model, at
+        # https://code.claude.com/docs/en/errors.md and https://platform.claude.com/docs/en/api/errors.md: it is set
+        # aside whatever it spent.
+        spent = dict(errored, total_cost_usd=0.41, api_error_status=400)
+        for answer in ("Credit balance is too low", "Credit balance too low · Add funds: https://x",
+                       "Usage credits ran out before the response was finished.",
+                       "You've hit your org's monthly spend limit · visit https://x to raise it",
+                       "You've hit your individual usage limit", "You've hit your team's shared budget · ask your admin",
+                       'API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"You have '
+                       'reached your specified API usage limits. You will regain access on 2026-12-01"}}',
+                       "Failed to authenticate: OAuth token revoked. Please log in again or contact your administrator.",
+                       "Your ANTHROPIC_API_KEY belongs to a disabled organization · Update or unset the environment variable",
+                       "There's an issue with the selected model (claude-x). It may not exist or you may not have access "
+                       "to it. Run --model to pick a different model.", "Model 'claude-fable-5-2' not found"):
+            self.assertEqual(run.refusal(dict(spent, answer=answer)), "api_error", answer)
+        for status in (401, 402, 403):  # authentication, billing, permission
+            self.assertEqual(run.refusal(dict(spent, answer="", api_error_status=status)), "api_error", status)
+        self.assertEqual(run.refusal(dict(spent, answer="You've hit your session limit · resets 3pm")), "limit")
+        # Task text that talks about credit or keys, or a run that didn't error, is a task's own answer.
+        for row in (dict(spent, answer="The credit balance is too low to cover the refund, so it fails."),
+                    dict(spent, answer="Draft: Invalid API key handling returns 401."),
+                    dict(spent, is_error=False, exit_code=0, answer="Credit balance is too low")):
+            self.assertIsNone(run.refusal(row), row["answer"])
         # A run that spent tried the task, and a zero cost on error_during_execution may have been zeroed.
         self.assertIsNone(run.refusal(dict(errored, answer="The fix is incomplete.", total_cost_usd=0.02)))
         self.assertIsNone(run.refusal(dict(errored, answer="", subtype="error_during_execution", total_cost_usd=0)))
@@ -1908,6 +1931,22 @@ class Limits(unittest.TestCase):
                                  "--seed", "0", "--max-total", "3", "--claude", *claude, "--out", str(out)])
             read = lambda p: [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []  # noqa: E731
             return code, read(out), read(Path(tmp) / "limited" / "out.jsonl"), [p for p in pauses if p >= run.LIMIT_PAUSE]
+
+    def test_an_account_error_part_way_is_set_aside_with_its_spend_and_run_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.jsonl"
+            argv = ["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", str(run.API_ERROR_STOP + 1),
+                    "--max-total", "9", "--claude", *stub(tmp, CREDIT_STUB), "--out", str(out)]
+            limited = Path(tmp) / "limited" / "out.jsonl"
+            for again in (1, 2):
+                with unittest.mock.patch.dict("os.environ", AUTH), contextlib.redirect_stderr(io.StringIO()) as err:
+                    self.assertEqual(run.main(argv), 2)
+                self.assertIn(f"stopped: {run.API_ERROR_STOP} runs in a row set aside", err.getvalue())
+                rows = [json.loads(line) for line in limited.read_text().splitlines()]
+                # None is on record as a failed task, so the same command runs them again.
+                self.assertFalse(out.exists())
+                self.assertEqual([(r["limited_reason"], r["total_cost_usd"], r["passed"]) for r in rows],
+                                 [("api_error", 0.41, False)] * run.API_ERROR_STOP * again)
 
     def test_api_errors_in_a_row_stop_the_bench_without_a_failed_task(self):
         code, rows, limited, pauses = self.refused("every run", ["defaults"], runs=run.API_ERROR_STOP + 2)
@@ -1937,6 +1976,19 @@ if os.environ["STUB_REFUSED"] in ("every run", os.environ.get("CLAUDE_CODE_SUBAG
     sys.exit(1)
 print(json.dumps({"type": "result", "is_error": False, "subtype": "success", "api_error_status": None, "total_cost_usd": 0.01,
                   "result": "read_retry_limit in app/settings.py", "modelUsage": {}}))
+'''
+
+
+# The account runs dry part-way: $0.41 spent, then the API refuses for credit.
+CREDIT_STUB = '''#!/usr/bin/env python3
+import json, sys
+if "--version" in sys.argv:
+    print("9.9.9 (stub)"); sys.exit(0)
+print(json.dumps({"type": "system", "subtype": "init", "apiKeySource": "ANTHROPIC_API_KEY", "plugins": []}))
+print(json.dumps({"type": "result", "subtype": "success", "is_error": True, "api_error_status": 400,
+                  "terminal_reason": "api_error", "total_cost_usd": 0.41, "num_turns": 4,
+                  "result": "Credit balance is too low", "permission_denials": [], "modelUsage": {}}))
+sys.exit(1)
 '''
 
 
@@ -3013,7 +3065,7 @@ class Harness(unittest.TestCase):
 
     def test_bash_runs_in_the_sandbox_with_one_settings_json(self):
         options = {"claude": ["claude"], "model": "sonnet", "budget": 0.5, "plugin_dir": "/p"}
-        cmd, env = run.command("x", self.configs["plugin-nogate"], options,
+        cmd, env = run.command("x", self.configs["plugin"], options,
                                {"ANTHROPIC_API_KEY": "k", "GITHUB_TOKEN": "g", "PATH": "/bin"})
         self.assertEqual(cmd.count("--settings"), 1)
         settings = json.loads(cmd[cmd.index("--settings") + 1])
@@ -3026,13 +3078,12 @@ class Harness(unittest.TestCase):
                                                              {"name": "GITHUB_TOKEN", "mode": "deny"}])
         denied = {f["path"] for f in sandbox["credentials"]["files"]}
         self.assertTrue({"~/.ssh", "~/.aws", "~/.claude", "~/.claude.json"} <= denied)
-        self.assertEqual(settings["pluginConfigs"], {"model-router@inline": {"options": {"verify_gate": False}}})
         tools = cmd[cmd.index("--allowedTools") + 1:]
         self.assertEqual(tools, list(run.TOOLS))
         self.assertIn("Bash", tools)
 
     def test_where_no_sandbox_can_start_the_run_stops_and_the_readme_says_what_happens(self):
-        settings = run.settings({}, {}, hidden=[])
+        settings = run.settings({}, hidden=[])
         self.assertIs(settings["sandbox"]["failIfUnavailable"], True)
         readme = (ROOT / "bench" / "README.md").read_text(encoding="utf-8")
         self.assertIn("Where no sandbox can start", readme)
@@ -3182,9 +3233,9 @@ class Harness(unittest.TestCase):
         self.assertNotEqual((Path(frozen) / "hooks" / "hooks.json").read_text(), "{}")
         self.assertNotEqual(freeze()[1], digest)
         loaded = json.dumps([{"name": "model-router", "path": "/p"}])
-        code, rows, _ = self.main("--configs", "plugin", "plugin-nogate", "defaults", "--runs", "2", "--seed", "5",
+        code, rows, _ = self.main("--configs", "plugin", "defaults", "--runs", "2", "--seed", "5",
                                   env={"STUB_PLUGINS": loaded})
-        self.assertEqual(sorted({r["config"] for r in rows}), ["defaults", "plugin", "plugin-nogate"])
+        self.assertEqual(sorted({r["config"] for r in rows}), ["defaults", "plugin"])
         self.assertEqual(len({r["plugin_hash"] for r in rows if r["config"] != "defaults"}), 1)
         self.assertTrue(next(r["plugin_hash"] for r in rows if r["config"] == "plugin"))
         self.assertEqual({r["plugin_hash"] for r in rows if r["config"] == "defaults"}, {None})
@@ -3211,7 +3262,7 @@ class Harness(unittest.TestCase):
         self.assertEqual((code, written, [r["limited_reason"] for r in limited]), (2, False, ["no_start"] * 3))
 
     def test_a_documented_startup_failure_is_no_start_under_every_configuration(self):
-        for config in ("defaults", "haiku-high", "plugin", "plugin-nogate"):
+        for config in ("defaults", "haiku-high", "plugin"):
             row = run.record(Recorder.task, self.configs[config], Recorder.options,
                              STARTUP_FAILURE, dict(Recorder.facts, init={}, exit_code=1))
             self.assertEqual((run.set_aside(row), row["claude_started"], row["total_cost_usd"], row["cost_known"]),
@@ -3314,24 +3365,6 @@ class Harness(unittest.TestCase):
         (folder / "s.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
         self.assertIsNone(run.transcript_cost(folder))
 
-    def test_a_router_run_whose_ledger_rules_out_its_options_is_set_aside(self):
-        # The plugin keeps no copy of its options, so only a row an option forbids can show it didn't apply.
-        loaded = json.dumps([{"name": "model-router", "path": "/p"}])
-        gate = json.dumps({"event": "gate", "session": "s", "kind": "verify"})
-        spawn = json.dumps({"event": "spawn", "agent": "Explore", "action": "keep", "level": "lookup"})
-        row, _ = self.one("plugin-nogate", env={"STUB_PLUGINS": loaded, "STUB_LEDGER": spawn})
-        self.assertTrue(row["options_applied"])
-        self.assertIsNone(run.set_aside(row))
-        self.assertNotIn("plugin_options", row)
-        asked, _ = self.one("plugin-nogate", env={"STUB_PLUGINS": loaded, "STUB_LEDGER": spawn + "\n" + gate})
-        self.assertFalse(asked["options_applied"])  # the Stop check asked although verify_gate is off
-        self.assertEqual(run.set_aside(asked), "options_not_applied")
-        self.assertIsNone(self.one("plugin-nogate", env={"STUB_PLUGINS": loaded})[0]["options_applied"])  # no ledger
-        gated, _ = self.one("plugin", env={"STUB_PLUGINS": loaded, "STUB_LEDGER": gate})
-        self.assertIsNone(gated["options_applied"])
-        self.assertIsNone(run.set_aside(gated))
-        self.assertTrue(run.options_applied({"plugin_options": {"verify_gate": "on"}}, [{"event": "gate"}]))
-
     def test_each_agent_call_records_what_it_named_and_what_it_ran_on(self):
         stream = "\n".join(json.dumps(e) for e in (
             {"type": "assistant", "parent_tool_use_id": None, "message": {"model": "claude-opus-5-5", "content": [
@@ -3392,18 +3425,12 @@ class Configurations(unittest.TestCase):
             self.assertIn(name, agents)
 
     def test_no_configuration_sets_an_option_the_plugin_drops(self):
-        sys.path.insert(0, str(run.PLUGIN / "scripts"))
-        from modelrouter import settings
         for config in self.configs.values():
-            self.assertLessEqual(set(config.get("plugin_options", {})), set(settings.OPTIONS), config["id"])
+            self.assertNotIn("plugin_options", config, config["id"])  # run.py passes no plugin options
             self.assertNotIn("router_config", config, config["id"])
         for gone in ("plugin-cheap", "plugin-cheap-nomain", "plugin-cheap-nomain-nogate", "plugin-m6-08-b",
-                     "plugin-m6-08-b-nogate", "plugin-m6-10", "opusplan"):
+                     "plugin-m6-08-b-nogate", "plugin-m6-10", "opusplan", "plugin-nogate"):
             self.assertNotIn(gone, self.configs)
-
-    def test_the_router_arms_are_todays_defaults_and_no_gate(self):
-        self.assertNotIn("plugin_options", self.configs["plugin"])
-        self.assertEqual(self.configs["plugin-nogate"]["plugin_options"], {"verify_gate": False})
 
 
 class RunEdges(unittest.TestCase):
@@ -3456,7 +3483,9 @@ class RunEdges(unittest.TestCase):
         stated = "the upper bound of its pass rate minus the baseline's is below plus 10 points"
         self.assertIn(stated, (ROOT / "bench" / "README.md").read_text(encoding="utf-8"))
         page = analyze.build_page(analyze.load([]))
-        self.assertIn(stated.replace("10 points", "10%"), page)
+        self.assertIn(stated, page)
+        self.assertIn("The non-inferiority margin is 10 points of pass rate", page)
+        self.assertNotIn("10%", page)
         self.assertNotIn("isn't shown", page)
 
     def test_a_paid_row_that_stops_the_bench_is_filed_by_the_set_aside_rules(self):
@@ -3509,7 +3538,7 @@ class RunEdges(unittest.TestCase):
         self.assertEqual(graded.verdict, "pass", graded.reason)
         for path in json.loads(graded.reason):
             self.assertTrue(run._under(str(Path(path).resolve()), str(run.RUNS.resolve())), path)
-        hidden = run.settings({}, {}, hidden=[], own=str(run.RUNS / "tmpx"))["sandbox"]["filesystem"]
+        hidden = run.settings({}, hidden=[], own=str(run.RUNS / "tmpx"))["sandbox"]["filesystem"]
         self.assertIn(str(run.RUNS), hidden["denyRead"])
 
     def test_a_model_written_agent_type_that_is_not_a_plain_name_counts_as_invalid(self):
@@ -3545,7 +3574,8 @@ class RunEdges(unittest.TestCase):
 
         def row(n, config, verdict="pass", cost=0.01, **extra):
             return json.dumps({"run": n, "task": "lookup-retry-limit", "task_revision": revision, "config": config,
-                               "total_cost_usd": cost, "grade": {"verdict": verdict}, **extra}) + "\n"
+                               "total_cost_usd": cost, "grade": {"verdict": verdict}, "claude_version": "9.9.9 (stub)",
+                               **extra}) + "\n"
         out.write_text(row(0, "defaults") + row(0, "haiku-high", "stopped", 0.5)
                        + row(1, "haiku-high", task_revision=revision - 1))
         limited.write_text(row(1, "defaults", cost=0.0, limited_reason="network"))
@@ -3564,6 +3594,48 @@ class RunEdges(unittest.TestCase):
         limited.write_text("")
         self.assertEqual(self.main(*argv, "--budget", "0.5")[0], 1)
         self.assertEqual(len(triples(kept=1)), 1)
+
+    def test_a_rerun_on_another_claude_code_or_plugin_build_stops_before_any_run(self):
+        out = self.dir / "out.jsonl"
+        revision = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")["revision"]
+
+        def row(n=0, config="defaults", **extra):
+            return json.dumps({"run": n, "task": "lookup-retry-limit", "task_revision": revision, "config": config,
+                               "total_cost_usd": 0.01, "grade": {"verdict": "pass"}, "claude_version": "9.9.9 (stub)",
+                               "plugin_hash": None, **extra}) + "\n"
+        argv = ("--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "2", "--seed", "1")
+        # Rows on two versions or two plugin builds get no verdict, so the rerun that would add them never starts.
+        out.write_text(row(claude_version="2.1.331 (Claude Code)"))
+        code, err, ran = self.main(*argv)
+        self.assertEqual((code, ran), (2, False))
+        self.assertIn("runs on Claude Code `2.1.331 (Claude Code)` (`claude_version`)", err)
+        self.assertIn("--claude ~/.local/share/claude/versions/2.1.331", err)
+        out.write_text(row(config="plugin", plugin_hash="0" * 16, bench_commit="abc1234"))
+        code, err, ran = self.main(*argv)
+        self.assertEqual((code, ran), (2, False))
+        self.assertIn(f"plugin build {'0' * 16} (`plugin_hash`)", err)
+        self.assertIn("abc1234", err)
+        # A stopped run is run again and left out of the page, so its version doesn't matter, nor does any when
+        # nothing is left to run.
+        out.write_text(row(claude_version="2.1.331 (Claude Code)", grade={"verdict": "stopped"}))
+        self.assertEqual(self.main(*argv)[0], 0)
+        out.write_text(row(0, claude_version="2.1.331 (Claude Code)") + row(1, claude_version="2.1.331 (Claude Code)"))
+        (self.dir / "seen.json").unlink()
+        code, err, ran = self.main(*argv)
+        self.assertEqual((code, ran), (0, False))
+        self.assertIn("skipped 2 runs already in the results", err)
+
+    def test_uncommitted_code_is_one_warning_at_the_start_and_no_stop(self):
+        warned = {}
+        for dirty in (True, False):
+            with unittest.mock.patch.object(run, "_git_dirty", return_value=dirty):
+                code, err, ran = self.main("--tasks", "lookup-retry-limit", "--configs", "defaults",
+                                           out=self.dir / f"out-{dirty}.jsonl")
+            self.assertEqual((code, ran), (0, True))
+            warned[dirty] = [line for line in err.splitlines() if "uncommitted" in line]
+        self.assertEqual(warned[False], [])
+        [line] = warned[True]
+        self.assertIn("the page gives no verdict on rows from uncommitted code (`bench_dirty`)", line)
 
     def test_a_results_or_keep_folder_that_cannot_be_written_stops_the_runner_before_any_run(self):
         (self.dir / "a-file").write_text("not a folder")

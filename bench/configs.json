@@ -7,15 +7,6 @@
     "env": {}
   },
   {
-    "id": "plugin-nogate",
-    "description": "Model Router with the Stop check off (`verify_gate: false`)",
-    "plugin": true,
-    "env": {},
-    "plugin_options": {
-      "verify_gate": false
-    }
-  },
-  {
     "id": "defaults",
     "description": "No plugin: subagents inherit the session model at its default effort",
     "plugin": false,

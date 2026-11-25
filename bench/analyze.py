@@ -33,6 +33,7 @@ PILOT = RESULTS / "pilot"  # exploratory rounds: shown on the page, never judged
 MIN_RUNS = 10  # fewer runs of either of the split pair than this and a class isn't read as saturated
 ALPHA = 0.05  # the 95% intervals, and the one-sided level of the exact comparisons
 MARGIN = 0.10  # the non-inferiority margin on pass rate, fixed before any run
+MARGIN_TEXT = f"{MARGIN * 100:.0f} points"  # a difference of pass rates, never a share of one
 DENIAL_SHARE = 0.25  # a cell with more of its runs denied a Bash call than this gets no verdict
 LABELS = {"WIN": "WIN", "LOSE": "LOSE", "NONE": "no difference shown", "REFUSED": "no verdict"}
 SPLIT_STRONG, SPLIT_WEAK = "defaults", "haiku-high"  # the pair a task must split to count as telling models apart
@@ -193,8 +194,8 @@ def _refusal(name: str, ours: list[dict], base: str, theirs: list[dict]) -> str 
 def _judge(base: str, pass_ci: tuple, cost_ci: tuple, fewer: bool, solved: tuple) -> tuple[str, str]:
     """The verdict against one baseline; `solved` is the router's solved runs and runs, then the baseline's."""
     (p_lo, p_hi), (c_lo, c_hi) = pass_ci, cost_ci
-    seen = (f"cost per solved task {_fmt(c_lo)} to {_fmt(c_hi)}, pass rate {p_lo:+.0%} to {p_hi:+.0%} "
-            "(95% intervals of the router's minus the baseline's)")
+    seen = (f"cost per solved task {_fmt(c_lo)} to {_fmt(c_hi)}, pass rate {p_lo * 100:+.0f} to {p_hi * 100:+.0f} "
+            "points (95% intervals of the router's minus the baseline's)")
     # The runs added per task shrink a pass-rate gap, so the exact test can see a loss the interval hides.
     behind = _lower_p(*solved)
     if p_hi < 0 or behind < ALPHA:
@@ -204,10 +205,10 @@ def _judge(base: str, pass_ci: tuple, cost_ci: tuple, fewer: bool, solved: tuple
     if math.isfinite(c_hi) and c_hi < 0 and p_lo > -MARGIN:
         if fewer:  # a saving counts only at an equal or higher pass rate
             return "NONE", f"cheaper per solved task beyond noise, but it solved a smaller share of the runs; {seen}"
-        return "WIN", (f"cheaper per solved task beyond noise, at an equal or higher share of runs solved, pass rate "
-                       f"within {MARGIN:.0%} of it; {seen}")
+        return "WIN", (f"cheaper per solved task beyond noise, at an equal or higher share of runs solved, its pass "
+                       f"rate shown no more than {MARGIN_TEXT} behind; {seen}")
     if math.isfinite(c_lo) and c_lo > 0 and p_hi < MARGIN:
-        return "LOSE", f"dearer per solved task beyond noise, pass rate shown under {MARGIN:.0%} ahead; {seen}"
+        return "LOSE", f"dearer per solved task beyond noise, pass rate shown under {MARGIN_TEXT} ahead; {seen}"
     return "NONE", seen
 
 
@@ -251,13 +252,14 @@ def _quality(cells: dict, runs: list[dict]) -> dict:
                                  "models apart"}
     w, s = cells[weak], cells[strong]
     if min(w["runs"], s["runs"]) < MIN_RUNS:
-        return {**out, "reason": f"too few runs ({MIN_RUNS} needed) to say whether the tasks tell models apart"}
+        return {**out, "reason": f"too few runs ({MIN_RUNS} of each needed) to say whether the tasks tell models apart"}
     p = _lower_p(w["solved"], w["runs"], s["solved"], s["runs"])
-    seen = f"{weak} solved {w['solved']} of {w['runs']}, {strong} {s['solved']} of {s['runs']} (exact p = {p:.3f})"
+    seen = (f"`{weak}` solved {w['solved']} of {w['runs']} and `{strong}` {s['solved']} of {s['runs']} (exact "
+            f"one-sided p = {p:.3f})")
     if p >= ALPHA:
-        return {**out, "saturated": True, "reason": f"{seen}, a gap that could be chance, so these tasks can't tell "
-                                                    "models apart"}
-    return {**out, "saturated": False, "reason": f"{seen}, so these tasks tell models apart"}
+        return {**out, "saturated": True, "reason": f"{seen}, so `{weak}` wasn't shown to solve fewer and these tasks "
+                                                    "can't tell models apart"}
+    return {**out, "saturated": False, "reason": f"{seen}, so `{weak}` solved fewer and these tasks tell models apart"}
 
 
 def _summary(cls: str, runs: list[dict], *, routers: frozenset[str], router: str, draws: int, seed: int,
@@ -445,9 +447,10 @@ def _metrics(summary: list[dict], rows: list[dict], routers: frozenset[str]) -> 
 def render_sessions(parts: list[tuple], meta: dict, routers: frozenset[str]) -> str:
     body = []
     for model, router, summary, every, rows in parts:
+        rows_here = summary + ([every] if every else [])
         body += [f"## Results: session model `{model}`", "",
                  f"Every run here had `{model}` as its session model; router: `{router}`.", "",
-                 *_table(summary + ([every] if every else [])), "", *_quality_lines(summary), "",
+                 *_table(rows_here), "", *_quality_lines(rows_here), "",
                  *_metrics(summary, rows, routers), ""]
     return "\n".join([meta.get("header", "# Benchmarks"), "", *body, meta.get("body", "")]).rstrip() + "\n"
 
@@ -520,6 +523,9 @@ def load(paths: list[Path]) -> Results:
 
 
 CACHE_FIELDS = ("cache_read_tokens", "cache_write_tokens", "fresh_input_tokens")
+# The apiKeySource values a run can report (https://code.claude.com/docs/en/agent-sdk/typescript#apikeysource).
+PAID = {"ANTHROPIC_API_KEY": "an API key (`ANTHROPIC_API_KEY`)",
+        "none": "no API key, so a login token, a bearer token or a cloud provider (`none`)"}
 
 
 def _cache_line(by_config: dict[str, list[dict]]) -> str:
@@ -550,9 +556,7 @@ def _notes(results: Results) -> list[str]:
            "no_start": "run(s) are set aside, outside the results, because `claude` stopped before its stream began "
                        "(no `system/init` event and no result), as when the sandbox can't start",
            "router_silent": "router run(s) are set aside, outside the results, because a subagent ran but the "
-                            "router's ledger holds no spawn row, so its hooks never acted",
-           "options_not_applied": "router run(s) are set aside, outside the results, because their ledger holds a row "
-                                  "their configuration's plugin options rule out"}
+                            "router's ledger holds no spawn row, so its hooks never acted"}
     aside = [row for row in found if row.get("limited_reason") not in own]
     lines = []
     for reason, text in own.items():
@@ -565,10 +569,10 @@ def _notes(results: Results) -> list[str]:
                         for o in rows) for r in aside)
         parts = [f"{reasons.count('network')} lost the network"] * ("network" in reasons) + \
                 [f"{reasons.count('limit')} hit a rate or usage limit"] * ("limit" in reasons) + \
-                [f"{reasons.count('api_error')} got an API error before any spend (a bad key, no credit or a model "
-                 "the account can't use)"] * ("api_error" in reasons)
-        lines.append(f"- {len(aside)} run(s) are set aside, outside the results, because the API never got to the "
-                     f"task: {', '.join(parts)}. {again} of them were run again later on the same task and "
+                [f"{reasons.count('api_error')} got an account error (a bad or revoked key, no credit, a spend limit "
+                 "or a model the account can't use), whatever was spent"] * ("api_error" in reasons)
+        lines.append(f"- {len(aside)} run(s) are set aside, outside the results, because the API stopped serving "
+                     f"them, before or during the task: {', '.join(parts)}. {again} of them were run again later on the same task and "
                      "configuration, and none counts for or against a configuration. Their raw lines, with the reason, "
                      "are under `bench/results/limited/`.")
     spend: dict[tuple, dict[str, float]] = {}
@@ -656,15 +660,15 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "paired by task. Each of 2,000 resamples draws the row's tasks with replacement, then each drawn task's "
         "runs with replacement, so the interval reflects how few tasks there are as well as how few runs. For the "
         "pass rate, each task's runs get one solved and one failed run added, so a cell where every run passed "
-        f"still has spread. The non-inferiority margin is {MARGIN:.0%} of pass rate. WIN: the 95% interval of the "
+        f"still has spread. The non-inferiority margin is {MARGIN_TEXT} of pass rate. WIN: the 95% interval of the "
         "router's cost per solved task minus the baseline's is below zero, the lower bound of its pass rate "
-        f"minus the baseline's is above minus {MARGIN:.0%}, and the router solved at least the baseline's share of "
+        f"minus the baseline's is above minus {MARGIN_TEXT}, and the router solved at least the baseline's share of "
         "runs (per-task pass rates averaged), so a saving counts only at an equal or higher pass rate. LOSE: the "
         "router's pass rate is behind beyond noise (the upper bound of its pass rate minus the baseline's is below "
         "zero, or an exact one-sided test at 5% of its solved runs against the baseline's, every run of the row "
         "pooled, puts it behind, which catches a gap the added runs shrink), "
         "or its cost per solved task is above beyond noise while the upper bound of its pass rate minus the "
-        f"baseline's is below plus {MARGIN:.0%}, the mirror of the WIN rule. A cost bound that is n/a decides "
+        f"baseline's is below plus {MARGIN_TEXT}, the mirror of the WIN rule. A cost bound that is n/a decides "
         "nothing: it comes from resamples in which one side solved none of the runs drawn, so it has no cost per "
         "solved task, and a row where a side solved nothing, or nearly nothing, gets its verdict from the pass rate "
         "alone. Anything else is \"no difference shown\", which is not parity. There is no verdict when the two "
@@ -678,9 +682,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
         f"- Each table ends with an `{ALL}` row, judged the same way over every task in the table: the tasks of all "
         "its classes are paired and resampled together. A class with one task can't show the margin, so a plan "
         f"with a few tasks per class is judged on its `{ALL}` row.",
-        f"- A class is saturated when `{SPLIT_WEAK}` (every subagent on Haiku) can't be told from `{SPLIT_STRONG}` "
-        f"(subagents on the session model) by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an "
-        "equal pass rate says nothing about quality. Runs on an earlier revision of a task are left out of every table. A run on a "
+        f"- A row, the `{ALL}` row too, is saturated when an exact one-sided test (5%, at least {MIN_RUNS} runs of each) "
+        f"doesn't show `{SPLIT_WEAK}` (every subagent on Haiku) solving fewer runs than `{SPLIT_STRONG}` (subagents on "
+        "the session model). Then an equal pass rate says nothing about quality: the tasks can't tell a small model "
+        "from a strong one. Runs on an earlier revision of a task are left out of every table. A run on a "
         "task's current revision that a check other than today's graded stops the page from being built, since the "
         "check changed without a raise of the revision.",
         "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest, and n/a on a "
@@ -728,29 +733,39 @@ def _page(results: Results, summary: list[dict]) -> dict:
         for name, count in (r.get("agents_started") or {}).items():
             agents.setdefault(r["config"], {}).setdefault(name, 0)
             agents[r["config"]][name] += count
+    paid: dict[str, Counter] = {}
+    for r in rows:
+        paid.setdefault(r.get("main_model") or "unknown", Counter())[r.get("auth")] += 1
     shapes = {r.get("shape", "single") for r in rows}
     uncovered = [name for shape, name in (("fanout", "fan-out"), ("plan-build", "plan-then-build"), ("redo", "redo"),
                                           ("workflow", "workflow")) if shape not in shapes]
     saturated = sum(bool(row["quality"]["saturated"]) for row in summary)
+    every = [row for row in summary if row["class"] == ALL]
     counted = sorted({r["task"] for r in rows})
     brief = {t["id"]: t for t in tasks}
     header = "\n".join([
         "# Benchmarks", "",
         f"Cost and quality of Model Router against Claude Code without it. {len(rows)} runs, "
         f"${total:.2f} at list price, on {dates[0]}" + (f" to {dates[-1]}" if dates[-1] != dates[0] else "") + ".", "",
-        "No class here has a verdict against any baseline: the runs can't support one (each class line says why). "
+        "No row here has a verdict against any baseline: the runs can't support one (each row's line says why). "
         "Claim nothing from them beyond what the raw data shows."
         if summary and all(row["status"] == "REFUSED" for row in summary) else
         "Claim \"cheaper\" only against a baseline the router has a WIN against, and link its raw data.",
-        *(["", f"{saturated} of {len(summary)} class rows below are saturated: `{SPLIT_WEAK}` solved as many runs "
-              f"as `{SPLIT_STRONG}`, within noise, so these tasks can't tell models apart, and an equal pass rate there says nothing "
-              "about quality."] if saturated else []),
+        *(["", f"{saturated} of {len(summary)} rows below are saturated ({sum(bool(r['quality']['saturated']) for r in every)} "
+              f"of {len(every)} `{ALL}` rows): on their tasks the cheapest forced baseline, `{SPLIT_WEAK}` (every subagent "
+              f"on Haiku), wasn't shown to solve fewer runs than Claude Code's defaults (`{SPLIT_STRONG}`), so an equal "
+              "pass rate there says nothing about quality."] if saturated else []),
     ])
     body = "\n".join([
         *read,
         "## Setup", "",
         f"- Claude Code: {', '.join(versions)}. Session models: {', '.join(main) or 'n/a'} (`--model`), "
         "one results table each. Inside a table every configuration ran on that session model.",
+        "- How the runs were paid for, by session model (`auth`, the `apiKeySource` of the run's `system/init` event): "
+        + "; ".join(f"`{model}`: " + "; ".join(
+            f"{PAID.get(how, f'`{how}`') if how else 'not recorded'} in {n} run{'s' * (n != 1)}"
+            for how, n in sorted(counts.items(), key=lambda kv: (-kv[1], str(kv[0]))))
+            for model, counts in sorted(paid.items())) + ".",
         "- Configurations run: " + "; ".join(f"`{c}` ({described.get(c, '?')})" for c in used) + ".",
         "- Models that ran, with Claude Code's list-price cost across all runs: "
         + "; ".join(f"`{name}` ${sum(costs):.4f} over {len(costs)} runs" for name, costs in sorted(models.items()))
@@ -794,10 +809,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "empty list doesn't prove no policy applied (https://code.claude.com/docs/en/managed-settings.md). Only a "
         "router configuration passes `--plugin-dir`, from a copy of `plugins/model-router` made once when the "
         "batch starts. Each raw line records the hash of the plugin "
-        "it loaded in `plugin_hash`, null with no plugin. The plugin keeps no copy of its options, so a run of a "
-        "router variant is set aside only when its ledger holds a row an option rules out (a `gate` row with "
-        "`verify_gate` off); `options_applied` true means no such row, "
-        "not proof.",
+        "it loaded in `plugin_hash`, null with no plugin.",
         "- The router keeps state (model health and its ledger) in its plugin data folder, inside the run's own "
         "config folder, so every router run starts from an empty one and its data goes when the scratch copy does. "
         "For a router run the raw line records the count of ledger rows with event `gate` in `gate_events`.",
@@ -807,7 +819,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "results file, its raw line naming the folder in `transcripts`.",
         "- Cost is Claude Code's `total_cost_usd`, which includes subagents and is a client-side estimate at list "
         "price, not a bill (https://code.claude.com/docs/en/agent-sdk/cost-tracking.md). A run with no result (a "
-        "timeout or a crash) is priced from its saved transcripts at list price, each message once, or charged the "
+        "timeout, an interrupt, SIGTERM or a crash) is priced from its saved transcripts at list price, each message once, or charged the "
         "whole budget when they hold no usage or a model with no price; `cost_source` says which. Every run is "
         "capped with "
         "`--max-budget-usd`, which a run can pass by up to the cost of one response plus anything that subagents "
@@ -894,7 +906,7 @@ def pilot_rows() -> tuple[list[dict], dict]:
 
 def build_page(results: Results, router: str | None = None, current: str | None = None) -> str:
     parts = sessions(results, router)
-    summary = [row for part in parts for row in part[2]]
+    summary = [row for part in parts for row in part[2] + ([part[3]] if part[3] else [])]
     kept = bool(current and current.startswith(HEAD_START) and HEAD_END in current)
     head = current.split(HEAD_END, 1)[0] + HEAD_END if kept else ""
     page = head + render_sessions(parts, _page(results, summary), results.routers)
