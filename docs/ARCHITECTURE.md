@@ -131,7 +131,7 @@ The climb (`router._redo`):
 
 A step `maxEffortLevel` or `effort_stops_at` holds counts as none, and under an effort variable the router sets no effort, so the redo takes the next model. A nested run with no effort on record skips step 1. The call's model, the pin, a rule's model and `CLAUDE_CODE_SUBAGENT_MODEL` don't hold a redo back; under the force pin it gets one effort step. The session floor and `maxEffortLevel` apply after. `escalated_from` names the redone run's level.
 
-With no stronger usable model and no effort to gain, the redo runs as the run it redoes did, and the decision's `no_step` is set. Claude then reads one sentence after the result, such as "This redo ran on opus at max, the same as the run it redoes: nothing stronger is usable here." (`spawn.redo_note`): `additionalContext` beside `updatedInput` on the fallback, the `tool.call` result's `context` on the mod.
+With no stronger usable model and no effort to gain, the redo runs as the run it redoes did, and the decision's `no_step` is set. Claude then reads one sentence after the result, such as "This redo ran on opus at max, the strongest model and the most effort usable here, the same as the run it redoes." (`spawn.redo_note`): `additionalContext` beside `updatedInput` on the fallback, the `tool.call` result's `context` on the mod.
 
 A redo is left alone wherever a plain call is. It misses its record after a skipped write, 30 minutes, 100 newer tasks, or a day idle. It never changes later calls. A run that swapped models mid-run (`modelsUsed`) finishes nothing and isn't health evidence.
 

@@ -107,8 +107,9 @@ def redo_note(decision: router.Decision) -> str | None:
     if not decision["no_step"]:
         return None
     at = f" at {decision['effort']}" if decision["effort"] else ""
-    return (f"This redo ran on {decision['model'] or decision['was']}{at}, the same as the run it redoes: nothing "
-            "stronger is usable here.")
+    # It names the effort as the most usable, since the call may have named one the model doesn't take.
+    return (f"This redo ran on {decision['model'] or decision['was']}{at}, the strongest model and the most effort "
+            "usable here, the same as the run it redoes.")
 
 
 def decide(hook_input: dict, snap: settings.Snapshot) -> Spawn:

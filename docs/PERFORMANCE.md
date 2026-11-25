@@ -55,7 +55,7 @@ Characters of plugin text Claude gets. Tokens weren't measured.
 | Session-start note (`hooks._rules`) | each start, resume, clear, compact and fork | 700 with no option set, 206 to 717 over 32 option mixes | 720 |
 | The same note, after two newlines, in the Agent tool's description (mod only) | all session | 702 with no option set, at most 719 | 720, the note's |
 | The table for a script's stages, after two newlines, in the Workflow tool's description (mod only) | all session | 519 with no option set | none |
-| A redo with no step left (`spawn.redo_note`) | after that call's result | 87 to 97 | none |
+| A redo with no step left (`spawn.redo_note`) | after that call's result | 107 to 118 | none |
 | The five agents' descriptions | all session | 687 | 930 |
 | The `route` skill's description | all session | 199 | 200 |
 | A note that the prompt names a model | on such a prompt | about 135 | none |
