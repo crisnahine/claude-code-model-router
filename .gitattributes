@@ -1,0 +1,6 @@
+* text=auto eol=lf
+bench/tasks/** linguist-vendored
+bench/results/** linguist-generated
+docs/assets/*.svg linguist-generated
+# The logos are drawn by hand; tools/docs_assets.py writes the other SVGs.
+docs/assets/logo*.svg -linguist-generated

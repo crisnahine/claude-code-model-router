@@ -1,13 +1,6 @@
 #!/bin/sh
-# Launcher for model-router.py, used by hooks and skills.
-# Runs the first Python 3.9+ interpreter on PATH. model-router.py checks its own version
-# and exits 87, before reading stdin, when the interpreter is too old, so a working run
-# costs one interpreter start. Any other failure is checked with a version probe: a real
-# error from a command keeps its exit code, while a broken interpreter (a Store stub, a
-# shim with no version set) gives the next one a turn. If none works, it exits 0: a missing
-# interpreter must never block a session, a tool call or a skill. The plugin's hooks are
-# then inactive, and skills say why. A hook's error exits 1, never 2: exit 2 blocks the tool
-# call, the prompt or the stop (https://code.claude.com/docs/en/hooks.md#exit-code-2-behavior-per-event).
+# Runs model-router.py for hooks and skills on the first working Python 3.9+ on PATH (87: too old, try the next);
+# with none it exits 0. A hook's own error exits 1, never 2, since 2 blocks the tool call, prompt or stop.
 # -I: a repository's settings can set PYTHONPATH or PYTHONHOME for hooks, which must not load code here.
 dir=$(dirname "$0")
 hook=
