@@ -8,8 +8,8 @@ A plugin for Claude Code that keeps each subagent's model and effort within the 
 
 Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`.
 
-Options, in `/config`: `routing_mode` (`auto`), `max_tier` (`none`) and `verify_gate` (`true`). Commands: `/model-router:route`, `/model-router:models` and `/model-router:usage`.
+Options, in `/config`: `routing_mode` (`auto`), `max_tier` (`none`), `verify_gate` (`true`) and `session_check` (`ask`). Commands: `/model-router`, `/model-router:route`, `/model-router:models` and `/model-router:usage`.
 
-What it runs: the hooks in `hooks/hooks.json` and the mod `hooks/router.ts`, which start `sh` and Python on your machine. What it keeps: a ledger and state files in the plugin's data folder, private to your user on macOS and Linux, never a prompt, brief or description. It makes no network call of its own.
+What it runs: the hooks in `hooks/hooks.json` and the mod `hooks/router.ts`, which start `sh` and Python on your machine, and, for a setup you pick when a session starts below the recommended ones, Claude Code's `/model` and `/effort`. It writes one option, `session_check`, when you ask it to. What it keeps: a ledger and state files in the plugin's data folder, private to your user on macOS and Linux, never a prompt, brief or description. It makes no network call of its own.
 
 How it decides, every option and every limit are in the [main README](https://github.com/crisnahine/claude-code-model-router#readme). Apache-2.0.

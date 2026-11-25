@@ -56,6 +56,8 @@ The project's own words, and the code behind each.
 
 **Pin**: a model or effort an agent's own definition names. The router keeps it within the cap; a redo climbs past it.
 
+**Recommended setup**: a model family and the lowest effort the session that plans and delegates should run it at: Opus and Fable at `medium`, Sonnet at `xhigh`, in `config/models.json` under `session` (`Registry.session`). A family left out is never one.
+
 **Read-only agent**: one whose `tools` hold none of Edit, Write, NotebookEdit and Bash, or whose `disallowedTools` remove them all, and the built-in Explore and Plan (`agents.read_only`). A call that nothing names a model for runs at lookup on one, and at standard on any other agent.
 
 **Redo**: a call whose `description` starts with "Redo:" (`calls.marked_redo`). It climbs from its task's done record, effort first, then the model (`router._redo`).
@@ -66,9 +68,13 @@ The project's own words, and the code behind each.
 
 **Routing mode**: `auto` or `off`, set only in `/config`. `off` changes no call and gives no note or Stop check; the ledger and health still record.
 
+**Session check**: the once-per-session question, at the start of an interactive session below the recommended setups, that offers one, then an effort (`session.check`, the `session_check` option). Only on the mod path.
+
 **Session floor**: on the session's own model, an effort the router sets for a main-conversation call is at least the session's (`router._session_floor`).
 
 **Session model**: the model the conversation runs on, which a call naming nothing inherits (`session.py`).
+
+**Session switch**: `/model-router on` or `off`, which sets routing for one session in `switches.json`, read by every snapshot of that session (`settings.switch`, `Settings.switched`).
 
 **Set aside**: moving a `state.json` that fails to parse to `state.json.corrupt-<stamp>`, three kept (`store._set_aside`).
 
@@ -77,6 +83,8 @@ The project's own words, and the code behind each.
 **Snapshot**: the registry, options, usable models, health and allowlist one hook call reads once (`settings.Snapshot`).
 
 **Spawn**: a call starting its agent: `agent.spawn` on the mod path, `PreToolUse` on `Agent` on the fallback.
+
+**Status line**: the mod's one line under the prompt: mode, path, cap, and this session's routed calls and redos (`report.status`, `$.ui.status`).
 
 **Stop check**: the ask before a turn ends when a project file was edited and no check ran since (`gates.py`, `verify_gate`). Guidance, never a block.
 

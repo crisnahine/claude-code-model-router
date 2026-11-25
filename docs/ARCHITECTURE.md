@@ -4,24 +4,25 @@
 
 # Architecture
 
-Model Router changes two fields of an agent call, `model` and `effort`; the agent, prompt and tools stay as written. Claude names both on each Agent call, from a table in the session-start note, which the mod also puts in the Agent tool's description. The plugin holds them to the user's cap, the allowlist and model health, fills in the effort when only a model is named, gives a call that names no model a level from its agent's tools, raises a call to a rule's level, and runs a call marked "Redo:" higher. A Stop check asks for a check after unchecked edits.
+Model Router changes two fields of an agent call, `model` and `effort`; the agent, prompt and tools stay as written. Claude names both on each Agent call, from a table in the session-start note, which the mod also puts in the Agent tool's description. The plugin holds them to the user's cap, the allowlist and model health, fills in the effort when only a model is named, gives a call that names no model a level from its agent's tools, raises a call to a rule's level, and runs a call marked "Redo:" higher. A Stop check asks for a check after unchecked edits. With a person at the prompt, the mod also shows a status line, answers `/model-router`, and offers a stronger main-session setup once at the start.
 
 ## Two paths, one router
 
 ![Two paths, one router: engine events reach the mod, hooks/router.ts. The settings hooks in hooks/hooks.json do the bookkeeping, and their PreToolUse hook is the fallback. Both run one Python runtime.](assets/two-paths.svg)
 
-Both paths run one launcher, `scripts/model-router.sh`, and one procedure, `spawn.decide` then `spawn.record`. The mod, `hooks/router.ts` (under `modules` in `hooks/hooks.json`), is the main path, asking the runtime through `mod-start`, `mod-spawn` and `mod-usage`:
+Both paths run one launcher, `scripts/model-router.sh`, and one procedure, `spawn.decide` then `spawn.record`. The mod, `hooks/router.ts` (under `modules` in `hooks/hooks.json`), is the main path, asking the runtime through `mod-start`, `mod-spawn` and `mod-usage`, and in an interactive session `mod-status`, `mod-check` and `mod-end`:
 
 | Event | What the mod does |
 | :- | :- |
 | `tool.call` (`Agent`) | Keeps the call's `effort`, which `agent.spawn` lacks, and writes the mark. After the result, adds the spawn answer's `note` to its `context` |
 | `tool.describe` | Appends to the Agent tool's description the session-start note the latest `mod-start` answer carried (`rules`), and to the Workflow tool's the same table for a script's stages (`workflow_rules`). Every other tool is passed on |
-| `session.start` | Sends the settings layers; the runtime stores them, clears day-old marks and answers the session-start note |
-| `session.end` | At `/clear`, forgets the session id the layers went to |
+| `session.start` | Sends the settings layers; the runtime stores them, clears day-old marks and answers the session-start note. When `isInteractive`, registers `/model-router`, then refreshes the status line and starts the session check once the hook has returned |
+| `session.end` | At `/clear`, forgets the session id the layers went to. In an interactive session, drops the session's switch and check (`mod-end`) |
+| `command.run` (`model-router`) | Answers `/model-router` itself, display only: the state, a switch (`mod-status`), or `session_check` through `$.config.set` |
 | `agent.spawn` | Sends the call, `parent_model`, `kind` and the session's effort; passes the answer's `model` on. Marks a spawn a later mod moved to another family. Forks and resumed runs pass untouched |
-| `turn.start` | On the main loop, sends the layers again when the session id changed, as it does at `/clear`. Gives an agent whose first request beats its spawn's return that spawn's effort, if its prompt's waiting spawns agree |
+| `turn.start` | On the main loop, notes that a turn has started, which keeps the session check away, and sends the layers again when the session id changed, as it does at `/clear`. Gives an agent whose first request beats its spawn's return that spawn's effort, if its prompt's waiting spawns agree |
 | `turn.step` | Sets the agent's effort on each request (a workflow agent's only when higher); records the main loop's |
-| `turn.complete` | Sends a subagent's tokens and cost estimate to the ledger, and the model and effort its last request carried (`lastRequest`), with the Agent call it came from |
+| `turn.complete` | Sends a subagent's tokens and cost estimate to the ledger, and the model and effort its last request carried (`lastRequest`), with the Agent call it came from. On the main loop of an interactive session, refreshes the status line with `$.session.model()` and the main loop's effort |
 
 The fallback is `PreToolUse` on `Agent` (`fallback.route`), which rewrites `model` and `effort` through `updatedInput`.
 
@@ -41,6 +42,15 @@ The other settings hooks do the bookkeeping: the session note and model, a model
 
 `cli.main` catches what a handler raises and exits 0. The launcher runs Python with `-I`, exits 0 with no Python 3.9 or later, and 1, never 2, on other hook failures. Each mod hook's `.catch` passes the event on.
 
+## In an interactive session
+
+None of this runs unless `session.start` reports `isInteractive`, and each call into the mods API it makes sits in a `try`, since the loader takes `$` only as calls and a Claude Code or a surface may lack one.
+
+- **Status line.** `report.status` builds one line from the options, the session's switch and its ledger rows (read with `ledger.read(session=...)`): `auto · mod · cap opus · 14 routed · 2 redos`, or `off`. The mod pins it with `$.ui.status`. Refreshes run after the hook that asks for one, one at a time, with any asked for meanwhile folded into one more.
+- **Switch.** `/model-router on` or `off` asks `mod-status` with `routing`. `settings.switch` keeps it in the session's `switches.json` entry, or none when it matches `routing_mode`, and `settings.resolve` reads it for every snapshot with a session id, so `mod-spawn` and the settings hooks both decide with routing off. The mod keeps the answer too, for a call whose round trip fails (`capped`).
+- **Session check.** Started after `session.start` returns, when `$.session.turns()` is 0. `mod-check` sends `$.session.model()` and whether managed settings own `session_check` (`$.config.list()`), and `session.check` answers the first question, or nothing. It marks the session checked first, so the reload a `$.config.set` causes, which runs `session.start` again, asks nothing. The question is data: each choice carries its label, its next question (`then`), what it does (`model`, `effort`, `check`) and the line to show after (`done`). The mod asks with `$.ui.ask`, only while no main-loop turn has started, and acts only on a label it sent: `$.command.run` for `model`, then `$.session.model()` to confirm the family, then `effort`; `$.config.set` for `check`.
+- **Effort before the first request.** `session.effort_on`: `CLAUDE_CODE_EFFORT_LEVEL`, then `Allowlist.saved_effort` over the settings layers in precedence order (`allowlist.PRECEDENCE`), a model's `modelSettings` level before its file's top-level `effortLevel` and the user file's top-level one skipped, then `router.DEFAULT_EFFORT`, held to `maxEffortLevel`. From the first main-loop request on, `turn.step` gives the exact effort, which `session.observe` records for the status text.
+
 ## Modules
 
 In `scripts/modelrouter/`, standard library only:
@@ -51,12 +61,12 @@ In `scripts/modelrouter/`, standard library only:
 | `mod`, `fallback` | The mod's commands and mark; the fallback's rewrite, repeat guard and deny |
 | `spawn`, `router` | The shared procedure and the run a redo redoes; `decide`, from facts alone |
 | `ladder`, `registry`, `config` | Levels and rungs; the `Registry` (`select`, `clamp`, `family`); building it from the config files |
-| `settings` | Options, environment facts, and each hook's `Snapshot` |
+| `settings` | Options, environment facts, the session's routing switch, and each hook's `Snapshot` |
 | `allowlist`, `health` | `availableModels`, `deniedModels`, `maxEffortLevel`; model errors and substitutions |
 | `calls` | Routes, outcomes, the redo mark, tasks, done records |
-| `agents`, `session` | Agent definitions and whether one can only read (`agents.read_only`); the conversation's model and transcripts |
+| `agents`, `session` | Agent definitions and whether one can only read (`agents.read_only`); the conversation's model and transcripts, and the session check (`session.check`) |
 | `intake`, `request`, `gates` | Whether a prompt is the person's; the model it names; the Stop check |
-| `ledger`, `report`, `store` | Ledger rows; skill tables and `--json`; state files and locks |
+| `ledger`, `report`, `store` | Ledger rows; skill tables, `--json` and the status line (`report.status`); state files and locks |
 
 The agents `scout` and `verifier` pin Haiku at `medium`, `implementer` Haiku at `high`, and `architect` and `reviewer` Sonnet at `high`. Models are entries in `config/models.json`; the four family names are also text in `hooks._rules` and the mod's `TIERS`.
 
@@ -174,6 +184,7 @@ The data folder is `${CLAUDE_PLUGIN_DATA}`, else `plugins/data/model-router-loca
 | `state.json` | Model health |
 | `allowlist.json` | Per session: settings layers |
 | `sessions`, `routes`, `pending`, `launched`, `done`, `edits` (`.json`) | Per session: its model, routes, waiting fallback rewrites, waiting background runs, finished runs, edit and check times |
+| `switches.json` | Per session: the `/model-router` switch, whether the session check ran, its estimate and the setup the latest main-loop request carried. Dropped at session end, or after a day unwritten |
 | `locks.json` | Per file: lock waits, waits on another session, skipped writes |
 | `<file>.flock`, `mod-calls/` | OS lock files; the mod's marks |
 | `ledger.jsonl` | One row per spawn, result, model error, Stop ask and subagent turn |
@@ -199,7 +210,7 @@ The user's `~/.claude/model-router.json` is trusted in full. A project's `.claud
 - Its rule `level` is a floor, its rule `model` follows row 5, and `route: false` is ignored. A user rule setting an agent's level or model voids both of the project's.
 - A model it adds is never a pick, a clamp stand-in or a redo's next model, is ignored under a cap, and may not overlap a trusted name.
 
-Only `/config` sets `routing_mode`. Bad types and non-finite numbers are dropped, and `/model-router:models` lists what was dropped or held back.
+Only `/config` sets `routing_mode`; `/model-router` switches routing for one session without writing it. Bad types and non-finite numbers are dropped, and `/model-router:models` lists what was dropped or held back.
 
 ## Machine-readable output
 
@@ -213,7 +224,8 @@ Only `/config` sets `routing_mode`. Bad types and non-finite numbers are dropped
 
 - **Network calls.** The runtime imports no network module; the mod uses only the engine's own APIs.
 - **Reading a brief to pick a model.** A call's prompt is only hashed into its key (`calls.identify`) and matched to the agent's first turn. A call that names no model gets its level from the agent definition's `tools` and `disallowedTools`. The person's prompt is read only for a model it names.
-- **Changing more than `model` and `effort`**, or the main conversation's model or effort.
+- **Changing more than `model` and `effort`** of an agent call. The main conversation's model and effort change only through Claude Code's own `/model` and `/effort`, run for a setup the person picks in the session check.
+- **Writing settings**, but for one option: `session_check`, through `$.config.set`, from `/model-router check on` or `off` or the session check's "Don't ask again".
 - **Approving a call.** No hook returns `permissionDecision: "allow"`.
 - **Blocking a spawn**, but for one case. A fallback rewrite waits in `pending.json`. If the same call comes back 5 seconds or more later with no result, the rewrite didn't run, so it passes through untouched rather than loop; if that would run it above `max_tier`, it is denied, with the model to use (`fallback._guard`).
 - **Blocking a session.** Hooks never exit 2.

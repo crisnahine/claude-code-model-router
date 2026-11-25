@@ -32,9 +32,10 @@ Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `pyt
 
 In `/config`:
 
-- `routing_mode`: `auto` (default), or `off` to leave every call as it is, with no notes and no check.
+- `routing_mode`: `auto` (default), or `off` to leave every call as it is, with no notes, no check and no session check.
 - `max_tier`: the strongest model subagents may run on, except one an environment variable sets: `none` (default), `haiku`, `sonnet`, `opus` or `fable`.
 - `verify_gate`: `true` (default) turns on the check before a turn ends.
+- `session_check`: `ask` (default) offers a stronger setup when a new session starts below the recommended ones, or `off`.
 
 Per-agent rules go in `~/.claude/model-router.json` or a project's `.claude/model-router.json`, which can only raise ([keys](docs/GUIDE.md)).
 
@@ -62,8 +63,26 @@ Claude marks a redo by starting the call's `description` with "Redo:". It climbs
 
 When Claude changed a project file with Edit, Write or NotebookEdit and no check command ran since, the `Stop` hook asks Claude once for the work's own check, such as tests for code or a reread of a document. It runs nothing itself and waits out background work.
 
+## In a session
+
+With its mod loaded and a person at the prompt, Model Router shows one line under the prompt, after the plugin's name, such as `auto · mod · cap opus · 14 routed · 2 redos`: routing on (`auto`) or `off`, the path that routes calls, the cap when one is set, and this session's calls the router changed and its redos. `(this session)` follows the mode while `/model-router` overrides the saved option. The line updates after each spawn and each turn.
+
+`/model-router` prints the same state with no model turn. `/model-router off` and `/model-router on` switch routing for this session only, from the next spawn; `routing_mode` in `/config` keeps a choice. `/model-router check off` and `check on` set `session_check`.
+
+### The session check
+
+The session that plans and delegates works best on a strong setup: Opus or Fable at `medium` effort or higher, or Sonnet at `xhigh` or higher. When a new session starts below these, Model Router asks once, before your first prompt:
+
+1. Which model: each recommended model usable here, then `Stay on <model> at <effort>`. The first is marked `(Recommended)` and the strongest `(the strongest model)`.
+2. Which effort, from that model's lowest recommended effort up to `max`. A pick runs Claude Code's `/model` when the model changes and `/effort` when the effort does, and Claude Code keeps both as your default for new sessions (`max` lasts this session only).
+
+After Stay, it asks whether to ask again next session or never; `/model-router check on` brings it back.
+
+A dismissal or typed text changes nothing. It never asks in `claude -p` or the Agent SDK, once the conversation has a prompt in it, with routing off, or with `session_check` off, and at most once per session. Before the first request, the effort is an estimate from `CLAUDE_CODE_EFFORT_LEVEL`, your settings files and the model's default; a `--effort` flag isn't visible to it.
+
 ## Commands
 
+- `/model-router [on | off | check on | check off]`: the state above, or a switch. Only with the mod.
 - `/model-router:route [task]`: which model and effort fit a task, and what a call would run on.
 - `/model-router:models [reset]`: which models are in use, capped, blocked or routed around. `reset` clears model health.
 - `/model-router:usage [days]`: agents, levels, models, tokens, redos and Claude Code's cost estimate per subagent (default 7 days).
@@ -77,12 +96,12 @@ Its files stay in the plugin's data folder, private to your user on macOS and Li
 <a id="compatibility"></a>
 ## What it can't do
 
-- It never changes the main conversation's model or effort, or which agent a call runs.
+- It never changes the main conversation's model or effort by itself: only a setup you pick in the session check does, through `/model` and `/effort`. It never changes which agent a call runs.
 - It leaves forks alone, and an agent whose definition file it can't find, unless the call or your rule names a model.
 - A cloned repository's `.claude/model-router.json` can raise its agents up to your `max_tier`.
 - It retries nothing. After two model errors on a model, it routes around it for a day.
 - Each hook starts Python ([performance](docs/PERFORMANCE.md)).
-- Workflow stages, token counts and cost estimates need its mod; otherwise a `PreToolUse` hook routes Agent calls.
+- Workflow stages, token counts, cost estimates, the status line, `/model-router` and the session check need its mod; otherwise a `PreToolUse` hook routes Agent calls, the state is in `/config` and `/model-router:usage`, and nothing asks about the session.
 
 ## Benchmark
 

@@ -16,6 +16,7 @@ It needs Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3
 
 ## Commands
 
+- `/model-router` prints the [status line](#the-status-line), the session's setup once a request shows it, and how to switch. `/model-router off` and `on` [switch routing for this session](#switch-routing-for-this-session), and `/model-router check off` and `on` set `session_check`. It runs with no model turn, and its reply is for you only. It exists only where the mod runs, in a session with a person at the prompt.
 - `/model-router:route [task]` shows the mode, cap, ladder and role agents, which Claude uses to say what model and effort fit the task, or to delegate it.
 - `/model-router:models [reset]` shows, per model, what it last ran as and whether it is working, unused, above your cap, not permitted or routed around, and what your rules files had wrong. `reset` clears the model health record first.
 - `/model-router:usage [days]` shows, over `days` (default 7), calls per agent with levels and models, redos, tokens per model, model errors and, where the mod runs, Claude Code's cost estimate, which isn't your bill.
@@ -31,6 +32,7 @@ Set in `/config`:
 - `routing_mode`: `auto` (default) or `off`. `off` changes no call and adds no notes or checks, but still keeps records and tells Claude of a model error or a mid-run model swap.
 - `max_tier`: `none` (default), `haiku`, `sonnet`, `opus` or `fable`, the strongest model a subagent may run on. A stronger one is lowered, except an environment pin or a fork.
 - `verify_gate`: `true` (default) or `false`, the [check before a turn ends](#the-check-before-a-turn-ends).
+- `session_check`: `ask` (default) or `off`, the [session check](#the-session-check). `/model-router check off` and `check on` write it too, unless managed settings own it.
 
 ### Rules files
 
@@ -45,6 +47,42 @@ Agents are keyed by the name a call uses. Levels are in [the ladder](#the-ladder
 - `models.<name>.strength` and `.cost`: yours adds or re-ranks a model, named by an alias the Agent tool accepts. A project's adds only new names, used only when named, never under `max_tier`.
 
 Where your rule sets an agent's `level` or `model`, a project's rule for it is ignored. `routing_mode`, wrong types and other keys are ignored; `/model-router:models` lists what was dropped or held back. `max_tier` caps only the model; `maxEffortLevel` in your settings bounds effort.
+
+## In a session
+
+Where the mod runs and a person is at the prompt, three things appear. None of them exists in `claude -p`, the Agent SDK, a subagent, a teammate or a workflow agent, and each platform call they make is wrapped, so on a Claude Code or a surface that lacks one, that feature is absent and routing goes on.
+
+### The status line
+
+One line under the prompt, after the plugin's name:
+
+| Part | Shows |
+| :- | :- |
+| `auto` or `off` | `routing_mode`, or this session's switch, marked `(this session)` while it overrides the saved option. With routing off the line is that word alone |
+| `mod` or `fallback` | The path that routed this session's latest call |
+| `cap opus` | `max_tier`, when set |
+| `14 routed` | This session's calls the router changed, counted from the ledger |
+| `2 redos` | This session's calls marked "Redo:" |
+
+It refreshes when the session starts, after each spawn, after each main-loop turn and after a switch, from one runtime answer (`report.status`), after the hook that asks for it has returned. A spawn during a refresh waits for one more.
+
+### Switch routing for this session
+
+`/model-router off` leaves every call as it is from the next spawn, on the mod and the fallback alike, and the ledger records "routing is off" as it does for `routing_mode`. `/model-router on` turns routing back on, over a saved `off` too. The reply says whether it lasts: "Routing is off for this session. To keep it off, set Routing mode in /config." The switch ends with the session, at `/clear` included, and `/model-router` never writes `routing_mode`. The table already in the session note and the Agent tool's description stays in Claude's context after a switch.
+
+### The session check
+
+The session that plans and delegates works best on a strong setup. The recommended ones are in `config/models.json` under `session`, as each model's lowest effort: Opus at `medium`, Fable at `medium` and Sonnet at `xhigh`, each up to `max`. A model left out, such as Haiku, is never recommended.
+
+When a new interactive session starts below these, with `routing_mode` on and `session_check` at `ask`, Model Router asks once, after the session has started:
+
+1. "Model Router works best with a strong session to plan and delegate. This session is on Sonnet at medium. Which model should it run on?" The options are each recommended model usable here, in the order Opus, Fable, Sonnet, then `Stay on Sonnet at medium`. The first carries `(Recommended)`, the strongest one left carries `(the strongest model)`, and Sonnet says `(at xhigh effort or higher)`. A model `availableModels` or `deniedModels` blocks is left out, and so is one `maxEffortLevel` holds below its lowest recommended effort. `max_tier` caps subagents, not the session, so it leaves none out.
+2. After a model: "Which effort for Opus? Claude Code keeps this model and effort as your default for new sessions." The efforts run from the lowest recommended one, marked `(Recommended)` and `Claude Code's default` where it is, up to `max (this session only)`, held to `maxEffortLevel`. Under `CLAUDE_CODE_EFFORT_LEVEL`, which `/effort` can't override, a model whose level it already reaches is offered at that level with no second step.
+3. After Stay: "Ask about this again?", with `Ask again next session` first and `Don't ask again (/model-router check on brings this back)`, which sets `session_check` to `off`. With the option owned by managed settings, there is no second step.
+
+Picking a setup runs Claude Code's own `/model` when the model differs, then `/effort` when the effort differs, and one line says where the session is now, as "This session is now on Opus at medium." If Claude Code refuses the model, say for an allowlist, the line says the session stayed and no effort is set, since Claude Code saves effort per model. A dismissal, text typed under the dialog's own rows, or Stay changes nothing.
+
+It asks at most once per session, a plugin reload included, and never once the conversation has a prompt in it: a first prompt given at launch, or typed before the question shows, keeps it away. Before the first request the session's effort is an estimate: `CLAUDE_CODE_EFFORT_LEVEL`, then the settings files in Claude Code's order (a model's saved level, a top-level `effortLevel`), then the model's default, `medium`, held to `maxEffortLevel`. It can't see a `--effort` flag or an organization's default effort. From the first request on, the main loop's own effort is read, and `/model-router` shows it, as `session: opus at medium` or `session: sonnet at medium (below the recommended setups)`. A wrong estimate never brings the question back mid-work.
 
 ## Who decides the model
 
@@ -123,12 +161,13 @@ Where a provider's alias runs an older model, as on Bedrock, Vertex AI and Found
 
 ## What it stores
 
-Its state is in `~/.claude/plugins/data/model-router-claude-code-model-router/`, readable only by you on macOS and Linux, and holds no prompt, brief or description. `ledger.jsonl` has a row per spawn, result, model error, check and subagent turn (agent, level, model, effort, reason, tokens, cost estimate) for 30 days, at most 4 MiB. `state.json` holds model health until `reset`. The rest track routes, redos, edits and locks for a day or the newest 200 sessions. Delete the folder to remove it all. On a Python that writes no bytecode under the launcher, as the macOS system Python does, compiled code is cached in `~/.cache/model-router/pycache`, which you can delete at any time and which uninstalling leaves behind.
+Its state is in `~/.claude/plugins/data/model-router-claude-code-model-router/`, readable only by you on macOS and Linux, and holds no prompt, brief or description. `ledger.jsonl` has a row per spawn, result, model error, check and subagent turn (agent, level, model, effort, reason, tokens, cost estimate) for 30 days, at most 4 MiB. `state.json` holds model health until `reset`. The rest track routes, redos, edits, locks and each session's switch and session check for a day or the newest 200 sessions. Delete the folder to remove it all. On a Python that writes no bytecode under the launcher, as the macOS system Python does, compiled code is cached in `~/.cache/model-router/pycache`, which you can delete at any time and which uninstalling leaves behind.
 
 ## What it can't do
 
-- It never changes the main conversation's model or effort, since a switch re-reads the conversation uncached. Use `ultrathink` or `/effort`.
+- It never changes the main conversation's model or effort by itself, since a switch re-reads the conversation uncached. The [session check](#the-session-check) offers one before the first prompt, and only a setup you pick runs `/model` and `/effort`. Otherwise use `ultrathink` or `/effort`.
 - It leaves forks, resumed agents and agents whose definition it can't find alone, unless the call or your rule names a model.
 - It doesn't retry a failed call; set `fallbackModel`. After a model error it suggests a usable model (not under the force variable), and after two errors, or two runs on another model, it routes around that model for a day. With the mod, a run that another mod moved to another model doesn't count.
 - Where Fable bills to usage credits, a background session or teammate with nobody to answer the consent prompt ends its turn, and `claude -p` bills without asking; `max_tier` at `opus` avoids both.
-- Without the mod, as where an organization blocks user mods, it has no dollar figures, workflow routing, settings lists, newest IDs or model table in the Agent and Workflow tools' descriptions. With hooks off it does nothing.
+- Without the mod, as where an organization blocks user mods, it has no dollar figures, workflow routing, settings lists, newest IDs or model table in the Agent and Workflow tools' descriptions, and no status line, `/model-router` or session check: the state is in `/config` and `/model-router:usage`, and nothing asks about the session. With hooks off it does nothing.
+- The session check can't see an organization's model restrictions or effort limits, which come with the sign-in. Claude Code still refuses a blocked `/model`, and the check says the session stayed.

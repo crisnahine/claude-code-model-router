@@ -23,7 +23,7 @@ p95 ran 84 to 107 ms on 3.9.6 and 49 to 60 ms on 3.13. Starting `sh` and `python
 
 The routing decision itself (`config.load`, `spawn.facts`, `router.decide`) takes 1.1 ms in process, and the mod's `agent.spawn` handler 0.05 ms in Node. So nearly all of each figure is starting Python and loading the plugin. Not timed: the mod's settings reads, which wait at most 2 s (`SETTINGS_MS` in `hooks/router.ts`).
 
-No hook runs async, and the mod waits for each answer. Summed at p50:
+No hook runs async, and the mod waits for each answer it routes by. In a session with a person at the prompt, the mod also runs `mod-status` (the status line) after each spawn, each main-loop turn and each switch, `mod-check` once at the start, and `mod-end` at the end. Each starts Python like the commands above, and they weren't timed. `mod-status` and `mod-check` run after the hook that asks for them has returned, so no spawn or turn waits on them, and a spawn during a refresh adds one more refresh, not one each. Summed at p50:
 
 | What | Commands | 3.9.6 | 3.13 |
 | :- | :- | -: | -: |
