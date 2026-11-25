@@ -26,6 +26,12 @@
   "aliases": {
     "best": "opus"
   },
+  "session": {
+    "$comment": "The main session's recommended setups: each family's lowest effort for the session that plans and delegates. A family left out is never recommended. The session check offers them in this order. Read from this file only.",
+    "opus": "medium",
+    "fable": "medium",
+    "sonnet": "xhigh"
+  },
   "newest": {
     "$comment": "The newest full model ID of each family that some provider's alias lags behind. Every provider in older_aliases takes this Claude API form: Bedrock and Agent Platform map it to their own ID, Foundry sends it as the deployment name, and Claude Platform on AWS and Claude Models on Google Cloud use it as is (https://platform.claude.com/docs/en/about-claude/models/overview.md).",
     "opus": "claude-opus-5-5",

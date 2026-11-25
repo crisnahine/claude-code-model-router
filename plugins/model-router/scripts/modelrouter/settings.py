@@ -18,8 +18,8 @@ from .registry import Registry
 CLOUDS = ("bedrock", "vertex", "foundry")
 PROVIDERS = (*CLOUDS, "anthropic_aws", "anthropic_google_cloud", "mantle")
 # The userConfig keys in plugin.json.
-OPTIONS = ("routing_mode", "max_tier", "verify_gate")
-# Per session: the /model-router switch. Dropped at session end, or a day unwritten.
+OPTIONS = ("routing_mode", "max_tier", "verify_gate", "session_check")
+# Per session: the /model-router switch, and what the session check found. Dropped at session end, or a day unwritten.
 SWITCHES = "switches"
 SWITCH_KEPT = 86400
 UNKNOWN = "unknown"  # a provider whose aliases aren't documented: only aliases are sent, and none counts as moving
@@ -29,6 +29,7 @@ UNKNOWN = "unknown"  # a provider whose aliases aren't documented: only aliases 
 class Settings:
     mode: str = "auto"  # routing_mode, or this session's /model-router switch
     switched: bool = False  # the session's switch, not the saved option, sets `mode`
+    session_check: str = "ask"  # session_check: "ask" or "off"
     cap: str | None = None  # max_tier, when it names a registry model
     verify_gate: bool = True
     subagent_model: str | None = None  # CLAUDE_CODE_SUBAGENT_MODEL
@@ -75,7 +76,7 @@ def switch(session_id: str | None, mode: str) -> None:
 
 
 def forget(session_id: str | None) -> None:
-    """The session ended: its switch goes with it."""
+    """The session ended: its switch and its check go with it."""
     store.drop_entry(SWITCHES, session_id)
 
 
@@ -95,6 +96,7 @@ def resolve(reg: Registry | None = None, session_id: str | None = None) -> Setti
     return Settings(
         mode=mode or saved,
         switched=bool(mode) and mode != saved,
+        session_check="off" if option("session_check") == "off" else "ask",
         cap=cap if reg and cap in reg.models else None,
         verify_gate=_on(option("verify_gate")),
         subagent_model=env("CLAUDE_CODE_SUBAGENT_MODEL"),

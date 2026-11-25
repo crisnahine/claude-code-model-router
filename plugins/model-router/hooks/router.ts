@@ -7,21 +7,25 @@ import type { EngineInterface, ModelEffort, PluginOptions, Register, SettingsSou
 const KEPT = 500
 const SETTINGS_MS = 2000
 const SOURCES: readonly SettingsSource[] = ['policy', 'user', 'project', 'local', 'flag']
-const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides', 'maxEffortLevel', 'modelSettings']
+const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides', 'maxEffortLevel', 'modelSettings', 'effortLevel']
 const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
 // The max_tier ladder, weakest first, for a call the runtime didn't answer.
 const TIERS: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable']
 // The id names a file the fallback looks up, so only a plain one is marked (scripts/modelrouter/mod.py routes).
 const PLAIN_ID = /^[A-Za-z0-9_-]{1,128}$/
-// The mod's slash command.
+// The mod's slash command, and the session check's /config row, keyed as Claude Code keys a plugin's userConfig field.
 const COMMAND = 'model-router'
+const CHECK = 'model-router.session_check'
 
 // What the runtime answers. A spawn's: `note` is for Claude after the Agent call's result; `rules` is the session note,
-// for the Agent tool's description. mod-status: `line`, `text`, `reply`, `routing`.
+// for the Agent tool's description. mod-status: `line`, `text`, `reply`, `routing`. mod-check: a Step's fields.
 type Answer = {
   model?: string; effort?: ModelEffort; note?: unknown; rules?: unknown; workflow_rules?: unknown
-  line?: unknown; text?: unknown; reply?: unknown; routing?: unknown
+  line?: unknown; text?: unknown; reply?: unknown; routing?: unknown; question?: unknown; header?: unknown; options?: unknown
 } | null
+// One question of the session check; each choice may lead to the next (`then`) and says what picking it does.
+type Step = { question: string; header?: string; options: Choice[] }
+type Choice = { label: string; family?: string; model?: string; effort?: string; check?: string; done?: string; then?: Step }
 // The effort a routed agent steps at. A workflow script can set a stage's effort, which agent.spawn doesn't carry,
 // so a workflow agent's is only ever raised.
 type Want = { effort: ModelEffort; raiseOnly: boolean }
@@ -86,12 +90,14 @@ function raises(want: string, current: string): boolean {
   return from >= 0 && EFFORTS.indexOf(want) > from
 }
 
-// modelSettings can hold more per model than the effort cap, and the runtime reads only the cap.
-function effortCaps(raw: unknown): unknown {
+// modelSettings can hold more per model than its effort fields, and the runtime reads only those.
+function effortFields(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object') return raw
-  return Object.fromEntries(Object.entries(raw as Record<string, unknown>).flatMap(([id, entry]) =>
-    entry && typeof entry === 'object' && 'maxEffortLevel' in entry
-      ? [[id, { maxEffortLevel: (entry as Record<string, unknown>).maxEffortLevel }]] : []))
+  return Object.fromEntries(Object.entries(raw as Record<string, unknown>).flatMap(([id, entry]) => {
+    const kept = entry && typeof entry === 'object'
+      ? Object.fromEntries(Object.entries(entry).filter(([key]) => key === 'maxEffortLevel' || key === 'effortLevel')) : {}
+    return Object.keys(kept).length ? [[id, kept]] : []
+  }))
 }
 
 type Layers = Record<string, Record<string, unknown>>
@@ -112,7 +118,7 @@ async function modelSettings($: EngineInterface, reads: Reads): Promise<Layers |
         try {
           const found = (await $.settings.read({ source })) as Record<string, unknown>
           reads.latest[source] = Object.fromEntries(KEYS.filter(key => key in found)
-            .map(key => [key, key === 'modelSettings' ? effortCaps(found[key]) : found[key]]))
+            .map(key => [key, key === 'modelSettings' ? effortFields(found[key]) : found[key]]))
         } catch {
           delete reads.latest[source]
         } finally {
@@ -201,6 +207,12 @@ function status($: EngineInterface, line: unknown): void {
   } catch {}
 }
 
+function toast($: EngineInterface, text: string): void {
+  try {
+    $.ui.toast(text)
+  } catch {}
+}
+
 // Runs `task` once the calling hook has returned, so nothing waits on it. Whether it was scheduled. Never throws.
 function later($: EngineInterface, task: () => Promise<unknown>): boolean {
   try {
@@ -211,12 +223,78 @@ function later($: EngineInterface, task: () => Promise<unknown>): boolean {
   }
 }
 
+// Whether managed settings own the session check's option; a list that fails counts as owned, so nothing offers to write it.
+async function locked($: EngineInterface): Promise<boolean> {
+  try {
+    return (await $.config.list()).find(row => row.key === CHECK)?.isLocked !== false
+  } catch {
+    return true
+  }
+}
+
+// Writes session_check, and says what happened.
+async function setCheck($: EngineInterface, value: 'ask' | 'off'): Promise<string> {
+  try {
+    const row = (await $.config.list()).find(found => found.key === CHECK)
+    if (row?.isLocked) return `Session check is set by managed settings, so it stays ${String(row.value)}.`
+  } catch {}
+  try {
+    const done = await $.config.set({ key: CHECK, value })
+    if (done.deny !== undefined) return `Session check stays as it is: ${done.deny}`
+  } catch {
+    return 'Session check stays as it is: Claude Code did not take the change.'
+  }
+  return value === 'off' ? 'Session check is off. /model-router check on, or Session check in /config, turns it back on.'
+    : 'Session check is on: Model Router asks once when a new session starts below the recommended setups.'
+}
+
+// Asks `step` and each question its pick leads to: the choices picked, or undefined for a dismissal or an answer
+// that is no label, such as text typed under the dialog's own rows, so a half-answered question switches nothing.
+async function walk($: EngineInterface, step: Step): Promise<Choice[] | undefined> {
+  let picked: string
+  try {
+    picked = await $.ui.ask(step.question, { options: step.options.map(choice => choice.label), header: step.header })
+  } catch {
+    return undefined
+  }
+  const choice = step.options.find(found => found.label === picked)
+  if (!choice?.then) return choice && [choice]
+  const rest = await walk($, choice.then)
+  return rest && [choice, ...rest]
+}
+
+// Runs the picked setup through Claude Code's own commands, and says what the session is on now.
+async function apply($: EngineInterface, picks: Choice[]): Promise<void> {
+  if (picks.some(choice => choice.check === 'off')) return toast($, await setCheck($, 'off'))
+  const family = picks.find(choice => choice.family)?.family
+  const model = picks.find(choice => choice.model)?.model
+  const effort = picks.find(choice => choice.effort)?.effort
+  const done = picks.filter(choice => choice.done).at(-1)?.done
+  if (!family || (!model && !effort)) return
+  for (const [command, args] of [['model', model], ['effort', effort]] as const) {
+    if (!args) continue
+    try {
+      await $.command.run({ command, args })
+    } catch {
+      return toast($, `Claude Code did not run /${command} ${args}, so the session is left as it is.`)
+    }
+    const now = await $.session.model()
+    // A switch the allowlist or a declined consent refused: an effort set now would be saved for the old model.
+    if (TIERS.find(tier => now.toLowerCase().includes(tier)) !== family) {
+      return toast($, `This session stays on ${now}: Claude Code did not switch it.`)
+    }
+    if ((command === 'effort' || !effort) && done) toast($, done)
+  }
+}
+
 // What one load of the module knows of the person at the prompt and of this session.
 type Live = {
   interactive: boolean // only then does the mod draw, ask, or register its command
   routingOn?: boolean // this session's routing as the runtime last answered it, a /model-router switch included
+  setup?: { model: string; effort: string | null } // the main loop's model and effort, as its latest request carried them
   refreshing: boolean // one status refresh at a time: one asked for during it runs once more after it
   stale: boolean
+  turned: boolean // the main loop's first turn started: a question now would land in the middle of work
 }
 
 function shown($: EngineInterface, live: Live, answer: Answer | undefined): void {
@@ -234,12 +312,22 @@ function refresh($: EngineInterface, opts: Record<string, string>, live: Live): 
     try {
       do {
         live.stale = false
-        shown($, live, await ask($, opts, 'mod-status', {}))
+        shown($, live, await ask($, opts, 'mod-status', live.setup ? { setup: live.setup } : {}))
       } while (live.stale)
     } finally {
       live.refreshing = false
     }
   })
+}
+
+// At most once per session id, which the runtime keeps across the reload a /config change causes.
+async function checkSession($: EngineInterface, opts: Record<string, string>, live: Live): Promise<void> {
+  // A conversation that already has prompts was resumed or forked, not started.
+  if (await $.session.turns() !== 0) return
+  const step = await ask($, opts, 'mod-check', { model: await $.session.model(), locked: await locked($) })
+  if (typeof step?.question !== 'string' || !Array.isArray(step.options) || live.turned) return
+  const picks = await walk($, step as Step)
+  if (picks) await apply($, picks)
 }
 
 function remember<V>(map: Map<string, V>, key: string, value: V): void {
@@ -278,7 +366,7 @@ export const register: Register = (on, options) => {
   // The runtime's table for each tool whose description carries it.
   const rules: Record<string, string> = {}
   let sentFor: string | undefined
-  const live: Live = { interactive: false, refreshing: false, stale: false }
+  const live: Live = { interactive: false, refreshing: false, stale: false, turned: false }
   const started = (reply: Answer | undefined): void => {
     const answer = heard(reply)
     if (typeof answer?.rules === 'string') rules.Agent = answer.rules
@@ -312,9 +400,10 @@ export const register: Register = (on, options) => {
     if (live.interactive) {
       try {
         await $.command.register({ name: COMMAND, description: "Shows Model Router's state, or switches routing for this session",
-          argumentHint: '[on | off]', immediate: true })
+          argumentHint: '[on | off | check on | check off]', immediate: true })
       } catch {}
       refresh($, opts, live)
+      later($, () => checkSession($, opts, live))
     }
     return done
   }).catch(($, e, next) => next(e))
@@ -324,6 +413,7 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (live.interactive) {
       live.routingOn = undefined
+      live.setup = undefined
       await ask($, opts, 'mod-end', { session_id: e.sessionId })
     }
     return done
@@ -332,13 +422,15 @@ export const register: Register = (on, options) => {
   // Answered here, with no model turn; the text is for the person, and Claude Code puts the plugin's name before it.
   on('command.run', { command: COMMAND }, async ($, e, next) => {
     const words = e.args.trim().toLowerCase().split(/\s+/).join(' ')
-    let text = 'Takes on or off.'
+    let text = 'Takes on, off, check on or check off.'
     if (words === 'on' || words === 'off') {
-      const answer = await ask($, opts, 'mod-status', { routing: words })
+      const answer = await ask($, opts, 'mod-status', { routing: words, ...(live.setup ? { setup: live.setup } : {}) })
       shown($, live, answer)
       text = typeof answer?.reply === 'string' ? answer.reply : 'Routing is unchanged: the runtime did not answer.'
+    } else if (words === 'check on' || words === 'check off') {
+      text = await setCheck($, words === 'check on' ? 'ask' : 'off')
     } else if (!words) {
-      const answer = await ask($, opts, 'mod-status', {})
+      const answer = await ask($, opts, 'mod-status', live.setup ? { setup: live.setup } : {})
       shown($, live, answer)
       text = typeof answer?.text === 'string' ? answer.text : 'The runtime did not answer, so the state is unknown.'
     }
@@ -401,6 +493,7 @@ export const register: Register = (on, options) => {
 
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
+      live.turned = true
       // session.start doesn't fire after /clear, so the new session's first turn sends the layers.
       const id = await sessionId($)
       if (id !== undefined && id !== sentFor) {
@@ -433,7 +526,12 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId === undefined) {
-      refresh($, opts, live)
+      if (live.interactive) {
+        try {
+          live.setup = { model: await $.session.model(), effort: sessionEffort ?? null }
+        } catch {}
+        refresh($, opts, live)
+      }
       return done
     }
     const type = agentType.get(e.agentId)

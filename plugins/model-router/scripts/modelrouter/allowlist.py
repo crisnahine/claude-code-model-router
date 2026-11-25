@@ -1,5 +1,5 @@
-"""Which registry models availableModels and deniedModels leave open, and the effort cap
-maxEffortLevel sets for each.
+"""Which registry models availableModels and deniedModels leave open, the effort cap
+maxEffortLevel sets for each, and the effort a settings file saves for one.
 
 The mod reads each settings source from the engine and sends the keys that matter. Without
 those layers no list applies here: Claude Code enforces the lists on every subagent model and
@@ -15,7 +15,10 @@ from .config import EFFORTS, project_dir
 from .registry import Registry
 
 SOURCES = ("policy", "user", "project", "local", "flag")
-KEYS = ("availableModels", "deniedModels", "availableModelsMatch", "modelOverrides", "maxEffortLevel", "modelSettings")
+KEYS = ("availableModels", "deniedModels", "availableModelsMatch", "modelOverrides", "maxEffortLevel", "modelSettings",
+        "effortLevel")
+# Settings precedence, highest first (https://code.claude.com/docs/en/settings.md#settings-precedence).
+PRECEDENCE = ("policy", "flag", "local", "project", "user")
 # Where a blocked family alias moves to the newest permitted version (https://code.claude.com/docs/en/model-config.md).
 # None is the Anthropic API.
 SUBSTITUTING = (None, "anthropic_aws")
@@ -36,14 +39,15 @@ def _denied(raw: list) -> list[str] | None:
 
 
 def _caps(raw: object) -> dict[str, dict]:
-    """modelSettings cut to each model's maxEffortLevel."""
-    found = ((k, v.get("maxEffortLevel")) for k, v in raw.items() if isinstance(v, dict)) if isinstance(raw, dict) else ()
-    return dict([(k, {"maxEffortLevel": v}) for k, v in found if v in EFFORTS and 0 < len(k) <= MAX_CHARS][:MAX_ENTRIES])
+    """modelSettings cut to each model's maxEffortLevel and effortLevel."""
+    found = ((k, {f: v[f] for f in ("maxEffortLevel", "effortLevel") if v.get(f) in EFFORTS})
+             for k, v in raw.items() if isinstance(v, dict)) if isinstance(raw, dict) else ()
+    return dict([(k, v) for k, v in found if v and 0 < len(k) <= MAX_CHARS][:MAX_ENTRIES])
 
 
 def _layer(raw: object, policy: bool = False) -> dict:
     """One source cut to KEYS, each with the right shape; a bad key counts as unset.
-    modelOverrides keeps only whether it holds anything, and modelSettings only its effort caps. A deny list over the cap, or in the
+    modelOverrides keeps only whether it holds anything, and modelSettings only its effort fields. A deny list over the cap, or in the
     policy a list key that isn't a list, marks the layer "unreadable", which from_layers turns
     into no model open: dropping it would drop a deny."""
     if not isinstance(raw, dict):
@@ -65,8 +69,9 @@ def _layer(raw: object, policy: bool = False) -> dict:
         layer["availableModelsMatch"] = raw["availableModelsMatch"]
     if isinstance(raw.get("modelOverrides"), (dict, bool)):
         layer["modelOverrides"] = bool(raw["modelOverrides"])
-    if raw.get("maxEffortLevel") in EFFORTS:
-        layer["maxEffortLevel"] = raw["maxEffortLevel"]
+    for key in ("maxEffortLevel", "effortLevel"):
+        if raw.get(key) in EFFORTS:
+            layer[key] = raw[key]
     if _caps(raw.get("modelSettings")):
         layer["modelSettings"] = _caps(raw["modelSettings"])
     return layer
@@ -113,6 +118,7 @@ class Allowlist:
     overrides: bool  # some source sets modelOverrides
     effort_caps: tuple[dict, ...] = ()  # each source's maxEffortLevel and modelSettings caps
     provider: str | None = None  # settings.provider: whether a blocked alias moves to a permitted version
+    efforts: tuple[tuple[str, dict], ...] = ()  # each source and its layer, in PRECEDENCE order
 
     def permitted(self, reg: Registry, sendable: frozenset = frozenset()) -> set[str]:
         """Registry models the lists leave open. An allow entry matches its family, so
@@ -161,11 +167,24 @@ class Allowlist:
             # shortcut: modelSettings is keyed by model ID, and several IDs of one family read as the
             # highest of their caps; Claude Code still applies the exact one to each request.
             own = [v["maxEffortLevel"] for k, v in (layer.get("modelSettings") or {}).items()
-                   if name and reg.family(k) == name]
+                   if name and "maxEffortLevel" in v and reg.family(k) == name]
             cap = max(own, key=EFFORTS.index) if own else layer.get("maxEffortLevel")
             if cap in EFFORTS and cap != "max":
                 found.append(cap)
         return min(found, key=EFFORTS.index) if found else None
+
+    def saved_effort(self, reg: Registry, name: str | None) -> str | None:
+        """The effort the settings files set for `name`'s family: the first source in precedence order with a level
+        for that model, or a top-level one that applies to it (https://code.claude.com/docs/en/settings-reference.md#modelsettings)."""
+        for source, layer in self.efforts:
+            own = [v["effortLevel"] for k, v in (layer.get("modelSettings") or {}).items()
+                   if name and "effortLevel" in v and reg.family(k) == name]
+            # shortcut: a user file's top-level effortLevel is skipped, as Opus 5.5 and later models skip it; older models
+            # still take it, so read it for them if the registry ever routes to one.
+            top = layer.get("effortLevel") if source != "user" else None
+            if own or top:
+                return max(own, key=EFFORTS.index) if own else top
+        return None
 
 
 def from_layers(layers: dict, provider: str | None = None) -> Allowlist:
@@ -187,7 +206,7 @@ def from_layers(layers: dict, provider: str | None = None) -> Allowlist:
                      overrides=any(layer.get("modelOverrides") for layer in layers.values()),
                      effort_caps=tuple(layer for layer in layers.values()
                                        if "maxEffortLevel" in layer or "modelSettings" in layer),
-                     provider=provider)
+                     provider=provider, efforts=tuple((s, layers[s]) for s in PRECEDENCE))
 
 
 def remember(session_id: str | None, sent: object) -> dict[str, dict] | None:
