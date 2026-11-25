@@ -23,7 +23,7 @@ def source(value):
 
 try:
     d = json.loads((Path(sys.argv[1]) / "RESEARCH.json").read_text(encoding="utf-8"))
-except (OSError, ValueError):
+except (OSError, ValueError, RecursionError):
     d = None
 ok = False
 if (isinstance(d, dict) and set(d) == {"stream_since", "timeout_since", "safe_since", "sources"}

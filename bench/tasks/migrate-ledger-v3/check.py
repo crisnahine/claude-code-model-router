@@ -159,7 +159,7 @@ def wrong(got, want):
         for n, line in enumerate(text.splitlines(), 1):
             try:
                 records.append(json.loads(line))
-            except ValueError:
+            except (ValueError, RecursionError):
                 return f"line {n} of the v3 file isn't JSON: {line[:80]!r}"
         if not all(isinstance(r, dict) and "id" in r for r in records):
             return "a line of the v3 file isn't a record with an id"

@@ -23,7 +23,7 @@ for rel in shipped:
 
 try:
     data = json.loads((work / "ANSWERS.json").read_text(encoding="utf-8-sig"))
-except (OSError, ValueError):
+except (OSError, ValueError, RecursionError):
     passcheck.finish(False, "ANSWERS.json is missing or isn't JSON")
 if not isinstance(data, dict) or set(data) != {"page_size", "refund_email", "webhook_attempts"}:
     passcheck.finish(False, "ANSWERS.json must be an object with exactly page_size, refund_email and webhook_attempts")

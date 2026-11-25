@@ -1245,6 +1245,20 @@ class KnownAnswers(unittest.TestCase):
                         elif kind == "wrong":  # a check that gives reasons pins each wrong answer's
                             self.assertEqual(graded.reason, "the check exited 1", "add an expect.txt")
 
+    def test_a_json_answer_nested_too_deep_to_parse_fails_and_never_breaks_the_check(self):
+        nested = "[" * 100_000 + "]" * 100_000
+        for task in gradable_tasks():
+            answers = sorted((task["dir"] / "solution").glob("*.json")) if (task["dir"] / "solution").is_dir() else []
+            for name in [a.name for a in answers]:
+                with self.subTest(task=task["id"], file=name), tempfile.TemporaryDirectory() as tmp:
+                    work = Path(tmp) / "work"
+                    build_work(task, None, work)
+                    (work / name).write_text(nested, encoding="utf-8")
+                    answer = Path(tmp) / "answer.txt"
+                    answer.write_text(task.get("reference_answer", ""), encoding="utf-8")
+                    graded = run.grade(task["dir"] / "check.py", work, answer, timeout=60)
+                    self.assertEqual(graded.verdict, "fail", graded.reason)
+
     def test_an_answer_folder_changes_something(self):
         for task in run.load_tasks():
             for kind in ("wrong", "right"):
@@ -2211,6 +2225,7 @@ class ProbeHelper(unittest.TestCase):
         ('import os\nos._exit(0)', None),
         ('import time\ntime.sleep(30)', None),
         ('import sys, json\nprint(json.dumps(sys.flags.isolated))', 1),
+        ('print("[" * 100000 + "]" * 100000)', None),  # too deep for json.loads
     )
 
     def test_probe_returns_the_last_json_line_and_none_on_anything_else(self):
