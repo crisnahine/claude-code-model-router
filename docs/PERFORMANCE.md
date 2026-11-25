@@ -56,7 +56,7 @@ Characters of plugin text Claude gets. Tokens weren't measured.
 | The same note, after two newlines, in the Agent tool's description (mod only) | all session | 673 with no option set, at most 689 | 720, the note's |
 | The table for a script's stages, after two newlines, in the Workflow tool's description (mod only) | all session | 509 with no option set | 540 |
 | A redo with no step left (`spawn.redo_note`) | after that call's result | 107 to 118 | none |
-| The five agents' descriptions | all session | 687 | 930 |
+| The five agents' descriptions | all session | 765 | 930 |
 | The `route` skill's description | all session | 199 | 200 |
 | A note that the prompt names a model | on such a prompt | about 135 | none |
 | The Stop ask (`gates.unverified_edit`) | once per batch of unchecked edits | 511 | none |

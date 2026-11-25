@@ -242,6 +242,14 @@ class Shipped(unittest.TestCase):
                             ("reviewer", "A small, tested change doesn't need one.")):
             self.assertIn(limit, frontmatter(PLUGIN / "agents" / f"{name}.md")["description"], name)
 
+    def test_the_reviewer_is_briefed_with_the_diff_file_it_needs(self):
+        # It has Read, Grep and Glob only, so it can't run git, and its body stops when no diff file was given.
+        reviewer = PLUGIN / "agents" / "reviewer.md"
+        self.assertIn("diff file named in your brief", reviewer.read_text(encoding="utf-8"))
+        self.assertNotIn("Bash", frontmatter(reviewer)["tools"])
+        for text in (frontmatter(reviewer)["description"], (PLUGIN / "skills" / "route" / "SKILL.md").read_text(encoding="utf-8")):
+            self.assertIn("a diff file the brief names, such as one `git diff > review.diff` wrote", text)
+
     # Each role agent carries its level in its definition, which holds with the router off; the implementer names
     # none, so the caller names one per step.
     LEVELS = {"scout": Level.lookup, "verifier": Level.lookup, "implementer": Level.standard,
