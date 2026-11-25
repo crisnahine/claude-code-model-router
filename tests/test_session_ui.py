@@ -297,6 +297,19 @@ class SessionCheck(Sandbox):
         answer = self.check(OPUS, "s2", **low, policy={"availableModels": ["opus", "fable", "sonnet", "claude-sonnet-4-5"]})
         self.assertEqual(self.labels(answer), ["Opus (Recommended)", "Fable (the strongest model)", "Stay on Opus at low"])
 
+    def test_a_session_on_an_older_model_of_its_family_is_below_the_setups_and_is_offered_the_newest(self):
+        self.options(CLAUDE_CODE_USE_BEDROCK="1")  # where the sonnet alias runs Sonnet 4.5
+        for session_id, model in (("alias", "sonnet"), ("id", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")):
+            answer = session.check(snapshot(session_id), model, launched="xhigh")
+            self.assertEqual(self.choice(answer, "Sonnet").get("model"), SONNET, model)
+        self.assertEqual(session.check(snapshot("newest"), SONNET, launched="xhigh"), {})
+        session.observe(snapshot("seen"), "sonnet", "xhigh")
+        self.assertFalse(store.load_entry(settings.SWITCHES, "seen")["setup"]["recommended"])
+        self.options(CLAUDE_CODE_USE_BEDROCK="0")  # the Anthropic API's alias runs the newest
+        answer = session.check(snapshot("api"), "claude-sonnet-4-5", launched="xhigh")
+        self.assertEqual(self.choice(answer, "Sonnet").get("model"), "sonnet")
+        self.assertEqual(session.check(snapshot("api-alias"), "sonnet", launched="xhigh"), {})
+
     def test_routing_off_the_option_off_or_an_unknown_model_asks_nothing(self):
         self.assertEqual(self.check("gpt-5", "a"), {})
         settings.switch("b", "off")

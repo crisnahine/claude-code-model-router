@@ -73,7 +73,7 @@ It refreshes when the session starts, after each spawn, after each main-loop tur
 
 ### The session check
 
-The session that plans and delegates works best on a strong setup. The recommended ones are in `config/models.json` under `session`, as each model's lowest effort: Opus at `medium`, Fable at `medium` and Sonnet at `xhigh`, each up to `max`. A model left out, such as Haiku, is never recommended.
+The session that plans and delegates works best on a strong setup. The recommended ones are in `config/models.json` under `session`, as each model's lowest effort: Opus at `medium`, Fable at `medium` and Sonnet at `xhigh`, each up to `max`. A model left out, such as Haiku, is never recommended, and neither is an older version of a family: an older full ID, or the alias where the provider runs an older model with it, as `sonnet` on Bedrock. Picking that family again switches to its newest model.
 
 When a new interactive session starts below these, with `routing_mode` on and `session_check` at `ask`, Model Router asks once, after the session has started:
 

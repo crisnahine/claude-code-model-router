@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
+import re
 from typing import Iterator
 
 from . import router, settings, store
@@ -18,6 +19,23 @@ NEVER = "Don't ask again (/model-router check on brings this back)"
 def recommended(reg: Registry, family: str | None, effort: str | None) -> bool:
     floor = reg.session.get(family or "")
     return bool(floor) and effort in EFFORTS and EFFORTS.index(effort) >= EFFORTS.index(floor)
+
+
+def _version(model_id: str, family: str) -> tuple[int, ...]:
+    found = re.search(rf"{re.escape(family)}-(\d{{1,2}})(?:-(\d{{1,2}}))?(?!\d)", model_id)
+    return tuple(int(n) for n in found.groups() if n) if found else ()
+
+
+def older(reg: Registry, provider: str | None, model: object) -> bool:
+    """Whether `model` runs an older version than its family's newest: the provider's alias where it lags, or an
+    older full ID. An ID with no version to read counts as current."""
+    family = reg.family(model, twins=False)
+    if family not in reg.newest or not isinstance(model, str):
+        return False
+    name = model.lower().split("[")[0]
+    if name == family:
+        return family in reg.older_aliases.get(provider or "", {})
+    return () < _version(name, family) < _version(reg.newest[family], family)
 
 
 def effort_on(snap: settings.Snapshot, family: str, launched: object = None) -> str | None:
@@ -51,7 +69,7 @@ def _remarks(*remarks: str | None) -> str:
     return f" ({', '.join(found)})" if found else ""
 
 
-def _model_choice(snap: settings.Snapshot, family: str, name: str, launched: object = None) -> dict | None:
+def _model_choice(snap: settings.Snapshot, family: str | None, name: str, launched: object = None) -> dict | None:
     """Step one's choice of `name` without its label, with step two's efforts, or None when it can't run here at a
     recommended effort."""
     reg, options = snap.registry, snap.options
@@ -90,14 +108,17 @@ def check(snap: settings.Snapshot, model: object, locked: bool = False, launched
         return {}
     family = reg.family(model)
     effort = effort_on(snap, family, launched) if family else None
-    fine = recommended(reg, family, effort)
+    stale = older(reg, options.provider, model)
+    fine = recommended(reg, family, effort) and not stale
 
     def mark(entry: dict) -> None:
         entry["checked"] = True
         if family:
             entry["estimate"] = {"model": family, "effort": effort, "recommended": fine}
     store.mutate_entry(settings.SWITCHES, session_id, mark, max_age=settings.SWITCH_KEPT)
-    choices = [c for c in (_model_choice(snap, family, n, launched) for n in reg.session) if c] if family and not fine else []
+    # A session on an older model of its family is offered the newest one, as another family would be.
+    current = None if stale else family
+    choices = [c for c in (_model_choice(snap, current, n, launched) for n in reg.session) if c] if family and not fine else []
     if not choices:
         return {}
     strongest = max(choices, key=lambda c: reg.strength(c["family"]))
@@ -120,7 +141,8 @@ def observe(snap: settings.Snapshot, model: object, effort: object) -> None:
     if not isinstance(snap.session_id, str) or not family:
         return
     level = effort if effort in EFFORTS else None
-    setup = {"model": family, "effort": level, "recommended": recommended(snap.registry, family, level)}
+    setup = {"model": family, "effort": level, "recommended": recommended(snap.registry, family, level)
+             and not older(snap.registry, snap.options.provider, model)}
     store.mutate_entry(settings.SWITCHES, snap.session_id, lambda entry: entry.update(setup=setup), max_age=settings.SWITCH_KEPT)
 
 
