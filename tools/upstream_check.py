@@ -27,7 +27,7 @@ HTTP_TIMEOUT = 30  # per request: each socket wait, and the body's download as a
 WATCHED_PAGES = ("plugins", "sub-agents", "hooks", "skills", "model-config", "workflows",
                  "plugin-evals", "mcp", "settings", "agent-teams", "costs", "permission-modes",
                  "env-vars", "prompt-caching", "fast-mode", "advisor", "headless", "best-practices")
-# The pages the registry's prices, strengths and efforts come from.
+# The pages bench/prices.json and the registry's strengths and efforts come from.
 PLATFORM_PAGES = ("https://platform.claude.com/docs/en/about-claude/pricing.md",
                   "https://platform.claude.com/docs/en/models/overview.md",
                   "https://platform.claude.com/docs/en/build-with-claude/effort.md",

@@ -26,12 +26,11 @@ sys.path.insert(0, str(run.PLUGIN / "scripts"))
 sys.path.insert(0, str(BENCH.parent / "tools"))
 from docs_pages import HEAD_END, HEAD_START  # noqa: E402
 from modelrouter import config as mrconfig  # noqa: E402
-from modelrouter.registry import Registry  # noqa: E402
 from overhead import percentile  # noqa: E402
 
 RESULTS = BENCH / "results"
 PILOT = RESULTS / "pilot"  # exploratory rounds: shown on the page, never judged
-MIN_RUNS = 10  # fewer runs per forced baseline than this and a class isn't read as saturated
+MIN_RUNS = 10  # fewer runs of either of the split pair than this and a class isn't read as saturated
 ALPHA = 0.05  # the 95% intervals, and the one-sided level of the exact comparisons
 MARGIN = 0.10  # the non-inferiority margin on pass rate, fixed before any run
 DENIAL_SHARE = 0.25  # a cell with more of its runs denied a Bash call than this gets no verdict
@@ -201,12 +200,13 @@ def _judge(base: str, pass_ci: tuple, cost_ci: tuple, fewer: bool, solved: tuple
     if p_hi < 0 or behind < ALPHA:
         return "LOSE", (f"pass rate behind beyond noise: solved {solved[0]} of {solved[1]} runs against {solved[2]} of "
                         f"{solved[3]} (exact one-sided p = {behind:.3f}); {seen}")
-    if c_hi < 0 and p_lo > -MARGIN:
+    # A bound with no value comes from draws where a side solved nothing, which says nothing about cost.
+    if math.isfinite(c_hi) and c_hi < 0 and p_lo > -MARGIN:
         if fewer:  # a saving counts only at an equal or higher pass rate
             return "NONE", f"cheaper per solved task beyond noise, but it solved a smaller share of the runs; {seen}"
         return "WIN", (f"cheaper per solved task beyond noise, at an equal or higher share of runs solved, pass rate "
                        f"within {MARGIN:.0%} of it; {seen}")
-    if c_lo > 0 and p_hi < MARGIN:
+    if math.isfinite(c_lo) and c_lo > 0 and p_hi < MARGIN:
         return "LOSE", f"dearer per solved task beyond noise, pass rate shown under {MARGIN:.0%} ahead; {seen}"
     return "NONE", seen
 
@@ -241,18 +241,14 @@ def splitting_tasks(runs: list[dict], strong: str = SPLIT_STRONG, weak: str = SP
     return out
 
 
-def _quality(cells: dict, runs: list[dict], forced: dict) -> dict:
-    """Whether a class's tasks tell models apart: when the weakest forced baseline can't be told from the strongest
-    by an exact one-sided test, the class is `saturated` and an equal pass rate there says nothing. With every forced
-    baseline on one model, `defaults`, on the session model, is the strong end."""
-    ladder = sorted((n for n in cells if n in forced), key=lambda n: (forced[n], n))
-    weak, strong = (ladder[0], ladder[-1]) if ladder else (None, None)
-    if ladder and forced[weak][0] == forced[strong][0] and SPLIT_STRONG in cells:
-        strong = SPLIT_STRONG
-    out = {"saturated": None, "weakest": weak, "strongest": strong, "splits": splitting_tasks(runs)}
-    if not ladder or strong != SPLIT_STRONG and forced[weak][0] == forced[strong][0]:
-        return {**out, "reason": f"no forced baseline, or forced baselines on one model and no `{SPLIT_STRONG}`, so "
-                                 "the class can't show whether the tasks tell models apart"}
+def _quality(cells: dict, runs: list[dict]) -> dict:
+    """Whether a class's tasks tell models apart: when `haiku-high` can't be told from `defaults` by an exact one-sided
+    test, the class is `saturated` and an equal pass rate there says nothing."""
+    weak, strong = SPLIT_WEAK, SPLIT_STRONG
+    out = {"saturated": None, "splits": splitting_tasks(runs)}
+    if weak not in cells or strong not in cells:
+        return {**out, "reason": f"`{weak}` or `{strong}` didn't run, so the class can't show whether the tasks tell "
+                                 "models apart"}
     w, s = cells[weak], cells[strong]
     if min(w["runs"], s["runs"]) < MIN_RUNS:
         return {**out, "reason": f"too few runs ({MIN_RUNS} needed) to say whether the tasks tell models apart"}
@@ -265,7 +261,7 @@ def _quality(cells: dict, runs: list[dict], forced: dict) -> dict:
 
 
 def _summary(cls: str, runs: list[dict], *, routers: frozenset[str], router: str, draws: int, seed: int,
-             session: str, forced: dict | None) -> dict:
+             session: str) -> dict:
     """One row of a table: each configuration's cell and the router's verdict against each baseline."""
     configs = sorted({r["config"] for r in runs}, key=lambda c: (c != router, c))
     by = {c: [r for r in runs if r["config"] == c] for c in configs}
@@ -302,24 +298,24 @@ def _summary(cls: str, runs: list[dict], *, routers: frozenset[str], router: str
         if router in cells and base and status != "REFUSED" else None
     return {"class": cls, "configs": cells, "verdicts": verdicts, "status": status, "rank": rank,
             "reason": "no router or baseline runs" if not verdicts else _verdict_text(verdicts),
-            "quality": _quality(cells, runs, forced or {})}
+            "quality": _quality(cells, runs)}
 
 
 def summarize(rows: list[dict], *, routers: frozenset[str], router: str = "plugin", draws: int = 2000,
-              seed: int = 0, session: str = "", forced: dict | None = None) -> list[dict]:
+              seed: int = 0, session: str = "") -> list[dict]:
     """One row per task class."""
     order = {name: i for i, name in enumerate(run.CLASSES)}
     return [_summary(cls, [r for r in rows if r["class"] == cls], routers=routers, router=router, draws=draws,
-                     seed=seed, session=session, forced=forced)
+                     seed=seed, session=session)
             for cls in sorted({r["class"] for r in rows}, key=lambda c: (order.get(c, len(order)), c))]
 
 
 def overall(rows: list[dict], *, routers: frozenset[str], router: str = "plugin", draws: int = 2000,
-            seed: int = 0, session: str = "", forced: dict | None = None) -> dict | None:
+            seed: int = 0, session: str = "") -> dict | None:
     """One row over every task in a table, the tasks of all its classes resampled together, so a plan with one task
     per class can still show the margin."""
-    return _summary(ALL, rows, routers=routers, router=router, draws=draws, seed=seed, session=session,
-                    forced=forced) if rows else None
+    return _summary(ALL, rows, routers=routers, router=router, draws=draws, seed=seed,
+                    session=session) if rows else None
 
 
 def _verdict_text(verdicts: dict) -> str:
@@ -363,7 +359,7 @@ def sessions(results: Results, router: str | None = None) -> list[tuple[str, str
     chosen = router or next((c["id"] for c in results.configs if c.get("judged")), "plugin")
     out = []
     for model, group in sorted(groups.items()):
-        kwargs = {"routers": results.routers, "router": chosen, "session": model, "forced": results.forced}
+        kwargs = {"routers": results.routers, "router": chosen, "session": model}
         out.append((model, chosen, summarize(group, **kwargs), overall(group, **kwargs), group))
     return out
 
@@ -484,9 +480,7 @@ class Results:
     aside: list[dict]
     configs: list[dict]
     tasks: list[dict]
-    registry: Registry
     routers: frozenset[str]
-    forced: dict
     pilot: list = field(default_factory=list)
     pilot_notes: dict = field(default_factory=dict)
 
@@ -495,26 +489,13 @@ def router_ids(configs: list[dict]) -> frozenset[str]:
     return frozenset(c["id"] for c in configs if c.get("plugin"))
 
 
-def forced_ranks(configs: list[dict], registry_config: Registry) -> dict[str, tuple[float, int]]:
-    """Each configuration that forces every subagent onto one model, ranked by that model's strength in the
-    registry, then by the effort it sets (none ranks below low)."""
-    out = {}
-    for c in configs:
-        env = c.get("env") or {}
-        if env.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE") and env.get("CLAUDE_CODE_SUBAGENT_MODEL"):
-            model = registry_config.family(env["CLAUDE_CODE_SUBAGENT_MODEL"])
-            effort = env.get("CLAUDE_CODE_SUBAGENT_EFFORT")
-            out[c["id"]] = (registry_config.strength(model),
-                            mrconfig.EFFORTS.index(effort) if effort in mrconfig.EFFORTS else -1)
-    return out
-
-
 def _split(every: list[dict], tasks: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
     """The rows that count, each settled, then the rows on an earlier revision of their task, which aren't comparable
-    with later runs of it, then the rows whose pass check broke, which were neither solved nor failed."""
+    with later runs of it, then the rows whose pass check broke or that the bench stopped before their check finished,
+    which were neither solved nor failed."""
     revisions = {t["id"]: t.get("revision", 1) for t in tasks}
     old = [r.get("task_revision", 1) < revisions.get(r["task"], 1) for r in every]
-    bad = [(r.get("grade") or {}).get("verdict") == "broken" for r in every]
+    bad = [(r.get("grade") or {}).get("verdict") in ("broken", "stopped") for r in every]
     return ([_settle(r) for r, gone, b in zip(every, old, bad) if not (gone or b)],
             [r for r, gone in zip(every, old) if gone], [r for r, gone, b in zip(every, old, bad) if b and not gone])
 
@@ -535,9 +516,7 @@ def load(paths: list[Path]) -> Results:
                          "task.json if the change can change a run's outcome: " + "; ".join(
                              f"`{task}`: a row graded by check {got}, today's is {today[task]}" for task, got in moved))
     aside = [row for folder in sorted({f.parent for f in files}) for row in _jsonl((folder / "limited").glob("*.jsonl"))]
-    registry_config = mrconfig.shipped()
-    return Results(files, rows, stale, broken, aside, configs, tasks, registry_config, router_ids(configs),
-                   forced_ranks(configs, registry_config))
+    return Results(files, rows, stale, broken, aside, configs, tasks, router_ids(configs))
 
 
 CACHE_FIELDS = ("cache_read_tokens", "cache_write_tokens", "fresh_input_tokens")
@@ -610,12 +589,19 @@ def _notes(results: Results) -> list[str]:
                 f"{'main loop' if who == 'main' else f'`{who}`'} ${usd:.4f} ({usd / total:.0%})" for who, usd in order)
         lines.append("- Router spend by agent type, from the router's ledger (`agent_costs`), over the runs that "
                      "record it: " + "; ".join(share(c) for c in sorted(spend)) + ".")
-    if results.broken:
-        names = sorted({r["task"] for r in results.broken})
-        lines.append(f"- {len(results.broken)} run(s) (${sum(r['total_cost_usd'] for r in results.broken):.2f}) are "
+    broke = [r for r in results.broken if r["grade"]["verdict"] == "broken"]
+    halted = [r for r in results.broken if r["grade"]["verdict"] == "stopped"]
+    if broke:
+        names = sorted({r["task"] for r in broke})
+        lines.append(f"- {len(broke)} run(s) (${sum(r['total_cost_usd'] for r in broke):.2f}) are "
                      "set aside, though they stay in the results files: the pass check of "
                      + ", ".join(f"`{n}`" for n in names) + " broke on them (exit code 2, a bug in the check), so "
                      "none counts as solved or failed. Each raw line's `grade` has the check's error.")
+    if halted:
+        lines.append(f"- {len(halted)} run(s) (${sum(r['total_cost_usd'] for r in halted):.2f}) are set aside, though "
+                     "they stay in the results files: the bench itself stopped them before their check finished (an "
+                     "interrupt, SIGTERM or an error in the harness), so none counts as solved or failed, and the same "
+                     "command run again runs them again. Each raw line's `grade.reason` says what stopped it.")
     for task in results.tasks:
         old = [r for r in results.stale if r["task"] == task["id"]]
         if old:
@@ -678,9 +664,11 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "zero, or an exact one-sided test at 5% of its solved runs against the baseline's, every run of the row "
         "pooled, puts it behind, which catches a gap the added runs shrink), "
         "or its cost per solved task is above beyond noise while the upper bound of its pass rate minus the "
-        f"baseline's is below plus {MARGIN:.0%}, the mirror of the WIN rule. "
-        "Anything else is \"no difference shown\", which is not parity. There is no verdict when the two didn't run "
-        "each task the same number of times in each batch, since each side's cost is pooled over its runs and pass "
+        f"baseline's is below plus {MARGIN:.0%}, the mirror of the WIN rule. A cost bound that is n/a decides "
+        "nothing: it comes from resamples in which one side solved none of the runs drawn, so it has no cost per "
+        "solved task, and a row where a side solved nothing, or nearly nothing, gets its verdict from the pass rate "
+        "alone. Anything else is \"no difference shown\", which is not parity. There is no verdict when the two "
+        "didn't run each task the same number of times in each batch, since each side's cost is pooled over its runs and pass "
         f"rates drift between batches, when more than {DENIAL_SHARE:.0%} of either's runs had a Bash call denied, "
         "when the router's runs loaded more than one plugin build (`plugin_hash`), when the two ran a task at "
         "different budgets (`budget_usd`) or on different Claude Code versions (`claude_version`), or when any of "
@@ -690,15 +678,14 @@ def _page(results: Results, summary: list[dict]) -> dict:
         f"- Each table ends with an `{ALL}` row, judged the same way over every task in the table: the tasks of all "
         "its classes are paired and resampled together. A class with one task can't show the margin, so a plan "
         f"with a few tasks per class is judged on its `{ALL}` row.",
-        "- A class is saturated when the weakest forced baseline (every subagent on the weakest model) can't be told "
-        f"from the strongest, or from `{SPLIT_STRONG}` (subagents on the session model) when every forced baseline "
-        f"is on one model, by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an equal pass rate "
-        "says nothing about quality. Runs on an earlier revision of a task are left out of every table. A run on a "
+        f"- A class is saturated when `{SPLIT_WEAK}` (every subagent on Haiku) can't be told from `{SPLIT_STRONG}` "
+        f"(subagents on the session model) by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an "
+        "equal pass rate says nothing about quality. Runs on an earlier revision of a task are left out of every table. A run on a "
         "task's current revision that a check other than today's graded stops the page from being built, since the "
         "check changed without a raise of the revision.",
         "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest, and n/a on a "
-        "row with no verdict. A router variant (another configuration that loads the plugin) has its own column "
-        "but is never a baseline.",
+        "row with no verdict; a configuration that solved none of the row's runs counts as the dearest. A router "
+        "variant (another configuration that loads the plugin) has its own column but is never a baseline.",
         "- Run metrics, per class and configuration: p50 and p90 are nearest-rank percentiles of each run's wall "
         "time (`wall_ms`, the runner's clock around the `claude` process). Cache is cache-read tokens over all input tokens, which are input plus cache reads "
         "plus cache writes (https://platform.claude.com/docs/en/build-with-claude/prompt-caching.md), summed over "
@@ -755,9 +742,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "Claim nothing from them beyond what the raw data shows."
         if summary and all(row["status"] == "REFUSED" for row in summary) else
         "Claim \"cheaper\" only against a baseline the router has a WIN against, and link its raw data.",
-        *(["", f"{saturated} of {len(summary)} class rows below are saturated: the weakest forced baseline solved "
-              f"as many runs as the strongest, or as `{SPLIT_STRONG}` when every forced baseline is on one model, "
-              "within noise, so these tasks can't tell models apart, and an equal pass rate there says nothing "
+        *(["", f"{saturated} of {len(summary)} class rows below are saturated: `{SPLIT_WEAK}` solved as many runs "
+              f"as `{SPLIT_STRONG}`, within noise, so these tasks can't tell models apart, and an equal pass rate there says nothing "
               "about quality."] if saturated else []),
     ])
     body = "\n".join([
@@ -768,7 +754,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "- Configurations run: " + "; ".join(f"`{c}` ({described.get(c, '?')})" for c in used) + ".",
         "- Models that ran, with Claude Code's list-price cost across all runs: "
         + "; ".join(f"`{name}` ${sum(costs):.4f} over {len(costs)} runs" for name, costs in sorted(models.items()))
-        + ". Each run's raw line also carries the registry's prices for those models.",
+        + ". Each run's raw line also carries the list prices of those models in `bench/prices.json`.",
         "- Agents started, by configuration, counted from the Agent calls in the run's stream (`agents_started`): "
         + "; ".join(f"`{c}` " + ", ".join(f"{name} x{n}" for name, n in sorted(agents.get(c, {}).items()))
                     for c in used) + ".",
@@ -810,7 +796,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "batch starts. Each raw line records the hash of the plugin "
         "it loaded in `plugin_hash`, null with no plugin. The plugin keeps no copy of its options, so a run of a "
         "router variant is set aside only when its ledger holds a row an option rules out (a `gate` row with "
-        "`verify_gate` off, a rewritten spawn with `routing_mode` off); `options_applied` true means no such row, "
+        "`verify_gate` off); `options_applied` true means no such row, "
         "not proof.",
         "- The router keeps state (model health and its ledger) in its plugin data folder, inside the run's own "
         "config folder, so every router run starts from an empty one and its data goes when the scratch copy does. "
@@ -863,7 +849,8 @@ def _exploratory(rows: list[dict], notes: dict, tasks: list[dict]) -> list[str]:
            "Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a "
            "configuration for one, and a router configuration here may run the plugin from another commit. A run "
            "the harness stopped, by the timeout or the budget cap, counts as failed whatever its files held. As in "
-           "the judged tables, runs on an earlier revision of a task and runs whose pass check broke are left out.", ""]
+           "the judged tables, runs on an earlier revision of a task, runs whose pass check broke and runs the bench "
+           "stopped before their check finished are left out.", ""]
     for name, every in batches.items():
         runs, stale, broken = _split(every, tasks)
         models = ", ".join(f"`{m}`" for m in sorted({r.get("main_model") or "unknown" for r in every}))
@@ -871,12 +858,15 @@ def _exploratory(rows: list[dict], notes: dict, tasks: list[dict]) -> list[str]:
                 f"${sum(r['total_cost_usd'] for r in runs):.2f}, session on {models}", ""]
         if isinstance(notes.get(name), str):
             out += [notes[name], ""]
-        left = ([f"{len(stale)} run(s) (${sum(r['total_cost_usd'] for r in stale):.2f}) on an earlier revision of "
-                 + ", ".join(f"`{t}`" for t in sorted({r["task"] for r in stale}))] if stale else []) + \
-               ([f"{len(broken)} run(s) (${sum(r['total_cost_usd'] for r in broken):.2f}) whose pass check broke"]
-                if broken else [])
+        left = [f"{len(stale)} run(s) (${sum(r['total_cost_usd'] for r in stale):.2f}) on an earlier revision of "
+                + ", ".join(f"`{t}`" for t in sorted({r["task"] for r in stale}))] if stale else []
+        for verdict, what in (("broken", "whose pass check broke"),
+                              ("stopped", "the bench stopped before their check finished")):
+            some = [r for r in broken if r["grade"]["verdict"] == verdict]
+            left += [f"{len(some)} run(s) (${sum(r['total_cost_usd'] for r in some):.2f}) {what}"] if some else []
         if left:
-            out += ["Left out of the table: " + " and ".join(left) + ".", ""]
+            out += ["Left out of the table: " + (", ".join(left[:-1]) + " and " if len(left) > 1 else "") + left[-1]
+                    + ".", ""]
         out += ["| Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |",
                 "| :- | -: | -: | :- | -: | :- |"] if runs else []
         cells: dict[str, list[dict]] = {}

@@ -20,6 +20,7 @@ for name, folder in (("HOME", "home"), ("TMPDIR", "tmp"), ("TMP", "tmp"), ("TEMP
     os.environ[name] = str(host / folder)
 tempfile.tempdir = None
 out = {"error": None, "result": None}
+charged = []
 try:
     if payload["action"] == "init":
         importlib.import_module("db").init(payload["db"])
@@ -28,11 +29,18 @@ try:
         conn.commit()
     elif payload["action"] in ("post", "crash"):
         if payload["action"] == "crash":
+            # Only a commit after the charge, so a commit made before it can't use up the crash.
             class Crash(sqlite3.Connection):
                 def commit(self):
                     super().commit()
-                    os.write(1, ("\n" + json.dumps(out) + "\n").encode())
-                    os._exit(0)
+                    if charged:
+                        os.write(1, ("\n" + json.dumps(out) + "\n").encode())
+                        os._exit(0)
+
+                def __exit__(self, kind, *rest):
+                    if kind is None:
+                        self.commit()  # Python 3.12 and later commit a with block without calling commit()
+                    return super().__exit__(kind, *rest)
 
             def crashing(*args, _connect=sqlite3.connect, **kwargs):
                 kwargs.setdefault("factory", Crash)
@@ -47,6 +55,7 @@ try:
             got = real_charge(*args, **kwargs)
             with open(payload["db"] + ".charges", "a", encoding="utf-8") as log:
                 log.write("charge\n")
+            charged.append(True)
             return got
 
         gateway.charge = charge

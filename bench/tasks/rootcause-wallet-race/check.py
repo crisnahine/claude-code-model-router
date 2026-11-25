@@ -1,6 +1,7 @@
 """Pass when ledger/wallet.py, run by two worker copies against a store that forces each bad interleaving and times out
 a lock held for 5 s, loses no credit, takes no wallet below zero, hangs nowhere and never makes unrelated wallets wait.
-Each copy is a fresh load of every work-dir module, so a lock inside the module shares nothing across them."""
+Each copy is a fresh load of every work-dir module, so a lock inside the module shares nothing across them, and the
+store keeps a copy of each value, as a shared service would, so a lock object put in it shares nothing either."""
 import importlib.util
 import json
 import sys

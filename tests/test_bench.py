@@ -8,9 +8,12 @@ import fnmatch
 import importlib.util
 import io
 import json
+import math
 import os
 import re
+import shlex
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -41,7 +44,7 @@ def full_row(**changes):
     """A row as run.record writes it, from a real result line, with `changes` applied. A row of a task in bench/tasks
     carries today's check hash, as a run of it would."""
     result = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    row = dict(run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}), result,
+    row = dict(run.record(Recorder.task, Recorder.config, Recorder.options, result,
                           Recorder.facts), **changes)
     return graded_today(row) if "grade" not in changes else row
 
@@ -116,6 +119,17 @@ class Analysis(unittest.TestCase):
         self.assertEqual(analyze._status({"a": {"verdict": "WIN"}, "b": {"verdict": "NONE"}}), "NONE")
         self.assertEqual(analyze._status({"a": {"verdict": "WIN"}, "b": {"verdict": "WIN"}}), "WIN")
 
+    def test_a_cost_bound_with_no_value_decides_nothing(self):
+        # The router dear and right, the baseline cheap and wrong on every run: every draw's gap is minus infinity.
+        data = spread("plugin", "lookup", 2, 2, 1.50) + spread("haiku-high", "lookup", 2, 2, 0.10, solved=0)
+        v = self.verdict(data, "haiku-high")
+        self.assertEqual((v["verdict"], v["cost_ci"]), ("NONE", (None, None)))
+        self.assertIn("cost per solved task n/a to n/a", v["reason"])
+        self.assertEqual(analyze._judge("b", (-0.05, 0.05), (math.inf, math.inf), False, (9, 10, 9, 10))[0], "NONE")
+        self.assertEqual(analyze._judge("b", (-0.05, 0.05), (-math.inf, -0.1), False, (9, 10, 9, 10))[0], "WIN")
+        self.assertEqual(analyze._judge("b", (-0.05, 0.05), (0.1, math.inf), False, (9, 10, 9, 10))[0], "LOSE")
+        self.assertIn("A cost bound that is n/a decides nothing", analyze.build_page(analyze.load([])))
+
     def test_behind_beyond_noise_loses_even_inside_the_margin(self):
         self.assertEqual(analyze._judge("defaults", (-0.08, -0.01), (-0.05, -0.01), False, (9, 10, 9, 10))[0], "LOSE")
 
@@ -140,29 +154,51 @@ class Analysis(unittest.TestCase):
         row = self.summary(apart)["lookup"]
         self.assertEqual((row["status"], row["rank"]), ("REFUSED", None))
 
-    PLAN = (("bugfix-statement-queries", "bugfix"), ("cross-amount-cents", "cross-module"),
-            ("design-checkout-retries", "design"), ("security-admin-route", "security-review"),
-            ("rootcause-wallet-race", "root-cause"), ("impl-merge-customers", "implementation"))
+    OPUS_PLAN = ("rootcause-wallet-race", "cachefix-stale-across-services", "impl-merge-customers",
+                 "finance-ledger-reconcile", "legal-services-agreement", "fanout-three-lookups",
+                 "design-cache-invalidation", "security-tar-symlink-chain", "redo-failing-check",
+                 "workflow-two-stage-report", "mixed-plan-then-build", "research-study-synthesis", "ops-inbox-triage",
+                 "migrate-ledger-v3", "bugfix-statement-queries", "design-checkout-retries")
+    FABLE_PLAN = ("rootcause-wallet-race", "impl-merge-customers", "fanout-three-lookups", "design-cache-invalidation")
 
-    def plan_rows(self, runs):
-        """The README's measurement plan: 6 tasks in 6 classes, every run solved, the router cheapest."""
-        return [dict(r, task=task, batch=f"measure-{1 + i // 2}") for task, cls in self.PLAN
-                for config, usd in (("plugin", 0.05), ("defaults", 0.26), ("haiku-high", 0.10), ("pinned", 0.20))
-                for i, r in enumerate(rows(config, cls, [usd] * runs, [True] * runs))]
+    def plan_rows(self, tasks, runs, costs):
+        """Every run of `tasks` solved, at `costs` a run by configuration."""
+        classes = {t["id"]: t["class"] for t in run.load_tasks()}
+        return [dict(r, task=task, batch="judged") for task in tasks for config, usd in costs.items()
+                for r in rows(config, classes[task], [usd] * runs, [True] * runs)]
 
-    def test_the_documented_plan_can_reach_a_win_over_all_tasks(self):
+    def test_the_documented_plan_can_reach_a_verdict_over_all_tasks(self):
         kwargs = {"routers": frozenset({"plugin"}), "router": "plugin", "session": OPUS}
-        for runs, verdict in ((6, "NONE"), (8, "NONE"), (10, "WIN")):
-            with self.subTest(runs=runs):
-                data = self.plan_rows(runs)
-                every = analyze.overall(data, **kwargs)
-                self.assertEqual({v["verdict"] for v in every["verdicts"].values()}, {verdict})
-                self.assertEqual(every["class"], analyze.ALL)
-                # One task per class, so a class alone can't show the margin.
-                self.assertEqual({c["status"] for c in analyze.summarize(data, **kwargs)}, {"NONE"})
-        # The knife edge at 8 runs: a lower bound equal to the margin is not inside it.
-        edge = analyze.overall(self.plan_rows(8), **kwargs)["verdicts"]["pinned"]
-        self.assertEqual((edge["pass_ci"][0], edge["verdict"]), (-analyze.MARGIN, "NONE"))
+        cheap, dear = ({"plugin": usd, "defaults": 0.26, "haiku-high": 0.10} for usd in (0.05, 0.30))
+        for tasks, runs, verdicts in ((self.OPUS_PLAN, 2, ("NONE", "NONE")), (self.OPUS_PLAN, 5, ("WIN", "LOSE")),
+                                      (self.FABLE_PLAN, 5, ("NONE", "NONE"))):
+            for costs, verdict in zip((cheap, dear), verdicts):
+                with self.subTest(tasks=len(tasks), runs=runs, router=costs["plugin"]):
+                    every = analyze.overall(self.plan_rows(tasks, runs, costs), **kwargs)
+                    self.assertEqual({v["verdict"] for v in every["verdicts"].values()}, {verdict})
+        # The knife edge: a lower bound equal to the margin is not inside it.
+        edge = analyze.overall(self.plan_rows(self.OPUS_PLAN[:6], 8, {"plugin": 0.05, "pinned": 0.20}), **kwargs)
+        self.assertEqual((edge["verdicts"]["pinned"]["pass_ci"][0], edge["verdicts"]["pinned"]["verdict"]),
+                         (-analyze.MARGIN, "NONE"))
+
+    def test_the_readme_runs_the_plan_with_commands_that_work_as_written(self):
+        text = (ROOT / "bench" / "README.md").read_text(encoding="utf-8").replace("\\\n", " ")
+        commands = [line.strip().rstrip("&").replace('"$n"', "0").replace("$n", "0")
+                    for block in re.findall(r"```bash\n(.*?)```", text, re.S) for line in block.splitlines()
+                    if "bench/run.py" in line]
+        flat = " ".join(" ".join(commands).split())
+        for tasks, model in ((self.OPUS_PLAN, "claude-opus-5-5"), (self.FABLE_PLAN, "claude-fable-5-2")):
+            self.assertIn(f"--tasks {' '.join(tasks)} --configs plugin defaults haiku-high --runs 1 --first-run 0", flat)
+            self.assertRegex(flat, rf"--budget 2 --max-total \d+ --model {model} ")
+        bare = {k: v for k, v in os.environ.items() if k not in run.AUTH and not k.startswith("CLAUDE_CODE_USE_")}
+        for command in commands:
+            argv = shlex.split(command.replace("$HOME", str(Path.home())))
+            with self.subTest(command=command[:60]), unittest.mock.patch.dict("os.environ", bare, clear=True), \
+                    contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+                self.assertEqual(argv[:2], ["python3", "bench/run.py"])
+                run.main(argv[2:])
+            # Every option and id parses; the one thing missing is the credential, read from the environment.
+            self.assertIn("set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY", err.getvalue())
 
     def test_the_judged_router_comes_from_configs_json_not_file_order(self):
         data = [dict(r, main_model=OPUS) for r in spread("plugin", "lookup", 2, 4, 0.1)
@@ -342,41 +378,25 @@ class Analysis(unittest.TestCase):
         self.assertAlmostEqual(low, 0.0667, places=3)
         self.assertAlmostEqual(high, 0.6525, places=3)
 
-    def quality(self, data, forced):
-        summary = analyze.summarize(data, routers=frozenset({"plugin"}), router="plugin", draws=200, seed=1, forced=forced)
+    def quality(self, data):
+        summary = analyze.summarize(data, routers=frozenset({"plugin"}), router="plugin", draws=200, seed=1)
         return {s["class"]: s for s in summary}["lookup"]["quality"]
 
-    FORCED = {"haiku": (1, -1), "opus": (3, -1)}
-
-    def test_a_class_where_the_weakest_forced_baseline_keeps_up_is_saturated(self):
-        n = analyze.MIN_RUNS
-        data = (rows("plugin", "lookup", [0.1] * n, [True] * n) + rows("haiku", "lookup", [0.2] * n, [True] * n)
-                + rows("opus", "lookup", [0.4] * n, [True] * n))
-        q = self.quality(data, self.FORCED)
-        self.assertEqual((q["saturated"], q["weakest"], q["strongest"]), (True, "haiku", "opus"))
-        weak = rows("haiku", "lookup", [0.2] * n, [True] * 4 + [False] * 6)
-        q = self.quality(rows("plugin", "lookup", [0.3] * n, [True] * n) + weak + rows("opus", "lookup", [0.4] * n, [True] * n),
-                         self.FORCED)
-        self.assertIs(q["saturated"], False)
-
-    def test_with_one_forced_model_defaults_is_the_strong_end(self):
-        forced = analyze.forced_ranks(run.load_configs(), analyze.mrconfig.shipped())
+    def test_a_class_where_haiku_high_keeps_up_with_defaults_is_saturated(self):
         data = [r for c, usd in (("plugin", 0.1), ("defaults", 0.3), ("haiku-high", 0.1))
                 for r in spread(c, "lookup", 6, analyze.MIN_RUNS, usd)]
-        q = self.quality(data, forced)
-        self.assertEqual((q["saturated"], q["weakest"], q["strongest"]), (True, "haiku-high", "defaults"))
-        rows = [full_row(task=r["task"], config=r["config"], total_cost_usd=r["total_cost_usd"], **{"class": "lookup"})
-                for r in data]
-        page = analyze.build_page(dataclasses.replace(analyze.load([]), rows=rows))
-        self.assertIn("1 of 1 class rows below are saturated", page)
+        self.assertIs(self.quality(data)["saturated"], True)
+        recorded = [full_row(task=r["task"], config=r["config"], total_cost_usd=r["total_cost_usd"],
+                             **{"class": "lookup"}) for r in data]
+        page = analyze.build_page(dataclasses.replace(analyze.load([]), rows=recorded))
+        self.assertIn("1 of 1 class rows below are saturated: `haiku-high` solved as many runs as `defaults`", page)
         self.assertIn("an equal pass rate there says nothing about quality", page)
         self.assertIn("- lookup: saturated, haiku-high solved 60 of 60, defaults 60 of 60", page)
-
-    def test_forced_baselines_on_one_model_cannot_show_saturation(self):
         n = analyze.MIN_RUNS
-        data = (rows("plugin", "lookup", [0.1] * n, [True] * n) + rows("opus", "lookup", [0.4] * n, [True] * n)
-                + rows("opus-high", "lookup", [0.4] * n, [True] * n))
-        self.assertIsNone(self.quality(data, {"opus": (3, -1), "opus-high": (3, 2)})["saturated"])
+        behind = (rows("plugin", "lookup", [0.3] * n, [True] * n) + rows("defaults", "lookup", [0.4] * n, [True] * n)
+                  + rows("haiku-high", "lookup", [0.2] * n, [True] * 4 + [False] * 6))
+        self.assertIs(self.quality(behind)["saturated"], False)
+        self.assertIsNone(self.quality([r for r in behind if r["config"] != "defaults"])["saturated"])
 
     def test_a_cells_draws_do_not_depend_on_the_other_cells(self):
         n = analyze.MIN_RUNS
@@ -397,21 +417,6 @@ class Analysis(unittest.TestCase):
                 + task_rows("d", [True, True, True], [True, True, False]))  # weak over 1 of 3
         self.assertEqual(analyze.splitting_tasks(data), ["a", "b"])
         self.assertIsNone(analyze.splitting_tasks([r for r in data if r["config"] == "defaults"]))
-
-    def test_forced_baselines_rank_by_model_strength_then_effort(self):
-        def forced(name, model, effort=None):
-            env = {"CLAUDE_CODE_SUBAGENT_MODEL": model, "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}
-            return {"id": name, "env": {**env, **({"CLAUDE_CODE_SUBAGENT_EFFORT": effort} if effort else {})}}
-        configs = [forced("haiku", "haiku"), forced("haiku-low", "haiku", "low"), forced("haiku-high", "haiku", "high"),
-                   forced("sonnet-low", "sonnet", "low"), forced("opus", "opus"), {"id": "unforced", "env": {}}]
-        ranks = analyze.forced_ranks(configs, analyze.mrconfig.shipped())
-        self.assertLess(ranks["haiku"], ranks["haiku-low"])
-        self.assertLess(ranks["haiku-low"], ranks["haiku-high"])
-        self.assertLess(ranks["haiku-high"], ranks["sonnet-low"])
-        self.assertLess(ranks["sonnet-low"], ranks["opus"])
-        self.assertNotIn("unforced", ranks)
-        shipped = analyze.forced_ranks(run.load_configs(), analyze.mrconfig.shipped())
-        self.assertEqual(set(shipped), {"haiku-high"})
 
     def test_a_class_with_no_router_or_baseline_has_no_verdict(self):
         row = self.summary(rows("defaults", "lookup", [0.3], [True]))["lookup"]
@@ -572,6 +577,8 @@ class Analysis(unittest.TestCase):
                               passed=True, **batch),
                      dict(full_row(config="defaults", total_cost_usd=0.75, passed=False, **batch),
                           grade={"verdict": "broken", "reason": "NameError: x", "check_hash": "b" * 16}),
+                     dict(full_row(config="defaults", total_cost_usd=0.5, passed=False, **batch),
+                          grade={"verdict": "stopped", "reason": "the bench stopped", "check_hash": "b" * 16}),
                      full_row(config="defaults", plugin_loaded=None, total_cost_usd=0.2, passed=True,
                               batch="calibration-1", main_model="claude-opus-5-5", started_at="2020-01-01T00:00:00+00:00")]
             (pilot / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in lines), encoding="utf-8")
@@ -591,8 +598,9 @@ class Analysis(unittest.TestCase):
         self.assertIn("| `plugin-cheap` | 2 | 2 | none | $0.260 | `fffffff` |", section)
         self.assertIn("| `defaults` | 2 | 0 | 1 by the timeout | $0.300 |  |", section)  # a set-aside run is not counted
         self.assertIn("A run the harness stopped, by the timeout or the budget cap, counts as failed", section)
-        self.assertIn("Left out of the table: 1 run(s) ($0.50) on an earlier revision of `ops-inbox-triage` and 1 "
-                      "run(s) ($0.75) whose pass check broke.", section)
+        self.assertIn("Left out of the table: 1 run(s) ($0.50) on an earlier revision of `ops-inbox-triage`, 1 "
+                      "run(s) ($0.75) whose pass check broke and 1 run(s) ($0.50) the bench stopped before their check "
+                      "finished.", section)
         self.assertIn("### `calibration-1`: 1 runs", section)
         self.assertNotRegex(section, r"WIN|LOSE|no difference shown")
         self.assertNotIn("## Results", page)  # a pilot row is never a judged row
@@ -767,7 +775,7 @@ class Recorder(unittest.TestCase):
              "ledger": None, "agent_types": {}, "kept": None}
 
     def row(self, result, **facts):
-        return run.record(self.task, self.config, self.options, run.mrconfig.build({}), result, {**self.facts, **facts})
+        return run.record(self.task, self.config, self.options, result, {**self.facts, **facts})
 
     def test_a_real_2_1_330_result_becomes_a_row(self):
         row = self.row(json.loads(FIXTURE.read_text(encoding="utf-8")))
@@ -939,7 +947,7 @@ class Runner(unittest.TestCase):
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 1,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
-            row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "defaults"), options, {})
+            row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "defaults"), options)
         self.assertEqual((row["exit_code"], row["passed"], row["cost_known"], row["total_cost_usd"], row["answer"]),
                          (None, False, False, 0.5, ""))
         self.assertGreaterEqual(row["wall_ms"], 1000)
@@ -953,7 +961,7 @@ class Runner(unittest.TestCase):
                 options = {"claude": stub(tmp, STOPPED_STUB), "model": "sonnet", "budget": 0.5, "timeout": 2,
                            "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
                 with unittest.mock.patch.dict("os.environ", {"STUB_HOW": how}):
-                    row = run.run_one(task, defaults, options, {})
+                    row = run.run_one(task, defaults, options)
                 self.assertEqual((row["stopped_by"], row["passed"]), (stopped, stopped is None), row["grade"])
                 self.assertIn("FINDING.json", row["final_answer"]["files"])  # the files would have passed
                 if stopped:
@@ -986,7 +994,7 @@ class Runner(unittest.TestCase):
                         (unittest.mock.patch.object(subprocess.Popen, "communicate", interrupted) if how == "interrupt"
                          else contextlib.nullcontext()), \
                         (self.assertRaises(KeyboardInterrupt) if how == "interrupt" else contextlib.nullcontext()):
-                    run.run_one(task, defaults, options, {})
+                    run.run_one(task, defaults, options)
                 pid = int(child.read_text())
                 for _ in range(100):
                     try:
@@ -999,10 +1007,78 @@ class Runner(unittest.TestCase):
                     self.fail(f"the run's child {pid} outlived the run")
 
 
+    @unittest.skipIf(sys.platform == "win32", "needs a symlink and a shebang")
+    def test_an_update_during_a_round_never_reaches_a_later_run(self):
+        # The installer moves the claude symlink on PATH to each new version; the first run here does that.
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_, out = Path(tmp) / "bin", Path(tmp) / "out.jsonl"
+            bin_.mkdir()
+            for version in ("1", "2"):
+                path = Path(tmp) / f"claude-{version}"
+                path.write_text(f"#!{sys.executable}\n" + VERSIONED_STUB.replace("<v>", version), encoding="utf-8")
+                path.chmod(0o755)
+            (bin_ / "claude").symlink_to(Path(tmp) / "claude-1")
+            env = {**AUTH, "PATH": f"{bin_}{os.pathsep}{os.environ['PATH']}"}
+            with unittest.mock.patch.dict("os.environ", env), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "2",
+                                 "--max-total", "3", "--claude", "claude", "--out", str(out)])
+            rows = [json.loads(line) for line in out.read_text().splitlines()]
+            self.assertEqual(os.readlink(bin_ / "claude"), str(Path(tmp) / "claude-2"))
+        self.assertEqual(code, 0)
+        self.assertEqual([(r["claude_version"], r["answer"][-4:]) for r in rows], [("1.0.0 (stub)", "(v1)")] * 2)
+
+    @unittest.skipIf(sys.platform == "win32", "Windows ends a process without running its signal handlers")
+    def test_a_runner_sent_sigterm_leaves_no_child_no_scratch_and_writes_the_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            child, cwd, out, temp = (Path(tmp) / n for n in ("child.pid", "cwd.txt", "out.jsonl", "temp"))
+            temp.mkdir()
+            env = {**os.environ, **AUTH, "STUB_CHILD": str(child), "STUB_CWD": str(cwd), "TMPDIR": str(temp)}
+            runner = subprocess.Popen([sys.executable, str(run.BENCH / "run.py"), "--tasks", "lookup-retry-limit",
+                                       "--configs", "defaults", "--max-total", "3", "--claude", *stub(tmp, ORPHAN_STUB),
+                                       "--out", str(out)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for _ in range(600):
+                if child.is_file() and child.read_text():
+                    break
+                time.sleep(0.05)
+            runner.send_signal(signal.SIGTERM)
+            runner.wait(timeout=60)
+            pid = int(child.read_text())
+            for _ in range(100):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                os.kill(pid, 9)
+                self.fail(f"the run's child {pid} outlived the runner")
+            self.assertFalse(Path(cwd.read_text()).parent.exists())  # the run's scratch folder
+            self.assertEqual(list(temp.iterdir()), [])  # the frozen plugin copy
+            [row] = [json.loads(line) for line in out.read_text().splitlines()]
+            self.assertIn("KeyboardInterrupt", row["grade"]["reason"])
+
+
+VERSIONED_STUB = '''import json, os, shutil, sys
+from pathlib import Path
+if "--version" in sys.argv:
+    print("<v>.0.0 (stub)"); sys.exit(0)
+link = Path(shutil.which("claude"))
+if os.readlink(link).endswith("claude-1"):
+    link.with_name("next").symlink_to(Path(os.readlink(link)).with_name("claude-2"))
+    os.replace(link.with_name("next"), link)
+print(json.dumps({"type": "result", "result": "read_retry_limit in app/settings.py (v<v>)", "total_cost_usd": 0.01,
+                  "modelUsage": {}}))
+'''
+
+
 ORPHAN_STUB = '''#!/usr/bin/env python3
 import os, subprocess, sys, time
 if "--version" in sys.argv:
     print("9.9.9 (stub)"); sys.exit(0)
+if os.environ.get("STUB_CWD"):
+    with open(os.environ["STUB_CWD"], "w") as fh:
+        fh.write(os.getcwd())
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
 with open(os.environ["STUB_CHILD"], "w") as fh:
     fh.write(str(child.pid))
@@ -1033,6 +1109,45 @@ print(json.dumps({"type": "result", "subtype": "error_max_budget_usd" if capped 
                   "result": "", "total_cost_usd": 0.5 if capped else 0.1, "modelUsage": {}}))
 sys.exit(1 if capped else 0)
 '''
+
+
+class Prices(unittest.TestCase):
+    """bench/prices.json, from https://platform.claude.com/docs/en/about-claude/pricing.md (checked 2026-11-22)."""
+
+    # The pricing page lists no rate for this one.
+    UNLISTED = {"claude-mythos-preview"}
+
+    def test_every_model_still_in_service_and_each_familys_newest_has_a_price(self):
+        lifecycle = json.loads((ROOT / "compat" / "baseline.json").read_text(encoding="utf-8"))["lifecycle"]
+        missing = [model for model, info in lifecycle.items()
+                   if info.get("state") in ("Active", "Deprecated") and model not in self.UNLISTED
+                   and run.price(model) is None]
+        self.assertEqual(missing, [])
+        for family, model_id in analyze.mrconfig.shipped().newest.items():
+            self.assertIsNotNone(run.price(model_id), family)
+
+    def test_a_model_id_finds_its_list_price(self):
+        self.assertEqual(run.price("claude-opus-4-7")["input"], 5)  # one entry covers Opus 4.x
+        self.assertEqual(run.price("claude-opus-4-1-20250805"),  # except 4.1, at its own list price
+                         {"input": 15, "output": 75, "cache_read": 1.5, "cache_write": 18.75, "cache_write_1h": 30})
+        for opus_4 in ("claude-opus-4-0", "claude-opus-4-20250514"):  # Opus 4 lists at the same price as 4.1
+            self.assertEqual(run.price(opus_4), run.price("claude-opus-4-1"), opus_4)
+        self.assertEqual(run.price("claude-haiku-4-5-20251001")["input"], 1)
+        self.assertEqual(run.price("claude-opus-5-5[1m]")["input"], 4)
+        self.assertIsNone(run.price("claude-opus-5-6"))  # a new version is never priced as its neighbour
+
+    def test_mythos_is_priced_like_its_fable_twin(self):
+        for version, rates in (("5-2", (8, 40, 0.2, 10, 16)), ("5-1", (10, 50, 0.25, 12.5, 20)),
+                               ("5", (10, 50, 1, 12.5, 20))):
+            price = run.price(f"claude-mythos-{version}")
+            self.assertEqual(tuple(price[k] for k in ("input", "output", "cache_read", "cache_write",
+                                                      "cache_write_1h")), rates, version)
+
+    def test_the_plugin_carries_no_price(self):
+        sys.path.insert(0, str(run.PLUGIN / "scripts"))
+        from modelrouter import config as cfg
+        self.assertNotIn("prices", cfg.base_config())
+        self.assertFalse(hasattr(cfg.shipped(), "price"))
 
 
 class Overhead(unittest.TestCase):
@@ -1158,7 +1273,7 @@ class FinalAnswer(unittest.TestCase):
             task = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
-            row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "defaults"), options, {})
+            row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "defaults"), options)
         self.assertEqual((len(row["answer"]), len(row["final_answer"]["reply"])), (2000, 3000))
         self.assertEqual(row["final_answer"]["files"], {"FINDING.json": '{"file": "app/settings.py", "line": 7}',
                                                         "app/client.py": "changed\n"})
@@ -1369,9 +1484,9 @@ class PluginState(unittest.TestCase):
             shared.chmod(0)  # any read or write of the shared folder now fails
             try:
                 with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
-                    first = run.run_one(task, configs["plugin"], options, {})
-                    second = run.run_one(task, configs["plugin"], options, {})
-                    baseline = run.run_one(task, configs["defaults"], options, {})
+                    first = run.run_one(task, configs["plugin"], options)
+                    second = run.run_one(task, configs["plugin"], options)
+                    baseline = run.run_one(task, configs["defaults"], options)
             finally:
                 shared.chmod(0o755)
             self.assertEqual([p.name for p in shared.iterdir()], ["state.json"])
@@ -1435,7 +1550,7 @@ class Sessions(unittest.TestCase):
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
-                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
             self.assertEqual([p.name for p in (home / "projects").iterdir()], ["-Users-someone-project"])
             self.assertTrue((other / "keep.jsonl").is_file())
             self.assertNotIn("session_dir_removed", row)
@@ -1448,7 +1563,7 @@ class Sessions(unittest.TestCase):
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60, "keep": str(kept),
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
-                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
             [folder] = list(kept.iterdir())
             self.assertEqual(row["kept"], str(folder))
             self.assertTrue((folder / "work" / "app" / "settings.py").is_file())
@@ -1479,11 +1594,10 @@ class Stopped(unittest.TestCase):
                           "--claude", *stub(tmp, source), "--out", str(out), *argv])
             rows = [json.loads(line) for line in out.read_text().splitlines()] if out.exists() else []
             sessions = list((home / "projects").iterdir()) if (home / "projects").exists() else []
-            # The frozen plugin copy is a batch's own scratch too, removed when the bench exits.
-            left = [p for p in scratch.iterdir() if not p.name.startswith("mrbench-plugin-")]
-            return rows, left + list(runs.iterdir()), sessions
+            # The frozen plugin copy is made there too, and goes however the bench stops.
+            return rows, list(scratch.iterdir()) + list(runs.iterdir()), sessions
 
-    def test_an_interrupt_during_the_claude_call_writes_a_broken_row_charged_the_budget_and_cleans_up(self):
+    def test_an_interrupt_during_the_claude_call_writes_a_stopped_row_charged_the_budget_and_cleans_up(self):
         def interrupted(cmd, work, env, timeout):
             """Ctrl-C mid-call, once the session has started. Raised here, since a real SIGINT that lands inside a
             finalizer of this long-lived process is ignored."""
@@ -1495,14 +1609,14 @@ class Stopped(unittest.TestCase):
         with unittest.mock.patch.object(run, "run_claude", interrupted):
             rows, scratch, sessions = self.stop(KeyboardInterrupt)
         self.assertEqual([(r["grade"]["verdict"], r["exit_code"], r["cost_known"], r["total_cost_usd"]) for r in rows],
-                         [("broken", None, False, 0.5)])
+                         [("stopped", None, False, 0.5)])
         self.assertIn("KeyboardInterrupt", rows[0]["grade"]["reason"])
         self.assertEqual((scratch, sessions), ([], []))
 
     def test_an_interrupt_while_grading_still_writes_the_row_and_cleans_up(self):
         rows, scratch, sessions = self.stop(KeyboardInterrupt, grade=unittest.mock.Mock(side_effect=KeyboardInterrupt))
         self.assertEqual([(r["grade"]["verdict"], r["total_cost_usd"], r["passed"]) for r in rows],
-                         [("broken", 0.01, False)])
+                         [("stopped", 0.01, False)])
         self.assertIn("KeyboardInterrupt", rows[0]["grade"]["reason"])
         self.assertEqual((scratch, sessions), ([], []))
 
@@ -1598,9 +1712,9 @@ class RouterVariants(unittest.TestCase):
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
-                row = run.run_one(task, variant, options, {})
+                row = run.run_one(task, variant, options)
                 got = json.loads(seen.read_text())
-                run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+                run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
                 plain = json.loads(seen.read_text())
         settings = json.loads(got["argv"][got["argv"].index("--settings") + 1])
         self.assertEqual(settings["pluginConfigs"], {"model-router@inline": {"options": {"verify_gate": False}}})
@@ -1646,7 +1760,7 @@ class AgentCosts(unittest.TestCase):
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
-                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
         self.assertEqual(row["agent_costs"], {"model-router:implementer": 0.07, "model-router:verifier": 0.01,
                                               "main": 0.03})
         self.assertEqual(row["duration_ms"], 1)
@@ -1671,7 +1785,7 @@ class AgentCosts(unittest.TestCase):
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}), \
                     unittest.mock.patch.object(run, "grade", rewrite):
-                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
         self.assertEqual(row["agent_costs"], {"model-router:implementer": 0.07, "model-router:verifier": 0.01,
                                               "main": 0.03})
 
@@ -1769,7 +1883,7 @@ class Limits(unittest.TestCase):
     def test_an_api_error_before_any_spend_is_set_aside_not_retried(self):
         # What Claude Code 2.1.330 printed for an invalid API key: an error, nothing spent, no model usage.
         result = json.loads(API_ERROR.read_text(encoding="utf-8"))
-        row = run.record({"id": "t", "class": "lookup"}, {"id": "defaults"}, Recorder.options, run.mrconfig.build({}),
+        row = run.record({"id": "t", "class": "lookup"}, {"id": "defaults"}, Recorder.options,
                          result, dict(Recorder.facts, exit_code=1))
         self.assertEqual(run.refusal(row), "api_error")
         self.assertEqual((row["total_cost_usd"], row["cost_known"]), (0, True))
@@ -1846,7 +1960,7 @@ class TaskIdentity(unittest.TestCase):
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
                 for task in run.load_tasks():
                     with self.subTest(task=task["id"]):
-                        row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
+                        row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options)
                         ours = str(Path(row["answer"]).resolve()).replace(base, "")
                         self.assertNotIn(task["id"], ours)
                         self.assertEqual(row["task_revision"], task.get("revision", 1))
@@ -1856,7 +1970,7 @@ class TaskIdentity(unittest.TestCase):
             self.assertIsInstance(task.get("revision"), int, task["id"])
             self.assertGreaterEqual(task["revision"], 1, task["id"])
         tasks = {t["id"]: t for t in run.load_tasks()}
-        self.assertEqual(tasks["design-cache-invalidation"]["revision"], 2)
+        self.assertEqual(tasks["design-cache-invalidation"]["revision"], 3)
 
     def test_rows_on_an_earlier_task_revision_are_left_out_of_the_tables(self):
         old = full_row(task_revision=1, **{"class": "design"})
@@ -1873,7 +1987,7 @@ class TaskIdentity(unittest.TestCase):
             page = out.read_text(encoding="utf-8")
         self.assertEqual(sorted(r["task"] for r in loaded.stale), ["design-cache-invalidation"] * 2)
         self.assertEqual([r["task"] for r in loaded.rows], ["design-rate-limiter"])
-        self.assertIn("`design-cache-invalidation` is at revision 2; 2 of its runs ($", page)
+        self.assertIn("`design-cache-invalidation` is at revision 3; 2 of its runs ($", page)
         self.assertIn("are left out of every table", page)
 
 
@@ -2135,20 +2249,25 @@ class Grading(unittest.TestCase):
                 self.assertNotEqual(changed, first, path)
                 first = changed
 
-    def test_analyze_sets_aside_a_run_whose_check_broke(self):
+    def test_analyze_sets_aside_a_run_whose_check_broke_or_that_the_bench_stopped(self):
         good = full_row(config="defaults", task="design-rate-limiter", task_revision=1, passed=True, **{"class": "design"})
         bad = dict(good, passed=False, total_cost_usd=0.25, grade=dict(good["grade"], verdict="broken", reason="NameError: x"))
+        stopped = dict(good, task="design-event-partitions", passed=False, total_cost_usd=0.5,
+                       grade=dict(good["grade"], verdict="stopped", reason="the bench stopped before the check finished"))
         with tempfile.TemporaryDirectory() as tmp:
             results = Path(tmp) / "results"
             results.mkdir()
-            (results / "a.jsonl").write_text("".join(json.dumps(r) + "\n" for r in (good, bad)))
+            (results / "a.jsonl").write_text("".join(json.dumps(graded_today(r)) + "\n" for r in (good, bad, stopped)))
             loaded = analyze.load([results / "a.jsonl"])
             out = Path(tmp) / "page.md"
             analyze.main([str(results / "a.jsonl"), "--out", str(out)])
             page = out.read_text(encoding="utf-8")
-        self.assertEqual((len(loaded.rows), len(loaded.broken)), (1, 1))
+        self.assertEqual((len(loaded.rows), len(loaded.broken)), (1, 2))
         self.assertIn("1 run(s) ($0.25) are set aside, though they stay in the results files: the pass check of "
                       "`design-rate-limiter` broke on them", page)
+        self.assertIn("1 run(s) ($0.50) are set aside, though they stay in the results files: the bench itself stopped "
+                      "them before their check finished", page)
+        self.assertNotIn("`design-event-partitions` broke", page)
 
 
 class Pilot(unittest.TestCase):
@@ -2246,7 +2365,6 @@ class QualityTier(unittest.TestCase):
                 "cross-amount-cents": "cross-module", "design-checkout-retries": "design"}
         tasks = {t["id"]: t for t in run.load_tasks()}
         self.assertEqual({i: tasks[i]["class"] for i in want}, want)
-        self.assertTrue(all(tasks[i]["revision"] == 1 for i in want))
 
     def test_sqlite_carries_a_rename_into_foreign_keys(self):
         self.assertGreaterEqual(sqlite3.sqlite_version_info, (3, 26, 0))
@@ -2609,7 +2727,7 @@ class DelegationTasks(unittest.TestCase):
                 options = {"claude": stub(Path(tmp), STREAM_STUB), "model": "sonnet", "budget": 0.5, "timeout": 60,
                            "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
                 with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
-                    run.run_one(self.task(task_id), defaults, options, {})
+                    run.run_one(self.task(task_id), defaults, options)
                 argv = json.loads(seen.read_text())["argv"]
                 self.assertEqual(argv[argv.index("--allowedTools") + 1:], [*run.TOOLS, *extra])
                 self.assertNotIn("Read", argv)  # a bare Read would approve reading anywhere
@@ -2629,7 +2747,7 @@ class DelegationTasks(unittest.TestCase):
                 options = {"claude": stub(Path(tmp), STREAM_STUB), "model": "sonnet", "budget": 0.5, "timeout": 60,
                            "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
                 with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
-                    row = run.run_one(task, defaults, options, {})
+                    row = run.run_one(task, defaults, options)
                 argv = json.loads(seen.read_text())["argv"]
                 self.assertEqual(argv[argv.index("-p") + 1], run.prompt(task))
                 self.assertEqual(row["shape"], shape)
@@ -2880,7 +2998,7 @@ class Harness(unittest.TestCase):
 
     def one(self, config="defaults", env=None, **options):
         with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(self.seen), **(env or {})}):
-            row = run.run_one(self.task, self.configs[config], self.options(**options), run.mrconfig.shipped())
+            row = run.run_one(self.task, self.configs[config], self.options(**options))
         return row, json.loads(self.seen.read_text())
 
     def main(self, *argv, env=None):
@@ -2977,13 +3095,13 @@ class Harness(unittest.TestCase):
         self.assertIsNone(self.one("defaults")[0]["plugin_loaded"])
 
     def test_a_router_run_with_no_stream_is_not_filed_as_a_plugin_that_did_not_load(self):
-        stopped = run.record(Recorder.task, self.configs["plugin"], Recorder.options, run.mrconfig.build({}), {},
+        stopped = run.record(Recorder.task, self.configs["plugin"], Recorder.options, {},
                              dict(Recorder.facts, init={}, exit_code=None))
         self.assertIsNone(stopped["plugin_loaded"])
         self.assertNotEqual(run.set_aside(stopped), "plugin_not_loaded")
         (self.dir / "hang").mkdir()
         hang = stub(self.dir / "hang", HANGING_STUB)
-        row = run.run_one(self.task, self.configs["plugin"], self.options(timeout=1, claude=hang), run.mrconfig.shipped())
+        row = run.run_one(self.task, self.configs["plugin"], self.options(timeout=1, claude=hang))
         self.assertEqual((row["plugin_loaded"], row["stopped_by"]), (None, "timeout"))
 
     def test_a_router_run_whose_plugin_did_not_load_is_set_aside(self):
@@ -2998,7 +3116,7 @@ class Harness(unittest.TestCase):
     def test_denials_keep_the_tool_and_the_first_200_characters_of_its_input(self):
         denials = [{"tool_name": "Bash", "tool_use_id": "u1", "tool_input": {"command": "python3 " + "x" * 300}},
                    {"tool_name": "Write", "tool_use_id": "u2", "tool_input": {"file_path": "/etc/x"}}]
-        row = run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}),
+        row = run.record(Recorder.task, Recorder.config, Recorder.options,
                          {"permission_denials": denials, "terminal_reason": "completed", "errors": ["e"]}, Recorder.facts)
         self.assertEqual(row["permission_denials"], [{"tool": "Bash", "input": ("python3 " + "x" * 300)[:200]},
                                                      {"tool": "Write", "input": '{"file_path": "/etc/x"}'}])
@@ -3028,8 +3146,8 @@ class Harness(unittest.TestCase):
         usage = {"input_tokens": 0, "output_tokens": 1000000}
         first = {"type": "assistant", "message": {"id": "a", "model": "claude-haiku-4-5", "usage": usage}}
         (folder / "s.jsonl").write_text("\n".join(json.dumps(x) for x in (first, first, {"type": "user"})) + "\nnot json\n")
-        self.assertAlmostEqual(run.transcript_cost(folder, run.mrconfig.shipped()), 5.0)
-        self.assertIsNone(run.transcript_cost(self.dir / "none", run.mrconfig.shipped()))
+        self.assertAlmostEqual(run.transcript_cost(folder), 5.0)
+        self.assertIsNone(run.transcript_cost(self.dir / "none"))
 
     def test_main_needs_a_token_or_an_api_key(self):
         bare = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
@@ -3053,12 +3171,16 @@ class Harness(unittest.TestCase):
         shutil.copytree(run.PLUGIN, source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         (source / "scripts" / "__pycache__").mkdir(exist_ok=True)
         (source / "scripts" / "__pycache__" / "x.pyc").write_bytes(b"cache")
-        frozen, digest = run.freeze_plugin(source)
-        self.assertEqual(run.freeze_plugin(source)[1], digest)
+        def freeze():
+            frozen, digest = run.freeze_plugin(source)
+            self.addCleanup(shutil.rmtree, Path(frozen).parent)
+            return frozen, digest
+        frozen, digest = freeze()
+        self.assertEqual(freeze()[1], digest)
         self.assertFalse(list(Path(frozen).rglob("*.pyc")))
         (source / "hooks" / "hooks.json").write_text("{}")  # an edit after the batch starts
         self.assertNotEqual((Path(frozen) / "hooks" / "hooks.json").read_text(), "{}")
-        self.assertNotEqual(run.freeze_plugin(source)[1], digest)
+        self.assertNotEqual(freeze()[1], digest)
         loaded = json.dumps([{"name": "model-router", "path": "/p"}])
         code, rows, _ = self.main("--configs", "plugin", "plugin-nogate", "defaults", "--runs", "2", "--seed", "5",
                                   env={"STUB_PLUGINS": loaded})
@@ -3090,16 +3212,16 @@ class Harness(unittest.TestCase):
 
     def test_a_documented_startup_failure_is_no_start_under_every_configuration(self):
         for config in ("defaults", "haiku-high", "plugin", "plugin-nogate"):
-            row = run.record(Recorder.task, self.configs[config], Recorder.options, run.mrconfig.shipped(),
+            row = run.record(Recorder.task, self.configs[config], Recorder.options,
                              STARTUP_FAILURE, dict(Recorder.facts, init={}, exit_code=1))
             self.assertEqual((run.set_aside(row), row["claude_started"], row["total_cost_usd"], row["cost_known"]),
                              ("no_start", False, 0, True), config)
         # Without the reason field (an older Claude Code), the same shape with no init event is still no start.
         bare = {k: v for k, v in STARTUP_FAILURE.items() if k != "startup_failure_reason"}
-        row = run.record(Recorder.task, self.configs["defaults"], Recorder.options, run.mrconfig.shipped(), bare,
+        row = run.record(Recorder.task, self.configs["defaults"], Recorder.options, bare,
                          dict(Recorder.facts, init={}, exit_code=1))
         self.assertEqual(run.set_aside(row), "no_start")
-        started = run.record(Recorder.task, self.configs["defaults"], Recorder.options, run.mrconfig.shipped(), bare,
+        started = run.record(Recorder.task, self.configs["defaults"], Recorder.options, bare,
                              dict(Recorder.facts, init={"type": "system", "subtype": "init"}, exit_code=1))
         self.assertIsNone(run.set_aside(started))
         self.assertFalse(started["cost_known"])
@@ -3190,7 +3312,7 @@ class Harness(unittest.TestCase):
         lines = [{"type": "assistant", "message": {"id": "a", "model": "claude-haiku-4-5", "usage": usage}},
                  {"type": "assistant", "message": {"id": "b", "model": "claude-unpriced-9-9", "usage": usage}}]
         (folder / "s.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
-        self.assertIsNone(run.transcript_cost(folder, run.mrconfig.shipped()))
+        self.assertIsNone(run.transcript_cost(folder))
 
     def test_a_router_run_whose_ledger_rules_out_its_options_is_set_aside(self):
         # The plugin keeps no copy of its options, so only a row an option forbids can show it didn't apply.
@@ -3208,9 +3330,6 @@ class Harness(unittest.TestCase):
         gated, _ = self.one("plugin", env={"STUB_PLUGINS": loaded, "STUB_LEDGER": gate})
         self.assertIsNone(gated["options_applied"])
         self.assertIsNone(run.set_aside(gated))
-        off = {"id": "off", "plugin": True, "env": {}, "plugin_options": {"routing_mode": "off"}}
-        self.assertFalse(run.options_applied(off, [{"event": "spawn", "action": "rewrite"}]))
-        self.assertTrue(run.options_applied(off, [{"event": "spawn", "action": "keep"}, {"event": "gate"}]))
         self.assertTrue(run.options_applied({"plugin_options": {"verify_gate": "on"}}, [{"event": "gate"}]))
 
     def test_each_agent_call_records_what_it_named_and_what_it_ran_on(self):
@@ -3250,10 +3369,10 @@ class Harness(unittest.TestCase):
 
     def test_gate_rows_in_the_ledger_are_counted(self):
         ledger = [{"event": "gate"}, {"event": "spawn"}, {"event": "gate", "kind": "verify"}]
-        row = run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}), {},
+        row = run.record(Recorder.task, Recorder.config, Recorder.options, {},
                          dict(Recorder.facts, ledger=ledger))
         self.assertEqual(row["gate_events"], 2)
-        self.assertEqual(run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}), {},
+        self.assertEqual(run.record(Recorder.task, Recorder.config, Recorder.options, {},
                                     Recorder.facts)["gate_events"], 0)
 
 
@@ -3326,7 +3445,7 @@ class RunEdges(unittest.TestCase):
         self.assertEqual((hidden["router_silent"], run.set_aside(hidden)), (True, "router_silent"))
         # No subagent shown running, or no plugin at all: nothing says the router should have acted.
         self.assertFalse(Recorder().row({"total_cost_usd": 0.1}, ledger=None, agent_calls=unseen)["router_silent"])
-        plain = run.record(Recorder.task, {"id": "defaults"}, Recorder.options, run.mrconfig.build({}),
+        plain = run.record(Recorder.task, {"id": "defaults"}, Recorder.options,
                            {"total_cost_usd": 0.1}, {**Recorder.facts, "agent_calls": ran})
         self.assertFalse(plain["router_silent"])
 
@@ -3341,7 +3460,7 @@ class RunEdges(unittest.TestCase):
         self.assertNotIn("isn't shown", page)
 
     def test_a_paid_row_that_stops_the_bench_is_filed_by_the_set_aside_rules(self):
-        def stops(task, config, options, registry):
+        def stops(task, config, options):
             exc = OSError("disk full")
             exc.row = dict(Recorder().row({"total_cost_usd": 0.4}), plugin_loaded=False)
             raise exc
@@ -3417,6 +3536,34 @@ class RunEdges(unittest.TestCase):
                 code, err, ran = self.main(*argv)
                 self.assertEqual((code, ran), (2, False))
                 self.assertIn(named, err)
+
+    def test_the_same_command_after_a_stop_runs_only_what_is_not_on_record_and_counts_its_spend(self):
+        out, limited = self.dir / "out.jsonl", self.dir / "limited" / "out.jsonl"
+        limited.parent.mkdir()
+
+        revision = next(t for t in run.load_tasks() if t["id"] == "lookup-retry-limit")["revision"]
+
+        def row(n, config, verdict="pass", cost=0.01, **extra):
+            return json.dumps({"run": n, "task": "lookup-retry-limit", "task_revision": revision, "config": config,
+                               "total_cost_usd": cost, "grade": {"verdict": verdict}, **extra}) + "\n"
+        out.write_text(row(0, "defaults") + row(0, "haiku-high", "stopped", 0.5)
+                       + row(1, "haiku-high", task_revision=revision - 1))
+        limited.write_text(row(1, "defaults", cost=0.0, limited_reason="network"))
+        argv = ("--tasks", "lookup-retry-limit", "--configs", "defaults", "haiku-high", "--runs", "2", "--seed", "1")
+
+        def triples(kept=3):
+            return [(r["run"], r["config"]) for r in map(json.loads, out.read_text().splitlines())][kept:]
+        self.assertEqual(self.main(*argv)[0], 0)
+        self.assertEqual(sorted(triples()), [(0, "haiku-high"), (1, "defaults"), (1, "haiku-high")])
+        code, err, _ = self.main(*argv)
+        self.assertEqual(code, 0)
+        self.assertIn("skipped 4 runs already in the results", err)
+        self.assertEqual(len(triples()), 3)
+        # What the rows on record cost counts toward --max-total: room for one more $0.50 run, not two.
+        out.write_text(row(0, "defaults", cost=2.0))
+        limited.write_text("")
+        self.assertEqual(self.main(*argv, "--budget", "0.5")[0], 1)
+        self.assertEqual(len(triples(kept=1)), 1)
 
     def test_a_results_or_keep_folder_that_cannot_be_written_stops_the_runner_before_any_run(self):
         (self.dir / "a-file").write_text("not a folder")

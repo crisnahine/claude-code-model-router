@@ -8,7 +8,6 @@ else."""
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Mapping
@@ -66,7 +65,6 @@ class Registry:
     levels: Mapping[Level, LevelSpec]  # in level order; `needs` never falls as the level rises
     trusted_levels: Mapping[Level, LevelSpec] = field(default_factory=dict)  # the levels without a project's file
     aliases: Mapping[str, str] = field(default_factory=dict)
-    prices: Mapping[str, Any] = field(default_factory=dict)  # the shipped list prices, which the benchmark reads
     newest: Mapping[str, str] = field(default_factory=dict)
     older_aliases: Mapping[str, Mapping[str, str]] = field(default_factory=dict)  # provider: family: the ID its alias runs
     session: Mapping[str, str] = field(default_factory=dict)  # family: its lowest effort for a recommended main session
@@ -161,13 +159,3 @@ class Registry:
             return float(value) if value is not None else self.strength(n)
 
         return min(qualifying, key=lambda n: (cost(n), self.strength(n), n))
-
-    def price(self, model_id: str) -> dict | None:
-        """List prices for a full model ID, or None for a version the table doesn't list. The router prices
-        nothing: the benchmark reads these. A near match never counts: a new version is often priced differently."""
-        table = self.prices
-        model_id = re.sub(r"-\d{8}$", "", (model_id or "").lower().split("[")[0])
-        if model_id in table:
-            return table[model_id]
-        families = [k for k in table if k.endswith("-*") and model_id.startswith(k[:-1])]
-        return table[max(families, key=len)] if families else None

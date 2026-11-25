@@ -1,5 +1,8 @@
 {
   "class": "bugfix",
-  "revision": 1,
+  "revision": 2,
+  "revisions": {
+    "2": "balances is also timed untraced on 15,000 accounts and fails over 1 s of CPU time, so a loop that runs in C, such as `x in list` over the invoices, fails"
+  },
   "brief": "balances in billing/statement.py makes the month-end run on 40,000 accounts take hours. The cause: it runs one query per account and one per invoice. Make it run at most 3 SQL statements however many rows there are, with work that grows in proportion to the data, and return exactly what it returns now. Don't change the schema or billing/rules.py, and leave no temp tables behind."
 }

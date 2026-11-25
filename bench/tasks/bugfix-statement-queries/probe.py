@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location("passcheck", Path(__file__).resolve().parent.parent / "passcheck.py")
@@ -18,11 +19,12 @@ PREFIX = work + os.sep
 LINE_CAP = 3_000_000  # a linear answer stays far below this
 VM_CAP = 2_000_000  # progress-handler calls, 100 VM steps each
 OVER = 10 ** 9
+clock = time.process_time  # bound before the work's code loads, so it can't replace the clock
 
 
 def run(data):
     out = {"error": None, "pairs": None, "statements": 0, "vm": 0, "lines": 0, "sentinel": False, "schema": None,
-           "temp": None}
+           "temp": None, "cpu": None}
     seen = {"statements": 0, "vm": 0, "lines": 0, "sentinel": False, "counting": True, "traced": True}
 
     def on_statement(sql):
@@ -60,16 +62,21 @@ def run(data):
         conn.executemany("INSERT INTO payments VALUES (?, ?, ?, ?, ?)", data["payments"])
         conn.commit()
         balances = importlib.import_module("billing.statement").balances
-        conn.set_trace_callback(on_statement)
-        conn.set_progress_handler(on_progress, 100)
-        sys.settrace(tracer)
-        try:
+        if payload.get("timed"):
+            start = clock()
             result = balances(conn)
-        finally:
-            if sys.gettrace() is not tracer:
-                seen["traced"] = False  # tracing was replaced or removed, so the line count means nothing
-            sys.settrace(None)
-            seen["counting"] = False
+            out["cpu"] = clock() - start
+        else:
+            conn.set_trace_callback(on_statement)
+            conn.set_progress_handler(on_progress, 100)
+            sys.settrace(tracer)
+            try:
+                result = balances(conn)
+            finally:
+                if sys.gettrace() is not tracer:
+                    seen["traced"] = False  # tracing was replaced or removed, so the line count means nothing
+                sys.settrace(None)
+                seen["counting"] = False
         if isinstance(result, dict):
             try:
                 pairs = sorted(result.items())
