@@ -229,19 +229,6 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
-def _plugin_roots(plugin: str) -> list[Path]:
-    """Install folders of a plugin: the install record, else a bounded walk of the plugins folder by name."""
-    roots = installed_roots(plugin)
-    if roots:
-        return roots
-    for current, dirs, files in _shallow_walk(store.claude_home() / "plugins"):
-        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS + ("data",)]
-        if Path(current).name == plugin:
-            roots.append(Path(current))
-            dirs[:] = []
-    return roots
-
-
 def find(agent_type: str, project: Path) -> dict | None:
     """The agent's definition, or None when it can't be found. An agent we can't see is
     left alone: it may have a model of its own that we would be overriding blind."""
@@ -249,7 +236,7 @@ def find(agent_type: str, project: Path) -> dict | None:
         plugin, name = agent_type.split(":", 1)
         leaf = name.split(":")[-1]
         ours = plugin == cfg.PLUGIN_NAME
-        roots = [cfg.PLUGIN_ROOT] if ours else _plugin_roots(plugin)
+        roots = [cfg.PLUGIN_ROOT] if ours else installed_roots(plugin)
         listed = [path for root in roots for path in _listed(plugin, root)] if not ours else []
         if listed:
             for path in listed:

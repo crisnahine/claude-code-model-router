@@ -1314,9 +1314,9 @@ class AgentDiscovery(Sandbox):
         self.agent("late", "opus", install / "zz" / "agents")
         self.assertIsNone(agents.find("acme:late", self.project))  # the walk stops at 2000 .md files
 
-    def test_other_plugin_by_folder_name(self):
+    def test_a_plugin_the_install_record_doesnt_list_is_left_alone_and_never_walked_for(self):
         self.agent("helper", "haiku", self.home / "plugins" / "cache" / "market" / "acme" / "1.0" / "agents")
-        self.assertEqual(agents.find("acme:helper", self.project)["model"], "haiku")
+        self.assertIsNone(agents.find("acme:helper", self.project))
 
     def test_quoted_model(self):
         self.agent("quoted", '"opus"  # the strong one')

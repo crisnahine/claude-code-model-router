@@ -167,7 +167,7 @@ Its state is in `~/.claude/plugins/data/model-router-claude-code-model-router/`,
 ## What it can't do
 
 - It never changes the main conversation's model or effort by itself, since a switch re-reads the conversation uncached. The [session check](#the-session-check) offers one before the first prompt, and only a setup you pick runs `/model` and `/effort`. Otherwise use `ultrathink` or `/effort`.
-- It leaves forks, resumed agents and agents whose definition it can't find alone, unless the call or your rule names a model.
+- It leaves forks, resumed agents and agents whose definition it can't find alone, unless the call or your rule names a model. A plugin's agent is found through Claude Code's install record, so one from a plugin loaded with `--plugin-dir` is left alone.
 - It doesn't retry a failed call; set `fallbackModel`. After a model error it suggests a usable model (not under the force variable), and after two errors, or two runs on another model, it routes around that model for a day. With the mod, a run that another mod moved to another model doesn't count.
 - Where Fable bills to usage credits, a background session or teammate with nobody to answer the consent prompt ends its turn, and `claude -p` bills without asking; `max_tier` at `opus` avoids both.
 - Without the mod, as where an organization blocks user mods, it has no dollar figures, workflow routing, settings lists, newest IDs or model table in the Agent and Workflow tools' descriptions, and no status line, `/model-router` or session check: the state is in `/config` and `/model-router:usage`, and nothing asks about the session. With hooks off it does nothing.
