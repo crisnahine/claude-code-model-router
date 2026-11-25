@@ -82,14 +82,14 @@ def read(days: int | None = None, path: Path | None = None, session: str | None 
     mark = f'"session": {json.dumps(session)}' if session else ""
     cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days) if days else None
     try:
-        lines = (path or store.ledger_path()).read_text(encoding="utf-8").splitlines()
+        lines = (path or store.ledger_path()).read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return rows
     for line in lines:
         if mark not in line:
             continue
         try:
-            row = json.loads(line)
+            row = store.loads(line)
             if cutoff and _dt.datetime.fromisoformat(row["ts"]) < cutoff:
                 continue
         except (KeyError, ValueError, TypeError):
@@ -104,10 +104,10 @@ def since(days: int, path: Path | None = None) -> str | None:
     less than asked: a new ledger, or one `store.append_ledger` cut to its newer half."""
     cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)
     try:
-        with (path or store.ledger_path()).open(encoding="utf-8") as fh:
+        with (path or store.ledger_path()).open(encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 try:
-                    ts = json.loads(line)["ts"]
+                    ts = store.loads(line)["ts"]
                     return ts if _dt.datetime.fromisoformat(ts) > cutoff else None
                 except (KeyError, ValueError, TypeError):
                     continue

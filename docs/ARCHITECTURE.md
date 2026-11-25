@@ -40,7 +40,7 @@ While the runtime answers (its last command replied, if only `{"ok": true}`), th
 
 The other settings hooks do the bookkeeping: the session note and model, a model the request names, `Agent` results and failures, background stops, and the Stop check.
 
-`cli.main` catches what a handler raises and exits 0. The launcher runs Python with `-I`, exits 0 with no Python 3.9 or later, and 1, never 2, on other hook failures. Each mod hook's `.catch` passes the event on.
+`cli.main` catches what a handler raises, writes its type and place to stderr, and exits 1: Claude Code shows a hook error notice and goes on, and the mod counts a failed round trip, so it holds `max_tier` by family (`capped`). Hook input that doesn't parse reads as empty, and an Agent call with no readable input is left alone on both paths. The launcher runs Python with `-I`, exits 0 with no Python 3.9 or later, and 1, never 2, on other hook failures. Each mod hook's `.catch` passes the event on.
 
 ## In an interactive session
 
@@ -200,7 +200,7 @@ Writes are atomic. Each read-modify-write and ledger append holds an OS lock (`f
 | Newer `schema` in `state.json` or `locks.json` | Read, never written |
 | `locks.json` corrupt | Left as it is |
 | Per-session file corrupt | Read as empty, replaced on the next write |
-| Bad ledger line | Skipped |
+| Ledger line that doesn't parse (bad bytes, nesting past the parser's limit) | Skipped |
 
 ## Trust
 
@@ -210,7 +210,7 @@ The user's `~/.claude/model-router.json` is trusted in full. A project's `.claud
 - Its rule `level` is a floor, its rule `model` follows row 5, and `route: false` is ignored. A user rule setting an agent's level or model voids both of the project's.
 - A model it adds is never a pick, a clamp stand-in or a redo's next model, is ignored under a cap, and may not overlap a trusted name.
 
-Only `/config` sets `routing_mode`; `/model-router` switches routing for one session without writing it. Bad types and non-finite numbers are dropped, and `/model-router:models` lists what was dropped or held back.
+Only `/config` sets `routing_mode`; `/model-router` switches routing for one session without writing it. Bad types and non-finite numbers are dropped, and `/model-router:models` lists what was dropped or held back. An override file that doesn't parse, nests past the parser's limit, is over 4 MiB or isn't a regular file says nothing (`store.load_dict`).
 
 ## Machine-readable output
 

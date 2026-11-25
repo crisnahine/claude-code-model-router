@@ -157,6 +157,21 @@ test('mod-start and mod-spawn carry the allowlist and effort keys of each settin
   }
 })
 
+test('a settings value nested past what the runtime reads crosses cut to three levels', async () => {
+  // A repository's settings file, or another mod's answer, can nest a value past the runtime's JSON parser.
+  let deep: unknown = 'opus'
+  for (let i = 0; i < 100000; i++) deep = [deep]
+  const mod = load({ 'mod-spawn': PICK }, {}, { project: { availableModels: deep, deniedModels: ['haiku'],
+    modelSettings: { 'claude-opus-5-5': { maxEffortLevel: { a: { b: deep } }, effortLevel: 'high' } } } })
+  await mod.sessionStart({ source: 'startup' })
+  await mod.spawn(spawnEvent())
+  assert.equal(mod.calls.length, 2)
+  for (const call of mod.calls) {
+    assert.deepEqual(call.stdin.settings.project, { availableModels: [[[null]]], deniedModels: ['haiku'],
+      modelSettings: { 'claude-opus-5-5': { maxEffortLevel: { a: null }, effortLevel: 'high' } } })
+  }
+})
+
 test('a settings read that fails leaves that source out and sends the others', async () => {
   const settings: Record<string, object | Error> = { policy: new Error('denied'), user: { availableModels: ['haiku'] } }
   const mod = load({ 'mod-spawn': PICK }, {}, settings)

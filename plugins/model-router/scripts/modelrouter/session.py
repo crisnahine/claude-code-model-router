@@ -3,7 +3,6 @@ setups the registry recommends for the session that plans and delegates."""
 from __future__ import annotations
 
 import datetime as _dt
-import json
 import os
 from typing import Iterator
 
@@ -149,7 +148,7 @@ def tool_calls(transcript_path: object, marker: str) -> Iterator[tuple[dict, dic
         if '"tool_use"' not in line or marker not in line:
             continue
         try:
-            row = json.loads(line)
+            row = store.loads(line)
             content = row["message"]["content"]
         except (ValueError, KeyError, TypeError):
             continue
@@ -179,7 +178,7 @@ def from_transcript(transcript_path: object) -> tuple[str | None, float | None]:
         if '"assistant"' not in line or '"model"' not in line:
             continue
         try:
-            row = json.loads(line)
+            row = store.loads(line)
         except ValueError:
             continue
         if not isinstance(row, dict) or row.get("isSidechain"):

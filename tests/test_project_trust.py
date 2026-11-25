@@ -1,13 +1,19 @@
 """What a project's files and the hook's cwd can and can't change."""
 from __future__ import annotations
 
+import io
+import json
 import os
+import sys
+import threading
+import time
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from test_model_router import HARD, Sandbox
-from modelrouter import agents, request
+from test_model_router import BUILD, HARD, Sandbox
+from modelrouter import agents, cli, request, store
 from modelrouter import config as cfg
 from modelrouter import mod as modpath
 from modelrouter.config import Level
@@ -146,6 +152,69 @@ class ModSpawnElsewhere(Sandbox):
         out = modpath.spawn({"session_id": "s1", "cwd": str(other), "parent_model": "claude-opus-5-5",
                              "kind": "subagent", "tool_input": {"subagent_type": "scout", "prompt": "list files"}})
         self.assertEqual(out["model"], "opus")
+
+
+def run_hook(name: str, hook_input: dict) -> str:
+    """A hook as the launcher runs it: JSON on stdin, and cli.main catching what a handler raises."""
+    stdin = io.TextIOWrapper(io.BytesIO(json.dumps(hook_input).encode()), encoding="utf-8")
+    with mock.patch.object(sys, "stdin", stdin), redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()):
+        cli.main([name])
+    return out.getvalue()
+
+
+class UnreadableProjectFiles(Sandbox):
+    """A project file that can't be read with confidence says nothing: routing, the cap and the session note go on."""
+
+    def setUp(self):
+        super().setUp()
+        (self.project / ".claude").mkdir()
+        self.rules = self.project / ".claude" / "model-router.json"
+
+    def test_a_file_nested_past_the_parsers_limit_says_nothing(self):
+        self.options(max_tier="sonnet")
+        call = self.call("general-purpose", BUILD, model="opus")
+        for junk in ("[" * 100000, "{\"a\":" * 100000):
+            with self.subTest(junk=junk[:5]):
+                self.rules.write_text(junk)
+                self.assertIn('"model": "sonnet"', run_hook("pre-agent", call))
+                note = json.loads(run_hook("session-start", {"session_id": "s1", "cwd": str(self.project)}))
+                self.assertIn("Here every Agent call names both", note["hookSpecificOutput"]["additionalContext"])
+
+    def test_a_file_over_the_size_limit_or_of_endless_digits_says_nothing_and_reads_at_once(self):
+        raised = json.dumps({"levels": {"complex": {"effort": "max"}}})
+        with mock.patch.object(store, "FILE_MAX_BYTES", len(raised)):
+            self.rules.write_text(raised)
+            self.assertEqual(cfg.load().levels[Level.complex].effort, "max")
+            self.rules.write_text(raised + " ")
+            self.assertNotEqual(cfg.load().levels[Level.complex].effort, "max")
+        self.rules.write_text('{"levels": {"complex": {"needs": ' + "9" * 1000000 + '}}}')
+        started = time.monotonic()
+        reg = cfg.load()
+        self.assertLess(time.monotonic() - started, 1)  # a million digits as an int would take seconds
+        self.assertEqual(reg.levels, cfg.shipped().levels)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "needs FIFOs")
+    def test_a_file_that_is_a_fifo_or_a_device_says_nothing_and_never_blocks(self):
+        fifo = Path(self.tmp.name) / "fifo"
+        os.mkfifo(fifo)
+        for target in (fifo, Path("/dev/zero")):
+            with self.subTest(target=target):
+                self.rules.unlink(missing_ok=True)
+                os.symlink(target, self.rules)
+                done = threading.Event()
+                threading.Thread(target=lambda: (cfg.load(), done.set()), daemon=True).start()
+                self.assertTrue(done.wait(5), "the read blocked")
+                self.assertEqual(cfg.load().levels, cfg.shipped().levels)
+
+    def test_a_file_in_a_folder_this_user_cant_enter_says_nothing(self):
+        real = Path.is_file
+
+        def is_file(path):
+            if path == self.rules:
+                raise PermissionError(13, "Permission denied")
+            return real(path)
+        with mock.patch.object(Path, "is_file", is_file):
+            self.assertEqual(cfg.load().levels, cfg.shipped().levels)
 
 
 class VersionAfterTheCap(Sandbox):

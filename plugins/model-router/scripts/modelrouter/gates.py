@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import datetime as _dt
-import json
 import os
 import re
 from pathlib import Path
@@ -85,8 +84,8 @@ def note_agent_checks(hook_input: dict) -> None:
     """A subagent's commands are in its own transcript, which the Stop check doesn't read."""
     session_id = hook_input.get("session_id")
     entry = store.load_entry("edits", session_id)
-    edited = entry.get("edited_at") or 0
-    if edited > (entry.get("verified_at") or 0) and checks_ran_since(hook_input.get("agent_transcript_path"), edited):
+    edited = store.stamp(entry.get("edited_at"))
+    if edited > store.stamp(entry.get("verified_at")) and checks_ran_since(hook_input.get("agent_transcript_path"), edited):
         note_check(session_id)
 
 
@@ -394,7 +393,7 @@ def _never_ran(tail: str, ids: set) -> set:
         if '"tool_result"' not in line:
             continue
         try:
-            content = json.loads(line)["message"]["content"]
+            content = store.loads(line)["message"]["content"]
         except (ValueError, KeyError, TypeError):
             continue
         for block in content if isinstance(content, list) else []:
@@ -413,8 +412,8 @@ def _never_ran(tail: str, ids: set) -> set:
 def unverified_edit(hook_input: dict) -> str | None:
     session_id = hook_input.get("session_id")
     entry = store.load_entry("edits", session_id)
-    edited = entry.get("edited_at") or 0
-    if not edited or edited <= (entry.get("verified_at") or 0):
+    edited = store.stamp(entry.get("edited_at"))
+    if not edited or edited <= store.stamp(entry.get("verified_at")):
         return None
     ran = checks_ran_since(hook_input.get("transcript_path"), edited)
     if ran is None:

@@ -100,6 +100,15 @@ function effortFields(raw: unknown): unknown {
   }))
 }
 
+// A copy at most `depth` levels deep, null below. The runtime reads these keys three levels deep at most
+// (modelSettings, a model, its field), and a value nested past its JSON parser's limit would fail the whole command.
+function shallow(value: unknown, depth = 3): unknown {
+  if (value === null || typeof value !== 'object') return value
+  if (depth === 0) return null
+  return Array.isArray(value) ? value.map(item => shallow(item, depth - 1))
+    : Object.fromEntries(Object.entries(value).map(([key, item]) => [key, shallow(item, depth - 1)]))
+}
+
 type Layers = Record<string, Record<string, unknown>>
 // Each source's newest answer, the reads not answered yet, and the sources that once missed SETTINGS_MS.
 type Reads = { latest: Layers; out: Set<SettingsSource>; slow: Set<SettingsSource> }
@@ -118,7 +127,7 @@ async function modelSettings($: EngineInterface, reads: Reads): Promise<Layers |
         try {
           const found = (await $.settings.read({ source })) as Record<string, unknown>
           reads.latest[source] = Object.fromEntries(KEYS.filter(key => key in found)
-            .map(key => [key, key === 'modelSettings' ? effortFields(found[key]) : found[key]]))
+            .map(key => [key, shallow(key === 'modelSettings' ? effortFields(found[key]) : found[key])]))
         } catch {
           delete reads.latest[source]
         } finally {

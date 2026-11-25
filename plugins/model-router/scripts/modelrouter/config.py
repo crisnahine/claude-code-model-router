@@ -438,13 +438,20 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
     )
 
 
+def _is_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:  # a symlink into a folder this user can't enter raises PermissionError
+        return False
+
+
 def load(hook_input: dict | None = None) -> Registry:
     """The registry for this user and project, from the three files, each read once. The project's file is
     the nearest one up to the repository root from CLAUDE_PROJECT_DIR, else, for a skill command run
     through Bash, from cwd."""
     start = Path(os.environ["CLAUDE_PROJECT_DIR"]) if os.environ.get("CLAUDE_PROJECT_DIR") else project_dir(hook_input)
     found = [f / ".claude" / OVERRIDE_FILE for f in project_folders(start)]
-    project_file = next((p for p in found if p.is_file()), found[0])
+    project_file = next((p for p in found if _is_file(p)), found[0])
     paths = (store.claude_home() / OVERRIDE_FILE, project_file)
     user, project = (store.load_dict(path) for path in paths)
     newer = tuple(path for path, file in zip(paths, (user, project)) if _newer(file))

@@ -6,7 +6,7 @@ import itertools
 import json
 from pathlib import Path
 
-from test_model_router import BUILD, Sandbox, calls, cfg, gates, health, hooks, settings
+from test_model_router import BUILD, Sandbox, calls, cfg, gates, health, hooks, session, settings
 from modelrouter import mod as modpath
 
 COMMIT = ("git commit -m \"$(cat <<'EOF'\nAdd parser tests\n\npytest now covers the empty-input case.\nEOF\n)\"")
@@ -119,6 +119,20 @@ class StopCheck(Sandbox):
         self.assertIsNone(self.edit_then_stop(self.bash("pytest -q"), self.result("1 passed", error=False)))
         self.assertIsNone(self.edit_then_stop(self.bash("pytest -q"), self.result(refused),
                                               self.bash("pytest -q", "toolu_2")))
+
+    def test_a_transcript_line_nested_past_the_parsers_limit_is_skipped(self):
+        # An MCP tool's structured result is whatever its server sent, and every marker is on this line.
+        deep = ('{"type": "assistant", "model": "x", "tool_use": "command", "tool_result": '
+                + "[" * 100000 + "]" * 100000 + "}\n")
+        for rows, asked in (((self.bash("pytest -q"),), False), ((), True)):
+            path = Path(self.transcript(*rows))
+            path.write_text(deep + path.read_text() + deep)
+            self.advance(10)
+            hooks.post_edit({"session_id": "s1", "cwd": str(self.project),
+                             "tool_input": {"file_path": str(self.project / "src" / "parser.py")}})
+            out = hooks.stop({"session_id": "s1", "cwd": str(self.project), "transcript_path": str(path)})
+            self.assertEqual(out is not None, asked)
+            self.assertEqual(session.from_transcript(str(path)), (None, None))
 
     def test_the_check_waits_for_any_background_task(self):
         for kind in ("monitor", "cloud session", "MCP task", "a type Claude Code adds later"):

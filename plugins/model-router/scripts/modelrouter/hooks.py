@@ -157,7 +157,15 @@ def mod_start(hook_input: dict) -> dict:
 def pre_agent(hook_input: dict) -> dict | None:
     if mod.routes(hook_input.get("tool_use_id")):
         return None  # the plugin's mod routes this call when it spawns
+    if not cfg.tool_input(hook_input):
+        return None  # an input that didn't parse: updatedInput would replace the call with only a model
     return fallback.route(hook_input, settings.Snapshot(hook_input, sends_ids=False))
+
+
+def mod_spawn(hook_input: dict) -> dict | None:
+    """A spawn left as it is still answers OK, so an empty answer means the runtime didn't run, and the mod holds the cap.
+    A spawn whose input didn't parse gets that empty answer too."""
+    return (mod.spawn(hook_input) or mod.OK) if cfg.tool_input(hook_input) else None
 
 
 def _outcome(kind: str, hook_input: dict, reg: Registry, **fields: Any) -> calls.Outcome:
@@ -268,8 +276,7 @@ def model_switch(hook_input: dict) -> dict | None:
 
 
 HANDLERS = {
-    # A spawn left as it is still answers OK, so an empty answer means the runtime didn't run.
-    "mod-start": mod_start, "mod-spawn": lambda hook_input: mod.spawn(hook_input) or mod.OK, "mod-usage": mod.usage,
+    "mod-start": mod_start, "mod-spawn": mod_spawn, "mod-usage": mod.usage,
     "mod-status": mod.status, "mod-check": mod.check, "mod-end": mod.end,
     "session-start": session_start, "user-prompt": user_prompt, "pre-agent": pre_agent,
     "post-agent": post_agent, "agent-failed": agent_failed, "agent-stopped": agent_stopped,

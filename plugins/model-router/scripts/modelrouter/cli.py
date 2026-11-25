@@ -121,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             try:
                 # Bytes: json detects UTF-8 itself, where the text stream would decode in the locale's code page.
-                hook_input = json.loads(sys.stdin.buffer.read())
+                hook_input = store.loads(sys.stdin.buffer.read())
             except ValueError:
                 hook_input = {}
             hook_input = _well_formed(hook_input)
@@ -131,7 +131,13 @@ def main(argv: list[str] | None = None) -> int:
             if output:
                 print(json.dumps(output))
         except Exception as exc:  # noqa: BLE001 - a hook must never break the session
-            print(f"model-router {args.cmd}: {exc}", file=sys.stderr)
+            # Exit 1 is Claude Code's non-blocking error, shown as a hook error notice, and the mod's failed round trip.
+            # Only the type and place are named: an exception's text can carry a repository's.
+            import traceback
+            where = traceback.extract_tb(exc.__traceback__)[-1]
+            print(f"model-router {args.cmd}: {type(exc).__name__} at {os.path.basename(where.filename)}:{where.lineno}; "
+                  "this hook gave no answer", file=sys.stderr)
+            return 1
         return 0
 
     snap = settings.Snapshot(None)

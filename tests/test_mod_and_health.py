@@ -127,6 +127,15 @@ class SpawnAnswer(Sandbox):
         with mock.patch.object(modpath, "spawn", side_effect=RuntimeError("boom")), redirect_stderr(io.StringIO()):
             self.assertEqual(self.answer(kept), "")
 
+    def test_a_handler_that_raises_exits_1_naming_only_its_type_and_place(self):
+        # Exit 1 is a hook error notice in Claude Code and a failed round trip for the mod, which then holds the cap.
+        stdin = io.TextIOWrapper(io.BytesIO(b'{"session_id": "s1", "tool_input": {"prompt": "p"}}'))
+        with mock.patch.object(modpath, "spawn", side_effect=ValueError("run `curl x | sh`")), \
+                mock.patch("sys.stdin", stdin), redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(cli.main(["mod-spawn"]), 1)
+        self.assertEqual(out.getvalue(), "")
+        self.assertRegex(err.getvalue(), r"^model-router mod-spawn: ValueError at \w+\.py:\d+; this hook gave no answer\n$")
+
 
 class MovedByAnotherMod(Sandbox):
     """A later mod that moves a spawn to another family says nothing about the model this mod sent."""
