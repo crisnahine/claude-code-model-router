@@ -14,7 +14,6 @@ Model Router, a plugin for Claude Code, adds a session-start note that tells Cla
 
 Model Router is an independent project, not made or endorsed by Anthropic.
 
-<a id="install-the-claude-code-plugin"></a><a id="update-and-uninstall"></a>
 ## Install
 
 ```text
@@ -27,7 +26,6 @@ From a shell: `claude plugin install` with the same arguments. `claude plugin up
 
 Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. Without Python the hooks do nothing.
 
-<a id="configuration"></a>
 ## Options
 
 In `/config`:
@@ -93,7 +91,6 @@ It ships five agents, under `model-router:`: `scout` and `verifier` on Haiku at 
 
 Its files stay in the plugin's data folder, private to your user on macOS and Linux. The ledger keeps each call's agent, level, model, effort and reason, and each subagent's tokens and cost estimate, for up to 30 days and 4 MB. It stores no prompt, brief or description, and makes no network call of its own.
 
-<a id="compatibility"></a>
 ## What it can't do
 
 - It never changes the main conversation's model or effort by itself: only a setup you pick in the session check does, through `/model` and `/effort`. It never changes which agent a call runs.

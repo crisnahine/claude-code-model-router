@@ -18,7 +18,6 @@ Model Router manages the Claude model and effort that each subagent, teammate an
 - Commands: `/model-router` (state, `on`, `off`, `check on`, `check off`), `/model-router:route` says which model and effort fit a task, `/model-router:models` shows the models usable here (`reset` clears learned availability), and `/model-router:usage` shows recent routing, tokens per model and Claude Code's cost estimate per subagent.
 - Agents: `scout` and `verifier` on Haiku at `medium`, `implementer` on Haiku at `high`, and `architect` and `reviewer` on Sonnet at `high`.
 - Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python`. The plugin makes no network call.
-- If you installed from `main` on 2026-11-22 or 2026-11-23, delete `~/.claude/plugins/cache/claude-code-model-router/model-router/0.2.0` first. That older copy has the same version number, and Claude Code keeps running it.
 
 ## 0.1.2 - 2026-11-24
 
