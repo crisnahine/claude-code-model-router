@@ -1,4 +1,4 @@
-From: Mark Ellis <mark@granitepay.com>
+From: Mark Ellis <mark@granitepay.test>
 Date: 2026-11-23 17:05 UTC
 Subject: Dark mode?
 

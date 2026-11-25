@@ -1,4 +1,4 @@
-From: Nina Petrova <nina@everlane-studio.com>
+From: Nina Petrova <nina@everlane-studio.test>
 Date: 2026-11-23 16:40 UTC
 Subject: Password changed, I didn't do it
 

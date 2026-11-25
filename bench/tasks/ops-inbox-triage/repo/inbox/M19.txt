@@ -1,5 +1,5 @@
-From: Mail Delivery System <postmaster@copperleaf.co>
+From: Mail Delivery System <postmaster@copperleaf.test>
 Date: 2026-11-23 17:30 UTC
 Subject: Undeliverable: Your weekly summary
 
-Delivery has failed to these recipients or groups: j.doe@copperleaf.co. The email address you entered couldn't be found.
+Delivery has failed to these recipients or groups: j.doe@copperleaf.test. The email address you entered couldn't be found.

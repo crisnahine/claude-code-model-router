@@ -1,4 +1,4 @@
-From: A. Researcher <sec.research@protonmail.com>
+From: A. Researcher <sec.research@example.net>
 Date: 2026-11-23 19:30 UTC
 Subject: Stored XSS in shared report pages
 

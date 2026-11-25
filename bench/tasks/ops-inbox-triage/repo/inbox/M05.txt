@@ -1,4 +1,4 @@
-From: GranitePay IT <it@granitepay.com>
+From: GranitePay IT <it@granitepay.test>
 Date: 2026-11-23 10:05 UTC
 Subject: Our API key ended up in a public repo
 

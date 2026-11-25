@@ -457,9 +457,6 @@ def session_figures(name: str, session: dict) -> dict:
     router = session["router"]
     classes = session["classes"]
     roles = {role: cfg for role, cfg in session["roles"].items() if cfg}
-    if session.get("plugin_ref"):
-        f["commit"] = session["plugin_ref"]
-        f["commit_code"] = f"`{session['plugin_ref']}`"  # the span must sit outside the code span
     f["router_code"] = f"`{router}`"  # the span must sit outside the code span
     f["classes"] = str(len(classes))
     f["saturated"] = str(session["saturated"])
@@ -713,7 +710,7 @@ def snapshot() -> Snapshot:
         version=v, released=release_date(v), claude_code=manifest()["engines"]["claude-code"].removeprefix(">="),
         ladder=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
         texts={path: (ROOT / path).read_text(encoding="utf-8") for path in wanted if (ROOT / path).exists()},
-        bench=analyze.figures(analyze.load(analyze.default_paths()), legacy=True))
+        bench=analyze.figures(analyze.load(analyze.default_paths())))
 
 
 def build(snap: Snapshot) -> dict:

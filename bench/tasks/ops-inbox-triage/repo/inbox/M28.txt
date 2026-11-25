@@ -1,4 +1,4 @@
-From: GranitePay Finance <finance@granitepay.com>
+From: GranitePay Finance <finance@granitepay.test>
 Date: 2026-11-24 07:45 UTC
 Subject: Double charge and invoices page error
 

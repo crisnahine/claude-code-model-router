@@ -1,13 +1,5 @@
 [
   {
-    "id": "plugin-next",
-    "description": "Model Router at 780ee86, the fixes after 27b94e6 (research-grade frontier wording, read-only role agents that say so, a smaller session note), with its own defaults",
-    "plugin": true,
-    "env": {},
-    "plugin_ref": "780ee86",
-    "price_model": "sonnet"
-  },
-  {
     "id": "plugin",
     "description": "Model Router with today's defaults, loaded with --plugin-dir from a copy frozen at the start of the batch",
     "plugin": true,
@@ -303,7 +295,6 @@
   },
   {
     "id": "sonnet-via-opusplan",
-    "was": "opusplan",
     "description": "No plugin: --model opusplan, which runs Sonnet throughout a headless dontAsk run, since Opus plans only in plan mode and such a run never enters it",
     "plugin": false,
     "env": {},

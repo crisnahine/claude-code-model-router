@@ -1,4 +1,4 @@
-From: Bluefin Health Mailer <noreply@mailer.bluefin.health>
+From: Bluefin Health Mailer <noreply@mailer.bluefin-health.test>
 Date: 2026-11-23 09:12 UTC
 Subject: Automatic reply: URGENT: your ticket #4471
 
