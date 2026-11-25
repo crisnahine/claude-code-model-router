@@ -69,5 +69,11 @@
       "model": "claude-haiku-5-5",
       "effort": "low"
     }
+  },
+  "mod-status": {
+    "session_id": "s1"
+  },
+  "mod-end": {
+    "session_id": "s1"
   }
 }

@@ -8,7 +8,7 @@ import re
 import time
 from pathlib import Path
 
-from . import allowlist, calls, ladder, ledger, settings, store
+from . import allowlist, calls, ladder, ledger, report, settings, store
 from . import config as cfg
 from . import spawn as procedure
 
@@ -105,6 +105,21 @@ def _newest(snap: settings.Snapshot, decision: dict) -> str | None:
     if decision["action"] == "deny" or decision["version"]:
         return None
     return snap.registry.newest_id(decision["model"], snap.options.provider, snap.allowed, snap.health)
+
+
+def status(hook_input: dict) -> dict:
+    """The status line and the /model-router reply, after the switch `routing` asks for (on or off), when given."""
+    session_id, asked = hook_input.get("session_id"), {"on": "auto", "off": "off"}.get(hook_input.get("routing"))
+    if asked:
+        settings.switch(session_id, asked)
+    snap = settings.Snapshot(hook_input)
+    shown = report.status(snap)
+    return {**OK, **shown, "routing": snap.options.mode == "auto", **({"reply": report.switched(snap, asked)} if asked else {})}
+
+
+def end(hook_input: dict) -> dict:
+    settings.forget(hook_input.get("session_id"))
+    return OK
 
 
 def usage(hook_input: dict) -> dict:

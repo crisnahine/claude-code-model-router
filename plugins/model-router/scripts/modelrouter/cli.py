@@ -1,7 +1,8 @@
 """Command line: hook commands read hook JSON on stdin; the rest serve skills and scripts.
 
   hooks      session-start, user-prompt, pre-agent, post-agent, agent-failed, agent-stopped,
-             post-edit, stop, model-switch, and mod-start, mod-spawn, mod-usage for hooks/router.ts
+             post-edit, stop, model-switch, and mod-start, mod-spawn, mod-usage, mod-status,
+             mod-end for hooks/router.ts
   policy     the routing policy as it stands for this user and project
   models     what each registry model really runs as, and what is unavailable
              (reset forgets learned availability; --json prints model-router.models/3)

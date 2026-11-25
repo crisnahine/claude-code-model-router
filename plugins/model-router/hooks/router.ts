@@ -13,9 +13,15 @@ const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const TIERS: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable']
 // The id names a file the fallback looks up, so only a plain one is marked (scripts/modelrouter/mod.py routes).
 const PLAIN_ID = /^[A-Za-z0-9_-]{1,128}$/
+// The mod's slash command.
+const COMMAND = 'model-router'
 
-// `note` is for Claude after the Agent call's result; `rules` is the session note, for the Agent tool's description.
-type Pick = { model?: string; effort?: ModelEffort; note?: unknown; rules?: unknown; workflow_rules?: unknown } | null
+// What the runtime answers. A spawn's: `note` is for Claude after the Agent call's result; `rules` is the session note,
+// for the Agent tool's description. mod-status: `line`, `text`, `reply`, `routing`.
+type Answer = {
+  model?: string; effort?: ModelEffort; note?: unknown; rules?: unknown; workflow_rules?: unknown
+  line?: unknown; text?: unknown; reply?: unknown; routing?: unknown
+} | null
 // The effort a routed agent steps at. A workflow script can set a stage's effort, which agent.spawn doesn't carry,
 // so a workflow agent's is only ever raised.
 type Want = { effort: ModelEffort; raiseOnly: boolean }
@@ -32,7 +38,7 @@ function optionEnv(options: PluginOptions): Record<string, string> {
 
 // The runtime's answer (every command answers at least { ok: true }), null when no Python ran, or undefined when
 // the round trip failed. Never throws: a hook that already called next(e) must not reach its .catch and call it again.
-async function ask($: EngineInterface, options: Record<string, string>, command: string, payload: object): Promise<Pick | undefined> {
+async function ask($: EngineInterface, options: Record<string, string>, command: string, payload: object): Promise<Answer | undefined> {
   try {
     const env = { ...(await $.process.hookEnv()), ...options }
     const run = await $.process.run(['sh', `${$.plugin.root}/scripts/model-router.sh`, command], {
@@ -41,7 +47,7 @@ async function ask($: EngineInterface, options: Record<string, string>, command:
       timeoutMs: 8000,
     })
     if (run.exitCode !== 0) return undefined
-    return run.stdout.trim() ? JSON.parse(run.stdout) as Pick : null
+    return run.stdout.trim() ? JSON.parse(run.stdout) as Answer : null
   } catch {
     return undefined
   }
@@ -127,7 +133,7 @@ async function modelSettings($: EngineInterface, reads: Reads): Promise<Layers |
 }
 
 // The settings layers, as session.start sends them, and the runtime's answer. Never throws, like ask.
-async function sendLayers($: EngineInterface, opts: Record<string, string>, reads: Reads): Promise<Pick | undefined> {
+async function sendLayers($: EngineInterface, opts: Record<string, string>, reads: Reads): Promise<Answer | undefined> {
   const layers = await modelSettings($, reads)
   return await ask($, opts, 'mod-start', { ...(layers ? { settings: layers } : {}) })
 }
@@ -187,6 +193,55 @@ function routing(opts: Record<string, string>): boolean {
   return (opts.CLAUDE_PLUGIN_OPTION_ROUTING_MODE ?? '').trim().toLowerCase() !== 'off'
 }
 
+// The interactive features call each platform call inside a try: on a Claude Code without it, or a surface that can't
+// draw it, the feature is absent and routing goes on. The mod loader takes $ only as calls, so nothing is probed first.
+function status($: EngineInterface, line: unknown): void {
+  try {
+    if (typeof line === 'string') $.ui.status(line)
+  } catch {}
+}
+
+// Runs `task` once the calling hook has returned, so nothing waits on it. Whether it was scheduled. Never throws.
+function later($: EngineInterface, task: () => Promise<unknown>): boolean {
+  try {
+    $.clock.after(0, () => { task().catch(() => {}) })
+    return true
+  } catch {
+    return false
+  }
+}
+
+// What one load of the module knows of the person at the prompt and of this session.
+type Live = {
+  interactive: boolean // only then does the mod draw, ask, or register its command
+  routingOn?: boolean // this session's routing as the runtime last answered it, a /model-router switch included
+  refreshing: boolean // one status refresh at a time: one asked for during it runs once more after it
+  stale: boolean
+}
+
+function shown($: EngineInterface, live: Live, answer: Answer | undefined): void {
+  if (typeof answer?.routing === 'boolean') live.routingOn = answer.routing
+  status($, answer?.line)
+}
+
+function refresh($: EngineInterface, opts: Record<string, string>, live: Live): void {
+  if (!live.interactive) return
+  if (live.refreshing) {
+    live.stale = true
+    return
+  }
+  live.refreshing = later($, async () => {
+    try {
+      do {
+        live.stale = false
+        shown($, live, await ask($, opts, 'mod-status', {}))
+      } while (live.stale)
+    } finally {
+      live.refreshing = false
+    }
+  })
+}
+
 function remember<V>(map: Map<string, V>, key: string, value: V): void {
   map.set(key, value)
   if (map.size > KEPT) map.delete(map.keys().next().value as string)
@@ -197,7 +252,7 @@ export const register: Register = (on, options) => {
   // Whether the runtime answers. Only an answer turns it on, and none, or a failed round trip, turns it off. While
   // it's off, the fallback routes each Agent call.
   let answering = false
-  const heard = (reply: Pick | undefined): Pick | undefined => {
+  const heard = (reply: Answer | undefined): Answer | undefined => {
     answering = !!reply
     return reply
   }
@@ -223,7 +278,8 @@ export const register: Register = (on, options) => {
   // The runtime's table for each tool whose description carries it.
   const rules: Record<string, string> = {}
   let sentFor: string | undefined
-  const started = (reply: Pick | undefined): void => {
+  const live: Live = { interactive: false, refreshing: false, stale: false }
+  const started = (reply: Answer | undefined): void => {
     const answer = heard(reply)
     if (typeof answer?.rules === 'string') rules.Agent = answer.rules
     if (typeof answer?.workflow_rules === 'string') rules.Workflow = answer.workflow_rules
@@ -252,19 +308,51 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     sentFor = await sessionId($) ?? sentFor
     started(await sendLayers($, opts, reads))
+    live.interactive = e.isInteractive === true
+    if (live.interactive) {
+      try {
+        await $.command.register({ name: COMMAND, description: "Shows Model Router's state, or switches routing for this session",
+          argumentHint: '[on | off]', immediate: true })
+      } catch {}
+      refresh($, opts, live)
+    }
     return done
   }).catch(($, e, next) => next(e))
 
-  on('session.end', ($, e, next) => {
+  on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') sentFor = undefined
-    return next(e)
+    const done = await next(e)
+    if (live.interactive) {
+      live.routingOn = undefined
+      await ask($, opts, 'mod-end', { session_id: e.sessionId })
+    }
+    return done
+  }).catch(($, e, next) => next(e))
+
+  // Answered here, with no model turn; the text is for the person, and Claude Code puts the plugin's name before it.
+  on('command.run', { command: COMMAND }, async ($, e, next) => {
+    const words = e.args.trim().toLowerCase().split(/\s+/).join(' ')
+    let text = 'Takes on or off.'
+    if (words === 'on' || words === 'off') {
+      const answer = await ask($, opts, 'mod-status', { routing: words })
+      shown($, live, answer)
+      text = typeof answer?.reply === 'string' ? answer.reply : 'Routing is unchanged: the runtime did not answer.'
+    } else if (!words) {
+      const answer = await ask($, opts, 'mod-status', {})
+      shown($, live, answer)
+      text = typeof answer?.text === 'string' ? answer.text : 'The runtime did not answer, so the state is unknown.'
+    }
+    return { text, isTextDisplayOnly: true }
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
     if (e.fork || e.resume) return next(e)
     const unmarked = marked.get(e.tool_use_id) === false
     marked.delete(e.tool_use_id)
-    if (unmarked) return next(e) // the fallback routed it
+    if (unmarked) {
+      refresh($, opts, live)
+      return next(e) // the fallback routed it
+    }
     const effort = callerEffort.get(e.tool_use_id)
     const layers = await modelSettings($, reads)
     const facts = {
@@ -289,7 +377,7 @@ export const register: Register = (on, options) => {
     const pick = heard(reply)
     if (typeof pick?.note === 'string' && e.tool_use_id) remember(notes, e.tool_use_id, pick.note)
     // Without an answer neither path routed this call, so only the cap can still be held, and only while routing.
-    const model = pick ? pick.model : routing(opts) ? capped(e.model, opts.CLAUDE_PLUGIN_OPTION_MAX_TIER) : undefined
+    const model = pick ? pick.model : (live.routingOn ?? routing(opts)) ? capped(e.model, opts.CLAUDE_PLUGIN_OPTION_MAX_TIER) : undefined
     const mine: Want | null = pick?.effort ? { effort: pick.effort, raiseOnly: !!e.workflow } : null
     const efforts = inFlight.get(e.prompt) ?? []
     efforts.push(mine)
@@ -303,6 +391,7 @@ export const register: Register = (on, options) => {
       if (!e.workflow && PLAIN_ID.test(e.tool_use_id) && movedOn(next.trace, model || e.model)) {
         await mark($, `${e.tool_use_id}.moved`)
       }
+      refresh($, opts, live)
       return started
     } finally {
       efforts.splice(efforts.indexOf(mine), 1)
@@ -317,6 +406,7 @@ export const register: Register = (on, options) => {
       if (id !== undefined && id !== sentFor) {
         sentFor = id
         started(await sendLayers($, opts, reads))
+        refresh($, opts, live)
       }
     } else if (!agentEffort.has(e.agentId)) {
       const [want, ...others] = inFlight.get(e.text) ?? []
@@ -342,7 +432,10 @@ export const register: Register = (on, options) => {
   // The main loop's cost and tokens are Claude Code's own (/usage), so only a subagent's turn is recorded.
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    if (e.agentId === undefined) return done
+    if (e.agentId === undefined) {
+      refresh($, opts, live)
+      return done
+    }
     const type = agentType.get(e.agentId)
     const listed = await agentUsage($, e.agentId, e.usage)
     const figures = listed?.figures ?? (e.usage ? { ...(type ? { subagent_type: type } : {}), usage: e.usage } : undefined)

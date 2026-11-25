@@ -75,21 +75,26 @@ def usage(session_id: str | None, agent_id: object, agent: str | None, models: o
                          **({"agent": agent} if agent else {}), **row})
 
 
-def read(days: int | None = None, path: Path | None = None) -> list[dict]:
+def read(days: int | None = None, path: Path | None = None, session: str | None = None) -> list[dict]:
+    """The rows of the last `days` days, or all; with `session`, only that session's."""
     rows: list[dict] = []
+    # Only a line holding the session's id is parsed: the status line reads the ledger after every spawn.
+    mark = f'"session": {json.dumps(session)}' if session else ""
     cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days) if days else None
     try:
         lines = (path or store.ledger_path()).read_text(encoding="utf-8").splitlines()
     except OSError:
         return rows
     for line in lines:
+        if mark not in line:
+            continue
         try:
             row = json.loads(line)
             if cutoff and _dt.datetime.fromisoformat(row["ts"]) < cutoff:
                 continue
         except (KeyError, ValueError, TypeError):
             continue
-        if isinstance(row, dict):
+        if isinstance(row, dict) and (not session or row.get("session") == session):
             rows.append(row)
     return rows
 

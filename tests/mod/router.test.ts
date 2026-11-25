@@ -20,6 +20,17 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
   const writes: [string, string][] = []
   // What $.agent.list(), $.session.usage() and $.session.id() answer; a test sets them.
   const engine = { agents: [] as object[], rateLimits: [] as object[], session: 's1', idFails: false }
+  // The interactive surface: what was drawn, asked, run and written, and what the person answers.
+  const ui = {
+    lines: [] as (string | undefined)[], toasts: [] as string[], asked: [] as [string, any][], registered: [] as any[],
+    ran: [] as any[], sets: [] as [string, unknown][], model: 'claude-sonnet-5-5', turns: 0,
+    answer: async (_labels: readonly string[]): Promise<string> => { throw new Error('dismissed') },
+    rows: [{ key: 'model-router.session_check', label: 'Session check', kind: 'choice', value: 'ask', options: ['ask', 'off'],
+      provider: { plugin: 'model-router@claude-code-model-router', tier: 'user' }, isLocked: false }] as any[],
+    setAnswer: undefined as object | undefined,
+    switches: { opus: 'claude-opus-5-5' } as Record<string, string>,
+    runFails: '' as string,
+  }
   const on = (event: string, ...rest: unknown[]) => {
     hooks[event] = rest.pop() as Hook
     if (rest.length) matchers[event] = rest[0]
@@ -50,6 +61,26 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
         if (engine.idFails) throw new Error('no session id')
         return engine.session
       },
+      model: async () => ui.model,
+      turns: async () => ui.turns,
+    },
+    ui: {
+      status: (text: string | undefined) => { ui.lines.push(text) },
+      toast: (text: string) => { ui.toasts.push(text) },
+      ask: async (question: string, options: any) => { ui.asked.push([question, options]); return ui.answer(options.options) },
+    },
+    command: {
+      register: async (spec: any) => { ui.registered.push(spec); return { command: spec.name } },
+      run: async (args: any) => {
+        ui.ran.push(args)
+        if (ui.runFails === args.command) throw new Error(`/${args.command} failed`)
+        if (args.command === 'model') ui.model = ui.switches[args.args] ?? args.args
+        return {}
+      },
+    },
+    config: {
+      list: async () => ui.rows,
+      set: async ({ key, value }: { key: string; value: unknown }) => { ui.sets.push([key, value]); return ui.setAnswer ?? { value } },
     },
     process: {
       hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: engine.session, CLAUDE_PLUGIN_DATA: '/tmp/x' }),
@@ -65,7 +96,9 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
   }
   register(on as unknown as On, options)
   return {
-    hooks, matchers, catches, calls, writes, $, engine,
+    hooks, matchers, catches, calls, writes, $, engine, ui,
+    command: (args: string) => hooks['command.run']!($, { command: 'model-router', args, origin: { kind: 'composer' },
+      presentation: { isFullscreen: false, columns: 80 } }, () => { throw new Error('the command ran on') }),
     toolCall: (e: object) => hooks['tool.call']!($, e, same),
     sessionStart: (e: object) => hooks['session.start']!($, e, same),
     end: (e: object) => hooks['session.end']!($, e, same),
@@ -704,7 +737,7 @@ test('a CLI that throws after next(e) ran does not run next again', async () => 
 
 test('every hook falls back to next(e) when it throws', async () => {
   const mod = load()
-  const events = ['agent.spawn', 'session.end', 'session.start', 'tool.call', 'tool.describe', 'turn.complete', 'turn.start', 'turn.step']
+  const events = ['agent.spawn', 'command.run', 'session.end', 'session.start', 'tool.call', 'tool.describe', 'turn.complete', 'turn.start', 'turn.step']
   assert.deepEqual(Object.keys(mod.hooks).sort(), events)
   assert.deepEqual(Object.keys(mod.catches).sort(), events)
   for (const [event, handler] of Object.entries(mod.catches)) {
@@ -736,11 +769,146 @@ test("a workflow agent, which Claude Code doesn't list, sends its turn's tokens 
   ])
 })
 
+// The status line, the /model-router command and the session check, which exist only with a person at the prompt.
+const START = { cwd: '/p', surface: 'terminal', isInteractive: true }
+const HEADLESS = { cwd: '/p', surface: null, isInteractive: false }
+const STATUS = { stdout: JSON.stringify({ ok: true, line: 'auto · mod · 0 routed · 0 redos', text: 'auto · mod · 0 routed · 0 redos\nSwitch it off', routing: true }) }
+// Lets the tasks the mod started after a hook returned run to their end.
+const idle = async () => { for (let i = 0; i < 30; i++) await new Promise(resolve => setTimeout(resolve, 0)) }
+const commands = (mod: ReturnType<typeof load>) => mod.calls.map(c => c.command)
+
+test('an interactive start registers the command and shows the status line after the hook returned', async () => {
+  const mod = load({ 'mod-status': STATUS })
+  const done = await mod.sessionStart(START)
+  assert.equal(done, START)
+  assert.deepEqual(mod.ui.registered, [{ name: 'model-router', description: "Shows Model Router's state, or switches routing for this session",
+    argumentHint: '[on | off]', immediate: true }])
+  assert.deepEqual(mod.ui.lines, []) // startup never waits on the runtime for it
+  await idle()
+  assert.deepEqual(mod.ui.lines, ['auto · mod · 0 routed · 0 redos'])
+})
+
+test('a headless run registers, draws and asks nothing, and routes as before', async () => {
+  const mod = load({ 'mod-spawn': PICK, 'mod-status': STATUS })
+  await mod.sessionStart(HEADLESS)
+  let seen: any
+  await mod.spawn(spawnEvent(), (e: any) => { seen = e; return { agentId: 'a1' } })
+  await mod.complete(completeEvent({ usage: TURN }))
+  await mod.end({ reason: 'other', sessionId: 's1', resume: {} })
+  await idle()
+  assert.equal(seen.model, 'haiku')
+  assert.deepEqual([mod.ui.registered, mod.ui.lines, mod.ui.asked, mod.ui.toasts], [[], [], [], []])
+  assert.deepEqual(commands(mod), ['mod-start', 'mod-spawn'])
+})
+
+test('the status line follows each spawn and each main-loop turn', async () => {
+  const mod = load({ 'mod-spawn': PICK, 'mod-status': STATUS })
+  await mod.sessionStart(START)
+  await idle()
+  await mod.spawn(spawnEvent())
+  await idle()
+  await mod.step(stepEvent({ effort: 'xhigh' }))
+  await mod.complete(completeEvent({ usage: TURN }))
+  await idle()
+  const status = mod.calls.filter(c => c.command === 'mod-status').map(c => c.stdin)
+  assert.deepEqual(status, [{ session_id: 's1' }, { session_id: 's1' }, { session_id: 's1' }])
+  assert.equal(mod.ui.lines.length, 3)
+})
+
+test('spawns that land during a refresh fold into one more refresh', async () => {
+  const mod = load({ 'mod-spawn': PICK, 'mod-status': STATUS })
+  await mod.sessionStart(START)
+  await idle()
+  await Promise.all([1, 2, 3, 4].map(i => mod.spawn(spawnEvent({ tool_use_id: `tu${i}` }))))
+  await idle()
+  assert.equal(mod.calls.filter(c => c.command === 'mod-status').length, 2)
+})
+
+test('/model-router prints the runtime state for the person alone', async () => {
+  const mod = load({ 'mod-status': STATUS })
+  await mod.sessionStart(START)
+  assert.deepEqual(await mod.command(''), { text: 'auto · mod · 0 routed · 0 redos\nSwitch it off', isTextDisplayOnly: true })
+  assert.deepEqual(await mod.command('please'), { text: 'Takes on or off.', isTextDisplayOnly: true })
+  const failing = load({ 'mod-status': { exitCode: 1, stdout: '' } })
+  await failing.sessionStart(START)
+  assert.deepEqual(await failing.command(' '), { text: 'The runtime did not answer, so the state is unknown.', isTextDisplayOnly: true })
+})
+
+test('/model-router off and on switch routing for this session and redraw the line', async () => {
+  const off = { stdout: JSON.stringify({ ok: true, line: 'off (this session)', text: 'off', routing: false,
+    reply: 'Routing is off for this session. To keep it off, set Routing mode in /config.' }) }
+  const mod = load({ 'mod-status': [STATUS, off] })
+  await mod.sessionStart(START)
+  await idle()
+  assert.deepEqual(await mod.command('OFF'), { text: 'Routing is off for this session. To keep it off, set Routing mode in /config.',
+    isTextDisplayOnly: true })
+  assert.deepEqual(mod.calls.at(-1)!.stdin, { session_id: 's1', routing: 'off' })
+  assert.equal(mod.ui.lines.at(-1), 'off (this session)')
+  const failing = load({ 'mod-status': { exitCode: 1, stdout: '' } })
+  await failing.sessionStart(START)
+  assert.equal((await failing.command('on')).text, 'Routing is unchanged: the runtime did not answer.')
+})
+
+test('a session switched off leaves a call whose round trip fails as named, and a clear forgets the switch', async () => {
+  const off = { stdout: JSON.stringify({ ok: true, line: 'off (this session)', text: 'off', routing: false, reply: 'off' }) }
+  const mod = load({ 'mod-status': off, 'mod-spawn': { exitCode: 1, stdout: '' } }, { max_tier: 'sonnet' })
+  await mod.sessionStart(START)
+  await mod.command('off')
+  const seen: unknown[] = []
+  const next = (x: any) => { seen.push(x.model); return { agentId: 'a1' } }
+  await mod.spawn(spawnEvent({ model: 'opus' }), next)
+  await mod.end({ reason: 'clear', sessionId: 's1', resume: {} })
+  await mod.spawn(spawnEvent({ model: 'opus', tool_use_id: 'tu2' }), next)
+  assert.deepEqual(seen, ['opus', 'sonnet'])
+  assert.deepEqual(mod.calls.find(c => c.command === 'mod-end')!.stdin, { session_id: 's1' })
+})
+
+
+
+
+
+
+
+
+
+
+test('a mod API without the interactive calls keeps every feature away and routing as it is', async () => {
+  const mod = load({ 'mod-spawn': PICK, 'mod-status': STATUS })
+  for (const key of ['ui', 'command', 'config']) (mod.$ as any)[key] = undefined
+  ;(mod.$.session as any).model = undefined
+  ;(mod.$.session as any).turns = undefined
+  assert.equal(await mod.sessionStart(START), START)
+  await idle()
+  let seen: any
+  await mod.spawn(spawnEvent(), (e: any) => { seen = e; return { agentId: 'a1' } })
+  assert.equal(seen.model, 'haiku')
+  assert.equal((await mod.step(stepEvent({ agentId: 'a1', effort: 'high' }))).effort, 'low')
+  const done = completeEvent({ usage: TURN })
+  assert.equal(await mod.complete(done), done)
+  assert.deepEqual((await mod.command('')).text, 'auto · mod · 0 routed · 0 redos\nSwitch it off')
+})
+
+test('each platform call that throws leaves routing intact', async () => {
+  const mod = load({ 'mod-spawn': PICK, 'mod-status': STATUS })
+  const boom = () => { throw new Error('not on this surface') }
+  Object.assign(mod.$.ui, { status: boom, ask: boom, toast: boom })
+  Object.assign(mod.$.command, { register: boom })
+  Object.assign(mod.$.clock, { after: boom })
+  assert.equal(await mod.sessionStart(START), START)
+  let seen: any
+  await mod.spawn(spawnEvent(), (e: any) => { seen = e; return { agentId: 'a1' } })
+  assert.equal(seen.model, 'haiku')
+  const done = completeEvent({ usage: TURN })
+  assert.equal(await mod.complete(done), done)
+  await mod.end({ reason: 'other', sessionId: 's1', resume: {} })
+})
+
 test('each payload the mod sends matches its fixture', async () => {
   const mod = load({}, {}, payloads['mod-start'].settings)
   const spawn = payloads['mod-spawn']
   const usage = payloads['mod-usage']
-  await mod.sessionStart({ source: 'startup' })
+  await mod.sessionStart(START)
+  await idle()
   await mod.toolCall({ tool: 'Agent', tool_use_id: 'tu1', effort: spawn.tool_input.effort })
   await mod.spawn(spawnEvent({
     parentAgentId: spawn.parent_agent_id, parentModel: spawn.parent_model, model: spawn.tool_input.model,
@@ -749,5 +917,7 @@ test('each payload the mod sends matches its fixture', async () => {
   mod.engine.agents = [{ id: usage.agent_id, type: usage.subagent_type, usage: usage.models, cost: usage.cost, lastRequest: { at: 1, ...usage.ran } }]
   mod.engine.rateLimits = [{ kind: 'seven_day', percentUsed: 1 }]
   await mod.complete(completeEvent({ turnId: 't2', agentId: usage.agent_id, usage: usage.models[0] }))
+  await idle()
+  await mod.end({ reason: 'prompt_input_exit', sessionId: payloads['mod-end'].session_id, resume: {} })
   assert.deepEqual(Object.fromEntries(mod.calls.map(c => [c.command, c.stdin])), payloads)
 })

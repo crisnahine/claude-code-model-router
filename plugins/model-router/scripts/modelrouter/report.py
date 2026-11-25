@@ -50,6 +50,33 @@ def policy(snap: settings.Snapshot) -> str:
     return "\n".join(lines)
 
 
+def status(snap: settings.Snapshot) -> dict:
+    """The mod's status line (under 80 characters: Claude Code puts the plugin's name before it) and the
+    /model-router reply: the line and how to switch."""
+    options, session_id = snap.options, snap.session_id
+    mode = f"{options.mode}{' (this session)' if options.switched else ''}"
+    rows = [r for r in ledger.read(session=session_id) if r.get("event") == "spawn"] if isinstance(session_id, str) else []
+    redos = sum(1 for r in rows if r.get("escalated_from"))
+    line = mode if options.mode == "off" else " · ".join(
+        [mode, rows[-1].get("via") if rows and rows[-1].get("via") == "fallback" else "mod",
+         *([f"cap {options.cap}"] if options.cap else []), f"{sum(r.get('action') == 'rewrite' for r in rows)} routed",
+         f"{redos} redo{'' if redos == 1 else 's'}"])
+    other = "off" if options.mode == "auto" else "on"
+    how = f"Switch it {other} for this session with /model-router {other}, or for good with Routing mode in /config."
+    return {"line": line, "text": "\n".join([line, how])}
+
+
+def switched(snap: settings.Snapshot, asked: str) -> str:
+    """What a /model-router on or off did, and whether it lasts."""
+    options = snap.options
+    state = "on" if options.mode == "auto" else "off"
+    if options.mode != asked:
+        return f"Routing stays {state}: the switch could not be saved."
+    if options.switched:
+        return f"Routing is {state} for this session. To keep it {state}, set Routing mode in /config."
+    return f"Routing is {state}, as Routing mode in /config sets it."
+
+
 def models_data(snap: settings.Snapshot) -> dict:
     """Each registry model's state here, in the `model-router.models/3` shape."""
     reg, options, table, usable = snap.registry, snap.options, snap.health, snap.usable
