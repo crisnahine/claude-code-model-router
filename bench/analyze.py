@@ -509,22 +509,24 @@ def forced_ranks(configs: list[dict], registry_config: Registry) -> dict[str, tu
     return out
 
 
+def _split(every: list[dict], tasks: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
+    """The rows that count, each settled, then the rows on an earlier revision of their task, which aren't comparable
+    with later runs of it, then the rows whose pass check broke, which were neither solved nor failed."""
+    revisions = {t["id"]: t.get("revision", 1) for t in tasks}
+    old = [r.get("task_revision", 1) < revisions.get(r["task"], 1) for r in every]
+    bad = [(r.get("grade") or {}).get("verdict") == "broken" for r in every]
+    return ([_settle(r) for r, gone, b in zip(every, old, bad) if not (gone or b)],
+            [r for r, gone in zip(every, old) if gone], [r for r, gone, b in zip(every, old, bad) if b and not gone])
+
+
 def load(paths: list[Path]) -> Results:
-    """Everything the page is built from, read once. The order and repeats of `paths` don't matter. A row on an
-    earlier revision of its task isn't comparable with later runs of it, so it sits in `stale`, not `rows`, and a
-    row whose pass check broke sits in `broken`. A row on the current revision that another check graded stops it:
-    the check changed without a raise of the task's revision."""
+    """Everything the page is built from, read once. The order and repeats of `paths` don't matter. Rows are split
+    as `_split` says. A row on the current revision that another check graded stops it: the check changed without
+    a raise of the task's revision."""
     files = sorted({p.resolve() for p in paths})
     tasks = run.load_tasks()
-    revisions = {t["id"]: t.get("revision", 1) for t in tasks}
     configs = run.load_configs()
-    every = _jsonl(files)
-    old = [r.get("task_revision", 1) < revisions.get(r["task"], 1) for r in every]
-    stale = [r for r, gone in zip(every, old) if gone]
-    # A run whose pass check broke has no verdict: it was neither solved nor failed.
-    bad_check = [(r.get("grade") or {}).get("verdict") == "broken" for r in every]
-    broken = [r for r, gone, bad in zip(every, old, bad_check) if bad and not gone]
-    rows = [_settle(r) for r, gone, bad in zip(every, old, bad_check) if not (gone or bad)]
+    rows, stale, broken = _split(_jsonl(files), tasks)
     today = {t["id"]: run.check_hash(t["dir"] / "check.py") for t in tasks}
     moved = sorted({(r["task"], str((r.get("grade") or {}).get("check_hash"))) for r in rows + broken
                     if r["task"] in today and (r.get("grade") or {}).get("check_hash") != today[r["task"]]})
@@ -849,23 +851,32 @@ def _page(results: Results, summary: list[dict]) -> dict:
     return {"header": header, "body": body}
 
 
-def _exploratory(rows: list[dict], notes: dict) -> list[str]:
-    """A table per exploratory batch, oldest first: what each configuration solved and cost, and nothing judged."""
+def _exploratory(rows: list[dict], notes: dict, tasks: list[dict]) -> list[str]:
+    """A table per exploratory batch, oldest first: what each configuration solved and cost, and nothing judged. It
+    leaves out what the judged tables leave out."""
     batches: dict[str, list[dict]] = {}
     for r in sorted(rows, key=lambda r: r.get("started_at") or ""):
         batches.setdefault(r.get("batch") or "unnamed", []).append(r)
     out = ["## Exploratory rounds", "",
            "Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a "
            "configuration for one, and a router configuration here may run the plugin from another commit. A run "
-           "the harness stopped, by the timeout or the budget cap, counts as failed whatever its files held.", ""]
-    for name, runs in batches.items():
-        models = ", ".join(f"`{m}`" for m in sorted({r.get("main_model") or "unknown" for r in runs}))
-        out += [f"### `{name}`: {len(runs)} runs on {runs[0].get('started_at', '')[:10]}, "
+           "the harness stopped, by the timeout or the budget cap, counts as failed whatever its files held. As in "
+           "the judged tables, runs on an earlier revision of a task and runs whose pass check broke are left out.", ""]
+    for name, every in batches.items():
+        runs, stale, broken = _split(every, tasks)
+        models = ", ".join(f"`{m}`" for m in sorted({r.get("main_model") or "unknown" for r in every}))
+        out += [f"### `{name}`: {len(runs)} runs on {every[0].get('started_at', '')[:10]}, "
                 f"${sum(r['total_cost_usd'] for r in runs):.2f}, session on {models}", ""]
         if isinstance(notes.get(name), str):
             out += [notes[name], ""]
+        left = ([f"{len(stale)} run(s) (${sum(r['total_cost_usd'] for r in stale):.2f}) on an earlier revision of "
+                 + ", ".join(f"`{t}`" for t in sorted({r["task"] for r in stale}))] if stale else []) + \
+               ([f"{len(broken)} run(s) (${sum(r['total_cost_usd'] for r in broken):.2f}) whose pass check broke"]
+                if broken else [])
+        if left:
+            out += ["Left out of the table: " + " and ".join(left) + ".", ""]
         out += ["| Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |",
-                "| :- | -: | -: | :- | -: | :- |"]
+                "| :- | -: | -: | :- | -: | :- |"] if runs else []
         cells: dict[str, list[dict]] = {}
         for r in runs:
             cells.setdefault(r["config"], []).append(r)
@@ -886,7 +897,7 @@ def pilot_rows() -> tuple[list[dict], dict]:
         notes = json.loads((PILOT / "notes.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         notes = {}
-    return [_settle(r) for r in _jsonl(sorted(PILOT.glob("*.jsonl")))], notes if isinstance(notes, dict) else {}
+    return _jsonl(sorted(PILOT.glob("*.jsonl"))), notes if isinstance(notes, dict) else {}
 
 
 def build_page(results: Results, router: str | None = None, current: str | None = None) -> str:
@@ -897,7 +908,7 @@ def build_page(results: Results, router: str | None = None, current: str | None 
     page = head + render_sessions(parts, _page(results, summary), results.routers)
     if not results.pilot:
         return page
-    return page.rstrip("\n") + "\n\n" + "\n".join(_exploratory(results.pilot, results.pilot_notes)).rstrip("\n") + "\n"
+    return page.rstrip("\n") + "\n\n" + "\n".join(_exploratory(results.pilot, results.pilot_notes, results.tasks)).rstrip("\n") + "\n"
 
 
 def check(results: Results, out: Path, current: str | None, router: str | None = None) -> list[str]:

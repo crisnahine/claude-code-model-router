@@ -52,7 +52,7 @@ python3 bench/run.py --tasks rootcause-cart --configs plugin --runs 2 --seed 1 -
     --max-total 4 --model claude-opus-5-5 --out "$HOME/mrb-smoke/smoke.jsonl" --keep "$HOME/mrb-smoke/keep"
 ```
 
-A calibration round finds the tasks that tell models apart: the five tasks of work that isn't code and six harder coding tasks, under `haiku-high` and `defaults`, 2 runs each, 44 runs. Rows under `results/pilot/` get no verdict; the page shows each batch as an exploratory round.
+A calibration round finds the tasks that tell models apart: the five tasks of work that isn't code and six harder coding tasks, under `haiku-high` and `defaults`, 2 runs each, 44 runs. Rows under `results/pilot/` get no verdict; the page shows each batch as an exploratory round, leaving out runs on an earlier `revision` and runs whose check broke, as the judged tables do, and saying how many.
 
 ```bash
 python3 bench/run.py --tasks legal-services-agreement finance-ledger-reconcile finance-runway-forecast \

@@ -1,4 +1,4 @@
 {
-  "calibration-1": "Eleven tasks under the two baselines, to look for tasks that tell a strong subagent from a cheap one. None did: both solved every run.",
+  "calibration-1": "Eleven tasks under the two baselines, to look for tasks that tell a strong subagent from a cheap one. None did: both solved every run. The table counts ten of them, since `ops-inbox-triage` has changed since it ran.",
   "calibration-2": "The four hard coding tasks and the redo, fan-out and plan-then-build tasks under the same two baselines. Each solved 13 of 14 runs: the one it missed was a `perf-nlogn-rewrite` run the 900-second timeout stopped."
 }

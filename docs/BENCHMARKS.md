@@ -34,16 +34,18 @@ python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
 
 ## Exploratory rounds
 
-Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a configuration for one, and a router configuration here may run the plugin from another commit. A run the harness stopped, by the timeout or the budget cap, counts as failed whatever its files held.
+Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a configuration for one, and a router configuration here may run the plugin from another commit. A run the harness stopped, by the timeout or the budget cap, counts as failed whatever its files held. As in the judged tables, runs on an earlier revision of a task and runs whose pass check broke are left out.
 
-### `calibration-1`: 44 runs on 2026-11-25, $9.20, session on `claude-opus-5-5`
+### `calibration-1`: 40 runs on 2026-11-25, $8.29, session on `claude-opus-5-5`
 
-Eleven tasks under the two baselines, to look for tasks that tell a strong subagent from a cheap one. None did: both solved every run.
+Eleven tasks under the two baselines, to look for tasks that tell a strong subagent from a cheap one. None did: both solved every run. The table counts ten of them, since `ops-inbox-triage` has changed since it ran.
+
+Left out of the table: 4 run(s) ($0.91) on an earlier revision of `ops-inbox-triage`.
 
 | Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |
 | :- | -: | -: | :- | -: | :- |
-| `defaults` | 22 | 22 | none | $0.282 |  |
-| `haiku-high` | 22 | 22 | none | $0.136 |  |
+| `defaults` | 20 | 20 | none | $0.279 |  |
+| `haiku-high` | 20 | 20 | none | $0.136 |  |
 
 ### `calibration-2`: 28 runs on 2026-11-25, $9.87, session on `claude-opus-5-5`
 
