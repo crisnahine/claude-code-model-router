@@ -737,7 +737,7 @@ class Analysis(unittest.TestCase):
                 + [dict(base, main_model=OPUS, auth="none")] * 2 + [dict(older, main_model=OPUS)])
         page = analyze.build_page(dataclasses.replace(analyze.load([]), rows=data))
         self.assertIn(f"- How the runs were paid for, by session model (`auth`, the `apiKeySource` of the run's "
-                      f"`system/init` event): `{OPUS}`: a login token or a cloud provider (`none`: no API key) in 2 "
+                      f"`system/init` event): `{OPUS}`: no API key, so a login token, a bearer token or a cloud provider (`none`) in 2 "
                       "runs; not recorded in 1 run; `sonnet`: an API key (`ANTHROPIC_API_KEY`) in 3 runs.", page)
 
     def test_the_page_gives_each_configurations_cache_read_share_and_never_reads_a_missing_field_as_zero(self):

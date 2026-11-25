@@ -525,7 +525,7 @@ def load(paths: list[Path]) -> Results:
 CACHE_FIELDS = ("cache_read_tokens", "cache_write_tokens", "fresh_input_tokens")
 # The apiKeySource values a run can report (https://code.claude.com/docs/en/agent-sdk/typescript#apikeysource).
 PAID = {"ANTHROPIC_API_KEY": "an API key (`ANTHROPIC_API_KEY`)",
-        "none": "a login token or a cloud provider (`none`: no API key)"}
+        "none": "no API key, so a login token, a bearer token or a cloud provider (`none`)"}
 
 
 def _cache_line(by_config: dict[str, list[dict]]) -> str:
