@@ -1077,6 +1077,14 @@ class Allowlist(Sandbox):
         self.assertEqual(caps(policy={"maxEffortLevel": "medium"}, user={"maxEffortLevel": "max"})["fable"], "medium")
         self.assertEqual(caps(user={"maxEffortLevel": "turbo", "modelSettings": ["opus"]})["opus"], None)
 
+    def test_a_model_settings_entry_for_a_twins_id_sets_nothing_for_its_family(self):
+        def read(model_id: str) -> tuple:
+            found = allowlist.from_layers({"user": {"modelSettings": {model_id: {"maxEffortLevel": "low", "effortLevel": "low"}}}})
+            return found.effort_cap(self.config, "fable"), found.saved_effort(self.config, "fable")
+
+        self.assertEqual(read("claude-mythos-5-2"), (None, None))
+        self.assertEqual(read("claude-fable-5-2"), ("low", "low"))
+
     def test_a_deny_list_over_the_cap_leaves_no_model_open_while_an_allow_list_is_only_cut(self):
         for denied in (["opus"] + ["x"] * allowlist.MAX_ENTRIES, ["opus", "y" * (allowlist.MAX_CHARS + 1)]):
             self.assertEqual(self.permitted(policy={"deniedModels": denied}), set())
