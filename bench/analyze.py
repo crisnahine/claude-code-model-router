@@ -512,10 +512,11 @@ def forced_ranks(configs: list[dict], registry_config: Registry) -> dict[str, tu
 
 def _split(every: list[dict], tasks: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
     """The rows that count, each settled, then the rows on an earlier revision of their task, which aren't comparable
-    with later runs of it, then the rows whose pass check broke, which were neither solved nor failed."""
+    with later runs of it, then the rows whose pass check broke or that the bench stopped before their check finished,
+    which were neither solved nor failed."""
     revisions = {t["id"]: t.get("revision", 1) for t in tasks}
     old = [r.get("task_revision", 1) < revisions.get(r["task"], 1) for r in every]
-    bad = [(r.get("grade") or {}).get("verdict") == "broken" for r in every]
+    bad = [(r.get("grade") or {}).get("verdict") in ("broken", "stopped") for r in every]
     return ([_settle(r) for r, gone, b in zip(every, old, bad) if not (gone or b)],
             [r for r, gone in zip(every, old) if gone], [r for r, gone, b in zip(every, old, bad) if b and not gone])
 
@@ -611,12 +612,19 @@ def _notes(results: Results) -> list[str]:
                 f"{'main loop' if who == 'main' else f'`{who}`'} ${usd:.4f} ({usd / total:.0%})" for who, usd in order)
         lines.append("- Router spend by agent type, from the router's ledger (`agent_costs`), over the runs that "
                      "record it: " + "; ".join(share(c) for c in sorted(spend)) + ".")
-    if results.broken:
-        names = sorted({r["task"] for r in results.broken})
-        lines.append(f"- {len(results.broken)} run(s) (${sum(r['total_cost_usd'] for r in results.broken):.2f}) are "
+    broke = [r for r in results.broken if r["grade"]["verdict"] == "broken"]
+    halted = [r for r in results.broken if r["grade"]["verdict"] == "stopped"]
+    if broke:
+        names = sorted({r["task"] for r in broke})
+        lines.append(f"- {len(broke)} run(s) (${sum(r['total_cost_usd'] for r in broke):.2f}) are "
                      "set aside, though they stay in the results files: the pass check of "
                      + ", ".join(f"`{n}`" for n in names) + " broke on them (exit code 2, a bug in the check), so "
                      "none counts as solved or failed. Each raw line's `grade` has the check's error.")
+    if halted:
+        lines.append(f"- {len(halted)} run(s) (${sum(r['total_cost_usd'] for r in halted):.2f}) are set aside, though "
+                     "they stay in the results files: the bench itself stopped them before their check finished (an "
+                     "interrupt, SIGTERM or an error in the harness), so none counts as solved or failed, and the same "
+                     "command run again runs them again. Each raw line's `grade.reason` says what stopped it.")
     for task in results.tasks:
         old = [r for r in results.stale if r["task"] == task["id"]]
         if old:
@@ -866,7 +874,8 @@ def _exploratory(rows: list[dict], notes: dict, tasks: list[dict]) -> list[str]:
            "Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a "
            "configuration for one, and a router configuration here may run the plugin from another commit. A run "
            "the harness stopped, by the timeout or the budget cap, counts as failed whatever its files held. As in "
-           "the judged tables, runs on an earlier revision of a task and runs whose pass check broke are left out.", ""]
+           "the judged tables, runs on an earlier revision of a task, runs whose pass check broke and runs the bench "
+           "stopped before their check finished are left out.", ""]
     for name, every in batches.items():
         runs, stale, broken = _split(every, tasks)
         models = ", ".join(f"`{m}`" for m in sorted({r.get("main_model") or "unknown" for r in every}))
@@ -874,12 +883,15 @@ def _exploratory(rows: list[dict], notes: dict, tasks: list[dict]) -> list[str]:
                 f"${sum(r['total_cost_usd'] for r in runs):.2f}, session on {models}", ""]
         if isinstance(notes.get(name), str):
             out += [notes[name], ""]
-        left = ([f"{len(stale)} run(s) (${sum(r['total_cost_usd'] for r in stale):.2f}) on an earlier revision of "
-                 + ", ".join(f"`{t}`" for t in sorted({r["task"] for r in stale}))] if stale else []) + \
-               ([f"{len(broken)} run(s) (${sum(r['total_cost_usd'] for r in broken):.2f}) whose pass check broke"]
-                if broken else [])
+        left = [f"{len(stale)} run(s) (${sum(r['total_cost_usd'] for r in stale):.2f}) on an earlier revision of "
+                + ", ".join(f"`{t}`" for t in sorted({r["task"] for r in stale}))] if stale else []
+        for verdict, what in (("broken", "whose pass check broke"),
+                              ("stopped", "the bench stopped before their check finished")):
+            some = [r for r in broken if r["grade"]["verdict"] == verdict]
+            left += [f"{len(some)} run(s) (${sum(r['total_cost_usd'] for r in some):.2f}) {what}"] if some else []
         if left:
-            out += ["Left out of the table: " + " and ".join(left) + ".", ""]
+            out += ["Left out of the table: " + (", ".join(left[:-1]) + " and " if len(left) > 1 else "") + left[-1]
+                    + ".", ""]
         out += ["| Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |",
                 "| :- | -: | -: | :- | -: | :- |"] if runs else []
         cells: dict[str, list[dict]] = {}

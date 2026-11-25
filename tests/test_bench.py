@@ -585,6 +585,8 @@ class Analysis(unittest.TestCase):
                               passed=True, **batch),
                      dict(full_row(config="defaults", total_cost_usd=0.75, passed=False, **batch),
                           grade={"verdict": "broken", "reason": "NameError: x", "check_hash": "b" * 16}),
+                     dict(full_row(config="defaults", total_cost_usd=0.5, passed=False, **batch),
+                          grade={"verdict": "stopped", "reason": "the bench stopped", "check_hash": "b" * 16}),
                      full_row(config="defaults", plugin_loaded=None, total_cost_usd=0.2, passed=True,
                               batch="calibration-1", main_model="claude-opus-5-5", started_at="2020-01-01T00:00:00+00:00")]
             (pilot / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in lines), encoding="utf-8")
@@ -604,8 +606,9 @@ class Analysis(unittest.TestCase):
         self.assertIn("| `plugin-cheap` | 2 | 2 | none | $0.260 | `fffffff` |", section)
         self.assertIn("| `defaults` | 2 | 0 | 1 by the timeout | $0.300 |  |", section)  # a set-aside run is not counted
         self.assertIn("A run the harness stopped, by the timeout or the budget cap, counts as failed", section)
-        self.assertIn("Left out of the table: 1 run(s) ($0.50) on an earlier revision of `ops-inbox-triage` and 1 "
-                      "run(s) ($0.75) whose pass check broke.", section)
+        self.assertIn("Left out of the table: 1 run(s) ($0.50) on an earlier revision of `ops-inbox-triage`, 1 "
+                      "run(s) ($0.75) whose pass check broke and 1 run(s) ($0.50) the bench stopped before their check "
+                      "finished.", section)
         self.assertIn("### `calibration-1`: 1 runs", section)
         self.assertNotRegex(section, r"WIN|LOSE|no difference shown")
         self.assertNotIn("## Results", page)  # a pilot row is never a judged row
@@ -1563,7 +1566,7 @@ class Stopped(unittest.TestCase):
             # The frozen plugin copy is made there too, and goes however the bench stops.
             return rows, list(scratch.iterdir()) + list(runs.iterdir()), sessions
 
-    def test_an_interrupt_during_the_claude_call_writes_a_broken_row_charged_the_budget_and_cleans_up(self):
+    def test_an_interrupt_during_the_claude_call_writes_a_stopped_row_charged_the_budget_and_cleans_up(self):
         def interrupted(cmd, work, env, timeout):
             """Ctrl-C mid-call, once the session has started. Raised here, since a real SIGINT that lands inside a
             finalizer of this long-lived process is ignored."""
@@ -1575,14 +1578,14 @@ class Stopped(unittest.TestCase):
         with unittest.mock.patch.object(run, "run_claude", interrupted):
             rows, scratch, sessions = self.stop(KeyboardInterrupt)
         self.assertEqual([(r["grade"]["verdict"], r["exit_code"], r["cost_known"], r["total_cost_usd"]) for r in rows],
-                         [("broken", None, False, 0.5)])
+                         [("stopped", None, False, 0.5)])
         self.assertIn("KeyboardInterrupt", rows[0]["grade"]["reason"])
         self.assertEqual((scratch, sessions), ([], []))
 
     def test_an_interrupt_while_grading_still_writes_the_row_and_cleans_up(self):
         rows, scratch, sessions = self.stop(KeyboardInterrupt, grade=unittest.mock.Mock(side_effect=KeyboardInterrupt))
         self.assertEqual([(r["grade"]["verdict"], r["total_cost_usd"], r["passed"]) for r in rows],
-                         [("broken", 0.01, False)])
+                         [("stopped", 0.01, False)])
         self.assertIn("KeyboardInterrupt", rows[0]["grade"]["reason"])
         self.assertEqual((scratch, sessions), ([], []))
 
@@ -2215,20 +2218,25 @@ class Grading(unittest.TestCase):
                 self.assertNotEqual(changed, first, path)
                 first = changed
 
-    def test_analyze_sets_aside_a_run_whose_check_broke(self):
+    def test_analyze_sets_aside_a_run_whose_check_broke_or_that_the_bench_stopped(self):
         good = full_row(config="defaults", task="design-rate-limiter", task_revision=1, passed=True, **{"class": "design"})
         bad = dict(good, passed=False, total_cost_usd=0.25, grade=dict(good["grade"], verdict="broken", reason="NameError: x"))
+        stopped = dict(good, task="design-event-partitions", passed=False, total_cost_usd=0.5,
+                       grade=dict(good["grade"], verdict="stopped", reason="the bench stopped before the check finished"))
         with tempfile.TemporaryDirectory() as tmp:
             results = Path(tmp) / "results"
             results.mkdir()
-            (results / "a.jsonl").write_text("".join(json.dumps(r) + "\n" for r in (good, bad)))
+            (results / "a.jsonl").write_text("".join(json.dumps(graded_today(r)) + "\n" for r in (good, bad, stopped)))
             loaded = analyze.load([results / "a.jsonl"])
             out = Path(tmp) / "page.md"
             analyze.main([str(results / "a.jsonl"), "--out", str(out)])
             page = out.read_text(encoding="utf-8")
-        self.assertEqual((len(loaded.rows), len(loaded.broken)), (1, 1))
+        self.assertEqual((len(loaded.rows), len(loaded.broken)), (1, 2))
         self.assertIn("1 run(s) ($0.25) are set aside, though they stay in the results files: the pass check of "
                       "`design-rate-limiter` broke on them", page)
+        self.assertIn("1 run(s) ($0.50) are set aside, though they stay in the results files: the bench itself stopped "
+                      "them before their check finished", page)
+        self.assertNotIn("`design-event-partitions` broke", page)
 
 
 class Pilot(unittest.TestCase):

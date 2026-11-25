@@ -34,7 +34,7 @@ python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
 
 ## Exploratory rounds
 
-Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a configuration for one, and a router configuration here may run the plugin from another commit. A run the harness stopped, by the timeout or the budget cap, counts as failed whatever its files held. As in the judged tables, runs on an earlier revision of a task and runs whose pass check broke are left out.
+Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a configuration for one, and a router configuration here may run the plugin from another commit. A run the harness stopped, by the timeout or the budget cap, counts as failed whatever its files held. As in the judged tables, runs on an earlier revision of a task, runs whose pass check broke and runs the bench stopped before their check finished are left out.
 
 ### `calibration-1`: 36 runs on 2026-11-25, $7.45, session on `claude-opus-5-5`
 

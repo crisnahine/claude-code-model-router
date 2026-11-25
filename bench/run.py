@@ -274,7 +274,7 @@ BUDGET_STOP = "error_max_budget_usd"
 
 
 class Grade(NamedTuple):
-    verdict: str  # "pass", "fail" or "broken"
+    verdict: str  # "pass", "fail", "broken", or "stopped" for a run the bench itself stopped before the check finished
     reason: str  # the last line the check printed, or for a broken check the last line of its error
     check_hash: str  # the check's code, so a row says which check graded it
     sandbox: str | None = None  # what the check ran in: "sandbox-exec", "bwrap", or None for no sandbox
@@ -723,7 +723,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
         wall_ms = round((time.monotonic() - clock) * 1000)
     shutil.rmtree(scratch, ignore_errors=True)
     if graded is None:
-        graded = Grade("broken", f"the bench stopped before the check finished: {stopped!r}",
+        graded = Grade("stopped", f"the bench stopped before the check finished: {stopped!r}",
                        check_hash(task["dir"] / "check.py"))
     row = record(task, config, options, registry_config, result,
                  {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr, "stopped_by": stopped_by,
