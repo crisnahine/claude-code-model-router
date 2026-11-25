@@ -15,4 +15,4 @@ What isn't done yet.
 ## Later
 
 - Run it live in the Desktop app, VS Code, JetBrains and the Agent SDK.
-- Add a workflow shape and an agent-team shape to the benchmark, beside `redo`, `fanout` and `plan-build`.
+- Run the benchmark's `workflow` shape (`workflow-two-stage-report`), which has no run yet, and read how the stream shows a workflow's agents. An agent-team shape can't run headless, since `claude -p` and the Agent SDK never start teammates.

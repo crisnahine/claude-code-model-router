@@ -496,6 +496,28 @@ def load(paths: list[Path]) -> Results:
                    frozenset(c["id"] for c in configs if c.get("model")), forced_ranks(configs, registry_config))
 
 
+CACHE_FIELDS = ("cache_read_tokens", "cache_write_tokens", "fresh_input_tokens")
+
+
+def _cache_line(by_config: dict[str, list[dict]]) -> str:
+    """Each configuration's share of input tokens read from the prompt cache, over the runs whose row records the
+    three counts; a row without them (an older harness's) is left out, never read as zero."""
+    parts = []
+    for config, group in sorted(by_config.items()):
+        told = [r for r in group if all(isinstance(r.get(k), (int, float)) for k in CACHE_FIELDS)]
+        total = sum(r[k] for r in told for k in CACHE_FIELDS)
+        if not total:
+            parts.append(f"`{config}` " + ("no input tokens" if told else "not recorded"))
+            continue
+        runs = f"{len(told)} of {len(group)} runs" if len(told) < len(group) else f"{len(group)} run{'s' * (len(group) != 1)}"
+        parts.append(f"`{config}` {sum(r['cache_read_tokens'] for r in told) / total:.0%} ({runs})")
+    return ("- Input tokens read from the prompt cache, by configuration (`cache_read_tokens` over it plus "
+            "`cache_write_tokens` and `fresh_input_tokens`, the whole run's, subagents and workflow agents included): "
+            + "; ".join(parts) + ". It shows how much a run reuses within itself, since every run starts cold: each has "
+            "its own work dir and config folder, and Claude Code's prompt cache is scoped to one machine and directory "
+            "(https://code.claude.com/docs/en/prompt-caching.md#cache-scope).")
+
+
 def _notes(results: Results) -> list[str]:
     """Page lines on runs set aside, router spend by agent type, and the batches each configuration's rows pool."""
     rows, found = results.rows, results.aside
@@ -565,6 +587,8 @@ def _notes(results: Results) -> list[str]:
     if by_config:
         lines.append("- Runs with a Bash denial, by configuration: " + "; ".join(
             "`{}` {} of {}".format(c, *bash_denials(group)) for c, group in sorted(by_config.items())) + ".")
+    if by_config:
+        lines.append(_cache_line(by_config))
     managed = sum(bool(r.get("managed_settings")) for r in rows)
     if managed:
         lines.append(f"- {managed} run(s) here ran on a machine with managed settings files or a macOS plist, which "
@@ -657,8 +681,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
             agents.setdefault(r["config"], {}).setdefault(name, 0)
             agents[r["config"]][name] += count
     shapes = {r.get("shape", "single") for r in rows}
-    uncovered = [name for shape, name in (("fanout", "fan-out"), ("plan-build", "plan-then-build"), ("redo", "redo"))
-                 if shape not in shapes] + ["workflow", "team"]
+    uncovered = [name for shape, name in (("fanout", "fan-out"), ("plan-build", "plan-then-build"), ("redo", "redo"),
+                                          ("workflow", "workflow")) if shape not in shapes]
     saturated = sum(bool(row["quality"]["saturated"]) for row in summary)
     counted = sorted({r["task"] for r in rows})
     brief = {t["id"]: t for t in tasks}
@@ -697,7 +721,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "prompt is the brief alone, as a person would type it; its rows get their own table. A task with a "
         "`shape` in its task.json gets another `delegate` prompt (`run.SHAPES`): `redo` runs the check the brief "
         "names and sends the work back, `fanout` gives each question its own subagent, all started at once, and "
-        "`plan-build` hands out the steps in order. Each row records its `shape`.",
+        "`plan-build` hands out the steps in order, and `workflow` has the session write a script of stages and run it "
+        "with the Workflow tool, with `Workflow` and `Read(./**)` added to `--allowedTools` for it. Each row "
+        "records its `shape`. An agent-team shape can't run: a headless or Agent SDK session never starts teammates "
+        "(https://code.claude.com/docs/en/agent-teams.md).",
         "- Each run starts in a fresh copy of the task's files, outside any repository, with a Claude Code config "
         "folder of its own inside that copy (`CLAUDE_CONFIG_DIR`, with `CLAUDE_CODE_PROJECT_DIR_NAME=run`; "
         "https://code.claude.com/docs/en/env-vars), so `~/.claude.json`, user settings, plugins and transcripts "
@@ -746,9 +773,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "still running at that moment spend before they stop "
         "(https://code.claude.com/docs/en/agent-sdk/agent-loop.md#budget-headroom). The runner starts a run only "
         "with room for twice its cap under the total, which is a margin, not a bound.",
-        "- The prompt cache is shared across runs, so later runs of a configuration may read what earlier ones "
-        "wrote. The runner shuffles the run order with a seed each raw line records (`order_seed`). Every raw line "
-        "records its cache tokens.", "",
+        "- The runner shuffles the run order with a seed each raw line records (`order_seed`), so no configuration "
+        "always runs first or at one time of day.", "",
         "## Task set", "",
         f"The tables count runs of these {len(counted)} tasks:", "",
         *[f"- `{t}` ({brief[t]['class']}): {brief[t]['brief']}" if t in brief else
@@ -762,9 +788,11 @@ def _page(results: Results, summary: list[dict]) -> dict:
         *commands,
         "Defined in `bench/configs.json` but not run here: "
         + (", ".join(f"`{c['id']}`" for c in results.configs if c["id"] not in used) or "none") + ".", "",
-        "Not covered yet: the " + ", ".join(uncovered[:-1]) + f" and {uncovered[-1]} shapes; a cold and a warm "
-        "prompt cache measured "
-        "apart; and router overhead per spawn and per turn. `sonnet-via-opusplan` runs `--model opusplan`, which "
+        "Not covered yet: "
+        + (f"the {' and '.join([', '.join(uncovered[:-1]), uncovered[-1]] if len(uncovered) > 1 else uncovered)} "
+           f"shape{'s' * (len(uncovered) > 1)}; " if uncovered else "")
+        + "a warm prompt cache, since every run starts cold; and router overhead per spawn and per turn. "
+        "`sonnet-via-opusplan` runs `--model opusplan`, which "
         "in a headless `dontAsk` run never enters plan mode, so it runs Sonnet throughout "
         "(https://code.claude.com/docs/en/model-config.md#opusplan-model-setting, "
         "https://code.claude.com/docs/en/permission-modes.md). The advisor needs the Anthropic API, Claude "

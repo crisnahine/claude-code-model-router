@@ -599,6 +599,27 @@ class Analysis(unittest.TestCase):
         self.assertIn("1 router run(s) are set aside, outside the results, because a subagent ran but the router's "
                       "ledger holds no spawn row", page)
 
+    def test_the_page_gives_each_configurations_cache_read_share_and_never_reads_a_missing_field_as_zero(self):
+        base = full_row(task="bugfix-median", main_model="sonnet", **{"class": "bugfix"})
+        warm = dict(base, cache_read_tokens=80, cache_write_tokens=15, fresh_input_tokens=5)
+        older = {k: v for k, v in base.items() if k not in ("cache_read_tokens", "cache_write_tokens",
+                                                           "fresh_input_tokens")}
+        data = [dict(warm, config="defaults"), dict(warm, config="defaults", cache_read_tokens=0),
+                dict(older, config="plugin"), dict(older, config="haiku-high"), dict(warm, config="haiku-high")]
+        with tempfile.TemporaryDirectory() as tmp:
+            res = Path(tmp) / "a-bugfix-2026-11-22.jsonl"
+            res.write_text("".join(json.dumps(r) + "\n" for r in data))
+            page = analyze.build_page(analyze.load([res]))
+        line = next(line for line in page.splitlines() if line.startswith("- Input tokens read from the prompt cache"))
+        self.assertIn("`defaults` 67% (2 runs)", line)  # 80 of 120
+        self.assertIn("`haiku-high` 80% (1 of 2 runs)", line)
+        self.assertIn("`plugin` not recorded", line)
+        self.assertNotIn("`plugin` 0%", line)
+        self.assertIn("every run starts cold", line)
+        self.assertNotIn("may read what earlier ones wrote", page)
+        self.assertIn("Not covered yet: the fan-out, plan-then-build, redo and workflow shapes", page)
+        self.assertIn("An agent-team shape can't run", page)
+
 
 FIXTURE = ROOT / "tests" / "fixtures" / "claude-2.1.330-result.json"
 AUTH = {"ANTHROPIC_API_KEY": "sk-test"}  # main refuses to start without a token or a key
@@ -657,6 +678,17 @@ class Recorder(unittest.TestCase):
         broken = self.row(json.loads(FIXTURE.read_text(encoding="utf-8")),
                           grade={"verdict": "broken", "reason": "NameError: x", "check_hash": "f" * 16})
         self.assertEqual((broken["passed"], broken["grade"]["verdict"]), (False, "broken"))
+
+    def test_a_row_counts_the_whole_runs_cache_reads_writes_and_fresh_input(self):
+        def tokens(result):
+            row = self.row(result)
+            return row["cache_read_tokens"], row["cache_write_tokens"], row["fresh_input_tokens"]
+        self.assertEqual(tokens(json.loads(FIXTURE.read_text(encoding="utf-8"))), (51466, 19374, 8))
+        both = {"modelUsage": {"claude-opus-5-5": {"inputTokens": 10, "cacheReadInputTokens": 100,
+                                                   "cacheCreationInputTokens": 50},
+                               "claude-haiku-5-5": {"inputTokens": 1, "cacheReadInputTokens": 7}}}
+        self.assertEqual(tokens(both), (107, 50, 11))  # subagents' models are in modelUsage too
+        self.assertEqual(tokens({}), (None, None, None))  # no result line: not known, not zero
 
     def test_a_zeroed_cost_on_an_error_counts_the_whole_budget(self):
         base = json.loads(FIXTURE.read_text(encoding="utf-8"))
@@ -1792,7 +1824,7 @@ class Isolation(unittest.TestCase):
                 if (task["dir"] / folder).is_dir():
                     names |= {p.stem if p.is_file() else p.name for p in (task["dir"] / folder).iterdir()
                               if p.suffix == ".py" or p.is_dir()}
-        names.discard("__pycache__")
+        names = {n for n in names if n.isidentifier()} - {"__pycache__"}  # `.claude` can't be imported
         res = subprocess.run([sys.executable, "-I", "-c", "import importlib.util, sys; "
                               "print([n for n in sys.argv[1:] if importlib.util.find_spec(n)])", *sorted(names)],
                              capture_output=True, text=True)
@@ -2335,7 +2367,8 @@ class DelegationTasks(unittest.TestCase):
     """Tasks that measure how work is handed out: a redo after a failing check, calls started together, a plan
     and then a build. Each one's prompt lets the session start more than one subagent."""
     WANT = {"redo-failing-check": ("redo", "redo"), "fanout-three-lookups": ("lookup", "fanout"),
-            "mixed-plan-then-build": ("cross-module", "plan-build")}
+            "mixed-plan-then-build": ("cross-module", "plan-build"),
+            "workflow-two-stage-report": ("cross-module", "workflow")}
 
     def task(self, task_id):
         return next(t for t in run.load_tasks() if t["id"] == task_id)
@@ -2348,7 +2381,7 @@ class DelegationTasks(unittest.TestCase):
         self.assertEqual(run.prompt({"brief": "Do x."}, "delegate"), run.PROMPTS["delegate"].format(brief="Do x.", pick=""))
 
     def test_each_shape_keeps_the_brief_and_lets_the_session_start_more_than_one_subagent(self):
-        self.assertEqual(set(run.SHAPES), {"redo", "fanout", "plan-build"})
+        self.assertEqual(set(run.SHAPES), {"redo", "fanout", "plan-build", "workflow"})
         pinned = {"args": ["--agents", json.dumps({"a": {}, "b": {}})]}
         for shape in run.SHAPES:
             task = {"brief": "Do x.", "shape": shape}
@@ -2359,6 +2392,34 @@ class DelegationTasks(unittest.TestCase):
                 self.assertNotIn("one subagent", prompt)
                 self.assertNotRegex(prompt, "[\u2013\u2014]")
                 self.assertEqual(run.prompt(task, "direct"), "Do x.")
+
+    def test_the_workflow_prompt_has_the_session_write_and_run_a_script_of_stages(self):
+        task = self.task("workflow-two-stage-report")
+        pinned = {"args": ["--agents", json.dumps({"a": {}, "b": {}})]}
+        prompt = run.prompt(task, "delegate", pinned)
+        self.assertIn("one Workflow tool call", prompt)
+        self.assertIn("one `agent()` stage for each step", prompt)
+        head = prompt.split("\n\nTask: ")[0].replace("Use one of these agents: a or b.", "")
+        self.assertNotRegex(head, r"haiku|sonnet|opus|fable|model|effort")  # which model a stage names is measured
+        self.assertIn("Use one of these agents: a or b.", prompt)
+        self.assertTrue(prompt.endswith(f"\n\nTask: {task['brief']}"))
+        self.assertEqual(run.prompt(task, "direct"), task["brief"])
+        self.assertFalse((task["dir"] / "repo" / ".claude").exists())  # a saved script would fix the stages' models
+
+    def test_only_a_workflow_task_in_the_delegate_arm_may_call_workflow_and_read(self):
+        defaults = next(c for c in run.load_configs() if c["id"] == "defaults")
+        for task_id, arm, extra in (("workflow-two-stage-report", "delegate", ["Workflow", "Read(./**)"]),
+                                    ("workflow-two-stage-report", "direct", []),
+                                    ("fanout-three-lookups", "delegate", [])):
+            with self.subTest(task=task_id, arm=arm), tempfile.TemporaryDirectory() as tmp:
+                seen = Path(tmp) / "seen.json"
+                options = {"claude": stub(Path(tmp), STREAM_STUB), "model": "sonnet", "budget": 0.5, "timeout": 60,
+                           "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None, "arm": arm}
+                with unittest.mock.patch.dict("os.environ", {"STUB_SEEN": str(seen)}):
+                    run.run_one(self.task(task_id), defaults, options, {})
+                argv = json.loads(seen.read_text())["argv"]
+                self.assertEqual(argv[argv.index("--allowedTools") + 1:], [*run.TOOLS, *extra])
+                self.assertNotIn("Read", argv)  # a bare Read would approve reading anywhere
 
     def test_an_unknown_shape_is_an_error(self):
         with self.assertRaises(KeyError):
@@ -2534,6 +2595,7 @@ print(json.dumps([got, *(conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
                                   "*": ["choose b", "option b is", "pick b", "recommend", "prefer"],
                                   "docs/PROPOSAL.md": ["worker", "process", "host"],
                                   "test_payments.py": ["idempotency"]},
+        "workflow-two-stage-report": {"brief": ["3.4.1", "25", "settings.py", "version.py"]},
     }
 
     def test_no_shipped_file_names_an_answer(self):
@@ -2593,7 +2655,8 @@ if os.environ.get("STUB_HANG"):
 answer = os.environ.get("STUB_ANSWER", "read_retry_limit in app/settings.py")
 denials = json.loads(os.environ.get("STUB_DENIALS", "[]"))
 print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": answer, "total_cost_usd": 0.01,
-                  "modelUsage": {}, "permission_denials": denials, "terminal_reason": "completed"}))
+                  "modelUsage": json.loads(os.environ.get("STUB_MODEL_USAGE", "{}")), "permission_denials": denials,
+                  "terminal_reason": "completed"}))
 '''
 
 
@@ -2670,6 +2733,44 @@ class Harness(unittest.TestCase):
         tools = cmd[cmd.index("--allowedTools") + 1:]
         self.assertEqual(tools, list(run.TOOLS))
         self.assertIn("Bash", tools)
+
+    def test_where_no_sandbox_can_start_the_run_stops_and_the_readme_says_what_happens(self):
+        settings = run.settings({}, {}, hidden=[])
+        self.assertIs(settings["sandbox"]["failIfUnavailable"], True)
+        readme = (ROOT / "bench" / "README.md").read_text(encoding="utf-8")
+        self.assertIn("Where no sandbox can start", readme)
+        self.assertIn("never runs a command unsandboxed", readme)
+
+    def test_a_stub_streams_cache_counts_reach_the_row(self):
+        usage = {"claude-sonnet-5-5": {"inputTokens": 3, "cacheReadInputTokens": 900, "cacheCreationInputTokens": 90},
+                 "claude-haiku-5-5": {"inputTokens": 2, "cacheReadInputTokens": 100, "cacheCreationInputTokens": 10}}
+        row, _ = self.one(env={"STUB_MODEL_USAGE": json.dumps(usage)})
+        self.assertEqual((row["cache_read_tokens"], row["cache_write_tokens"], row["fresh_input_tokens"]),
+                         (1000, 100, 5))
+
+    def test_a_workflow_call_is_recorded_without_reading_its_result(self):
+        stream = "\n".join(json.dumps(e) for e in (
+            {"type": "assistant", "message": {"model": "claude-opus-5-5", "content": [
+                {"type": "tool_use", "id": "w1", "name": "Workflow", "input": {"name": "release-facts"}},
+                {"type": "tool_use", "id": "w2", "name": "Workflow", "input": {"scriptPath": "./x.js"}},
+                {"type": "tool_use", "id": "w3", "name": "Workflow", "input": {"name": "bad name\n## WIN"}},
+                {"type": "tool_use", "id": "a1", "name": "Agent", "input": {"subagent_type": "worker"}}]}},
+            {"type": "user", "tool_use_result": "an undocumented shape", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "w1", "content": [{"type": "text", "text": "x"}]},
+                {"type": "tool_result", "tool_use_id": "w2", "is_error": True, "content": "no Read"}]}},
+            {"type": "assistant", "parent_tool_use_id": "w1", "message": {"model": "claude-haiku-5-5", "content": []}},
+            {"type": "user", "message": "not an object"},
+            {"type": "user", "message": {"content": "plain text"}}))
+        init, result, started, calls, workflows = run.read_stream(stream)
+        self.assertEqual(workflows, [{"name": "release-facts", "is_error": False},
+                                     {"name": None, "is_error": True},
+                                     {"name": "invalid", "is_error": None}])
+        self.assertEqual((started, calls), ({"worker": 1}, [
+            {"agent": "worker", "named_model": None, "named_effort": None, "ran_on": None}]))
+        row = Recorder().row({}, workflow_calls=workflows)
+        self.assertEqual(row["workflow_calls"], workflows)
+        self.assertEqual(Recorder().row({})["workflow_calls"], [])
+        self.assertEqual(self.one()[0]["workflow_calls"], [])
 
     def test_a_run_uses_its_own_config_folder_and_never_the_hosts(self):
         host = self.dir / "host"
@@ -2964,7 +3065,7 @@ class Harness(unittest.TestCase):
             {"type": "assistant", "parent_tool_use_id": "b", "message": {"model": "claude-sonnet-5-5", "content": []}},
             {"type": "assistant", "parent_tool_use_id": "a", "message": "not an object"},
             {"type": "assistant", "parent_tool_use_id": "a", "message": {"model": "claude-opus-5-5", "content": []}}))
-        init, result, started, calls = run.read_stream(stream)
+        init, result, started, calls, _ = run.read_stream(stream)
         self.assertEqual(started, {"worker": 3})
         self.assertEqual(calls, [
             {"agent": "worker", "named_model": "opus", "named_effort": None, "ran_on": "claude-opus-5-5"},
@@ -3171,7 +3272,7 @@ class ReviewFixes(unittest.TestCase):
             with self.subTest(kind=kind):
                 stream = json.dumps({"type": "assistant", "message": {"content": [
                     {"type": "tool_use", "id": "t1", "name": "Agent", "input": {"subagent_type": kind}}]}})
-                _, _, started, calls = run.read_stream(stream)
+                _, _, started, calls, _ = run.read_stream(stream)
                 self.assertEqual((started, [c["agent"] for c in calls]), ({"invalid": 1}, ["invalid"]))
         stream = json.dumps({"type": "assistant", "message": {"content": [
             {"type": "tool_use", "id": "t1", "name": "Agent", "input": ["not", "a", "dict"]},
