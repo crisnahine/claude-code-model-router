@@ -6,7 +6,7 @@ import itertools
 import json
 from pathlib import Path
 
-from test_model_router import BUILD, Sandbox, calls, gates, health, hooks, settings
+from test_model_router import BUILD, Sandbox, calls, cfg, gates, health, hooks, settings
 from modelrouter import mod as modpath
 
 COMMIT = ("git commit -m \"$(cat <<'EOF'\nAdd parser tests\n\npytest now covers the empty-input case.\nEOF\n)\"")
@@ -129,7 +129,7 @@ class StopCheck(Sandbox):
 
 
 def note(**options) -> str:
-    return hooks._rules(dataclasses.replace(settings.Settings(), **options))
+    return hooks._rules(dataclasses.replace(settings.Settings(), **options), cfg.shipped())
 
 
 class Notes(Sandbox):

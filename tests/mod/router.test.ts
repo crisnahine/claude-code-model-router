@@ -12,7 +12,7 @@ const same = <T>(e: T): T => e
 // What the runtime answers to the commands that set nothing (scripts/modelrouter/mod.py OK).
 const RAN: Reply = { stdout: JSON.stringify({ ok: true }) }
 
-function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}, settings: Record<string, object | Error> = {}) {
+function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOptions = {}, settings: Record<string, object | Error> = {}) {
   const hooks: Record<string, Hook> = {}
   const matchers: Record<string, unknown> = {}
   const catches: Record<string, Hook> = {}
@@ -50,7 +50,9 @@ function load(replies: Record<string, Reply> = {}, options: PluginOptions = {}, 
       run: async (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) => {
         const command = argv[2] ?? ''
         calls.push({ command, argv, stdin: JSON.parse(init.stdin), env: init.env })
-        const reply = replies[command] ?? RAN
+        const given = replies[command] ?? RAN
+        // A list answers one call each, and its last entry every call after.
+        const reply = Array.isArray(given) ? (given.length > 1 ? given.shift()! : given[0]) : given
         return { exitCode: reply.exitCode ?? 0, stdout: reply.stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
       },
     },
@@ -389,14 +391,22 @@ test('a call whose spawn round trip fails still runs within max_tier, and one th
   assert.equal(seen.at(-1), 'opus')
 })
 
+test('a spawn round trip that fails once is asked again, and the second answer routes the call', async () => {
+  const mod = load({ 'mod-spawn': [{ exitCode: 1, stdout: '' }, PICK] }, { max_tier: 'sonnet' })
+  const seen: unknown[] = []
+  await mod.spawn(spawnEvent({ model: 'opus' }), (x: any) => { seen.push(x.model); return { agentId: 'a1' } })
+  assert.deepEqual(seen, ['haiku'])
+  assert.equal(mod.calls.filter(c => c.command === 'mod-spawn').length, 2)
+})
+
 test('with routing off, a call whose spawn round trip fails runs as named', async () => {
   const seen: unknown[] = []
   const next = (x: any) => { seen.push(x.model); return { agentId: 'a1' } }
-  for (const routing_mode of ['off', 'advise']) {
-    const mod = load({ 'mod-spawn': { exitCode: 1, stdout: '' } }, { routing_mode, max_tier: 'sonnet' })
-    await mod.spawn(spawnEvent({ model: 'opus' }), next)
-  }
-  assert.deepEqual(seen, ['opus', 'opus'])
+  const mod = load({ 'mod-spawn': { exitCode: 1, stdout: '' } }, { routing_mode: 'off', max_tier: 'sonnet' })
+  await mod.spawn(spawnEvent({ model: 'opus' }), next)
+  const unknown = load({ 'mod-spawn': { exitCode: 1, stdout: '' } }, { routing_mode: 'advise', max_tier: 'sonnet' })
+  await unknown.spawn(spawnEvent({ model: 'opus' }), next)
+  assert.deepEqual(seen, ['opus', 'sonnet'])  // an unknown word is auto, as the runtime reads it
 })
 
 test('with no Python the launcher answers nothing, so no call is marked', async () => {
@@ -507,7 +517,8 @@ test('a failing or garbled CLI leaves every event unchanged', async () => {
     }
     const done = completeEvent({ agentId: 'a1', usage: TURN })
     assert.equal(await mod.complete(done), done)
-    assert.equal(mod.calls.length, 3)
+    // A failed spawn round trip is asked once more; an empty answer means no Python ran, and is not.
+    assert.equal(mod.calls.length, reply.stdout ? 4 : 3)
   }
 })
 

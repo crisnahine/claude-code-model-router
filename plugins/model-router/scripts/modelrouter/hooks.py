@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import calls, fallback, gates, health, intake, ledger, mod, request, session, settings
+from . import calls, fallback, gates, health, intake, ladder, ledger, mod, request, session, settings
 from . import config as cfg
 from .registry import Registry
 
@@ -16,8 +16,14 @@ def _context(event: str, text: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
 
 
-def _rules(options: settings.Settings) -> str:
-    """The level rule for Claude, written as facts: the Agent tool sets `effort` only when instructions ask."""
+_HARD = "work that is hard to check, high-stakes, ambiguous or broad"
+_SUCH = "a bug's cause, a design, a review, a contract or financial figures"
+
+
+def _rules(options: settings.Settings, reg: Registry) -> str:
+    """The level rule for Claude, written as facts: the Agent tool sets `effort` only when instructions ask.
+    Each level's model and effort come from the registry, so a rules file that moves a level moves the note."""
+    at = {level: (ladder.model_for(reg, level), ladder.effort(reg, level)) for level in cfg.Level}
     redo = ("A redo after a failed check or a gap in the report keeps its `description` with \"Redo:\" in front "
             "and runs {above}.")
     # CLAUDE_CODE_EFFORT_LEVEL wins over a call's effort (sub-agents.md), and either variable keeps a redo's effort.
@@ -30,9 +36,11 @@ def _rules(options: settings.Settings) -> str:
                 "no effect.")
         if fixed:
             return f"{lead} {fixed}"
-        return (lead + " Model Router keeps the `effort` a call names, by the work: medium for finding, reading, "
-                "listing and everyday work to a clear brief; high for work that is hard to check, high-stakes, "
-                "ambiguous or broad, such as a bug's cause, a design, a review, a contract or financial figures."
+        light, everyday, hard = (at[level][1] for level in (cfg.Level.lookup, cfg.Level.standard, cfg.Level.complex))
+        plain = (f"{light} for finding, reading, listing and everyday work to a clear brief" if light == everyday
+                 else f"{light} for finding, reading and listing; {everyday} for everyday work to a clear brief")
+        return (lead + f" Model Router keeps the `effort` a call names, by the work: {plain}; {hard} for {_HARD}, "
+                f"such as {_SUCH}."
                 + ("" if options.subagent_effort else " " + redo.format(above="one effort step higher")))
     if options.subagent_model:
         # The cap doesn't lower CLAUDE_CODE_SUBAGENT_MODEL, only a model the agent names.
@@ -40,20 +48,19 @@ def _rules(options: settings.Settings) -> str:
     else:
         neither = f"its agent's own model or the conversation's{', within the cap' if options.cap else ''}"
     if fixed:
-        lead, medium, high = (f"Model Router keeps the `model` an Agent call names, within the user's cap. {fixed} "
-                              "Here every Agent call names a model, by the work:\n"), "", ""
+        lead, efforts = (f"Model Router keeps the `model` an Agent call names, within the user's cap. {fixed} "
+                         "Here every Agent call names a model, by the work:\n"), False
     else:
         fills = "" if options.subagent_effort else ", and fills in `effort` when a call names only a model"
-        lead, medium, high = (f"Model Router keeps the `model` and `effort` an Agent call names, within the user's "
-                              f"cap{fills}. Here every Agent call names both, by the work:\n"), " at medium", " at high"
+        lead, efforts = (f"Model Router keeps the `model` and `effort` an Agent call names, within the user's "
+                         f"cap{fills}. Here every Agent call names both, by the work:\n"), True
     above = ("on a stronger model than the run it redoes" if fixed or options.subagent_effort
              else "above the run it redoes, effort before model")
-    return (lead + f"- haiku{medium}: finding, reading and listing\n"
-            f"- sonnet{medium}: everyday work to a clear brief\n"
-            f"- opus{high}: work that is hard to check, high-stakes, ambiguous or broad (a bug's cause, a design, "
-            "a review, a contract or financial figures)\n"
-            f"- fable{high}: open-ended research\n"
-            f"A call that names neither runs on {neither}. " + redo.format(above=above))
+    work = ((cfg.Level.lookup, "finding, reading and listing"), (cfg.Level.standard, "everyday work to a clear brief"),
+            (cfg.Level.complex, f"{_HARD} ({_SUCH})"), (cfg.Level.frontier, "open-ended research"))
+    rows = "".join(f"- {at[level][0]}{f' at {at[level][1]}' if efforts and at[level][1] else ''}: {what}\n"
+                   for level, what in work if at[level][0])
+    return f"{lead}{rows}A call that names neither runs on {neither}. " + redo.format(above=above)
 
 
 def session_start(hook_input: dict) -> dict | None:
@@ -66,7 +73,7 @@ def session_start(hook_input: dict) -> dict | None:
     mode = options.mode
     opens = hook_input.get("source") not in ("clear", "compact")
     if mode == "auto":
-        note = _rules(options)
+        note = _rules(options, snap.registry)
         if options.force:
             notices.append(
                 f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent to {options.subagent_model or 'one model'}, "

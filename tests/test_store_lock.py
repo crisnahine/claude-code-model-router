@@ -79,18 +79,6 @@ class StoreLock(Sandbox):
         self.assertEqual(store.try_update(self.data / "state.json", lambda data: data.update(a=1))[1], "saved")
         self.assertEqual(store.load_state_file(self.data / "state.json"), {"a": 1})
 
-    def test_an_older_release_never_waits_on_or_breaks_this_releases_lock(self):
-        self.data.mkdir(exist_ok=True)
-        path = self.data / "state.json"
-        old_lock = self.data / "state.json.lock"  # an older release's: held while it exists, removed after ten seconds
-        with store.locked(path):
-            old_lock.unlink(missing_ok=True)  # that release breaking it as stale
-            with mock.patch.object(store, "LOCK_WAIT_SECONDS", 0.02), self.assertRaises(store.Busy):
-                with store.locked(path):
-                    pass
-            self.assertFalse(old_lock.exists())
-        self.assertFalse(old_lock.exists())
-
     def test_a_lock_let_go_names_no_holder(self):
         self.data.mkdir(exist_ok=True)
         path = self.data / "state.json"

@@ -134,9 +134,9 @@ function capped(model: string | undefined, maxTier: string | undefined): string 
   return cap >= 0 && named > cap ? TIERS[cap] : undefined
 }
 
-// routing_mode as the runtime reads it (config.parse_mode): advise, from older releases, is off.
+// routing_mode as the runtime reads it (config.parse_mode): anything but off is auto.
 function routing(opts: Record<string, string>): boolean {
-  return !['off', 'advise'].includes((opts.CLAUDE_PLUGIN_OPTION_ROUTING_MODE ?? '').trim().toLowerCase())
+  return (opts.CLAUDE_PLUGIN_OPTION_ROUTING_MODE ?? '').trim().toLowerCase() !== 'off'
 }
 
 function remember<V>(map: Map<string, V>, key: string, value: V): void {
@@ -189,7 +189,7 @@ export const register: Register = (on, options) => {
     if (unmarked) return next(e) // the fallback routed it
     const effort = callerEffort.get(e.tool_use_id)
     const layers = await modelSettings($, reads)
-    const pick = heard(await ask($, opts, 'mod-spawn', {
+    const facts = {
       ...(layers ? { settings: layers } : {}),
       parent_agent_id: e.parentAgentId,
       parent_model: e.parentModel,
@@ -204,7 +204,11 @@ export const register: Register = (on, options) => {
         ...(e.model ? { model: e.model } : {}),
         ...(effort ? { effort } : {}),
       },
-    }))
+    }
+    // The fallback already stood down for this call, so a failed round trip is asked once more.
+    let reply = await ask($, opts, 'mod-spawn', facts)
+    if (reply === undefined) reply = await ask($, opts, 'mod-spawn', facts)
+    const pick = heard(reply)
     // Without an answer neither path routed this call, so only the cap can still be held, and only while routing.
     const model = pick ? pick.model : routing(opts) ? capped(e.model, opts.CLAUDE_PLUGIN_OPTION_MAX_TIER) : undefined
     const mine: Want | null = pick?.effort ? { effort: pick.effort, raiseOnly: !!e.workflow } : null

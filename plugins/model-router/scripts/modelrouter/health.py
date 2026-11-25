@@ -53,8 +53,6 @@ class Health:
         if self.healthy(name):
             return None
         info = self._info(name)
-        if not info.get("why") and info.get("substituted") and not info.get("last_error"):
-            return f"ran as {info.get('substituted_by')} instead"  # a record written before the cause was kept
         return str(info.get("why") or info.get("last_error") or "calls failed with a model error")
 
 

@@ -138,7 +138,6 @@ def _number(value: Any) -> bool:
 
 def parse_mode(value: Any) -> str | None:
     value = value.strip().lower() if isinstance(value, str) else None
-    value = "off" if value == "advise" else value  # advise, from older releases, changed no call
     return value if value in MODES else None
 
 
@@ -209,7 +208,9 @@ def _clean(override: Any, source: str, problems: list[str], plain_keys: bool = F
                 bad(f"agents.{name}", "is not an object")
                 continue
             kept = {}
-            if isinstance(spec.get("model"), str):
+            if isinstance(spec.get("model"), str) and plain_keys and not _PLAIN_NAME.fullmatch(spec["model"]):
+                problems.append(f"{source}: a model under agents that is not a plain name, dropped")
+            elif isinstance(spec.get("model"), str):
                 kept["model"] = spec["model"]
             elif spec.get("model") is not None:
                 bad(f"agents.{name}.model", "is not a model name")
@@ -327,8 +328,6 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
     held: list[Held] = []
     user_file, project_file = user or {}, project or {}
     mine = _clean(user_file, USER_FILE, problems)
-    if isinstance(user_file, dict) and "prices" in user_file:
-        problems.append(f"{USER_FILE}: prices is no longer read, since the dollars shown are Claude Code's estimate")
     theirs = _clean(project_file, PROJECT_FILE, problems, plain_keys=True)
     vouched = set(base.get("models") or {}) | set(mine.get("models") or {})
     added = {}

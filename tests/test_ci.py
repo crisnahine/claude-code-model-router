@@ -72,7 +72,7 @@ class PluginVersion(unittest.TestCase):
         self.assertIn("0.1.3 was already carried", out)
 
     def test_a_version_carried_only_before_the_first_release_passes(self):
-        # Nobody could install a release then, so no install holds a cached copy under that version.
+        # Nothing was released then, so only an install made from the branch itself holds a copy under it.
         for version in ("0.2.0", "0.1.1"):
             self.set_version(version, extra="x")
             self.commit()

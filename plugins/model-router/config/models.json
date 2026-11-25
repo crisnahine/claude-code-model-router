@@ -16,7 +16,7 @@
     "opus": {
       "strength": 3,
       "cost": 3,
-      "use_for": "Defect fixes, migrations and performance work, design and planning, cross-module changes, subtle bugs, security-sensitive code, adversarial review. On coding it came within a point of Fable at the same effort for under a quarter of the cost."
+      "use_for": "Defect fixes, migrations and performance work, design and planning, cross-module changes, subtle bugs, security-sensitive code, adversarial review."
     },
     "fable": {
       "strength": 4,

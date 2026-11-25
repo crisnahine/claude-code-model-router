@@ -146,7 +146,6 @@ def locked(path: Path) -> Iterator[None]:
     a write without the lock could drop another hook's update. The lock is the OS's, on a
     file that stays on disk, so a process that dies lets go of it at once. On a filesystem
     that can't lock at all, the write goes ahead without one."""
-    # Not ".lock": older releases read that file's existence as held and remove it after ten seconds.
     lock = path.with_name(path.name + ".flock")
     deadline = time.monotonic() + LOCK_WAIT_SECONDS
     delay = 0.001

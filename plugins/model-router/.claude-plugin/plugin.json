@@ -46,7 +46,7 @@
     "verify_gate": {
       "type": "boolean",
       "title": "Check before finishing",
-      "description": "On by default, as this plugin's own choice, and only while routing_mode is auto. When Claude edited a project file with Edit, Write or NotebookEdit and no check command ran afterwards, Claude is asked once, before it finishes a turn, to run the work's own check: tests, build or linter for code, a recompute for figures, a reread against the request for a document. A file changed by a shell command doesn't count. There is no ask while background work runs or when the session's transcript can't be read. An ask costs one more turn. Set it to false to skip it.",
+      "description": "On by default, as this plugin's own choice, and only while routing_mode is auto. When Claude edited a project file with Edit, Write or NotebookEdit and no check command ran afterwards, Claude is asked once, before it finishes a turn, to run the work's own check: tests, type check or linter for code, a recompute for figures, a reread against the request for a document. A file changed by a shell command doesn't count. There is no ask while background work runs or when the session's transcript can't be read. An ask costs one more turn. Set it to false to skip it.",
       "default": true
     }
   }

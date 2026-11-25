@@ -127,12 +127,12 @@ def models(snap: settings.Snapshot) -> str:
     return "\n".join(lines)
 
 
-LOCK_EVENTS = ("waits", "other_session", "skipped", "broken")
+LOCK_EVENTS = ("waits", "other_session", "skipped")
 
 
 def lock_rows() -> list[dict]:
     """Each state file's lock counts, for `models`: waits for the lock, how many of those were
-    on another session's lock, writes skipped because it stayed held, stale locks broken."""
+    on another session's lock, writes skipped because it stayed held."""
     rows = []
     for name, counts in sorted(store.lock_counts().items()):
         if isinstance(counts, dict):
@@ -145,9 +145,9 @@ def lock_rows() -> list[dict]:
 def lock_table(rows: list[dict]) -> list[str]:
     if not rows:
         return []
-    return ["", "| State file | Lock waits | On another session's lock | Writes skipped | Stale locks broken |",
-            "| :- | -: | -: | -: | -: |",
-            *(f"| {r['file']} | {r['waits']} | {r['other_session']} | {r['skipped']} | {r['broken']} |" for r in rows),
+    return ["", "| State file | Lock waits | On another session's lock | Writes skipped |",
+            "| :- | -: | -: | -: |",
+            *(f"| {r['file']} | {r['waits']} | {r['other_session']} | {r['skipped']} |" for r in rows),
             "", "A skipped write lost one update to that file, since the lock stayed held past "
             f"{store.LOCK_WAIT_SECONDS:g} seconds."]
 

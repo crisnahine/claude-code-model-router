@@ -2,7 +2,8 @@
 v* tag holds.
 
 Installs keep their cached copy until the version string changes. A version the branch carried only before its
-first v* tag is free: no release could be installed then. Run from the repository root:
+first v* tag is free: nothing was released then, and only an install made from the branch itself holds a copy.
+Run from the repository root:
 python3 tools/plugin_version.py <base ref>
 """
 from __future__ import annotations

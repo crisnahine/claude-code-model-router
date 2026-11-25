@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Mapping, Optional, TypedDict
 
 from . import ladder
-from .config import EFFORTS, Level
+from .config import _PLAIN_NAME, EFFORTS, Level
 from .registry import Registry, Rule
 from .settings import Settings
 
@@ -140,7 +140,9 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         if definition is None:
             why = "this agent's definition wasn't found, so it is left alone"
         elif own_model and not pinned:
-            why = f"the agent names a model outside the registry ({own_model})"
+            # An agent file can come with a repository, so only a plain name is shown back.
+            shown = own_model if _PLAIN_NAME.fullmatch(str(own_model)) else "not a plain name"
+            why = f"the agent names a model outside the registry ({shown})"
         elif pinned:
             target, source, why = pinned, "pin", "the agent names its own model"
         elif env_default and not redo:

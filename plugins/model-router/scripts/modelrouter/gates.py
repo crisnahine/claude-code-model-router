@@ -424,7 +424,7 @@ def unverified_edit(hook_input: dict) -> str | None:
         return None
     return (
         "Model Router: project files changed since the last check and nothing has checked them yet. The work's own "
-        "check comes next: for code, the project's tests, build or linter, and "
+        "check comes next: for code, the project's tests, type check or linter, and "
         f"{cfg.PLUGIN_NAME}:verifier for a check that takes more than one command; for figures or a spreadsheet, a "
         "recompute or a diff against known values; for a document or an analysis, a reread against the request and "
         "its sources. Work that isn't finished, that waits on the user, or that has no check to run ends the turn "
