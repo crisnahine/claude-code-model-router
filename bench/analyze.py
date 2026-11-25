@@ -445,9 +445,10 @@ def _metrics(summary: list[dict], rows: list[dict], routers: frozenset[str]) -> 
 def render_sessions(parts: list[tuple], meta: dict, routers: frozenset[str]) -> str:
     body = []
     for model, router, summary, every, rows in parts:
+        rows_here = summary + ([every] if every else [])
         body += [f"## Results: session model `{model}`", "",
                  f"Every run here had `{model}` as its session model; router: `{router}`.", "",
-                 *_table(summary + ([every] if every else [])), "", *_quality_lines(summary), "",
+                 *_table(rows_here), "", *_quality_lines(rows_here), "",
                  *_metrics(summary, rows, routers), ""]
     return "\n".join([meta.get("header", "# Benchmarks"), "", *body, meta.get("body", "")]).rstrip() + "\n"
 
@@ -676,7 +677,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         f"- Each table ends with an `{ALL}` row, judged the same way over every task in the table: the tasks of all "
         "its classes are paired and resampled together. A class with one task can't show the margin, so a plan "
         f"with a few tasks per class is judged on its `{ALL}` row.",
-        f"- A class is saturated when `{SPLIT_WEAK}` (every subagent on Haiku) can't be told from `{SPLIT_STRONG}` "
+        f"- A row, the `{ALL}` row too, is saturated when `{SPLIT_WEAK}` (every subagent on Haiku) can't be told from `{SPLIT_STRONG}` "
         f"(subagents on the session model) by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an "
         "equal pass rate says nothing about quality. Runs on an earlier revision of a task are left out of every table. A run on a "
         "task's current revision that a check other than today's graded stops the page from being built, since the "
@@ -730,19 +731,21 @@ def _page(results: Results, summary: list[dict]) -> dict:
     uncovered = [name for shape, name in (("fanout", "fan-out"), ("plan-build", "plan-then-build"), ("redo", "redo"),
                                           ("workflow", "workflow")) if shape not in shapes]
     saturated = sum(bool(row["quality"]["saturated"]) for row in summary)
+    every = [row for row in summary if row["class"] == ALL]
     counted = sorted({r["task"] for r in rows})
     brief = {t["id"]: t for t in tasks}
     header = "\n".join([
         "# Benchmarks", "",
         f"Cost and quality of Model Router against Claude Code without it. {len(rows)} runs, "
         f"${total:.2f} at list price, on {dates[0]}" + (f" to {dates[-1]}" if dates[-1] != dates[0] else "") + ".", "",
-        "No class here has a verdict against any baseline: the runs can't support one (each class line says why). "
+        "No row here has a verdict against any baseline: the runs can't support one (each row's line says why). "
         "Claim nothing from them beyond what the raw data shows."
         if summary and all(row["status"] == "REFUSED" for row in summary) else
         "Claim \"cheaper\" only against a baseline the router has a WIN against, and link its raw data.",
-        *(["", f"{saturated} of {len(summary)} class rows below are saturated: `{SPLIT_WEAK}` solved as many runs "
-              f"as `{SPLIT_STRONG}`, within noise, so these tasks can't tell models apart, and an equal pass rate there says nothing "
-              "about quality."] if saturated else []),
+        *(["", f"{saturated} of {len(summary)} rows below are saturated ({sum(bool(r['quality']['saturated']) for r in every)} "
+              f"of {len(every)} `{ALL}` rows): on their tasks the cheapest forced baseline, `{SPLIT_WEAK}` (every subagent "
+              f"on Haiku), wasn't shown to solve fewer runs than Claude Code's defaults (`{SPLIT_STRONG}`), so an equal "
+              "pass rate there says nothing about quality."] if saturated else []),
     ])
     body = "\n".join([
         *read,
@@ -889,7 +892,7 @@ def pilot_rows() -> tuple[list[dict], dict]:
 
 def build_page(results: Results, router: str | None = None, current: str | None = None) -> str:
     parts = sessions(results, router)
-    summary = [row for part in parts for row in part[2]]
+    summary = [row for part in parts for row in part[2] + ([part[3]] if part[3] else [])]
     kept = bool(current and current.startswith(HEAD_START) and HEAD_END in current)
     head = current.split(HEAD_END, 1)[0] + HEAD_END if kept else ""
     page = head + render_sessions(parts, _page(results, summary), results.routers)

@@ -389,9 +389,13 @@ class Analysis(unittest.TestCase):
         recorded = [full_row(task=r["task"], config=r["config"], total_cost_usd=r["total_cost_usd"],
                              **{"class": "lookup"}) for r in data]
         page = analyze.build_page(dataclasses.replace(analyze.load([]), rows=recorded))
-        self.assertIn("1 of 1 class rows below are saturated: `haiku-high` solved as many runs as `defaults`", page)
-        self.assertIn("an equal pass rate there says nothing about quality", page)
-        self.assertIn("- lookup: saturated, haiku-high solved 60 of 60, defaults 60 of 60", page)
+        # The all-tasks row is the one a verdict is read from, so its saturation is printed and counted too.
+        self.assertIn("2 of 2 rows below are saturated (1 of 1 `all tasks` rows): on their tasks the cheapest forced "
+                      "baseline, `haiku-high` (every subagent on Haiku), wasn't shown to solve fewer runs than Claude "
+                      "Code's defaults (`defaults`), so an equal pass rate there says nothing about quality.", page)
+        quality = page.split("### Do the tasks tell models apart")[1].split("###")[0]
+        self.assertIn("- lookup: saturated, haiku-high solved 60 of 60, defaults 60 of 60", quality)
+        self.assertIn("- all tasks: saturated, haiku-high solved 60 of 60, defaults 60 of 60", quality)
         n = analyze.MIN_RUNS
         behind = (rows("plugin", "lookup", [0.3] * n, [True] * n) + rows("defaults", "lookup", [0.4] * n, [True] * n)
                   + rows("haiku-high", "lookup", [0.2] * n, [True] * 4 + [False] * 6))
