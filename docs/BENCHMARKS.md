@@ -38,7 +38,7 @@ Small rounds run to choose tasks and settings. They get no verdict: each has too
 
 ### `calibration-1`: 28 runs on 2026-11-25, $5.27, session on `claude-opus-5-5`
 
-Eleven tasks under the two baselines, to look for tasks that tell a strong subagent from a cheap one. None did: both solved every run. The table counts ten of them, since `ops-inbox-triage` has changed since it ran.
+Eleven tasks under the two baselines, to look for tasks that tell a strong subagent from a cheap one. None did: both solved every run. The table counts seven of them, since `bugfix-statement-queries`, `impl-merge-customers`, `ops-inbox-triage` and `rootcause-wallet-race` have changed since it ran.
 
 Left out of the table: 16 run(s) ($3.94) on an earlier revision of `bugfix-statement-queries`, `impl-merge-customers`, `ops-inbox-triage`, `rootcause-wallet-race`.
 
@@ -49,7 +49,7 @@ Left out of the table: 16 run(s) ($3.94) on an earlier revision of `bugfix-state
 
 ### `calibration-2`: 24 runs on 2026-11-25, $8.37, session on `claude-opus-5-5`
 
-The four hard coding tasks and the redo, fan-out and plan-then-build tasks under the same two baselines. Each solved 13 of 14 runs: the one it missed was a `perf-nlogn-rewrite` run the 900-second timeout stopped.
+The four hard coding tasks and the redo, fan-out and plan-then-build tasks under the same two baselines. The table counts six of them, since `mixed-plan-then-build` has changed since it ran. Each baseline solved 11 of those 12 runs: the one it missed was a `perf-nlogn-rewrite` run the 900-second timeout stopped.
 
 Left out of the table: 4 run(s) ($1.50) on an earlier revision of `mixed-plan-then-build`.
 
@@ -60,7 +60,7 @@ Left out of the table: 4 run(s) ($1.50) on an earlier revision of `mixed-plan-th
 
 ### `release-1`: 66 runs on 2026-11-25, $15.78, session on `opus`
 
-Sixteen tasks under the plugin and the two baselines, with the ladder and the table the plugin ships. It stays exploratory for two reasons: the plugin has changed since the commit it ran, and each run had a $0.50 cap, which stopped five runs before they finished.
+Sixteen tasks under the plugin and the two baselines, with the ladder and the table the plugin ships. The table counts the eleven that haven't changed since it ran. It stays exploratory for two reasons: the plugin has changed since the commit it ran, and each run had a $0.50 cap, which stopped four of the runs counted before they finished.
 
 Left out of the table: 30 run(s) ($6.83) on an earlier revision of `bugfix-statement-queries`, `design-cache-invalidation`, `impl-merge-customers`, `mixed-plan-then-build`, `rootcause-wallet-race`.
 
