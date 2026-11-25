@@ -24,18 +24,89 @@ def _field(block: str, name: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+# A tool entry as sub-agents.md writes them: Read, Bash(git status), mcp__github__*, Agent(worker, researcher).
+_TOOL = re.compile(r"[A-Za-z_*][\w*.-]*(?:\(.*\))?")
+_NOT_TEXT = re.compile(r"(?i)null|~|true|false|yes|no|on|off|[-+.\d]+")  # scalars YAML reads as no string
+
+
+def _uncomment(text: str) -> str:
+    """`text` without a YAML comment: a # at the start or after a blank, outside quotes."""
+    quote = None
+    for i, c in enumerate(text):
+        if quote:
+            quote = None if c == quote else quote
+        elif c in "'\"":
+            quote = c
+        elif c == "#" and (i == 0 or text[i - 1] in " \t"):
+            return text[:i].strip()
+    return text.strip()
+
+
+def _split(text: str) -> list[str] | None:
+    """Comma-separated entries, a comma inside quotes or parentheses kept; None at a nested list or map."""
+    items, current, depth, quote = [], "", 0, None
+    for c in text:
+        if quote:
+            quote = None if c == quote else quote
+        elif c in "'\"":
+            quote = c
+        elif c in "[]{}":
+            return None
+        elif c in "()":
+            depth += 1 if c == "(" else -1
+        elif c == "," and depth == 0:
+            items.append(current)
+            current = ""
+            continue
+        current += c
+    return [*items, current]
+
+
+def _below(lines: list[str]) -> list[str]:
+    """The lines under a key, comments dropped, up to the next key."""
+    found = []
+    for line in lines:
+        text = _uncomment(line)
+        if text and line[:1] not in (" ", "\t", "-"):
+            break
+        if text:
+            found.append(text)
+    return found
+
+
+def _tools(entries: list[str] | None) -> list[str] | None:
+    """The entries unquoted, when there are some and each is a tool's name; else None."""
+    items = [i for i in (e.strip().strip("'\"").strip() for e in entries or ()) if i]
+    return items if items and all(_TOOL.fullmatch(i) for i in items) else None
+
+
 def _list(block: str, name: str) -> list[str] | None:
-    """A comma list, a [flow] list or a block of `- item` lines; None when the field is absent."""
-    match = re.search(r"^%s:[ \t]*(.*)$" % re.escape(name), block, re.M)
-    if not match:
+    """A comma list, a [flow] list (over several lines too) or `- item` lines, as YAML reads them. None when the field
+    is absent, null or empty, and when its value can't be read with confidence: read_only then takes the safe side,
+    every tool for `tools` and none removed for `disallowedTools`."""
+    lines = [line.rstrip("\r") for line in block.split("\n")]
+    at = next((i for i, line in enumerate(lines) if re.match(r"%s:(?:[ \t]|$)" % re.escape(name), line)), None)
+    if at is None:
         return None
-    inline = match.group(1).strip()
-    if inline:
-        items = inline.strip("[]").split(",")
-    else:
-        rest = re.match(r"(?:\n[ \t]+-[^\n]*)*", block[match.end():]).group(0)
-        items = re.findall(r"^[ \t]+-[ \t]*(.*)$", rest, re.M)
-    return [i for i in (item.strip().strip("'\"").strip() for item in items) if i]
+    value, following = _uncomment(lines[at][len(name) + 1:]), lines[at + 1:]
+    below = _below(following)
+    if not value:
+        if below and all(re.match(r"-(?:\s|$)", line) for line in below):
+            return _tools([line[1:] for line in below])
+        value, following, below = " ".join(below), [], []  # a flow list or a scalar indented under the key
+    if value.startswith("["):
+        for line in following:  # the closing bracket can be lines below, even at a line's start
+            if "]" in value:
+                break
+            value += " " + _uncomment(line)
+        inner, close, after = value[1:].partition("]")
+        return _tools(_split(inner)) if close and not after else None
+    # Null or another non-string, a scalar over several lines, a block scalar, an anchor or alias, a tag, a map.
+    quoted = value[:1] in ("'", '"')
+    if (not value or below or value[0] in "|>&*!{?" or _NOT_TEXT.fullmatch(value)
+            or (quoted and (len(value) < 2 or value[-1] != value[0]))):
+        return None
+    return _tools(_split(value[1:-1] if quoted else value))
 
 
 def read_only(definition: dict) -> bool:
