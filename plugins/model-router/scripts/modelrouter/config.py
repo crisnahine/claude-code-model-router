@@ -83,6 +83,81 @@ def project_dir(hook_input: dict | None = None) -> Path:
     return Path(os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd())
 
 
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+
+    # Private DLL objects, so these prototypes never change ctypes.windll for other code.
+    _advapi32, _kernel32 = ctypes.WinDLL("advapi32"), ctypes.WinDLL("kernel32")
+    _PP = ctypes.POINTER(ctypes.c_void_p)
+    _GetNamedSecurityInfoW = _advapi32.GetNamedSecurityInfoW
+    _GetNamedSecurityInfoW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD, _PP, _PP, _PP, _PP, _PP]
+    _GetNamedSecurityInfoW.restype = wintypes.DWORD
+    _OpenProcessToken = _advapi32.OpenProcessToken
+    _OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+    _OpenProcessToken.restype = wintypes.BOOL
+    _GetTokenInformation = _advapi32.GetTokenInformation
+    _GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+                                     ctypes.POINTER(wintypes.DWORD)]
+    _GetTokenInformation.restype = wintypes.BOOL
+    _IsValidSid = _advapi32.IsValidSid
+    _IsValidSid.argtypes = [ctypes.c_void_p]
+    _IsValidSid.restype = wintypes.BOOL
+    _EqualSid = _advapi32.EqualSid
+    _EqualSid.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    _EqualSid.restype = wintypes.BOOL
+    _GetCurrentProcess = _kernel32.GetCurrentProcess
+    _GetCurrentProcess.argtypes = []
+    _GetCurrentProcess.restype = wintypes.HANDLE
+    _CloseHandle = _kernel32.CloseHandle
+    _CloseHandle.argtypes = [wintypes.HANDLE]
+    _CloseHandle.restype = wintypes.BOOL
+    _LocalFree = _kernel32.LocalFree
+    _LocalFree.argtypes = [ctypes.c_void_p]
+    _LocalFree.restype = ctypes.c_void_p
+    _SE_FILE_OBJECT, _OWNER_SECURITY_INFORMATION, _TOKEN_QUERY = 1, 0x1, 0x8
+    _TOKEN_USER, _TOKEN_OWNER = 1, 4
+
+    def _owner_is_me(path: Path) -> bool:
+        owner, descriptor, token = ctypes.c_void_p(), ctypes.c_void_p(), wintypes.HANDLE()
+        try:
+            # os.stat follows links, so the owner read here is the target's too.
+            if _GetNamedSecurityInfoW(os.path.realpath(path), _SE_FILE_OBJECT, _OWNER_SECURITY_INFORMATION,
+                                      ctypes.byref(owner), None, None, None, ctypes.byref(descriptor)):
+                return False
+            if not owner.value or not _IsValidSid(owner):
+                return False
+            if not _OpenProcessToken(_GetCurrentProcess(), _TOKEN_QUERY, ctypes.byref(token)):
+                return False
+            # TokenOwner too: an elevated admin's new files are owned by Administrators, not the user.
+            for info_class in (_TOKEN_USER, _TOKEN_OWNER):
+                needed = wintypes.DWORD()
+                _GetTokenInformation(token, info_class, None, 0, ctypes.byref(needed))
+                # TOKEN_USER and TOKEN_OWNER both start with the SID pointer, into this same buffer.
+                buf = (ctypes.c_void_p * (needed.value // ctypes.sizeof(ctypes.c_void_p) + 1))()
+                if (_GetTokenInformation(token, info_class, buf, ctypes.sizeof(buf), ctypes.byref(needed))
+                        and buf[0] and _IsValidSid(buf[0]) and _EqualSid(owner, buf[0])):
+                    return True
+            return False
+        except Exception:
+            return False
+        finally:
+            if token.value:
+                _CloseHandle(token)
+            if descriptor.value:
+                _LocalFree(descriptor)
+
+
+def _mine(path: Path) -> bool:
+    """Whether this process's user owns `path`. False when the owner can't be read."""
+    if os.name == "nt":
+        return _owner_is_me(path)
+    try:
+        return os.stat(path).st_uid == os.getuid()
+    except OSError:
+        return False
+
+
 def _up_to_root(start: Path) -> list[Path]:
     """`start` and each folder above it up to the repository root (the first one holding .git),
     nearest first. Only `start` outside a repository, or when that root is the home folder or
@@ -95,9 +170,8 @@ def _up_to_root(start: Path) -> list[Path]:
                 break
             chain.append(folder)
             if (folder / ".git").exists():
-                owned = not hasattr(os, "getuid") or all(
-                    os.stat(p).st_uid == os.getuid() for p in (folder, folder / ".git", folder / ".claude")
-                    if p == folder or p.exists())
+                owned = all(_mine(p) for p in (folder, folder / ".git", folder / ".claude")
+                            if p == folder or p.exists())
                 return chain if owned else [start]
     except (OSError, RuntimeError):
         pass
