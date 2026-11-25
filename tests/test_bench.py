@@ -11,6 +11,7 @@ import json
 import math
 import os
 import re
+import shlex
 import shutil
 import signal
 import sqlite3
@@ -153,29 +154,51 @@ class Analysis(unittest.TestCase):
         row = self.summary(apart)["lookup"]
         self.assertEqual((row["status"], row["rank"]), ("REFUSED", None))
 
-    PLAN = (("bugfix-statement-queries", "bugfix"), ("cross-amount-cents", "cross-module"),
-            ("design-checkout-retries", "design"), ("security-admin-route", "security-review"),
-            ("rootcause-wallet-race", "root-cause"), ("impl-merge-customers", "implementation"))
+    OPUS_PLAN = ("rootcause-wallet-race", "cachefix-stale-across-services", "impl-merge-customers",
+                 "finance-ledger-reconcile", "legal-services-agreement", "fanout-three-lookups",
+                 "design-cache-invalidation", "security-tar-symlink-chain", "redo-failing-check",
+                 "workflow-two-stage-report", "mixed-plan-then-build", "research-study-synthesis", "ops-inbox-triage",
+                 "migrate-ledger-v3", "bugfix-statement-queries", "design-checkout-retries")
+    FABLE_PLAN = ("rootcause-wallet-race", "impl-merge-customers", "fanout-three-lookups", "design-cache-invalidation")
 
-    def plan_rows(self, runs):
-        """The README's measurement plan: 6 tasks in 6 classes, every run solved, the router cheapest."""
-        return [dict(r, task=task, batch=f"measure-{1 + i // 2}") for task, cls in self.PLAN
-                for config, usd in (("plugin", 0.05), ("defaults", 0.26), ("haiku-high", 0.10), ("pinned", 0.20))
-                for i, r in enumerate(rows(config, cls, [usd] * runs, [True] * runs))]
+    def plan_rows(self, tasks, runs, costs):
+        """Every run of `tasks` solved, at `costs` a run by configuration."""
+        classes = {t["id"]: t["class"] for t in run.load_tasks()}
+        return [dict(r, task=task, batch="judged") for task in tasks for config, usd in costs.items()
+                for r in rows(config, classes[task], [usd] * runs, [True] * runs)]
 
-    def test_the_documented_plan_can_reach_a_win_over_all_tasks(self):
+    def test_the_documented_plan_can_reach_a_verdict_over_all_tasks(self):
         kwargs = {"routers": frozenset({"plugin"}), "router": "plugin", "session": OPUS}
-        for runs, verdict in ((6, "NONE"), (8, "NONE"), (10, "WIN")):
-            with self.subTest(runs=runs):
-                data = self.plan_rows(runs)
-                every = analyze.overall(data, **kwargs)
-                self.assertEqual({v["verdict"] for v in every["verdicts"].values()}, {verdict})
-                self.assertEqual(every["class"], analyze.ALL)
-                # One task per class, so a class alone can't show the margin.
-                self.assertEqual({c["status"] for c in analyze.summarize(data, **kwargs)}, {"NONE"})
-        # The knife edge at 8 runs: a lower bound equal to the margin is not inside it.
-        edge = analyze.overall(self.plan_rows(8), **kwargs)["verdicts"]["pinned"]
-        self.assertEqual((edge["pass_ci"][0], edge["verdict"]), (-analyze.MARGIN, "NONE"))
+        cheap, dear = ({"plugin": usd, "defaults": 0.26, "haiku-high": 0.10} for usd in (0.05, 0.30))
+        for tasks, runs, verdicts in ((self.OPUS_PLAN, 2, ("NONE", "NONE")), (self.OPUS_PLAN, 5, ("WIN", "LOSE")),
+                                      (self.FABLE_PLAN, 5, ("NONE", "NONE"))):
+            for costs, verdict in zip((cheap, dear), verdicts):
+                with self.subTest(tasks=len(tasks), runs=runs, router=costs["plugin"]):
+                    every = analyze.overall(self.plan_rows(tasks, runs, costs), **kwargs)
+                    self.assertEqual({v["verdict"] for v in every["verdicts"].values()}, {verdict})
+        # The knife edge: a lower bound equal to the margin is not inside it.
+        edge = analyze.overall(self.plan_rows(self.OPUS_PLAN[:6], 8, {"plugin": 0.05, "pinned": 0.20}), **kwargs)
+        self.assertEqual((edge["verdicts"]["pinned"]["pass_ci"][0], edge["verdicts"]["pinned"]["verdict"]),
+                         (-analyze.MARGIN, "NONE"))
+
+    def test_the_readme_runs_the_plan_with_commands_that_work_as_written(self):
+        text = (ROOT / "bench" / "README.md").read_text(encoding="utf-8").replace("\\\n", " ")
+        commands = [line.strip().rstrip("&").replace('"$n"', "0").replace("$n", "0")
+                    for block in re.findall(r"```bash\n(.*?)```", text, re.S) for line in block.splitlines()
+                    if "bench/run.py" in line]
+        flat = " ".join(" ".join(commands).split())
+        for tasks, model in ((self.OPUS_PLAN, "claude-opus-5-5"), (self.FABLE_PLAN, "claude-fable-5-2")):
+            self.assertIn(f"--tasks {' '.join(tasks)} --configs plugin defaults haiku-high --runs 1 --first-run 0", flat)
+            self.assertRegex(flat, rf"--budget 2 --max-total \d+ --model {model} ")
+        bare = {k: v for k, v in os.environ.items() if k not in run.AUTH and not k.startswith("CLAUDE_CODE_USE_")}
+        for command in commands:
+            argv = shlex.split(command.replace("$HOME", str(Path.home())))
+            with self.subTest(command=command[:60]), unittest.mock.patch.dict("os.environ", bare, clear=True), \
+                    contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+                self.assertEqual(argv[:2], ["python3", "bench/run.py"])
+                run.main(argv[2:])
+            # Every option and id parses; the one thing missing is the credential, read from the environment.
+            self.assertIn("set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY", err.getvalue())
 
     def test_the_judged_router_comes_from_configs_json_not_file_order(self):
         data = [dict(r, main_model=OPUS) for r in spread("plugin", "lookup", 2, 4, 0.1)

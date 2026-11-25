@@ -47,34 +47,52 @@ Every run spends money or usage. Cost is Claude Code's `total_cost_usd`; a run w
 Smoke-test two `plugin` runs in a folder of their own (each run's sandbox hides the results folder). Both rows need empty `permission_denials`, `plugin_loaded` true and `agent_calls` filled in, and each transcript under `$HOME/mrb-smoke/keep/<run>/session/` should show a sandboxed heredoc and a temp file read back working.
 
 ```bash
-export CLAUDE_CODE_OAUTH_TOKEN=...   # or ANTHROPIC_API_KEY
 python3 bench/run.py --tasks rootcause-cart --configs plugin --runs 2 --seed 1 --batch smoke-1 --budget 1 \
     --max-total 4 --model claude-opus-5-5 --out "$HOME/mrb-smoke/smoke.jsonl" --keep "$HOME/mrb-smoke/keep"
 ```
 
-A calibration round finds the tasks that tell models apart: the five tasks of work that isn't code and six harder coding tasks, under `haiku-high` and `defaults`, 2 runs each, 44 runs. Rows under `results/pilot/` get no verdict; the page shows each batch as an exploratory round, leaving out runs on an earlier `revision` and runs whose check broke, as the judged tables do, and saying how many.
+Rows under `results/pilot/` get no verdict: the page shows each batch as an exploratory round, leaving out what the judged tables leave out and saying how many.
+
+### The judged plan
+
+This plan is fixed before any run. Each batch is read once, when all its runs are in, since every look is another chance for noise to pass. `run.py` reads the credential from the environment, `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`, and stops before any run when neither is set.
+
+Batch 1, on an Opus session: 16 tasks, `rootcause-wallet-race`, `cachefix-stale-across-services`, `impl-merge-customers`, `finance-ledger-reconcile`, `legal-services-agreement`, `fanout-three-lookups`, `design-cache-invalidation`, `security-tar-symlink-chain`, `redo-failing-check`, `workflow-two-stage-report`, `mixed-plan-then-build`, `research-study-synthesis`, `ops-inbox-triage`, `migrate-ledger-v3`, `bugfix-statement-queries` and `design-checkout-retries`, under `plugin`, `defaults` and `haiku-high`, 5 runs of each task under each, 240 runs. They run as five processes of 48 side by side, each its own run number, with a $2 cap per run; each process's total cap lets every run start even if all of them hit that cap.
 
 ```bash
-python3 bench/run.py --tasks legal-services-agreement finance-ledger-reconcile finance-runway-forecast \
-    research-study-synthesis ops-inbox-triage impl-merge-customers bugfix-statement-queries security-admin-route \
-    rootcause-wallet-race cross-amount-cents design-checkout-retries --configs haiku-high defaults --runs 2 --seed 2 \
-    --batch calibration-1 --budget 1.5 --max-total 20 --model claude-opus-5-5 \
-    --out bench/results/pilot/calibration-1.jsonl
+for n in 0 1 2 3 4; do
+  python3 bench/run.py --tasks rootcause-wallet-race cachefix-stale-across-services impl-merge-customers \
+      finance-ledger-reconcile legal-services-agreement fanout-three-lookups design-cache-invalidation \
+      security-tar-symlink-chain redo-failing-check workflow-two-stage-report mixed-plan-then-build \
+      research-study-synthesis ops-inbox-triage migrate-ledger-v3 bugfix-statement-queries design-checkout-retries \
+      --configs plugin defaults haiku-high --runs 1 --first-run "$n" --seed "$n" --batch judged-opus --budget 2 \
+      --max-total 100 --model claude-opus-5-5 --out "bench/results/judged-opus-$n.jsonl" &
+done
+wait
 ```
 
-Keep a task when `defaults` solves at least 2 of every 3 runs and `haiku-high` at most 1 of every 3 (`analyze.splitting_tasks(rows, "defaults", "haiku-high")`). Two are needed from the 7 candidates outside the 4 fixed coding tasks below; with fewer, swap candidates and run once more. If that fails too, these tasks can't tell Haiku from Opus.
-
-A measurement round runs the 4 fixed tasks and the 2 kept ones under `plugin`, `plugin-nogate`, `defaults` and `haiku-high`, 2 runs each, 48 runs. Verdicts are against `defaults` and `haiku-high`; `plugin-nogate` shows what `verify_gate` adds, and a row set aside with `options_not_applied` means its options didn't arrive. Round 1:
+Batch 2, on a Fable session: `rootcause-wallet-race`, `impl-merge-customers`, `fanout-three-lookups` and `design-cache-invalidation`, under the same three configurations, 5 runs each, 60 runs, as five processes of 12 with the same $2 cap.
 
 ```bash
-python3 bench/run.py --tasks bugfix-statement-queries cross-amount-cents design-checkout-retries security-admin-route \
-    <kept-1> <kept-2> --configs plugin plugin-nogate defaults haiku-high --runs 2 --first-run 0 --seed 3 \
-    --batch measure-1 --budget 1.5 --max-total 25 --model claude-opus-5-5 --out bench/results/measure-1.jsonl
+for n in 0 1 2 3 4; do
+  python3 bench/run.py --tasks rootcause-wallet-race impl-merge-customers fanout-three-lookups design-cache-invalidation \
+      --configs plugin defaults haiku-high --runs 1 --first-run "$n" --seed "$n" --batch judged-fable --budget 2 \
+      --max-total 28 --model claude-fable-5-2 --out "bench/results/judged-fable-$n.jsonl" &
+done
+wait
 python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
-python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check
 ```
 
-Run five rounds on at least two days, 240 runs; rounds 2 to 5 change only `--first-run` (2, 4, 6, 8), `--seed`, `--batch measure-<n>` and `--out bench/results/measure-<n>.jsonl`. Read the `all tasks` verdicts after round 3 (6 runs per task and configuration) and round 5 (10) only, since each look is another chance for noise to pass. With every run solved, a cost verdict can't show before the second look. Read class rows for a LOSE only. Undecided after round 5 is "no difference shown".
+To stop a batch, send its processes SIGTERM (`pkill -f bench/run.py`): each one kills its `claude` and writes the row of the run it paid for. A process that stopped (at a limit it couldn't wait out, after three runs in a row set aside, or by a signal) leaves gaps, and a verdict needs none: run the whole loop again. Each process runs only what isn't on record in its own file, so one that finished skips all its runs and exits.
+
+Each session model gets a table of its own, and the verdicts read are each table's `all tasks` rows; a class row has too few tasks to reach WIN, so it is read for a LOSE only. At 5 runs of each of 16 tasks, every run solved, the router's pass rate minus a baseline's has a 95% interval of about minus 9 to plus 9 points, so a WIN and a cost LOSE can both fire; at 2 runs it is about minus 15 to plus 15, and neither could. Batch 2's 4 tasks at 5 runs give about minus 18 to plus 18: it can show a pass-rate LOSE, never a WIN or a cost LOSE (`tests/test_bench.py`). Each outcome is reported this way:
+
+- WIN against both baselines: Model Router is cheaper per solved task than Claude Code's defaults and than every subagent forced onto Haiku, at a pass rate within 10 points of each.
+- WIN against one, LOSE against the other on cost: cheaper per solved task than the first and dearer than the second, at a pass rate within 10 points of each. Against `haiku-high` this is the outcome the exploratory rounds on the page point to, and it is reported as a loss: forcing every subagent onto Haiku costs less per solved task, at a pass rate not shown 10 points worse.
+- LOSE on pass rate against either: Model Router solves fewer tasks than that baseline, whatever it costs.
+- No difference shown against a baseline: no cost or quality claim against it, and never "as good as".
+- No verdict: the reason the page gives, and no claim.
+- Batch 2, with no pass-rate LOSE: no difference shown on a Fable session; its costs are reported as measured, with no claim.
 
 `--timeout` kills a run after that many seconds (default 900), and every process it started: `claude` runs in a session of its own, and a timeout, Ctrl-C or SIGTERM kills its process group (on Windows, which has none, `claude` alone) and still writes the run's row. `--model` is the session model of every configuration (default `sonnet`), and `--claude` takes an argv prefix for a stub. Its first word is resolved once, through any symlink, when the runner starts, and every run uses that file, so an update that moves the `claude` link during a round can't reach a later run; `claude_version` is that file's. Without `--tasks` or `--configs` it runs all. After a stop, run the same command again: it skips each run number, task and configuration already in `--out`, runs again one the bench stopped (`stopped`) or set aside, and counts what the rows already in `--out` and its `limited/` file cost toward `--max-total`. An unknown or repeated id, or a results, `limited/` or `--keep` folder it can't write, exits 2 before any run.
 
@@ -89,8 +107,6 @@ The rule is fixed before any run. The router gets one verdict per baseline on ea
 - No verdict: the two didn't run each task the same number of times in each batch, Bash was denied in more than a quarter of either's runs, the router's runs loaded more than one `plugin_hash`, the two ran a task at different `budget_usd` or `claude_version` (a task may have its own budget, as long as every configuration ran it at that one), or any of their runs has `bench_dirty`. Nor when the baseline's stopped runs decide it: counted as solved, they would change the verdict; the router's own stopped runs count against it and never withhold one. No verdict, no rank.
 
 A row is LOSE when any baseline beats the router, has no verdict when any comparison has none, and is WIN only against every baseline. A class is saturated when the weakest forced baseline can't be told from the strongest, or from `defaults` when every forced baseline is on one model (`haiku-high` alone), by an exact one-sided test (5%, 10 runs each at least); an equal pass rate there says nothing. Runs on an earlier `revision` of a task, runs whose check broke and runs the bench stopped before their check finished are left out. A row on a task's current revision whose `grade.check_hash` isn't today's `run.check_hash` stops `analyze.py`: the check changed without a raise of `revision`.
-
-One task can't reach WIN: at 10 runs, all solved, its pass-rate interval is -25 to +25 points. On the plan's `all tasks` row, with every run solved and the router cheapest, only 10 runs per task and configuration lift the lower bound above minus 10 points (`tests/test_bench.py`).
 
 ## Adding a task
 
@@ -119,12 +135,6 @@ What a row holds for a workflow: its calls in `workflow_calls`, and its agents' 
 ## The hard tasks
 
 `cachefix-stale-across-services` (root-cause), `perf-nlogn-rewrite` and `migrate-ledger-v3` (implementation) and `security-tar-symlink-chain` (security-review) tell a small model from a strong one: 1,000 lines or more over 10 or more files, a brief that gives the goal but not the cause, and a test the agent can run. The check runs that test unchanged and far more, so a wrong answer can pass it and still fail (`HardTasks` in `tests/test_bench.py`). In `calibration-2`, at a $2 cap, each baseline solved 13 of 14 runs: the 900-second timeout stopped one `perf-nlogn-rewrite` run of each, and the dearest run cost $0.99. Read `permission_denials` before a verdict, since each expects its test to run.
-
-```bash
-python3 bench/run.py --tasks cachefix-stale-across-services perf-nlogn-rewrite migrate-ledger-v3 \
-    security-tar-symlink-chain --configs defaults haiku-high --runs 3 --seed 5 --batch calibration-3 --budget 2 \
-    --max-total 60 --model claude-opus-5-5 --out bench/results/pilot/calibration-3.jsonl
-```
 
 - Cache: the report blames the order service; the cause is the shared cache's invalidation. Fourteen write orders, each followed by reads that no change touched, which must not reach the database, while the cache is watched during the writes. Limit: one thread, so dropping the cache just before the commit passes.
 - Report: 200,000 rows through `reports.render` and `python3 -m reports` (`--out`, `--standings`, `--verify`), each under 10 seconds of CPU; 20,000 rows over 4 seconds end a slow answer early. Small cases must match the shipped code's output and errors on awkward input, including an amount too big for a float, and reuse the same two file paths. Limit: the visible `test_report.py` allows 10 seconds of wall-clock time, so a right answer can fail it on a loaded machine.
