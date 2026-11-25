@@ -1938,6 +1938,62 @@ class Isolation(unittest.TestCase):
                 self.assertTrue(run.grade(check, Path(tmp), Path(tmp) / "answer.txt").passed)
                 self.assertEqual(sorted(set(secret) & set(run.grading_env(dict(os.environ)))), [])
 
+    def test_a_check_runs_with_no_network_no_credential_files_and_writes_only_to_its_scratch(self):
+        import socket
+        server = socket.socket()
+        self.addCleanup(server.close)
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        with tempfile.TemporaryDirectory() as tmp:
+            secret, outside = Path(tmp) / "netrc", Path(tmp) / "outside.txt"
+            secret.write_text("machine example.test password p", encoding="utf-8")
+            check = Path(tmp) / "check.py"
+            check.write_text(f"""import socket, tempfile
+from pathlib import Path
+blocked = []
+for name, act in (("credentials", lambda: Path({str(secret)!r}).read_text()),
+                  ("network", lambda: socket.create_connection(("127.0.0.1", {server.getsockname()[1]}), 5).close()),
+                  ("write", lambda: Path({str(outside)!r}).write_text("x")),
+                  ("scratch", lambda: Path(tempfile.mkdtemp(), "x").write_text("x"))):
+    try:
+        act()
+    except OSError:
+        blocked.append(name)
+print(" ".join(blocked) or "nothing")
+""", encoding="utf-8")
+            with unittest.mock.patch.object(run, "CREDENTIAL_FILES", (*run.CREDENTIAL_FILES, str(secret))):
+                graded = run.grade(check, Path(tmp), Path(tmp) / "answer.txt")
+                wrote = outside.exists()
+                with unittest.mock.patch.object(run, "_can_sandbox", return_value=False):
+                    bare = run.grade(check, Path(tmp), Path(tmp) / "answer.txt")
+            if graded.sandbox is None:  # Windows, or a Linux host where bwrap can't start
+                self.assertNotEqual(sys.platform, "darwin")
+            else:
+                self.assertEqual((graded.sandbox, graded.reason, wrote),
+                                 ({"darwin": "sandbox-exec"}.get(sys.platform, "bwrap"), "credentials network write", False))
+        # Where no sandbox can start the check still runs, and the row says it ran without one.
+        self.assertEqual((bare.verdict, bare.sandbox, bare.reason), ("pass", None, "nothing"))
+        self.assertIn("graded without a sandbox", (ROOT / "bench" / "README.md").read_text(encoding="utf-8"))
+
+    def test_bwrap_hides_the_credential_files_and_the_network_and_binds_only_the_scratch_writable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder, file = Path(tmp) / "ssh", Path(tmp) / "netrc"
+            folder.mkdir()
+            file.write_text("x", encoding="utf-8")
+            with unittest.mock.patch.object(run.sys, "platform", "linux"), \
+                    unittest.mock.patch.object(run, "_can_sandbox", return_value=True), \
+                    unittest.mock.patch.object(run, "CREDENTIAL_FILES", (str(folder), str(file), str(Path(tmp) / "gone"))):
+                argv, name = run.grade_sandbox(Path(tmp) / "scratch")
+        own = os.path.realpath(Path(tmp) / "scratch")
+        self.assertEqual((name, argv[0], argv[-1]), ("bwrap", "bwrap", "--"))
+        self.assertEqual(argv[1:4], ["--ro-bind", "/", "/"])
+        self.assertIn("--unshare-net", argv)
+        joined = " ".join(argv)
+        self.assertIn(f"--bind {own} {own}", joined)
+        self.assertIn(f"--tmpfs {os.path.realpath(folder)}", joined)
+        self.assertIn(f"--ro-bind /dev/null {os.path.realpath(file)}", joined)
+        self.assertNotIn("gone", joined)
+
     def test_credential_names_are_matched_in_any_case(self):
         # A plain dict: environment names are upper-cased on Windows, so os.environ can't hold these there.
         env = {"api_key": "1", "Github_Pat": "2", "my_auth": "3", "Db_Credential": "4", "keep": "5", "Path": "6"}

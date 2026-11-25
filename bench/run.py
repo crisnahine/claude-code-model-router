@@ -10,6 +10,7 @@ import argparse
 import atexit
 import datetime
 import filecmp
+import functools
 import hashlib
 import json
 import os
@@ -278,6 +279,7 @@ class Grade(NamedTuple):
     verdict: str  # "pass", "fail" or "broken"
     reason: str  # the last line the check printed, or for a broken check the last line of its error
     check_hash: str  # the check's code, so a row says which check graded it
+    sandbox: str | None = None  # what the check ran in: "sandbox-exec", "bwrap", or None for no sandbox
 
     @property
     def passed(self) -> bool:
@@ -318,32 +320,64 @@ def _uncopyable(folder: str, names: list[str]) -> list[str]:
     return out
 
 
+@functools.lru_cache(maxsize=None)
+def _can_sandbox(tool: str) -> bool:
+    """Whether `tool` can start a sandbox here: a host can bar it, as one that forbids unprivileged namespaces does."""
+    probe = {"sandbox-exec": ["sandbox-exec", "-p", "(version 1)(allow default)", "true"],
+             "bwrap": ["bwrap", "--ro-bind", "/", "/", "--unshare-net", "--die-with-parent", "--", "true"]}[tool]
+    try:
+        return shutil.which(tool) is not None and subprocess.run(probe, capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def grade_sandbox(scratch: Path) -> tuple[list[str], str | None]:
+    """The argv prefix that runs a check in the OS sandbox, as a run's own commands are: no network, the credential
+    files unreadable, writes only under `scratch`. With its name, or ([], None) where neither sandbox-exec (macOS)
+    nor bwrap (Linux) can start."""
+    own = os.path.realpath(scratch)
+    hidden = [os.path.realpath(os.path.expanduser(p)) for p in CREDENTIAL_FILES]
+    if sys.platform == "darwin" and _can_sandbox("sandbox-exec"):
+        def paths(items: list[str]) -> str:
+            return " ".join(f"(subpath {json.dumps(p)})" for p in items)
+        return ["sandbox-exec", "-p", f"(version 1)(allow default)(deny network*)(deny file-read* {paths(hidden)})"
+                f"(deny file-write* (require-not (require-any {paths([own, '/dev'])})))"], "sandbox-exec"
+    if sys.platform.startswith("linux") and _can_sandbox("bwrap"):
+        masks = [arg for p in hidden if os.path.lexists(p)
+                 for arg in (("--tmpfs", p) if os.path.isdir(p) else ("--ro-bind", "/dev/null", p))]
+        return ["bwrap", "--ro-bind", "/", "/", "--dev-bind", "/dev", "/dev", "--bind", own, own, "--unshare-net",
+                "--die-with-parent", *masks, "--"], "bwrap"
+    return [], None
+
+
 def grade(check: Path, work: Path, answer: Path, timeout: int = 120) -> Grade:
     """The task's check run on a throwaway copy of a work dir, from a scratch folder, and an answer file, so code a
     run left behind can't write into the work dir, the checkout or the results. -I keeps the check's folder and the
     work dir off sys.path and ignores PYTHON* variables, so that code can't shadow what the check imports. The
-    scratch folder sits under RUNS and is the check's temp folder, so no other run's sandbox can read the copies."""
+    scratch folder sits under RUNS and is the check's temp folder, so no other run's sandbox can read the copies.
+    The check, and the work's code it runs, run in the OS sandbox where one can start (`grade_sandbox`)."""
     digest = check_hash(check)
     scratch = Path(tempfile.mkdtemp(prefix="mrbench-grade-", dir=runs_folder()))
+    jail, sandbox = grade_sandbox(scratch)
     try:
         copy = scratch / "work"
         if not os.access(work, os.R_OK | os.X_OK):  # the ignore callback never sees the root, and the harness owns it
             os.chmod(work, stat.S_IRWXU)
         shutil.copytree(work, copy, symlinks=True, ignore=_uncopyable)
-        res = subprocess.run([sys.executable, "-I", "-c", _LAUNCH, str(check), str(copy), str(answer)],
+        res = subprocess.run([*jail, sys.executable, "-I", "-c", _LAUNCH, str(check), str(copy), str(answer)],
                              capture_output=True, cwd=scratch,
                              env={**grading_env(dict(os.environ)), "TMPDIR": str(scratch)}, timeout=timeout)
     except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
-        return Grade("fail", f"the check timed out after {timeout} s", digest)
+        return Grade("fail", f"the check timed out after {timeout} s", digest, sandbox)
     except OSError as exc:
-        return Grade("broken", f"the work dir could not be copied for the check: {exc}", digest)
+        return Grade("broken", f"the work dir could not be copied for the check: {exc}", digest, sandbox)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     if res.returncode == 0:
-        return Grade("pass", _last_line(res.stdout), digest)
+        return Grade("pass", _last_line(res.stdout), digest, sandbox)
     if res.returncode == 2:
-        return Grade("broken", _last_line(res.stderr) or _last_line(res.stdout), digest)
-    return Grade("fail", _last_line(res.stdout) or f"the check exited {res.returncode}", digest)
+        return Grade("broken", _last_line(res.stderr) or _last_line(res.stdout), digest, sandbox)
+    return Grade("fail", _last_line(res.stdout) or f"the check exited {res.returncode}", digest, sandbox)
 
 
 def can_start(spent: float, budget: float, max_total: float) -> bool:
