@@ -310,6 +310,18 @@ class Analysis(unittest.TestCase):
                 self.assertEqual(v["verdict"], "REFUSED")
                 self.assertIn(why, v["reason"])
 
+    def test_the_page_states_the_budget_cap_the_runs_had(self):
+        base = full_row(task="bugfix-median", main_model="sonnet", passed=True, **{"class": "bugfix"})
+        data = [dict(base, config="defaults", budget_usd=2.0), dict(base, config="plugin", budget_usd=2.0),
+                dict(base, config="plugin", budget_usd=0.5)]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.jsonl"
+            path.write_text("".join(json.dumps(r) + "\n" for r in data), encoding="utf-8")
+            page = analyze.build_page(analyze.load([path]))
+        self.assertIn("- Budget cap of a run (`--budget`, recorded as `budget_usd`): $0.50 in 1 run; $2.00 in 2 runs.", page)
+        self.assertIn("--budget <usd> --max-total <usd>", page)
+        self.assertNotIn("--budget 0.5", page)
+
     def test_a_run_the_harness_stopped_counts_as_failed_and_the_page_counts_them(self):
         base = full_row(task="bugfix-median", main_model="sonnet", passed=True, **{"class": "bugfix"})
         older = {k: v for k, v in base.items() if k != "stopped_by"}  # a row from before the field
@@ -2346,14 +2358,22 @@ class Pilot(unittest.TestCase):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
         data = [json.loads(line) for path in raw for line in path.read_text(encoding="utf-8").splitlines() if line]
         revisions = {t["id"]: t.get("revision", 1) for t in run.load_tasks()}
-        for row in data:  # a lookup is graded from its answer alone, so today's check must agree with the record
+        for row in data:  # the row keeps a lookup's answer and the files it left, so today's check must agree
+            left = row.get("final_answer") or {}
             if (row["class"] == "lookup" and len(row["answer"]) < 2000  # the line keeps 2,000 characters
+                    and not left.get("omitted")
                     and row.get("task_revision", 1) == revisions[row["task"]]):  # an older revision's check differed
                 with tempfile.TemporaryDirectory() as tmp:
+                    _, work = SuiteCoverage.shipped(self, row["task"], tmp)
+                    for rel, text in left.get("files", {}).items():
+                        (work / rel).parent.mkdir(parents=True, exist_ok=True)
+                        (work / rel).write_text(text, encoding="utf-8")
+                    for rel in left.get("removed", []):
+                        (work / rel).unlink()
                     answer = Path(tmp) / "answer.txt"
                     answer.write_text(row["answer"], encoding="utf-8")
                     check = ROOT / "bench" / "tasks" / row["task"] / "check.py"
-                    self.assertEqual(run.grade(check, Path(tmp), answer).passed, row["passed"], row["config"])
+                    self.assertEqual(run.grade(check, work, answer).passed, row["passed"], row["config"])
 
 
 class HardTier(unittest.TestCase):

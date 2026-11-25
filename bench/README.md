@@ -52,7 +52,7 @@ Rows under `results/pilot/` get no verdict: the page shows each batch as an expl
 
 ### The judged plan
 
-This plan is fixed before any run. Each batch is read once, when all its runs are in, since every look is another chance for noise to pass.
+This plan is fixed before any run. Each batch is read once, when all its runs are in, since every look is another chance for noise to pass. Both batches ran on 2026-11-25, and [docs/BENCHMARKS.md](../docs/BENCHMARKS.md) has the result.
 
 Batch 1, on an Opus session: the 16 tasks below under `plugin`, `defaults` and `haiku-high`, 5 runs of each task under each, 240 runs, as five processes of 48 side by side, each its own run number, with a $2 cap per run. Each process's total cap lets every run start even if all of them hit that cap. Run a batch on a machine doing nothing else heavy: `migrate-ledger-v3` fails a big export that takes over 15 seconds, and its reference answer takes about 2 seconds with five copies at once, so a very busy machine can fail a right answer.
 

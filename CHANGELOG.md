@@ -4,7 +4,7 @@
 
 # Changelog
 
-## 0.2.0 - 2026-11-25
+## 0.2.0 - 2026-11-26
 
 Model Router manages the Claude model and effort that each subagent, teammate and workflow agent runs on.
 
@@ -20,6 +20,7 @@ Model Router manages the Claude model and effort that each subagent, teammate an
 - Commands: `/model-router` (state, `on`, `off`, `check on`, `check off`), `/model-router:route` says which model and effort fit a task, `/model-router:models` shows each model's state here (`reset` clears what it learned), and `/model-router:usage` shows recent routing, tokens per model and Claude Code's cost estimate per subagent.
 - Agents: `scout` and `verifier` on Haiku at `medium`, `implementer` on Haiku at `high`, and `architect` and `reviewer` on Sonnet at `high`.
 - Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python`. The plugin makes no network call.
+- Measured on an Opus session, 80 runs per setup: Model Router solved 80 of 80 at $0.183 per solved task, Claude Code's defaults 80 of 80 at $0.361, and every subagent forced onto Haiku 78 of 80 at $0.139. [docs/BENCHMARKS.md](docs/BENCHMARKS.md) has the tables, the method and the limits.
 
 ## 0.1.2 - 2026-11-24
 

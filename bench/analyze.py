@@ -617,6 +617,10 @@ def _notes(results: Results) -> list[str]:
     for r in rows:
         by_config.setdefault(r["config"], []).append(r)
     if by_config:
+        caps = Counter(r["budget_usd"] for r in rows if r.get("budget_usd") is not None)
+        if caps:
+            lines.append("- Budget cap of a run (`--budget`, recorded as `budget_usd`): " + "; ".join(
+                f"${cap:.2f} in {n} run{'s' * (n != 1)}" for cap, n in sorted(caps.items())) + ".")
         lines.append("- Runs the harness stopped, by configuration: " + "; ".join(
             f"`{c}` {sum(bool(r.get('stopped_by')) for r in group)} of {len(group)}"
             + (f" ({_stops(group)})" if any(r.get("stopped_by") for r in group) else "")
@@ -708,7 +712,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "come from the run's `routed` line, and n/a means no run in the cell has it.", ""]
     commands = [
         "```bash",
-        "python3 bench/run.py --tasks <ids> --configs <ids> --runs <n> --budget 0.5 --max-total <usd> "
+        "python3 bench/run.py --tasks <ids> --configs <ids> --runs <n> --budget <usd> --max-total <usd> "
         "--out bench/results/<name>.jsonl",
         "python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md",
         "```", ""]

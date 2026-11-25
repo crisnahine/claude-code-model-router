@@ -79,7 +79,21 @@ Its state is in the plugin's data folder, readable only by you on macOS and Linu
 
 ## Benchmark
 
-[docs/BENCHMARKS.md](docs/BENCHMARKS.md) compares Claude Code with and without Model Router on fixed tasks run headless from `bench/`: how many runs pass each task's check, and the cost per solved task.
+A judged round ran 16 fixed tasks headless from `bench/`, 5 times each, under three setups. Each task's own check grades a run. Cost is Claude Code's list-price estimate per solved task.
+
+| Session on Opus, 80 runs per setup | Solved | Cost per solved task |
+| :- | :- | :- |
+| Model Router | 80 of 80 | $0.183 |
+| Claude Code's defaults (subagents on the session model) | 80 of 80 | $0.361 |
+| Every subagent forced onto Haiku at `high` | 78 of 80 | $0.139 |
+
+Against the defaults that is a win by the benchmark's rule, fixed before the runs: cheaper per solved task beyond noise, at an equal pass rate. It is a cost result. These tasks can't tell a cheap model from a strong one, so it says nothing about quality.
+
+Against all-Haiku no difference is shown, so there is no claim either way. As measured, all-Haiku cost less per solved task and solved two fewer runs. What the plugin's Sonnet level and its redo step add over all-Haiku is still unmeasured.
+
+A smaller batch on a Fable session (4 tasks, 20 runs per setup) shows no difference against either baseline. Its figures are reported as measured, with no claim: Model Router solved 19 of 20 at $0.319 per solved task, the defaults 18 of 20 at $0.857, and all-Haiku 20 of 20 at $0.292.
+
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md) has every table, the method and the limits, and the raw rows are in [`bench/results/`](bench/results/). The 300 runs were paid with an API key.
 
 ## Documentation
 

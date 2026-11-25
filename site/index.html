@@ -305,7 +305,7 @@ footer nav a { display: inline-flex; align-items: center; min-height: 44px; padd
 <section id="results">
   <div class="wrap">
     <h2>What does the benchmark measure?</h2>
-    <p class="intro">The benchmark in <code>bench/</code> runs fixed tasks headless with and without the plugin, and compares tasks solved and cost per solved task. No judged round is recorded yet. <a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/BENCHMARKS.md">BENCHMARKS.md</a> holds the method and the exploratory rounds.</p>
+    <p class="intro">The benchmark in <code>bench/</code> runs fixed tasks headless with and without the plugin, and compares tasks solved and cost per solved task. In the judged round, on an Opus session, Model Router solved 80 of 80 runs at $0.183 per solved task, Claude Code's defaults 80 of 80 at $0.361, and every subagent forced onto Haiku 78 of 80 at $0.139. Against the defaults that is a win by the benchmark's rule, and a cost result: these tasks can't tell a cheap model from a strong one, so it says nothing about quality. Against all-Haiku no difference is shown, so there is no claim either way. <a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/BENCHMARKS.md">BENCHMARKS.md</a> holds every table, the method and the limits.</p>
   </div>
 </section>
 
@@ -362,7 +362,7 @@ footer nav a { display: inline-flex; align-items: center; min-height: 44px; padd
 
 <footer>
   <div class="wrap">
-    <span>Model Router, Apache-2.0 license, not made or endorsed by Anthropic, by <a href="https://github.com/crisnahine">Cris Nahine</a>. Version 0.2.0, released <time datetime="2026-11-25">2026-11-25</time>.</span>
+    <span>Model Router, Apache-2.0 license, not made or endorsed by Anthropic, by <a href="https://github.com/crisnahine">Cris Nahine</a>. Version 0.2.0, released <time datetime="2026-11-26">2026-11-26</time>.</span>
     <nav aria-label="Project">
       <a href="https://github.com/crisnahine/claude-code-model-router">GitHub</a>
       <a href="https://discord.gg/AHZZ7bABJy">Discord</a>

@@ -8,12 +8,10 @@ What isn't done yet.
 
 ## Next
 
-- Run the judged benchmark round on this release and record it in [BENCHMARKS.md](BENCHMARKS.md).
-- Add a benchmark task that the cheapest model fails, so the benchmark can show what the redo step is worth.
-- Run a live session on Linux and on Windows. CI runs the unit and mod tests there.
-- Run it live under the Agent SDK.
+- Add benchmark tasks that the cheapest model fails. In the judged rounds every subagent forced onto Haiku solved 98 of 100 runs, so [BENCHMARKS.md](BENCHMARKS.md) shows what the plugin costs and not yet what its stronger levels and its redo step are worth.
+- Run a live session on Windows. CI runs the unit and mod tests there.
 
 ## Later
 
-- Run it live on Amazon Bedrock, Vertex AI and Microsoft Foundry, and with an API-key login.
+- Run it live on Amazon Bedrock, Vertex AI and Microsoft Foundry.
 - Check the Desktop app's window and the VS Code panel by hand, and the other cases [TESTING.md](TESTING.md#the-interactive-features-by-hand) lists as not run by hand.
