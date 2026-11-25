@@ -1874,6 +1874,18 @@ class RepeatGuard(Sandbox):
         again = self.decide("general-purpose", LOOKUP, model="haiku", description="Redo: list src")
         self.assertEqual((again["action"], again["model"], again["escalated_from"]), ("rewrite", "sonnet", "lookup"))
 
+    def test_a_redo_that_names_the_same_model_and_effort_twice_climbs_twice(self):
+        # Told to name both on every call, Claude repeats the first call's pair on each redo.
+        self.pre("general-purpose", LOOKUP, model="haiku", effort="medium", description="List files")
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="medium", description="List files")
+        first = self.decide("general-purpose", LOOKUP, model="haiku", effort="medium", description="Redo: list files")
+        self.assertEqual((first["model"], first["effort"]), ("haiku", "high"))
+        self.pre("general-purpose", LOOKUP, model="haiku", effort="medium", description="Redo: list files")
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="medium",
+                  description="Redo: list files")
+        second = self.decide("general-purpose", LOOKUP, model="haiku", effort="medium", description="Redo: list files")
+        self.assertEqual((second["action"], second["model"]), ("rewrite", "sonnet"))
+
     def test_a_redo_that_names_more_than_the_run_it_redoes_runs_as_named(self):
         self.pre("general-purpose", LOOKUP, model="haiku", description="List src")
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="medium", description="List src")

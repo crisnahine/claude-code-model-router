@@ -305,13 +305,13 @@ def _above(effort: str | None, than: str | None) -> bool:
 def runs_at(effort: str | None, tool_input: dict, definition: dict | None, settings: Settings,
             teammate: bool) -> str | None:
     """The effort a call runs at as far as the router can tell, in Claude Code's order
-    (https://code.claude.com/docs/en/sub-agents.md#choose-an-effort-level): CLAUDE_CODE_EFFORT_LEVEL, the call's,
-    the router's own `effort` (which the call carries), the agent's, then CLAUDE_CODE_SUBAGENT_EFFORT. None when
-    nothing it sees sets one."""
+    (https://code.claude.com/docs/en/sub-agents.md#choose-an-effort-level): CLAUDE_CODE_EFFORT_LEVEL, the router's
+    own `effort` (which the call then carries in place of one it named), the call's, the agent's, then
+    CLAUDE_CODE_SUBAGENT_EFFORT. None when nothing it sees sets one."""
     env = str(settings.effort_level or "").lower()
     if env:
         return env if env in EFFORTS else None  # auto or unset sends no effort
-    chosen = (tool_input.get("effort"), effort, (definition or {}).get("effort"),
+    chosen = (effort, tool_input.get("effort"), (definition or {}).get("effort"),
               None if teammate else settings.subagent_effort)
     return next((e for e in (str(c).lower() for c in chosen if c) if e in EFFORTS), None)
 
