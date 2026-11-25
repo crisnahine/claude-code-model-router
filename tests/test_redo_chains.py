@@ -238,9 +238,7 @@ class Walk:
         top, same = self.at_top(prev), run == prev
         check(not same or (top and decision["no_step"] and note and "the same as the run it redoes" in note),
               f"[never the same] {where}")
-        # Under an effort variable the router sets no effort, so at the top a call naming none runs at the variable's.
-        stays = same or (self.env_effort and run.model == prev.model)
-        check(not decision["no_step"] or (top and stays), f"[no_step only at the top] {where}")
+        check(not decision["no_step"] or (top and same), f"[no_step only at the top] {where}")
         check(top or self.rank(run) > self.rank(prev), f"[strictly above] {where}")
         asked = Run(named[0], named[1] or "") if named[0] else None
         if (asked and asked.model in self.usable and not self.forced and not self.opts.effort_level

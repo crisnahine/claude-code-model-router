@@ -91,6 +91,8 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     done_level = Level.parse(done.get("level")) if done else None
     redo = done_level is not None and reg.family(done.get("model")) is not None
     free = not _env_effort(settings, facts.teammate)
+    # A call's effort beats CLAUDE_CODE_SUBAGENT_EFFORT, so a redo left on its model can keep the effort it redoes.
+    keeps = bool(settings.subagent_effort and not settings.effort_level and not facts.teammate)
 
     if settings.force:
         model = env_default or facts.parent
@@ -100,7 +102,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         if redo:
             # The model is pinned, so effort is the one lever a redo has.
             before = _ran_at(done)
-            effort = _one_step(before) if free and not done.get("no_effort") else None
+            effort = None if done.get("no_effort") else _one_step(before) if free else before if keeps else None
             gains = _above(capped(effort, facts.effort_caps.get(model or ""))[0], before)
             level, out["escalated_from"], out["no_step"] = ladder.rung(reg, model, effort) or done_level, done_level, not gains
             step = f"; a redo of the {done_level} run, " + (
@@ -154,7 +156,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         out.update(level=level, reason=why + held)
         return out
     if redo:
-        return _redo(out, facts, reg, done, done_level, free, held)
+        return _redo(out, facts, reg, done, done_level, free, keeps, held)
     if target is None:
         # Nothing names a model, so Claude Code's own order applies: the parent's model.
         runs_on = out["was"]
@@ -204,7 +206,8 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     return out
 
 
-def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Level, free: bool, held: str) -> Decision:
+def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Level, free: bool, keeps: bool,
+          held: str) -> Decision:
     """A marked redo climbs from the run it redoes: one effort step up on the same model while that run's
     effort was below high, else the next stronger usable model at its own rung's effort, else one more effort
     step, at most max. A model or effort the call names that asks for no more than that run, the agent's own,
@@ -231,7 +234,8 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
         clamp_note += f"; {final}'s alias runs an older model here"
         final = reg.past_lag(final, facts.usable, facts.lagging)
         effort = ladder.effort(reg, ladder.rung(reg, final))
-    effort, floor_note = _session_floor(effort if free else None, final, facts)
+    kept = before if keeps and final == ran and not done.get("no_effort") else None
+    effort, floor_note = _session_floor(effort if free else kept, final, facts)
     effort, capped_note = capped(effort, facts.effort_caps.get(final))
     came = "the run that came back before" if facts.on_record else "the run it would get unmarked"
     at = "its parent's effort" if done.get("inherited") else "no effort" if done.get("no_effort") else before
