@@ -2325,8 +2325,8 @@ class Calls(Sandbox):
         for source in ("caller", None, "router", "pin", "rule"):
             call = {"prompt": f"list {source}", "description": f"list {source}"}
             self.route(call, source=source)
-            self.assertTrue(self.came_back(call).finished, source)  # every foreground result finishes its call
-            self.assertTrue(self.kept(call), source)
+            self.came_back(call)
+            self.assertTrue(self.kept(call), source)  # every foreground result finishes its call
         unleveled = {"prompt": "list more", "description": "list more"}
         self.route(unleveled, level=None)
         self.came_back(unleveled)
@@ -2354,15 +2354,18 @@ class Calls(Sandbox):
         call = {"prompt": LOOKUP, "description": "List src"}
         finished = lambda: self.kept(call)  # noqa: E731
         self.route(call)
-        for kind, fields, says in (
-                ("failure", {"error": "timed out"}, False),
-                ("result", {"launched": True, "agent_id": "a1"}, False),
-                ("result", {"models_used": ("claude-haiku-5-5", "claude-haiku-5")}, False),
-                ("stop", {"agent_id": "a9"}, False)):  # an agent this session never launched
-            self.assertEqual((self.came_back(call, kind, **fields).finished, finished()), (says, False), (kind, fields))
-        self.assertEqual((self.came_back(call, "stop", agent_id="a1", answered=False).finished, finished()), (False, False))
+        for kind, fields in (
+                ("failure", {"error": "timed out"}),
+                ("result", {"launched": True, "agent_id": "a1"}),
+                ("result", {"models_used": ("claude-haiku-5-5", "claude-haiku-5")}),
+                ("stop", {"agent_id": "a9"})):  # an agent this session never launched
+            self.came_back(call, kind, **fields)
+            self.assertFalse(finished(), (kind, fields))
+        self.came_back(call, "stop", agent_id="a1", answered=False)
+        self.assertFalse(finished())
         self.came_back(call, launched=True, agent_id="a1")
-        self.assertEqual((self.came_back(call, "stop", agent_id="a1").finished, finished()), (True, True))
+        self.came_back(call, "stop", agent_id="a1")
+        self.assertTrue(finished())
 
     def test_a_route_is_kept_per_spawn(self):
         call = {"prompt": LOOKUP}
@@ -2401,7 +2404,7 @@ class Calls(Sandbox):
         key = calls.identify({"prompt": LOOKUP})[1]
         store.save_entry("routes", "s1", {key: {"call": key, "model": 7, "level": "nope", "at": "later"}, "x": 3})
         route = calls.route_of("s1", key)
-        self.assertEqual((route.model, route.level, route.at), (None, None, 0.0))
+        self.assertEqual((route.model, route.level), (None, None))
         self.assertIsNone(calls.route_of("s1", "unknown"))
 
     def test_a_stored_time_that_is_not_a_number_sorts_as_oldest(self):

@@ -137,9 +137,10 @@ class Allowlist:
             return names
         runs = reg.older_aliases.get(self.provider or "") or {}
         return {n for n in names if n not in reg.newest or n in sendable
-                or self._lists_permit(reg, n, runs.get(n, reg.newest[n]))}
+                or self.lists_permit(reg, n, runs.get(n, reg.newest[n]))}
 
-    def _lists_permit(self, reg: Registry, name: str, model_id: str) -> bool:
+    def lists_permit(self, reg: Registry, name: str, model_id: str) -> bool:
+        """Whether availableModels and deniedModels let the full ID `model_id` of family `name` run."""
         own = reg.family(model_id, twins=False) == name  # a twin's ID isn't in its family's name to Claude Code
 
         def names(entries: tuple[str, ...], prefix: bool) -> bool:
@@ -153,12 +154,7 @@ class Allowlist:
     def permits_id(self, reg: Registry, name: str, model_id: str) -> bool:
         """Whether the full ID of family `name` may run: not ruled out by the lists or by
         modelOverrides, which Claude Code applies to the ID itself."""
-        return self._lists_permit(reg, name, model_id) and not self.overrides
-
-    def permits_named(self, reg: Registry, name: str, model_id: str) -> bool:
-        """Whether a full ID the caller or the agent named may run. Only the lists count: Claude Code
-        maps that ID through modelOverrides whether the router sends it or leaves the call alone."""
-        return self._lists_permit(reg, name, model_id)
+        return self.lists_permit(reg, name, model_id) and not self.overrides
 
     def effort_cap(self, reg: Registry, name: str | None) -> str | None:
         """The highest effort `name`'s family may run at, or None for no cap. The lowest cap of any

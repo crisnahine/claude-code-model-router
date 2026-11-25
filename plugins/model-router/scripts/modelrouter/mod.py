@@ -94,7 +94,8 @@ def exact(snap: settings.Snapshot, decision: dict) -> str | None:
     version = decision["version"]
     if decision["action"] != "rewrite" or not version:
         return None
-    permitted = snap.allowed.permits_named(snap.registry, decision["model"], version) and snap.health.healthy(version)
+    # Only the lists count: Claude Code maps a named ID through modelOverrides whether it is sent or left alone.
+    permitted = snap.allowed.lists_permit(snap.registry, decision["model"], version) and snap.health.healthy(version)
     return version if permitted else None
 
 

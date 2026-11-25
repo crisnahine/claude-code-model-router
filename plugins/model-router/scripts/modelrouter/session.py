@@ -176,8 +176,6 @@ def tool_calls(transcript_path: object, marker: str) -> Iterator[tuple[dict, dic
             content = row["message"]["content"]
         except (ValueError, KeyError, TypeError):
             continue
-        if not isinstance(row, dict):
-            continue
         for block in content if isinstance(content, list) else []:
             if isinstance(block, dict) and block.get("type") == "tool_use":
                 yield row, block
