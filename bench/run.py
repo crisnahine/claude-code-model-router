@@ -739,7 +739,8 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         "plugin_hash": options.get("plugin_hash") if config.get("plugin") else None,
         "managed_settings": options.get("managed"),
         "claude_started": not unstarted, "startup_failure_reason": result.get("startup_failure_reason"),
-        "plugin_loaded": plugin_loaded(facts.get("init") or {}) if config.get("plugin") else None,
+        # With no init event the stream never began, so it can't say whether the plugin loaded.
+        "plugin_loaded": (plugin_loaded(facts["init"]) if facts.get("init") else None) if config.get("plugin") else None,
         "options_applied": options_applied(config, ledger) if config.get("plugin") else None,
         "agent_costs": None if ledger is None else spend_by_agent(ledger, facts["agent_types"], cost if known else None),
         "routed": None if ledger is None else spawns(ledger),

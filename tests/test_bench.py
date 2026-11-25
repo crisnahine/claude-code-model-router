@@ -560,8 +560,9 @@ class Analysis(unittest.TestCase):
             pilot = Path(tmp) / "pilot"
             pilot.mkdir()
             batch = dict(batch="ladder-1", main_model="claude-opus-5-5")
-            lines = [full_row(config="plugin-cheap", bench_commit="f" * 40, total_cost_usd=0.25, passed=True, **batch),
-                     full_row(config="plugin-cheap", bench_commit="f" * 40, total_cost_usd=0.27, passed=True, **batch),
+            loaded = dict(bench_commit="f" * 40, plugin_loaded=True, passed=True)
+            lines = [full_row(config="plugin-cheap", total_cost_usd=0.25, **loaded, **batch),
+                     full_row(config="plugin-cheap", total_cost_usd=0.27, **loaded, **batch),
                      full_row(config="defaults", plugin_loaded=None, total_cost_usd=0.4, passed=False, **batch),
                      # An older row a timeout stopped, graded on what it had written by then.
                      {k: v for k, v in full_row(config="defaults", plugin_loaded=None, total_cost_usd=0.2, passed=True,
@@ -2858,6 +2859,16 @@ class Harness(unittest.TestCase):
         self.assertFalse(self.one("plugin")[0]["plugin_loaded"])
         self.assertFalse(self.one("plugin", env={"STUB_PLUGINS": loaded, "STUB_PLUGIN_ERRORS": "1"})[0]["plugin_loaded"])
         self.assertIsNone(self.one("defaults")[0]["plugin_loaded"])
+
+    def test_a_router_run_with_no_stream_is_not_filed_as_a_plugin_that_did_not_load(self):
+        stopped = run.record(Recorder.task, self.configs["plugin"], Recorder.options, run.mrconfig.build({}), {},
+                             dict(Recorder.facts, init={}, exit_code=None))
+        self.assertIsNone(stopped["plugin_loaded"])
+        self.assertNotEqual(run.set_aside(stopped), "plugin_not_loaded")
+        (self.dir / "hang").mkdir()
+        hang = stub(self.dir / "hang", HANGING_STUB)
+        row = run.run_one(self.task, self.configs["plugin"], self.options(timeout=1, claude=hang), run.mrconfig.shipped())
+        self.assertEqual((row["plugin_loaded"], row["stopped_by"]), (None, "timeout"))
 
     def test_a_router_run_whose_plugin_did_not_load_is_set_aside(self):
         code, rows, limited = self.main("--configs", "plugin", "defaults")
