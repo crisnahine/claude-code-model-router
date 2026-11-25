@@ -169,7 +169,7 @@ def _judge(base: str, pass_ci: tuple, cost_ci: tuple, fewer: bool) -> tuple[str,
         return "WIN", (f"cheaper per solved task beyond noise, at an equal or higher share of runs solved, pass rate "
                        f"within {MARGIN:.0%} of it; {seen}")
     if c_lo > 0 and p_hi < MARGIN:
-        return "LOSE", f"dearer per solved task beyond noise, pass rate not {MARGIN:.0%} ahead; {seen}"
+        return "LOSE", f"dearer per solved task beyond noise, pass rate shown under {MARGIN:.0%} ahead; {seen}"
     return "NONE", seen
 
 
@@ -545,6 +545,8 @@ def _notes(results: Results) -> list[str]:
                        "(no `system/init` event and no result), as when the sandbox can't start",
            "off_pin": "run(s) of a configuration with pinned agents are set aside, outside the results, because they "
                       "used none of those agents, another one, or a model or effort set on the Agent call",
+           "router_silent": "router run(s) are set aside, outside the results, because a subagent ran but the "
+                            "router's ledger holds no spawn row, so its hooks never acted",
            "options_not_applied": "router run(s) are set aside, outside the results, because their ledger holds a row "
                                   "their configuration's plugin options rule out"}
     aside = [row for _, row in found if row.get("limited_reason") not in own]
@@ -570,7 +572,7 @@ def _notes(results: Results) -> list[str]:
     counted: dict[tuple, int] = {}
     for r in rows:
         if isinstance(r.get("agent_costs"), dict):
-            key = (r["config"], r.get("main_model") or "unknown")
+            key = (r["config"], r.get("main_model") or "unknown", r.get("schema", 1) < run.ROW_SCHEMA)
             counted[key] = counted.get(key, 0) + 1
             for who, usd in r["agent_costs"].items():
                 spend.setdefault(key, {}).setdefault(who, 0.0)
@@ -580,7 +582,8 @@ def _notes(results: Results) -> list[str]:
             total = sum(spend[key].values()) or 1
             order = sorted(spend[key].items(), key=lambda kv: (kv[0] != "main", -kv[1]))
             runs = counted[key]
-            return f"`{key[0]}` on `{key[1]}` ({runs} run{'s' * (runs != 1)}): " + ", ".join(
+            era = " below schema 3" if key[2] else ""
+            return f"`{key[0]}`{era} on `{key[1]}` ({runs} run{'s' * (runs != 1)}): " + ", ".join(
                 f"{'main loop' if who == 'main' else f'`{who}`'} ${usd:.4f} ({usd / total:.0%})" for who, usd in order)
         lines.append("- Router spend by agent type, from the router's ledger (`agent_costs`), over the runs that "
                      "record it: " + "; ".join(share(c) for c in sorted(spend)) + ".")
@@ -683,14 +686,15 @@ def _page(results: Results, summary: list[dict]) -> dict:
     dates = sorted(r["started_at"][:10] for r in rows)
     used = sorted({r["config"] for r in rows})
     models: dict[str, list[float]] = {}
-    agents: dict[str, dict[str, int]] = {}
+    agents: dict[tuple, dict[str, int]] = {}  # by configuration and whether the row is below schema 3
     for r in rows:
         for name, usage in r["models"].items():
             models.setdefault(name, []).append(usage.get("costUSD") or 0.0)
         started = r.get("agents_started") if "agents_started" in r else (r.get("subagents") or {}).get("by_type")
+        era = (r["config"], r.get("schema", 1) < run.ROW_SCHEMA)
         for name, count in (started or {}).items():
-            agents.setdefault(r["config"], {}).setdefault(name, 0)
-            agents[r["config"]][name] += count
+            agents.setdefault(era, {}).setdefault(name, 0)
+            agents[era][name] += count
     predate = sum(1 for r in rows if _lacks(r, "plugin_state"))
     unsaved = sum(1 for r in rows if _lacks(r, "sessions_saved"))
     borrowed = sum(1 for r in rows if r.get("plugin_state") is not None and _lacks(r, "plugin_data_own"))
@@ -732,7 +736,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         f"minus the baseline's is above minus {MARGIN:.0%}, and the router solved at least the baseline's share of "
         "runs (per-task pass rates averaged), so a saving counts only at an equal or higher pass rate. LOSE: the "
         "router's pass rate is behind beyond noise, "
-        f"or its cost per solved task is above beyond noise while its pass rate isn't shown {MARGIN:.0%} ahead. "
+        "or its cost per solved task is above beyond noise while the upper bound of its pass rate minus the "
+        f"baseline's is below plus {MARGIN:.0%}, the mirror of the WIN rule. "
         "Anything else is \"no difference shown\", which is not parity. There is no verdict when the two ran "
         "different tasks or in different batches, when either has a row from before Bash ran in the sandbox (row "
         f"schema below 3), or when more than {DENIAL_SHARE:.0%} of either's runs had a Bash call denied. A row "
@@ -769,8 +774,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         + ". Each run's raw line also carries the registry's prices for those models.",
         "- Agents started, by configuration, counted from the Agent calls in the run's stream (`agents_started`), "
         "or for a row below schema 3 from Claude Code's `subagent_stats`, which no documented result type has: "
-        + "; ".join(f"`{c}` " + ", ".join(f"{name} x{n}" for name, n in sorted(agents.get(c, {}).items()))
-                    for c in used) + ".",
+        + "; ".join(f"`{c}`{' below schema 3' if old else ''} " + ", ".join(
+            f"{name} x{n}" for name, n in sorted(agents.get((c, old), {}).items()))
+                    for c, old in sorted({(r["config"], r.get("schema", 1) < run.ROW_SCHEMA) for r in rows})) + ".",
         *_notes(results),
         "- Shape: a single agent. In the `delegate` arm the prompt hands each task to one subagent with the Agent "
         "tool and relays its answer, so the subagent is what each configuration changes. For a configuration that "

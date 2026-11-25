@@ -17,6 +17,7 @@ import os
 import random
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -64,6 +65,8 @@ STATE_FILES = ("state.json",)
 RUNS = (Path("/tmp") / f"mrb-{os.getuid()}" if hasattr(os, "getuid")
         else Path(tempfile.gettempdir()) / "mrb")
 VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # what sandbox.credentials.envVars accepts
+# A subagent_type is model-written and reaches the page, so anything else counts as "invalid".
+AGENT_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 # The shell's directories can name the checkout, whose tasks hold the reference answers.
 DROPPED = ("PWD", "OLDPWD")
 PROMPTS = {
@@ -321,17 +324,41 @@ def _last_line(data: bytes) -> str:
     return lines[-1][:300] if lines else ""
 
 
+def _uncopyable(folder: str, names: list[str]) -> list[str]:
+    """The entries a check couldn't read anyway: a socket, a pipe, a file or folder the run made unreadable. Left out
+    of the copy, they read as missing, so they fail the run instead of breaking the check."""
+    out = []
+    for name in names:
+        path = os.path.join(folder, name)
+        try:
+            mode = os.lstat(path).st_mode
+        except OSError:
+            out.append(name)
+            continue
+        if stat.S_ISDIR(mode):
+            readable = os.access(path, os.R_OK | os.X_OK)
+        else:
+            readable = stat.S_ISLNK(mode) or (stat.S_ISREG(mode) and os.access(path, os.R_OK))
+        if not readable:
+            out.append(name)
+    return out
+
+
 def grade(check: Path, work: Path, answer: Path, timeout: int = 120) -> Grade:
     """The task's check run on a throwaway copy of a work dir, from a scratch folder, and an answer file, so code a
     run left behind can't write into the work dir, the checkout or the results. -I keeps the check's folder and the
-    work dir off sys.path and ignores PYTHON* variables, so that code can't shadow what the check imports."""
+    work dir off sys.path and ignores PYTHON* variables, so that code can't shadow what the check imports. The
+    scratch folder sits under RUNS and is the check's temp folder, so no other run's sandbox can read the copies."""
     digest = check_hash(check)
-    scratch = Path(tempfile.mkdtemp(prefix="mrbench-grade-"))
+    scratch = Path(tempfile.mkdtemp(prefix="mrbench-grade-", dir=runs_folder()))
     try:
         copy = scratch / "work"
-        shutil.copytree(work, copy, symlinks=True)
+        if not os.access(work, os.R_OK | os.X_OK):  # the ignore callback never sees the root, and the harness owns it
+            os.chmod(work, stat.S_IRWXU)
+        shutil.copytree(work, copy, symlinks=True, ignore=_uncopyable)
         res = subprocess.run([sys.executable, "-I", "-c", _LAUNCH, str(check), str(copy), str(answer)],
-                             capture_output=True, cwd=scratch, env=grading_env(dict(os.environ)), timeout=timeout)
+                             capture_output=True, cwd=scratch,
+                             env={**grading_env(dict(os.environ)), "TMPDIR": str(scratch)}, timeout=timeout)
     except subprocess.TimeoutExpired:  # code the run left that hangs the check fails the task, not the bench
         return Grade("fail", f"the check timed out after {timeout} s", digest)
     except OSError as exc:
@@ -389,8 +416,10 @@ def read_stream(stdout: str) -> tuple[dict, dict, dict[str, int], list[dict]]:
             for block in message.get("content") or []:
                 if (isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") in ("Agent", "Task")
                         and block.get("id") not in calls):
-                    call = block.get("input") or {}
+                    call = block.get("input") if isinstance(block.get("input"), dict) else {}
                     kind = call.get("subagent_type") or "general-purpose"
+                    if not isinstance(kind, str) or not AGENT_NAME.fullmatch(kind):
+                        kind = "invalid"
                     started[kind] = started.get(kind, 0) + 1
                     calls[block.get("id")] = {"agent": kind, "named_model": call.get("model") or None,
                                               "named_effort": call.get("effort") or None, "ran_on": None}
@@ -725,6 +754,10 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         "options_applied": options_applied(config, ledger) if config.get("plugin") else None,
         "agent_costs": None if ledger is None else spend_by_agent(ledger, facts["agent_types"], cost if known else None),
         "routed": None if ledger is None else spawns(ledger),
+        # shortcut: a fork leaves no spawn row and isn't told apart; key on its fork flag if a fork-only run shows up.
+        "router_silent": bool(config.get("plugin"))
+        and (any(c.get("ran_on") for c in facts.get("agent_calls") or []) or bool(facts.get("agent_types")))
+        and not any(r.get("event") == "spawn" for r in ledger or []),
         "gate_events": sum(r.get("event") == "gate" for r in ledger or []),
         "plugin_ref": config.get("plugin_ref"), "plugin_data_own": True, "sessions_saved": True,
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
@@ -765,10 +798,11 @@ def _write(path: Path, row: dict) -> None:
 
 def set_aside(row: dict) -> str | None:
     """Why a row stays out of the results: claude stopped before the session began (so no API call was made), the
-    API never got to the task, a router run's plugin didn't load or didn't get its options, or a pinned run didn't
-    use its pinned agents."""
+    API never got to the task, a router run's plugin didn't load, its router logged nothing for a subagent that ran,
+    or it didn't get its options, or a pinned run didn't use its pinned agents."""
     return (("no_start" if row.get("claude_started") is False else None) or refusal(row)
             or ("plugin_not_loaded" if row.get("plugin_loaded") is False else None)
+            or ("router_silent" if row.get("router_silent") else None)
             or ("options_not_applied" if row.get("options_applied") is False else None)
             or ("off_pin" if row.get("off_pin") else None))
 
@@ -776,14 +810,15 @@ def set_aside(row: dict) -> str | None:
 # Set-aside reasons a pause can't fix; this many in a row stop the bench.
 NO_RETRY = {"api_error": "API error before any spend", "no_start": "claude stopped before the session began",
             "plugin_not_loaded": "the plugin did not load",
+            "router_silent": "the router logged no spawn though a subagent ran",
             "options_not_applied": "the ledger holds a row the configuration's plugin options rule out",
             "off_pin": "the run didn't use its pinned agents"}
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--tasks", nargs="*", help="task ids (default: all)")
-    parser.add_argument("--configs", nargs="*", help="configuration ids (default: all)")
+    parser.add_argument("--tasks", nargs="+", help="task ids (default: all)")
+    parser.add_argument("--configs", nargs="+", help="configuration ids (default: all)")
     parser.add_argument("--runs", type=int, default=1, help="runs of each task under each configuration")
     parser.add_argument("--first-run", type=int, default=0, help="number of the first run, to go on from an earlier round")
     parser.add_argument("--arms", nargs="+", choices=sorted(PROMPTS), default=["delegate"],
@@ -801,9 +836,15 @@ def main(argv: list[str] | None = None) -> int:
 
     tasks = [t for t in load_tasks() if not args.tasks or t["id"] in args.tasks]
     configs = [c for c in load_configs() if not args.configs or c["id"] in args.configs]
-    for flag, asked, found in (("--tasks", args.tasks, tasks), ("--configs", args.configs, configs)):
-        if asked and not found:
-            parser.error(f"{flag} matches no id: {', '.join(asked)}")
+    for flag, asked, found in (("--tasks", args.tasks, tasks), ("--configs", args.configs, configs),
+                               ("--arms", args.arms, [{"id": arm} for arm in PROMPTS])):
+        known = {item["id"] for item in found}
+        unknown = [i for i in asked or [] if i not in known]
+        repeated = sorted({i for i in asked or [] if asked.count(i) > 1})
+        if unknown:
+            parser.error(f"{flag} matches no id: {', '.join(unknown)}")
+        if repeated:
+            parser.error(f"{flag} names an id more than once: {', '.join(repeated)}")
     # Each run has its own config folder, and a Keychain login is keyed to the folder, so it can't sign in.
     if not (any(os.environ.get(k) for k in AUTH) or any(k.startswith("CLAUDE_CODE_USE_") and v for k, v in os.environ.items())):
         parser.error("set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (or a CLAUDE_CODE_USE_* provider switch)")
@@ -820,8 +861,20 @@ def main(argv: list[str] | None = None) -> int:
                "hidden": answer_paths(str(args.out.parent), args.keep and str(args.keep)),
                "transcripts": str(args.out.parent / "transcripts" / args.out.stem)}
     print(f"batch {batch}, seed {seed}", file=sys.stderr)
-    args.out.parent.mkdir(parents=True, exist_ok=True)
     limited = args.out.parent / "limited" / args.out.name
+    # A run is paid for before its row is written, so every place a row or a kept run goes must take a write first.
+    try:
+        for target in (args.out, limited):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            new = not target.exists()
+            with target.open("a", encoding="utf-8"):
+                pass
+            if new:  # an empty results file would read as a batch with no runs
+                target.unlink()
+        if args.keep:
+            args.keep.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        parser.error(f"can't write the results or --keep: {exc}")
     spent, errors = 0.0, 0
     for run_index, task, config, arm in schedule(tasks, configs, args.runs, args.first_run, seed, tuple(args.arms)):
         begin = time.time()
@@ -834,7 +887,7 @@ def main(argv: list[str] | None = None) -> int:
             except BaseException as exc:
                 row = getattr(exc, "row", None)
                 if row is not None:  # the run was paid for, so it goes on record where the loop would put it
-                    row["run"], reason = run_index, refusal(row)
+                    row["run"], reason = run_index, set_aside(row)
                     if reason:
                         row["limited_reason"] = reason
                     _write(limited if reason else args.out, row)
