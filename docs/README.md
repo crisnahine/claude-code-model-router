@@ -14,25 +14,25 @@ Every page about Model Router, the Claude Code plugin that keeps the Claude mode
 <td width="50%" valign="top"><a href="GUIDE.md"><b>Guide</b></a><br>How do I configure it for my setup?</td>
 </tr>
 <tr>
-<td width="50%" valign="top"><a href="FAQ.md"><b>Questions</b></a><br>What is Model Router, and how does it pick?</td>
+<td width="50%" valign="top"><a href="FAQ.md"><b>Questions</b></a><br>What is Model Router, and who picks the model?</td>
 <td width="50%"></td>
 </tr>
-<tr><th colspan="2" align="left">How it works<br><sub>The design, its words and sources, and what it costs to run.</sub></th></tr>
+<tr><th colspan="2" align="left">How it works<br><sub>How it is built, its words, whom it trusts, and what it costs to run.</sub></th></tr>
 <tr>
-<td width="50%" valign="top"><a href="ARCHITECTURE.md"><b>Architecture</b></a><br>How do two paths share one router?</td>
+<td width="50%" valign="top"><a href="ARCHITECTURE.md"><b>Architecture</b></a><br>How is it built, and how does it decide a call?</td>
 <td width="50%" valign="top"><a href="GLOSSARY.md"><b>Glossary</b></a><br>What do call, level, pick and redo mean?</td>
 </tr>
 <tr>
-<td width="50%" valign="top"><a href="SECURITY.md"><b>Security</b></a><br>What reaches the network, and who can steer it?</td>
-<td width="50%" valign="top"><a href="PERFORMANCE.md"><b>Performance</b></a><br>What does the router cost in time and disk?</td>
+<td width="50%" valign="top"><a href="SECURITY.md"><b>Security</b></a><br>What does it store, and who can steer it?</td>
+<td width="50%" valign="top"><a href="PERFORMANCE.md"><b>Performance</b></a><br>What does it cost in time, disk and context?</td>
 </tr>
 <tr><th colspan="2" align="left">Evidence<br><sub>What it follows, and what was measured and tested.</sub></th></tr>
 <tr>
 <td width="50%" valign="top"><a href="CLAUDE_CODE_DOCS.md"><b>Built on the docs</b></a><br>Which Claude Code docs does it follow, and where?</td>
-<td width="50%" valign="top"><a href="BENCHMARKS.md"><b>Benchmarks</b></a><br>What does a solved task cost, with and without it?</td>
+<td width="50%" valign="top"><a href="BENCHMARKS.md"><b>Benchmarks</b></a><br>How is it measured against Claude Code without it?</td>
 </tr>
 <tr>
-<td width="50%" valign="top"><a href="TESTING.md"><b>Testing</b></a><br>Which checks gate a change, and what passed last?</td>
+<td width="50%" valign="top"><a href="TESTING.md"><b>Testing</b></a><br>Which checks gate a change, and how do I run them?</td>
 <td width="50%"></td>
 </tr>
 <tr><th colspan="2" align="left">The project<br><sub>What comes next, what changed, and how to take part.</sub></th></tr>

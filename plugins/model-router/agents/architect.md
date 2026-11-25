@@ -13,6 +13,7 @@ Rules:
 - You have read-only tools, so you can't change anything. If the plan depends on a command's output (git history, a test run), name the command and what to look for.
 - If the brief asks you to write a file, give its exact content in your answer for the caller to write, and say so first.
 - Ground the plan in the code: cite `path:line` for every place that changes.
+- When the plan relies on a library, service or API, check its current docs with WebFetch.
 - Consider at least one alternative and say in a sentence why you rejected it.
 - Call out risks: data migrations, public API changes, security, performance, concurrency.
 

@@ -108,7 +108,7 @@ def frame(w, h, rx=16):
 # Cards on the index for pages that carry no page head of their own.
 EXTRA_CARDS = [("README.md", "Model Router", "What does it do, and how do I install it?", 1)]
 GROUPS = {1: ("Start here", "What it is, and the questions people ask first."),
-          2: ("How it works", "The design, its words and sources, and what it costs to run."),
+          2: ("How it works", "How it is built, its words, whom it trusts, and what it costs to run."),
           3: ("Evidence", "What it follows, and what was measured and tested."),
           4: ("The project", "What comes next, what changed, and how to take part.")}
 CARDS_START, CARDS_END = "<!-- Cards, written by tools/docs_assets.py from PAGES in tools/docs_pages.py. -->", "<!-- End of cards. -->"
@@ -176,8 +176,8 @@ LADDER = [  # level, model, effort, needs, subtask
     ("lookup", "Haiku", "medium", 1, "Finding, reading and listing"),
     ("standard", "Haiku", "high", 1, "Code, figures and documents to a brief"),
     ("complex", "Sonnet", "high", 2, "A judgment call: a design or a review"),
-    ("hardest", "Opus", "high", 3, "When a redo, a call or a rule names it"),
-    ("frontier", "Fable", "high", 4, "When a redo, a call or a rule names it"),
+    ("hardest", "Opus", "high", 3, "Reached by a redo, a rule or a call naming it"),
+    ("frontier", "Fable", "high", 4, "Reached by a redo, a rule or a call naming it"),
 ]
 
 
@@ -223,14 +223,16 @@ def diagram_ladder() -> str:
                + pill(30, cy - 12, "redo", cls="rt", tcls="tag", size=12)[0])
     out.append(f'<path class="rts" d="M124 {ys["lookup"] - 4}V{cy + 18}" stroke-width="2.5" '
                f'stroke-dasharray="4 4" fill="none" stroke-linecap="round"/>')
-    out.append(text(32, 432, "A model named on a call stands for its lowest level. When the cap, "
-                    "availableModels, deniedModels or failures", "mut", 13))
-    out.append(text(32, 452, "rule a model out, the pick moves to the nearest usable model above it, or to the "
-                    "strongest one left. A redo adds effort first.", "mut", 13))
-    out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh.", "mut", 13))
+    out.append(text(32, 432, "A model named on a call stands for its lowest level, or the one its named effort "
+                    "reaches. A redo adds effort first.", "mut", 13))
+    out.append(text(32, 452, "When the cap, availableModels, deniedModels or failures rule a model out, the pick "
+                    "moves to the nearest usable model", "mut", 13))
+    out.append(text(32, 472, "above it, or to the strongest one left. A pick weaker than its level needs gets one "
+                    "more effort step, up to xhigh.", "mut", 13))
     title = "The ladder: five levels to a model and an effort"
     label = ("Lookup runs on Haiku at medium effort, standard on Haiku at high, complex on Sonnet at high, hardest "
-             "on Opus at high, and frontier on Fable at high. A model named on a call stands for its lowest level. "
+             "on Opus at high, and frontier on Fable at high. A model named on a call stands for its lowest level, "
+             "or the one its named effort reaches. "
              "A call Claude marks as a redo runs one effort step higher on its model while it ran below high, and "
              "after that on the next stronger model: Haiku, Sonnet, Opus, then Fable. When the cap, the availableModels or "
              "deniedModels settings, or failures rule a model out, the pick moves to the nearest usable model above "
@@ -308,45 +310,48 @@ def diagram_two_paths() -> str:
     out.append(card(32, 92, 410, 96, rx=12, cls="faint", sw=0))
     out.append(text(52, 120, "Claude Code engine events", "ink b", 14.5))
     out.append(chip_row(52, 140, ["agent.spawn", "turn.start", "turn.step", "turn.complete"], 11.5, 6))
-    out.append(card(32, 222, 410, 108, rx=12))
-    out.append('<rect x="33" y="238" width="4" height="76" rx="2" class="r2"/>')
+    out.append(card(32, 222, 410, 126, rx=12))
+    out.append('<rect x="33" y="238" width="4" height="94" rx="2" class="r2"/>')
     out.append(text(52, 252, "The mod: hooks/router.ts", "ink b", 15))
-    out.append(lines(52, 276, ["Primary path. Sets each spawn's model and its effort",
-                               "on each model request. Reaches teammates and",
-                               "workflow stages too."], "mut", 13, 19))
-    out.append(card(478, 92, 410, 238, rx=12, cls="faint", sw=0))
+    out.append(lines(52, 276, ["Primary path. Sets each spawn's model, and its effort",
+                               "on each model request, for teammates and workflow",
+                               "stages too. With a person at the prompt: the status",
+                               "line, /model-router and the session check."], "mut", 13, 19))
+    out.append(card(478, 92, 410, 256, rx=12, cls="faint", sw=0))
     out.append(text(498, 120, "Settings hooks: hooks/hooks.json", "ink b", 14.5))
     out.append(chip_row(498, 138, ["SessionStart", "UserPromptSubmit", "PreToolUse"], 11.5))
     out.append(chip_row(498, 172, ["PostToolUse", "PostToolUseFailure", "SubagentStop"], 11.5))
     out.append(chip_row(498, 206, ["PostModelSwitch", "Stop"], 11.5))
-    out.append(card(498, 244, 370, 72, rx=10))
-    out.append('<rect x="499" y="256" width="4" height="48" rx="2" class="r4"/>')
-    out.append(lines(516, 266, ["Fallback: PreToolUse rewrites the Agent call where",
+    out.append(card(498, 256, 370, 72, rx=10))
+    out.append('<rect x="499" y="268" width="4" height="48" rx="2" class="r4"/>')
+    out.append(lines(516, 278, ["Fallback: PreToolUse rewrites the Agent call where",
                                 "mods don't load, and stands down for each call",
                                 "the mod's tool.call hook marked."], "mut", 12.5, 18))
     arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
     out.append(f'<path d="M237 188V216M232 211L237 216L242 211" {arrow}/>')
-    out.append(f'<path d="M237 330V366H410V398M405 393L410 398L415 393" {arrow}/>')
-    out.append(f'<path d="M683 330V366H510V398M505 393L510 398L515 393" {arrow}/>')
-    out.append(text(250, 356, "sh model-router.sh mod-*", "mono mut", 11.5))
-    out.append(text(696, 356, "sh model-router.sh <event>", "mono mut", 11.5))
+    out.append(f'<path d="M237 348V374H410V398M405 393L410 398L415 393" {arrow}/>')
+    out.append(f'<path d="M683 348V374H510V398M505 393L510 398L515 393" {arrow}/>')
+    out.append(text(250, 367, "sh model-router.sh mod-*", "mono mut", 11.5))
+    out.append(text(696, 367, "sh model-router.sh <event>", "mono mut", 11.5))
     out.append(card(132, 404, 656, 110, rx=12))
     out.append('<rect x="133" y="420" width="4" height="78" rx="2" class="rt"/>')
     out.append(text(156, 434, "scripts/modelrouter: one Python runtime, one router", "ink b", 15))
     out.append(chip_row(156, 450, ["spawn", "router.decide", "ladder", "registry", "calls", "gates"], 11.5))
     out.append(text(156, 500, "One decision procedure and one state store for both paths.", "mut", 13))
     title = "Two control paths, one router"
-    label = ("Claude Code engine events (agent.spawn, turn.start, turn.step, turn.complete) reach the mod, "
-             "hooks/router.ts. Settings hooks in hooks/hooks.json (SessionStart, UserPromptSubmit, PreToolUse, "
-             "PostToolUse, PostToolUseFailure, SubagentStop, PostModelSwitch, Stop) do the bookkeeping and are the "
-             "fallback. Both run sh model-router.sh, which calls one Python runtime that decides every spawn.")
+    label = ("Claude Code engine events, such as agent.spawn, turn.start, turn.step and turn.complete, reach the mod, "
+             "hooks/router.ts. With a person at the prompt, the mod also shows the status line, serves /model-router "
+             "and runs the session check. Settings hooks in hooks/hooks.json (SessionStart, UserPromptSubmit, "
+             "PreToolUse, PostToolUse, PostToolUseFailure, SubagentStop, PostModelSwitch, Stop) do the bookkeeping "
+             "and are the fallback. Both run sh model-router.sh, which calls one Python runtime that decides every "
+             "spawn.")
     return svg(w, h, title, label, "".join(out))
 
 
 PRECEDENCE = [
     ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "pins every subagent's model; the router sets effort only", True),
     ("A model named on the call", "by Claude, a skill's instructions or a workflow script", False),
-    ("A per-agent rule", "in ~/.claude/model-router.json or .claude/model-router.json", False),
+    ("A per-agent rule", "yours in ~/.claude/model-router.json; a project's can only raise", False),
     ("The agent's own model field", "in its frontmatter; inherit means the parent's model", False),
     ("CLAUDE_CODE_SUBAGENT_MODEL", "your default for agents that name no model", True),
     ("The agent's tools", "lookup if it can't edit, write or run commands, else standard", False),
@@ -356,7 +361,7 @@ PRECEDENCE = [
 def diagram_precedence() -> str:
     w, h = 920, 520
     out = [frame(w, h), text(32, 42, "Who decides the model", "ink b", 17),
-           text(32, 66, "Strongest first: the first source that names a model wins.",
+           text(32, 66, "Strongest first: the first source that names a model wins. A redo climbs past 2 to 5.",
                 "mut", 13.5)]
     top, rh = 92, 60
     for k, (head, detail, is_env) in enumerate(PRECEDENCE):
@@ -396,7 +401,10 @@ def diagram_precedence() -> str:
              "CLAUDE_CODE_SUBAGENT_MODEL, then the level the agent's tools put it at: lookup for an agent that can't edit, write or run commands, "
              "standard for any other. For all but the two environment variables, the winner must be usable under the "
              "cap and your settings, else the next stronger usable model runs, or the strongest usable one when "
-             "nothing stronger is left. A workflow agent whose script names no model runs on "
+             "nothing stronger is left. A project's rule can only raise a call. A redo climbs past a rule's model, the "
+             "agent's own, CLAUDE_CODE_SUBAGENT_MODEL and a call's model that asks for no more than the run it redoes. "
+             "A workflow agent whose script names no "
+             "model runs on "
              "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL when it is set. Effort is filled in from the model's level when the "
              "call, a rule, the agent or its tools name the model, unless the call, the agent, CLAUDE_CODE_EFFORT_LEVEL or "
              "CLAUDE_CODE_SUBAGENT_EFFORT sets it.")
