@@ -102,6 +102,15 @@ def _unmarked_run(found: router.Facts, snap: settings.Snapshot) -> dict:
     return {"level": plain["level"], "model": model, "effort": _runs_at(plain["effort"], model, found, snap)}
 
 
+def redo_note(decision: router.Decision) -> str | None:
+    """What Claude reads after a redo that had no step left, so it doesn't send the same call again expecting more."""
+    if not decision["no_step"]:
+        return None
+    at = f" at {decision['effort']}" if decision["effort"] else ""
+    return (f"This redo ran on {decision['model'] or decision['was']}{at}, the same as the run it redoes: nothing "
+            "stronger is usable here.")
+
+
 def decide(hook_input: dict, snap: settings.Snapshot) -> Spawn:
     """Decide one spawn. Writes nothing."""
     call = calls.identify(cfg.tool_input(hook_input))

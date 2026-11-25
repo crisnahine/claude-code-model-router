@@ -11,7 +11,8 @@ from pathlib import Path
 from . import allowlist, ledger, settings, store
 from . import spawn as procedure
 
-MARKS = "mod-calls"  # hooks/router.ts writes one empty file here per Agent call it routes at spawn
+# hooks/router.ts writes an empty file here per Agent call it routes at spawn, and `<id>.moved` for one a later mod moved
+MARKS = "mod-calls"
 MARK_KEPT = 86400
 _PLAIN_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
@@ -20,12 +21,11 @@ def _marks() -> Path:
     return store.data_dir() / MARKS
 
 
-def routes(tool_use_id: object) -> bool:
-    """Whether the mod's tool.call hook marked this Agent call, so its spawn hook routes it. The mark is
-    taken: it answers one call. The id names a file, so only a plain one is looked up."""
+def _take(tool_use_id: object, suffix: str = "") -> bool:
+    """Whether the mark is there, taken so it answers one call. The id names a file, so only a plain one is looked up."""
     if not isinstance(tool_use_id, str) or not _PLAIN_ID.fullmatch(tool_use_id):
         return False
-    mark = _marks() / tool_use_id
+    mark = _marks() / f"{tool_use_id}{suffix}"
     try:
         mark.unlink()
     except FileNotFoundError:
@@ -33,6 +33,16 @@ def routes(tool_use_id: object) -> bool:
     except OSError:
         return mark.is_file()
     return True
+
+
+def routes(tool_use_id: object) -> bool:
+    """Whether the mod's tool.call hook marked this Agent call, so its spawn hook routes it."""
+    return _take(tool_use_id)
+
+
+def moved(tool_use_id: object) -> bool:
+    """Whether a mod later in the chain moved this call's spawn to another family than the one this mod sent."""
+    return _take(tool_use_id, ".moved")
 
 
 def _sweep() -> None:
@@ -53,7 +63,7 @@ OK = {"ok": True}  # the launcher answers nothing when no Python runs, so this t
 
 
 def start(hook_input: dict) -> dict:
-    """The session started: keep the settings layers the mod read, and clear old marks."""
+    """A session started, or a /clear began one: keep the settings layers the mod read, and clear old marks."""
     allowlist.remember(hook_input.get("session_id"), hook_input.get("settings"))
     _sweep()
     return OK
@@ -70,9 +80,11 @@ def spawn(hook_input: dict) -> dict | None:
     newest = _newest(snap, decision)
     sent = newest or exact(snap, decision)
     procedure.record(spawned, "mod", sent)
+    same = procedure.redo_note(decision)
+    note = {"note": same} if same else {}  # the mod adds it to the Agent call's result, where Claude reads it
     if decision["action"] != "rewrite" and not newest:
-        return None
-    return {"model": sent or decision["model"], "effort": decision["effort"], "reason": decision["reason"]}
+        return {**OK, **note} if note else None
+    return {"model": sent or decision["model"], "effort": decision["effort"], "reason": decision["reason"], **note}
 
 
 def exact(snap: settings.Snapshot, decision: dict) -> str | None:

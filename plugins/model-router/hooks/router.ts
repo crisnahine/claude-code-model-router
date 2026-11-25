@@ -14,7 +14,8 @@ const TIERS: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable']
 // The id names a file the fallback looks up, so only a plain one is marked (scripts/modelrouter/mod.py routes).
 const PLAIN_ID = /^[A-Za-z0-9_-]{1,128}$/
 
-type Pick = { model?: string; effort?: ModelEffort } | null
+// `note` is for Claude after the Agent call's result; `rules` is the session note, for the Agent tool's description.
+type Pick = { model?: string; effort?: ModelEffort; note?: unknown; rules?: unknown } | null
 // The effort a routed agent steps at. A workflow script can set a stage's effort, which agent.spawn doesn't carry,
 // so a workflow agent's is only ever raised.
 type Want = { effort: ModelEffort; raiseOnly: boolean }
@@ -46,14 +47,29 @@ async function ask($: EngineInterface, options: Record<string, string>, command:
   }
 }
 
-// Tells the fallback's PreToolUse hook, which runs after this one, that agent.spawn routes this call. Whether the
-// mark was written. Never throws.
-async function mark($: EngineInterface, toolUseId: string): Promise<boolean> {
+// An empty file a settings hook takes (scripts/modelrouter/mod.py): `<id>` stands the fallback down for the call, and
+// `<id>.moved` tells post-agent that another mod moved its spawn. Whether it was written. Never throws.
+async function mark($: EngineInterface, name: string): Promise<boolean> {
   try {
     const data = (await $.process.hookEnv()).CLAUDE_PLUGIN_DATA
     if (!data) return false
-    await $.fs.write(`${data}/mod-calls/${toolUseId}`, '')
+    await $.fs.write(`${data}/mod-calls/${name}`, '')
     return true
+  } catch {
+    return false
+  }
+}
+
+function family(model: string | undefined): string | undefined {
+  return model === undefined ? undefined : TIERS.find(tier => model.toLowerCase().includes(tier)) ?? model.toLowerCase()
+}
+
+// Whether a later link moved the spawn to another family than this mod sent: the engine's own entry holds what core
+// was asked for. A trace without one, or without a model there, says nothing. Never throws.
+function movedOn(trace: readonly { plugin: string; received: { model?: string } }[], sent: string | undefined): boolean {
+  try {
+    const asked = trace.find(entry => entry.plugin === 'engine')?.received?.model
+    return typeof asked === 'string' && family(asked) !== family(sent)
   } catch {
     return false
   }
@@ -105,6 +121,21 @@ async function modelSettings($: EngineInterface, reads: Reads): Promise<Layers |
     timer?.cancel()
     for (const source of pending) reads.slow.add(source)
     return Object.keys(reads.latest).length ? { ...reads.latest } : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// The settings layers, as session.start sends them, and the runtime's answer. Never throws, like ask.
+async function sendLayers($: EngineInterface, opts: Record<string, string>, reads: Reads): Promise<Pick | undefined> {
+  const layers = await modelSettings($, reads)
+  return await ask($, opts, 'mod-start', { ...(layers ? { settings: layers } : {}) })
+}
+
+// The session's id, or undefined when it can't be read. Never throws.
+async function sessionId($: EngineInterface): Promise<string | undefined> {
+  try {
+    return await $.session.id()
   } catch {
     return undefined
   }
@@ -167,19 +198,44 @@ export const register: Register = (on, options) => {
   // between their pick and next() returning, with the effort each got (null for none): the first request takes
   // that effort only while every one of them got the same, so it never runs at another spawn's.
   const inFlight = new Map<string, (Want | null)[]>()
+  // What the runtime has Claude read after an Agent call's result, by tool_use_id.
+  const notes = new Map<string, string>()
+  // The session note the last mod-start answer carried, and the session id the layers last went to.
+  let rules: string | undefined
+  let sentFor: string | undefined
+  const started = (reply: Pick | undefined): void => {
+    const text = heard(reply)?.rules
+    if (typeof text === 'string') rules = text
+  }
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     const id = typeof e.tool_use_id === 'string' ? e.tool_use_id : ''
     if (id && typeof e.effort === 'string') remember(callerEffort, id, e.effort)
     if (id) remember(marked, id, answering && PLAIN_ID.test(id) && await mark($, id))
-    return next(e)
+    const done = await next(e)
+    const note = notes.get(id)
+    notes.delete(id)
+    if (!note || !done || done.deny !== undefined || done.isError) return done
+    return { ...done, context: [...(Array.isArray(done.context) ? done.context : []), note] }
+  }).catch(($, e, next) => next(e))
+
+  on('tool.describe', { tool: 'Agent' }, async ($, e, next) => {
+    const described = await next(e)
+    // Claude reads the table where it fills in the call, and the tool's own text sets `effort` only when asked to.
+    return rules && typeof described?.description === 'string'
+      ? { ...described, description: `${described.description}\n\n${rules}` } : described
   }).catch(($, e, next) => next(e))
 
   on('session.start', async ($, e, next) => {
-    const started = await next(e)
-    const layers = await modelSettings($, reads)
-    heard(await ask($, opts, 'mod-start', { ...(layers ? { settings: layers } : {}) }))
-    return started
+    const done = await next(e)
+    sentFor = await sessionId($) ?? sentFor
+    started(await sendLayers($, opts, reads))
+    return done
+  }).catch(($, e, next) => next(e))
+
+  on('session.end', ($, e, next) => {
+    if (e.reason === 'clear') sentFor = undefined
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   on('agent.spawn', async ($, e, next) => {
@@ -209,6 +265,7 @@ export const register: Register = (on, options) => {
     let reply = await ask($, opts, 'mod-spawn', facts)
     if (reply === undefined) reply = await ask($, opts, 'mod-spawn', facts)
     const pick = heard(reply)
+    if (typeof pick?.note === 'string' && e.tool_use_id) remember(notes, e.tool_use_id, pick.note)
     // Without an answer neither path routed this call, so only the cap can still be held, and only while routing.
     const model = pick ? pick.model : routing(opts) ? capped(e.model, opts.CLAUDE_PLUGIN_OPTION_MAX_TIER) : undefined
     const mine: Want | null = pick?.effort ? { effort: pick.effort, raiseOnly: !!e.workflow } : null
@@ -219,6 +276,10 @@ export const register: Register = (on, options) => {
       const started = await next(model ? { ...e, model } : e)
       if (mine && started.agentId) remember(agentEffort, started.agentId, mine)
       if (started.agentId && e.workflow && e.subagentType) remember(agentType, started.agentId, e.subagentType)
+      // A run on the model another mod moved it to is no substitution for the one this mod sent.
+      if (!e.workflow && PLAIN_ID.test(e.tool_use_id) && movedOn(next.trace, model || e.model)) {
+        await mark($, `${e.tool_use_id}.moved`)
+      }
       return started
     } finally {
       efforts.splice(efforts.indexOf(mine), 1)
@@ -226,8 +287,15 @@ export const register: Register = (on, options) => {
     }
   }).catch(($, e, next) => next(e))
 
-  on('turn.start', ($, e, next) => {
-    if (e.agentId !== undefined && !agentEffort.has(e.agentId)) {
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) {
+      // session.start doesn't fire after /clear, so the new session's first turn sends the layers.
+      const id = await sessionId($)
+      if (id !== undefined && id !== sentFor) {
+        sentFor = id
+        started(await sendLayers($, opts, reads))
+      }
+    } else if (!agentEffort.has(e.agentId)) {
       const [want, ...others] = inFlight.get(e.text) ?? []
       if (want && others.every((other) => other?.effort === want.effort && other.raiseOnly === want.raiseOnly)) {
         remember(agentEffort, e.agentId, want)

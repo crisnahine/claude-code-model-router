@@ -313,7 +313,7 @@ const runs = %(runs)d
 const pick = JSON.stringify({ model: 'haiku', effort: 'low', reason: 'lookup subtask', level: 'complex' })
 const hooks = {}
 const on = (event, ...rest) => { hooks[event] = rest.pop(); return { catch: () => {} } }
-const $ = { plugin: { root: '/plugin' }, session: { model: async () => 'claude-opus-5-5' },
+const $ = { plugin: { root: '/plugin' }, session: { model: async () => 'claude-opus-5-5', id: async () => 'bench' },
   process: { hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: 'bench' }),
              run: async () => ({ exitCode: 0, stdout: pick, stderr: '' }) } }
 register(on, {})

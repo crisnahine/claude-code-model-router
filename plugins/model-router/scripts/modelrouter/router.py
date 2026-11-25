@@ -30,6 +30,7 @@ class Decision(TypedDict):
     escalated_from: Optional[str]
     version: Optional[str]  # an exact model ID the caller or the agent named, not just a family
     held: Optional[str]  # what a project's rule asked for that this call didn't take, and why
+    no_step: bool  # a redo with nothing stronger usable and no effort to gain: it runs as the run it redoes did
 
 
 @dataclass(frozen=True)
@@ -54,7 +55,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     tool_input, agent, definition, usable = facts.tool_input, facts.agent, facts.definition, facts.usable
     out: Decision = {"agent": agent, "action": "keep", "model": None, "effort": None, "level": None,
                      "source": None, "was": None, "reason": "", "repeat_of": None, "escalated_from": facts.redoes,
-                     "version": None, "held": None}
+                     "version": None, "held": None, "no_step": False}
     if agent == "fork":
         out["reason"] = "a fork runs on its conversation's model"
         return out
@@ -221,6 +222,7 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
         how = "no stronger model is usable" + (", so it runs one effort step up" if gains
                                                else f", and {ran} gets no more effort" if free else "")
     final = reg.clamp(model, facts.usable)
+    out["no_step"] = not stronger and not gains and final == ran
     clamp_note = f"; {model} is over the cap or unavailable here" if final != model else ""
     if model != ran and reg.past_lag(final, facts.usable, facts.lagging) != final:
         # The next model is the router's own pick, so it passes over a family whose alias runs an older model.

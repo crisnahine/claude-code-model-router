@@ -15,7 +15,7 @@ Warm p50 milliseconds per call over 30 runs, each through `sh scripts/model-rout
 | Command | 3.9.6 | 3.13 |
 | :- | -: | -: |
 | Each of the nine settings hooks in `hooks.json` | 78 to 98 | 48 to 51 |
-| `mod-start`, at the mod's `session.start` | 83 | 49 |
+| `mod-start`, at the mod's `session.start` and the first main-loop turn after `/clear` | 83 | 49 |
 | `mod-spawn`, at `agent.spawn` | 86 | 52 |
 | `mod-usage`, at each subagent turn's `turn.complete` | 83 | 48 |
 
@@ -53,10 +53,12 @@ Characters of plugin text Claude gets. Tokens weren't measured.
 | Text | When | Characters | Test budget |
 | :- | :- | -: | -: |
 | Session-start note (`hooks._rules`) | each start, resume, clear, compact and fork | 700 with no option set, 206 to 717 over 32 option mixes | 720 |
+| The same note, after two newlines, in the Agent tool's description (mod only) | all session | 702 with no option set, at most 719 | 720, the note's |
+| A redo with no step left (`spawn.redo_note`) | after that call's result | 87 to 97 | none |
 | The five agents' descriptions | all session | 687 | 930 |
 | The `route` skill's description | all session | 199 | 200 |
 | A note that the prompt names a model | on such a prompt | about 135 | none |
 | The Stop ask (`gates.unverified_edit`) | once per batch of unchecked edits | 511 | none |
 | The `route` skill and its policy output | when it runs | 5,045 and 1,561 | none |
 
-`Notes.test_every_note_stays_within_budget` walks the mixes of `max_tier`, `CLAUDE_CODE_SUBAGENT_MODEL`, its FORCE switch and the two effort variables. `Hooks.test_the_text_in_context_every_session_stays_within_budget` holds the descriptions. `models` and `usage` set `disable-model-invocation`, so their descriptions stay out ([skills](https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill)). With `routing_mode` off there is no note and no Stop ask.
+With the mod, the model table appears twice: in the session context and in the Agent tool's description, so a session with no option set carries 1,402 characters of it. `Notes.test_every_note_stays_within_budget` walks the mixes of `max_tier`, `CLAUDE_CODE_SUBAGENT_MODEL`, its FORCE switch and the two effort variables. `Hooks.test_the_text_in_context_every_session_stays_within_budget` holds the descriptions. `models` and `usage` set `disable-model-invocation`, so their descriptions stay out ([skills](https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill)). With `routing_mode` off there is no note and no Stop ask.

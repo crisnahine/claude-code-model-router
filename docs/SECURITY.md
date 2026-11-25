@@ -54,9 +54,10 @@ It reads no settings file. The mod asks Claude Code for each settings source and
 
 All of it goes to the model provider with the conversation:
 
-- the session-start note, which names `CLAUDE_CODE_SUBAGENT_MODEL` under FORCE only when it is a short plain name (`Notes.test_an_environment_model_reaches_claude_only_as_a_plain_name`);
+- the session-start note, which names `CLAUDE_CODE_SUBAGENT_MODEL` under FORCE only when it is a short plain name (`Notes.test_an_environment_model_reaches_claude_only_as_a_plain_name`), and, where the mod runs, the same note in the Agent tool's description (`tool.describe` in `hooks/router.ts`);
 - a note when the user's prompt names a shipped or user model (`hooks.user_prompt`);
 - the fallback's note on each call it rewrites, and its deny reason (`fallback.route`);
+- a sentence after a redo that had no step left, naming only a registry model and an effort (`spawn.redo_note`);
 - the Stop ask, and the notes after a model error or a mid-run model switch (`hooks.agent_failed`, `hooks.post_agent`);
 - skill output: the policy and `explain` from `/model-router:route`, model status, state file paths, held rules and a workflow pin named only as a plain name from `/model-router:models` (`Notes.test_the_models_report_names_a_workflow_pin_only_as_a_plain_name`), and agent and model names, tokens and dollar estimates from `/model-router:usage`.
 
@@ -68,7 +69,7 @@ It never approves a tool call (`SecurityClaims.test_it_never_approves_a_tool_cal
 
 ## The mod
 
-`hooks/router.ts` runs `sh <plugin root>/scripts/model-router.sh <command>` as an argument array, so no shell parses the input, and sends the event as JSON on stdin with an 8-second timeout (`ask`). Every hook passes the event on unchanged when anything fails (Node test "every hook falls back to next(e) when it throws"). It never changes a prompt. Its one file write is an empty mark under `mod-calls/` per `Agent` call, named by the call's `tool_use_id` only when that id is 1 to 128 letters, digits, `_` or `-` (`PLAIN_ID`), and the fallback checks the same pattern before it removes one (`Mod.test_only_a_plain_tool_use_id_is_looked_up`).
+`hooks/router.ts` runs `sh <plugin root>/scripts/model-router.sh <command>` as an argument array, so no shell parses the input, and sends the event as JSON on stdin with an 8-second timeout (`ask`). Every hook passes the event on unchanged when anything fails (Node test "every hook falls back to next(e) when it throws"). It never changes a prompt. Its only file writes are empty marks under `mod-calls/`: one per `Agent` call, and `<tool_use_id>.moved` for a spawn a later mod moved. Each is named by the call's `tool_use_id` only when that id is 1 to 128 letters, digits, `_` or `-` (`PLAIN_ID`), and the settings hooks check the same pattern before they remove one (`Mod.test_only_a_plain_tool_use_id_is_looked_up`, `MovedByAnotherMod.test_only_a_plain_tool_use_id_is_looked_up`).
 
 ## Skills
 
