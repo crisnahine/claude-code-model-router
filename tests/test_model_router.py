@@ -1420,16 +1420,24 @@ class RoutingEvals(Sandbox):
     # Runs each grader must fail, then runs it must pass; the right answers are from live runs.
     RUNS = {
         ("route-review-subagent", "found-the-bypass"): (
-            [{"last_message": "The handler looks correct and there is no way to bypass the check."}],
+            [{"last_message": "The handler looks correct and there is no way to bypass the check."},
+             {"last_message": "The admin account is fine; an attacker could bypass hashing."}],
             [{"last_message": "The check uses `or` where it needs `and`. Because of that, anyone who enters the username "
                               "`admin` is logged in with any password."},
              {"last_message": "The `or` short-circuits, so anyone who submits `user='admin'` is authenticated without any "
-                              "password check."}]),
+                              "password check."},
+             {"last_message": "If the username is 'admin', the function returns True without evaluating the password at all."},
+             {"last_message": "The `or` means the password check is skipped entirely when the username is admin."}]),
         ("route-contract-summary", "flags-the-cap"): (
-            [{"last_message": "Liability is capped at $10. Nothing here is unusual."}],
+            [{"last_message": "Liability is capped at $10. Nothing here is unusual."},
+             {"last_message": "The $10 cap is common in these agreements; the termination clause is one-sided."}],
             [{"last_message": "- **Liability:** The Supplier's total liability is capped at $10.\n\n**Unusual points:**\n\n"
                               "1. **The $10 cap is extremely low.** Supplier caps are usually tied to fees paid."},
-             {"last_message": "1. **Liability is very one-sided.** A $10 cap leaves the Customer with almost no remedy."}]),
+             {"last_message": "1. **Liability is very one-sided.** A $10 cap leaves the Customer with almost no remedy."},
+             {"last_message": "The Supplier's liability cap of $10 is far too low to cover any real loss."},
+             {"last_message": "A $10 liability cap is ridiculously low."},
+             {"last_message": "The Supplier's liability is limited to $10 while the Customer's is unlimited, which heavily "
+                              "favors the Supplier."}]),
         ("route-redo-escalates", "first-redo-stayed-on-haiku"): (
             [{"trace": trace("claude-haiku-5-5", "claude-sonnet-5-5", "claude-sonnet-5-5")}],
             [{"trace": trace("claude-haiku-5-5", "claude-haiku-5-5", "claude-sonnet-5-5")}]),
