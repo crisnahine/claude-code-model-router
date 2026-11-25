@@ -47,23 +47,25 @@ Left out of the table: 8 run(s) ($1.76) on an earlier revision of `bugfix-statem
 | `defaults` | 18 | 18 | none | $0.278 |  |
 | `haiku-high` | 18 | 18 | none | $0.136 |  |
 
-### `calibration-2`: 28 runs on 2026-11-25, $9.87, session on `claude-opus-5-5`
+### `calibration-2`: 24 runs on 2026-11-25, $8.37, session on `claude-opus-5-5`
 
 The four hard coding tasks and the redo, fan-out and plan-then-build tasks under the same two baselines. Each solved 13 of 14 runs: the one it missed was a `perf-nlogn-rewrite` run the 900-second timeout stopped.
 
+Left out of the table: 4 run(s) ($1.50) on an earlier revision of `mixed-plan-then-build`.
+
 | Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |
 | :- | -: | -: | :- | -: | :- |
-| `defaults` | 14 | 13 | 1 by the timeout | $0.523 |  |
-| `haiku-high` | 14 | 13 | 1 by the timeout | $0.182 |  |
+| `defaults` | 12 | 11 | 1 by the timeout | $0.517 |  |
+| `haiku-high` | 12 | 11 | 1 by the timeout | $0.180 |  |
 
-### `release-1`: 90 runs on 2026-11-25, $21.40, session on `opus`
+### `release-1`: 84 runs on 2026-11-25, $19.45, session on `opus`
 
 Sixteen tasks under the plugin and the two baselines, with the ladder and the table the plugin ships. It stays exploratory for two reasons: the plugin has changed since the commit it ran, and each run had a $0.50 cap, which stopped five runs before they finished.
 
-Left out of the table: 6 run(s) ($1.20) on an earlier revision of `bugfix-statement-queries`.
+Left out of the table: 12 run(s) ($3.15) on an earlier revision of `bugfix-statement-queries`, `mixed-plan-then-build`.
 
 | Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |
 | :- | -: | -: | :- | -: | :- |
-| `defaults` | 30 | 26 | 4 by the budget cap | $0.344 |  |
-| `plugin` | 30 | 29 | 1 by the budget cap | $0.222 | `99467a2` |
-| `haiku-high` | 30 | 30 | none | $0.147 |  |
+| `defaults` | 28 | 25 | 3 by the budget cap | $0.334 |  |
+| `plugin` | 28 | 27 | 1 by the budget cap | $0.217 | `99467a2` |
+| `haiku-high` | 28 | 28 | none | $0.144 |  |

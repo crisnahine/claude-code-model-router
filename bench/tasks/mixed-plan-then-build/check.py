@@ -6,9 +6,9 @@ as shipped and on each broken build in mutants.py. A charge counts when the work
 rolls back, as a real card stays charged. A mutant wraps the work's own
 handle_post, so the test is judged on the requests it sends, not on the names it imports. Requests run one at a
 time, so a build that looks the key up, charges and then stores it with no lock passes, though two requests with one
-key at the same moment would both charge. A request that dies right after its first commit, as a host
-can, is retried once on the other host and may be charged once in all, so a build that stores the key in a commit of
-its own after the payment's fails."""
+key at the same moment would both charge. A request that dies right after its first commit after the charge,
+as a host can, is retried once on the other host and may be charged once in all, so a build that stores the key in a
+commit of its own after the payment's fails."""
 import importlib.util
 import re
 import shutil
@@ -68,14 +68,16 @@ def behaviour(work, tmp):
     counts = step(b, db, "count")
     if counts != [4, 4]:
         return f"{counts[0]} charges and {counts[1]} payments, expected 4 of each"
-    # The process dies right after its first commit, as a host can; whatever the retry answers, one charge at most.
+    # The process dies right after its first commit after the charge, as a host can; whatever the retry answers, one
+    # charge at most.
     db = str(Path(tmp) / "crash.db")
     step(a, db, "init")
     step(a, db, "crash", request(1, 500, "k-3"), strict=False)
     step(b, db, "post", request(1, 500, "k-3"), strict=False)
     charges = step(b, db, "count")[0]
     if charges > 1:
-        return f"a retry after the request died at its first commit was charged again ({charges} charges)"
+        return (f"a retry after the request died at its first commit after the charge was charged again "
+                f"({charges} charges)")
     return None
 
 

@@ -1,14 +1,15 @@
 {
   "class": "cross-module",
   "shape": "plan-build",
-  "revision": 7,
+  "revision": 8,
   "revisions": {
     "2": "requests take turns between two copies of the work dir, so state kept in the code tree or a temp file is lost between hosts, and test_idempotency.py must fail on two broken builds",
     "3": "the broken builds wrap the work's own handle_post, so a test passes or fails on the requests it sends, and the brief says the tests send requests to it",
     "4": "charges are counted as the gateway is called, outside the work's transaction, so a build that charges and then rolls back fails, and two more broken builds charge a retry again, so a test must check the charges",
     "5": "a fifth broken build charges a repeated key without recording a payment, so a test that counts payment rows fails, a request that dies after its first commit is retried and may be charged once, and DESIGN.json with a byte order mark is read",
     "6": "the broken build that charges without a payment charges through the work's own code and then deletes the payment row, so a test that mocks the gateway where the work looks it up sees the charge, and a choice written as Option B is read as B",
-    "7": "a sixth broken build answers a retry without a charge but with another body, so a test must check what a retry answers, and a choice written as B. or Option B: with a name is read as B"
+    "7": "a sixth broken build answers a retry without a charge but with another body, so a test must check what a retry answers, and a choice written as B. or Option B: with a name is read as B",
+    "8": "the crash step kills the request at its first commit after the charge, so a commit made before the charge can't use it up"
   },
   "brief": "Payment requests need idempotency keys, and docs/PROPOSAL.md says what we want and gives two ways to build it. First, pick one of the two options and write the pick to DESIGN.json as {\"choice\": \"<A or B>\", \"reasons\": [\"...\"]}. Then build the option you picked, with tests for it in test_idempotency.py that send requests to api.payments.handle_post, check what each one answers and charges, and pass. Keep test_payments.py passing, and use the standard library only."
 }

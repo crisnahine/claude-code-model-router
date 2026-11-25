@@ -1,1 +1,1 @@
-a retry after the request died at its first commit was charged again
+died at its first commit after the charge
