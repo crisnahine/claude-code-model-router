@@ -7,13 +7,15 @@ import math
 from pathlib import Path
 
 from . import router, store
+from .config import HIDDEN, plain
 
 
 def spawn(session_id: str | None, via: str, decision: router.Decision, kind: str | None = None,
           on_record: bool = True) -> None:
     action = decision["action"]
-    row = {"event": "spawn", "via": via, "session": session_id, "agent": decision["agent"], "action": action,
-           "level": decision["level"],
+    # Agent and model names come from agent files and settings a repository can ship, so a row keeps only plain ones.
+    row = {"event": "spawn", "via": via, "session": session_id, "agent": plain(decision["agent"], HIDDEN),
+           "action": action, "level": decision["level"],
            "model": None if action == "deny" else decision["model"] or decision["was"],
            "was": decision["was"], "effort": decision["effort"], "source": decision["source"],
            "escalated_from": decision["escalated_from"], "reason": decision["reason"]}
@@ -28,13 +30,14 @@ def spawn(session_id: str | None, via: str, decision: router.Decision, kind: str
 
 def result(session_id: str | None, agent: str, asked: str | None, resolved_model: object, status: object,
            models_used: list[str] | None = None) -> None:
-    store.append_ledger({"event": "result", "session": session_id, "agent": agent, "asked": asked,
+    store.append_ledger({"event": "result", "session": session_id, "agent": plain(agent, HIDDEN), "asked": asked,
                          "resolved_model": resolved_model, "status": status,
                          **({"models_used": models_used} if models_used else {})})
 
 
 def model_error(session_id: str | None, agent: object, model: str) -> None:
-    store.append_ledger({"event": "model_error", "session": session_id, "agent": agent, "model": model})
+    store.append_ledger({"event": "model_error", "session": session_id, "agent": plain(agent, HIDDEN),
+                         "model": plain(model, HIDDEN)})
 
 
 def gate(session_id: str | None, kind: str) -> None:
@@ -45,7 +48,7 @@ TOKENS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_cre
 
 
 def _tokens(usage: dict) -> dict:
-    return {"model": usage["model"], **{k: int(store.stamp(usage.get(k))) for k in TOKENS}}
+    return {"model": plain(usage["model"], HIDDEN), **{k: int(store.stamp(usage.get(k))) for k in TOKENS}}
 
 
 def _usage(value: object) -> bool:
@@ -72,7 +75,7 @@ def usage(session_id: str | None, agent_id: object, agent: str | None, models: o
     else:
         return
     store.append_ledger({"event": "usage", "session": session_id, "agent_id": agent_id,
-                         **({"agent": agent} if agent else {}), **row})
+                         **({"agent": plain(agent, HIDDEN)} if agent else {}), **row})
 
 
 def read(days: int | None = None, path: Path | None = None, session: str | None = None) -> list[dict]:
@@ -82,14 +85,14 @@ def read(days: int | None = None, path: Path | None = None, session: str | None 
     mark = f'"session": {json.dumps(session)}' if session else ""
     cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days) if days else None
     try:
-        lines = (path or store.ledger_path()).read_text(encoding="utf-8").splitlines()
+        lines = (path or store.ledger_path()).read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return rows
     for line in lines:
         if mark not in line:
             continue
         try:
-            row = json.loads(line)
+            row = store.loads(line)
             if cutoff and _dt.datetime.fromisoformat(row["ts"]) < cutoff:
                 continue
         except (KeyError, ValueError, TypeError):
@@ -104,10 +107,10 @@ def since(days: int, path: Path | None = None) -> str | None:
     less than asked: a new ledger, or one `store.append_ledger` cut to its newer half."""
     cutoff = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)
     try:
-        with (path or store.ledger_path()).open(encoding="utf-8") as fh:
+        with (path or store.ledger_path()).open(encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 try:
-                    ts = json.loads(line)["ts"]
+                    ts = store.loads(line)["ts"]
                     return ts if _dt.datetime.fromisoformat(ts) > cutoff else None
                 except (KeyError, ValueError, TypeError):
                     continue

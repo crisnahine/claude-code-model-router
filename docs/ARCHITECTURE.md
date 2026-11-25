@@ -40,7 +40,7 @@ While the runtime answers (its last command replied, if only `{"ok": true}`), th
 
 The other settings hooks do the bookkeeping: the session note and model, a model the request names, `Agent` results and failures, background stops, and the Stop check.
 
-`cli.main` catches what a handler raises and exits 0. The launcher runs Python with `-I`, exits 0 with no Python 3.9 or later, and 1, never 2, on other hook failures. Each mod hook's `.catch` passes the event on.
+`cli.main` catches what a handler raises, writes its type and place to stderr, and exits 1: Claude Code shows a hook error notice and goes on, and the mod counts a failed round trip, so it holds `max_tier` by family (`capped`). Hook input that doesn't parse reads as empty, and an Agent call with no readable input is left alone on both paths. The launcher runs Python with `-I`, exits 0 with no Python 3.9 or later, and 1, never 2, on other hook failures. Each mod hook's `.catch` passes the event on.
 
 ## In an interactive session
 
@@ -103,7 +103,7 @@ A decision is `keep`, `rewrite` or `deny` (the guard's), with model, effort, lev
 | 5 | A project's rule `model` | Applies it only when not weaker than what the call runs on without it, and not a model the project added; else `held` says why |
 | 6 | The agent's own `model` | Keeps it, and for `inherit` the parent's model, which outranks row 7; with no definition found, or a `model` outside the registry, leaves the call alone |
 | 7 | `CLAUDE_CODE_SUBAGENT_MODEL` | Leaves the call alone. Unforced, the variable doesn't move the built-in Explore and Plan, which go to row 8 |
-| 8 | Nothing | The level the agent's tools put it at: `lookup` when its `tools` hold none of Edit, Write, NotebookEdit and Bash, or its `disallowedTools` remove them all, as for the built-in Explore and Plan; `standard` otherwise |
+| 8 | Nothing | The level the agent's tools put it at: `lookup` when its `tools` hold none of Edit, Write, NotebookEdit and Bash, or its `disallowedTools` remove them all, as for the built-in Explore and Plan; `standard` otherwise. A list `agents._list` can't read with confidence counts as every tool, or as removing none |
 
 Then, for rows 3 to 6 and 8 (steps 5 and 6 on rows 1 and 2 too):
 
@@ -161,7 +161,7 @@ Model health lives in `state.json` (`health.py`):
 
 - A model error is a failed `Agent` call whose error text has `not_found_error`, `model_not_found` or `claude_code_version_too_old`. A substitution is a `resolvedModel` in another family than asked, outside the force pin, a swapped run, or the untouched model.
 - A spawn a later mod moved to another family strikes nothing. The mod compares the model it sent with the one the engine's entry in `next.trace` was asked for, and writes `mod-calls/<tool_use_id>.moved`; `post-agent` and `agent-failed` take it (`mod.moved`).
-- Two of either route the model around for a day; a run as asked clears it. A full ID the router sent (a newest ID, or an exact ID kept on a rewrite) is routed around after one model error or provider refusal (`health.REFUSED`). An exact ID on a call left as it is strikes nothing.
+- Two of either route the model around for a day; a run as asked clears it. The cause kept is the error's type identifier, never its display text, which can quote a model ID a repository's settings chose. A full ID the router sent (a newest ID, or an exact ID kept on a rewrite) is routed around after one model error or provider refusal (`health.REFUSED`). An exact ID on a call left as it is strikes nothing.
 - `Registry.available` drops the health filter rather than leave nothing usable, never the allowlist's.
 
 The allowlist (`allowlist.py`):
@@ -191,7 +191,7 @@ The data folder is `${CLAUDE_PLUGIN_DATA}`, else `plugins/data/model-router-loca
 
 Per-session files keep 200 sessions and 100 records each. The ledger drops rows past 30 days, and its older half past 4 MB.
 
-Writes are atomic. Each read-modify-write and ledger append holds an OS lock (`flock`, or `msvcrt.locking` on Windows) on the file's `.flock` (`store.locked`), since agents started together run their hooks at once. The OS frees a dead holder's lock, and a filesystem that can't lock writes unlocked.
+Writes are atomic. Each read-modify-write and ledger append holds an OS lock (`flock`, or `msvcrt.locking` on Windows) on the file's `.flock` (`store.locked`), since agents started together run their hooks at once. The OS frees a dead holder's lock. A held lock is `BlockingIOError` from `flock` and `PermissionError` (`EACCES`) from `msvcrt.locking`; any other lock error means the filesystem can't lock, and the write goes ahead unlocked.
 
 | Case | What happens |
 | :- | :- |
@@ -200,7 +200,7 @@ Writes are atomic. Each read-modify-write and ledger append holds an OS lock (`f
 | Newer `schema` in `state.json` or `locks.json` | Read, never written |
 | `locks.json` corrupt | Left as it is |
 | Per-session file corrupt | Read as empty, replaced on the next write |
-| Bad ledger line | Skipped |
+| Ledger line that doesn't parse (bad bytes, nesting past the parser's limit) | Skipped |
 
 ## Trust
 
@@ -210,7 +210,7 @@ The user's `~/.claude/model-router.json` is trusted in full. A project's `.claud
 - Its rule `level` is a floor, its rule `model` follows row 5, and `route: false` is ignored. A user rule setting an agent's level or model voids both of the project's.
 - A model it adds is never a pick, a clamp stand-in or a redo's next model, is ignored under a cap, and may not overlap a trusted name.
 
-Only `/config` sets `routing_mode`; `/model-router` switches routing for one session without writing it. Bad types and non-finite numbers are dropped, and `/model-router:models` lists what was dropped or held back.
+Only `/config` sets `routing_mode`; `/model-router` switches routing for one session without writing it. Bad types and non-finite numbers are dropped, and `/model-router:models` lists what was dropped or held back. An override file that doesn't parse, nests past the parser's limit, is over 4 MiB or isn't a regular file says nothing (`store.load_dict`).
 
 ## Machine-readable output
 
@@ -227,5 +227,5 @@ Only `/config` sets `routing_mode`; `/model-router` switches routing for one ses
 - **Changing more than `model` and `effort`** of an agent call. The main conversation's model and effort change only through Claude Code's own `/model` and `/effort`, run for a setup the person picks in the session check.
 - **Writing settings**, but for one option: `session_check`, through `$.config.set`, from `/model-router check on` or `off` or the session check's "Don't ask again".
 - **Approving a call.** No hook returns `permissionDecision: "allow"`.
-- **Blocking a spawn**, but for one case. A fallback rewrite waits in `pending.json`. If the same call comes back 5 seconds or more later with no result, the rewrite didn't run, so it passes through untouched rather than loop; if that would run it above `max_tier`, it is denied, with the model to use (`fallback._guard`).
+- **Blocking a spawn**, but for one case. A fallback rewrite waits in `pending.json`. If the same call comes back 5 seconds to 30 minutes later with no result, the rewrite didn't run, so it passes through untouched rather than loop; if that would run it above `max_tier`, it is denied, with the model to use (`fallback._guard`).
 - **Blocking a session.** Hooks never exit 2.

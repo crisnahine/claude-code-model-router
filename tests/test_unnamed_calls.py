@@ -24,6 +24,50 @@ class AgentTools(Sandbox):
         self.assertEqual(self.parsed("disallowedTools: Write, Edit\n")["disallowed"], ["Write", "Edit"])
         plain = self.parsed("")
         self.assertEqual((plain["tools"], plain["disallowed"]), (None, None))
+        # Each form YAML reads and Claude Code takes (sub-agents.md: "a comma-separated string ... or a YAML list").
+        forms = {
+            "tools: Read, Bash  # runs the tests\n": ["Read", "Bash"],
+            "tools: [Read, Bash] # a flow list with a comment\n": ["Read", "Bash"],
+            "tools: [\n  Read,\n  Write\n]\n": ["Read", "Write"],
+            "tools: [Read,  # the reader\n        Edit]\n": ["Read", "Edit"],
+            "tools:\n  [Read, Bash]\n": ["Read", "Bash"],
+            "tools:\n  - Read\n  - Edit  # fixes the code\n": ["Read", "Edit"],
+            "tools:\n- Read\n- Bash\n": ["Read", "Bash"],
+            "tools:\n  # a reader that can test\n  - Read\n\n  - 'Bash(git status)'\n": ["Read", "Bash(git status)"],
+            "tools: \"Read, Bash\"\n": ["Read", "Bash"],
+            "tools: 'Read, Edit' # quoted\n": ["Read", "Edit"],
+            "tools: Agent(worker, researcher), Read, Bash\n": ["Agent(worker, researcher)", "Read", "Bash"],
+            "tools: [\"Bash(git log, git diff)\", Read]\n": ["Bash(git log, git diff)", "Read"],
+            "tools: mcp__github__*, Read\n": ["mcp__github__*", "Read"],
+            "tools: Read, Grep\r\nmodel: haiku\r\n": ["Read", "Grep"],
+            "disallowedTools: Write, Edit  # no file writes\n": ["Write", "Edit"],
+        }
+        for extra, tools in forms.items():
+            with self.subTest(extra=extra):
+                found = self.parsed(extra)
+                self.assertEqual(found["disallowed" if extra.startswith("disallowed") else "tools"], tools)
+
+    def test_a_tool_list_that_cant_be_read_with_confidence_counts_as_every_tool(self):
+        # The safe side: every tool for `tools`, so the agent can change files, and nothing removed for `disallowedTools`.
+        for extra in ("tools:\n", "tools: []\n", "tools: ~\n", "tools: null\n", "tools: true\n", "tools: >\n  Read\n",
+                      "tools: |\n  Read\n", "tools: *readers\n", "tools: !!str Read\n", "tools: {Read: true}\n",
+                      "tools: Read,\n  Grep\n", "tools: [Read, [Grep]]\n", "tools: [Read, Grep\n", "tools: \"Read, Grep\n",
+                      "tools:\n  - Read\n  - [Grep]\n", "tools:\n  - Read\n  Grep\n", "tools: Read Grep\n",
+                      "tools: Bash(echo #x)\n"):
+            with self.subTest(extra=extra):
+                found = self.parsed(extra)
+                self.assertIsNone(found["tools"])
+                self.assertFalse(agents.read_only(found))
+        found = self.parsed("tools: Read, Grep\ndisallowedTools: >\n  Bash\n")
+        self.assertEqual((found["tools"], found["disallowed"], agents.read_only(found)), (["Read", "Grep"], None, True))
+        self.assertFalse(agents.read_only(self.parsed("disallowedTools: [Edit, Write, NotebookEdit,\n")))
+
+    def test_an_agent_whose_list_carries_a_comment_or_spans_lines_is_routed_by_the_tools_it_has(self):
+        for extra in ("tools: Read, Bash  # runs the tests\n", "tools:\n  - Read\n  - Edit  # fixes the code\n",
+                      "tools: [\n  Read,\n  Write\n]\n"):
+            with self.subTest(extra=extra):
+                self.agent("worker", extra=extra)
+                self.assertEqual(self.decide("worker", BRIEF)["level"], "standard")
 
     def test_an_agent_reads_only_when_it_can_edit_write_or_run_nothing(self):
         reads = lambda extra: agents.read_only(self.parsed(extra))  # noqa: E731

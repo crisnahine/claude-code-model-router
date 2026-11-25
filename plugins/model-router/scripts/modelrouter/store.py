@@ -7,6 +7,7 @@ import datetime as _dt
 import json
 import math
 import os
+import stat
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -18,6 +19,7 @@ KEEP_SET_ASIDE = 3  # copies of an unreadable state file kept for a person to lo
 LOCK_WAIT_SECONDS = 1.0
 LOCK_POLL_MAX = 0.01  # the longest sleep between tries, so a waiter isn't starved by newcomers
 KEPT_RECORDS = 100  # calls kept per record file
+FILE_MAX_BYTES = 4 * 1024 * 1024  # an override file or plugin record over this says nothing
 # The version written into each shared file (state.json, locks.json), which
 # several releases can write at once. A file with no version has today's shape.
 SCHEMA = 1
@@ -67,10 +69,42 @@ def data_dir() -> Path:
     return path
 
 
-def load_dict(path: Path) -> dict:
+def loads(raw: str | bytes, **options: Any) -> Any:
+    """json.loads, with the RecursionError that deep nesting raises turned into the ValueError every caller handles."""
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(raw, **options)
+    except RecursionError as exc:
+        raise ValueError("nested too deeply") from exc
+
+
+def read_head(path: Path, size: int) -> bytes | None:
+    """At most `size` bytes from the start of a regular file, else None. The open doesn't block, so a FIFO a
+    repository's symlink points at can't hang a hook."""
+    try:
+        fd = os.open(str(path), os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
     except (OSError, ValueError):
+        return None
+    try:
+        with open(fd, "rb") as fh:
+            return fh.read(size) if stat.S_ISREG(os.fstat(fd).st_mode) else None
+    except OSError:
+        return None
+
+
+def _short_int(digits: str) -> float:
+    # Python turns digits into an int in quadratic time, so a megabyte of them would stall the hook. Longer reads as
+    # infinite, which every reader already drops as not a finite number.
+    return int(digits) if len(digits) <= 64 else math.inf
+
+
+def load_dict(path: Path) -> dict:
+    """A JSON object file, or {} when it is missing, unreadable, malformed, nested too deeply or over FILE_MAX_BYTES."""
+    raw = read_head(path, FILE_MAX_BYTES + 1)
+    if raw is None or len(raw) > FILE_MAX_BYTES:
+        return {}
+    try:
+        value = loads(raw, parse_int=_short_int)
+    except ValueError:
         return {}
     return value if isinstance(value, dict) else {}
 
@@ -195,7 +229,8 @@ def locked(path: Path) -> Iterator[None]:
 if os.name == "nt":
     import msvcrt
 
-    _HELD = OSError  # msvcrt raises PermissionError for a held range
+    # The CRT's _locking sets EACCES (PermissionError) for a held range; a filesystem that can't lock fails otherwise.
+    _HELD = PermissionError
 
     def _try_lock(handle: int) -> None:
         os.lseek(handle, 0, os.SEEK_SET)
@@ -227,7 +262,7 @@ def _read_state(path: Path, durable: bool = True) -> tuple[dict, str]:
     except OSError:
         return {}, "unreadable"
     try:
-        data = json.loads(raw)
+        data = loads(raw)
     except ValueError:
         return {}, "corrupt"
     if not isinstance(data, dict):
@@ -384,7 +419,7 @@ def _older(line: str, cutoff: _dt.datetime) -> bool | None:
     """Whether a ledger line's row is older than `cutoff`, or None when it has no readable time.
     A time with no zone is read as UTC."""
     try:
-        ts = _dt.datetime.fromisoformat(json.loads(line)["ts"])
+        ts = _dt.datetime.fromisoformat(loads(line)["ts"])
         return (ts if ts.tzinfo else ts.replace(tzinfo=_dt.timezone.utc)) < cutoff
     except (KeyError, ValueError, TypeError):
         return None
@@ -403,11 +438,12 @@ def append_ledger(entry: dict) -> None:
         with locked(path):
             with _private_file(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND) as fh:
                 fh.write(json.dumps(entry) + "\n")
-            with path.open(encoding="utf-8") as fh:
+            # A bad byte reads as U+FFFD, so its line is one more that doesn't parse.
+            with path.open(encoding="utf-8", errors="replace") as fh:
                 oldest = next((found for found in map(lambda line: _older(line, cutoff), fh) if found is not None), False)
             big = path.stat().st_size > LEDGER_MAX_BYTES
             if oldest or big:
-                lines = [line for line in path.read_text(encoding="utf-8").splitlines(keepends=True)
+                lines = [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
                          if line.strip() and not _older(line, cutoff)]
                 if sum(len(line.encode("utf-8")) for line in lines) > LEDGER_MAX_BYTES:
                     lines = lines[len(lines) // 2:]

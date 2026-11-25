@@ -113,7 +113,7 @@ def models_data(snap: settings.Snapshot) -> dict:
         "set_aside": [str(p) for p in store.set_aside()],
         "newer_files": [str(p) for p in store.newer_files()],
         "newer_config": [str(p) for p in reg.newer],
-        "workflow_model": options.workflow_model,
+        "workflow_model": None if options.workflow_model is None else cfg.plain(options.workflow_model, "one model"),
     }
     # New keys appear only when they have something to say, so a clean setup's output keeps its bytes.
     if reg.problems:
@@ -148,9 +148,9 @@ def models(snap: settings.Snapshot) -> str:
                   "(a project's file can raise, never lower):"]
         lines += [f"- {h['kind']} {h['name']}: {h['reason']}" for h in data["held_back"]]
     if data["workflow_model"]:
-        pin = data["workflow_model"] if cfg._PLAIN_NAME.fullmatch(data["workflow_model"]) else "one model"
         lines += ["", f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins every workflow agent whose script names no model to "
-                  f"{pin}, so Model Router sets only their effort. /model-router:usage shows the model each one ran on."]
+                  f"{data['workflow_model']}, so Model Router sets only their effort. /model-router:usage shows the model "
+                  "each one ran on."]
     if data["set_aside"]:
         lines += ["", "Set aside because it could not be read, so that state started fresh: "
                   + ", ".join(data["set_aside"]) + ". Look at them, then delete them."]

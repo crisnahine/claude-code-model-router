@@ -13,6 +13,8 @@ const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const TIERS: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable']
 // The id names a file the fallback looks up, so only a plain one is marked (scripts/modelrouter/mod.py routes).
 const PLAIN_ID = /^[A-Za-z0-9_-]{1,128}$/
+// A model a repository's settings can set is shown only as a plain name, as the runtime shows one (config._PLAIN_NAME).
+const PLAIN_NAME = /^[A-Za-z0-9._:/@[\]-]{1,100}$/
 // The mod's slash command, and the session check's /config row, keyed as Claude Code keys a plugin's userConfig field.
 const COMMAND = 'model-router'
 const CHECK = 'model-router.session_check'
@@ -100,6 +102,15 @@ function effortFields(raw: unknown): unknown {
   }))
 }
 
+// A copy at most `depth` levels deep, null below. The runtime reads these keys three levels deep at most
+// (modelSettings, a model, its field), and a value nested past its JSON parser's limit would fail the whole command.
+function shallow(value: unknown, depth = 3): unknown {
+  if (value === null || typeof value !== 'object') return value
+  if (depth === 0) return null
+  return Array.isArray(value) ? value.map(item => shallow(item, depth - 1))
+    : Object.fromEntries(Object.entries(value).map(([key, item]) => [key, shallow(item, depth - 1)]))
+}
+
 type Layers = Record<string, Record<string, unknown>>
 // Each source's newest answer, the reads not answered yet, and the sources that once missed SETTINGS_MS.
 type Reads = { latest: Layers; out: Set<SettingsSource>; slow: Set<SettingsSource> }
@@ -118,7 +129,7 @@ async function modelSettings($: EngineInterface, reads: Reads): Promise<Layers |
         try {
           const found = (await $.settings.read({ source })) as Record<string, unknown>
           reads.latest[source] = Object.fromEntries(KEYS.filter(key => key in found)
-            .map(key => [key, key === 'modelSettings' ? effortFields(found[key]) : found[key]]))
+            .map(key => [key, shallow(key === 'modelSettings' ? effortFields(found[key]) : found[key])]))
         } catch {
           delete reads.latest[source]
         } finally {
@@ -281,7 +292,7 @@ async function apply($: EngineInterface, picks: Choice[]): Promise<void> {
     const now = await $.session.model()
     // A switch the allowlist or a declined consent refused: an effort set now would be saved for the old model.
     if (TIERS.find(tier => now.toLowerCase().includes(tier)) !== family) {
-      return toast($, `This session stays on ${now}: Claude Code did not switch it.`)
+      return toast($, `This session stays on ${PLAIN_NAME.test(now) ? now : 'its model'}: Claude Code did not switch it.`)
     }
     if ((command === 'effort' || !effort) && done) toast($, done)
   }

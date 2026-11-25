@@ -24,8 +24,15 @@ EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 USER_FILE = "your model-router.json"
 PROJECT_FILE = "the project's model-router.json"
-# A repository's key names are printed into skill output Claude reads, so only short plain names are kept.
-_PLAIN_NAME = re.compile(r"[A-Za-z0-9._:/\[\]-]{1,64}")
+# What a repository or the environment can set reaches notes, the ledger and skill output only as a short plain name:
+# a model ID (a Bedrock ARN, Vertex's claude-x@date) or a key, never a sentence.
+_PLAIN_NAME = re.compile(r"[A-Za-z0-9._:/@\[\]-]{1,100}")
+HIDDEN = "not a plain name"  # what a report or the ledger shows in place of one that isn't
+
+
+def plain(value: object, instead: str | None) -> str | None:
+    """`value` when it is a short plain name, else `instead`."""
+    return value if isinstance(value, str) and _PLAIN_NAME.fullmatch(value) else instead
 
 
 class Level(str, Enum):
@@ -226,7 +233,7 @@ def _clean(override: Any, source: str, problems: list[str], plain_keys: bool = F
     def bad(where: str, why: str) -> None:
         problems.append(f"{source}: {where} {why}, dropped")
 
-    def plain(name: object, section: str) -> bool:
+    def plain_key(name: object, section: str) -> bool:
         if plain_keys and isinstance(name, str) and not _PLAIN_NAME.fullmatch(name):
             problems.append(f"{source}: a key under {section} that is not a plain name, dropped")
             return False
@@ -239,7 +246,7 @@ def _clean(override: Any, source: str, problems: list[str], plain_keys: bool = F
     if isinstance(models, dict):
         out["models"] = {}
         for name, spec in models.items():
-            if not plain(name, "models"):
+            if not plain_key(name, "models"):
                 continue
             if not isinstance(name, str) or not isinstance(spec, dict):
                 bad(f"models.{name}", "is not an object")
@@ -276,7 +283,7 @@ def _clean(override: Any, source: str, problems: list[str], plain_keys: bool = F
     if isinstance(agents, dict):
         out["agents"] = {}
         for name, spec in agents.items():
-            if not plain(name, "agents"):
+            if not plain_key(name, "agents"):
                 continue
             if not isinstance(name, str) or not isinstance(spec, dict):
                 bad(f"agents.{name}", "is not an object")
@@ -438,13 +445,20 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
     )
 
 
+def _is_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:  # a symlink into a folder this user can't enter raises PermissionError
+        return False
+
+
 def load(hook_input: dict | None = None) -> Registry:
     """The registry for this user and project, from the three files, each read once. The project's file is
     the nearest one up to the repository root from CLAUDE_PROJECT_DIR, else, for a skill command run
     through Bash, from cwd."""
     start = Path(os.environ["CLAUDE_PROJECT_DIR"]) if os.environ.get("CLAUDE_PROJECT_DIR") else project_dir(hook_input)
     found = [f / ".claude" / OVERRIDE_FILE for f in project_folders(start)]
-    project_file = next((p for p in found if p.is_file()), found[0])
+    project_file = next((p for p in found if _is_file(p)), found[0])
     paths = (store.claude_home() / OVERRIDE_FILE, project_file)
     user, project = (store.load_dict(path) for path in paths)
     newer = tuple(path for path, file in zip(paths, (user, project)) if _newer(file))
