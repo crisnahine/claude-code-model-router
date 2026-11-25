@@ -41,11 +41,11 @@ def _rules(options: settings.Settings) -> str:
         neither = f"its agent's own model or the conversation's{', within the cap' if options.cap else ''}"
     if fixed:
         lead, medium, high = (f"Model Router keeps the `model` an Agent call names, within the user's cap. {fixed} "
-                              "Calls name a model by the work:\n"), "", ""
+                              "Here every Agent call names a model, by the work:\n"), "", ""
     else:
         fills = "" if options.subagent_effort else ", and fills in `effort` when a call names only a model"
         lead, medium, high = (f"Model Router keeps the `model` and `effort` an Agent call names, within the user's "
-                              f"cap{fills}. Calls name both by the work:\n"), " at medium", " at high"
+                              f"cap{fills}. Here every Agent call names both, by the work:\n"), " at medium", " at high"
     above = ("on a stronger model than the run it redoes" if fixed or options.subagent_effort
              else "above the run it redoes, effort before model")
     return (lead + f"- haiku{medium}: finding, reading and listing\n"

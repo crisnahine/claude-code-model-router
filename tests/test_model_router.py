@@ -1884,6 +1884,14 @@ class RepeatGuard(Sandbox):
         harder = self.decide("general-purpose", LOOKUP, model="haiku", effort="xhigh", description="Redo: list src")
         self.assertEqual((harder["model"], harder["source"], harder["escalated_from"]), ("haiku", "caller", "lookup"))
 
+    def test_a_redo_that_names_effort_its_model_gains_nothing_from_climbs_to_the_next_model(self):
+        # Haiku gets nothing past high (`effort_stops_at`), so haiku at xhigh after haiku at high asks for no more.
+        self.pre("general-purpose", LOOKUP, model="haiku", effort="high", description="List src")
+        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="high", description="List src")
+        redo = self.decide("general-purpose", LOOKUP, model="haiku", effort="xhigh", description="Redo: list src")
+        self.assertEqual((redo["action"], redo["model"], redo["source"], redo["escalated_from"]),
+                         ("rewrite", "sonnet", "router", "lookup"))
+
     def test_a_redo_that_names_a_model_with_no_run_on_record_still_climbs(self):
         redo = self.decide("general-purpose", LOOKUP, model="haiku", description="Redo: list src")
         self.assertEqual((redo["action"], redo["model"], redo["effort"]), ("rewrite", "haiku", "high"))
@@ -3130,6 +3138,8 @@ class Hooks(Sandbox):
         text = self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))
         self.assertIn("keeps the `model` and `effort` an Agent call names, within the user's cap", text)
         self.assertIn("fills in `effort` when a call names only a model", text)
+        # The firm wording matters: a Haiku session named Opus in 2 of 6 live runs without it, 6 of 6 with it.
+        self.assertIn("Here every Agent call names both, by the work:\n", text)
         for line in ("- haiku at medium: finding, reading and listing", "- sonnet at medium: everyday work to a clear brief",
                      "- opus at high: work that is hard to check, high-stakes, ambiguous or broad",
                      "- fable at high: open-ended research"):
@@ -3179,7 +3189,7 @@ class Hooks(Sandbox):
     def test_the_text_in_context_every_session_stays_within_budget(self):
         # The session-start note, the role agents' descriptions and the model-invoked skills' listings are in
         # the main loop's context in every session (docs/PERFORMANCE.md, "Context the plugin adds").
-        # The note holds up to 700 characters: it carries the table of which model and effort fit which work,
+        # The note holds up to 720 characters: it carries the table of which model and effort fit which work,
         # since the Agent tool sets `effort` only when instructions such as CLAUDE.md or a skill ask for one.
         notes = [self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))]
         for pin in ({"CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5-5[1m]"}, {"CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}):
@@ -3190,7 +3200,7 @@ class Hooks(Sandbox):
         skills = [f.get("description", "") + f.get("when_to_use", "") for f in listed
                   if f.get("disable-model-invocation") != "true"]
         for note in notes:
-            self.assertLessEqual(len(note), 700, note)
+            self.assertLessEqual(len(note), 720, note)
         self.assertLessEqual(sum(map(len, agents)), 930)
         self.assertLessEqual(sum(map(len, skills)), 200)
 

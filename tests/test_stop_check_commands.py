@@ -178,7 +178,7 @@ class Notes(Sandbox):
         for model, force, level, sub, cap in itertools.product((None, "claude-sonnet-5-5[1m]"), (False, True),
                                                                (None, "low"), (None, "low"), (None, "sonnet")):
             text = note(subagent_model=model, force=force, effort_level=level, subagent_effort=sub, cap=cap)
-            self.assertLessEqual(len(text), 700, text)
+            self.assertLessEqual(len(text), 720, text)
 
     def test_the_workflow_pin_notice_leaves_out_a_stage_whose_script_names_a_model(self):
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="haiku")
