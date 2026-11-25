@@ -166,6 +166,12 @@ class DocsAssets(unittest.TestCase):
         ladder = "Five levels: " + ", ".join(f"{lv} on {m} at {e}" for lv, m, e, *_ in docs_assets.LADDER)
         self.assertIn(ladder, app["featureList"])
 
+    def test_the_llms_index_gives_the_levels_from_the_ladder(self):
+        texts = dict(self.snap.texts)
+        texts["site/llms.txt"] = re.sub(r"(?m)^- Levels: [^.\n]*\.", "- Levels: lookup on Opus at low.", texts["site/llms.txt"])
+        levels = ", ".join(f"{lv} on {m} at {e}" for lv, m, e, *_ in docs_assets.LADDER)
+        self.assertIn(f"\n- Levels: {levels}. ", self.build(texts=texts)["site/llms.txt"])
+
     def test_every_structured_data_reference_names_a_node(self):
         graph = json.loads(re.search(r'<script type="application/ld\+json">(.*?)</script>',
                                      self.build()["site/index.html"], re.S).group(1))["@graph"]

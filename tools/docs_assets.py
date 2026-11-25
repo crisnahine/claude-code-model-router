@@ -503,7 +503,8 @@ def site_files(faq: str, texts: dict, v: str, day: str, floor: str) -> dict:
         page = head + sep + tail.replace(old, url)
     page = between(page, FAQ_HTML, site_faq_html(faq), "site/index.html")
     page = with_floor(badge_alt(page, v), floor)
-    ladder = "Five levels: " + ", ".join(f"{lv} on {model} at {effort}" for lv, model, effort, *_ in LADDER)
+    levels = ", ".join(f"{lv} on {model} at {effort}" for lv, model, effort, *_ in LADDER)
+    ladder = "Five levels: " + levels
     for pattern, value in ((r'"softwareVersion": "[^"]*"', f'"softwareVersion": "{v}"'),
                            (r'"Five levels: [^"]*"', f'"{ladder}"'),
                            (r'Version [^,]+, released <time datetime="[^"]*">[^<]*</time>',
@@ -511,12 +512,18 @@ def site_files(faq: str, texts: dict, v: str, day: str, floor: str) -> dict:
         page, found = re.subn(pattern, lambda m: value, page)
         if found != 1:
             raise SystemExit(f"site/index.html: expected one match for {pattern}, found {found}")
-    return {
+    out = {
         "site/index.html": page,
         "site/sitemap.xml": ('<?xml version="1.0" encoding="UTF-8"?>\n'
                              '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
                              f"  <url>\n    <loc>{url}</loc>\n  </url>\n</urlset>\n"),
     }
+    if "site/llms.txt" in texts:
+        llms, found = re.subn(r"(?m)^- Levels: [^.\n]*\.", lambda m: f"- Levels: {levels}.", texts["site/llms.txt"])
+        if found != 1:
+            raise SystemExit(f"site/llms.txt: expected one '- Levels: ...' line, found {found}")
+        out["site/llms.txt"] = with_floor(llms, floor)
+    return out
 
 
 def site_asset_problems(page: str, root: Path = ROOT) -> list:

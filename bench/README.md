@@ -4,7 +4,7 @@ Measures Model Router's cost per solved task and pass rate against Claude Code w
 
 - `tasks/<id>/`: one task each ([Adding a task](#adding-a-task)). `configs.json`: the configurations.
 - `run.py`: runs tasks under configurations with `claude -p`, grades each run and appends one JSON row per run to `--out`.
-- `analyze.py`: writes `docs/BENCHMARKS.md` from the rows and gives `tools/docs_assets.py` the figures for the `<!-- bench:KEY -->` spans. A row below `run.ROW_SCHEMA` (3) stops it, naming the file and line.
+- `analyze.py`: writes `docs/BENCHMARKS.md` from the rows. A row below `run.ROW_SCHEMA` (3) stops it, naming the file and line.
 - `overhead.py`: hook time, mod path and state growth, with no paid call: `python3 bench/overhead.py [--runs 30] [--calls 1000] [--json]`.
 - `results/`: the `*.jsonl` rows the page judges, `pilot/` for exploratory rounds with a note per batch in `pilot/notes.json`, `limited/` for runs set aside, and `transcripts/`, which git ignores.
 
