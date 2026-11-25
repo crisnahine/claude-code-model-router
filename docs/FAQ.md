@@ -44,7 +44,7 @@ Set `routing_mode` to `off` in `/config`: it changes no call and adds no session
 
 ## How do I see what it did?
 
-Where the mod runs, a line under the prompt shows the mode, the cap and this session's routed calls and redos, and `/model-router` prints it with no model turn. `/model-router:usage` shows the calls per agent, how many the router changed, their levels, the models they ran on and, where the mod runs, Claude Code's cost estimate. `/model-router:models` shows each model's state, and `/model-router:route <task>` says what a call would run on and why before you run it ([guide](GUIDE.md#commands)).
+Where the mod runs, a line under the prompt shows the mode, the cap, this session's calls and how many the router changed or ran as redos, and `/model-router` prints it with no model turn. `/model-router:usage` shows the calls per agent, how many the router changed, their levels, the models they ran on and, where the mod runs, Claude Code's cost estimate. `/model-router:models` shows each model's state, and `/model-router:route <task>` says what a call would run on and why before you run it ([guide](GUIDE.md#commands)).
 
 ## Does it change the main conversation's model?
 

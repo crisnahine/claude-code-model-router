@@ -65,7 +65,7 @@ When Claude changed a project file with Edit, Write or NotebookEdit and no check
 
 ## In a session
 
-With its mod loaded and a person at the prompt, Model Router shows one line under the prompt, after the plugin's name, such as `auto · mod · cap opus · 14 routed · 2 redos`: routing on (`auto`) or `off`, the path that routes calls, the cap when one is set, and this session's calls the router changed and its redos. `(this session)` follows the mode while `/model-router` overrides the saved option. The line updates after each spawn and each turn.
+With its mod loaded and a person at the prompt, Model Router shows one line under the prompt, after the plugin's name, such as `auto · mod · cap opus · 14 calls · 5 changed · 2 redos`: routing on (`auto`) or `off`, the path that routes calls, the cap when one is set, this session's subagent calls, and how many of them the router changed and how many were redos, each shown once there is one. `(this session)` follows the mode while `/model-router` overrides the saved option. The line updates after each spawn and each turn.
 
 `/model-router` prints the same state with no model turn. `/model-router off` and `/model-router on` switch routing for this session only, from the next spawn; `routing_mode` in `/config` keeps a choice. `/model-router check off` and `check on` set `session_check`.
 

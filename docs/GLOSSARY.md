@@ -84,7 +84,7 @@ The project's own words, and the code behind each.
 
 **Spawn**: a call starting its agent: `agent.spawn` on the mod path, `PreToolUse` on `Agent` on the fallback.
 
-**Status line**: the mod's one line under the prompt: mode, path, cap, and this session's routed calls and redos (`report.status`, `$.ui.status`).
+**Status line**: the mod's one line under the prompt: mode, path, cap, this session's calls, and how many the router changed or ran as redos (`report.status`, `$.ui.status`).
 
 **Stop check**: the ask before a turn ends when a project file was edited and no check ran since (`gates.py`, `verify_gate`). Guidance, never a block.
 

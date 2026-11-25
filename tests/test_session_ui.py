@@ -88,44 +88,44 @@ class StatusLine(Sandbox):
     def line(self, session_id: str = "s1") -> str:
         return report.status(snapshot(session_id))["line"]
 
-    def test_it_counts_this_sessions_routed_calls_and_redos(self):
-        self.assertEqual(self.line(), "auto · mod · 0 routed · 0 redos")
-        self.spawn(model="haiku", description="d")  # the effort is filled in: routed
+    def test_it_counts_this_sessions_calls_the_ones_changed_and_redos(self):
+        self.assertEqual(self.line(), "auto · mod · 0 calls")
+        self.spawn(model="haiku", description="d")  # the effort is filled in: changed
         self.spawn(model="haiku", effort="medium", prompt="list the docs")  # kept as named
         self.spawn("s2", model="haiku")
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", description="d")
         self.spawn(model="haiku", description="Redo: d")
-        self.assertEqual(self.line(), "auto · mod · 2 routed · 1 redo")
-        self.assertEqual(self.line("s2"), "auto · mod · 1 routed · 0 redos")
+        self.assertEqual(self.line(), "auto · mod · 3 calls · 2 changed · 1 redo")
+        self.assertEqual(self.line("s2"), "auto · mod · 1 call · 1 changed")
 
     def test_it_names_the_cap_and_the_path_that_routed_last(self):
         self.options(max_tier="opus")
         self.session_on(OPUS)
         self.pre("general-purpose", LOOKUP, model="haiku")
-        self.assertEqual(self.line(), "auto · fallback · cap opus · 1 routed · 0 redos")
+        self.assertEqual(self.line(), "auto · fallback · cap opus · 1 call · 1 changed")
 
     def test_routing_off_reads_off_and_a_session_switch_is_marked(self):
         self.options(routing_mode="off")
         self.assertEqual(self.line(), "off")
         settings.switch("s1", "auto")
-        self.assertEqual(self.line(), "auto (this session) · mod · 0 routed · 0 redos")
+        self.assertEqual(self.line(), "auto (this session) · mod · 0 calls")
         self.options(routing_mode="auto")
         settings.switch("s1", "off")
         self.assertEqual(self.line(), "off (this session)")
 
-    def test_it_stays_under_80_characters(self):
+    def test_it_stays_under_100_characters(self):
         self.options(max_tier="sonnet", routing_mode="off")
         settings.switch("s1", "auto")
         row = {"event": "spawn", "via": "fallback", "session": "s1", "action": "rewrite", "escalated_from": "lookup"}
         path = store.ledger_path()
         path.write_text("".join(json.dumps({"ts": "2099-01-01T00:00:00+00:00", **row}) + "\n" for _ in range(10000)))
         line = self.line()
-        self.assertEqual(line, "auto (this session) · fallback · cap sonnet · 10000 routed · 10000 redos")
-        self.assertLess(len(line), 80)
+        self.assertEqual(line, "auto (this session) · fallback · cap sonnet · 10000 calls · 10000 changed · 10000 redos")
+        self.assertLess(len(line), 100)
 
     def test_the_text_adds_the_session_and_how_to_switch(self):
         text = report.status(snapshot())["text"].splitlines()
-        self.assertEqual(text, ["auto · mod · 0 routed · 0 redos",
+        self.assertEqual(text, ["auto · mod · 0 calls",
                                 "Switch it off for this session with /model-router off, or for good with Routing mode in /config."])
         session.observe(snapshot(), SONNET, "medium")
         self.assertEqual(report.status(snapshot())["text"].splitlines()[1],

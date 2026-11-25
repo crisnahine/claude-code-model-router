@@ -61,8 +61,9 @@ One line under the prompt, after the plugin's name:
 | `auto` or `off` | `routing_mode`, or this session's switch, marked `(this session)` while it overrides the saved option. With routing off the line is that word alone |
 | `mod` or `fallback` | The path that routed this session's latest call |
 | `cap opus` | `max_tier`, when set |
-| `14 routed` | This session's calls the router changed, counted from the ledger |
-| `2 redos` | This session's calls marked "Redo:" |
+| `14 calls` | This session's subagent, teammate and workflow agent calls, counted from the ledger |
+| `5 changed` | The ones whose model or effort the router set or moved; shown once there is one |
+| `2 redos` | The ones marked "Redo:"; shown once there is one |
 
 It refreshes when the session starts, after each spawn, after each main-loop turn and after a switch, from one runtime answer (`report.status`), after the hook that asks for it has returned. A spawn during a refresh waits for one more.
 

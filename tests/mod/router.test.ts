@@ -773,7 +773,7 @@ test("a workflow agent, which Claude Code doesn't list, sends its turn's tokens 
 // The status line, the /model-router command and the session check, which exist only with a person at the prompt.
 const START = { cwd: '/p', surface: 'terminal', isInteractive: true }
 const HEADLESS = { cwd: '/p', surface: null, isInteractive: false }
-const STATUS = { stdout: JSON.stringify({ ok: true, line: 'auto · mod · 0 routed · 0 redos', text: 'auto · mod · 0 routed · 0 redos\nSwitch it off', routing: true }) }
+const STATUS = { stdout: JSON.stringify({ ok: true, line: 'auto · mod · 0 calls', text: 'auto · mod · 0 calls\nSwitch it off', routing: true }) }
 const effortStep = (name: string, efforts: string[]) => ({
   question: `Which effort for ${name}? Claude Code keeps this model and effort as your default for new sessions.`, header: 'Model Router',
   options: efforts.map((e, i) => ({ label: i ? e : `${e} (Recommended)`, done: `This session is now on ${name} at ${e}.`,
@@ -804,7 +804,7 @@ test('an interactive start registers the command, shows the status line and asks
     argumentHint: '[on | off | check on | check off]', immediate: true }])
   assert.deepEqual(mod.ui.asked, []) // startup never waits on the question
   await idle()
-  assert.deepEqual(mod.ui.lines, ['auto · mod · 0 routed · 0 redos'])
+  assert.deepEqual(mod.ui.lines, ['auto · mod · 0 calls'])
   assert.deepEqual(mod.ui.asked[0], [QUESTION.question, { options: QUESTION.options.map(o => o.label), header: 'Model Router' }])
   assert.deepEqual(picks, QUESTION.options.map(o => o.label))
   assert.deepEqual(mod.calls.find(c => c.command === 'mod-check')!.stdin, { session_id: 's1', model: 'claude-sonnet-5-5', locked: false })
@@ -850,7 +850,7 @@ test('spawns that land during a refresh fold into one more refresh', async () =>
 test('/model-router prints the runtime state for the person alone', async () => {
   const mod = load({ 'mod-status': STATUS, 'mod-check': { stdout: '' } })
   await mod.sessionStart(START)
-  assert.deepEqual(await mod.command(''), { text: 'auto · mod · 0 routed · 0 redos\nSwitch it off', isTextDisplayOnly: true })
+  assert.deepEqual(await mod.command(''), { text: 'auto · mod · 0 calls\nSwitch it off', isTextDisplayOnly: true })
   assert.deepEqual(await mod.command('please'), { text: 'Takes on, off, check on or check off.', isTextDisplayOnly: true })
   const failing = load({ 'mod-status': { exitCode: 1, stdout: '' } })
   await failing.sessionStart(START)

@@ -51,16 +51,17 @@ def policy(snap: settings.Snapshot) -> str:
 
 
 def status(snap: settings.Snapshot) -> dict:
-    """The mod's status line (under 80 characters: Claude Code puts the plugin's name before it) and the
+    """The mod's status line (under 100 characters: Claude Code puts the plugin's name before it) and the
     /model-router reply: the line, the session's setup once known, and how to switch."""
     options, session_id = snap.options, snap.session_id
     mode = f"{options.mode}{' (this session)' if options.switched else ''}"
     rows = [r for r in ledger.read(session=session_id) if r.get("event") == "spawn"] if isinstance(session_id, str) else []
-    redos = sum(1 for r in rows if r.get("escalated_from"))
+    changed, redos = sum(r.get("action") == "rewrite" for r in rows), sum(1 for r in rows if r.get("escalated_from"))
+    # Every call counts, kept as named or not: a subagent that ran beside "0 routed" read as a plugin that slept.
     line = mode if options.mode == "off" else " · ".join(
         [mode, rows[-1].get("via") if rows and rows[-1].get("via") == "fallback" else "mod",
-         *([f"cap {options.cap}"] if options.cap else []), f"{sum(r.get('action') == 'rewrite' for r in rows)} routed",
-         f"{redos} redo{'' if redos == 1 else 's'}"])
+         *([f"cap {options.cap}"] if options.cap else []), f"{len(rows)} call{'' if len(rows) == 1 else 's'}",
+         *([f"{changed} changed"] if changed else []), *([f"{redos} redo{'' if redos == 1 else 's'}"] if redos else [])])
     entry = store.load_entry(settings.SWITCHES, session_id) if isinstance(session_id, str) else {}
     found = entry.get("setup") or entry.get("estimate")
     setup = []
