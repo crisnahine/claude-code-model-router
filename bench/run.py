@@ -11,7 +11,6 @@ import atexit
 import datetime
 import filecmp
 import hashlib
-import io
 import json
 import os
 import random
@@ -20,7 +19,6 @@ import shutil
 import stat
 import subprocess
 import sys
-import tarfile
 import tempfile
 import time
 from pathlib import Path
@@ -62,7 +60,6 @@ MANAGED_SETTINGS = ("/Library/Application Support/ClaudeCode/managed-settings.js
                     "/etc/claude-code/managed-settings.json", "/etc/claude-code/managed-settings.d",
                     "C:\\Program Files\\ClaudeCode\\managed-settings.json", "C:\\Program Files\\ClaudeCode\\managed-settings.d")
 AUTH = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
-STATE_FILES = ("state.json",)
 # Every run's scratch folder sits here, so one sandbox rule hides the others' work from it. Short and unresolved:
 # the run's CLAUDE_CODE_TMPDIR is its scratch folder, and one over about 30 bytes falls back to the shared temp folder.
 RUNS = (Path("/tmp") / f"mrb-{os.getuid()}" if hasattr(os, "getuid")
@@ -72,24 +69,21 @@ VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # what sandbox.credentials.env
 AGENT_NAME = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
 # The shell's directories can name the checkout, whose tasks hold the reference answers.
 DROPPED = ("PWD", "OLDPWD")
-PROMPTS = {
-    "delegate": ("Hand the task below to one subagent with the Agent tool and wait for its answer; don't do the work "
-                 "yourself.{pick} When it returns, reply with its final answer.\n\nTask: {brief}"),
-    "direct": "{brief}",
-}
+PROMPT = ("Hand the task below to one subagent with the Agent tool and wait for its answer; don't do the work "
+          "yourself. When it returns, reply with its final answer.\n\nTask: {brief}")
 # A task.json "shape" replaces the delegate prompt with one that lets the session start more than one subagent.
 SHAPES = {
     "redo": ("Hand the task below to a subagent with the Agent tool and wait for its answer; don't do the work "
-             "yourself, but do run any check the task names and send the work back when the task says to.{pick} When "
+             "yourself, but do run any check the task names and send the work back when the task says to. When "
              "the work is done, reply with its final answer.\n\nTask: {brief}"),
     "fanout": ("Give each question in the task below to its own subagent with the Agent tool, all started at once, and "
-               "wait for their answers; don't look up the answers yourself.{pick} Then write the answer file the task "
+               "wait for their answers; don't look up the answers yourself. Then write the answer file the task "
                "asks for from what they found, and reply with its contents.\n\nTask: {brief}"),
     "plan-build": ("Hand each step of the task below to a subagent with the Agent tool, one step at a time and in "
-                   "order, giving each one what the steps before it decided; don't do the work yourself.{pick} When "
+                   "order, giving each one what the steps before it decided; don't do the work yourself. When "
                    "the last step returns, reply with its final answer.\n\nTask: {brief}"),
     "workflow": ("Do the task below with one Workflow tool call: write a short script with one `agent()` stage for "
-                 "each step of the task, run it and wait for it to finish; don't do the work yourself.{pick} When it "
+                 "each step of the task, run it and wait for it to finish; don't do the work yourself. When it "
                  "returns, reply with what it returned.\n\nTask: {brief}"),
 }
 
@@ -106,24 +100,9 @@ def load_configs() -> list[dict]:
     return json.loads((BENCH / "configs.json").read_text(encoding="utf-8"))
 
 
-def pins(config: dict) -> list[str] | None:
-    """The inline agents a configuration defines with --agents, each on a fixed model and effort; None without any."""
-    args = list(config.get("args", []))
-    return sorted(json.loads(args[args.index("--agents") + 1])) if "--agents" in args else None
-
-
-def prompt(task: dict, arm: str, config: dict | None = None) -> str:
-    """The prompt for an arm: `delegate` hands the task to one subagent, or as the task's `shape` says, naming a
-    configuration's pinned agents, and `direct` is the brief as a person types it."""
-    names = pins(config or {})
-    pick = f" Use one of these agents: {', '.join(names[:-1])} or {names[-1]}." if names else ""
-    text = SHAPES[task["shape"]] if arm == "delegate" and "shape" in task else PROMPTS[arm]
-    return text.format(brief=task["brief"], pick=pick)
-
-
-def shape_of(task: dict, arm: str) -> str:
-    """The prompt shape a run sent: the task's own in the delegate arm, else `single`."""
-    return task.get("shape", "single") if arm == "delegate" else "single"
+def prompt(task: dict) -> str:
+    """The prompt that hands the task to one subagent, or as the task's `shape` says."""
+    return (SHAPES[task["shape"]] if "shape" in task else PROMPT).format(brief=task["brief"])
 
 
 def _plugin_files(folder: Path) -> list[Path]:
@@ -149,35 +128,6 @@ def freeze_plugin(source: Path = PLUGIN) -> tuple[str, str]:
 def managed_settings() -> list[str]:
     """The managed settings sources on this machine; a run loads them whatever its own settings say."""
     return [p for p in MANAGED_SETTINGS if os.path.exists(p)]
-
-
-_EXPORTED: dict[str, tuple[str, str]] = {}  # plugin_ref: (folder, hash)
-
-
-def plugin_dir_for(config: dict, options: dict) -> str:
-    """The plugin a run loads: the batch's frozen copy, or the one at a configuration's plugin_ref, exported once
-    from git so a branch under test can't change while the bench runs."""
-    ref = config.get("plugin_ref")
-    if not ref:
-        return options["plugin_dir"]
-    if ref not in _EXPORTED:
-        archive = subprocess.run(["git", "-C", str(ROOT), "archive", ref, "plugins/model-router"],
-                                 capture_output=True, check=True).stdout
-        target = Path(tempfile.mkdtemp(prefix="mrbench-plugin-"))
-        atexit.register(shutil.rmtree, target, ignore_errors=True)
-        with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
-            tar.extractall(target, **({"filter": "data"} if hasattr(tarfile, "data_filter") else {}))
-        folder = target / "plugins" / "model-router"
-        _EXPORTED[ref] = (str(folder), plugin_hash(folder))
-    return _EXPORTED[ref][0]
-
-
-def loaded_hash(config: dict, options: dict) -> str | None:
-    """The hash of the plugin a run loaded; None for a run with no plugin."""
-    if not config.get("plugin"):
-        return None
-    ref = config.get("plugin_ref")
-    return (_EXPORTED[ref][1] if ref in _EXPORTED else None) if ref else options.get("plugin_hash")
 
 
 def _plugin_name() -> str:
@@ -251,14 +201,14 @@ def command(prompt: str, config: dict, options: dict, base_env: dict, shape: str
         env["CLAUDE_CODE_TMPDIR"] = options["scratch"]
     env.update(config.get("env", {}))
     cmd = [*options["claude"], "-p", prompt, "--output-format", "stream-json", "--verbose",
-           "--model", config.get("model", options["model"]),
+           "--model", options["model"],
            "--max-budget-usd", str(options["budget"]), "--setting-sources", "project", "--strict-mcp-config",
            "--permission-mode", "dontAsk",
            "--settings", json.dumps(settings(config, env, options.get("hidden"), options.get("scratch")))]
     if config.get("plugin"):
-        cmd += ["--plugin-dir", plugin_dir_for(config, options)]
+        cmd += ["--plugin-dir", options["plugin_dir"]]
     tools = TOOLS + (WORKFLOW_TOOLS if shape == "workflow" else ())
-    return cmd + list(config.get("args", [])) + ["--allowedTools", *tools], env
+    return cmd + ["--allowedTools", *tools], env
 
 
 LIMIT_RETRIES = 5
@@ -589,11 +539,6 @@ def spawns(ledger: list[dict]) -> list[dict]:
     return [{k: row[k] for k in ROUTED_KEYS if k in row} for row in ledger if row.get("event") == "spawn"]
 
 
-def state_hashes(folder: Path) -> dict:
-    return {name: hashlib.sha256((folder / name).read_bytes()).hexdigest()[:16] if (folder / name).is_file() else None
-            for name in STATE_FILES}
-
-
 def _text(value) -> str:
     return value.decode("utf-8", "replace") if isinstance(value, bytes) else (value or "")
 
@@ -668,15 +613,10 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
     scratch = Path(tempfile.mkdtemp(dir=runs_folder()))
     work = scratch / "work"
     shutil.copytree(task["dir"] / "repo", work)
-    if config.get("router_config"):  # a router variant, as the project's own model-router.json
-        (work / ".claude").mkdir(exist_ok=True)
-        (work / ".claude" / "model-router.json").write_text(json.dumps(config["router_config"]), encoding="utf-8")
-    arm = options.get("arm", "delegate")
-    cmd, env = command(prompt(task, arm, config), config,
+    cmd, env = command(prompt(task), config,
                        {**options, "config_dir": str(scratch / "config"), "scratch": str(scratch)}, dict(os.environ),
-                       shape_of(task, arm))
+                       task.get("shape", "single"))
     started = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-    plugin_state = state_hashes(plugin_data_dir(env)) if config.get("plugin") else None
     clock = time.monotonic()
     stdout, stderr, code, wall_ms, result, init, started_agents, calls = "", "interrupted", None, None, {}, {}, {}, []
     workflows: list[dict] = []
@@ -723,7 +663,7 @@ def run_one(task: dict, config: dict, options: dict, registry_config: Registry) 
     row = record(task, config, options, registry_config, result,
                  {"started_at": started, "wall_ms": wall_ms, "exit_code": code, "stderr": stderr,
                   "grade": graded._asdict(), "final_answer": final,
-                  "plugin_state": plugin_state, "ledger": ledger, "agent_types": types,
+                  "ledger": ledger, "agent_types": types,
                   "kept": kept and str(kept), "init": init, "agents_started": started_agents,
                   "agent_calls": calls, "workflow_calls": workflows,
                   "agent_overrides": sum(bool(c["named_model"] or c["named_effort"]) for c in calls),
@@ -778,19 +718,16 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         result.get("subtype") == "error_during_execution" and cost == 0 and not refused)
     priced = facts.get("transcript_cost")
     source = "result" if known else "transcripts" if priced is not None else "budget"
-    arm, pinned = options.get("arm", "delegate"), pins(config)
     started, overrides = facts.get("agents_started") or {}, facts.get("agent_overrides") or 0
-    # Told to use its pinned agents, a run that used none, or another, or set a model on the call, didn't run pinned.
-    off_pin = None if pinned is None or arm != "delegate" else bool(not started or set(started) - set(pinned) or overrides)
     return {
         "schema": ROW_SCHEMA, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
-        "shape": shape_of(task, arm), "config": config["id"], "arm": arm,
+        "shape": task.get("shape", "single"), "config": config["id"],
         "batch": options.get("batch"), "order_seed": options.get("seed"),
         "started_at": facts["started_at"], "claude_version": options["claude_version"],
-        "main_model": config.get("model", options["model"]),
+        "main_model": options["model"],
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
-        "plugin_hash": loaded_hash(config, options), "managed_settings": options.get("managed"),
-        "plugin_state": facts["plugin_state"],
+        "plugin_hash": options.get("plugin_hash") if config.get("plugin") else None,
+        "managed_settings": options.get("managed"),
         "claude_started": not unstarted, "startup_failure_reason": result.get("startup_failure_reason"),
         "plugin_loaded": plugin_loaded(facts.get("init") or {}) if config.get("plugin") else None,
         "options_applied": options_applied(config, ledger) if config.get("plugin") else None,
@@ -801,7 +738,6 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         and (any(c.get("ran_on") for c in facts.get("agent_calls") or []) or bool(facts.get("agent_types")))
         and not any(r.get("event") == "spawn" for r in ledger or []),
         "gate_events": sum(r.get("event") == "gate" for r in ledger or []),
-        "plugin_ref": config.get("plugin_ref"),
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
         "api_error_status": result.get("api_error_status"), "terminal_reason": result.get("terminal_reason"),
         "errors": result.get("errors"),
@@ -813,7 +749,6 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         "models": models, "prices": {name: registry_config.price(name) for name in models}, **cache,
         "agents_started": started, "agent_calls": facts.get("agent_calls") or [], "agent_overrides": overrides,
         "workflow_calls": facts.get("workflow_calls") or [],
-        "off_pin": off_pin,
         "permission_denials": [_denial(d) for d in result.get("permission_denials") or [] if isinstance(d, dict)],
         "passed": facts["grade"]["verdict"] == "pass", "grade": facts["grade"],
         "answer": (result.get("result") or "")[:2000], "final_answer": facts["final_answer"],
@@ -823,12 +758,12 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
     }
 
 
-def schedule(tasks: list[dict], configs: list[dict], runs: int, first_run: int = 0, seed: int = 0,
-             arms: tuple[str, ...] = ("delegate",)) -> list[tuple[int, dict, dict, str]]:
-    """Each run to make as (run number, task, configuration, arm), in an order shuffled by `seed`, so no
+def schedule(tasks: list[dict], configs: list[dict], runs: int, first_run: int = 0,
+             seed: int = 0) -> list[tuple[int, dict, dict]]:
+    """Each run to make as (run number, task, configuration), in an order shuffled by `seed`, so no
     configuration always goes first on a cold prompt cache or at one time of day."""
-    out = [(run_index, task, config, arm) for run_index in range(first_run, first_run + runs)
-           for task in tasks for config in configs for arm in arms]
+    out = [(run_index, task, config) for run_index in range(first_run, first_run + runs)
+           for task in tasks for config in configs]
     random.Random(seed).shuffle(out)
     return out
 
@@ -842,20 +777,18 @@ def _write(path: Path, row: dict) -> None:
 def set_aside(row: dict) -> str | None:
     """Why a row stays out of the results: claude stopped before the session began (so no API call was made), the
     API never got to the task, a router run's plugin didn't load, its router logged nothing for a subagent that ran,
-    or it didn't get its options, or a pinned run didn't use its pinned agents."""
+    or it didn't get its options."""
     return (("no_start" if row.get("claude_started") is False else None) or refusal(row)
             or ("plugin_not_loaded" if row.get("plugin_loaded") is False else None)
             or ("router_silent" if row.get("router_silent") else None)
-            or ("options_not_applied" if row.get("options_applied") is False else None)
-            or ("off_pin" if row.get("off_pin") else None))
+            or ("options_not_applied" if row.get("options_applied") is False else None))
 
 
 # Set-aside reasons a pause can't fix; this many in a row stop the bench.
 NO_RETRY = {"api_error": "API error before any spend", "no_start": "claude stopped before the session began",
             "plugin_not_loaded": "the plugin did not load",
             "router_silent": "the router logged no spawn though a subagent ran",
-            "options_not_applied": "the ledger holds a row the configuration's plugin options rule out",
-            "off_pin": "the run didn't use its pinned agents"}
+            "options_not_applied": "the ledger holds a row the configuration's plugin options rule out"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -864,8 +797,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--configs", nargs="+", help="configuration ids (default: all)")
     parser.add_argument("--runs", type=int, default=1, help="runs of each task under each configuration")
     parser.add_argument("--first-run", type=int, default=0, help="number of the first run, to go on from an earlier round")
-    parser.add_argument("--arms", nargs="+", choices=sorted(PROMPTS), default=["delegate"],
-                        help="delegate: the prompt hands the task to one subagent; direct: the brief alone")
     parser.add_argument("--seed", type=int, help="the run order's shuffle seed (default: a random one, recorded)")
     parser.add_argument("--batch", help="the batch name every row records; processes started together share one")
     parser.add_argument("--model", default="sonnet", help="the session model, the same for every configuration that sets none")
@@ -879,8 +810,7 @@ def main(argv: list[str] | None = None) -> int:
 
     tasks = [t for t in load_tasks() if not args.tasks or t["id"] in args.tasks]
     configs = [c for c in load_configs() if not args.configs or c["id"] in args.configs]
-    for flag, asked, found in (("--tasks", args.tasks, tasks), ("--configs", args.configs, configs),
-                               ("--arms", args.arms, [{"id": arm} for arm in PROMPTS])):
+    for flag, asked, found in (("--tasks", args.tasks, tasks), ("--configs", args.configs, configs)):
         known = {item["id"] for item in found}
         unknown = [i for i in asked or [] if i not in known]
         repeated = sorted({i for i in asked or [] if asked.count(i) > 1})
@@ -919,14 +849,14 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as exc:
         parser.error(f"can't write the results or --keep: {exc}")
     spent, errors = 0.0, 0
-    for run_index, task, config, arm in schedule(tasks, configs, args.runs, args.first_run, seed, tuple(args.arms)):
+    for run_index, task, config in schedule(tasks, configs, args.runs, args.first_run, seed):
         begin = time.time()
         for attempt in range(LIMIT_RETRIES + 1):
             if not can_start(spent, args.budget, args.max_total):  # a retry spends too
                 print(f"stopped: ${spent:.4f} spent, cap ${args.max_total}", file=sys.stderr)
                 return 1
             try:
-                row = run_one(task, config, {**options, "arm": arm}, registry_config)
+                row = run_one(task, config, options, registry_config)
             except BaseException as exc:
                 row = getattr(exc, "row", None)
                 if row is not None:  # the run was paid for, so it goes on record where the loop would put it
@@ -957,13 +887,12 @@ def main(argv: list[str] | None = None) -> int:
                   f"{(row['answer'] or row['stderr'])[:200]}", file=sys.stderr)
             if errors == API_ERROR_STOP:
                 print(f"stopped: {errors} runs in a row set aside; check the key, the credit balance, the account's "
-                      "model access, whether the sandbox can start, the plugin's load errors and the agents the "
-                      "pinned runs used", file=sys.stderr)
+                      "model access, whether the sandbox can start and the plugin's load errors", file=sys.stderr)
                 return 2
             continue
         errors = 0
         _write(args.out, row)
-        print(f"{task['id']} {config['id']} {arm} run {run_index}: passed={row['passed']} "
+        print(f"{task['id']} {config['id']} run {run_index}: passed={row['passed']} "
               f"${row['total_cost_usd']:.4f} {time.time() - begin:.0f}s, total ${spent:.4f}")
         if row["grade"]["verdict"] == "broken":
             print(f"{task['id']}: its pass check broke ({row['grade']['reason']}); analyze sets this run aside",

@@ -94,7 +94,7 @@ The project's own words, and the code behind each.
 
 ## The benchmark
 
-**Baseline**: a way of running Claude Code without the router, in `bench/configs.json`. By role: `defaults` (no plugin, no forced model), `best` (lowest cost per solved task), `strongest` (strongest forced model) (`analyze.roles`).
+**Baseline**: a way of running Claude Code without the router, in `bench/configs.json`: `defaults` (no plugin, subagents on the session model) and `haiku-high` (every subagent forced onto Haiku at high effort).
 
 **Broken run**: a run whose pass check exited 2. It is left out of the tables and counted in a note.
 

@@ -81,16 +81,14 @@ def _cell(runs: list[dict], rng: random.Random, draws: int) -> dict:
     costs = [float(r["total_cost_usd"]) for r in runs]
     passed = [bool(r["passed"]) for r in runs]
     n, solved, total = len(runs), sum(passed), sum(costs)
-    cps, rate = [], []
+    cps = []
     for _ in range(draws):
         picks = [int(rng.random() * n) for _ in range(n)]
         hits = sum(passed[i] for i in picks)
         cps.append(sum(costs[i] for i in picks) / hits if hits else math.inf)
-        rate.append(hits / n)
     return {"runs": n, "solved": solved, "cost_usd": total, "pass_rate": solved / n,
             "cost_per_solved": total / solved if solved else None,
-            "pass_ci": exact_interval(solved, n), "cps_ci": tuple(_finite(v) for v in _interval(cps)),
-            "_cps": cps, "_rate": rate}
+            "pass_ci": exact_interval(solved, n), "cps_ci": tuple(_finite(v) for v in _interval(cps))}
 
 
 def _key(cell: dict) -> float:
@@ -225,25 +223,20 @@ def _summary(cls: str, runs: list[dict], *, routers: frozenset[str], router: str
     cells = {c: _cell(by[c], random.Random(f"{seed}/{session}/{cls}/{c}"), draws) for c in configs}
     # A router variant (any configuration that loads the plugin) is a rival build, never a baseline.
     base = [c for c in configs if c != router and c not in routers]
-    verdicts, differences, pass_differences = {}, {}, {}
+    verdicts = {}
     for b in base if router in cells else []:
         why = _refusal(router, by[router], b, by[b])
         if why:
-            verdicts[b], differences[b] = {"verdict": "REFUSED", "reason": why}, None
+            verdicts[b] = {"verdict": "REFUSED", "reason": why}
             continue
         pass_ci, cost_ci, fewer = _paired(by[router], by[b], random.Random(f"{seed}/{session}/{cls}/{router}/{b}"), draws)
         code, reason = _judge(b, pass_ci, cost_ci, fewer)
         verdicts[b] = {"verdict": code, "reason": reason, "pass_ci": pass_ci, "cost_ci": tuple(map(_finite, cost_ci))}
-        differences[b], pass_differences[b] = verdicts[b]["cost_ci"], pass_ci
-    best = min(base, key=lambda name: (_key(cells[name]), name)) if base else None
     status = _status(verdicts)
     # A rank is a cost claim, which a row with no verdict can't support.
     rank = 1 + sum(_key(cells[b]) < _key(cells[router]) for b in base) \
         if router in cells and base and status != "REFUSED" else None
-    for cell in cells.values():
-        del cell["_cps"], cell["_rate"]
-    return {"class": cls, "configs": cells, "verdicts": verdicts, "differences": differences,
-            "pass_differences": pass_differences, "status": status, "rank": rank, "best_baseline": best,
+    return {"class": cls, "configs": cells, "verdicts": verdicts, "status": status, "rank": rank,
             "reason": "no router or baseline runs" if not verdicts else _verdict_text(verdicts),
             "quality": _quality(cells, runs, forced or {})}
 
@@ -297,28 +290,12 @@ def _table(summary: list[dict]) -> list[str]:
     return [*lines, "", *[f"- {row['class']}: {row['reason']}." for row in summary]]
 
 
-def _group(r: dict) -> str:
-    """A row's table: its session model, and its arm when the prompt wasn't the one-subagent hand-off."""
-    model, arm = r.get("main_model") or "unknown", r.get("arm") or "delegate"
-    return model if arm == "delegate" else f"{model}, {arm} arm"
-
-
 def sessions(results: Results, router: str | None = None) -> list[tuple[str, str, list[dict], dict | None, list[dict]]]:
-    """One summary per session model and prompt arm, since a configuration costs differently on each, with its
-    class rows and its all-tasks row. Its router is `router`, or else the configuration configs.json marks
-    `judged`. A configuration that sets its own session model runs the same in any batch, so it joins every table
-    of its arm."""
+    """One summary per session model, since a configuration costs differently on each, with its class rows and its
+    all-tasks row. Its router is `router`, or else the configuration configs.json marks `judged`."""
     groups: dict[str, list[dict]] = {}
     for r in results.rows:
-        if r["config"] not in results.own_model:
-            groups.setdefault(_group(r), []).append(r)
-    for r in results.rows:
-        if r["config"] in results.own_model:
-            arm = r.get("arm") or "delegate"
-            mine = [g for name, g in groups.items() if (name.endswith(f", {arm} arm") or arm == "delegate"
-                                                         and not name.endswith(" arm"))]
-            for group in mine or [groups.setdefault(_group(r), [])]:
-                group.append(r)
+        groups.setdefault(r.get("main_model") or "unknown", []).append(r)
     chosen = router or next((c["id"] for c in results.configs if c.get("judged")), "plugin")
     out = []
     for model, group in sorted(groups.items()):
@@ -405,15 +382,11 @@ def _metrics(summary: list[dict], rows: list[dict], routers: frozenset[str]) -> 
     return lines
 
 
-def render_sessions(parts: list[tuple], meta: dict, routers: frozenset[str], own_model: frozenset[str] = frozenset()) -> str:
+def render_sessions(parts: list[tuple], meta: dict, routers: frozenset[str]) -> str:
     body = []
-    for name, router, summary, every, rows in parts:
-        model, _, arm = name.partition(", ")
-        own = sorted({r["config"] for r in rows if r["config"] in own_model})
-        but = f", except {', '.join(f'`{c}`' for c in own)}, which sets its own" if own else ""
-        prompt = f" The prompt is the {arm}: the brief alone, with no order to delegate." if arm else ""
-        body += [f"## Results: session model `{model}`" + (f", {arm}" if arm else ""), "",
-                 f"Every run here had `{model}` as its session model{but}; router: `{router}`.{prompt}", "",
+    for model, router, summary, every, rows in parts:
+        body += [f"## Results: session model `{model}`", "",
+                 f"Every run here had `{model}` as its session model; router: `{router}`.", "",
                  *_table(summary + ([every] if every else [])), "", *_quality_lines(summary), "",
                  *_metrics(summary, rows, routers), ""]
     return "\n".join([meta.get("header", "# Benchmarks"), "", *body, meta.get("body", "")]).rstrip() + "\n"
@@ -449,7 +422,6 @@ class Results:
     tasks: list[dict]
     registry: Registry
     routers: frozenset[str]
-    own_model: frozenset[str]
     forced: dict
     pilot: list = field(default_factory=list)
     pilot_notes: dict = field(default_factory=dict)
@@ -491,7 +463,7 @@ def load(paths: list[Path]) -> Results:
     aside = [row for folder in sorted({f.parent for f in files}) for row in _jsonl((folder / "limited").glob("*.jsonl"))]
     registry_config = mrconfig.shipped()
     return Results(files, rows, stale, broken, aside, configs, tasks, registry_config, router_ids(configs),
-                   frozenset(c["id"] for c in configs if c.get("model")), forced_ranks(configs, registry_config))
+                   forced_ranks(configs, registry_config))
 
 
 CACHE_FIELDS = ("cache_read_tokens", "cache_write_tokens", "fresh_input_tokens")
@@ -524,8 +496,6 @@ def _notes(results: Results) -> list[str]:
                                 "(https://code.claude.com/docs/en/headless)",
            "no_start": "run(s) are set aside, outside the results, because `claude` stopped before its stream began "
                        "(no `system/init` event and no result), as when the sandbox can't start",
-           "off_pin": "run(s) of a configuration with pinned agents are set aside, outside the results, because they "
-                      "used none of those agents, another one, or a model or effort set on the Agent call",
            "router_silent": "router run(s) are set aside, outside the results, because a subagent ran but the "
                             "router's ledger holds no spawn row, so its hooks never acted",
            "options_not_applied": "router run(s) are set aside, outside the results, because their ledger holds a row "
@@ -667,7 +637,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
                                    "## Commands", "", *commands])}
     total = sum(r["total_cost_usd"] for r in rows)
     versions = sorted({r["claude_version"] for r in rows})
-    main = sorted({r["main_model"] for r in rows if r["config"] not in results.own_model})
+    main = sorted({r["main_model"] for r in rows})
     dates = sorted(r["started_at"][:10] for r in rows)
     used = sorted({r["config"] for r in rows})
     described = {c["id"]: c["description"] for c in results.configs}
@@ -701,9 +671,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         *read,
         "## Setup", "",
         f"- Claude Code: {', '.join(versions)}. Session models: {', '.join(main) or 'n/a'} (`--model`), "
-        "one results table each, and one per prompt arm. Inside a table every configuration that sets no model of "
-        "its own ran on that session model. A configuration that sets its own model is shown in every table of "
-        "its arm.",
+        "one results table each. Inside a table every configuration ran on that session model.",
         "- Configurations run: " + "; ".join(f"`{c}` ({described.get(c, '?')})" for c in used) + ".",
         "- Models that ran, with Claude Code's list-price cost across all runs: "
         + "; ".join(f"`{name}` ${sum(costs):.4f} over {len(costs)} runs" for name, costs in sorted(models.items()))
@@ -712,13 +680,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         + "; ".join(f"`{c}` " + ", ".join(f"{name} x{n}" for name, n in sorted(agents.get(c, {}).items()))
                     for c in used) + ".",
         *_notes(results),
-        "- Shape: a single agent. In the `delegate` arm the prompt hands each task to one subagent with the Agent "
-        "tool and relays its answer, so the subagent is what each configuration changes. For a configuration that "
-        "pins its agents with `--agents` the prompt names them, and a run that used none of them, another agent, "
-        "or set a model or effort on the Agent call, which outranks the agent's own "
-        "(https://code.claude.com/docs/en/sub-agents), is set aside as `off_pin`. In the `direct` arm the "
-        "prompt is the brief alone, as a person would type it; its rows get their own table. A task with a "
-        "`shape` in its task.json gets another `delegate` prompt (`run.SHAPES`): `redo` runs the check the brief "
+        "- Shape: a single agent. The prompt hands each task to one subagent with the Agent tool and relays its "
+        "answer, so the subagent is what each configuration changes. A task with a `shape` in its task.json gets "
+        "another prompt (`run.SHAPES`): `redo` runs the check the brief "
         "names and sends the work back, `fanout` gives each question its own subagent, all started at once, and "
         "`plan-build` hands out the steps in order, and `workflow` has the session write a script of stages and run it "
         "with the Workflow tool, with `Workflow` and `Read(./**)` added to `--allowedTools` for it. Each row "
@@ -750,15 +714,14 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "claude.ai sends to an eligible login, and the Windows registry policy can't be seen that way, so an "
         "empty list doesn't prove no policy applied (https://code.claude.com/docs/en/managed-settings.md). Only a "
         "router configuration passes `--plugin-dir`, from a copy of `plugins/model-router` made once when the "
-        "batch starts, or for a `plugin_ref` an export of that commit. Each raw line records the hash of the plugin "
+        "batch starts. Each raw line records the hash of the plugin "
         "it loaded in `plugin_hash`, null with no plugin. The plugin keeps no copy of its options, so a run of a "
         "router variant is set aside only when its ledger holds a row an option rules out (a `gate` row with "
         "`verify_gate` off, a rewritten spawn with `routing_mode` off); `options_applied` true means no such row, "
         "not proof.",
         "- The router keeps state (model health and its ledger) in its plugin data folder, inside the run's own "
         "config folder, so every router run starts from an empty one and its data goes when the scratch copy does. "
-        "For a router run the raw line records hashes of the state files it started from in `plugin_state`, and "
-        "the count of ledger rows with event `gate` in `gate_events`.",
+        "For a router run the raw line records the count of ledger rows with event `gate` in `gate_events`.",
         "- Sessions are saved in the run's own config folder, as Claude Code saves them by default, so the "
         "router's Stop check can read the transcripts and see a test run, the subagents' included. They go with "
         "the scratch copy. A run that failed or had a denied tool call keeps them in `transcripts/` beside its "
@@ -790,13 +753,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "Not covered yet: "
         + (f"the {' and '.join([', '.join(uncovered[:-1]), uncovered[-1]] if len(uncovered) > 1 else uncovered)} "
            f"shape{'s' * (len(uncovered) > 1)}; " if uncovered else "")
-        + "a warm prompt cache, since every run starts cold; and router overhead per spawn and per turn. "
-        "`sonnet-via-opusplan` runs `--model opusplan`, which "
-        "in a headless `dontAsk` run never enters plan mode, so it runs Sonnet throughout "
-        "(https://code.claude.com/docs/en/model-config.md#opusplan-model-setting, "
-        "https://code.claude.com/docs/en/permission-modes.md). The advisor needs the Anthropic API, Claude "
-        "Platform on AWS or Claude Models on Google Cloud (https://code.claude.com/docs/en/advisor.md), and the "
-        "`fable` and `fable-high` configurations need Fable access.",
+        + "a warm prompt cache, since every run starts cold; and router overhead per spawn and per turn.",
     ])
     return {"header": header, "body": body}
 
@@ -821,7 +778,7 @@ def _exploratory(rows: list[dict], notes: dict) -> list[str]:
             cells.setdefault(r["config"], []).append(r)
         for config, cell in sorted(cells.items(), key=lambda kv: -sum(r["total_cost_usd"] for r in kv[1]) / len(kv[1])):
             # A row says whether the plugin loaded only where its configuration loads one.
-            ran = {str(r.get("plugin_ref") or r.get("bench_commit") or "")[:7]
+            ran = {str(r.get("bench_commit") or "")[:7]
                    for r in cell if r.get("plugin_loaded") is not None}
             commit = ", ".join(f"`{c}`" for c in sorted(ran) if c)
             out.append(f"| `{config}` | {len(cell)} | {sum(bool(r['passed']) for r in cell)} | "
@@ -844,7 +801,7 @@ def build_page(results: Results, router: str | None = None, current: str | None 
     summary = [row for part in parts for row in part[2]]
     kept = bool(current and current.startswith(HEAD_START) and HEAD_END in current)
     head = current.split(HEAD_END, 1)[0] + HEAD_END if kept else ""
-    page = head + render_sessions(parts, _page(results, summary), results.routers, results.own_model)
+    page = head + render_sessions(parts, _page(results, summary), results.routers)
     if not results.pilot:
         return page
     return page.rstrip("\n") + "\n\n" + "\n".join(_exploratory(results.pilot, results.pilot_notes)).rstrip("\n") + "\n"

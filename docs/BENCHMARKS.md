@@ -22,32 +22,7 @@ Cost and quality of Model Router against Claude Code without it. No judged round
 - `plugin`: Model Router with today's defaults, loaded with --plugin-dir from a copy frozen at the start of the batch
 - `plugin-nogate`: Model Router with the Stop check off (`verify_gate: false`)
 - `defaults`: No plugin: subagents inherit the session model at its default effort
-- `pinned`: No plugin: three inline agents with a fixed model and effort each (--agents): a searcher on haiku at medium, a worker on sonnet at medium and a reviewer on opus at high, named in the delegate prompt
-- `haiku`: No plugin: every subagent on haiku (CLAUDE_CODE_SUBAGENT_MODEL=haiku, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1)
-- `haiku-low`: No plugin: every subagent on haiku at low effort (CLAUDE_CODE_SUBAGENT_MODEL=haiku, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1, CLAUDE_CODE_SUBAGENT_EFFORT=low)
-- `haiku-medium`: No plugin: every subagent on haiku at medium effort (CLAUDE_CODE_SUBAGENT_MODEL=haiku, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1, CLAUDE_CODE_SUBAGENT_EFFORT=medium)
 - `haiku-high`: No plugin: every subagent on haiku at high effort (CLAUDE_CODE_SUBAGENT_MODEL=haiku, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1, CLAUDE_CODE_SUBAGENT_EFFORT=high)
-- `sonnet`: No plugin: every subagent on sonnet (CLAUDE_CODE_SUBAGENT_MODEL=sonnet, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1)
-- `sonnet-low`: No plugin: every subagent on sonnet at low effort (CLAUDE_CODE_SUBAGENT_MODEL=sonnet, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1, CLAUDE_CODE_SUBAGENT_EFFORT=low)
-- `sonnet-medium`: No plugin: every subagent on sonnet at medium effort (CLAUDE_CODE_SUBAGENT_MODEL=sonnet, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1, CLAUDE_CODE_SUBAGENT_EFFORT=medium)
-- `sonnet-high`: No plugin: every subagent on sonnet at high effort (CLAUDE_CODE_SUBAGENT_MODEL=sonnet, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1, CLAUDE_CODE_SUBAGENT_EFFORT=high)
-- `opus`: No plugin: every subagent on opus (CLAUDE_CODE_SUBAGENT_MODEL=opus, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1)
-- `opus-low`: No plugin: every subagent on opus at low effort (CLAUDE_CODE_SUBAGENT_MODEL=opus, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1, CLAUDE_CODE_SUBAGENT_EFFORT=low)
-- `opus-medium`: No plugin: every subagent on opus at medium effort (CLAUDE_CODE_SUBAGENT_MODEL=opus, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1, CLAUDE_CODE_SUBAGENT_EFFORT=medium)
-- `opus-high`: No plugin: every subagent on opus at high effort (CLAUDE_CODE_SUBAGENT_MODEL=opus, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1, CLAUDE_CODE_SUBAGENT_EFFORT=high)
-- `session-haiku-low`: No plugin: the whole session on haiku at low effort (--model haiku --effort low), subagents inheriting it
-- `session-haiku-medium`: No plugin: the whole session on haiku at medium effort (--model haiku --effort medium), subagents inheriting it
-- `session-haiku-high`: No plugin: the whole session on haiku at high effort (--model haiku --effort high), subagents inheriting it
-- `session-sonnet-low`: No plugin: the whole session on sonnet at low effort (--model sonnet --effort low), subagents inheriting it
-- `session-sonnet-medium`: No plugin: the whole session on sonnet at medium effort (--model sonnet --effort medium), subagents inheriting it
-- `session-sonnet-high`: No plugin: the whole session on sonnet at high effort (--model sonnet --effort high), subagents inheriting it
-- `session-opus-low`: No plugin: the whole session on opus at low effort (--model opus --effort low), subagents inheriting it
-- `session-opus-medium`: No plugin: the whole session on opus at medium effort (--model opus --effort medium), subagents inheriting it
-- `session-opus-high`: No plugin: the whole session on opus at high effort (--model opus --effort high), subagents inheriting it
-- `fable`: No plugin: every subagent on fable (CLAUDE_CODE_SUBAGENT_MODEL=fable, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1); needs Fable access
-- `fable-high`: No plugin: every subagent on fable at high effort (CLAUDE_CODE_SUBAGENT_EFFORT=high); needs Fable access
-- `sonnet-via-opusplan`: No plugin: --model opusplan, which runs Sonnet throughout a headless dontAsk run, since Opus plans only in plan mode and such a run never enters it
-- `advisor`: No plugin: a sonnet session with an opus advisor (--advisor opus); needs the Anthropic API, Claude Platform on AWS or Claude Models on Google Cloud, on a subscription or API billing
 
 ## Commands
 
