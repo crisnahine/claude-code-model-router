@@ -37,8 +37,8 @@ Every page about Model Router, the Claude Code plugin that keeps the Claude mode
 </tr>
 <tr><th colspan="2" align="left">The project<br><sub>What comes next, what changed, and how to take part.</sub></th></tr>
 <tr>
-<td width="50%" valign="top"><a href="ROADMAP.md"><b>Roadmap</b></a><br>What gets built next, and why first?</td>
-<td width="50%" valign="top"><a href="../CHANGELOG.md"><b>Changelog</b></a><br>What changed in each release?</td>
+<td width="50%" valign="top"><a href="ROADMAP.md"><b>Roadmap</b></a><br>What is not done yet?</td>
+<td width="50%" valign="top"><a href="../CHANGELOG.md"><b>Changelog</b></a><br>What is in each release?</td>
 </tr>
 <tr>
 <td width="50%" valign="top"><a href="../CONTRIBUTING.md"><b>Contributing</b></a><br>How does a change get merged?</td>
@@ -47,38 +47,4 @@ Every page about Model Router, the Claude Code plugin that keeps the Claude mode
 </table>
 <!-- End of cards. -->
 
-## Delivery items
-
-Where each delivery item lives. Checked 2026-11-22.
-
-| # | Item | Where |
-| -: | :- | :- |
-| 1 | Source code and architecture | [ARCHITECTURE.md](ARCHITECTURE.md), [GLOSSARY.md](GLOSSARY.md) |
-| 2 | Capabilities and commands | [README.md](../README.md) "Commands", "Configuration", [GUIDE.md](GUIDE.md) |
-| 3 | Supported Claude Code versions, surfaces, platforms and providers | [README.md](../README.md) "Compatibility", [GUIDE.md](GUIDE.md) "Compatibility", [ARCHITECTURE.md](ARCHITECTURE.md) "Verified live" |
-| 4 | Install and usage | [README.md](../README.md) "Install the Claude Code plugin" |
-| 5 | Automated test results | [TESTING.md](TESTING.md) |
-| 6 | Security assessment | [SECURITY.md](SECURITY.md) |
-| 7 | Reproducible cost and quality results, with raw data | [BENCHMARKS.md](BENCHMARKS.md), raw data under [bench/results/](../bench/results/) |
-| 8 | Hook latency and state-size measurements | [PERFORMANCE.md](PERFORMANCE.md) |
-| 9 | Roadmap | [ROADMAP.md](ROADMAP.md) "Next" |
-| 10 | Comparison against the baselines | [BENCHMARKS.md](BENCHMARKS.md) |
-| 11 | Release checklist and changelog | [RELEASING.md](RELEASING.md), [CHANGELOG.md](../CHANGELOG.md) |
-
-Also kept: [CONTRIBUTING.md](../CONTRIBUTING.md) (gates, commit rules and where to work) and [compat/baseline.json](../compat/baseline.json) (the Claude Code version, docs pages, model aliases and model status last reviewed).
-
-## Outside tools and sources
-
-Every outside project, library, benchmark and tool these docs name, with its primary source. Checked 2026-11-22: each page loaded, or, for npm packages, `npm view` returned the version. Claude Code and Claude API claims cite code.claude.com and platform.claude.com where made.
-
-| Name | Used for | Primary source |
-| :- | :- | :- |
-| SWE-Bench Pro (Scale AI) | The cost and effort figures quoted from Anthropic's cost guide | https://labs.scale.com/papers/swe_bench_pro |
-| Percentile bootstrap (Efron, Annals of Statistics 7(1)) | The 95% cost and verdict intervals in [BENCHMARKS.md](BENCHMARKS.md) | https://doi.org/10.1214/aos/1176344552 |
-| `@anthropic-ai/claude-code` on npm | CI's `validate` and `eval` jobs and the daily `newest` job ([SECURITY.md](SECURITY.md)) | https://github.com/anthropics/claude-code (the package's homepage in the registry) |
-| TypeScript `tsc` 6.0.3 and `skipLibCheck` | The mod type check ([TESTING.md](TESTING.md)) | https://www.typescriptlang.org/tsconfig/#skipLibCheck |
-| `@types/node` 22.20.5 | The mod test's type check | https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node (the package's homepage in the registry) |
-| Node.js test runner and type stripping | The mod tests | https://nodejs.org/api/test.html, https://nodejs.org/api/typescript.html |
-| GitHub CLI `gh run list` | Reading CI runs | https://cli.github.com/manual/gh_run_list |
-| tmux | Interactive live runs ([ARCHITECTURE.md](ARCHITECTURE.md) "Verified live") | https://github.com/tmux/tmux/wiki |
-
+Also: the [code of conduct](../CODE_OF_CONDUCT.md) and the [license](../LICENSE), Apache-2.0.

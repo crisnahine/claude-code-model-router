@@ -4,94 +4,98 @@
 
 # Glossary
 
-The words this plugin's code, docs and reviews use for its own domain.
+The project's own words, and the code behind each.
 
-**Call**: one request to start an agent: a subagent, a teammate or a workflow stage. A call is known by its agent type and its prompt, so the same call issued twice is recognized.
+## The plugin
 
-**Task**: the work a call does, known by a hash of its agent type and its `description` without the redo mark (`calls.task`), so a rewritten brief keeps its task; case and spacing don't count. A marked redo climbs from the latest finished run of its task. An empty `description` gives no task, so such a redo climbs from the run it would get unmarked.
+**Agent rule**: an override file's `model`, `level` or `route: false` for one agent (`registry.Rule`). A project's rule only raises.
 
-**Spawn**: the moment a call starts an agent. The mod sees it as the engine's `agent.spawn` event, the fallback as a `PreToolUse` hook on the `Agent` tool.
+**Allowlist**: the registry models `availableModels` and `deniedModels` leave open, from the settings layers the mod sends (`allowlist.Allowlist`).
 
-**Path**: how a call reaches the router. The **mod path** runs in `hooks/router.ts` on engine events and calls `mod.py`. The **fallback path** (`fallback.py`) rewrites the `Agent` tool call and stands down for a call the mod's `tool.call` hook marked.
+**Call**: one request to start an agent: a subagent, a teammate or a workflow stage. Its key hashes the agent type and the prompt (`calls.identify`).
 
-**Documented extension point**: a part of Claude Code that its docs describe for plugins: the plugin manifest, hooks, the mods API, skills and subagents. Model Router is built on these, and relies on a few details no docs page states, such as `agent.spawn` fields that only the type files Claude Code writes for each build list. [Built on the docs](CLAUDE_CODE_DOCS.md) lists each docs rule it follows and where it goes past them.
+**Cap**: the `max_tier` option. Every model the router keeps or sets is lowered to fit it (`Registry.clamp`), except one an environment variable sets.
 
-**Session floor**: the lowest effort the router sets on the session's own model for a call the main conversation starts: the session's level, since that call would run at it without the router (`router._session_floor`).
+**Decision**: what `router.decide` returns for a call: keep, rewrite or deny, with model, effort, level, source and reason.
 
-**Adapter**: what one path adds around the shared spawn procedure (`spawn.decide`, `spawn.record`). It reads its path's event into the procedure's facts and turns the decision into what the path can apply: `mod.py` answers the mod with a model, an effort and a reason, `fallback.py` rewrites the `Agent` call's input. An adapter holds no routing rule, so both paths give the same route with two exceptions. On a provider whose alias runs an older model, the mod sends the family's newest full ID, while the fallback, whose `model` takes only an alias, moves a model the router picks itself one family up (`Snapshot.lagging`). And only the fallback turns a rewrite that came back without running into a keep, or a deny when the call would run above the cap (`fallback._guard`).
+**Done record**: a task's latest finished run, in `done.json`, which a redo climbs from (`calls.last_run`).
 
-**Route**: where one spawn went, written for every spawn that isn't denied or a workflow stage, on either path (`calls.Route`, `spawn.record`): the model it runs on, the model it would have run on untouched (`was`), the name or ID the path sent, the level, the effort, who chose the model (`router`, a `pin`, a `rule` or the `caller`) and the path. It is kept under the spawn's own id where the path has one (the Agent call's `tool_use_id`), else under the call.
+**Exact ID**: a full model ID or `[1m]` variant the call or agent names, kept while its family is (`mod.exact`).
 
-**Outcome**: a result, a failure or a stop coming back for a call (`calls.Outcome`). One rule set reads it for either path (`calls.returned`): the done record a redo reads, the health evidence and the ledger row. A model error, or the provider refusing it, strikes the full ID the spawn sent; else a model error strikes the model it was routed to, unless the call or its agent named that exact version, which strikes nothing.
+**Fallback path**: `PreToolUse` on `Agent`, which rewrites `model` and `effort` through `updatedInput` for a call the mod didn't mark (`fallback.route`).
 
-**Level**: how much reasoning a call needs: lookup, standard, complex, hardest or frontier. It comes from the model the call runs on: each model stands for its lowest level, or the level its named effort reaches (Opus at `xhigh` is hardest), and a rule can raise it. In code it is `config.Level`, a `str` written to state files and JSON as its bare name but ordered by difficulty (a plain `str` sorts alphabetically), so levels compare and `max` works on them.
+**Floor**: a rule's `level`, which raises a weaker model to that level's model (`Rule.level`, `Rule.floor`).
 
-**Registry**: the one value `config.load` builds per hook call or command from the shipped `config/models.json` and the override files (`registry.Registry`). It holds the models (the plugin's, the user's or the project's) with their relative strength and cost, the levels with their `needs` and effort, aliases, the shipped list prices the benchmark reads, agent rules, and the keys it dropped or held back. Its methods say which models are usable and pick between them (`available`, `select`, `clamp`, `family`). A level's `needs` is finite and never lower than the level below it.
+**Held**: what a project's file asked for that wasn't applied, with why: the decision's `held`, and `/model-router:models`.
 
-**Override file**: `~/.claude/model-router.json` or a project's `.claude/model-router.json`, merged over the registry. The user's file is trusted in full. `routing_mode` is set only by the `/config` option, never by either file. A project's only raises: it can raise a level's `needs` or `effort` but never lower it. A raised `needs` never moves a named model to a lower level. It can't switch routing off for an agent or re-rank a shipped or user-defined model. A key of the wrong type, such as a `needs` that isn't a finite number, is dropped from every file. `/model-router:models` lists what was dropped or held back. An override file is only read, never set aside.
+**Intake**: telling the person's own prompt from a delivered message or a Claude Code framing (`intake.is_user_prompt`).
 
-**Agent rule**: what an override file says about one agent: a `model`, a `level` or `route: false` (`registry.Rule`). From the user's file the `model` decides unless the call names one; from either file the `level` is a floor that raises a model below it. On a call that names no model, a project's floor applies only where it moves the call to a stronger model. From a project's file the `model` is a suggestion that applies only when it isn't weaker than what the call would run on without it (the agent's pin, `CLAUDE_CODE_SUBAGENT_MODEL` or the inherited model), and never when it names a model that file added itself.
+**Lagging alias**: a family whose alias runs an older model on this provider (`older_aliases`). The mod sends its newest ID instead (`Registry.newest_id`).
 
-**Ladder**: the five levels, each a model and an effort (`ladder.py`). `rung` gives the level a model stands for. When the model that runs is weaker than the level needs, because a cap, the allowlist or model health left nothing at or above it, it gets one more effort step, at most `xhigh`, which makes up part of the loss. No effort the router sets on a model, a redo's included, goes past its `effort_stops_at` (`high` on Haiku), except the session floor: on the session's own model a call gets at least the session's level, `xhigh` or `max` on a Haiku session included.
+**Ladder**: the five levels, each a `needs` strength and an effort (`ladder.py`, `config/models.json`).
 
-**Pick**: the cheapest usable model for a level and the effort it runs that level at (`ladder.pick`), as the policy in `/model-router:route` lists it. Where the router itself chooses a model (a rule's level, a teammate on a weak parent), it takes the level's model in the whole registry (`ladder.model_for`) and holds it to the cap and to what is usable (`Registry.clamp`).
+**Ledger**: `ledger.jsonl`, one row per spawn, result, model error, Stop-check ask and subagent turn (`ledger.py`). It holds no brief or description.
 
-**Decision**: the model and effort a call finally gets, with the reason (`router.py`). It applies an order of authority (force settings, a model named on the call, agent rules, the agent's pin, the subagent default, then the parent's model), raises the winner to a rule's level, holds it to the cap and to what is usable here, and sets the level's effort when nobody chose one. Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, or `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` for a workflow agent whose script names no model, it sets only the effort, and a call `CLAUDE_CODE_SUBAGENT_MODEL` decides is left as it is unless it is a marked redo. A call that names no model, for an agent with none of its own, stays on its parent's model. The cap or what is usable here can move that model (`Registry.clamp`), which then runs at its own level, a rule's `level` can raise it, and a teammate on a parent weaker than Sonnet starts on Sonnet.
+**Level**: lookup, standard, complex, hardest or frontier (`config.Level`). A call's level is the one its model stands for (`ladder.rung`), raised by a floor.
 
-**Session model**: the model the conversation itself runs on, which subagents inherit when nothing else decides (`session.py`). The mod reads it from the engine. The fallback reads it from the transcript, or from what SessionStart and PostModelSwitch recorded.
+**Mark**: the empty file `mod-calls/<tool_use_id>` that tells the fallback the mod routes this call (`mod.routes`). Not the redo mark.
 
-**Pin**: a model an agent's own definition names. A pinned agent keeps its model, and gets its level's effort when it names none.
+**Mod path**: `hooks/router.ts`, which sets the model at `agent.spawn` and the effort at `turn.step`, asking the runtime through `mod-*` commands (`mod.py`).
 
-**Cap**: the strongest model the user allows (`max_tier`). Every registry model the router keeps or sets is lowered to fit it, never raised, except a model the user's own environment sets (`CLAUDE_CODE_SUBAGENT_MODEL`, its `_FORCE` form, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`), which is left as set.
+**Model health**: model errors and substitutions seen here (`health.py`, `state.json`). Two of either route a model around for a day.
 
-**Routing mode**: `auto` holds each call's model to the user's limits and fills in the effort when only a model is named, and `off` changes no call, while the ledger and model health still record what ran (`routing_mode`). Only the `/config` option sets it.
+**Model swap**: a run whose model changed mid-run (`modelsUsed`). It finishes no call and isn't health evidence.
 
-**Allowlist** (`allowlist.py`): the `availableModels` and `deniedModels` settings, read the way Claude Code reads them, from the layers the mod sends. Without those layers no list applies, and Claude Code's own fallback handles a blocked model. Blocked models are not picked. On a provider whose alias doesn't move to the newest permitted version, a family counts only if the version its alias runs, or the newest ID the mod sends in its place, is permitted. Mantle and a host-managed provider count as such a provider. When they leave no registry model open, the call is left as it is. The same layers carry `maxEffortLevel`, the cap every effort the router sets is held to.
+**Order of authority**: where the model comes from, strongest first: the force pin, the workflow pin, the call, the user's rule, a project's rule, the agent, `CLAUDE_CODE_SUBAGENT_MODEL`, the parent (`router.decide`).
 
-**Model health** (`health.py`): what the router has seen of each model here, kept across turns. A model error is one whose text carries an API error type (`not_found_error`, `model_not_found`, `claude_code_version_too_old`), outside Claude Code's unknown-agent-type error. Two calls that fail with one, or run as a different model, route the model around for a day, and then it is tried again. A rewrite that came back without running is not held against the model. A run on the model the call would have had untouched is no substitution. A fallback call left on the parent's model, which the router could only guess, counts neither as a substitution nor as a failure. A call that runs as asked clears the record. Reading the table writes nothing; an outage a read finds too long for the clock is shortened in memory and written by the next spawn.
+**Outcome**: a result, failure or stop coming back for a call (`calls.Outcome`), read by one rule set on both paths (`calls.returned`).
 
-**Snapshot** (`settings.Snapshot`): the registry, options, usable models, health and allowlist a hook call reads once and passes to every step, with the ladder's `pick(level)` bound to them. The last three load on first use. A read writes nothing, so a dry run leaves the state as it was; a spawn writes what reads only noticed (`Snapshot.settle`).
+**Override file**: `~/.claude/model-router.json`, trusted in full, or a project's `.claude/model-router.json`, which only raises, merged over `config/models.json` (`config.build`).
 
-**Fork**: an agent that starts from its parent's conversation. It runs on its parent's model and cache, so the router leaves it alone. A skill with `context: fork` is not a fork ([skills](https://code.claude.com/docs/en/skills.md#run-skills-in-a-subagent)): it starts a new subagent of its `agent` type without an `agent.spawn` event, so it isn't routed either, and its model comes from the skill's `model` field, else from its agent type and the session.
+**Pick**: the cheapest usable model for a level and its effort there (`ladder.pick`), as `policy` lists it.
 
-**Redo**: a call whose `description` starts with "Redo:", which is how Claude marks a call for a weak result, however it rewrites the brief. The same call sent again unmarked is no redo. A redo that names a model or effort asking for more than the run it redoes runs as named (on Haiku, effort past `high` asks for no more); one that names the same or less climbs anyway, so naming the same model again never repeats the run. Otherwise it climbs from the latest finished run of its task in the session, within 30 minutes, or with none on record from the run it would get unmarked: one effort step up on that run's model while its effort was below `high`, else the next stronger usable model at the effort of that model's own level, else one more effort step, at most `max`. A nested call that ran at its parent's effort, which the router can't see, skips the same-model step. An agent's pin, a rule's model or `CLAUDE_CODE_SUBAGENT_MODEL` doesn't hold it back. A step that `maxEffortLevel`, `CLAUDE_CODE_EFFORT_LEVEL` or the model's `effort_stops_at` holds, or that would override the `CLAUDE_CODE_SUBAGENT_EFFORT` the user set, counts as none. A workflow stage is never redone. Nor does a redo climb for an agent whose definition isn't found, one a rule sets to `route: false`, or one whose own model is outside the registry: `router.decide` returns before `_redo` for them. Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` it gets only the effort step. A redo never changes the level of later calls: `/model-router:usage` counts redos by the level of the run they redo, and only those that redo a finished run on record, whether they climbed or ran as named. A run is finished when its result comes back, except a background launch (finished when its agent stops with an answer) or a swapped run. Both paths give the same redo, except that on a provider whose alias runs an older model the fallback moves the next model one family up where the mod sends that model's newest ID.
+**Pin**: a model or effort an agent's own definition names. The router keeps it within the cap; a redo climbs past it.
 
-**Model swap**: a run whose model changed mid-run, reported as `modelsUsed` on the `Agent` result ([hooks](https://code.claude.com/docs/en/hooks.md)). A content-classifier fallback causes it: Fable and Opus 5.5 to Opus 5 or Opus 4.8, Sonnet 5.5 to Sonnet 5, Opus 5 to Opus 4.8 ([model config](https://code.claude.com/docs/en/model-config.md#automatic-model-fallback)). A swapped run is no health evidence and doesn't finish its call, so no redo climbs from it.
+**Redo**: a call whose `description` starts with "Redo:" (`calls.marked_redo`). It climbs from its task's done record, effort first, then the model (`router._redo`).
 
-**Intake**: the check of whether a prompt is the person's request (`intake.py`). A teammate's report, another session's message and a background notification are not, so they never get the note for a model the request names.
+**Registry**: the models, levels, aliases, rules and newest IDs a hook call reads (`registry.Registry`).
 
-**Request**: one prompt from the user and the turns it starts. The settings hook's `UserPromptSubmit` reads it only for a model it names (`request.named_model`), and nothing keeps a record of it: a marked redo climbs from a run of any request within 30 minutes.
+**Route**: where one spawn went: model, ID sent, level, effort, source and path, in `routes.json` (`calls.Route`).
 
-**Ledger** (`ledger.py`): the append-only log of every spawn, result, model error, Stop-check ask and subagent turn's usage, with the reason for each decision. It keeps no brief and no description, though spawn rows that 0.1.0 and 0.1.2 wrote hold up to 120 characters of the description until they age out. A result row names the models of a swapped run in `models_used`. Rows older than 30 days are dropped, and past 4 MB the older half goes too.
+**Routing mode**: `auto` or `off`, set only in `/config`. `off` changes no call and gives no note or Stop check; the ledger and health still record.
 
-**Spend** (`ledger.py`, `report.py`): Claude Code's own cost estimate for a subagent, which the mod reads at each of its turn ends and the newest row holds for all of them. It is an estimate, not the bill, and on a subscription usage inside the plan isn't billed in dollars. Without the mod there is none, and a workflow agent has none, since Claude Code doesn't list it to a mod.
+**Session floor**: on the session's own model, an effort the router sets for a main-conversation call is at least the session's (`router._session_floor`).
 
-**Gate**: the check before a turn ends (`gates.py`). It asks once for the work's own check when a project file changed through Edit, Write or NotebookEdit and no check command ran since, in the main transcript or a subagent's, and then lets go. A file changed through Bash doesn't count. It says nothing when `routing_mode` is `off`, while background work runs, or when the transcript can't be read. The ask is guidance (`additionalContext` on `Stop`), not a block. It is on by default; `verify_gate` set to `false` turns it off.
+**Session model**: the model the conversation runs on, which a call naming nothing inherits (`session.py`).
 
-**Schema**: the version number written into each shared state file (`store.DURABLE`) and allowed in override files. A file without one has today's shape. A shared file from a newer release is read but never overwritten. Per-session state files carry none.
+**Set aside**: moving a `state.json` that fails to parse to `state.json.corrupt-<stamp>`, three kept (`store._set_aside`).
 
-**Set aside**: what happens to a shared state file other than `locks.json` that fails to parse (`store._set_aside`). It is renamed with a `.corrupt-` suffix and a timestamp, routing carries on with that state empty, and `/model-router:models` lists it. Only the three newest copies of each file are kept.
+**Skipped write**: a state write dropped because another process held the lock past one second (`store.Busy`), counted in `locks.json`.
 
-**Skipped write**: a state write a hook drops because another process held the file's lock past one second. The lock is the operating system's, on a `.flock` file beside the state file, so a process that dies lets go of it at once. The hook loses its own update rather than write without the lock and drop the other process's; only on a filesystem that can't lock at all does the write go ahead without one. Skipped writes, lock waits and waits on another session's lock are counted per file in `locks.json` and shown by `/model-router:models`.
+**Snapshot**: the registry, options, usable models, health and allowlist one hook call reads once (`settings.Snapshot`).
 
-**Upstream**: the public pages the repository's daily check compares with what was last reviewed (`compat/baseline.json`): Claude Code releases, the docs pages the plugin is built on, model aliases and model status. The plugin itself reads none of them.
+**Spawn**: a call starting its agent: `agent.spawn` on the mod path, `PreToolUse` on `Agent` on the fallback.
 
-**Baseline**: a way of running Claude Code without the router that the benchmark compares it against, such as its defaults or every subagent forced onto one model. The docs name each by role: `router`, and the baselines `defaults` (no plugin, no forced model), `best` (the lowest cost per solved task over all runs) and `strongest` (the strongest forced one), besides each baseline's own id.
+**Stop check**: the ask before a turn ends when a project file was edited and no check ran since (`gates.py`, `verify_gate`). Guidance, never a block.
 
-**Pass check**: a benchmark task's script that decides, from the files and the answer a run left, whether the task was solved. It has three outcomes: solved (exit 0), not solved (exit 1) and broken (exit 2, the check itself failed). `run.grade` gives the verdict with a reason, the last line the check printed, and a hash of the check's code. Each row `bench/run.py` writes now keeps all three under `grade`. Of the stored rows, only the 12 under `bench/results/pilot/redo-mark/` have one; the rest predate it and have only `passed`.
+**Task**: a hash of a call's agent type and its description without the redo mark (`calls.task`), by which a redo finds its earlier run.
 
-**Cost per solved task**: a configuration's total spend on a set of runs divided by the runs whose pass check passed. It is the benchmark's measure of cost. A failed run counts against it. A broken run and a run on an earlier task revision are left out of the spend and the count.
+**Upstream check**: the daily CI job, `tools/upstream_check.py`, that compares Claude Code releases, the docs pages the plugin is built on, model aliases and retirements with `compat/baseline.json`. The plugin reads none of them.
 
-**Pilot**: a benchmark run with too few runs per cell (under 10) to tell a difference from noise, or whose cells cover different tasks or counts. It supports no claim beyond its raw data. Its rows are kept under `bench/results/pilot/`, which the page's tables leave out, since they read only `bench/results/*.jsonl`: the harder-task pilot (3 runs per cell) and the 12 redo-mark rows.
+## The benchmark
 
-**Saturated**: a task class where the weakest forced baseline (every subagent on the lowest model) can't be told from the strongest by an exact one-sided test at 5%, with at least 10 runs each (`analyze._quality`). Its tasks can't tell models apart, so an equal pass rate there says nothing about quality. With fewer runs, or forced baselines on fewer than two models, whether it is saturated isn't known.
+**Baseline**: a way of running Claude Code without the router, in `bench/configs.json`. By role: `defaults` (no plugin, no forced model), `best` (lowest cost per solved task), `strongest` (strongest forced model) (`analyze.roles`).
 
-**Verdict**: the router's standing against one baseline in one table row (`analyze._judge`): WIN, LOSE, "no difference shown" or "no verdict". The two sides' runs are paired by task and resampled 2,000 times. WIN: cost per solved task below the baseline's beyond noise, a pass rate no more than 10 points behind, and at least the baseline's share of runs solved. LOSE: a pass rate behind beyond noise, or a cost per solved task above it beyond noise with the pass rate shown under 10 points ahead. Anything else is "no difference shown", which is not parity. There is no verdict when the two ran different tasks or in different batches, when either has a row below schema 3, or when more than a quarter of either's runs had a Bash call denied (`analyze._refusal`). A row is LOSE when any baseline beats the router, has no verdict when any comparison has none, and is WIN only against every baseline (`analyze._status`).
+**Broken run**: a run whose pass check exited 2. It is left out of the tables and counted in a note.
 
-**Known answers**: the right and wrong answers kept beside a task's pass check, as `wrong/<name>/` and `right/<name>/` overlays on `repo/` and `solution/`, or a `wrong_answer` for a reply. A test asserts that the check fails on `repo/` as shipped, passes every right answer and fails every wrong one, always as a verdict of the check, never as broken. A wrong answer's `expect.txt` holds a substring the check's reason must contain; without one it must fail as "the check exited 1".
+**Cost per solved task**: a configuration's total spend divided by its solved runs.
 
-**Task revision**: the number in a task's `task.json`, raised with a line under `revisions` saying why when a change to the task could change a run's outcome. Every row `bench/run.py` writes records the revision it ran on (`task_revision`), and an older row without one counts as revision 1. Rows on an earlier one are left out of every table, and the page counts them in a note.
+**Known answers**: the `right/` and `wrong/` answers beside a task's pass check, which a test makes the check accept and refuse.
 
-**Broken run**: a benchmark run whose pass check exited 2, so it was neither solved nor failed. It stays in its results file, with the check's error in `grade` on a row `bench/run.py` writes now (no stored row has one), is left out of every table, and the page counts it in a note.
+**Pass check**: a task's script that grades a run: exit 0 solved, 1 not solved, 2 broken (`run.grade`).
 
-**Prose fact**: a yes/no claim the docs' prose makes about the benchmark rows, such as every run solved or a baseline cheaper in every class. `bench/analyze.py` computes each from the rows (`PROSE`, `FACT_TEXT`), and `--check` fails when one is false.
+**Saturated**: a class where an exact one-sided test at 5% can't tell the weakest forced baseline from the strongest, with 10 or more runs each (`analyze._quality`).
+
+**Task revision**: the `revision` in a task's `task.json`, kept on each row as `task_revision`. Rows on an earlier revision are left out of the tables.
+
+**Verdict**: the router against one baseline in one class, from paired per-task resampling (`analyze._judge`): WIN, LOSE, "no difference shown", or "no verdict" when the runs can't support one (`analyze._refusal`).

@@ -16,8 +16,8 @@ PAGES = [
     ("docs/CLAUDE_CODE_DOCS.md", "Built on the docs", "Which Claude Code docs does it follow, and where?", 3),
     ("docs/BENCHMARKS.md", "Benchmarks", "What does a solved task cost, with and without it?", 3),
     ("docs/TESTING.md", "Testing", "Which checks gate a change, and what passed last?", 3),
-    ("docs/ROADMAP.md", "Roadmap", "What gets built next, and why first?", 4),
-    ("CHANGELOG.md", "Changelog", "What changed in each release?", 4),
+    ("docs/ROADMAP.md", "Roadmap", "What is not done yet?", 4),
+    ("CHANGELOG.md", "Changelog", "What is in each release?", 4),
     ("CONTRIBUTING.md", "Contributing", "How does a change get merged?", 4),
     ("docs/RELEASING.md", "Releasing", "How is a release cut, step by step?", 4),
 ]

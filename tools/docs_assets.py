@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Writes the docs' diagrams and badges, the docs' page heads and index, the benchmark figures and the site's
-generated parts.
+"""Writes the docs' diagrams and badges, the docs' page heads and index, and the site's generated parts.
 
 Run: python3 tools/docs_assets.py            write everything
      python3 tools/docs_assets.py --check    fail if anything on disk differs or breaks a rule
@@ -174,11 +173,11 @@ def badge_assets(version: str, floor: str) -> dict:
 # ---------------------------------------------------------------- the ladder
 
 LADDER = [  # level, model, effort, needs, subtask
-    ("lookup", "Haiku", "medium", 1, "Find, list, summarize, run a command"),
-    ("standard", "Sonnet", "medium", 2, "Implement to a clear spec, write tests"),
-    ("complex", "Opus", "high", 3, "Fix a bug, design, review, risky change"),
-    ("hardest", "Opus", "xhigh", 3, "Ambiguous, multi-system and risky at once"),
-    ("frontier", "Fable", "high", 4, "No known approach: research"),
+    ("lookup", "Haiku", "medium", 1, "Finding, reading and listing"),
+    ("standard", "Sonnet", "medium", 2, "Everyday work to a clear brief"),
+    ("complex", "Opus", "high", 3, "Hard to check, high-stakes or broad"),
+    ("hardest", "Opus", "xhigh", 3, "When a call or a rule names it"),
+    ("frontier", "Fable", "high", 4, "Open-ended research"),
 ]
 
 
@@ -229,7 +228,7 @@ def diagram_ladder() -> str:
     out.append(text(32, 452, "rule a model out, the pick moves to the nearest usable model above it, or to the "
                     "strongest one left. A redo adds effort first.", "mut", 13))
     out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh (high on "
-                    "Haiku), which makes up part of the loss.", "mut", 13))
+                    "Haiku).", "mut", 13))
     title = "The ladder: five levels to a model and an effort"
     label = ("Lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on Opus at high, hardest "
              "on Opus at xhigh, and frontier on Fable at high. A model named on a call stands for its lowest level. "
@@ -275,9 +274,9 @@ def diagram_redo() -> str:
     out.append(f'<circle cx="{last}" cy="{track}" r="11" class="halo" fill="none" stroke-width="5"/>'
                f'<circle cx="{last}" cy="{track}" r="9" class="rt"/>')
     note = ["The next model runs at its own level's effort; with no stronger usable model, one more effort step, at",
-            "most max. Not a redo: the same call sent again unmarked. Run as named: a redo that names its own model or",
-            "effort. Never redone: a workflow stage. A background agent's call counts as finished when the agent stops",
-            "with an answer."]
+            "most max (high on Haiku). Not a redo: the same call sent again unmarked. Run as named: a redo that names",
+            "a stronger model, or more effort on the same one. Never redone: a workflow stage. A background agent's",
+            "call counts as finished when the agent stops with an answer."]
     out.append(lines(32, 264, note, "mut", 13, 20))
     title = "Redo escalation: effort first, then the model"
     label = ("A call runs at its level, for example standard on Sonnet at medium effort. When its result falls short, "
@@ -382,21 +381,25 @@ def diagram_precedence() -> str:
     out.append(text(652, 120, "Then the cap", "ink b", 14.5))
     out.append(lines(652, 146, cap, "mut", 12.5, 19))
     ey = 92 + 66 + 19 * len(cap) + 16
-    out.append(card(632, ey, 256, 138, rx=12))
-    out.append(f'<rect x="633" y="{ey + 16}" width="4" height="106" rx="2" class="r3"/>')
+    out.append(card(632, ey, 256, 157, rx=12))
+    out.append(f'<rect x="633" y="{ey + 16}" width="4" height="125" rx="2" class="r3"/>')
     out.append(text(652, ey + 28, "And the effort", "ink b", 14.5))
-    out.append(lines(652, ey + 54, ["Set from the model's level, unless the", "call, the agent or one of these sets it:"],
-                     "mut", 13, 19))
-    out.append(lines(652, ey + 98, ["CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_EFFORT"], "mono ink", 11.5, 18))
-    out.append(text(32, 476, "Example: a call that names sonnet and no effort runs on Sonnet at medium effort, the",
-                    "mut", 13))
-    out.append(text(32, 496, "standard level's, which is inside the cap. A rule's level raises a model below it.", "mut", 13))
+    out.append(lines(652, ey + 54, ["From the model's level when 2, 3 or 4", "names the model, unless the call, the",
+                                    "agent or one of these sets it:"], "mut", 13, 19))
+    out.append(lines(652, ey + 117, ["CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_EFFORT"], "mono ink", 11.5, 18))
+    out.append(text(32, 476, "A workflow agent whose script names no model runs on CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL "
+                    "when it is set.", "mut", 13))
+    out.append(text(32, 496, "Example: a call that names sonnet and no effort runs on Sonnet at medium. A rule's level "
+                    "raises a model below it.", "mut", 13))
     title = "Who decides the model: the order of authority"
     label = ("Strongest first: CLAUDE_CODE_SUBAGENT_MODEL_FORCE, then a model named on the call, then a per-agent "
              "rule in model-router.json, then the agent's own model field, then CLAUDE_CODE_SUBAGENT_MODEL, then "
              "the parent's model. For all but the two environment variables, the winner must be usable under the "
              "cap and your settings, else the next stronger usable model runs, or the strongest usable one when "
-             "nothing stronger is left. Effort follows the model's level unless something already sets it.")
+             "nothing stronger is left. A workflow agent whose script names no model runs on "
+             "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL when it is set. Effort is filled in from the model's level when the "
+             "call, a rule or the agent names the model, unless the call, the agent, CLAUDE_CODE_EFFORT_LEVEL or "
+             "CLAUDE_CODE_SUBAGENT_EFFORT sets it.")
     return svg(w, h, title, label, "".join(out))
 
 
@@ -430,120 +433,6 @@ def diagram_stop_checks() -> str:
     return svg(w, h, title, label, "".join(out))
 
 
-# ---------------------------------------------------------------- the headline figures in the docs
-
-FIGURE_PAGES = ("README.md", "docs/ARCHITECTURE.md", "docs/FAQ.md", "docs/ROADMAP.md", "site/llms.txt")
-BENCH_SPAN = re.compile(r"<!-- bench:([\w.-]+) -->(.*?)<!-- /bench -->")
-SESSION_NAMES = {"claude-opus-5-5": "opus", "sonnet": "sonnet"}
-CLASS_WORDS = {"security-review": "security review", "root-cause": "root cause"}
-VERDICT_WORDS = {"WIN": "WIN", "LOSE": "LOSE", "NONE": "no difference shown", "REFUSED": "no verdict"}
-
-
-def class_word(k: str) -> str:
-    return CLASS_WORDS.get(k, k)
-
-
-def words(items: list) -> str:
-    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
-
-
-def pct(x: float) -> str:
-    return f"{100 * x:.0f}"
-
-
-def session_figures(name: str, session: dict) -> dict:
-    f = {}
-    router = session["router"]
-    classes = session["classes"]
-    roles = {role: cfg for role, cfg in session["roles"].items() if cfg}
-    if session.get("plugin_ref"):
-        f["commit"] = session["plugin_ref"]
-        f["commit_code"] = f"`{session['plugin_ref']}`"  # the span must sit outside the code span
-    f["router_code"] = f"`{router}`"  # the span must sit outside the code span
-    f["classes"] = str(len(classes))
-    f["saturated"] = str(session["saturated"])
-    for status in ("WIN", "LOSE", "NONE", "REFUSED"):
-        f[f"status.{status}"] = str(sum(c["status"] == status for c in classes))
-    # The router is spelled by its role, never by its id; every other configuration by its id, and some by a role too.
-    key = lambda cfg: "router" if cfg == router else cfg  # noqa: E731
-    for c in classes:
-        for cfg, cell in c["configs"].items():
-            v = cell["cost_per_solved"]
-            f[f"cell.{c['class']}.{key(cfg)}"] = "n/a" if v is None else f"${v:.4f}"
-            f[f"cell_solved.{c['class']}.{key(cfg)}"] = f"{cell['solved']} of {cell['runs']}"
-    pooled = session["pooled"]
-    spelled = {**{key(cfg): cfg for cfg in pooled}, **roles}
-    for k, cfg in spelled.items():
-        p = pooled[cfg]
-        f[f"runs.{k}"] = str(p["runs"])
-        f[f"solved.{k}"] = f"{p['solved']} of {p['runs']}"
-        if p["solved"]:
-            f[f"pooled.{k}"] = f"${p['cost_usd'] / p['solved']:.3f}"
-    against = {**{cfg: cfg for cfg in session["against"]}, **{r: roles[r] for r in ("defaults", "best", "strongest")
-                                                              if r in roles and roles[r] in session["against"]}}
-    for k, cfg in against.items():
-        a = session["against"][cfg]
-        if cfg in session["pooled_less"]:
-            f[f"pooled_less.{k}"] = pct(session["pooled_less"][cfg])
-        f[f"below.{k}"] = str(len(a["below"]))
-        if a["level"]:
-            f[f"level.{k}"] = words([class_word(c) for c in a["level"]])
-        if a["less"]:
-            f[f"less.{k}.min"], f[f"less.{k}.max"] = pct(a["less"][0]), pct(a["less"][1])
-    for cfg, a in session["against"].items():
-        if a["best_in"]:
-            f[f"best.{cfg}"], f[f"best_count.{cfg}"] = words([class_word(c) for c in a["best_in"]]), str(len(a["best_in"]))
-    if session["behind"]:
-        (lo, lo_class), (hi, hi_class) = session["behind"]["min"], session["behind"]["max"]
-        f["behind.min"], f["behind.min_class"] = pct(lo), class_word(lo_class)
-        f["behind.max"], f["behind.max_class"] = pct(hi), class_word(hi_class)
-    f["trace"] = "; ".join(class_trace(c, router) for c in classes)
-    return {f"{name}.{k}": v for k, v in f.items()}
-
-
-def class_trace(c: dict, router: str) -> str:
-    def usd(v):
-        return "n/a" if v is None else f"${v:.3f}"
-
-    def missed(cell):
-        return f", {cell['solved']} of {cell['runs']} solved" if cell["solved"] < cell["runs"] else ""
-
-    if router not in c["configs"]:
-        raise SystemExit(f"bench results have no {router} runs for {c['class']}")
-    cell = c["configs"][router]
-    key = lambda cfg: (c["configs"][cfg]["cost_per_solved"] is None, c["configs"][cfg]["cost_per_solved"] or 0, cfg)  # noqa: E731
-    def gap(cfg):
-        lo, hi = c["differences"][cfg] or (None, None)
-        return "" if lo is None or hi is None else f"{lo:+.3f} to {hi:+.3f}"
-
-    base = ", ".join(
-        f"`{cfg}` {usd(c['configs'][cfg]['cost_per_solved'])} "
-        f"({VERDICT_WORDS[c['verdicts'][cfg]['verdict']]}{', ' + gap(cfg) if gap(cfg) else ''}{missed(c['configs'][cfg])})"
-        for cfg in sorted(c["verdicts"], key=key))
-    return (f"{class_word(c['class'])} {VERDICT_WORDS[c['status']]} (router {usd(cell['cost_per_solved'])}{missed(cell)}; "
-            f"{base})")
-
-
-def bench_figures(data: dict) -> dict:
-    f = {"runs": f"{data['runs']:,}", "usd": f"${data['usd']:,.2f}",
-         "dates": " to ".join(dict.fromkeys(data["dates"])),
-         "claude": ", ".join(v.replace(" (Claude Code)", "") for v in data["claude_versions"]),
-         "per_cell": " or ".join(str(n) for n in data["per_cell"]),
-         "tasks": str(data["tasks"]), "tasks_total": str(data["tasks_total"])}
-    for s in data["sessions"]:
-        if s["model"] in SESSION_NAMES:
-            f.update(session_figures(SESSION_NAMES[s["model"]], s))
-    return f
-
-
-def with_figures(path: str, text: str, figures: dict) -> str:
-    def one(m):
-        if m.group(1) not in figures:
-            raise SystemExit(f"{path}: unknown benchmark figure {m.group(1)}")
-        return f"<!-- bench:{m.group(1)} -->{figures[m.group(1)]}<!-- /bench -->"
-    return BENCH_SPAN.sub(one, text)
-
-
 # ---------------------------------------------------------------- the Claude Code floor
 
 # The pages that state the current floor; the changelog keeps the floor of its day.
@@ -563,7 +452,7 @@ SITE_URL = re.compile(r"<!-- SITE_URL: (\S+) -->")
 
 def faq_entries(text: str) -> list:
     out = []
-    for block in BENCH_SPAN.sub(lambda m: m.group(2), text).split("\n## ")[1:]:
+    for block in text.split("\n## ")[1:]:
         question, _, answer = block.partition("\n")
         out.append((question.strip(), " ".join(answer.split())))
     return out
@@ -597,7 +486,7 @@ def between(current: str, marks: tuple, body: str, where: str) -> str:
     return before + body + after
 
 
-def site_files(faq: str, figures: dict, texts: dict, v: str, day: str, floor: str) -> dict:
+def site_files(faq: str, texts: dict, v: str, day: str, floor: str) -> dict:
     if "site/index.html" not in texts:
         return {}
     page = texts["site/index.html"]
@@ -614,7 +503,6 @@ def site_files(faq: str, figures: dict, texts: dict, v: str, day: str, floor: st
         page = head + sep + tail.replace(old, url)
     page = between(page, FAQ_HTML, site_faq_html(faq), "site/index.html")
     page = with_floor(badge_alt(page, v), floor)
-    page = with_figures("site/index.html", page, figures)
     ladder = "Five levels: " + ", ".join(f"{lv} on {model} at {effort}" for lv, model, effort, *_ in LADDER)
     for pattern, value in ((r'"softwareVersion": "[^"]*"', f'"softwareVersion": "{v}"'),
                            (r'"Five levels: [^"]*"', f'"{ladder}"'),
@@ -663,35 +551,29 @@ def release_date(v: str) -> str:
 @dataclasses.dataclass(frozen=True)
 class Snapshot:
     """Everything `build` reads, taken once: the plugin's version, its release date and its Claude Code floor, the
-    shipped ladder, the text of every page it rewrites, the page index and the benchmark figures from
-    `analyze.figures`."""
+    shipped ladder, the text of every page it rewrites and the page index."""
     version: str
     released: str
     claude_code: str
     ladder: dict
     texts: dict
-    bench: dict
     pages: list = dataclasses.field(default_factory=lambda: list(PAGES))
 
 
 def snapshot() -> Snapshot:
-    sys.path.insert(0, str(ROOT / "bench"))
-    import analyze
     v = version()
     wanted = [*(p[0] for p in PAGES), "README.md", "plugins/model-router/README.md", "site/index.html",
               "site/sitemap.xml", "site/llms.txt"]
     return Snapshot(
         version=v, released=release_date(v), claude_code=manifest()["engines"]["claude-code"].removeprefix(">="),
         ladder=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
-        texts={path: (ROOT / path).read_text(encoding="utf-8") for path in wanted if (ROOT / path).exists()},
-        bench=analyze.figures(analyze.load(analyze.default_paths()), legacy=True))
+        texts={path: (ROOT / path).read_text(encoding="utf-8") for path in wanted if (ROOT / path).exists()})
 
 
 def build(snap: Snapshot) -> dict:
     """The files to write, by path, for a snapshot of the inputs. Reads no file."""
     LAYOUT.clear()
     check_ladder_against_registry(snap.ladder)
-    figures = bench_figures(snap.bench)
     v = snap.version
     files = {}
     assets = badge_assets(v, snap.claude_code)
@@ -711,10 +593,7 @@ def build(snap: Snapshot) -> dict:
     for path in FLOOR_PAGES:
         if path in files or path in snap.texts:
             files[path] = with_floor(files.get(path, snap.texts[path]), snap.claude_code)
-    for path in FIGURE_PAGES:
-        if path in files:
-            files[path] = with_figures(path, files[path], figures)
-    files.update(site_files(files.get("docs/FAQ.md", ""), figures, snap.texts, v, snap.released, snap.claude_code))
+    files.update(site_files(files.get("docs/FAQ.md", ""), snap.texts, v, snap.released, snap.claude_code))
     return files
 
 
