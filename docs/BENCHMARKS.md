@@ -55,3 +55,13 @@ The four hard coding tasks and the redo, fan-out and plan-then-build tasks under
 | :- | -: | -: | :- | -: | :- |
 | `defaults` | 14 | 13 | 1 by the timeout | $0.523 |  |
 | `haiku-high` | 14 | 13 | 1 by the timeout | $0.182 |  |
+
+### `release-1`: 96 runs on 2026-11-25, $22.60, session on `opus`
+
+Sixteen tasks under the plugin and the two baselines, with the ladder and the table the plugin ships. It stays exploratory for two reasons: the plugin has changed since the commit it ran, and each run had a $0.50 cap, which stopped five runs before they finished.
+
+| Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |
+| :- | -: | -: | :- | -: | :- |
+| `defaults` | 32 | 28 | 4 by the budget cap | $0.341 |  |
+| `plugin` | 32 | 31 | 1 by the budget cap | $0.218 | `99467a2` |
+| `haiku-high` | 32 | 32 | none | $0.147 |  |
