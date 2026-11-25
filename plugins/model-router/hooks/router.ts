@@ -45,7 +45,7 @@ function optionEnv(options: PluginOptions): Record<string, string> {
 }
 
 // The runtime's answer (every command answers at least { ok: true }), null when no Python ran, or undefined when
-// the round trip failed. Never throws: a hook that already called next(e) must not reach its .catch and call it again.
+// the round trip failed. Never throws, so a failed round trip leaves the rest of its hook to run.
 async function ask($: EngineInterface, options: Record<string, string>, command: string, payload: object): Promise<Answer | undefined> {
   try {
     const env = { ...(await $.process.hookEnv()), ...options }
