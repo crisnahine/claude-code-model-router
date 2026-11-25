@@ -8,11 +8,12 @@ What isn't done yet.
 
 ## Next
 
-- Run benchmark rounds on this release and publish them in [BENCHMARKS.md](BENCHMARKS.md). None is recorded yet.
-- Run the plugin live on a Linux install and a Windows install. CI runs the unit and mod tests there, but no live session has.
-- Run it live on Amazon Bedrock, Vertex AI and Microsoft Foundry, and with an API-key login.
+- Run the judged benchmark round on this release and record it in [BENCHMARKS.md](BENCHMARKS.md).
+- Add a benchmark task that the cheapest model fails, so the benchmark can show what the redo step is worth.
+- Run a live session on Linux and on Windows. CI runs the unit and mod tests there.
+- Run it live under the Agent SDK.
 
 ## Later
 
-- Run it live in the Desktop app, VS Code, JetBrains and the Agent SDK.
-- Run the benchmark's `workflow` shape (`workflow-two-stage-report`), which has no run yet, and read how the stream shows a workflow's agents. An agent-team shape can't run headless, since `claude -p` and the Agent SDK never start teammates.
+- Run it live on Amazon Bedrock, Vertex AI and Microsoft Foundry, and with an API-key login.
+- Check the Desktop app's window and the VS Code panel by hand, and the other cases [TESTING.md](TESTING.md#the-interactive-features-by-hand) lists as not run by hand.

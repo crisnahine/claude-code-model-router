@@ -8,15 +8,15 @@ The project's own words, and the code behind each.
 
 ## The plugin
 
-**Agent rule**: an override file's `model`, `level` or `route: false` for one agent (`registry.Rule`). A project's rule only raises.
+**Agent rule**: a rules file's `model`, `level` or `route: false` for one agent (`registry.Rule`). A project's rule only raises.
 
 **Allowlist**: the registry models `availableModels` and `deniedModels` leave open, from the settings layers the mod sends (`allowlist.Allowlist`).
 
 **Call**: one request to start an agent: a subagent, a teammate or a workflow stage. Its key hashes the agent type and the prompt (`calls.identify`).
 
-**Cap**: the `max_tier` option. Every model the router keeps or sets is lowered to fit it (`Registry.clamp`), except one an environment variable sets. A model ID the registry can't place in a family is left as it is.
+**Cap**: the `max_tier` option. Every model the router keeps or sets is lowered to fit it (`Registry.clamp`), except one an environment variable pins and a fork's. A model ID the registry can't place in a family is left as it is.
 
-**Decision**: what `router.decide` returns for a call: keep, rewrite or deny, with model, effort, level, source and reason.
+**Decision**: what `router.decide` returns for a call, keep or rewrite, with model, effort, level, source and reason. The repeat guard can turn a rewrite into a deny.
 
 **Done record**: a task's latest finished run, in `done.json`, which a redo climbs from (`calls.last_run`).
 
@@ -30,7 +30,7 @@ The project's own words, and the code behind each.
 
 **Intake**: telling the person's own prompt from a delivered message or a Claude Code framing (`intake.is_user_prompt`).
 
-**Lagging alias**: a family whose alias runs an older model on this provider (`older_aliases`). The mod sends its newest ID instead (`Registry.newest_id`).
+**Lagging alias**: a family whose alias runs an older model on this provider (`older_aliases`). The mod sends its newest ID instead (`Registry.newest_id`); where none goes out, the router's own pick moves one family up (`Registry.past_lag`).
 
 **Ladder**: the five levels, each a `needs` strength and an effort (`ladder.py`, `config/models.json`).
 
@@ -42,7 +42,7 @@ The project's own words, and the code behind each.
 
 **Mod path**: `hooks/router.ts`, which sets the model at `agent.spawn` and the effort at `turn.step`, asking the runtime through `mod-*` commands (`mod.py`).
 
-**Model health**: model errors and substitutions seen here (`health.py`, `state.json`). Two of either route a model around for a day.
+**Model health**: model errors and substitutions seen here (`health.py`, `state.json`). Two of either route a model around for a day, and one refusal routes around a newest ID the mod sent.
 
 **Model swap**: a run whose model changed mid-run (`modelsUsed`). It finishes no call and isn't health evidence.
 
@@ -50,29 +50,35 @@ The project's own words, and the code behind each.
 
 **Outcome**: a result, failure or stop coming back for a call (`calls.Outcome`), read by one rule set on both paths (`calls.returned`).
 
-**Override file**: `~/.claude/model-router.json`, trusted in full, or a project's `.claude/model-router.json`, which only raises, merged over `config/models.json` (`config.build`).
+**Override file**: a rules file: `~/.claude/model-router.json`, trusted in full, or a project's `.claude/model-router.json`, which only raises, merged over `config/models.json` (`config.build`).
 
 **Pick**: the cheapest usable model for a level and its effort there (`ladder.pick`), as `policy` lists it.
 
-**Pin**: a model or effort an agent's own definition names. The router keeps it within the cap; a redo climbs past it.
+**Pin**: a model an agent's own definition names (the decision's source `pin`), or its effort. The router keeps it within the cap; a redo climbs past it. The force and workflow pins are the environment variables that set every subagent's or workflow agent's model.
+
+**Read-only agent**: one whose `tools` hold none of Edit, Write, NotebookEdit and Bash, or whose `disallowedTools` remove them all, and the built-in Explore and Plan (`agents.read_only`). A call that nothing names a model for runs at lookup on one, unless it is a teammate, and at standard on any other agent.
 
 **Recommended setup**: a model family and the lowest effort the session that plans and delegates should run it at: Opus and Fable at `medium`, Sonnet at `xhigh`, in `config/models.json` under `session` (`Registry.session`). A family left out is never one.
 
-**Read-only agent**: one whose `tools` hold none of Edit, Write, NotebookEdit and Bash, or whose `disallowedTools` remove them all, and the built-in Explore and Plan (`agents.read_only`). A call that nothing names a model for runs at lookup on one, and at standard on any other agent.
-
-**Redo**: a call whose `description` starts with "Redo:" (`calls.marked_redo`). It climbs from its task's done record, effort first, then the model (`router._redo`).
+**Redo**: a call whose `description` starts with "Redo:" (`calls.marked_redo`). It climbs from its task's done record, else from what it would run at unmarked, effort first, then the model (`router._redo`).
 
 **Registry**: the models, levels, aliases, rules and newest IDs a hook call reads (`registry.Registry`).
 
+**Repeat guard**: on the fallback path, a rewritten call that comes back unrun passes through unchanged, or is denied with the model to use when it would run above the cap (`fallback._guard`).
+
+**Role agent**: one of the plugin's five agents, `model-router:scout`, `verifier`, `implementer`, `architect` and `reviewer`, each with its own model and effort (`agents/`).
+
 **Route**: where one spawn went: model, ID sent, level, effort, source and path, in `routes.json` (`calls.Route`).
 
-**Routing mode**: `auto` or `off`, set only in `/config`. `off` changes no call and gives no note or Stop check; the ledger and health still record.
+**Routing mode**: the `routing_mode` option, `auto` or `off`, set in `/config` and never by a rules file. `off` changes no call and gives no session note, Stop check or session check; the ledger and health still record.
 
 **Session check**: the once-per-session question, at the start of an interactive session below the recommended setups, that offers one, then an effort (`session.check`, the `session_check` option). Only on the mod path.
 
 **Session floor**: on the session's own model, an effort the router sets for a main-conversation call is at least the session's (`router._session_floor`).
 
-**Session model**: the model the conversation runs on, which a call naming nothing inherits (`session.py`).
+**Session model**: the model the conversation runs on, which a call naming nothing inherits (`session.model`).
+
+**Session note**: the table of which model and effort fit which work that Claude gets at session start (`hooks._rules`). The mod also adds it to the Agent tool's description, and a form of it to the Workflow tool's (`hooks._workflow_rules`).
 
 **Session switch**: `/model-router on` or `off`, which sets routing for one session in `switches.json`, read by every snapshot of that session (`settings.switch`, `Settings.switched`).
 
@@ -88,23 +94,27 @@ The project's own words, and the code behind each.
 
 **Stop check**: the ask before a turn ends when a project file was edited and no check ran since (`gates.py`, `verify_gate`). Guidance, never a block.
 
+**Strength**: a model's rank in the registry, Haiku 1 to Fable 4 (`Model.strength`). A level's `needs` is the weakest strength it runs on.
+
 **Task**: a hash of a call's agent type and its description without the redo mark (`calls.task`), by which a redo finds its earlier run.
 
 **Upstream check**: the daily CI job, `tools/upstream_check.py`, that compares Claude Code releases, the docs pages the plugin is built on, model aliases and retirements with `compat/baseline.json`. The plugin reads none of them.
+
+**Usable**: the registry models inside the cap, permitted by the allowlist and not routed around, weakest first (`Registry.available`, `Snapshot.usable`).
 
 ## The benchmark
 
 **Baseline**: a way of running Claude Code without the router, in `bench/configs.json`: `defaults` (no plugin, subagents on the session model) and `haiku-high` (every subagent forced onto Haiku at high effort).
 
-**Broken run**: a run whose pass check exited 2. It is left out of the tables and counted in a note.
+**Broken run**: a run whose pass check broke, by exiting 2 or failing to start (`run.grade`). It is left out of the tables and counted in a note.
 
 **Cost per solved task**: a configuration's total spend divided by its solved runs.
 
 **Known answers**: the `right/` and `wrong/` answers beside a task's pass check, which a test makes the check accept and refuse.
 
-**Pass check**: a task's script that grades a run: exit 0 solved, 1 not solved, 2 broken (`run.grade`).
+**Pass check**: a task's script that grades a run: exit 0 solved, 2 broken, any other exit or a timeout not solved (`run.grade`).
 
-**Saturated**: a class where an exact one-sided test at 5% can't tell the weakest forced baseline from the strongest, or from `defaults` when every forced baseline is on one model, with 10 or more runs each (`analyze._quality`).
+**Saturated**: a class where an exact one-sided test at 5% can't tell `haiku-high` from `defaults`, with 10 or more runs each (`analyze._quality`).
 
 **Task revision**: the `revision` in a task's `task.json`, kept on each row as `task_revision`. Rows on an earlier revision are left out of the tables.
 

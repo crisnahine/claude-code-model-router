@@ -14,7 +14,7 @@ Every change passes these gates before merging. CI (`.github/workflows/ci.yml`) 
 | Plugin validate | `claude plugin validate --strict .` and `claude plugin validate --strict plugins/model-router` | The marketplace and the plugin, warnings as errors, on Claude Code 2.1.329, 2.1.331 and latest. |
 | Version | `python3 tools/plugin_version.py origin/main` | A plugin change sets a new version. |
 | Docs | `python3 tools/docs_assets.py --check` | Every file the script writes is current. |
-| Benchmarks page | `python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check` | `docs/BENCHMARKS.md` matches `bench/results/`. |
+| Benchmarks page | `python3 bench/analyze.py "bench/results/*.jsonl" --out docs/BENCHMARKS.md --check` | `docs/BENCHMARKS.md` matches `bench/results/`. |
 | Live evals | `claude plugin eval plugins/model-router --trust-plugin` | Claude names the expected model and effort on real runs. Paid, so run after a routing change. |
 
 ## The interactive features by hand

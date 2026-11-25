@@ -10,8 +10,8 @@ Requirements: Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `py
 
 Options, in `/config`: `routing_mode` (`auto`), `max_tier` (`none`), `verify_gate` (`true`) and `session_check` (`ask`). Commands: `/model-router`, `/model-router:route`, `/model-router:models` and `/model-router:usage`.
 
-What it runs: the hooks in `hooks/hooks.json` and the mod `hooks/router.ts`, which start `sh` and Python on your machine, and, for a setup you pick when a session starts below the recommended ones, Claude Code's `/model` and `/effort`. It writes one option, `session_check`, when you ask it to. What it keeps: a ledger and state files in the plugin's data folder, private to your user on macOS and Linux, never a prompt, brief or description. It makes no network call of its own.
+What it runs: the hooks in `hooks/hooks.json` and the mod `hooks/router.ts`, which start `sh` and Python on your machine. The mod also runs `ps` to read a `--effort` flag the session started with, and, for a setup you pick when a session starts below the recommended ones, Claude Code's `/model` and `/effort`. It writes one option, `session_check`, when you ask it to. What it keeps: a ledger and state files in the plugin's data folder, private to your user on macOS and Linux, never a prompt, brief or description. On a Python that writes no bytecode, such as the macOS system Python, it caches compiled code in `~/.cache/model-router/pycache`. It makes no network call of its own.
 
 `evals/` holds the cases `claude plugin eval` runs; `tsconfig.json` points an editor at the types Claude Code writes into `.claude-plugin/types/`. Neither runs in a session.
 
-How it decides, every option and every limit are in the [main README](https://github.com/crisnahine/claude-code-model-router#readme). Apache-2.0.
+How it decides, its options and its limits are in the [main README](https://github.com/crisnahine/claude-code-model-router#readme). Apache-2.0.
