@@ -38,10 +38,17 @@ OPUS = "claude-opus-5-5"
 
 
 def full_row(**changes):
-    """A row as run.record writes it, from a real result line, with `changes` applied."""
+    """A row as run.record writes it, from a real result line, with `changes` applied. A row of a task in bench/tasks
+    carries today's check hash, as a run of it would."""
     result = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    return dict(run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}), result,
-                           Recorder.facts), **changes)
+    row = dict(run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}), result,
+                          Recorder.facts), **changes)
+    return graded_today(row) if "grade" not in changes else row
+
+
+def graded_today(row):
+    check = run.BENCH / "tasks" / row["task"] / "check.py"
+    return dict(row, grade=dict(row["grade"], check_hash=run.check_hash(check))) if check.is_file() else row
 
 
 def rows(config, cls, costs, passes, task=None, **extra):
@@ -246,6 +253,43 @@ class Analysis(unittest.TestCase):
         self.assertEqual(v["verdict"], "REFUSED")
         self.assertIn("Bash denied in 19 of 72 `plugin` runs", v["reason"])
         self.assertEqual(analyze.bash_denials(ours), (19, 72))
+
+    def test_a_verdict_never_mixes_plugin_builds_budgets_versions_or_uncommitted_code(self):
+        ours, theirs = spread("plugin", "lookup", 6, 12, 0.10), spread("defaults", "lookup", 6, 12, 0.50)
+        self.assertEqual(self.verdict(ours + theirs)["verdict"], "WIN")
+        # A task may run at its own budget, as long as both sides ran it at that one.
+        dear = lambda side: [dict(r, budget_usd=2.0 if r["task"] == "lookup-3" else 0.5) for r in side]  # noqa: E731
+        self.assertEqual(self.verdict(dear(ours) + dear(theirs))["verdict"], "WIN")
+        cases = (([dict(r, plugin_hash=f"h{i % 2}") for i, r in enumerate(ours)], theirs,
+                  "`plugin`'s runs loaded 2 plugin builds (`plugin_hash`)"),
+                 (dear(ours), [dict(r, budget_usd=0.5) for r in theirs],
+                  "`lookup-3` ran at budget 2.0 under `plugin` and 0.5 under `defaults` (`budget_usd`)"),
+                 (ours, [dict(r, claude_version="2.1.333" if r["task"] == "lookup-0" else None) for r in theirs],
+                  "`lookup-0` ran at Claude Code None under `plugin` and 2.1.333 under `defaults` (`claude_version`)"),
+                 (ours, [dict(r, bench_dirty=i < 2) for i, r in enumerate(theirs)],
+                  "2 of the runs ran from code with uncommitted changes (`bench_dirty`)"))
+        for mine, yours, why in cases:
+            with self.subTest(why=why):
+                v = self.verdict(mine + yours)
+                self.assertEqual(v["verdict"], "REFUSED")
+                self.assertIn(why, v["reason"])
+
+    def test_a_current_row_graded_by_another_check_stops_the_page(self):
+        task = next(t for t in run.load_tasks() if t["id"] == "lookup-todo-count")
+        today = {"verdict": "pass", "reason": "solved", "check_hash": run.check_hash(task["dir"] / "check.py")}
+        good = full_row(task=task["id"], grade=today)
+        other = dict(good, grade=dict(today, check_hash="f" * 16))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.jsonl"
+            path.write_text(json.dumps(good) + "\n", encoding="utf-8")
+            self.assertEqual(len(analyze.load([path]).rows), 1)
+            path.write_text(json.dumps(other) + "\n", encoding="utf-8")
+            with self.assertRaises(SystemExit) as raised:
+                analyze.load([path])
+            self.assertIn(f"`lookup-todo-count`: a row graded by check ffffffffffffffff, today's is {today['check_hash']}",
+                          str(raised.exception))
+            path.write_text(json.dumps(dict(other, task_revision=0)) + "\n", encoding="utf-8")
+            self.assertEqual(len(analyze.load([path]).stale), 1)  # an earlier revision is left out, not checked
 
     def test_batches_that_did_not_run_together_get_no_verdict(self):
         ours = spread("plugin", "lookup", 6, 12, 0.10, batch="b1")
@@ -1665,7 +1709,7 @@ class TaskIdentity(unittest.TestCase):
         old = full_row(task_revision=1, **{"class": "design"})
         rows = [dict(old, task="design-cache-invalidation", config="plugin"),
                 dict(old, task="design-cache-invalidation", config="defaults"),
-                dict(old, task="design-rate-limiter", config="plugin", total_cost_usd=0.5)]
+                graded_today(dict(old, task="design-rate-limiter", config="plugin", total_cost_usd=0.5))]
         with tempfile.TemporaryDirectory() as tmp:
             results = Path(tmp) / "results"
             results.mkdir()
@@ -1883,10 +1927,8 @@ class Grading(unittest.TestCase):
                 first = changed
 
     def test_analyze_sets_aside_a_run_whose_check_broke(self):
-        good = full_row(config="defaults", task="design-rate-limiter", task_revision=1, passed=True,
-                        grade={"verdict": "pass", "reason": "solved", "check_hash": "a" * 16}, **{"class": "design"})
-        bad = dict(good, passed=False, total_cost_usd=0.25,
-                   grade={"verdict": "broken", "reason": "NameError: x", "check_hash": "b" * 16})
+        good = full_row(config="defaults", task="design-rate-limiter", task_revision=1, passed=True, **{"class": "design"})
+        bad = dict(good, passed=False, total_cost_usd=0.25, grade=dict(good["grade"], verdict="broken", reason="NameError: x"))
         with tempfile.TemporaryDirectory() as tmp:
             results = Path(tmp) / "results"
             results.mkdir()
@@ -2388,10 +2430,10 @@ class DelegationTasks(unittest.TestCase):
 
         def row(task_id, config, passed, spawned, started=None, **extra):
             task = tasks[task_id]
-            return dict(real, main_model="sonnet", config=config, passed=passed, task=task_id, wall_ms=1000,
-                        task_revision=task.get("revision", 1),
-                        agents_started={"general-purpose": spawned} if started is None else started,
-                        **{"class": task["class"]}, **extra)
+            return graded_today(dict(real, main_model="sonnet", config=config, passed=passed, task=task_id,
+                                     wall_ms=1000, task_revision=task.get("revision", 1),
+                                     agents_started={"general-purpose": spawned} if started is None else started,
+                                     **{"class": task["class"]}, **extra))
         first = {"agent": "general-purpose", "level": "standard", "escalated_from": None}
         design = {"agent": "general-purpose", "level": "lookup", "escalated_from": None}
         rows = [row("cross-amount-cents", "plugin", True, 1, routed=[first]),

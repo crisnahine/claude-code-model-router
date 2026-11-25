@@ -146,6 +146,19 @@ def _refusal(name: str, ours: list[dict], base: str, theirs: list[dict]) -> str 
         why.append(f"`{task}`" + (f" in batch `{batch}`" if batch else "") + f" ran {mine[uneven[0]]} times under "
                    f"`{name}` and {yours[uneven[0]]} under `{base}`" + (f", and {more} more task and batch pair(s) "
                                                                         "differ" if more else ""))
+    builds = {r.get("plugin_hash") for r in ours}
+    if len(builds) > 1:
+        why.append(f"`{name}`'s runs loaded {len(builds)} plugin builds (`plugin_hash`)")
+    # A task may have its own budget, but both sides must have run it at that one and on one Claude Code.
+    for key, what in (("budget_usd", "budget"), ("claude_version", "Claude Code")):
+        for task in sorted({r["task"] for r in ours} & {r["task"] for r in theirs}):
+            a, b = (", ".join(sorted({str(r.get(key)) for r in side if r["task"] == task})) for side in (ours, theirs))
+            if a != b:
+                why.append(f"`{task}` ran at {what} {a} under `{name}` and {b} under `{base}` (`{key}`)")
+                break
+    dirty = sum(bool(r.get("bench_dirty")) for r in ours + theirs)
+    if dirty:
+        why.append(f"{dirty} of the runs ran from code with uncommitted changes (`bench_dirty`)")
     for who, runs in ((name, ours), (base, theirs)):
         denied, n = bash_denials(runs)
         if denied > DENIAL_SHARE * n:
@@ -458,7 +471,8 @@ def forced_ranks(configs: list[dict], registry_config: Registry) -> dict[str, tu
 def load(paths: list[Path]) -> Results:
     """Everything the page is built from, read once. The order and repeats of `paths` don't matter. A row on an
     earlier revision of its task isn't comparable with later runs of it, so it sits in `stale`, not `rows`, and a
-    row whose pass check broke sits in `broken`."""
+    row whose pass check broke sits in `broken`. A row on the current revision that another check graded stops it:
+    the check changed without a raise of the task's revision."""
     files = sorted({p.resolve() for p in paths})
     tasks = run.load_tasks()
     revisions = {t["id"]: t.get("revision", 1) for t in tasks}
@@ -470,6 +484,13 @@ def load(paths: list[Path]) -> Results:
     bad_check = [(r.get("grade") or {}).get("verdict") == "broken" for r in every]
     broken = [r for r, gone, bad in zip(every, old, bad_check) if bad and not gone]
     rows = [r for r, gone, bad in zip(every, old, bad_check) if not (gone or bad)]
+    today = {t["id"]: run.check_hash(t["dir"] / "check.py") for t in tasks}
+    moved = sorted({(r["task"], str((r.get("grade") or {}).get("check_hash"))) for r in rows + broken
+                    if r["task"] in today and (r.get("grade") or {}).get("check_hash") != today[r["task"]]})
+    if moved:
+        raise SystemExit("rows on a task's current revision were graded by another check; raise its revision in "
+                         "task.json if the change can change a run's outcome: " + "; ".join(
+                             f"`{task}`: a row graded by check {got}, today's is {today[task]}" for task, got in moved))
     aside = [row for folder in sorted({f.parent for f in files}) for row in _jsonl((folder / "limited").glob("*.jsonl"))]
     registry_config = mrconfig.shipped()
     return Results(files, rows, stale, broken, aside, configs, tasks, registry_config, router_ids(configs),
@@ -608,8 +629,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
         f"baseline's is below plus {MARGIN:.0%}, the mirror of the WIN rule. "
         "Anything else is \"no difference shown\", which is not parity. There is no verdict when the two didn't run "
         "each task the same number of times in each batch, since each side's cost is pooled over its runs and pass "
-        f"rates drift between batches, or when more than {DENIAL_SHARE:.0%} of either's runs had a Bash call denied. "
-        "A row "
+        f"rates drift between batches, when more than {DENIAL_SHARE:.0%} of either's runs had a Bash call denied, "
+        "when the router's runs loaded more than one plugin build (`plugin_hash`), when the two ran a task at "
+        "different budgets (`budget_usd`) or on different Claude Code versions (`claude_version`), or when any of "
+        "their runs ran from code with uncommitted changes (`bench_dirty`). A row "
         "is LOSE when any baseline beats the router, has no verdict when any comparison has none, is WIN only when "
         "it wins against every baseline, and is otherwise \"no difference shown\".",
         f"- Each table ends with an `{ALL}` row, judged the same way over every task in the table: the tasks of all "
@@ -617,7 +640,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         f"with a few tasks per class is judged on its `{ALL}` row.",
         "- A class is saturated when the weakest forced baseline (every subagent on the weakest model) can't be told "
         f"from the strongest by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an equal pass rate "
-        "says nothing about quality. Runs on an earlier revision of a task are left out of every table.",
+        "says nothing about quality. Runs on an earlier revision of a task are left out of every table. A run on a "
+        "task's current revision that a check other than today's graded stops the page from being built, since the "
+        "check changed without a raise of the revision.",
         "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest, and n/a on a "
         "row with no verdict. A router variant (another configuration that loads the plugin) has its own column "
         "but is never a baseline.",
