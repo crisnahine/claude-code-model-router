@@ -226,6 +226,10 @@ def _wait_or_finish(session_id: str | None, outcome: Outcome, route: Route, fini
 def observed(session_id: str | None, spawn_id: str, run: dict) -> None:
     """What a spawn's agent ran at, as its requests carried it: it replaces what the route set at spawn, on the
     route and on a run already waiting or finished, whichever order the result and this arrive in."""
+    route = store.load_entry("routes", session_id).get(spawn_id)
+    if isinstance(route, dict) and route.get("ran") == run:
+        return  # an earlier turn brought the same pair, and every record took it then
+
     def into(records: dict) -> None:
         for record in records.values():
             if isinstance(record, dict) and record.get("spawn") == spawn_id:

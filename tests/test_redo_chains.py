@@ -376,6 +376,15 @@ class RedoChainCases(Sandbox):
         self.assertEqual((redo["model"], redo["effort"]), ("sonnet", "high"))
         self.assertIn("(haiku at no effort)", redo["reason"])
 
+    def test_a_turn_at_the_pair_already_on_record_rewrites_no_state_file(self):
+        ran = {"model": IDS["opus"], "effort": "low"}
+        self.mod_run("t1", "Parser fix", ran, model="opus", effort="medium")
+        with mock.patch.object(store, "mutate_entry", side_effect=AssertionError("a state file was rewritten")):
+            hooks.HANDLERS["mod-usage"]({"session_id": "s1", "agent_id": "at1", "tool_use_id": "t1", "ran": ran})
+        hooks.HANDLERS["mod-usage"]({"session_id": "s1", "agent_id": "at1", "tool_use_id": "t1", "ran": {**ran, "effort": "high"}})
+        self.assertEqual(calls.last_run("s1", calls.task({"subagent_type": "general-purpose", "description": "Parser fix"}))["effort"],
+                         "high")
+
     def test_an_observation_without_its_spawn_or_with_a_bad_pair_changes_nothing(self):
         for ran in ({"model": IDS["opus"], "effort": 3}, {"model": "gpt-x", "effort": "high"}, "high"):
             self.assertEqual(hooks.HANDLERS["mod-usage"]({"session_id": "s1", "agent_id": "a", "tool_use_id": "t9", "ran": ran}),
