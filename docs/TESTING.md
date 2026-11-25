@@ -19,26 +19,25 @@ Every change passes these gates before merging. CI (`.github/workflows/ci.yml`) 
 
 ## The interactive features by hand
 
-The status line, `/model-router` and the session check run only in a session with a person at the prompt, which no gate above starts. Checked by hand in the terminal on Claude Code 2.1.332: `session.start` reports `isInteractive` and no source, and fires again on every plugin reload, an option change by `$.config.set` included; `$.ui.status` draws under the prompt after the plugin's name and updates; a mod command named `model-router` lists in the typeahead and runs with no model turn; `$.ui.ask` from a task started at `session.start` shows before the first prompt and adds its own "Type something" and "Chat about this" rows; `$.command.run` for `model` and `effort` switches the running session and saves both as defaults; `$.session.model()` answers the full model ID; `$.config.list()` keys the option `model-router.session_check` and `$.config.set` writes it to `pluginConfigs`.
+The status line, `/model-router` and the session check run only in a session with a person at the prompt, which no gate above starts. They are checked by hand in a terminal session, with the plugin loaded by `--plugin-dir` and a new config folder for each case:
 
-Still to check on a live run:
+| Case | What happens | Claude Code |
+| :- | :- | :- |
+| A session on Haiku | The question shows before the first prompt, with the `Model Router` chip and the four options | 2.1.329, 2.1.332 |
+| Opus, then `medium` | `/model opus` runs alone, since the effort already holds | 2.1.332 |
+| Fable, then `max` | `/model fable`, then `/effort max`, which Claude Code applies to that session only | 2.1.332 |
+| A session on Sonnet at `medium`; Sonnet, then `xhigh` | `/effort xhigh` runs alone | 2.1.332 |
+| Stay, then "Don't ask again" | The option is written, the plugin reloads, and nothing asks again in that session | 2.1.332 |
+| Esc at the first step | Nothing changes | 2.1.332 |
+| A session on Opus | No question | 2.1.332 |
+| `--model sonnet --effort xhigh` | No question; `/model-router` says `session: sonnet at xhigh` | 2.1.332 |
+| `--model opus --effort low` | The question names Opus at low | 2.1.332 |
+| A prompt given at launch | No question, during the turn or after it | 2.1.332 |
+| `--continue` on that session | No question | 2.1.332 |
+| One subagent call | The line under the prompt goes from `auto · mod · 0 calls` to `auto · mod · 1 call · 1 changed` | 2.1.332 |
+| `/model-router`, `/model-router off`, `/model-router check on` | Each replies with no model turn, and the line under the prompt follows | 2.1.332 |
 
-1. The mod, with these calls, loads on Claude Code 2.1.329 and 2.1.330.
-2. The status line, the command, the dialog and the two commands with arguments in the Desktop app's Code tab and the VS Code extension, and what `isInteractive` reports there.
-3. `$.session.turns()` is 0 at the `session.start` of a fresh launch and above 0 under `--resume`, `--continue` and `--fork-session`.
-4. A first prompt given at launch starts its turn before the question shows, so no dialog appears mid-work.
-5. `/model-router` typed while a turn runs: whether Claude reads its reply.
-6. The toast after "Don't ask again", sent after `$.config.set` has reloaded the plugin.
-7. A split-pane teammate process and a background session: whether they report `isInteractive` and would ask.
-8. A refused `/model` from the mod (Fable's usage-credits prompt dismissed, a blocked model, a `PreModelSwitch` hook): `$.session.model()` keeps the old model, and the check says the session stayed.
-9. `/effort max` from the mod lasts the session only.
-10. Whether a `/model` before the first prompt shows a cache confirmation.
-11. Whether adding `session_check` opens the options dialog for an existing install.
-12. `isLocked` on the `session_check` row under a managed `pluginConfigs` value.
-13. The estimate against the first request's effort under a `--effort` flag and an organization default.
-14. Whether the status line goes away when the plugin is disabled or reloaded.
-15. The header chip `Model Router` on the dialog.
-16. What `$.session.model()` answers under `opusplan` and `default`.
+Not run by hand: the Desktop app's Code tab and the VS Code extension's panel (the Claude Code each bundles, 2.1.330 and 2.1.331, routes a call on both paths in a headless run), the web, a split-pane teammate and a background session, `--resume` and `--fork-session`, `/model-router` typed while a turn runs, a `/model` that Claude Code refuses, a `session_check` that managed settings own, and an organization's default effort.
 
 ## Latest results
 
