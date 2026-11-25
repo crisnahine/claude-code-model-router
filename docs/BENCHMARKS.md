@@ -36,16 +36,16 @@ python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
 
 Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a configuration for one, and a router configuration here may run the plugin from another commit. A run the harness stopped, by the timeout or the budget cap, counts as failed whatever its files held. As in the judged tables, runs on an earlier revision of a task, runs whose pass check broke and runs the bench stopped before their check finished are left out.
 
-### `calibration-1`: 32 runs on 2026-11-25, $6.41, session on `claude-opus-5-5`
+### `calibration-1`: 28 runs on 2026-11-25, $5.27, session on `claude-opus-5-5`
 
 Eleven tasks under the two baselines, to look for tasks that tell a strong subagent from a cheap one. None did: both solved every run. The table counts ten of them, since `ops-inbox-triage` has changed since it ran.
 
-Left out of the table: 12 run(s) ($2.80) on an earlier revision of `bugfix-statement-queries`, `impl-merge-customers`, `ops-inbox-triage`.
+Left out of the table: 16 run(s) ($3.94) on an earlier revision of `bugfix-statement-queries`, `impl-merge-customers`, `ops-inbox-triage`, `rootcause-wallet-race`.
 
 | Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |
 | :- | -: | -: | :- | -: | :- |
-| `defaults` | 16 | 16 | none | $0.263 |  |
-| `haiku-high` | 16 | 16 | none | $0.137 |  |
+| `defaults` | 14 | 14 | none | $0.249 |  |
+| `haiku-high` | 14 | 14 | none | $0.127 |  |
 
 ### `calibration-2`: 24 runs on 2026-11-25, $8.37, session on `claude-opus-5-5`
 
@@ -58,14 +58,14 @@ Left out of the table: 4 run(s) ($1.50) on an earlier revision of `mixed-plan-th
 | `defaults` | 12 | 11 | 1 by the timeout | $0.517 |  |
 | `haiku-high` | 12 | 11 | 1 by the timeout | $0.180 |  |
 
-### `release-1`: 78 runs on 2026-11-25, $18.20, session on `opus`
+### `release-1`: 66 runs on 2026-11-25, $15.78, session on `opus`
 
 Sixteen tasks under the plugin and the two baselines, with the ladder and the table the plugin ships. It stays exploratory for two reasons: the plugin has changed since the commit it ran, and each run had a $0.50 cap, which stopped five runs before they finished.
 
-Left out of the table: 18 run(s) ($4.40) on an earlier revision of `bugfix-statement-queries`, `impl-merge-customers`, `mixed-plan-then-build`.
+Left out of the table: 30 run(s) ($6.83) on an earlier revision of `bugfix-statement-queries`, `design-cache-invalidation`, `impl-merge-customers`, `mixed-plan-then-build`, `rootcause-wallet-race`.
 
 | Configuration | Runs | Solved | Stopped | Cost per run | Plugin commit |
 | :- | -: | -: | :- | -: | :- |
-| `defaults` | 26 | 23 | 3 by the budget cap | $0.334 |  |
-| `plugin` | 26 | 25 | 1 by the budget cap | $0.222 | `99467a2` |
-| `haiku-high` | 26 | 26 | none | $0.144 |  |
+| `defaults` | 22 | 19 | 3 by the budget cap | $0.347 |  |
+| `plugin` | 22 | 21 | 1 by the budget cap | $0.225 | `99467a2` |
+| `haiku-high` | 22 | 22 | none | $0.146 |  |

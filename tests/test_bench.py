@@ -1931,7 +1931,7 @@ class TaskIdentity(unittest.TestCase):
             self.assertIsInstance(task.get("revision"), int, task["id"])
             self.assertGreaterEqual(task["revision"], 1, task["id"])
         tasks = {t["id"]: t for t in run.load_tasks()}
-        self.assertEqual(tasks["design-cache-invalidation"]["revision"], 2)
+        self.assertEqual(tasks["design-cache-invalidation"]["revision"], 3)
 
     def test_rows_on_an_earlier_task_revision_are_left_out_of_the_tables(self):
         old = full_row(task_revision=1, **{"class": "design"})
@@ -1948,7 +1948,7 @@ class TaskIdentity(unittest.TestCase):
             page = out.read_text(encoding="utf-8")
         self.assertEqual(sorted(r["task"] for r in loaded.stale), ["design-cache-invalidation"] * 2)
         self.assertEqual([r["task"] for r in loaded.rows], ["design-rate-limiter"])
-        self.assertIn("`design-cache-invalidation` is at revision 2; 2 of its runs ($", page)
+        self.assertIn("`design-cache-invalidation` is at revision 3; 2 of its runs ($", page)
         self.assertIn("are left out of every table", page)
 
 
