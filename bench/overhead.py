@@ -35,11 +35,10 @@ MODEL_IDS = {"haiku": "claude-haiku-5-5", "sonnet": "claude-sonnet-5-5", "opus":
 SESSION_MODEL = "claude-opus-5-5"
 USAGE = {"model": "claude-sonnet-5-5", "input_tokens": 12000, "output_tokens": 800,
          "cache_read_input_tokens": 40000, "cache_creation_input_tokens": 2000}
-MODEL_ERROR = "model claude-fable-5-2 is not available on this account"  # matches health.MODEL_ERROR
+MODEL_ERROR = "API Error: 404 not_found_error: model: claude-fable-5-2"  # matches health.MODEL_ERROR
 
 # Hook input per settings hook command, from the documented fields
 # (https://code.claude.com/docs/en/hooks.md); hook_input() adds the common ones.
-# refresh-cache is left out: it is async, so nothing waits on it, and it fetches.
 HOOK_INPUTS = {
     "session-start": {"hook_event_name": "SessionStart", "source": "startup", "model": SESSION_MODEL},
     "user-prompt": {"hook_event_name": "UserPromptSubmit", "prompt": BRIEFS[2]},
@@ -61,11 +60,10 @@ MOD_INPUTS = {
     "mod-start": {},
     "mod-spawn": {"parent_model": SESSION_MODEL, "kind": "subagent",
                   "tool_input": {"subagent_type": "general-purpose", "prompt": BRIEFS[1], "description": "fix"}},
-    "mod-turn": {"text": BRIEFS[2], "model": SESSION_MODEL},
-    "mod-usage": {"agent_id": "a1", "usage": USAGE},
+    "mod-usage": {"agent_id": "a1", "subagent_type": "general-purpose", "models": [USAGE], "cost": {"usd": 0.05}},
 }
 # Files the simulation must have written, or the run didn't exercise their path.
-STATE_FILES = ("ledger.jsonl", "state.json", "learned.json")
+STATE_FILES = ("ledger.jsonl", "state.json", "allowlist.json")
 _TOP_KEYS = ("prompt", "text")
 
 
@@ -81,8 +79,7 @@ def summary(samples: list[float], digits: int = 1, **labels) -> dict:
 
 
 def vary(payload: dict, run: int) -> dict:
-    """The same call with a different brief each run, so repeats aren't read as redos or
-    refused rewrites."""
+    """The same call with a different brief each run, so repeats aren't read as refused rewrites."""
     payload = dict(payload)
     for key in _TOP_KEYS:
         if key in payload:
@@ -116,7 +113,6 @@ class Sandbox:
                if not k.startswith(("CLAUDE_", "ANTHROPIC_")) and k != "PYTHONDONTWRITEBYTECODE"}
         env.update({"CLAUDE_PLUGIN_DATA": str(self.root / "data"), "CLAUDE_CONFIG_DIR": str(self.root / "home"),
                     "CLAUDE_PROJECT_DIR": str(self.root / "project"), "CLAUDE_PLUGIN_ROOT": str(PLUGIN),
-                    "CLAUDE_PLUGIN_OPTION_UPDATE_CHECK": "false",
                     "PYTHONPYCACHEPREFIX": str(self.root / "pycache")})
         return env
 
@@ -216,12 +212,20 @@ def in_process(base: Path, calls: int, runs: int):
         router.decide(spawn.facts(hook_input, snap), snap.registry, snap.options)
         decide.append((time.perf_counter() - started) * 1000)
 
+    def layers(session: str) -> dict:
+        """The settings layers the mod sends, varied per session so each stores its own."""
+        allowed = ["haiku", "sonnet", "opus", "fable"][: 2 + int(session[1:]) % 3]
+        return {"user": {"availableModels": allowed}, "project": {}}
+
     def routed_call(session: str, i: int, mod: bool) -> None:
-        tool_input = {"subagent_type": "general-purpose", "prompt": f"{BRIEFS[i % 3]} (call {i})"}
+        # As Claude makes them: each call names a model and has a description of its own.
+        tool_input = {"subagent_type": "general-purpose", "prompt": f"{BRIEFS[i % 3]} (call {i})",
+                      "model": ("haiku", "sonnet", "opus")[i % 3], "description": f"task {i}"}
         call = {"session_id": session, "cwd": project, "tool_input": tool_input}
         before = len(taken)
         if mod:
-            model = (modpath.spawn({**call, "parent_model": SESSION_MODEL, "kind": "subagent"}) or {}).get("model")
+            model = (modpath.spawn({**call, "parent_model": SESSION_MODEL, "kind": "subagent",
+                                    "settings": layers(session)}) or {}).get("model")
         else:
             out = hooks.pre_agent(call)
             model = ((out or {}).get("hookSpecificOutput") or {}).get("updatedInput", {}).get("model")
@@ -236,11 +240,12 @@ def in_process(base: Path, calls: int, runs: int):
             hooks.post_agent({**call, "tool_response": {"resolvedModel": ran_as, "status": "completed"}})
         if i % 50 == 49:
             hooks.agent_failed({**call, "error": MODEL_ERROR})
-        modpath.usage({"session_id": session, "agent_id": f"a{i}", "usage": {**USAGE, "model": ran_as}})
+        modpath.usage({"session_id": session, "agent_id": f"a{i}", "subagent_type": "general-purpose",
+                       "models": [{**USAGE, "model": ran_as}], "cost": {"usd": 0.05}})
 
     def sizes() -> dict:
         return {p.name: p.stat().st_size for p in store.data_dir().iterdir()
-                if p.is_file() and not p.name.endswith(".lock")}
+                if p.is_file() and not p.name.endswith((".lock", ".flock"))}
 
     def simulate(n: int, per_session: int, offset: int = 0, watch: dict | None = None) -> None:
         """Even sessions take the fallback path, odd ones the mod path."""
@@ -251,10 +256,8 @@ def in_process(base: Path, calls: int, runs: int):
                 hooks.session_start({"session_id": session, "cwd": project, "source": "startup",
                                      "model": SESSION_MODEL})
                 if mod:
-                    modpath.start({"session_id": session})
-                    modpath.turn({"session_id": session, "text": BRIEFS[i % 3], "model": SESSION_MODEL})
-                else:
-                    hooks.user_prompt({"session_id": session, "cwd": project, "prompt": BRIEFS[i % 3]})
+                    modpath.start({"session_id": session, "settings": layers(session)})
+                hooks.user_prompt({"session_id": session, "cwd": project, "prompt": BRIEFS[i % 3]})
             routed_call(session, i, mod)
             if i % 5 == 0:
                 hooks.post_edit({"session_id": session, "cwd": project,

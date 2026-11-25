@@ -2,6 +2,7 @@
 import contextlib
 import importlib.util
 import json
+import math
 import re
 import subprocess
 import sys
@@ -82,10 +83,13 @@ def number(value) -> bool:
 
 
 def numeric(value):
+    """A number or numeric string as a finite float, else None: NaN compares False with everything, so a check's
+    `> tolerance` test would let it through."""
     try:
-        return float(value) if not isinstance(value, bool) else None
+        n = float(value) if not isinstance(value, bool) else None
     except (TypeError, ValueError):
         return None
+    return n if n is not None and math.isfinite(n) else None
 
 
 def finding(work: Path, target: str, lines: set) -> bool:

@@ -1,15 +1,15 @@
-"""Command line: hook commands read hook JSON on stdin; the rest serve skills and CI.
+"""Command line: hook commands read hook JSON on stdin; the rest serve skills and scripts.
 
   hooks      session-start, user-prompt, pre-agent, post-agent, agent-failed, agent-stopped,
-             post-edit, stop, model-switch, refresh-cache
+             post-edit, stop, model-switch, and mod-start, mod-spawn, mod-usage for hooks/router.ts
   policy     the routing policy as it stands for this user and project
   models     what each registry model really runs as, and what is unavailable
-             (--reset forgets learned availability and feedback; --json prints model-router.models/1)
-  explain    what the router would make of a task: explain [--agent NAME] TEXT
-  refresh    fetch upstream (--force) and show what changed; status shows the cache;
-             ack marks it reviewed
-  usage      the ledger by agent and model: usage [DAYS] [--json for model-router.usage/1]
-  upstream-check --baseline FILE [--write]   CI: compare live upstream with a baseline
+             (reset forgets learned availability; --json prints model-router.models/3)
+  explain    what an agent call would run on and why: explain [--agent NAME] [--model M] [--effort E] [TEXT]
+  usage      the ledger by agent and model: usage [DAYS] [--json for model-router.usage/2]
+
+policy, models and explain take the plugin's options as flags, such as --max-tier=sonnet:
+skills pass them as ${user_config.KEY}, since the Bash tool doesn't carry CLAUDE_PLUGIN_OPTION_<KEY>.
 """
 from __future__ import annotations
 
@@ -17,13 +17,13 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
+import unicodedata
 
-from . import health, hooks, learn, report, settings, store, upstream
+from . import health, hooks, report, settings, store
 
 
 # Hook fields the handlers use as text: as file keys, paths, or things to match against.
-_TEXT_FIELDS = ("session_id", "cwd", "transcript_path", "prompt", "prompt_id", "agent_id", "agent_type",
+_TEXT_FIELDS = ("session_id", "cwd", "transcript_path", "prompt", "agent_id", "agent_type",
                 "model", "to_model", "error")
 
 
@@ -55,46 +55,72 @@ def _reset_health() -> str:
     return "Learned availability left as is: state.json could not be read or written."
 
 
-def _reset_feedback() -> str:
-    status = learn.reset()
-    if status in ("removed", "missing"):
-        return "Feedback cleared." if status == "removed" else "No feedback to clear."
-    if status == "newer":
-        return "Feedback " + _NEWER.format("learned.json")
-    if status == "busy":
-        return "Feedback " + _BUSY.format("learned.json")
-    return "Feedback left as is: learned.json could not be read or removed."
+# What the two skills that pass the user's words through accept; anything else is ignored.
+_TAKES = {"models": "reset, --json and the option flags", "usage": "a number of days and --json"}
+
+
+class _Typed(Exception):
+    """A malformed word the user typed after a skill command."""
+
+
+def _reject(cmd: str, message: str) -> None:
+    raise _Typed(f"model-router {cmd}: {message}. It takes only {_TAKES[cmd]}, so nothing was shown.")
+
+
+def _days(typed: str) -> int | None:
+    """A positive whole number of days, capped at 100 years so the cutoff stays a date; else None."""
+    if not typed.isdecimal():
+        return None
+    digits = "".join(str(unicodedata.decimal(c)) for c in typed).lstrip("0")
+    if not digits:
+        return None
+    return 36500 if len(digits) > 5 else min(int(digits), 36500)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="model-router")
     parser.add_argument("--data-dir", help="plugin data directory; skills pass ${CLAUDE_PLUGIN_DATA}")
+    options = argparse.ArgumentParser(add_help=False)
+    for key in settings.OPTIONS:
+        options.add_argument("--" + key.replace("_", "-"), dest=key)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in (*hooks.HANDLERS, "policy", "ack"):
+    for name in hooks.HANDLERS:
         sub.add_parser(name)
-    p = sub.add_parser("models")
-    p.add_argument("--reset", action="store_true")
-    p.add_argument("--json", action="store_true")
-    p = sub.add_parser("explain")
+    sub.add_parser("policy", parents=[options])
+    models = sub.add_parser("models", parents=[options])
+    models.add_argument("action", nargs="*")
+    models.add_argument("--reset", action="store_true")
+    models.add_argument("--json", action="store_true")
+    p = sub.add_parser("explain", parents=[options])
     p.add_argument("--agent")
+    p.add_argument("--model")
+    p.add_argument("--effort")
     p.add_argument("text", nargs="*")
-    sub.add_parser("refresh").add_argument("--force", action="store_true")
-    sub.add_parser("status").add_argument("--json", action="store_true")
-    p = sub.add_parser("usage")
-    p.add_argument("days", nargs="?", default="7")
-    p.add_argument("--json", action="store_true")
-    p = sub.add_parser("upstream-check")
-    p.add_argument("--baseline", required=True)
-    p.add_argument("--write", action="store_true", help="overwrite the baseline with live data")
-    p.add_argument("--json-out")
-    args = parser.parse_args(argv)
+    usage = sub.add_parser("usage")
+    usage.add_argument("days", nargs="?", default="7")
+    usage.add_argument("--json", action="store_true")
+    # Their skill lines end in whatever the user typed, and a non-zero exit aborts the skill.
+    for name, p in (("models", models), ("usage", usage)):
+        p.error = lambda message, cmd=name: _reject(cmd, message)  # type: ignore[method-assign]
+    try:
+        args, extra = parser.parse_known_args(argv)
+    except _Typed as exc:
+        print(exc, file=sys.stderr if "--json" in (sys.argv if argv is None else argv) else sys.stdout)
+        return 0
+    if extra and args.cmd not in _TAKES:
+        parser.error("unrecognized arguments: " + " ".join(extra))
     if args.data_dir and "${" not in args.data_dir:
         os.environ["CLAUDE_PLUGIN_DATA"] = args.data_dir
+    for key in settings.OPTIONS:
+        value = getattr(args, key, None)
+        if value and "${" not in value:  # an unsubstituted ${user_config.KEY} leaves the option at its default
+            os.environ[f"CLAUDE_PLUGIN_OPTION_{key.upper()}"] = value
 
     if args.cmd in hooks.HANDLERS:
         try:
             try:
-                hook_input = json.load(sys.stdin)
+                # Bytes: json detects UTF-8 itself, where the text stream would decode in the locale's code page.
+                hook_input = json.loads(sys.stdin.buffer.read())
             except ValueError:
                 hook_input = {}
             hook_input = _well_formed(hook_input)
@@ -107,56 +133,27 @@ def main(argv: list[str] | None = None) -> int:
             print(f"model-router {args.cmd}: {exc}", file=sys.stderr)
         return 0
 
-    snap = settings.Snapshot(None, recorded=True)
-    options = snap.options
+    snap = settings.Snapshot(None)
     if args.cmd == "policy":
         print(report.policy(snap))
     elif args.cmd == "models":
-        if args.reset:
-            cleared = f"{_reset_health()}\n{_reset_feedback()}\n"
+        extra = args.action + extra
+        if args.reset or "reset" in extra:
+            cleared = f"{_reset_health()}\n"
             if not args.json:
                 print(cleared)
         print(json.dumps(report.models_data(snap), indent=2) if args.json
               else report.models(snap))
     elif args.cmd == "explain":
-        print(report.explain(snap, " ".join(args.text), args.agent))
-    elif args.cmd == "refresh":
-        try:
-            data = upstream.refresh(options, force=args.force)
-        except Exception as exc:  # noqa: BLE001 - offline or blocked: say so and show what is on disk
-            print(f"Couldn't reach the Claude Code docs ({exc}); showing the last check.")
-            print(report.status(upstream.pending()))
-            return 0  # Claude Code fails a skill's ! line on a non-zero exit, so the skill would never load
-        print(report.status(upstream.pending(data)))
-    elif args.cmd == "status":
-        changes = upstream.pending()
-        print(json.dumps(changes, indent=2) if args.json else report.status(changes))
-    elif args.cmd == "ack":
-        acked = upstream.ack()
-        if acked is None:
-            print("Nothing cached yet; run refresh first.")
-            return 1
-        version, status = acked
-        if status != "saved":
-            left = {"newer": _NEWER, "busy": _BUSY}.get(status, "left as is: {} could not be read or written.")
-            print("Review mark " + left.format("upstream.json"))
-            return 1
-        print(f"Marked Claude Code {version} and the current docs index as reviewed.")
+        print(report.explain(snap, " ".join(args.text), args.agent, args.model, args.effort))
     elif args.cmd == "usage":
-        days = int(args.days) if str(args.days).isdigit() and int(args.days) > 0 else 7  # ledger.read(0) is everything
+        days = _days(args.days)
+        if days is None:
+            days = 7
+            extra.insert(0, args.days)
         print(json.dumps(report.usage_data(days), indent=2) if args.json else report.usage(days))
-    elif args.cmd == "upstream-check":
-        baseline_path = Path(args.baseline)
-        live = upstream.fetch(options)
-        if args.write:
-            baseline = upstream.snapshot(live)
-            store.save_json(baseline_path, baseline)
-            print(f"Baseline written for Claude Code {baseline['claude_code_version']} "
-                  f"({len(live['pages'])} docs pages).")
-            return 0
-        changes = upstream.diff(store.load_dict(baseline_path), live)
-        if args.json_out:
-            Path(args.json_out).write_text(json.dumps({**changes, "pending": upstream.has_pending(changes)},
-                                                      indent=2), encoding="utf-8")
-        print(report.status(changes))
+    ignored = [word for word in extra if word != "reset" or args.cmd != "models"]
+    if ignored:
+        print(f"Ignored {' '.join(ignored)!r}: {args.cmd} takes only {_TAKES[args.cmd]}.",
+              file=sys.stderr if args.json else sys.stdout)
     return 0

@@ -1,0 +1,118 @@
+{
+  "M01": {
+    "priority": "P1",
+    "owner": "engineering"
+  },
+  "M02": {
+    "priority": "P2",
+    "owner": "billing"
+  },
+  "M03": {
+    "priority": "P4",
+    "owner": "none"
+  },
+  "M04": {
+    "priority": "P3",
+    "owner": "support"
+  },
+  "M05": {
+    "priority": "P1",
+    "owner": "security"
+  },
+  "M06": {
+    "priority": "P3",
+    "owner": "security"
+  },
+  "M07": {
+    "priority": "P1",
+    "owner": "security"
+  },
+  "M08": {
+    "priority": "P1",
+    "owner": "legal"
+  },
+  "M09": {
+    "priority": "P1",
+    "owner": "legal"
+  },
+  "M10": {
+    "priority": "P2",
+    "owner": "legal"
+  },
+  "M11": {
+    "priority": "P4",
+    "owner": "sales"
+  },
+  "M12": {
+    "priority": "P3",
+    "owner": "sales"
+  },
+  "M13": {
+    "priority": "P2",
+    "owner": "billing"
+  },
+  "M14": {
+    "priority": "P2",
+    "owner": "engineering"
+  },
+  "M15": {
+    "priority": "P2",
+    "owner": "engineering"
+  },
+  "M16": {
+    "priority": "P3",
+    "owner": "support"
+  },
+  "M17": {
+    "priority": "P1",
+    "owner": "security"
+  },
+  "M18": {
+    "priority": "P3",
+    "owner": "support"
+  },
+  "M19": {
+    "priority": "P4",
+    "owner": "none"
+  },
+  "M20": {
+    "priority": "P3",
+    "owner": "legal"
+  },
+  "M21": {
+    "priority": "P1",
+    "owner": "billing"
+  },
+  "M22": {
+    "priority": "P2",
+    "owner": "engineering"
+  },
+  "M23": {
+    "priority": "P1",
+    "owner": "security"
+  },
+  "M24": {
+    "priority": "P2",
+    "owner": "billing"
+  },
+  "M25": {
+    "priority": "P1",
+    "owner": "security"
+  },
+  "M26": {
+    "priority": "P2",
+    "owner": "billing"
+  },
+  "M27": {
+    "priority": "P4",
+    "owner": "sales"
+  },
+  "M28": {
+    "priority": "P1",
+    "owner": "billing"
+  },
+  "M29": {
+    "priority": "P1",
+    "owner": "security"
+  }
+}

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Writes the docs' SVG assets, the docs' page heads, the site's copies and CITATION.cff.
+"""Writes the docs' diagrams and badges, the docs' page heads and index, the benchmark figures, the site's
+generated parts and CITATION.cff.
 
 Run: python3 tools/docs_assets.py            write everything
      python3 tools/docs_assets.py --check    fail if anything on disk differs or breaks a rule
@@ -26,17 +27,14 @@ MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mo
 # The five rung colors run from the cheapest level (lookup) to the strongest (frontier).
 LIGHT = {
     "bg": "#F4F7FB", "card": "#FFFFFF", "line": "#D2DBE7", "ink": "#0C1524", "muted": "#4A5871",
-    "faint": "#E7EDF5", "route": "#A65200", "routesoft": "#FFF1DE", "tile": "#0C1524", "tileline": "#0C1524",
-    "tag": "#FFFFFF", "rungs": ["#0E8C6F", "#0A78B8", "#3B57D6", "#6D3FD1", "#A72C8A"],
+    "faint": "#E7EDF5", "route": "#A65200", "routesoft": "#FFF1DE", "tag": "#FFFFFF",
+    "rungs": ["#0E8C6F", "#0A78B8", "#3B57D6", "#6D3FD1", "#A72C8A"],
 }
 DARK = {
     "bg": "#0A101B", "card": "#0F1828", "line": "#26344B", "ink": "#E7EDF6", "muted": "#9BA9BD",
-    "faint": "#1A263A", "route": "#FFB23E", "routesoft": "#33260F", "tile": "#13203A", "tileline": "#2C3E60",
-    "tag": "#0C1524", "rungs": ["#38D3A8", "#45B4F2", "#8196FF", "#AA8BFF", "#F27BCD"],
+    "faint": "#1A263A", "route": "#FFB23E", "routesoft": "#33260F", "tag": "#0C1524",
+    "rungs": ["#38D3A8", "#45B4F2", "#8196FF", "#AA8BFF", "#F27BCD"],
 }
-TILE_INK = "#0C1524"  # the mark's tile is ink in both themes, so its rails and rungs keep one color
-
-LEVELS = ["lookup", "standard", "complex", "hardest", "frontier"]
 
 
 def esc(s: str) -> str:
@@ -57,49 +55,28 @@ def room(where: str, end: float, limit: float):
         LAYOUT.append(f"{where}: text ends at {end:.0f}, past {limit:.0f}")
 
 
-def wrap(text: str, size: float, width: float, mono: bool = False) -> list:
-    lines, line = [], ""
-    for word in text.split():
-        trial = f"{line} {word}".strip()
-        if line and width_of(trial, size, mono) > width:
-            lines.append(line)
-            line = word
-        else:
-            line = trial
-    return lines + ([line] if line else [])
-
-
 def palette_css(p: dict) -> str:
     rules = [
-        f".bg{{fill:{p['bg']}}}", f".card{{fill:{p['card']};stroke:{p['line']}}}", f".ink{{fill:{p['ink']}}}",
+        f".card{{fill:{p['card']};stroke:{p['line']}}}", f".ink{{fill:{p['ink']}}}",
         f".mut{{fill:{p['muted']}}}", f".faint{{fill:{p['faint']}}}", f".ln{{stroke:{p['line']}}}",
-        f".lnm{{stroke:{p['muted']}}}", f".inks{{stroke:{p['ink']}}}", f".rt{{fill:{p['route']}}}",
+        f".lnm{{stroke:{p['muted']}}}", f".rt{{fill:{p['route']}}}",
         f".rts{{stroke:{p['route']}}}", f".rtsoft{{fill:{p['routesoft']}}}", f".halo{{stroke:{p['card']}}}",
-        f".haloc{{stroke:{p['bg']}}}", f".tile{{fill:{p['tile']};stroke:{p['tileline']}}}",
-        f".stop0{{stop-color:{p['card']}}}", f".stop1{{stop-color:{p['bg']}}}", f".tag{{fill:{p['tag']}}}",
+        f".tag{{fill:{p['tag']}}}",
     ]
     for i, c in enumerate(p["rungs"], 1):
         rules.append(f".r{i}{{fill:{c}}}.r{i}s{{stroke:{c}}}")
     return "".join(rules)
 
 
-def style(extra: str = "", theme: str = "auto") -> str:
-    base = (f"text{{font-family:{SANS}}}.mono{{font-family:{MONO}}}.b{{font-weight:600}}"
-            ".rail{stroke:#C9D4E4}.tilehalo{stroke:" + TILE_INK + "}")
-    if theme == "auto":
-        colors = palette_css(LIGHT) + "@media (prefers-color-scheme: dark){" + palette_css(DARK) + "}"
-    else:
-        colors = palette_css(DARK if theme == "dark" else LIGHT)
-    motion = "@media (prefers-reduced-motion: reduce){*{animation:none!important}}" if "@keyframes" in extra else ""
-    return f"<style>{base}{colors}{extra}{motion}</style>"
+def style() -> str:
+    return (f"<style>text{{font-family:{SANS}}}.mono{{font-family:{MONO}}}.b{{font-weight:600}}"
+            + palette_css(LIGHT) + "@media (prefers-color-scheme: dark){" + palette_css(DARK) + "}</style>")
 
 
-def svg(w: int, h: int, title: str, label: str, body: str, extra_css: str = "", theme: str = "auto",
-        width=None) -> str:
-    size = f'width="{width or w}" height="{round(h * (width or w) / w)}"'
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" {size} role="img" '
+def svg(w: int, h: int, title: str, label: str, body: str) -> str:
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" role="img" '
             f'aria-label="{attr(label)}">\n<title>{esc(title)}</title>\n'
-            f"{style(extra_css, theme)}\n{body}\n</svg>\n")
+            f"{style()}\n{body}\n</svg>\n")
 
 
 def text(x, y, s, cls="ink", size=13, anchor=None, extra=""):
@@ -127,135 +104,10 @@ def frame(w, h, rx=16):
     return f'<rect x="0.5" y="0.5" width="{w - 1}" height="{h - 1}" rx="{rx}" class="card"/>'
 
 
-def keyframes(name: str, stops: list) -> str:
-    return f"@keyframes {name}{{" + "".join(f"{p}%{{{v}}}" for p, v in stops) + "}"
-
-
-# ---------------------------------------------------------------- brand
-
-def mark_body(x=0, y=0, s=1.0, halo="tilehalo"):
-    rungs = "".join(f'<path d="M21 {14 + 9 * k}H43" class="r{5 - k}s" stroke-width="3.4" stroke-linecap="round"/>'
-                    for k in range(5))
-    route = "M7 41H27A4.5 4.5 0 0 0 31.5 36.5A4.5 4.5 0 0 1 36 32H51"
-    return (f'<g transform="translate({x:g} {y:g}) scale({s:g})">'
-            f'<rect x="1" y="1" width="62" height="62" rx="15" class="tile" stroke-width="1.5"/>'
-            f'<path d="M21 9V55M43 9V55" class="rail" stroke-width="4.4" stroke-linecap="round" fill="none"/>'
-            f"{rungs}"
-            f'<path d="{route}" class="{halo}" stroke-width="10.5" fill="none" stroke-linecap="round"/>'
-            f'<path d="{route}" class="rts" stroke-width="5.4" fill="none" stroke-linecap="round" '
-            f'stroke-linejoin="round"/>'
-            f'<circle cx="54" cy="32" r="4.9" class="rt"/></g>')
-
-
-def glyphs(word: str):
-    """Monoline lowercase letters on a 36-unit x-height: (ink path, accent path, width)."""
-    top, base, asc, mid = 22, 58, 2, 40
-    x, ink, accent = 0.0, [], []
-    for ch in word:
-        if ch == " ":
-            x += 24
-            continue
-        if ch == "m":
-            ink.append(f"M{x:g} {top}V{base}M{x:g} {top + 11}A11 11 0 0 1 {x + 22:g} {top + 11}V{base}"
-                       f"M{x + 22:g} {top + 11}A11 11 0 0 1 {x + 44:g} {top + 11}V{base}")
-            w = 44
-        elif ch in "od":
-            ink.append(f"M{x:g} {mid}A18 18 0 1 0 {x + 36:g} {mid}A18 18 0 1 0 {x:g} {mid}")
-            if ch == "d":
-                ink.append(f"M{x + 36:g} {asc}V{base}")
-            w = 36
-        elif ch == "e":
-            ink.append(f"M{x:g} {mid}H{x + 36:g}A18 18 0 1 0 {x + 30.73:g} {mid + 12.73}")
-            w = 36
-        elif ch == "l":
-            ink.append(f"M{x:g} {asc}V{base}")
-            w = 0
-        elif ch == "r":
-            ink.append(f"M{x:g} {top}V{base}M{x:g} {top + 16}A16 16 0 0 1 {x + 16:g} {top}H{x + 19:g}")
-            w = 19
-        elif ch == "u":
-            ink.append(f"M{x:g} {top}V{mid}A18 18 0 0 0 {x + 36:g} {mid}M{x + 36:g} {top}V{base}")
-            w = 36
-        elif ch == "t":
-            ink.append(f"M{x + 7:g} {asc + 8}V{base - 9}A9 9 0 0 0 {x + 16:g} {base}H{x + 20:g}")
-            accent.append(f"M{x - 1:g} {top}H{x + 19:g}")
-            w = 20
-        else:
-            raise ValueError(ch)
-        x += w + 15
-    return "".join(ink), "".join(accent), x - 15 + 3.5
-
-
-WORD = "model router"
-WORD_SCALE = 0.84
-
-
-def wordmark_body(x=0, y=0, s=1.0, ink_cls="inks"):
-    ink, accent, _ = glyphs(WORD)
-    common = 'fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"'
-    return (f'<g transform="translate({x:g} {y:g}) scale({s:g})">{mark_body()}'
-            f'<g transform="translate(86 6) scale({WORD_SCALE})">'
-            f'<path d="{ink}" class="{ink_cls}" {common}/><path d="{accent}" class="rts" {common}/></g></g>')
-
-
-def wordmark_width():
-    return 86 + glyphs(WORD)[2] * WORD_SCALE + 4
-
-
-def brand_assets() -> dict:
-    out = {}
-    label = "Model Router mark: a ladder of five colored rungs, with an amber route that climbs one rung."
-    out["logo-mark.svg"] = svg(64, 64, "Model Router", label, mark_body())
-    w = round(wordmark_width())
-    wl = "Model Router logo: the ladder mark and the words model router."
-    out["logo.svg"] = svg(w, 64, "Model Router", wl, wordmark_body())
-    out["logo-light.svg"] = svg(w, 64, "Model Router", wl, wordmark_body(), theme="light")
-    out["logo-dark.svg"] = svg(w, 64, "Model Router", wl, wordmark_body(), theme="dark")
-    return out
-
-
-# ---------------------------------------------------------------- icons
-
-ICONS = {
-    "faq": '<path d="M5 4.5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4.5 3.5V16.5H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z"/>'
-           '<path d="M9.6 8.9a2.4 2.4 0 1 1 3.4 2.2c-.6.3-1 .8-1 1.4v.3"/><path d="M12 14.6v.1"/>',
-    "index": '<rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/>'
-             '<rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/>',
-    "architecture": '<rect x="3.5" y="3.5" width="7" height="6" rx="1.4"/><rect x="13.5" y="3.5" width="7" height="6" rx="1.4"/>'
-                    '<rect x="7.5" y="15" width="9" height="5.5" rx="1.4"/><path d="M7 9.5v2.5h10V9.5M12 12v3"/>',
-    "glossary": '<path d="M5 18.5V6a2.5 2.5 0 0 1 2.5-2.5H19v13H7.5A2.5 2.5 0 0 0 5 19a2.5 2.5 0 0 0 2.5 2H19"/>'
-                '<path d="M9 8h6M9 11.5h4"/>',
-    "research": '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.4 15.4L20.5 20.5M8 10.5h5M10.5 8v5"/>',
-    "performance": '<circle cx="12" cy="13.5" r="7"/><path d="M12 13.5L15 10.5M10 2.5h4M12 2.5v4M18.5 6l1.5-1.5"/>',
-    "security": '<path d="M12 3l7 2.8v5.4c0 4.4-2.9 8.1-7 9.8-4.1-1.7-7-5.4-7-9.8V5.8z"/><path d="M8.8 12l2.2 2.2 4.2-4.4"/>',
-    "benchmarks": '<path d="M3.5 20.5h17"/><path d="M6.5 20.5v-6M11 20.5V9.5M15.5 20.5v-4M20 20.5V5"/>',
-    "tests": '<rect x="4.5" y="4.5" width="15" height="16.5" rx="2.2"/><path d="M9 3h6v3H9z"/><path d="M8.5 13l2.4 2.4 4.6-4.8"/>',
-    "trace": '<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/>'
-             '<path d="M8.5 6h2a3 3 0 0 1 3 3v0a3 3 0 0 0 2 2.8M8.5 18h2a3 3 0 0 0 3-3v0a3 3 0 0 1 2-2.8"/>',
-    "flag": '<path d="M6 21V3.5"/><path d="M6 4.5h11.5l-2.5 4 2.5 4H6"/>',
-    "roadmap": '<circle cx="5.5" cy="18.5" r="2"/><circle cx="18.5" cy="5.5" r="2"/>'
-               '<path d="M7.5 18.5H15a3.25 3.25 0 0 0 0-6.5H9a3.25 3.25 0 0 1 0-6.5h7.5"/>',
-    "changelog": '<path d="M4 6h10M4 11h7M4 16h6"/><circle cx="16.5" cy="15.5" r="4.5"/><path d="M16.5 13.3v2.4l1.6 1"/>',
-    "branch": '<circle cx="6.5" cy="5.5" r="2.2"/><circle cx="6.5" cy="18.5" r="2.2"/><circle cx="17.5" cy="7.5" r="2.2"/>'
-              '<path d="M6.5 7.7v8.6M17.5 9.7c0 4.3-5.5 3.6-9.5 7.2"/>',
-    "plug": '<path d="M9 3.5v4.5M15 3.5v4.5"/><path d="M6 8h12v3.5a6 6 0 0 1-12 0z"/><path d="M12 17.5v3"/>',
-    "brand": '<circle cx="8" cy="9" r="4.5"/><circle cx="16" cy="9" r="4.5"/><circle cx="12" cy="15.5" r="4.5"/>',
-    "docs": '<path d="M4.5 18.5V5.5a2 2 0 0 1 2-2h13v14h-13a2 2 0 0 0-2 2 2 2 0 0 0 2 2h13"/>'
-            '<path d="M9 10.2l2.2 2.2 4.3-4.6"/>',
-    "tag": '<path d="M3.5 12.2V4.5a1 1 0 0 1 1-1h7.7l8.6 8.6a1.4 1.4 0 0 1 0 2l-6.7 6.7a1.4 1.4 0 0 1-2 0z"/>'
-           '<circle cx="8.2" cy="8.2" r="1.6"/>',
-}
-
-
-def icon_body(name, x=0, y=0, s=1.0, cls="inks", sw=1.8):
-    return (f'<g transform="translate({x:g} {y:g}) scale({s:g})" fill="none" class="{cls}" stroke-width="{sw}" '
-            f'stroke-linecap="round" stroke-linejoin="round">{ICONS[name]}</g>')
-
-
-# ---------------------------------------------------------------- pages and banners
+# ---------------------------------------------------------------- the documentation index
 
 # Cards on the index for pages that carry no page head of their own.
-EXTRA_CARDS = [("README.md", "readme", "Model Router", "What does it do, and how do I install it?", "plug", 1)]
+EXTRA_CARDS = [("README.md", "Model Router", "What does it do, and how do I install it?", 1)]
 GROUPS = {1: ("Start here", "What it is, and the questions people ask first."),
           2: ("How it works", "The design, its words and sources, and what it costs to run."),
           3: ("Evidence", "What was measured and tested, and what is still open."),
@@ -266,13 +118,13 @@ CARDS_START, CARDS_END = "<!-- Cards, written by tools/docs_assets.py from PAGES
 def cards(pages: list = PAGES) -> str:
     out = [CARDS_START, "<table>"]
     for group, (name, blurb) in GROUPS.items():
-        shown = [p for p in EXTRA_CARDS + pages if p[5] == group and p[0] != "docs/README.md"]
+        shown = [p for p in EXTRA_CARDS + pages if p[3] == group and p[0] != "docs/README.md"]
         out.append(f'<tr><th colspan="2" align="left">{name}<br><sub>{blurb}</sub></th></tr>')
         for k in range(0, len(shown), 2):
             out.append("<tr>")
-            for path, slug, title, question, _, _ in shown[k:k + 2]:
-                out.append(f'<td width="50%" valign="top"><img src="assets/icon-{slug}.svg" width="20" height="20" '
-                           f'alt=""> <a href="{rel("docs/README.md", path)}"><b>{title}</b></a><br>{question}</td>')
+            for path, title, question, _ in shown[k:k + 2]:
+                out.append(f'<td width="50%" valign="top"><a href="{rel("docs/README.md", path)}"><b>{title}</b></a>'
+                           f'<br>{question}</td>')
             if len(shown[k:k + 2]) == 1:
                 out.append('<td width="50%"></td>')
             out.append("</tr>")
@@ -286,55 +138,11 @@ def with_cards(current: str, pages: list = PAGES) -> str:
     return current
 
 
-def banner(slug, title, question, icon, group) -> str:
-    w, h = 880, 168
-    lo = group  # the route climbs from this rung to the next one up
-    y_of = lambda rung: 140 - (rung - 1) * 24  # noqa: E731
-    yf, yt, cx, r = y_of(lo), y_of(lo + 1), 726, 6
-    route = (f"M626 {yf}H{cx - r}A{r} {r} 0 0 0 {cx} {yf - r}V{yt + r}A{r} {r} 0 0 1 {cx + r} {yt}H806")
-    rungs = "".join(
-        f'<path d="M696 {y_of(i)}H{756}" class="r{i}s" stroke-width="6" stroke-linecap="round" '
-        f'opacity="{1 if i in (lo, lo + 1) else 0.45}"/>' for i in range(1, 6))
-    css = (".draw{stroke-dasharray:1;animation:draw 1.6s ease-in-out 0.2s both}"
-           + keyframes("draw", [(0, "stroke-dashoffset:1"), (100, "stroke-dashoffset:0")])
-           + ".dot{animation:dot 0.4s ease-out 1.7s both}"
-           + keyframes("dot", [(0, "opacity:0"), (100, "opacity:1")]))
-    body = (
-        '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0.45" class="stop0"/>'
-        '<stop offset="1" class="stop1"/></linearGradient></defs>'
-        f'<rect x="0.5" y="0.5" width="{w - 1}" height="{h - 1}" rx="18" fill="url(#g)" class="ln" stroke-width="1"/>'
-        + card(40, 52, 64, 64, rx=16)
-        + icon_body(icon, 54, 66, 1.5, sw=1.7)
-        + text(128, 66, "MODEL ROUTER DOCS", "mono rt b", 12, extra=' letter-spacing="1.6"')
-        + text(127, 103, title, "ink b", 32)
-        + text(128, 132, question, "mut", 16)
-        + '<path d="M696 28V152M756 28V152" class="lnm" stroke-width="5" stroke-linecap="round" opacity="0.35"/>'
-        + rungs
-        + f'<path d="{route}" class="halo" stroke-width="13" fill="none" stroke-linecap="round"/>'
-        + f'<path d="{route}" class="rts draw" pathLength="1" stroke-width="6" fill="none" stroke-linecap="round" '
-          'stroke-linejoin="round"/>'
-        + f'<circle cx="814" cy="{yt}" r="7" class="rt dot"/>'
-    )
-    room(f"banner-{slug}.svg: title", 127 + width_of(title, 32, bold=True), 610)
-    room(f"banner-{slug}.svg: question", 128 + width_of(question, 16), 610)
-    label = f"{title}: {question}"
-    return svg(w, h, f"{title}: Model Router documentation", label, body, css)
-
-
-def banner_assets(pages: list = PAGES) -> dict:
-    out = {}
-    for _, slug, title, question, icon, group in pages:
-        out[f"banner-{slug}.svg"] = banner(slug, title, question, icon, group)
-    for _, slug, title, question, icon, group in [*pages, *EXTRA_CARDS]:
-        out[f"icon-{slug}.svg"] = svg(24, 24, title, f"{title} icon", icon_body(icon))
-    return out
-
-
 # ---------------------------------------------------------------- badges
 
 BADGES = [
     ("version", "version", None),
-    ("claude-code", "claude code", "2.1.329 or later"),
+    ("claude-code", "claude code", None),
     ("python", "python", "3.9 or later"),
     ("dependencies", "dependencies", "none"),
     ("license", "license", "Apache-2.0"),
@@ -358,11 +166,12 @@ def badge(label: str, value: str) -> str:
     return svg(w, h, f"{label}: {value}", f"{label}: {value}", body)
 
 
-def badge_assets(version: str) -> dict:
-    return {f"badge-{slug}.svg": badge(label, value or version) for slug, label, value in BADGES}
+def badge_assets(version: str, floor: str) -> dict:
+    filled = {"version": version, "claude-code": f"{floor} or later"}
+    return {f"badge-{slug}.svg": badge(label, value or filled[slug]) for slug, label, value in BADGES}
 
 
-# ---------------------------------------------------------------- the ladder panel (hero, social preview)
+# ---------------------------------------------------------------- the ladder
 
 LADDER = [  # level, model, effort, needs, subtask
     ("lookup", "Haiku", "medium", 1, "Find, list, summarize, run a command"),
@@ -381,334 +190,18 @@ def check_ladder_against_registry(config: dict):
         raise SystemExit(f"LADDER differs from config/models.json: {shipped}")
 
 
-BRIEF = '"Implement parse_duration exactly as its docstring specifies"'
-
-
-def ladder_panel(x, y, w, s=1.0, animate=True, prefix="h", brief_lines=(BRIEF,), model_at=0.47,
-                 tag_gap=76, effort_right=104):
-    """Five rungs, a call routed at standard that comes back and climbs to complex."""
-    row_h = 60 * s
-    chip_h = (16 + 20 * len(brief_lines)) * s
-    top = y + 52 * s + chip_h + 44 * s
-    ys = {lv: top + (4 - i) * row_h for i, (lv, *_rest) in enumerate(LADDER)}
-    rail_l, rail_r = x + 34 * s, x + 74 * s
-    col_level, col_effort = x + 96 * s, x + w - effort_right * s
-    label = max(width_of(lv, round(15 * s), bold=True) for lv in LEVELS)
-    model_w = max(width_of(m, round(15 * s)) for _, m, *_r in LADDER)
-    # the model's dot sits 12s left of its name, so the name starts past the widest label, a gap and the dot
-    col_model = max(x + w * model_at, col_level + label + 26 * s)
-    panel_h = top - y + 4 * row_h + 42 * s
-    out = [card(x, y, w, panel_h, rx=round(18 * s), cls="card")]
-    out.append(text(x + 24 * s, y + 38 * s, "One agent call", "ink b", round(15 * s)))
-    out.append(f'<g class="{prefix}brief">' + card(x + 24 * s, y + 52 * s, w - 48 * s, chip_h, rx=round(10 * s), cls="faint", sw=0)
-               + lines(x + 38 * s, y + 52 * s + 28 * s, brief_lines, "mono ink", round(12.5 * s), round(20 * s)) + "</g>")
-    band_y = ys["complex"] - 22 * s
-    out.append(f'<rect x="{x + 12 * s:g}" y="{band_y:g}" width="{w - 24 * s:g}" height="{44 * s:g}" rx="{10 * s:g}" '
-               f'class="rtsoft {prefix}band"/>')
-    out.append(f'<path d="M{rail_l:g} {top - 22 * s:g}V{ys["lookup"] + 24 * s:g}M{rail_r:g} {top - 22 * s:g}'
-               f'V{ys["lookup"] + 24 * s:g}" class="lnm" stroke-width="{4.5 * s:g}" stroke-linecap="round" opacity="0.4"/>')
-    for i, (lv, model, effort, _needs, _sub) in enumerate(LADDER, 1):
-        yy = ys[lv]
-        out.append(f'<path d="M{rail_l:g} {yy:g}H{rail_r:g}" class="r{i}s" stroke-width="{6 * s:g}" stroke-linecap="round"/>')
-        out.append(text(col_level, yy + 5 * s, lv, "ink b", round(15 * s)))
-        out.append(f'<circle cx="{col_model - 12 * s:g}" cy="{yy:g}" r="{5 * s:g}" class="r{i}"/>')
-        out.append(text(col_model, yy + 5 * s, model, "ink", round(15 * s)))
-        p, _ = pill(col_effort, yy - 12 * s, effort, size=round(12.5 * s), h=round(24 * s), pad=10 * s)
-        out.append(p)
-    # the redo tag on the standard row and the solved tag on the complex row
-    sy, cy = ys["standard"], ys["complex"]
-    tag_x = max(col_model + tag_gap * s, col_model + model_w + 12 * s)
-    redo, _ = pill(tag_x, sy - 12 * s, "redo", cls="rt", tcls="tag", size=round(12 * s), h=round(24 * s), pad=10 * s)
-    out.append(f'<g class="{prefix}redo">{redo}</g>')
-    solved, tag_w = pill(tag_x, cy - 12 * s, "solved", cls="r1", tcls="tag", size=round(12 * s), h=round(24 * s), pad=10 * s)
-    room(f"ladder panel {prefix}: tags", tag_x + tag_w, col_effort - 6 * s)
-    effort_w = 2 * 10 * s + max(width_of(e, round(12.5 * s), True) for *_a, e, _n, _t in LADDER)
-    room(f"ladder panel {prefix}: effort", col_effort + effort_w, x + w - 10 * s)
-    room(f"ladder panel {prefix}: brief", x + 38 * s + max(width_of(b, round(12.5 * s), True) for b in brief_lines),
-         x + w - 24 * s)
-    out.append(f'<g class="{prefix}solved">{solved}</g>')
-    # the call itself
-    tx = (rail_l + rail_r) / 2
-    out.append(f'<g class="{prefix}token"><circle cx="{tx:g}" cy="{cy:g}" r="{13 * s:g}" class="halo" fill="none" '
-               f'stroke-width="{5 * s:g}"/><circle cx="{tx:g}" cy="{cy:g}" r="{11 * s:g}" class="rt"/></g>')
-    css = ""
-    if animate:
-        up = lambda d: f"transform:translate(0px,{d * row_h:g}px)"  # noqa: E731
-        d_top = (y + 52 * s + chip_h / 2) - cy
-        css += (f".{prefix}token{{animation:{prefix}t 10s ease-in-out infinite}}"
-                + keyframes(f"{prefix}t", [(0, f"transform:translate(0px,{d_top:g}px);opacity:0"),
-                                           (6, f"transform:translate(0px,{d_top:g}px);opacity:1"),
-                                           (18, up(1)), (44, up(1)), (54, up(0)), (92, up(0) + ";opacity:1"),
-                                           (100, up(0) + ";opacity:0")])
-                + f".{prefix}band{{animation:{prefix}b 10s ease-in-out infinite}}"
-                + keyframes(f"{prefix}b", [(0, up(1) + ";opacity:0"), (14, up(1) + ";opacity:0"),
-                                           (20, up(1) + ";opacity:1"), (44, up(1)), (54, up(0)),
-                                           (92, up(0) + ";opacity:1"), (100, up(0) + ";opacity:0")])
-                + f".{prefix}brief{{animation:{prefix}f 10s ease-in-out infinite}}"
-                + keyframes(f"{prefix}f", [(0, "opacity:0"), (5, "opacity:1"), (92, "opacity:1"), (100, "opacity:0")])
-                + f".{prefix}redo{{animation:{prefix}r 10s ease-in-out infinite}}"
-                + keyframes(f"{prefix}r", [(0, "opacity:0"), (30, "opacity:0"), (34, "opacity:1"),
-                                           (92, "opacity:1"), (100, "opacity:0")])
-                + f".{prefix}solved{{animation:{prefix}s 10s ease-in-out infinite}}"
-                + keyframes(f"{prefix}s", [(0, "opacity:0"), (58, "opacity:0"), (62, "opacity:1"),
-                                           (92, "opacity:1"), (100, "opacity:0")]))
-    return "".join(out), css, panel_h
-
-
-HERO_TITLE = "Model Router: every Claude Code agent on the cheapest model that should do the job"
-HERO_LABEL = ("Model Router, a Claude Code plugin. An agent call to implement a function is profiled as standard and "
-              "runs on Sonnet at medium effort. Its result comes back for a redo, so the same call climbs one level "
-              "to complex, Opus at high effort, and is solved. The ladder runs lookup on Haiku at medium, standard on "
-              "Sonnet at medium, complex on Opus at high, hardest on Opus at xhigh and frontier on Fable at high.")
-
-
-def hero(phone=False) -> str:
-    if phone:
-        w = 600
-        panel, css, ph = ladder_panel(24, 470, w - 48, 1.3, prefix="p",
-                                      brief_lines=('"Implement parse_duration', 'exactly as its docstring', 'specifies"'),
-                                      model_at=0.465, tag_gap=62, effort_right=80)
-        h = round(470 + ph + 40)
-        body = [frame(w, h, 24), wordmark_body(32, 44, 0.86),
-                text(34, 156, "CLAUDE CODE PLUGIN", "mono rt b", 15, extra=' letter-spacing="2"')]
-        body += [text(32, 206 + i * 44, s, "ink b", 35) for i, s in
-                 enumerate(["Every agent on the cheapest", "model and effort that should", "do the job."])]
-        body.append(lines(32, 372, ["When the work comes back for a redo,", "the same call runs one level higher."],
-                          "mut", 22, 32))
-        body.append(panel)
-        return svg(w, h, HERO_TITLE, HERO_LABEL, "".join(body), css)
-    w, h = 1200, 500
-    panel, css, _ = ladder_panel(640, 40, 520, 1.0)
-    body = [frame(w, h, 24), wordmark_body(56, 70, 0.92),
-            text(58, 186, "CLAUDE CODE PLUGIN", "mono rt b", 14, extra=' letter-spacing="2"')]
-    body += [text(56, 236 + i * 46, s, "ink b", 37) for i, s in
-             enumerate(["Every agent on the cheapest", "model and effort that", "should do the job."])]
-    body.append(lines(57, 384, ["When the work comes back for a redo, the", "same call runs one level higher."], "mut", 19, 28))
-    chips_x = 57
-    for label in ("subagents", "agent-team teammates", "workflow stages"):
-        p, pw = pill(chips_x, 432, label, size=13, h=28, pad=12)
-        body.append(p)
-        chips_x += pw + 10
-    body.append(panel)
-    return svg(w, h, HERO_TITLE, HERO_LABEL, "".join(body), css)
-
-
-# ---------------------------------------------------------------- the headline at the top of the README
-
-HEADLINE_EYEBROW = "ATTENTION, CLAUDE CODE USERS"
-HEADLINE = ("Stop paying for", "the wrong model.")
-HEADLINE_SUB = ("A subagent that names no model runs on your session's model, so easy work pays strong-model prices. "
-                "Model Router gives every call the model and effort its own brief needs, and moves a call up a level "
-                "when its work comes back.")
-PROOF_EYEBROW = "BUILT BY THE BOOK"
-PROOFS = [
-    ("Follows Claude's best practices",
-     "Haiku for simple work, as Claude Code's best practices advise, so a strong model does only the work that "
-     "needs it."),
-    ("Modeled on Anthropic's result",
-     "Anthropic found that starting low and re-running failures higher solved about 97% at $0.17 a task, against "
-     "95.3% at $0.29 all at high."),
-    ("Built on the Claude Code docs",
-     "Documented hooks, mods and settings only, checked against the changelog every day. Every hook fails open."),
-    ("Your choices come first",
-     "A model you name, an agent's own model and CLAUDE_CODE_SUBAGENT_MODEL stay, inside your max_tier."),
-]
-HEADLINE_TITLE = "Model Router: stop paying for the wrong model"
-# One brief per model. A test checks that `explain` puts each one on its level.
-CALLS = [("List the files under src", "lookup"), ("Write tests for the slugify helper", "standard"),
-         ("Review the auth change for security holes", "complex"),
-         ("Investigate open-ended data loss across services", "frontier")]
-RUNG = {level: (i + 1, model, effort) for i, (level, model, effort, *_) in enumerate(LADDER)}
-PROOF_DROP, PROOF_LINE = 27, 22  # a proof's title to its first body line, and its body line step
-
-
-@dataclasses.dataclass(frozen=True)
-class Fit:
-    """The sizes the headline uses at one width."""
-    w: int
-    margin: int
-    mark_y: int
-    mark_scale: float
-    eyebrow: float
-    head: float
-    sub: float
-    text_right: float  # where the left column's text has to end
-    price: float
-    cols: int  # proof columns
-
-
-DESKTOP = Fit(w=1200, margin=64, mark_y=48, mark_scale=0.8, eyebrow=15, head=56, sub=20, text_right=650, price=17, cols=2)
-PHONE = Fit(w=600, margin=32, mark_y=40, mark_scale=0.75, eyebrow=14, head=46, sub=19, text_right=568, price=15, cols=1)
-
-
-def headline_label() -> str:
-    models = [RUNG[level][1] for _, level in CALLS]
-    return (f"{' '.join(HEADLINE)} Four agent calls that would all run on the session's model run on "
-            f"{', '.join(models[:-1])} and {models[-1]} instead, each at the effort its brief needs.")
-
-
-def dot(cx, cy, cls, r=5.5):
-    return f'<circle cx="{cx:g}" cy="{cy:g}" r="{r:g}" class="{cls}"/>'
-
-
-def check_icon(x, y):
-    return (f'<g transform="translate({x:g} {y:g})"><circle cx="12" cy="12" r="12" class="faint"/>'
-            '<path d="M7.2 12.4l3.2 3.2 6.4-6.8" fill="none" class="inks" stroke-width="2.4" '
-            'stroke-linecap="round" stroke-linejoin="round"/></g>')
-
-
-def call_card(x, y, w, where):
-    """Four calls: one model for all of them without the router, and each on its own rung with it."""
-    pad, right = 24, x + w - 24
-    out = [text(x + pad, y + 38, "Four agent calls", "ink b", 15),
-           text(x + pad, y + 74, "WITHOUT MODEL ROUTER", "mono mut b", 11.5, extra=' letter-spacing="1.4"')]
-    session_y = y + 104
-    same = "All four run on your session's model."
-    out.append(dot(x + pad + 6, session_y - 5.5, "mut") + text(x + pad + 20, session_y, same, "mut", 15))
-    room(f"{where}: call card session line", x + pad + 20 + width_of(same, 15), right)
-    box_y = session_y + 24
-    line_y = box_y + 30
-    routed = [text(x + pad, line_y, "WITH MODEL ROUTER", "mono rt b", 11.5, extra=' letter-spacing="1.4"')]
-    for brief, level in CALLS:
-        rung, model, effort = RUNG[level]
-        quoted = f'"{brief}"'
-        line_y += 31
-        routed.append(text(x + pad, line_y, quoted, "mono ink", 12.5))
-        room(f"{where}: call card brief", x + pad + width_of(quoted, 12.5, True), right)
-        line_y += 33
-        routed.append(dot(x + pad + 6, line_y - 6.5, f"r{rung}") + text(x + pad + 20, line_y, model, "ink b", 18))
-        pill_x = x + pad + 36 + width_of(model, 18, bold=True)
-        for label in (level, effort):
-            chip, chip_w = pill(pill_x, line_y - 18.5, label, size=12.5, h=26, pad=11)
-            routed.append(chip)
-            pill_x += chip_w + 8
-        room(f"{where}: call card pills", pill_x, right)
-    box_h = line_y - box_y + 24
-    routed.insert(0, f'<rect x="{x + 10:g}" y="{box_y:g}" width="{w - 20:g}" height="{box_h:g}" rx="14" '
-                     'class="rtsoft"/>')
-    out.append('<g class="won">' + "".join(routed) + "</g>")
-    redo = "A call sent back for a redo climbs one level."
-    out.append(text(x + pad, box_y + box_h + 34, redo, "mut", 14))
-    room(f"{where}: call card redo line", x + pad + width_of(redo, 14), right)
-    h = box_y + box_h + 56 - y
-    return card(x, y, w, h, rx=18) + "".join(out), h
-
-
-def newest_prices(prices: dict) -> list:
-    """(rung, model, input price per million tokens) for the newest priced version of each model the calls use."""
-    out = []
-    for _, level in CALLS:
-        rung, model, _ = RUNG[level]
-        keys = [k for k in prices if re.fullmatch(rf"claude-{model.lower()}-\d+(-\d+)?", k)]
-        newest = max(keys, key=lambda k: [int(n) for n in k.split("-")[2:]])
-        out.append((rung, model, prices[newest]["input"]))
-    return out
-
-
-def price_row(x, y, prices: dict, size, where, limit):
-    """The list price of each model the calls run on, from the registry."""
-    gap = size * 1.4
-    out = [text(x, y, "API LIST PRICE, PER MILLION INPUT TOKENS", "mono mut b", round(size * 0.77),
-                extra=' letter-spacing="1.4"')]
-    chip_x, chip_y = x, y + size * 2.1
-    for rung, model, usd in newest_prices(prices):
-        price = f"${usd:.2f}" if usd < 1 else f"${usd:g}"
-        # One text element, so the price follows the name at the width the font really gives it.
-        out.append(dot(chip_x + 5, chip_y - size * 0.36, f"r{rung}", 5)
-                   + f'<text x="{chip_x + 16:g}" y="{chip_y:g}" font-size="{size:g}"><tspan class="ink b">'
-                   f'{esc(model)}</tspan><tspan class="mono mut" dx="{size * 0.5:g}">{esc(price)}</tspan></text>')
-        chip_x += 16 + width_of(model, size, bold=True) + size * 0.5 + width_of(price, size, True) + gap
-    room(f"{where}: price row", chip_x - gap, limit)
-    return "".join(out)
-
-
-def proof_block(x, y, w, title, body, cls, where):
-    rows = wrap(body, 14.5, w - 40)
-    room(f"{where}: proof title {title}", x + 40 + width_of(title, 17, bold=True), x + w)
-    return (f'<g class="{cls}">' + check_icon(x, y - 18) + text(x + 40, y, title, "ink b", 17)
-            + lines(x + 40, y + PROOF_DROP, rows, "mut", 14.5, PROOF_LINE) + "</g>"), len(rows)
-
-
-def proof_section(x, y, w, cols, where):
-    """A rule, the eyebrow and the proofs in rows of `cols`. Returns the SVG and the y below the last row."""
-    out = [f'<path d="M{x:g} {y:g}H{x + w:g}" class="ln" stroke-width="1"/>',
-           text(x, y + 40, PROOF_EYEBROW, "mono rt b", 13, extra=' letter-spacing="1.8"')]
-    y += 88
-    gap = 48
-    col_w = (w - (cols - 1) * gap) / cols
-    for start in range(0, len(PROOFS), cols):
-        tallest = 0
-        for k, (title, body) in enumerate(PROOFS[start:start + cols]):
-            block, n = proof_block(x + k * (col_w + gap), y, col_w, title, body, f"p{start + k + 1}", where)
-            out.append(block)
-            tallest = max(tallest, n)
-        y += PROOF_DROP + tallest * PROOF_LINE + 32
-    return "".join(out), y
-
-
-def headline_text(fit: Fit, prices: dict, where):
-    """The mark, eyebrow, headline, paragraph and price row. Returns the SVG and the y below the price row."""
-    m, scale = fit.margin, fit.mark_scale
-    eyebrow_x = m + 64 * scale + 16
-    out = [mark_body(m, fit.mark_y, scale),
-           text(eyebrow_x, fit.mark_y + 32 * scale + fit.eyebrow * 0.36, HEADLINE_EYEBROW, "mono rt b", fit.eyebrow,
-                extra=' letter-spacing="1.8"')]
-    room(f"{where}: eyebrow", eyebrow_x + width_of(HEADLINE_EYEBROW, fit.eyebrow, True) + 1.8 * len(HEADLINE_EYEBROW),
-         fit.text_right)
-    y = fit.mark_y + 64 * scale + 20 + fit.head * 0.9
-    out.append('<g class="a1">' + "".join(text(m - 2, y + i * fit.head * 1.1, line, "ink b", fit.head)
-                                          for i, line in enumerate(HEADLINE)) + "</g>")
-    for line in HEADLINE:
-        room(f"{where}: headline", m + width_of(line, fit.head, bold=True), fit.text_right)
-    y += (len(HEADLINE) - 1) * fit.head * 1.1 + fit.head * 0.55 + fit.sub * 1.4
-    sub, step = wrap(HEADLINE_SUB, fit.sub, fit.text_right - m), fit.sub * 1.55
-    prices_y = y + (len(sub) - 1) * step + fit.sub * 2.6
-    out.append('<g class="a2">' + lines(m, y, sub, "mut", fit.sub, step)
-               + price_row(m, prices_y, prices, fit.price, where, fit.text_right) + "</g>")
-    return "".join(out), prices_y + fit.price * 2.1
-
-
-HEADLINE_CSS = (
-    ".a1,.a2,.a3,.p1,.p2,.p3,.p4{animation:rise .7s ease-out both}"
-    ".a1{animation-delay:.05s}.a2{animation-delay:.25s}.a3{animation-delay:.45s}"
-    ".p1{animation-delay:1.8s}.p2{animation-delay:2s}.p3{animation-delay:2.2s}.p4{animation-delay:2.4s}"
-    ".won{animation:fade .6s ease-out 1.2s both}"
-    + keyframes("rise", [(0, "opacity:0;transform:translateY(12px)"), (100, "opacity:1;transform:none")])
-    + keyframes("fade", [(0, "opacity:0"), (100, "opacity:1")]))
-
-
-def headline(prices: dict, phone=False) -> str:
-    """A direct-response headline for the top of the README: the problem, the fix shown on four calls, and the
-    proof. Fixed dark, like the social preview, so it reads as one banner above the light page."""
-    fit, where = (PHONE, "headline-phone.svg") if phone else (DESKTOP, "headline.svg")
-    m, w = fit.margin, fit.w
-    top, text_bottom = headline_text(fit, prices, where)
-    if phone:  # the card goes under the text
-        call, call_h = call_card(m, text_bottom + 40, w - 2 * m, where)
-        bottom = text_bottom + 40 + call_h
-    else:  # the card goes beside it
-        card_w = 456
-        call, call_h = call_card(w - m - card_w, fit.mark_y, card_w, where)
-        bottom = max(text_bottom, fit.mark_y + call_h)
-    proofs, h = proof_section(m, bottom + 52, w - 2 * m, fit.cols, where)
-    body = (f'<rect width="{w}" height="{h:.0f}" rx="24" class="bg"/>'
-            f'<rect x="0.5" y="0.5" width="{w - 1}" height="{h - 1:.0f}" rx="24" fill="none" class="ln" '
-            f'stroke-width="1"/>{top}<g class="a3">{call}</g>{proofs}')
-    return svg(w, round(h), HEADLINE_TITLE, headline_label(), body, HEADLINE_CSS, theme="dark")
-
-
 # ---------------------------------------------------------------- diagrams
 
 def diagram_ladder() -> str:
     w, h = 920, 492
     out = [frame(w, h), text(32, 42, "The ladder", "ink b", 17),
-           text(32, 66, "Balanced priority: the cheapest usable model strong enough for each level.", "mut", 13.5)]
+           text(32, 66, "Each level runs on the cheapest usable model strong enough for it.", "mut", 13.5)]
     for x, label in ((180, "Level"), (300, "Model"), (392, "Effort"), (482, "Model strength"), (590, "Typical subtask")):
         out.append(text(x, 104, label, "mut b", 12))
     out.append('<path d="M24 114H896" class="ln" stroke-width="1"/>')
     row = 56
     ys = {lv: 142 + (4 - i) * row for i, (lv, *_r) in enumerate(LADDER)}
-    out.append(f'<rect x="24" y="{ys["complex"] - 22}" width="872" height="44" rx="10" class="rtsoft lband"/>')
+    out.append(f'<rect x="24" y="{ys["complex"] - 22}" width="872" height="44" rx="10" class="rtsoft"/>')
     out.append(f'<path d="M96 122V{ys["lookup"] + 24}M152 122V{ys["lookup"] + 24}" class="lnm" stroke-width="5" '
                f'stroke-linecap="round" opacity="0.4"/>')
     for i, (lv, model, effort, needs, sub) in enumerate(LADDER, 1):
@@ -724,49 +217,39 @@ def diagram_ladder() -> str:
         room("ladder.svg: subtask", 590 + width_of(sub, 12.5), 900)
         room("ladder.svg: level", 180 + width_of(lv, 15, bold=True), 290 - 5 - 6)
         room("ladder.svg: model", 300 + width_of(model, 15), 392 - 8)
-    # the call and its redo tag, which climb one rung on each redo
+    # a call redone from standard, more effort on Sonnet first, now on complex
     cy = ys["complex"]
-    out.append(f'<g class="lcall"><circle cx="124" cy="{cy}" r="13" class="halo" fill="none" stroke-width="5"/>'
+    out.append(f'<circle cx="124" cy="{cy}" r="13" class="halo" fill="none" stroke-width="5"/>'
                f'<circle cx="124" cy="{cy}" r="11" class="rt"/>'
-               f'<g class="lredo">' + pill(30, cy - 12, "redo", cls="rt", tcls="tag", size=12)[0] + "</g></g>")
-    out.append(f'<path class="lstatic rts" d="M124 {ys["standard"] - 4}V{cy + 18}" stroke-width="2.5" '
+               + pill(30, cy - 12, "redo", cls="rt", tcls="tag", size=12)[0])
+    out.append(f'<path class="rts" d="M124 {ys["standard"] - 4}V{cy + 18}" stroke-width="2.5" '
                f'stroke-dasharray="4 4" fill="none" stroke-linecap="round"/>')
-    out.append(text(32, 432, "Priority quality goes one step stronger, fast one step lighter. When the cap, "
+    out.append(text(32, 432, "A model named on a call stands for its lowest level. When the cap, "
                     "availableModels, deniedModels or failures", "mut", 13))
     out.append(text(32, 452, "rule a model out, the pick moves to the nearest usable model above it, or to the "
-                    "strongest one left. A redo runs one level higher.", "mut", 13))
-    out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh, "
-                    "which makes up part of the loss.", "mut", 13))
-    at = lambda lv: f"transform:translate(0px,{ys[lv] - cy}px)"  # noqa: E731
-    stops = [(0, at("lookup") + ";opacity:0"), (4, at("lookup") + ";opacity:1"), (18, at("lookup")),
-             (24, at("standard")), (40, at("standard")), (46, at("complex")), (62, at("complex")),
-             (68, at("hardest")), (84, at("hardest")), (90, at("frontier")), (96, at("frontier") + ";opacity:1"),
-             (100, at("frontier") + ";opacity:0")]
-    pulse = [(0, "opacity:0")]
-    for a, b in ((16, 26), (38, 48), (60, 70), (82, 92)):
-        pulse += [(a, "opacity:0"), (a + 2, "opacity:1"), (b, "opacity:1"), (b + 2, "opacity:0")]
-    css = (".lcall,.lband{animation:lc 12s ease-in-out infinite}" + keyframes("lc", stops)
-           + ".lredo{animation:lr 12s linear infinite}" + keyframes("lr", pulse + [(100, "opacity:0")])
-           + ".lstatic{animation:hide 1s infinite}" + keyframes("hide", [(0, "opacity:0"), (100, "opacity:0")]))
+                    "strongest one left. A redo adds effort first.", "mut", 13))
+    out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh (high on "
+                    "Haiku), which makes up part of the loss.", "mut", 13))
     title = "The ladder: five levels to a model and an effort"
-    label = ("With balanced priority, lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on "
-             "Opus at high, hardest on Opus at xhigh, and frontier on Fable at high. A call climbs one rung each "
-             "time it comes back for a redo. Quality priority goes one step stronger, fast one step lighter. When "
-             "the cap, the availableModels or deniedModels settings, or failures rule a model out, the pick moves "
-             "to the nearest usable model above it, or to the strongest one left, and a pick weaker than its level needs "
-             "gets one more effort step, up to xhigh.")
-    return svg(w, h, title, label, "".join(out), css)
+    label = ("Lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on Opus at high, hardest "
+             "on Opus at xhigh, and frontier on Fable at high. A model named on a call stands for its lowest level. "
+             "A call Claude marks as a redo runs one effort step higher on its model while it ran below high, and "
+             "after that on the next stronger model: Haiku, Sonnet, Opus, then Fable. When the cap, the availableModels or "
+             "deniedModels settings, or failures rule a model out, the pick moves to the nearest usable model above "
+             "it, or to the strongest one left, and a pick weaker than its level needs gets one more effort step, up "
+             "to xhigh, or high on Haiku.")
+    return svg(w, h, title, label, "".join(out))
 
 
 def diagram_redo() -> str:
-    w, h = 920, 450
+    w, h = 920, 336
     out = [frame(w, h), text(32, 42, "Redo escalation", "ink b", 17),
-           text(32, 66, "The same call, issued again in the same request after its result came back.", "mut", 13.5)]
+           text(32, 66, "A call Claude marks as a redo climbs from the run it redoes.", "mut", 13.5)]
     steps = [
-        ("1. Agent call", ["Routed at its level:"], "standard, Sonnet, medium", 2),
-        ("2. Result comes back", ["Recorded as finished,", "with the level it ran at."], None, 0),
-        ("3. Same call again", ["In the same request:", "the answer fell short."], None, -1),
-        ("4. One level higher", ["Up a model, or up effort:"], "complex, Opus, high", 3),
+        ("1. Agent call", ["Runs at its level:"], "standard, Sonnet, medium", 2),
+        ("2. Claude marks it", ["The result fell short:", 'its description gets "Redo:"'], None, -1),
+        ("3. Effort first", ["Below high, the same", "model, one step up:"], "Sonnet, high", 2),
+        ("4. Then the model", ["From high, the next", "stronger model:"], "complex, Opus, high", 3),
     ]
     cw, gap, top = 196, 28, 92
     for k, (head, body, code, accent) in enumerate(steps):
@@ -789,40 +272,19 @@ def diagram_redo() -> str:
     for k in range(4):
         out.append(f'<circle cx="{32 + k * (cw + gap) + cw / 2}" cy="{track}" r="5" class="faint"/>')
     last = 32 + 3 * (cw + gap) + cw / 2
-    out.append(f'<g class="rtok"><circle cx="{last}" cy="{track}" r="11" class="halo" fill="none" stroke-width="5"/>'
-               f'<circle cx="{last}" cy="{track}" r="9" class="rt"/></g>')
-    vy = 256
-    out.append(card(32, vy, 856, 92, rx=12))
-    out.append(text(56, vy + 32, "Each redo is a vote that the first level was routed too low", "ink b", 14.5))
-    for k in range(6):
-        out.append(f'<circle cx="{66 + k * 30}" cy="{vy + 62}" r="10" class="faint"/>'
-                   f'<circle cx="{66 + k * 30}" cy="{vy + 62}" r="10" class="r2 v{k}"/>')
-    out.append(text(262, vy + 58, "At least 6 votes that are also at least 30% of the level's calls raise it one step.",
-                    "ink", 13))
-    out.append(text(262, vy + 78, "A raise that keeps being overruled with a weaker model is undone the same way.",
-                    "mut", 13))
-    note = ["One level up the ladder: lookup, standard and hardest move to a stronger model; complex stays on Opus",
-            "at more effort, and a frontier redo runs at one step more effort. Not a redo: copies of one brief started",
-            "together. Never escalated: a call that names its own model. A background agent's call counts as finished",
-            "when the agent stops with an answer."]
-    out.append(lines(32, 378, note, "mut", 13, 20))
-    xs = [32 + k * (cw + gap) + cw / 2 - last for k in range(4)]
-    at = lambda k: f"transform:translate({xs[k]:g}px,0px)"  # noqa: E731
-    css = (".rtok{animation:rt 9s ease-in-out infinite}"
-           + keyframes("rt", [(0, at(0) + ";opacity:0"), (4, at(0) + ";opacity:1"), (14, at(0)), (22, at(1)),
-                              (32, at(1)), (40, at(2)), (50, at(2)), (58, at(3)), (92, at(3) + ";opacity:1"),
-                              (100, at(3) + ";opacity:0")]))
-    for k in range(6):
-        on = 58 + k * 5
-        css += (f".v{k}{{animation:v{k} 9s linear infinite}}"
-                + keyframes(f"v{k}", [(0, "opacity:0"), (on, "opacity:0"), (on + 1, "opacity:1"), (96, "opacity:1"),
-                                      (100, "opacity:0")]))
-    title = "Redo escalation: the same call again runs one level higher"
-    label = ("A call is routed at its level, for example standard on Sonnet at medium effort. Its result comes back "
-             "and the call is recorded as finished. If Claude issues the same call again in the same request, it "
-             "runs one level higher, complex on Opus at high, and counts as a vote that standard was routed too "
-             "low. At least 6 votes that are also at least 30 percent of a level's calls raise that level one step.")
-    return svg(w, h, title, label, "".join(out), css)
+    out.append(f'<circle cx="{last}" cy="{track}" r="11" class="halo" fill="none" stroke-width="5"/>'
+               f'<circle cx="{last}" cy="{track}" r="9" class="rt"/>')
+    note = ["The next model runs at its own level's effort; with no stronger usable model, one more effort step, at",
+            "most max. Not a redo: the same call sent again unmarked. Run as named: a redo that names its own model or",
+            "effort. Never redone: a workflow stage. A background agent's call counts as finished when the agent stops",
+            "with an answer."]
+    out.append(lines(32, 264, note, "mut", 13, 20))
+    title = "Redo escalation: effort first, then the model"
+    label = ("A call runs at its level, for example standard on Sonnet at medium effort. When its result falls short, "
+             "Claude marks a redo by starting the call's description with Redo. Below high effort, the redo runs the "
+             "same model one effort step up, Sonnet at high. From high, the next redo runs the next stronger model at "
+             "its own level's effort, complex on Opus at high.")
+    return svg(w, h, title, label, "".join(out))
 
 
 def chip(x, y, label, size=12, h=26):
@@ -851,9 +313,9 @@ def diagram_two_paths() -> str:
     out.append(card(32, 222, 410, 108, rx=12))
     out.append('<rect x="33" y="238" width="4" height="76" rx="2" class="r2"/>')
     out.append(text(52, 252, "The mod: hooks/router.ts", "ink b", 15))
-    out.append(lines(52, 276, ["Primary path. Sets each spawn's model, its effort on",
-                               "each model request, and a hard turn's effort. Reaches",
-                               "teammates and workflow stages too."], "mut", 13, 19))
+    out.append(lines(52, 276, ["Primary path. Sets each spawn's model and its effort",
+                               "on each model request. Reaches teammates and",
+                               "workflow stages too."], "mut", 13, 19))
     out.append(card(478, 92, 410, 238, rx=12, cls="faint", sw=0))
     out.append(text(498, 120, "Settings hooks: hooks/hooks.json", "ink b", 14.5))
     out.append(chip_row(498, 138, ["SessionStart", "UserPromptSubmit", "PreToolUse"], 11.5))
@@ -862,8 +324,8 @@ def diagram_two_paths() -> str:
     out.append(card(498, 244, 370, 72, rx=10))
     out.append('<rect x="499" y="256" width="4" height="48" rx="2" class="r4"/>')
     out.append(lines(516, 266, ["Fallback: PreToolUse rewrites the Agent call where",
-                                "mods don't load, and stands down once the mod has",
-                                "announced itself for the session (mod-start)."], "mut", 12.5, 18))
+                                "mods don't load, and stands down for each call",
+                                "the mod's tool.call hook marked."], "mut", 12.5, 18))
     arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
     out.append(f'<path d="M237 188V216M232 211L237 216L242 211" {arrow}/>')
     out.append(f'<path d="M237 330V366H410V398M405 393L410 398L415 393" {arrow}/>')
@@ -873,46 +335,23 @@ def diagram_two_paths() -> str:
     out.append(card(132, 404, 656, 110, rx=12))
     out.append('<rect x="133" y="420" width="4" height="78" rx="2" class="rt"/>')
     out.append(text(156, 434, "scripts/modelrouter: one Python runtime, one router", "ink b", 15))
-    out.append(chip_row(156, 450, ["spawn", "router.decide", "ladder", "registry", "profile", "calls", "learn",
-                                   "gates"], 11.5))
+    out.append(chip_row(156, 450, ["spawn", "router.decide", "ladder", "registry", "calls", "gates"], 11.5))
     out.append(text(156, 500, "One decision procedure and one state store for both paths.", "mut", 13))
-    for name in ("pa", "pb", "pc"):
-        out.append(f'<circle cx="0" cy="0" r="6" class="rt {name}"/>')
-
-    def path_frames(points, start, end):
-        stops = [(0, f"transform:translate({points[0][0]}px,{points[0][1]}px);opacity:0"),
-                 (start, f"transform:translate({points[0][0]}px,{points[0][1]}px);opacity:0")]
-        seg = [abs(b[0] - a[0]) + abs(b[1] - a[1]) for a, b in zip(points, points[1:])]
-        t = start
-        for (px, py), length in zip(points[1:], seg):
-            t += (end - start) * length / sum(seg)
-            stops.append((round(t, 2), f"transform:translate({px}px,{py}px);opacity:1"))
-        stops.insert(2, (start + 1, f"transform:translate({points[0][0]}px,{points[0][1]}px);opacity:1"))
-        stops.append((min(end + 2, 100), f"transform:translate({points[-1][0]}px,{points[-1][1]}px);opacity:0"))
-        stops.append((100, f"transform:translate({points[-1][0]}px,{points[-1][1]}px);opacity:0"))
-        return stops
-
-    css = ".pa,.pb,.pc{opacity:0}"
-    css += ".pa{animation:pa 6s linear infinite}" + keyframes("pa", path_frames([(237, 188), (237, 222)], 0, 12))
-    css += ".pb{animation:pb 6s linear infinite}" + keyframes(
-        "pb", path_frames([(237, 330), (237, 366), (410, 366), (410, 404)], 22, 52))
-    css += ".pc{animation:pc 6s linear infinite}" + keyframes(
-        "pc", path_frames([(683, 330), (683, 366), (510, 366), (510, 404)], 58, 88))
     title = "Two control paths, one router"
     label = ("Claude Code engine events (agent.spawn, turn.start, turn.step, turn.complete) reach the mod, "
              "hooks/router.ts. Settings hooks in hooks/hooks.json (SessionStart, UserPromptSubmit, PreToolUse, "
              "PostToolUse, PostToolUseFailure, SubagentStop, PostModelSwitch, Stop) do the bookkeeping and are the "
              "fallback. Both run sh model-router.sh, which calls one Python runtime that decides every spawn.")
-    return svg(w, h, title, label, "".join(out), css)
+    return svg(w, h, title, label, "".join(out))
 
 
 PRECEDENCE = [
     ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "pins every subagent's model; the router sets effort only", True),
     ("A model named on the call", "by Claude, a skill's instructions or a workflow script", False),
     ("A per-agent rule", "in ~/.claude/model-router.json or .claude/model-router.json", False),
-    ("The agent's own model field", "kept unless agent_pins is override", False),
+    ("The agent's own model field", "in its definition's frontmatter", False),
     ("CLAUDE_CODE_SUBAGENT_MODEL", "your default for agents that name no model", True),
-    ("The router's pick", "the ladder's model and effort for the brief's level", False),
+    ("The parent's model", "Claude Code's own default when nothing names one", False),
 ]
 
 
@@ -926,18 +365,18 @@ def diagram_precedence() -> str:
         y = top + k * rh
         out.append(card(32, y, 560, 52, rx=10))
         if k == 5:
-            out.append(f'<rect x="32.5" y="{y + 0.5}" width="559" height="51" rx="10" class="rtsoft qband"/>')
+            out.append(f'<rect x="32.5" y="{y + 0.5}" width="559" height="51" rx="10" class="rtsoft"/>')
         out.append(f'<circle cx="62" cy="{y + 26}" r="14" class="faint"/>')
         out.append(text(62, y + 31, str(k + 1), "ink b", 14, "middle"))
         out.append(text(88, y + 22, head, ("mono ink b" if is_env else "ink b"), 13 if is_env else 14))
         out.append(text(88, y + 41, detail, "mut", 12.5))
-    out.append(f'<g class="qmark"><rect x="22" y="{top + 5 * rh + 8}" width="5" height="36" rx="2.5" class="rt"/></g>')
+    out.append(f'<rect x="22" y="{top + 5 * rh + 8}" width="5" height="36" rx="2.5" class="rt"/>')
     arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
     out.append(f'<path d="M592 {top + 5 * rh + 26}H612V{top + 26}H624M619 {top + 21}L624 {top + 26}L619 {top + 31}" '
                f'{arrow}/>')
     cap = ["For 2, 3, 4 and 6, the winner has to", "be usable: inside max_tier, allowed", "by your availableModels and",
-           "deniedModels settings, and known to", "work. If it isn't, the strongest usable", "model below it runs, or the weakest",
-           "usable one when none is below it."]
+           "deniedModels settings, and known to", "work. If it isn't, the next stronger", "usable model runs, else the strongest",
+           "usable one left."]
     out.append(card(632, 92, 256, 66 + 19 * len(cap), rx=12))
     out.append(f'<rect x="633" y="108" width="4" height="{34 + 19 * len(cap)}" rx="2" class="rt"/>')
     out.append(text(652, 120, "Then the cap", "ink b", 14.5))
@@ -946,109 +385,59 @@ def diagram_precedence() -> str:
     out.append(card(632, ey, 256, 138, rx=12))
     out.append(f'<rect x="633" y="{ey + 16}" width="4" height="106" rx="2" class="r3"/>')
     out.append(text(652, ey + 28, "And the effort", "ink b", 14.5))
-    out.append(lines(652, ey + 54, ["Set from the level, unless the call,", "the agent or one of these sets it:"],
+    out.append(lines(652, ey + 54, ["Set from the model's level, unless the", "call, the agent or one of these sets it:"],
                      "mut", 13, 19))
     out.append(lines(652, ey + 98, ["CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_EFFORT"], "mono ink", 11.5, 18))
-    out.append(text(32, 476, "Example: a standard brief with nothing above it set falls through to the router's "
-                    "pick,", "mut", 13))
-    out.append(text(32, 496, "Sonnet at medium effort, which is inside the cap and runs.", "mut", 13))
-    marks = [(0, "transform:translate(0px,-300px);opacity:0"), (3, "transform:translate(0px,-300px);opacity:1")]
-    t = 3
-    for k in range(1, 6):
-        marks += [(t + 9, f"transform:translate(0px,{-300 + (k - 1) * rh}px)"),
-                  (t + 13, f"transform:translate(0px,{-300 + k * rh}px)")]
-        t += 13
-    marks += [(92, "transform:translate(0px,0px);opacity:1"), (100, "transform:translate(0px,0px);opacity:0")]
-    css = (".qmark{animation:qm 9s ease-in-out infinite}" + keyframes("qm", marks)
-           + ".qband{animation:qb 9s ease-in-out infinite}"
-           + keyframes("qb", [(0, "opacity:0"), (66, "opacity:0"), (70, "opacity:1"), (92, "opacity:1"),
-                              (100, "opacity:0")]))
+    out.append(text(32, 476, "Example: a call that names sonnet and no effort runs on Sonnet at medium effort, the",
+                    "mut", 13))
+    out.append(text(32, 496, "standard level's, which is inside the cap. A rule's level raises a model below it.", "mut", 13))
     title = "Who decides the model: the order of authority"
     label = ("Strongest first: CLAUDE_CODE_SUBAGENT_MODEL_FORCE, then a model named on the call, then a per-agent "
-             "rule in model-router.json, then the agent's own model field unless agent_pins is override, then "
-             "CLAUDE_CODE_SUBAGENT_MODEL, then the router's pick. For all but the two environment variables, the "
-             "winner must be usable under the cap and your settings, else the strongest usable model below it runs. Effort follows the level unless something "
-             "already sets it.")
-    return svg(w, h, title, label, "".join(out), css)
+             "rule in model-router.json, then the agent's own model field, then CLAUDE_CODE_SUBAGENT_MODEL, then "
+             "the parent's model. For all but the two environment variables, the winner must be usable under the "
+             "cap and your settings, else the next stronger usable model runs, or the strongest usable one when "
+             "nothing stronger is left. Effort follows the model's level unless something already sets it.")
+    return svg(w, h, title, label, "".join(out))
 
 
 def diagram_stop_checks() -> str:
     w, h = 920, 486
-    out = [frame(w, h), text(32, 42, "The checks before a turn ends", "ink b", 17),
-           text(32, 66, "The Stop hook runs two checks. Each asks once, then lets the turn end.", "mut", 13.5)]
+    out = [frame(w, h), text(32, 42, "The check before a turn ends", "ink b", 17),
+           text(32, 66, "The Stop hook runs one check. It asks once, then lets the turn end.", "mut", 13.5)]
     out.append(card(320, 88, 280, 50, rx=25))
     out.append(text(460, 118, "Claude is about to end the turn", "ink b", 13.5, "middle"))
     arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
-    out.append(f'<path d="M400 138V156H237V176M232 171L237 176L242 171" {arrow}/>')
-    out.append(f'<path d="M520 138V156H683V176M678 171L683 176L688 171" {arrow}/>')
-    lanes = [
-        (32, "strong_agent_gate", "on by default", "r1", "tag",
-         ["the request is complex or harder,", "the session model is weaker than it needs,",
-          "and no agent of the needed strength started."],
-         ["Blocks the stop once and asks for a stronger", "agent's check: the architect, or the deep-solver",
-          "for a frontier request, started no lower than", "the request's level."], 1.0),
-        (478, "verify_gate", "on by default", "r1", "tag",
-         ["code in the project changed, and no test, lint,", "type-check or build ran after the last edit,",
-          "and no verifier or reviewer is still running."],
-         ["Asks once for a test run (the verifier)", "before the turn ends. It is the failure signal", "the router reruns on. Turn it off in /config."],
-         1.0),
-    ]
-    for x, name, state, cls, tcls, when, then, op in lanes:
-        out.append(f'<g opacity="{op}">')
-        out.append(card(x, 182, 410, 252, rx=12))
-        out.append(text(x + 20, 212, name, "mono ink b", 14))
-        p, _ = pill(x + 26 + width_of(name, 14, True), 194, state, cls=cls, tcls=tcls, size=11.5, h=24, pad=10)
-        out.append(p)
-        out.append(text(x + 20, 244, "Asks when", "mut b", 12))
-        out.append(lines(x + 20, 266, when, "ink", 13, 20))
-        out.append(f'<path d="M{x + 20} 336H{x + 390}" class="ln" stroke-width="1"/>')
-        out.append(text(x + 20, 360, "Then", "mut b", 12))
-        out.append(lines(x + 62, 360, then, "ink", 13, 19))
-        out.append("</g>")
-    out.append(text(32, 464, "Both are options in /config. The stronger-agent hand-off starts at the request's "
-                    "level, so a short hand-off brief can't route it lower.", "mut", 13))
-    out.append('<circle cx="0" cy="0" r="6" class="rt sa"/>')
-    pts = [(400, 138), (400, 156), (237, 156), (237, 182)]
-    stops = [(0, f"transform:translate({pts[0][0]}px,{pts[0][1]}px);opacity:0"),
-             (8, f"transform:translate({pts[0][0]}px,{pts[0][1]}px);opacity:1")]
-    for k, (px, py) in enumerate(pts[1:], 1):
-        stops.append((8 + k * 10, f"transform:translate({px}px,{py}px);opacity:1"))
-    stops += [(44, f"transform:translate(237px,182px);opacity:0"), (100, "transform:translate(237px,182px);opacity:0")]
-    css = ".sa{opacity:0;animation:sa 5s linear infinite}" + keyframes("sa", stops)
-    title = "The checks before a turn ends: strong_agent_gate and verify_gate"
-    label = ("When Claude is about to end a turn, the Stop hook runs two checks. strong_agent_gate, on by default, "
-             "blocks the stop once when a complex or harder request was answered by a weaker session model with no "
-             "agent of the needed strength started, and asks for a stronger agent's check, started no lower than "
-             "the request's level. verify_gate, on by default, asks once for a test run when code changed and "
-             "nothing checked it.")
-    return svg(w, h, title, label, "".join(out), css)
-
-
-# ---------------------------------------------------------------- social preview
-
-def social_preview() -> str:
-    w, h = 1280, 640
-    panel, _, _ = ladder_panel(700, 92, 520, 1.0, animate=False, prefix="s")
-    body = (f'<rect width="{w}" height="{h}" class="bg"/>'
-            + wordmark_body(72, 96, 1.05)
-            + text(74, 232, "CLAUDE CODE PLUGIN", "mono rt b", 18, extra=' letter-spacing="2.4"')
-            + "".join(text(72, 300 + i * 56, s, "ink b", 46) for i, s in
-                      enumerate(["Every agent on the", "cheapest model that", "should do the job."]))
-            + lines(73, 488, ["For subagents, teammates and workflow", "agents. A call sent again climbs a level."], "mut", 24, 36)
-            + text(74, 590, "github.com/crisnahine/claude-code-model-router", "mono mut", 18)
-            + panel)
-    label = ("Model Router, a Claude Code plugin: every agent on the cheapest model that should do the job, and a "
-             "call Claude sends again climbs one level.")
-    return svg(w, h, "Model Router social preview", label, body, theme="dark")
+    out.append(f'<path d="M460 138V176M455 171L460 176L465 171" {arrow}/>')
+    x, name = 255, "verify_gate"
+    when = ["a file in the project was edited, and no", "check command ran after the last edit, and",
+            "the transcript can be read."]
+    then = ["Asks once for the work's own check: tests", "for code, a recompute for figures, a reread",
+            "for a document. Turn it off in /config."]
+    out.append(card(x, 182, 410, 252, rx=12))
+    out.append(text(x + 20, 212, name, "mono ink b", 14))
+    p, _ = pill(x + 26 + width_of(name, 14, True), 194, "on by default", cls="r1", tcls="tag", size=11.5, h=24, pad=10)
+    out.append(p)
+    out.append(text(x + 20, 244, "Asks when", "mut b", 12))
+    out.append(lines(x + 20, 266, when, "ink", 13, 20))
+    out.append(f'<path d="M{x + 20} 336H{x + 390}" class="ln" stroke-width="1"/>')
+    out.append(text(x + 20, 360, "Then", "mut b", 12))
+    out.append(lines(x + 62, 360, then, "ink", 13, 19))
+    out.append(text(32, 464, "Any background task still running, such as a subagent, shell or monitor, holds the "
+                    "check, since the turn is paused, not done.", "mut", 13))
+    title = "The check before a turn ends: verify_gate"
+    label = ("When Claude is about to end a turn, the Stop hook runs one check. verify_gate, on by default, asks "
+             "once for the work's own check when project files changed and nothing checked them.")
+    return svg(w, h, title, label, "".join(out))
 
 
 # ---------------------------------------------------------------- the headline figures in the docs
 
 FIGURE_PAGES = ("README.md", "docs/ARCHITECTURE.md", "docs/FAQ.md", "docs/RELEASE_READINESS.md", "docs/ROADMAP.md",
-                "docs/TRACEABILITY.md")
+                "docs/TRACEABILITY.md", "site/llms.txt")
 BENCH_SPAN = re.compile(r"<!-- bench:([\w.-]+) -->(.*?)<!-- /bench -->")
 SESSION_NAMES = {"claude-opus-5-5": "opus", "sonnet": "sonnet"}
 CLASS_WORDS = {"security-review": "security review", "root-cause": "root cause"}
+VERDICT_WORDS = {"WIN": "WIN", "LOSE": "LOSE", "NONE": "no difference shown", "REFUSED": "no verdict"}
 
 
 def class_word(k: str) -> str:
@@ -1074,14 +463,8 @@ def session_figures(name: str, session: dict) -> dict:
     f["router_code"] = f"`{router}`"  # the span must sit outside the code span
     f["classes"] = str(len(classes))
     f["saturated"] = str(session["saturated"])
-    for status in ("PASS", "FAIL", "PARTIAL"):
+    for status in ("WIN", "LOSE", "NONE", "REFUSED"):
         f[f"status.{status}"] = str(sum(c["status"] == status for c in classes))
-    passed = [class_word(c["class"]) for c in classes if c["status"] == "PASS"]
-    if passed:
-        f["pass_classes"] = words(passed)
-    partial = [class_word(c["class"]) for c in classes if c["status"] == "PARTIAL"]
-    if partial:
-        f["partial_classes"] = words(partial)
     # The router is spelled by its role, never by its id; every other configuration by its id, and some by a role too.
     key = lambda cfg: "router" if cfg == router else cfg  # noqa: E731
     for c in classes:
@@ -1130,11 +513,16 @@ def class_trace(c: dict, router: str) -> str:
         raise SystemExit(f"bench results have no {router} runs for {c['class']}")
     cell = c["configs"][router]
     key = lambda cfg: (c["configs"][cfg]["cost_per_solved"] is None, c["configs"][cfg]["cost_per_solved"] or 0, cfg)  # noqa: E731
+    def gap(cfg):
+        lo, hi = c["differences"][cfg] or (None, None)
+        return "" if lo is None or hi is None else f"{lo:+.3f} to {hi:+.3f}"
+
     base = ", ".join(
         f"`{cfg}` {usd(c['configs'][cfg]['cost_per_solved'])} "
-        f"({c['differences'][cfg][0]:+.3f} to {c['differences'][cfg][1]:+.3f}{missed(c['configs'][cfg])})"
-        for cfg in sorted(c["differences"], key=key))
-    return f"{class_word(c['class'])} {c['status']} (router {usd(cell['cost_per_solved'])}{missed(cell)}; {base})"
+        f"({VERDICT_WORDS[c['verdicts'][cfg]['verdict']]}{', ' + gap(cfg) if gap(cfg) else ''}{missed(c['configs'][cfg])})"
+        for cfg in sorted(c["verdicts"], key=key))
+    return (f"{class_word(c['class'])} {VERDICT_WORDS[c['status']]} (router {usd(cell['cost_per_solved'])}{missed(cell)}; "
+            f"{base})")
 
 
 def bench_figures(data: dict) -> dict:
@@ -1157,17 +545,20 @@ def with_figures(path: str, text: str, figures: dict) -> str:
     return BENCH_SPAN.sub(one, text)
 
 
-def img_alt(page: str, name: str, alt: str) -> str:
-    """The alt text of every <img> that shows the named asset, set to the asset's own label."""
-    if '"' in alt:
-        raise SystemExit(f"{name}: its label can't carry a double quote")
-    return re.sub(rf'({re.escape(name)}"[^>]*? alt=")[^"]*"', lambda m: m.group(1) + esc(alt) + '"', page)
+# ---------------------------------------------------------------- the Claude Code floor
+
+# The pages that state the current floor; the changelog and research pages keep the floor of their day.
+FLOOR_PAGES = ("README.md", "plugins/model-router/README.md", "docs/FAQ.md", "docs/GUIDE.md", "site/llms.txt")
+FLOOR = re.compile(r"Claude Code \d+(?:\.\d+)+ or later")
+
+
+def with_floor(text: str, floor: str) -> str:
+    return FLOOR.sub(f"Claude Code {floor} or later", text)
 
 
 # ---------------------------------------------------------------- the site
 
 FAQ_HTML = ("<!-- FAQ, written by tools/docs_assets.py from docs/FAQ.md. -->", "<!-- End of FAQ. -->")
-FAQ_LD = ("<!-- FAQ data, written by tools/docs_assets.py from docs/FAQ.md. -->", "<!-- End of FAQ data. -->")
 SITE_URL = re.compile(r"<!-- SITE_URL: (\S+) -->")
 
 
@@ -1193,24 +584,10 @@ def md_html(s: str) -> str:
     return re.sub(r"\[([^\]]+)\]\(([^)]+)\)", lambda m: f'<a href="{attr(md_link(m.group(2)))}">{m.group(1)}</a>', s)
 
 
-def md_plain(s: str) -> str:
-    s = re.sub(r"\s*\(\[[^\]]+\]\([^)]+\)(, \[[^\]]+\]\([^)]+\)[^)]*)?\)", "", s)
-    s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
-    return s.replace("`", "")
-
-
 def site_faq_html(faq: str) -> str:
     items = [f'<details{" open" if i == 0 else ""}><summary><h3>{esc(q)}</h3></summary><p>{md_html(a)}</p></details>'
              for i, (q, a) in enumerate(faq_entries(faq))]
     return FAQ_HTML[0] + "\n" + "\n".join(items) + "\n" + FAQ_HTML[1]
-
-
-def site_faq_ld(faq: str) -> str:
-    data = {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": [
-        {"@type": "Question", "name": q, "acceptedAnswer": {"@type": "Answer", "text": md_plain(a)}}
-        for q, a in faq_entries(faq)]}
-    body = json.dumps(data, indent=2, ensure_ascii=False).replace("</", "<\\/")  # an answer can't close the script
-    return FAQ_LD[0] + '\n<script type="application/ld+json">\n' + body + "\n</script>\n" + FAQ_LD[1]
 
 
 def between(current: str, marks: tuple, body: str, where: str) -> str:
@@ -1237,14 +614,10 @@ def site_files(faq: str, figures: dict, texts: dict, v: str, day: str, floor: st
         head, sep, tail = page.partition("-->")
         page = head + sep + tail.replace(old, url)
     page = between(page, FAQ_HTML, site_faq_html(faq), "site/index.html")
-    page = between(page, FAQ_LD, site_faq_ld(faq), "site/index.html")
-    page = badge_alt(page, v)
+    page = with_floor(badge_alt(page, v), floor)
     page = with_figures("site/index.html", page, figures)
     ladder = "Five levels: " + ", ".join(f"{lv} on {model} at {effort}" for lv, model, effort, *_ in LADDER)
     for pattern, value in ((r'"softwareVersion": "[^"]*"', f'"softwareVersion": "{v}"'),
-                           (r'"dateModified": "[^"]*"', f'"dateModified": "{day}"'),
-                           (r'"softwareRequirements": "Claude Code [^ ]+ or later;',
-                            f'"softwareRequirements": "Claude Code {floor} or later;'),
                            (r'"Five levels: [^"]*"', f'"{ladder}"'),
                            (r'Version [^,]+, released <time datetime="[^"]*">[^<]*</time>',
                             f'Version {v}, released <time datetime="{day}">{day}</time>')):
@@ -1255,10 +628,15 @@ def site_files(faq: str, figures: dict, texts: dict, v: str, day: str, floor: st
         "site/index.html": page,
         "site/sitemap.xml": ('<?xml version="1.0" encoding="UTF-8"?>\n'
                              '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-                             f"  <url>\n    <loc>{url}</loc>\n    <lastmod>{day}</lastmod>\n"
-                             "  </url>\n</urlset>\n"),
-        "site/robots.txt": f"User-agent: *\nAllow: /\n\nSitemap: {url}sitemap.xml\n",
+                             f"  <url>\n    <loc>{url}</loc>\n  </url>\n</urlset>\n"),
     }
+
+
+def site_asset_problems(page: str, root: Path = ROOT) -> list:
+    """The site's assets are copied from docs/assets when Pages deploys, so each one the page names must be there."""
+    return [f"site/index.html: assets/{name} is not in docs/assets"
+            for name in sorted(set(re.findall(r"\bassets/([\w.-]+\.\w+)", page)))
+            if not (root / "docs" / "assets" / name).exists()]
 
 
 # ---------------------------------------------------------------- write and check
@@ -1289,10 +667,11 @@ message: "If you use Model Router in your work, please cite it with these detail
 type: software
 title: "Model Router"
 abstract: >-
-  Model Router (model-router) is a Claude Code plugin that routes every agent
-  Claude Code starts (subagents, agent-team teammates and workflow stages) to
-  the cheapest Claude model and reasoning effort that should do the job, and
-  runs a call one level higher when its work comes back for a redo.
+  Model Router (model-router) is a Claude Code plugin that holds the Claude
+  model and reasoning effort Claude names for every agent Claude Code starts
+  (subagents, agent-team teammates and workflow stages) to the user's limits,
+  fills in the effort when only a model is named, and runs a call Claude marks
+  as a redo with more effort or on a stronger model.
 authors:
   - given-names: Cris
     family-names: Nahine
@@ -1308,12 +687,6 @@ keywords:
   - subagents
   - cost per solved task
 """
-
-
-SITE_ASSETS = ["logo-mark.svg", "logo.svg", "routing-call.svg", "badge-version.svg", "badge-claude-code.svg",
-               "badge-python.svg", "badge-license.svg", "ladder.svg", "redo-escalation.svg",
-               "two-paths.svg", "precedence.svg", "stop-checks.svg", "social-preview.png",
-               "video.mp4", "video-poster.jpg"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1334,12 +707,13 @@ def snapshot() -> Snapshot:
     sys.path.insert(0, str(ROOT / "bench"))
     import analyze
     v = version()
-    wanted = [*(p[0] for p in PAGES), "README.md", "site/index.html", "site/sitemap.xml"]
+    wanted = [*(p[0] for p in PAGES), "README.md", "plugins/model-router/README.md", "site/index.html",
+              "site/sitemap.xml", "site/llms.txt"]
     return Snapshot(
         version=v, released=release_date(v), claude_code=manifest()["engines"]["claude-code"].removeprefix(">="),
         ladder=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
         texts={path: (ROOT / path).read_text(encoding="utf-8") for path in wanted if (ROOT / path).exists()},
-        bench=analyze.figures(analyze.load(analyze.default_paths())))
+        bench=analyze.figures(analyze.load(analyze.default_paths()), legacy=True))
 
 
 def build(snap: Snapshot) -> dict:
@@ -1349,22 +723,12 @@ def build(snap: Snapshot) -> dict:
     figures = bench_figures(snap.bench)
     v = snap.version
     files = {}
-    assets = {}
-    assets.update(brand_assets())
-    assets.update(banner_assets(snap.pages))
-    assets.update(badge_assets(v))
-    assets["hero.svg"] = hero()
-    assets["hero-phone.svg"] = hero(phone=True)
-    assets["headline.svg"] = headline(snap.ladder["prices"])
-    assets["headline-phone.svg"] = headline(snap.ladder["prices"], phone=True)
+    assets = badge_assets(v, snap.claude_code)
     assets["ladder.svg"] = diagram_ladder()
     assets["redo-escalation.svg"] = diagram_redo()
     assets["two-paths.svg"] = diagram_two_paths()
     assets["precedence.svg"] = diagram_precedence()
     assets["stop-checks.svg"] = diagram_stop_checks()
-    assets["social-preview.svg"] = social_preview()
-    panel, css, ph = ladder_panel(1, 1, 518, prefix="c")
-    assets["routing-call.svg"] = svg(520, round(ph) + 2, "One agent call, routed and redone", HERO_LABEL, panel, css)
     for name, body in assets.items():
         files[f"docs/assets/{name}"] = body
     for path, *_ in snap.pages:
@@ -1372,8 +736,10 @@ def build(snap: Snapshot) -> dict:
             files[path] = with_head(path, snap.texts[path], snap.pages)
             if path == "docs/README.md":
                 files[path] = with_cards(files[path], snap.pages)
-    readme = badge_alt(snap.texts["README.md"], v)
-    files["README.md"] = img_alt(readme, "headline.svg", headline_label())
+    files["README.md"] = badge_alt(snap.texts["README.md"], v)
+    for path in FLOOR_PAGES:
+        if path in files or path in snap.texts:
+            files[path] = with_floor(files.get(path, snap.texts[path]), snap.claude_code)
     for path in FIGURE_PAGES:
         if path in files:
             files[path] = with_figures(path, files[path], figures)
@@ -1393,8 +759,6 @@ def problems_in_svg(name: str, source: str) -> list:
         found.append(f"{name}: needs role=img and an aria-label")
     if root.find(f"{ns}title") is None:
         found.append(f"{name}: needs a <title>")
-    if "@keyframes" in source and "prefers-reduced-motion: reduce" not in source:
-        found.append(f"{name}: animates without a reduced-motion rule")
     if re.search(r"<script|href=\"http|url\(http|@import", source):
         found.append(f"{name}: loads something from outside the file")
     if len(source.encode()) > 40_000:
@@ -1427,7 +791,7 @@ def palette_problems() -> list:
 
 
 def sync(files: dict, check: bool, root: Path = ROOT) -> list:
-    """Write `files` under `root`, or with `check` report each one that differs, and the same for the site's copies."""
+    """Write `files` under `root`, or with `check` report each one that differs."""
     problems = []
     for path, body in files.items():
         if path.endswith(".svg"):
@@ -1440,14 +804,6 @@ def sync(files: dict, check: bool, root: Path = ROOT) -> list:
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(body.encode("utf-8"))
-    for name in SITE_ASSETS:
-        src, dst = root / "docs" / "assets" / name, root / "site" / "assets" / name
-        if src.exists() and (not dst.exists() or dst.read_bytes() != src.read_bytes()):
-            if check:
-                problems.append(f"site/assets/{name}: differs from docs/assets, run python3 tools/docs_assets.py")
-            else:
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                dst.write_bytes(src.read_bytes())
     return problems
 
 
@@ -1455,6 +811,7 @@ def main(argv: list) -> int:
     check = "--check" in argv
     files = build(snapshot())
     problems = palette_problems() + LAYOUT + sync(files, check)
+    problems += site_asset_problems(files.get("site/index.html", ""))
     for p in problems:
         print(p, file=sys.stderr)
     return 1 if problems else 0

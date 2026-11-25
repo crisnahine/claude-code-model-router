@@ -1,6 +1,4 @@
 <!-- Page head, written by tools/docs_assets.py: edit PAGES in tools/docs_pages.py, then run it. -->
-<p align="center"><img src="assets/banner-docs.svg" width="880" alt="Documentation: Every page, and the question each one answers"></p>
-
 <p align="center"><a href="../README.md">Model Router</a> &nbsp;&middot;&nbsp; Previous: <a href="GUIDE.md">Guide</a> &nbsp;&middot;&nbsp; Next: <a href="ARCHITECTURE.md">Architecture</a></p>
 <!-- End of page head. -->
 
@@ -12,54 +10,54 @@ Every page about Model Router, the Claude Code plugin that routes each agent to 
 <table>
 <tr><th colspan="2" align="left">Start here<br><sub>What it is, and the questions people ask first.</sub></th></tr>
 <tr>
-<td width="50%" valign="top"><img src="assets/icon-readme.svg" width="20" height="20" alt=""> <a href="../README.md"><b>Model Router</b></a><br>What does it do, and how do I install it?</td>
-<td width="50%" valign="top"><img src="assets/icon-faq.svg" width="20" height="20" alt=""> <a href="FAQ.md"><b>Questions</b></a><br>What is Model Router, and how does it pick?</td>
+<td width="50%" valign="top"><a href="../README.md"><b>Model Router</b></a><br>What does it do, and how do I install it?</td>
+<td width="50%" valign="top"><a href="FAQ.md"><b>Questions</b></a><br>What is Model Router, and how does it pick?</td>
 </tr>
 <tr>
-<td width="50%" valign="top"><img src="assets/icon-guide.svg" width="20" height="20" alt=""> <a href="GUIDE.md"><b>Guide</b></a><br>How do I configure it for my setup?</td>
+<td width="50%" valign="top"><a href="GUIDE.md"><b>Guide</b></a><br>How do I configure it for my setup?</td>
 <td width="50%"></td>
 </tr>
 <tr><th colspan="2" align="left">How it works<br><sub>The design, its words and sources, and what it costs to run.</sub></th></tr>
 <tr>
-<td width="50%" valign="top"><img src="assets/icon-architecture.svg" width="20" height="20" alt=""> <a href="ARCHITECTURE.md"><b>Architecture</b></a><br>How do two paths share one router?</td>
-<td width="50%" valign="top"><img src="assets/icon-glossary.svg" width="20" height="20" alt=""> <a href="../GLOSSARY.md"><b>Glossary</b></a><br>What do call, level, pick and redo mean?</td>
+<td width="50%" valign="top"><a href="ARCHITECTURE.md"><b>Architecture</b></a><br>How do two paths share one router?</td>
+<td width="50%" valign="top"><a href="../GLOSSARY.md"><b>Glossary</b></a><br>What do call, level, pick and redo mean?</td>
 </tr>
 <tr>
-<td width="50%" valign="top"><img src="assets/icon-research.svg" width="20" height="20" alt=""> <a href="research/model-control.md"><b>Research</b></a><br>What can a plugin control in Claude Code?</td>
-<td width="50%" valign="top"><img src="assets/icon-research-quality.svg" width="20" height="20" alt=""> <a href="research/quality-first-routing.md"><b>Quality research</b></a><br>What can the router save without losing quality?</td>
+<td width="50%" valign="top"><a href="research/model-control.md"><b>Research</b></a><br>What can a plugin control in Claude Code?</td>
+<td width="50%" valign="top"><a href="research/quality-first-routing.md"><b>Quality research</b></a><br>What can the router save without losing quality?</td>
 </tr>
 <tr>
-<td width="50%" valign="top"><img src="assets/icon-research-redo.svg" width="20" height="20" alt=""> <a href="research/caller-levels-and-redo.md"><b>Redo research</b></a><br>Who names a call's level, and what marks a redo?</td>
-<td width="50%" valign="top"><img src="assets/icon-performance.svg" width="20" height="20" alt=""> <a href="PERFORMANCE.md"><b>Performance</b></a><br>What does the router cost in time and disk?</td>
+<td width="50%" valign="top"><a href="research/caller-levels-and-redo.md"><b>Redo research</b></a><br>Who names a call's level, and what marks a redo?</td>
+<td width="50%" valign="top"><a href="research/architecture-review.md"><b>Architecture review</b></a><br>Which design choices held up against the docs, and what changed?</td>
 </tr>
 <tr>
-<td width="50%" valign="top"><img src="assets/icon-security.svg" width="20" height="20" alt=""> <a href="SECURITY.md"><b>Security</b></a><br>What reaches the network, and who can steer it?</td>
-<td width="50%"></td>
+<td width="50%" valign="top"><a href="PERFORMANCE.md"><b>Performance</b></a><br>What does the router cost in time and disk?</td>
+<td width="50%" valign="top"><a href="SECURITY.md"><b>Security</b></a><br>What reaches the network, and who can steer it?</td>
 </tr>
 <tr><th colspan="2" align="left">Evidence<br><sub>What was measured and tested, and what is still open.</sub></th></tr>
 <tr>
-<td width="50%" valign="top"><img src="assets/icon-claude-code-docs.svg" width="20" height="20" alt=""> <a href="CLAUDE_CODE_DOCS.md"><b>Built on the docs</b></a><br>Which Claude Code docs does it follow, and where?</td>
-<td width="50%" valign="top"><img src="assets/icon-benchmarks.svg" width="20" height="20" alt=""> <a href="BENCHMARKS.md"><b>Benchmarks</b></a><br>What does a solved task cost, with and without it?</td>
+<td width="50%" valign="top"><a href="CLAUDE_CODE_DOCS.md"><b>Built on the docs</b></a><br>Which Claude Code docs does it follow, and where?</td>
+<td width="50%" valign="top"><a href="BENCHMARKS.md"><b>Benchmarks</b></a><br>What does a solved task cost, with and without it?</td>
 </tr>
 <tr>
-<td width="50%" valign="top"><img src="assets/icon-test-results.svg" width="20" height="20" alt=""> <a href="TEST_RESULTS.md"><b>Test results</b></a><br>What ran last, and what passed?</td>
-<td width="50%" valign="top"><img src="assets/icon-traceability.svg" width="20" height="20" alt=""> <a href="TRACEABILITY.md"><b>Traceability</b></a><br>Where is each requirement, and is it met?</td>
+<td width="50%" valign="top"><a href="TEST_RESULTS.md"><b>Test results</b></a><br>What ran last, and what passed?</td>
+<td width="50%" valign="top"><a href="TRACEABILITY.md"><b>Traceability</b></a><br>Where is each requirement, and is it met?</td>
 </tr>
 <tr>
-<td width="50%" valign="top"><img src="assets/icon-release-readiness.svg" width="20" height="20" alt=""> <a href="RELEASE_READINESS.md"><b>Release readiness</b></a><br>Is this release ready, and what is still open?</td>
+<td width="50%" valign="top"><a href="RELEASE_READINESS.md"><b>Release readiness</b></a><br>Is this release ready, and what is still open?</td>
 <td width="50%"></td>
 </tr>
 <tr><th colspan="2" align="left">The project<br><sub>What comes next, what changed, and how to take part.</sub></th></tr>
 <tr>
-<td width="50%" valign="top"><img src="assets/icon-roadmap.svg" width="20" height="20" alt=""> <a href="ROADMAP.md"><b>Roadmap</b></a><br>What gets built next, and why first?</td>
-<td width="50%" valign="top"><img src="assets/icon-changelog.svg" width="20" height="20" alt=""> <a href="../CHANGELOG.md"><b>Changelog</b></a><br>What changed in each release?</td>
+<td width="50%" valign="top"><a href="ROADMAP.md"><b>Roadmap</b></a><br>What gets built next, and why first?</td>
+<td width="50%" valign="top"><a href="../CHANGELOG.md"><b>Changelog</b></a><br>What changed in each release?</td>
 </tr>
 <tr>
-<td width="50%" valign="top"><img src="assets/icon-contributing.svg" width="20" height="20" alt=""> <a href="../CONTRIBUTING.md"><b>Contributing</b></a><br>How does a change get merged?</td>
-<td width="50%" valign="top"><img src="assets/icon-releasing.svg" width="20" height="20" alt=""> <a href="../RELEASING.md"><b>Releasing</b></a><br>How is a release cut, step by step?</td>
+<td width="50%" valign="top"><a href="../CONTRIBUTING.md"><b>Contributing</b></a><br>How does a change get merged?</td>
+<td width="50%" valign="top"><a href="../RELEASING.md"><b>Releasing</b></a><br>How is a release cut, step by step?</td>
 </tr>
 <tr>
-<td width="50%" valign="top"><img src="assets/icon-brand.svg" width="20" height="20" alt=""> <a href="assets/BRAND.md"><b>Brand</b></a><br>Which colors, type and motion make a page ours?</td>
+<td width="50%" valign="top"><a href="assets/BRAND.md"><b>Brand</b></a><br>Which colors and type make a page ours?</td>
 <td width="50%"></td>
 </tr>
 </table>
@@ -86,7 +84,7 @@ Where each delivery item lives. Checked 2026-11-22.
 | 13 | Comparison against the baselines | [BENCHMARKS.md](BENCHMARKS.md) |
 | 14 | Release checklist and changelog | [RELEASING.md](../RELEASING.md), [CHANGELOG.md](../CHANGELOG.md) |
 
-Also kept: [TRACEABILITY.md](TRACEABILITY.md) (one row per requirement, counted by `python3 tools/traceability.py`), [CONTRIBUTING.md](../CONTRIBUTING.md) (gates, commit rules and where to work) and [compat/baseline.json](../compat/baseline.json) (the Claude Code version, docs index, model aliases and model status last reviewed).
+Also kept: [TRACEABILITY.md](TRACEABILITY.md) (one row per requirement, counted by `python3 tools/traceability.py`), [CONTRIBUTING.md](../CONTRIBUTING.md) (gates, commit rules and where to work) and [compat/baseline.json](../compat/baseline.json) (the Claude Code version, docs pages, model aliases and model status last reviewed).
 
 ## Outside tools and sources
 
@@ -96,7 +94,7 @@ Every outside project, library, benchmark and tool these docs name, with its pri
 | :- | :- | :- |
 | SWE-Bench Pro (Scale AI) | The cost and effort figures quoted from Anthropic's cost guide ([research](research/model-control.md)) | https://labs.scale.com/papers/swe_bench_pro |
 | Percentile bootstrap (Efron, Annals of Statistics 7(1)) | The 95% intervals in [BENCHMARKS.md](BENCHMARKS.md) | https://doi.org/10.1214/aos/1176344552 |
-| `@anthropic-ai/claude-code` on npm | CI's `validate` job ([SECURITY.md](SECURITY.md)) | https://github.com/anthropics/claude-code (the package's homepage in the registry) |
+| `@anthropic-ai/claude-code` on npm | CI's `validate` and `eval` jobs and the daily `newest` job ([SECURITY.md](SECURITY.md)) | https://github.com/anthropics/claude-code (the package's homepage in the registry) |
 | TypeScript `tsc` 6.0.3 and `skipLibCheck` | The mod type check ([TEST_RESULTS.md](TEST_RESULTS.md)) | https://www.typescriptlang.org/tsconfig/#skipLibCheck |
 | `@types/node` 22.20.5 | The mod test's type check | https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node (the package's homepage in the registry) |
 | Node.js test runner and type stripping | The mod tests | https://nodejs.org/api/test.html, https://nodejs.org/api/typescript.html |

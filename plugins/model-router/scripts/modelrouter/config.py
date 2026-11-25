@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import operator
 import os
+import re
 from dataclasses import replace
 from enum import Enum
 from pathlib import Path
@@ -18,14 +19,13 @@ OVERRIDE_FILE = "model-router.json"
 # The shape of config/models.json and model-router.json; a file without `schema` is version 1.
 # docs/ARCHITECTURE.md "Compatibility" says when it changes.
 CONFIG_SCHEMA = 1
-MODES = ("off", "advise", "auto")
-PRIORITIES = ("fast", "balanced", "quality")
+MODES = ("off", "auto")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-# Who can choose a call's model and still leave its effort to the call's level.
-LEVEL_SOURCES = ("router", "pin", "rule")
 
 USER_FILE = "your model-router.json"
 PROJECT_FILE = "the project's model-router.json"
+# A repository's key names are printed into skill output Claude reads, so only short plain names are kept.
+_PLAIN_NAME = re.compile(r"[A-Za-z0-9._:/\[\]-]{1,64}")
 
 
 class Level(str, Enum):
@@ -56,10 +56,6 @@ class Level(str, Enum):
     @property
     def rank(self) -> int:
         return LEVELS.index(self)
-
-    def up(self) -> Level | None:
-        """The next level, or None at the top."""
-        return LEVELS[self.rank + 1] if self.rank + 1 < len(LEVELS) else None
 
     def _compare(self, other: object, op: Any) -> Any:
         found = Level.parse(other)
@@ -142,40 +138,52 @@ def _number(value: Any) -> bool:
 
 def parse_mode(value: Any) -> str | None:
     value = value.strip().lower() if isinstance(value, str) else None
+    value = "off" if value == "advise" else value  # advise, from older releases, changed no call
     return value if value in MODES else None
 
 
-def _clean(override: Any, source: str, problems: list[str]) -> dict:
+def _clean(override: Any, source: str, problems: list[str], plain_keys: bool = False) -> dict:
     """Keep only the well-formed parts of an override file, so a typo can't break a hook or put a
-    value on an agent call that Claude Code would reject. What is dropped is added to `problems`."""
+    value on an agent call that Claude Code would reject. What is dropped is added to `problems`.
+    With `plain_keys`, a model or agent key that isn't a short plain name, or a levels key that isn't a level,
+    is dropped unnamed."""
     if not isinstance(override, dict):
         return {}
 
     def bad(where: str, why: str) -> None:
         problems.append(f"{source}: {where} {why}, dropped")
 
+    def plain(name: object, section: str) -> bool:
+        if plain_keys and isinstance(name, str) and not _PLAIN_NAME.fullmatch(name):
+            problems.append(f"{source}: a key under {section} that is not a plain name, dropped")
+            return False
+        return True
+
     out: dict = {}
-    if parse_mode(override.get("routing_mode")):
-        out["routing_mode"] = parse_mode(override.get("routing_mode"))
-    elif override.get("routing_mode") is not None:
-        bad("routing_mode", "is not off, advise or auto")
+    if "routing_mode" in override:
+        bad("routing_mode", "is set only in /config")
     models = override.get("models")
     if isinstance(models, dict):
         out["models"] = {}
         for name, spec in models.items():
+            if not plain(name, "models"):
+                continue
             if not isinstance(name, str) or not isinstance(spec, dict):
                 bad(f"models.{name}", "is not an object")
                 continue
-            for field in ("strength", "speed", "cost"):
+            for field in ("strength", "cost"):
                 if spec.get(field) is not None and not _number(spec[field]):
                     bad(f"models.{name}.{field}", "is not a finite number")
-            out["models"][name.lower()] = {f: spec[f] for f in ("strength", "speed", "cost") if _number(spec.get(f))}
+            out["models"][name.lower()] = {f: spec[f] for f in ("strength", "cost") if _number(spec.get(f))}
     elif models is not None:
         bad("models", "is not an object")
     levels = override.get("levels")
     if isinstance(levels, dict):
         out["levels"] = {}
         for name, spec in levels.items():
+            if plain_keys and name not in LEVELS:
+                problems.append(f"{source}: a key under levels that is not a level, dropped")
+                continue
             if not isinstance(name, str) or name not in LEVELS or not isinstance(spec, dict):
                 bad(f"levels.{name}", "is not a level with an object")
                 continue
@@ -195,6 +203,8 @@ def _clean(override: Any, source: str, problems: list[str]) -> dict:
     if isinstance(agents, dict):
         out["agents"] = {}
         for name, spec in agents.items():
+            if not plain(name, "agents"):
+                continue
             if not isinstance(name, str) or not isinstance(spec, dict):
                 bad(f"agents.{name}", "is not an object")
                 continue
@@ -215,23 +225,6 @@ def _clean(override: Any, source: str, problems: list[str]) -> dict:
     elif agents is not None:
         bad("agents", "is not an object")
     return out
-
-
-def _prices(value: Any, source: str, problems: list[str]) -> dict:
-    """The numeric rate fields of a prices block, keyed by lowercase model ID."""
-    if not isinstance(value, dict):
-        return {}
-    fields = ("input", "output", "cache_read", "cache_write", "cache_write_1h")
-    out = {}
-    for name, spec in value.items():
-        if not isinstance(name, str) or not isinstance(spec, dict):
-            problems.append(f"{source}: prices.{name} is not an object, dropped")
-            continue
-        for field in fields:
-            if spec.get(field) is not None and not _number(spec[field]):
-                problems.append(f"{source}: prices.{name}.{field} is not a finite number, dropped")
-        out[name.lower()] = {f: spec[f] for f in fields if _number(spec.get(f))}
-    return {k: v for k, v in out.items() if v}
 
 
 def tool_input(hook_input: dict) -> dict:
@@ -259,8 +252,8 @@ def _raises_only(project: dict, shipped: dict, held: list[Held]) -> None:
 
 
 def _newer(file: dict) -> bool:
-    """An override file written for a newer release. It is still read, as far as _clean understands it:
-    refusing it would drop its `routing_mode: off` and turn routing back on."""
+    """An override file written for a newer release. It is still read, as far as _clean understands it,
+    so the settings this release knows still apply."""
     version = file.get("schema")
     return isinstance(version, int) and not isinstance(version, bool) and version > CONFIG_SCHEMA
 
@@ -281,9 +274,9 @@ def _models(raw: dict, added: set, base: dict, problems: list[str]) -> dict[str,
             if name not in base:
                 problems.append(f"models.{name} has no strength, so it is left out")
             continue
-        use_for = spec.get("use_for")
-        found[name] = Model(name, spec["strength"], _optional(spec, "speed"), _optional(spec, "cost"),
-                            use_for if isinstance(use_for, str) else "", project=name in added)
+        use_for, stops = spec.get("use_for"), spec.get("effort_stops_at")
+        found[name] = Model(name, spec["strength"], _optional(spec, "cost"), use_for if isinstance(use_for, str) else "",
+                            project=name in added, effort_stops_at=stops if stops in EFFORTS else None)
     return found
 
 
@@ -334,8 +327,9 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
     held: list[Held] = []
     user_file, project_file = user or {}, project or {}
     mine = _clean(user_file, USER_FILE, problems)
-    mine["prices"] = _prices(user_file.get("prices"), USER_FILE, problems)
-    theirs = _clean(project_file, PROJECT_FILE, problems)
+    if isinstance(user_file, dict) and "prices" in user_file:
+        problems.append(f"{USER_FILE}: prices is no longer read, since the dollars shown are Claude Code's estimate")
+    theirs = _clean(project_file, PROJECT_FILE, problems, plain_keys=True)
     vouched = set(base.get("models") or {}) | set(mine.get("models") or {})
     added = {}
     for name, spec in (theirs.get("models") or {}).items():
@@ -344,7 +338,6 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
             held.append(Held("model", name, "its name overlaps a shipped or your own model's, so it is ignored"))
         else:
             added[name] = spec
-    file_modes = [m for m in (mine.get("routing_mode"), theirs.get("routing_mode")) if m]
     shipped_levels = _merge(base.get("levels") or {}, mine.get("levels") or {})
     project_levels = theirs.get("levels") or {}
     _raises_only(project_levels, shipped_levels, held)
@@ -356,21 +349,16 @@ def build(base: dict, user: dict | None = None, project: dict | None = None) -> 
             aliases[alias] = target
         else:
             problems.append(f"aliases.{alias} names no model, dropped")
-    main = base.get("main") if isinstance(base.get("main"), dict) else {}
-    cache_rules = main.get("effort_keeps_cache") if isinstance(main.get("effort_keeps_cache"), dict) else {}
     return Registry(
         models=models,
         levels=_levels(_merge(shipped_levels, project_levels), problems),
+        trusted_levels=_levels(shipped_levels, []),
         aliases=aliases,
-        prices=_merge(base.get("prices") or {}, mine.get("prices") or {}),
-        main_effort={Level(k): e for k, e in (main.get("effort") or {}).items() if Level.parse(k) and e in EFFORTS},
-        keeps_cache={k: v for k, v in cache_rules.items() if not k.startswith("$") and isinstance(v, str)},
+        prices=dict(base.get("prices") or {}),
         newest={k: v for k, v in (base.get("newest") or {}).items() if not k.startswith("$") and isinstance(v, str)},
-        older_aliases={k: tuple(v) for k, v in (base.get("older_aliases") or {}).items()
-                       if not k.startswith("$") and isinstance(v, list)},
-        crew=dict(base.get("crew") or {}),
+        older_aliases={k: dict(v) for k, v in (base.get("older_aliases") or {}).items()
+                       if not k.startswith("$") and isinstance(v, dict)},
         rules=_rules(base.get("agents") or {}, mine.get("agents") or {}, theirs.get("agents") or {}, held),
-        routing_mode=min(file_modes, key=MODES.index) if file_modes else None,
         problems=tuple(problems),
         held=tuple(held),
     )

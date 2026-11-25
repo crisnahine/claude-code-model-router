@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://crisnahine.github.io/claude-code-model-router/sitemap.xml

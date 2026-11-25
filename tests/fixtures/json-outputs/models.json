@@ -1,8 +1,7 @@
 {
-  "schema": "model-router.models/1",
+  "schema": "model-router.models/3",
   "cap": null,
   "strongest_in_use": "opus",
-  "priority": "balanced",
   "models": [
     {
       "model": "haiku",
@@ -41,26 +40,6 @@
       "detail": "routed around until retried (ran as claude-opus-5-5 instead)"
     }
   ],
-  "levels": [
-    {
-      "level": "lookup",
-      "routed_calls": 3,
-      "votes_too_low": 0,
-      "raised": false
-    },
-    {
-      "level": "complex",
-      "routed_calls": 5,
-      "votes_too_low": 1,
-      "raised": true
-    }
-  ],
-  "doc_aliases": [
-    "haiku",
-    "saga",
-    "swift"
-  ],
-  "not_in_registry": [],
   "set_aside": [],
   "newer_files": [],
   "newer_config": [],

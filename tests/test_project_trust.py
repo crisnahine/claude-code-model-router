@@ -1,14 +1,13 @@
 """What a project's files and the hook's cwd can and can't change."""
 from __future__ import annotations
 
-import json
 import os
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from test_model_router import HARD, Sandbox
-from modelrouter import agents, allowlist, request
+from modelrouter import agents, request
 from modelrouter import config as cfg
 from modelrouter import mod as modpath
 from modelrouter.config import Level
@@ -20,17 +19,15 @@ class ProjectFromASubfolder(Sandbox):
         (self.project / ".git").mkdir()
         self.sub = self.project / "src" / "pkg"
         self.sub.mkdir(parents=True)
-        self.override({"routing_mode": "off"})
+        self.override({"levels": {"complex": {"effort": "max"}}})
         self.agent("pinned-helper", "haiku")
 
-    def test_a_subfolder_cwd_still_reads_the_roots_file_agents_and_settings(self):
-        self.assertEqual(cfg.load({"cwd": str(self.sub)}).routing_mode, "off")
+    def test_a_subfolder_cwd_still_reads_the_roots_file_and_agents(self):
+        self.assertEqual(cfg.load({"cwd": str(self.sub)}).levels[Level.complex].effort, "max")
         self.assertEqual(agents.find("pinned-helper", self.sub)["model"], "haiku")
-        (self.project / ".claude" / "settings.json").write_text(json.dumps({"availableModels": ["haiku"]}))
-        self.assertEqual(allowlist.file_layers(self.sub)["project"], {"availableModels": ["haiku"]})
         del os.environ["CLAUDE_PROJECT_DIR"]  # a skill command run through Bash
         with mock.patch.object(os, "getcwd", return_value=str(self.sub)):
-            self.assertEqual(cfg.load().routing_mode, "off")
+            self.assertEqual(cfg.load().levels[Level.complex].effort, "max")
         self.assertEqual(agents.find("pinned-helper", self.sub)["model"], "haiku")
 
     def test_a_session_started_in_a_monorepo_package_finds_the_roots_agents(self):
@@ -38,8 +35,8 @@ class ProjectFromASubfolder(Sandbox):
         package.mkdir(parents=True)
         os.environ["CLAUDE_PROJECT_DIR"] = str(package)
         self.assertEqual(agents.find("pinned-helper", package)["model"], "haiku")
-        self.assertEqual(cfg.load({"cwd": str(package)}).routing_mode, "off")
-        self.assertEqual(cfg.load().routing_mode, "off")
+        self.assertEqual(cfg.load({"cwd": str(package)}).levels[Level.complex].effort, "max")
+        self.assertEqual(cfg.load().levels[Level.complex].effort, "max")
 
     def test_the_walk_stops_at_the_repository_root(self):
         outer = self.project.parent / ".claude" / "agents"
