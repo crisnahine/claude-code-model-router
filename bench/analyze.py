@@ -26,12 +26,11 @@ sys.path.insert(0, str(run.PLUGIN / "scripts"))
 sys.path.insert(0, str(BENCH.parent / "tools"))
 from docs_pages import HEAD_END, HEAD_START  # noqa: E402
 from modelrouter import config as mrconfig  # noqa: E402
-from modelrouter.registry import Registry  # noqa: E402
 from overhead import percentile  # noqa: E402
 
 RESULTS = BENCH / "results"
 PILOT = RESULTS / "pilot"  # exploratory rounds: shown on the page, never judged
-MIN_RUNS = 10  # fewer runs per forced baseline than this and a class isn't read as saturated
+MIN_RUNS = 10  # fewer runs of either of the split pair than this and a class isn't read as saturated
 ALPHA = 0.05  # the 95% intervals, and the one-sided level of the exact comparisons
 MARGIN = 0.10  # the non-inferiority margin on pass rate, fixed before any run
 DENIAL_SHARE = 0.25  # a cell with more of its runs denied a Bash call than this gets no verdict
@@ -242,18 +241,14 @@ def splitting_tasks(runs: list[dict], strong: str = SPLIT_STRONG, weak: str = SP
     return out
 
 
-def _quality(cells: dict, runs: list[dict], forced: dict) -> dict:
-    """Whether a class's tasks tell models apart: when the weakest forced baseline can't be told from the strongest
-    by an exact one-sided test, the class is `saturated` and an equal pass rate there says nothing. With every forced
-    baseline on one model, `defaults`, on the session model, is the strong end."""
-    ladder = sorted((n for n in cells if n in forced), key=lambda n: (forced[n], n))
-    weak, strong = (ladder[0], ladder[-1]) if ladder else (None, None)
-    if ladder and forced[weak][0] == forced[strong][0] and SPLIT_STRONG in cells:
-        strong = SPLIT_STRONG
-    out = {"saturated": None, "weakest": weak, "strongest": strong, "splits": splitting_tasks(runs)}
-    if not ladder or strong != SPLIT_STRONG and forced[weak][0] == forced[strong][0]:
-        return {**out, "reason": f"no forced baseline, or forced baselines on one model and no `{SPLIT_STRONG}`, so "
-                                 "the class can't show whether the tasks tell models apart"}
+def _quality(cells: dict, runs: list[dict]) -> dict:
+    """Whether a class's tasks tell models apart: when `haiku-high` can't be told from `defaults` by an exact one-sided
+    test, the class is `saturated` and an equal pass rate there says nothing."""
+    weak, strong = SPLIT_WEAK, SPLIT_STRONG
+    out = {"saturated": None, "splits": splitting_tasks(runs)}
+    if weak not in cells or strong not in cells:
+        return {**out, "reason": f"`{weak}` or `{strong}` didn't run, so the class can't show whether the tasks tell "
+                                 "models apart"}
     w, s = cells[weak], cells[strong]
     if min(w["runs"], s["runs"]) < MIN_RUNS:
         return {**out, "reason": f"too few runs ({MIN_RUNS} needed) to say whether the tasks tell models apart"}
@@ -266,7 +261,7 @@ def _quality(cells: dict, runs: list[dict], forced: dict) -> dict:
 
 
 def _summary(cls: str, runs: list[dict], *, routers: frozenset[str], router: str, draws: int, seed: int,
-             session: str, forced: dict | None) -> dict:
+             session: str) -> dict:
     """One row of a table: each configuration's cell and the router's verdict against each baseline."""
     configs = sorted({r["config"] for r in runs}, key=lambda c: (c != router, c))
     by = {c: [r for r in runs if r["config"] == c] for c in configs}
@@ -303,24 +298,24 @@ def _summary(cls: str, runs: list[dict], *, routers: frozenset[str], router: str
         if router in cells and base and status != "REFUSED" else None
     return {"class": cls, "configs": cells, "verdicts": verdicts, "status": status, "rank": rank,
             "reason": "no router or baseline runs" if not verdicts else _verdict_text(verdicts),
-            "quality": _quality(cells, runs, forced or {})}
+            "quality": _quality(cells, runs)}
 
 
 def summarize(rows: list[dict], *, routers: frozenset[str], router: str = "plugin", draws: int = 2000,
-              seed: int = 0, session: str = "", forced: dict | None = None) -> list[dict]:
+              seed: int = 0, session: str = "") -> list[dict]:
     """One row per task class."""
     order = {name: i for i, name in enumerate(run.CLASSES)}
     return [_summary(cls, [r for r in rows if r["class"] == cls], routers=routers, router=router, draws=draws,
-                     seed=seed, session=session, forced=forced)
+                     seed=seed, session=session)
             for cls in sorted({r["class"] for r in rows}, key=lambda c: (order.get(c, len(order)), c))]
 
 
 def overall(rows: list[dict], *, routers: frozenset[str], router: str = "plugin", draws: int = 2000,
-            seed: int = 0, session: str = "", forced: dict | None = None) -> dict | None:
+            seed: int = 0, session: str = "") -> dict | None:
     """One row over every task in a table, the tasks of all its classes resampled together, so a plan with one task
     per class can still show the margin."""
-    return _summary(ALL, rows, routers=routers, router=router, draws=draws, seed=seed, session=session,
-                    forced=forced) if rows else None
+    return _summary(ALL, rows, routers=routers, router=router, draws=draws, seed=seed,
+                    session=session) if rows else None
 
 
 def _verdict_text(verdicts: dict) -> str:
@@ -364,7 +359,7 @@ def sessions(results: Results, router: str | None = None) -> list[tuple[str, str
     chosen = router or next((c["id"] for c in results.configs if c.get("judged")), "plugin")
     out = []
     for model, group in sorted(groups.items()):
-        kwargs = {"routers": results.routers, "router": chosen, "session": model, "forced": results.forced}
+        kwargs = {"routers": results.routers, "router": chosen, "session": model}
         out.append((model, chosen, summarize(group, **kwargs), overall(group, **kwargs), group))
     return out
 
@@ -485,29 +480,13 @@ class Results:
     aside: list[dict]
     configs: list[dict]
     tasks: list[dict]
-    registry: Registry
     routers: frozenset[str]
-    forced: dict
     pilot: list = field(default_factory=list)
     pilot_notes: dict = field(default_factory=dict)
 
 
 def router_ids(configs: list[dict]) -> frozenset[str]:
     return frozenset(c["id"] for c in configs if c.get("plugin"))
-
-
-def forced_ranks(configs: list[dict], registry_config: Registry) -> dict[str, tuple[float, int]]:
-    """Each configuration that forces every subagent onto one model, ranked by that model's strength in the
-    registry, then by the effort it sets (none ranks below low)."""
-    out = {}
-    for c in configs:
-        env = c.get("env") or {}
-        if env.get("CLAUDE_CODE_SUBAGENT_MODEL_FORCE") and env.get("CLAUDE_CODE_SUBAGENT_MODEL"):
-            model = registry_config.family(env["CLAUDE_CODE_SUBAGENT_MODEL"])
-            effort = env.get("CLAUDE_CODE_SUBAGENT_EFFORT")
-            out[c["id"]] = (registry_config.strength(model),
-                            mrconfig.EFFORTS.index(effort) if effort in mrconfig.EFFORTS else -1)
-    return out
 
 
 def _split(every: list[dict], tasks: list[dict]) -> tuple[list[dict], list[dict], list[dict]]:
@@ -537,9 +516,7 @@ def load(paths: list[Path]) -> Results:
                          "task.json if the change can change a run's outcome: " + "; ".join(
                              f"`{task}`: a row graded by check {got}, today's is {today[task]}" for task, got in moved))
     aside = [row for folder in sorted({f.parent for f in files}) for row in _jsonl((folder / "limited").glob("*.jsonl"))]
-    registry_config = mrconfig.shipped()
-    return Results(files, rows, stale, broken, aside, configs, tasks, registry_config, router_ids(configs),
-                   forced_ranks(configs, registry_config))
+    return Results(files, rows, stale, broken, aside, configs, tasks, router_ids(configs))
 
 
 CACHE_FIELDS = ("cache_read_tokens", "cache_write_tokens", "fresh_input_tokens")
@@ -701,9 +678,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         f"- Each table ends with an `{ALL}` row, judged the same way over every task in the table: the tasks of all "
         "its classes are paired and resampled together. A class with one task can't show the margin, so a plan "
         f"with a few tasks per class is judged on its `{ALL}` row.",
-        "- A class is saturated when the weakest forced baseline (every subagent on the weakest model) can't be told "
-        f"from the strongest, or from `{SPLIT_STRONG}` (subagents on the session model) when every forced baseline "
-        f"is on one model, by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an equal pass rate "
+        f"- A class is saturated when `{SPLIT_WEAK}` (every subagent on Haiku) can't be told from `{SPLIT_STRONG}` "
+        f"(subagents on the session model) by an exact one-sided test (5%, {MIN_RUNS} runs each at least). Then an equal pass rate "
         "says nothing about quality. Runs on an earlier revision of a task are left out of every table. A run on a "
         "task's current revision that a check other than today's graded stops the page from being built, since the "
         "check changed without a raise of the revision.",
@@ -766,9 +742,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "Claim nothing from them beyond what the raw data shows."
         if summary and all(row["status"] == "REFUSED" for row in summary) else
         "Claim \"cheaper\" only against a baseline the router has a WIN against, and link its raw data.",
-        *(["", f"{saturated} of {len(summary)} class rows below are saturated: the weakest forced baseline solved "
-              f"as many runs as the strongest, or as `{SPLIT_STRONG}` when every forced baseline is on one model, "
-              "within noise, so these tasks can't tell models apart, and an equal pass rate there says nothing "
+        *(["", f"{saturated} of {len(summary)} class rows below are saturated: `{SPLIT_WEAK}` solved as many runs "
+              f"as `{SPLIT_STRONG}`, within noise, so these tasks can't tell models apart, and an equal pass rate there says nothing "
               "about quality."] if saturated else []),
     ])
     body = "\n".join([
@@ -821,7 +796,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "batch starts. Each raw line records the hash of the plugin "
         "it loaded in `plugin_hash`, null with no plugin. The plugin keeps no copy of its options, so a run of a "
         "router variant is set aside only when its ledger holds a row an option rules out (a `gate` row with "
-        "`verify_gate` off, a rewritten spawn with `routing_mode` off); `options_applied` true means no such row, "
+        "`verify_gate` off); `options_applied` true means no such row, "
         "not proof.",
         "- The router keeps state (model health and its ledger) in its plugin data folder, inside the run's own "
         "config folder, so every router run starts from an empty one and its data goes when the scratch copy does. "

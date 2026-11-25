@@ -378,41 +378,25 @@ class Analysis(unittest.TestCase):
         self.assertAlmostEqual(low, 0.0667, places=3)
         self.assertAlmostEqual(high, 0.6525, places=3)
 
-    def quality(self, data, forced):
-        summary = analyze.summarize(data, routers=frozenset({"plugin"}), router="plugin", draws=200, seed=1, forced=forced)
+    def quality(self, data):
+        summary = analyze.summarize(data, routers=frozenset({"plugin"}), router="plugin", draws=200, seed=1)
         return {s["class"]: s for s in summary}["lookup"]["quality"]
 
-    FORCED = {"haiku": (1, -1), "opus": (3, -1)}
-
-    def test_a_class_where_the_weakest_forced_baseline_keeps_up_is_saturated(self):
-        n = analyze.MIN_RUNS
-        data = (rows("plugin", "lookup", [0.1] * n, [True] * n) + rows("haiku", "lookup", [0.2] * n, [True] * n)
-                + rows("opus", "lookup", [0.4] * n, [True] * n))
-        q = self.quality(data, self.FORCED)
-        self.assertEqual((q["saturated"], q["weakest"], q["strongest"]), (True, "haiku", "opus"))
-        weak = rows("haiku", "lookup", [0.2] * n, [True] * 4 + [False] * 6)
-        q = self.quality(rows("plugin", "lookup", [0.3] * n, [True] * n) + weak + rows("opus", "lookup", [0.4] * n, [True] * n),
-                         self.FORCED)
-        self.assertIs(q["saturated"], False)
-
-    def test_with_one_forced_model_defaults_is_the_strong_end(self):
-        forced = analyze.forced_ranks(run.load_configs(), analyze.mrconfig.shipped())
+    def test_a_class_where_haiku_high_keeps_up_with_defaults_is_saturated(self):
         data = [r for c, usd in (("plugin", 0.1), ("defaults", 0.3), ("haiku-high", 0.1))
                 for r in spread(c, "lookup", 6, analyze.MIN_RUNS, usd)]
-        q = self.quality(data, forced)
-        self.assertEqual((q["saturated"], q["weakest"], q["strongest"]), (True, "haiku-high", "defaults"))
-        rows = [full_row(task=r["task"], config=r["config"], total_cost_usd=r["total_cost_usd"], **{"class": "lookup"})
-                for r in data]
-        page = analyze.build_page(dataclasses.replace(analyze.load([]), rows=rows))
-        self.assertIn("1 of 1 class rows below are saturated", page)
+        self.assertIs(self.quality(data)["saturated"], True)
+        recorded = [full_row(task=r["task"], config=r["config"], total_cost_usd=r["total_cost_usd"],
+                             **{"class": "lookup"}) for r in data]
+        page = analyze.build_page(dataclasses.replace(analyze.load([]), rows=recorded))
+        self.assertIn("1 of 1 class rows below are saturated: `haiku-high` solved as many runs as `defaults`", page)
         self.assertIn("an equal pass rate there says nothing about quality", page)
         self.assertIn("- lookup: saturated, haiku-high solved 60 of 60, defaults 60 of 60", page)
-
-    def test_forced_baselines_on_one_model_cannot_show_saturation(self):
         n = analyze.MIN_RUNS
-        data = (rows("plugin", "lookup", [0.1] * n, [True] * n) + rows("opus", "lookup", [0.4] * n, [True] * n)
-                + rows("opus-high", "lookup", [0.4] * n, [True] * n))
-        self.assertIsNone(self.quality(data, {"opus": (3, -1), "opus-high": (3, 2)})["saturated"])
+        behind = (rows("plugin", "lookup", [0.3] * n, [True] * n) + rows("defaults", "lookup", [0.4] * n, [True] * n)
+                  + rows("haiku-high", "lookup", [0.2] * n, [True] * 4 + [False] * 6))
+        self.assertIs(self.quality(behind)["saturated"], False)
+        self.assertIsNone(self.quality([r for r in behind if r["config"] != "defaults"])["saturated"])
 
     def test_a_cells_draws_do_not_depend_on_the_other_cells(self):
         n = analyze.MIN_RUNS
@@ -433,21 +417,6 @@ class Analysis(unittest.TestCase):
                 + task_rows("d", [True, True, True], [True, True, False]))  # weak over 1 of 3
         self.assertEqual(analyze.splitting_tasks(data), ["a", "b"])
         self.assertIsNone(analyze.splitting_tasks([r for r in data if r["config"] == "defaults"]))
-
-    def test_forced_baselines_rank_by_model_strength_then_effort(self):
-        def forced(name, model, effort=None):
-            env = {"CLAUDE_CODE_SUBAGENT_MODEL": model, "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": "1"}
-            return {"id": name, "env": {**env, **({"CLAUDE_CODE_SUBAGENT_EFFORT": effort} if effort else {})}}
-        configs = [forced("haiku", "haiku"), forced("haiku-low", "haiku", "low"), forced("haiku-high", "haiku", "high"),
-                   forced("sonnet-low", "sonnet", "low"), forced("opus", "opus"), {"id": "unforced", "env": {}}]
-        ranks = analyze.forced_ranks(configs, analyze.mrconfig.shipped())
-        self.assertLess(ranks["haiku"], ranks["haiku-low"])
-        self.assertLess(ranks["haiku-low"], ranks["haiku-high"])
-        self.assertLess(ranks["haiku-high"], ranks["sonnet-low"])
-        self.assertLess(ranks["sonnet-low"], ranks["opus"])
-        self.assertNotIn("unforced", ranks)
-        shipped = analyze.forced_ranks(run.load_configs(), analyze.mrconfig.shipped())
-        self.assertEqual(set(shipped), {"haiku-high"})
 
     def test_a_class_with_no_router_or_baseline_has_no_verdict(self):
         row = self.summary(rows("defaults", "lookup", [0.3], [True]))["lookup"]
@@ -3322,9 +3291,6 @@ class Harness(unittest.TestCase):
         gated, _ = self.one("plugin", env={"STUB_PLUGINS": loaded, "STUB_LEDGER": gate})
         self.assertIsNone(gated["options_applied"])
         self.assertIsNone(run.set_aside(gated))
-        off = {"id": "off", "plugin": True, "env": {}, "plugin_options": {"routing_mode": "off"}}
-        self.assertFalse(run.options_applied(off, [{"event": "spawn", "action": "rewrite"}]))
-        self.assertTrue(run.options_applied(off, [{"event": "spawn", "action": "keep"}, {"event": "gate"}]))
         self.assertTrue(run.options_applied({"plugin_options": {"verify_gate": "on"}}, [{"event": "gate"}]))
 
     def test_each_agent_call_records_what_it_named_and_what_it_ran_on(self):

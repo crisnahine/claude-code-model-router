@@ -523,19 +523,14 @@ def ledger_rows(env: dict) -> list[dict] | None:
 
 def options_applied(config: dict, ledger: list[dict] | None) -> bool | None:
     """False when the run's ledger holds a row a plugin option the configuration sets rules out: a `gate` row with
-    verify_gate off, a rewritten spawn with routing_mode off. True when it holds none, which doesn't prove the
-    options arrived, since the plugin keeps no copy of them. None when the configuration sets none or there is no
-    ledger."""
+    verify_gate off. True when it holds none, which doesn't prove the options arrived, since the plugin keeps no copy
+    of them. None when the configuration sets none or there is no ledger."""
     asked = config.get("plugin_options")
     if not asked or ledger is None:
         return None
     said = {k: str(v).strip().lower() for k, v in asked.items()}  # a JSON false reaches the plugin as "false"
-    if said.get("verify_gate") in ("false", "0", "no", "off") and any(r.get("event") == "gate" for r in ledger):
-        return False
-    if said.get("routing_mode") == "off" and any(r.get("event") == "spawn" and r.get("action") == "rewrite"
-                                                for r in ledger):
-        return False
-    return True
+    return not (said.get("verify_gate") in ("false", "0", "no", "off")
+                and any(r.get("event") == "gate" for r in ledger))
 
 
 def agent_types(env: dict) -> dict[str, str]:
