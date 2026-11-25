@@ -163,7 +163,8 @@ class MovedByAnotherMod(Sandbox):
 class RedoWithNothingHigher(Sandbox):
     """A redo of a run already at the strongest usable model and its top effort runs the same again, and Claude is told."""
 
-    SAME = "This redo ran on haiku at high, the same as the run it redoes: nothing stronger is usable here."
+    SAME = ("This redo ran on haiku at high, the strongest model and the most effort usable here, the same as the run "
+            "it redoes.")
 
     def setUp(self):
         super().setUp()
@@ -180,7 +181,7 @@ class RedoWithNothingHigher(Sandbox):
         climbed = self.decide("general-purpose", LOOKUP, description="Redo: list src")
         self.assertEqual((climbed["model"], climbed["effort"], climbed["no_step"]), ("haiku", "high", False))
         self.assertIsNone(spawn.redo_note(climbed))
-        self.assertNotIn("nothing stronger", self.run_once("Redo: list src")["additionalContext"])
+        self.assertNotIn("the strongest model and the most effort usable here", self.run_once("Redo: list src")["additionalContext"])
         same = self.decide("general-purpose", LOOKUP, description="Redo: list src")
         self.assertEqual((same["model"], same["effort"], same["no_step"]), ("haiku", "high", True))
         self.assertEqual(spawn.redo_note(same), self.SAME)
@@ -201,11 +202,11 @@ class RedoWithNothingHigher(Sandbox):
         self.assertIsNone(self.run_once("List src", model="haiku"))
         out = self.run_once("Redo: list src", model="haiku")
         self.assertEqual(out, {"hookEventName": "PreToolUse", "additionalContext":
-                               "This redo ran on haiku, the same as the run it redoes: nothing stronger is usable here."})
+                               "This redo ran on haiku, the strongest model and the most effort usable here, the same as the run it redoes."})
 
     def test_a_copy_the_repeat_guard_passes_through_says_nothing(self):
         self.run_once("Draft it", ran_as="claude-fable-5-5", model="fable", effort="max")
-        self.assertIn("nothing stronger", self.pre("general-purpose", LOOKUP, description="Redo: draft it",
+        self.assertIn("the strongest model and the most effort usable here", self.pre("general-purpose", LOOKUP, description="Redo: draft it",
                                                    model="fable", effort="max")["additionalContext"])
         self.next_message()
         self.assertIsNone(self.pre("general-purpose", LOOKUP, description="Redo: draft it", model="fable", effort="max"))
