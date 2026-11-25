@@ -30,7 +30,7 @@ The plugin opens no connection. No shipped Python module imports `urllib`, `http
 
 ## What it reads, and whom it trusts
 
-The Python runtime starts no process and runs no code from the repository. It reads hook and mod payloads, its own state, `config/models.json`, the user's and a project's `model-router.json`, agent frontmatter and Claude Code's plugin install records (`agents.find`), the tail of the session's and a subagent's transcript (`session.transcript_tail`), and the plugin's options and model variables from the environment (`settings.resolve`).
+The Python runtime starts no process and runs no code from the repository. It reads hook and mod payloads, its own state, `config/models.json`, the user's and a project's `model-router.json`, agent frontmatter (`name`, `model`, `effort`, `tools` and `disallowedTools`) and Claude Code's plugin install records (`agents.find`), the tail of the session's and a subagent's transcript (`session.transcript_tail`), and the plugin's options and model variables from the environment (`settings.resolve`).
 
 It reads no settings file. The mod asks Claude Code for each settings source and passes on only `availableModels`, `deniedModels`, `availableModelsMatch`, `modelOverrides`, `maxEffortLevel` and each `modelSettings` entry's `maxEffortLevel`, never `env` (`KEYS` and `effortCaps` in `hooks/router.ts`; Node test "mod-start and mod-spawn carry the allowlist and effort cap keys of each settings source, and only the caps of modelSettings").
 
@@ -48,7 +48,7 @@ It reads no settings file. The mod asks Claude Code for each settings source and
 
 **Managed settings.** A managed `availableModels` applies alone, and `deniedModels` counts only there (`Allowlist.test_a_managed_list_applies_alone_else_the_other_sources_are_concatenated`). An allow list is cut to 200 entries of up to 200 characters, and a managed deny list over that leaves no model open (`Allowlist.test_a_deny_list_over_the_cap_leaves_no_model_open_while_an_allow_list_is_only_cut`). Claude Code still applies both lists to every subagent model ([sub-agents](https://code.claude.com/docs/en/sub-agents.md)).
 
-**Prompt and brief text.** The router reads no brief. Claude names the model and effort, so text Claude reads can sway what it names, within the cap. A `description` starting with "Redo:" makes a call climb, inside the usable models (`router._redo`; `RepeatGuard.test_a_redo_held_under_the_cap_on_its_model_takes_more_effort_up_to_max`).
+**Prompt and brief text.** The router reads no brief. Claude names the model and effort, so text Claude reads can sway what it names, within the cap. A call that names no model gets its level from its agent definition's `tools` and `disallowedTools` alone: `lookup` when they leave out Edit, Write, NotebookEdit and Bash, else `standard` (`agents.read_only`; `UnnamedCalls.test_the_pick_never_reads_the_brief`). A repository's own agent file sets that level through its tool list, as its `model` field can already set the model. A `description` starting with "Redo:" makes a call climb, inside the usable models (`router._redo`; `RepeatGuard.test_a_redo_held_under_the_cap_on_its_model_takes_more_effort_up_to_max`).
 
 ## What reaches Claude's context
 

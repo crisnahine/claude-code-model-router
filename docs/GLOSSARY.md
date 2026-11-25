@@ -46,7 +46,7 @@ The project's own words, and the code behind each.
 
 **Model swap**: a run whose model changed mid-run (`modelsUsed`). It finishes no call and isn't health evidence.
 
-**Order of authority**: where the model comes from, strongest first: the force pin, the workflow pin, the call, the user's rule, a project's rule, the agent, `CLAUDE_CODE_SUBAGENT_MODEL`, the parent (`router.decide`).
+**Order of authority**: where the model comes from, strongest first: the force pin, the workflow pin, the call, the user's rule, a project's rule, the agent, `CLAUDE_CODE_SUBAGENT_MODEL`, then the agent's tools, or the parent under the user's rule `level` (`router.decide`).
 
 **Outcome**: a result, failure or stop coming back for a call (`calls.Outcome`), read by one rule set on both paths (`calls.returned`).
 
@@ -55,6 +55,8 @@ The project's own words, and the code behind each.
 **Pick**: the cheapest usable model for a level and its effort there (`ladder.pick`), as `policy` lists it.
 
 **Pin**: a model or effort an agent's own definition names. The router keeps it within the cap; a redo climbs past it.
+
+**Read-only agent**: one whose `tools` hold none of Edit, Write, NotebookEdit and Bash, or whose `disallowedTools` remove them all, and the built-in Explore and Plan (`agents.read_only`). A call that nothing names a model for runs at lookup on one, and at standard on any other agent.
 
 **Redo**: a call whose `description` starts with "Redo:" (`calls.marked_redo`). It climbs from its task's done record, effort first, then the model (`router._redo`).
 

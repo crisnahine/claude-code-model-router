@@ -28,8 +28,9 @@ def policy(snap: settings.Snapshot) -> str:
     lines = [f"Routing: **{options.mode}**. Cap: **{limit or 'none'}**. "
              f"Strongest model in use: **{_strongest(reg, usable) or 'none'}**.", "",
              "A model named on a call, by a rule or by the agent stands for the lowest level it runs, and runs at that "
-             "level's effort when nobody chose one. A call that names none runs on CLAUDE_CODE_SUBAGENT_MODEL when it is "
-             "set, else on its parent's model.", "",
+             "level's effort when nobody chose one. A call that names none runs on its agent's own model, else on "
+             "CLAUDE_CODE_SUBAGENT_MODEL when it is set, else at the level its tools put it: lookup for an agent "
+             "that can't edit, write or run commands, standard for any other.", "",
              "| Level | Model | Effort |", "| :- | :- | :- |"]
     for level in cfg.LEVELS:
         pick = snap.pick(level)

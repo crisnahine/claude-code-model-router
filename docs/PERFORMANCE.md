@@ -52,14 +52,14 @@ Characters of plugin text Claude gets. Tokens weren't measured.
 
 | Text | When | Characters | Test budget |
 | :- | :- | -: | -: |
-| Session-start note (`hooks._rules`) | each start, resume, clear, compact and fork | 700 with no option set, 206 to 717 over 32 option mixes | 720 |
-| The same note, after two newlines, in the Agent tool's description (mod only) | all session | 702 with no option set, at most 719 | 720, the note's |
-| The table for a script's stages, after two newlines, in the Workflow tool's description (mod only) | all session | 519 with no option set | none |
+| Session-start note (`hooks._rules`) | each start, resume, clear, compact and fork | 671 with no option set, 206 to 687 over 32 option mixes | 720 |
+| The same note, after two newlines, in the Agent tool's description (mod only) | all session | 673 with no option set, at most 689 | 720, the note's |
+| The table for a script's stages, after two newlines, in the Workflow tool's description (mod only) | all session | 509 with no option set | 540 |
 | A redo with no step left (`spawn.redo_note`) | after that call's result | 107 to 118 | none |
 | The five agents' descriptions | all session | 687 | 930 |
 | The `route` skill's description | all session | 199 | 200 |
 | A note that the prompt names a model | on such a prompt | about 135 | none |
 | The Stop ask (`gates.unverified_edit`) | once per batch of unchecked edits | 511 | none |
-| The `route` skill and its policy output | when it runs | 5,045 and 1,561 | none |
+| The `route` skill and its policy output | when it runs | 5,144 and 1,428 | none |
 
-With the mod, the model table appears three times: in the session context, in the Agent tool's description and in the Workflow tool's, so a session with no option set carries 1,921 characters of it. `Notes.test_every_note_stays_within_budget` walks the mixes of `max_tier`, `CLAUDE_CODE_SUBAGENT_MODEL`, its FORCE switch and the two effort variables. `Hooks.test_the_text_in_context_every_session_stays_within_budget` holds the descriptions. `models` and `usage` set `disable-model-invocation`, so their descriptions stay out ([skills](https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill)). With `routing_mode` off there is no note and no Stop ask.
+With the mod, the model table appears three times: in the session context, in the Agent tool's description and in the Workflow tool's, so a session with no option set carries 1,853 characters of it. `Notes.test_every_note_stays_within_budget` walks the mixes of `max_tier`, `CLAUDE_CODE_SUBAGENT_MODEL`, its FORCE switch and the two effort variables. `Hooks.test_the_text_in_context_every_session_stays_within_budget` holds the descriptions. `models` and `usage` set `disable-model-invocation`, so their descriptions stay out ([skills](https://code.claude.com/docs/en/skills.md#control-who-invokes-a-skill)). With `routing_mode` off there is no note and no Stop ask.

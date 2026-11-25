@@ -45,7 +45,8 @@ class ProjectNamesMatchOnlyExactly(Sandbox):
             self.options(max_tier="fable")
             self.assertIsNone(self.spawn(), name)
             self.options(max_tier="opus")
-            self.assertIsNone(self.spawn("general-purpose", parent=ARN), name)
+            self.assertEqual(self.spawn("general-purpose", parent=ARN)["model"], "haiku", name)  # its own level's
+            self.assertIsNone(self.ledger()[-1]["was"], name)
 
     def test_a_project_model_still_runs_when_named_exactly(self):
         self.override({"models": {"house-model": {"strength": 2}}})
@@ -58,19 +59,20 @@ class ProjectFloorsOnAnUnknownModel(Sandbox):
     def spawn(self, agent: str, **extra):
         return modpath.spawn(mod_input(self.project, agent, **extra))
 
-    def test_a_project_floor_leaves_explore_and_plan_on_their_inherited_model(self):
+    def test_a_project_floor_only_raises_explore_and_plans_own_level(self):
         for agent in ("Explore", "Plan"):
             self.override({"agents": {agent: {"level": "lookup"}}})
-            self.assertIsNone(self.spawn(agent), agent)
+            self.assertEqual((self.spawn(agent)["model"], self.spawn(agent)["effort"]), ("haiku", "medium"), agent)
             self.override({"agents": {agent: {"level": "standard"}}})
-            self.assertIsNone(self.spawn(agent), agent)
+            self.assertEqual((self.spawn(agent)["model"], self.spawn(agent)["effort"]), ("haiku", "high"), agent)
 
-    def test_a_project_floor_leaves_a_nested_fallback_call_alone(self):
-        self.override({"agents": {"general-purpose": {"level": "standard"}}})
+    def test_a_project_floor_only_raises_a_nested_fallback_calls_own_level(self):
+        self.override({"agents": {"general-purpose": {"level": "lookup"}}})
         hook_input = {"session_id": "s1", "cwd": str(self.project), "agent_id": "sub1",
                       "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP}}
         snap = settings.Snapshot(hook_input)
-        self.assertEqual(spawn.decide(hook_input, snap).decision["action"], "keep")
+        decision = spawn.decide(hook_input, snap).decision
+        self.assertEqual((decision["level"], decision["model"], decision["source"]), ("standard", "haiku", "router"))
 
     def test_a_floor_that_can_only_raise_still_applies(self):
         self.override({"agents": {"Plan": {"level": "frontier"}}})
@@ -99,8 +101,10 @@ class ProjectNeedsKeepANamedModelsRung(Sandbox):
 
 class ProjectRuleOnTheSameModel(Sandbox):
     def test_a_project_model_the_call_runs_on_anyway_changes_nothing(self):
-        self.override({"agents": {"general-purpose": {"model": "opus"}}})
-        self.assertIsNone(modpath.spawn(mod_input(self.project, "general-purpose", nested=True)))
+        alone = modpath.spawn(mod_input(self.project, "general-purpose", nested=True))
+        self.override({"agents": {"general-purpose": {"model": alone["model"]}}})
+        ruled = modpath.spawn(mod_input(self.project, "general-purpose", nested=True))
+        self.assertEqual((ruled["model"], ruled["effort"]), (alone["model"], alone["effort"]))
         self.agent("exact", "claude-opus-5-5", folder=self.home / "agents")
         self.override({"agents": {"exact": {"model": "opus"}}})
         hook_input = mod_input(self.project, "exact", nested=True)
@@ -110,6 +114,11 @@ class ProjectRuleOnTheSameModel(Sandbox):
 
 class NestedRedo(Sandbox):
     PROMPT = "run the parser tests and report failures"
+
+    def setUp(self):
+        super().setUp()
+        # The user's own level rule turns the router's pick off, so the call runs at its parent's effort.
+        self.override({"agents": {"general-purpose": {"level": "lookup"}}}, user=True)
 
     def spawn(self, description: str, tid: str):
         return hooks.HANDLERS["mod-spawn"]({**mod_input(self.project, "general-purpose", self.PROMPT,
@@ -168,14 +177,16 @@ class NestedRedo(Sandbox):
 
 
 class ProjectFloorsSayWhyTheyDidNothing(Sandbox):
-    def test_a_project_floor_the_router_cant_apply_is_held_with_its_reason(self):
+    def test_a_project_floor_raises_a_call_naming_no_model_so_nothing_is_held(self):
+        # Such a call runs at its agent's own level, which the router knows, so a project's floor always applies.
         self.override({"agents": {"Plan": {"level": "complex"}}})
-        self.assertIsNone(modpath.spawn(mod_input(self.project, "Plan")))
-        self.assertIn("a project rule raises Plan to complex", self.ledger()[-1]["held"])
+        self.assertEqual(modpath.spawn(mod_input(self.project, "Plan"))["model"], "sonnet")
+        self.assertEqual((self.ledger()[-1]["source"], "held" in self.ledger()[-1]), ("rule", False))
         self.options(max_tier="sonnet")
         self.override({"agents": {"general-purpose": {"level": "hardest"}}})
-        self.assertIsNone(modpath.spawn(mod_input(self.project, "general-purpose", parent="sonnet")))
-        self.assertIn("no stronger than the parent's sonnet", self.ledger()[-1]["held"])
+        answer = modpath.spawn(mod_input(self.project, "general-purpose", parent="sonnet"))
+        self.assertEqual((answer["model"], answer["effort"]), ("sonnet", "xhigh"))  # the cap holds the raise
+        self.assertNotIn("held", self.ledger()[-1])
         self.override({"agents": {"general-purpose": {"level": "lookup"}}})
         modpath.spawn(mod_input(self.project, "general-purpose", parent="sonnet"))
         self.assertNotIn("held", self.ledger()[-1])  # it stands above the floor, so the floor holds

@@ -1,13 +1,14 @@
 """Decide the model and effort for one call, from facts the spawn procedure gathers.
 The agent never changes. Claude names a call's model and effort; the router holds what it names to the
-user's cap and to what is usable here, raises it to a rule's level, and sets the effort nobody chose. The
-order of authority is in docs/ARCHITECTURE.md. decide reads no state: every input arrives as a fact."""
+user's cap and to what is usable here, raises it to a rule's level, and sets the effort nobody chose. A call
+nothing names a model for gets a level from what its agent can do. The order of authority is in
+docs/ARCHITECTURE.md. decide reads no state: every input arrives as a fact."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Literal, Mapping, Optional, TypedDict
 
-from . import ladder
+from . import agents, ladder
 from .config import _PLAIN_NAME, EFFORTS, Level
 from .registry import Registry, Rule
 from .settings import Settings
@@ -117,8 +118,14 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         return _pinned(out, "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "workflow agent", model, level, effort, facts)
 
     floor = rule.level or rule.floor
+    # A call nothing names a model for gets a level from what its agent can do, never from its brief. The user's own
+    # rule level turns this off; a project's floor or model only raises it.
+    reads = definition is not None and agents.read_only(definition)
+    pick = None
+    if (definition is not None and not requested and not own_model and not env_default and not rule.level
+            and not reg.family(rule.model)):
+        pick = Level.standard if facts.teammate or not reads else Level.lookup
     target, source, why, chosen = None, None, "", False  # chosen: the router picked the model, nobody named it
-    unseen = False  # a project's floor moved a call whose inherited model and effort the router can't see
     if requested and not redo:  # a redo climbs past a model it names that asks for no more than the run it redoes
         target, source, why = requested, "caller", "the call names a model"
     elif reg.family(rule.model):
@@ -126,8 +133,9 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     elif reg.family(rule.suggested):
         # A project's model applies only when it isn't weaker than what the call would run on without it, and
         # never when the project added it: that model's strength is only the project's own claim.
-        suggested, runs_on = reg.family(rule.suggested), pinned or out["was"]
-        basis = ("the agent's own model" if pinned else "the CLAUDE_CODE_SUBAGENT_MODEL default"
+        suggested = reg.family(rule.suggested)
+        runs_on = pinned or (reg.clamp(ladder.model_for(reg, pick), usable) if pick else out["was"])
+        basis = ("the agent's own model" if pinned else f"the {pick} level's" if pick else "the CLAUDE_CODE_SUBAGENT_MODEL default"
                  if env_default and runs_on == env_default else "the parent's model")
         asked = f"a project rule names {suggested} for {agent}"
         if not reg.models[suggested].trusted:
@@ -157,20 +165,21 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         return out
     if redo:
         return _redo(out, facts, reg, done, done_level, free, keeps, held)
-    if target is None:
-        # Nothing names a model, so Claude Code's own order applies: the parent's model.
+    if target is None and pick:
+        level, source, chosen = pick, "router", True
+        why = f"no model is named, and this agent {'only reads' if reads else 'can change files'}: {pick}"
+        if facts.teammate and reads:
+            why = "no model is named, and a teammate starts no lower than standard, since its model is fixed for all its tasks"
+        if floor and pick < floor:
+            level, source = floor, "rule"
+            why += f"; a rule in model-router.json raises it to {floor}"
+        target = ladder.model_for(reg, level)
+    elif target is None:
+        # Only the user's own level rule turns the pick off, and it raises the parent's model when that is below it.
         runs_on = out["was"]
-        lifts = bool(floor) and _floor_lifts(reg, rule, floor, level, runs_on, usable)
-        if floor and not lifts and not rule.level and (level is None or level < floor):
-            note = f"a project rule raises {agent} to {floor}, " + (
-                f"whose model here is no stronger than the parent's {runs_on}" if runs_on
-                else "and the model the call would run on isn't known")
-            out["held"] = f"{out['held']}; {note}" if out["held"] else note
-            held += f"; {note}"
-        if lifts:
+        if level is None or level < floor:
             level, target, source, chosen = floor, ladder.model_for(reg, floor), "rule", True
             why = f"a rule in model-router.json raises this agent to {floor}"
-            unseen = runs_on is None and not rule.level and facts.session_effort is None
         elif facts.teammate and runs_on and reg.strength(runs_on) < reg.levels[Level.standard].needs:
             level, target, source, chosen = Level.standard, ladder.model_for(reg, Level.standard), "router", True
             why = f"a teammate starts no lower than {target}, since its model is fixed for all its tasks"
@@ -179,8 +188,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
             level = ladder.rung(reg, reg.clamp(runs_on, usable), named_effort)
             target, source, why = runs_on, "router", f"the call names no model and would run on the parent's {runs_on}"
         else:
-            out.update(level=level, reason="no model is named for this call, so it runs on "
-                       + (f"the parent's model, {runs_on}" if runs_on else "Claude Code's own choice") + held)
+            out.update(level=level, reason=f"no model is named for this call, so it runs on the parent's model, {runs_on}" + held)
             return out
     elif floor and (level < floor or reg.stronger(ladder.model_for(reg, floor), target)):
         # A named model keeps its rung from the ladder without a project's file, which may still raise the floor's model.
@@ -196,7 +204,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if final != clamped:
         why += f"; {clamped}'s alias runs an older model here"
     # Effort is set whenever nobody chose it: on current models it is the cheaper lever for quality.
-    effort = None if decided or unseen else ladder.effort_on(reg, level, final)
+    effort = None if decided else ladder.effort_on(reg, level, final)
     effort, floor_note = _session_floor(effort, final, facts)
     effort, capped_note = capped(effort, facts.effort_caps.get(final))
     out.update(model=final, source=source, level=level, reason=why + floor_note + capped_note + held)
@@ -248,18 +256,6 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
         return out
     out.update(action="rewrite", effort=effort)
     return out
-
-
-def _floor_lifts(reg: Registry, rule: Rule, floor: Level, level: Level | None, runs_on: str | None, usable: list) -> bool:
-    """Whether a rule's level moves a call that names no model. The user's applies wherever the call stands below
-    it. A project's only raises: it applies when its model is stronger than the one the call runs on, and, with
-    that model unknown, only when no model in the registry is stronger, so it can't land below the inherited one."""
-    if rule.level:
-        return level is None or level < floor
-    lift = reg.clamp(ladder.model_for(reg, floor), usable)
-    if runs_on is None:
-        return not any(reg.models[n].trusted and reg.stronger(n, lift) for n in reg.models)
-    return level < floor and reg.stronger(lift, runs_on)
 
 
 def _version(reg: Registry, named: object, final: str | None) -> str | None:

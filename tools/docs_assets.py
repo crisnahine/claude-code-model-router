@@ -349,7 +349,7 @@ PRECEDENCE = [
     ("A per-agent rule", "in ~/.claude/model-router.json or .claude/model-router.json", False),
     ("The agent's own model field", "in its definition's frontmatter", False),
     ("CLAUDE_CODE_SUBAGENT_MODEL", "your default for agents that name no model", True),
-    ("The parent's model", "Claude Code's own default when nothing names one", False),
+    ("The agent's tools", "lookup if it can't edit, write or run commands, else standard", False),
 ]
 
 
@@ -383,7 +383,7 @@ def diagram_precedence() -> str:
     out.append(card(632, ey, 256, 157, rx=12))
     out.append(f'<rect x="633" y="{ey + 16}" width="4" height="125" rx="2" class="r3"/>')
     out.append(text(652, ey + 28, "And the effort", "ink b", 14.5))
-    out.append(lines(652, ey + 54, ["From the model's level when 2, 3 or 4", "names the model, unless the call, the",
+    out.append(lines(652, ey + 54, ["From the level of the model 2, 3,", "4 or 6 gives, unless the call, the",
                                     "agent or one of these sets it:"], "mut", 13, 19))
     out.append(lines(652, ey + 117, ["CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_SUBAGENT_EFFORT"], "mono ink", 11.5, 18))
     out.append(text(32, 476, "A workflow agent whose script names no model runs on CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL "
@@ -393,11 +393,12 @@ def diagram_precedence() -> str:
     title = "Who decides the model: the order of authority"
     label = ("Strongest first: CLAUDE_CODE_SUBAGENT_MODEL_FORCE, then a model named on the call, then a per-agent "
              "rule in model-router.json, then the agent's own model field, then CLAUDE_CODE_SUBAGENT_MODEL, then "
-             "the parent's model. For all but the two environment variables, the winner must be usable under the "
+             "the level the agent's tools put it at: lookup for an agent that can't edit, write or run commands, "
+             "standard for any other. For all but the two environment variables, the winner must be usable under the "
              "cap and your settings, else the next stronger usable model runs, or the strongest usable one when "
              "nothing stronger is left. A workflow agent whose script names no model runs on "
              "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL when it is set. Effort is filled in from the model's level when the "
-             "call, a rule or the agent names the model, unless the call, the agent, CLAUDE_CODE_EFFORT_LEVEL or "
+             "call, a rule, the agent or its tools name the model, unless the call, the agent, CLAUDE_CODE_EFFORT_LEVEL or "
              "CLAUDE_CODE_SUBAGENT_EFFORT sets it.")
     return svg(w, h, title, label, "".join(out))
 

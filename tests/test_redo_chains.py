@@ -48,9 +48,10 @@ class Setup:
     cap: str | None = None
     env: tuple = ()
     session_effort: str = DEFAULT_EFFORT
+    agent: str = "general-purpose"  # "reader" can change nothing and "writer" can, so a call naming no model differs
 
     def __str__(self) -> str:
-        bits = [f"session {self.session} at {self.session_effort}", f"max_tier {self.cap}"]
+        bits = [f"{self.agent} in session {self.session} at {self.session_effort}", f"max_tier {self.cap}"]
         return ", ".join(bits + [f"{k}={v}" for k, v in self.env])
 
 
@@ -80,6 +81,10 @@ class Walk:
 
     def __init__(self, case: Sandbox, setup: Setup, paths=PATHS):
         self.case, self.setup, self.paths = case, setup, paths
+        if setup.agent == "reader":
+            case.agent("reader", extra="tools: Read, Grep, Glob\n")
+        elif setup.agent == "writer":
+            case.agent("writer")
         self.memo: dict = {p: {} for p in paths}
         self.tid = 0
         snap = settings.Snapshot({"session_id": "x", "cwd": str(case.project)})
@@ -131,7 +136,7 @@ class Walk:
         self.tid += 1
         tid = f"toolu_{self.tid}"
         model, effort = named
-        tool_input = {"subagent_type": "general-purpose", "prompt": PROMPT,
+        tool_input = {"subagent_type": self.setup.agent, "prompt": PROMPT,
                       "description": f"Redo: {TASK.lower()}" if redo else TASK,
                       **({"model": model} if model else {}), **({"effort": effort} if effort else {})}
         common = {"session_id": sid, "tool_use_id": tid, "cwd": str(self.case.project)}
@@ -168,7 +173,7 @@ class Walk:
         key = (_shape(record), named)
         if key not in self.memo[path]:
             # One session per path keeps the state files small; the done record is all a step reads.
-            sid, task = path, calls.task({"description": TASK})
+            sid, task = path, calls.task({"subagent_type": self.setup.agent, "description": TASK})
             session.record(sid, IDS[self.setup.session])
             store.save_entry("done", sid, {task: record} if record else {})
             store.save_entry("routes", sid, {})
@@ -254,6 +259,8 @@ ENV_CASES = ((("CLAUDE_CODE_SUBAGENT_EFFORT", "high"),), (("CLAUDE_CODE_EFFORT_L
              (("CLAUDE_CODE_SUBAGENT_MODEL", "sonnet"),),
              (("CLAUDE_CODE_SUBAGENT_MODEL", "haiku"), ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "1")),
              (("CLAUDE_CODE_SUBAGENT_MODEL", "opus"), ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "1")))
+# A first call that names no model runs at the level its agent's tools put it: lookup for a reader, standard otherwise.
+AGENTS = [Setup(s, cap, agent=agent) for agent in ("reader", "writer") for s in ("haiku", "opus") for cap in (None, "sonnet")]
 # The environment walk, smaller: each variable on a weak and a strong session with no cap, and under a Sonnet cap
 # on the strong one; then the session's level away from the default.
 ENVS = ([Setup(s, None, env) for env in ENV_CASES for s in ("haiku", "opus")]
@@ -293,6 +300,9 @@ class RedoChains(Sandbox):
     def test_every_redo_chain_under_the_environment_variables(self):
         walk(self, ENVS, self.check)
 
+    def test_every_redo_chain_from_a_reader_and_a_writer(self):
+        walk(self, AGENTS, self.check)
+
 
 class RedoChainCases(Sandbox):
     """Chains that went wrong in live runs, on every path through the same simulator as the walk."""
@@ -325,7 +335,7 @@ class RedoChainCases(Sandbox):
 
     def test_under_a_haiku_cap_a_redo_climbs_to_max_and_stays(self):
         self.assertEqual(self.chain(Setup("opus", "haiku"), *[(None, None)] * 5),
-                         ["haiku@medium", "haiku@high", "haiku@xhigh", "haiku@max", "haiku@max="])
+                         ["haiku@high", "haiku@xhigh", "haiku@max", "haiku@max=", "haiku@max="])
 
     def test_under_the_force_pin_a_redo_climbs_effort_to_max_and_stays(self):
         pin = (("CLAUDE_CODE_SUBAGENT_MODEL", "opus"), ("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "1"))

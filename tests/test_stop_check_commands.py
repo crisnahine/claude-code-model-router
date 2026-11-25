@@ -168,8 +168,8 @@ class Notes(Sandbox):
         self.options(max_tier="haiku")
         self.session_on("claude-opus-5-5")
         text = self.context(hooks.session_start({"session_id": "s1", "model": "claude-opus-5-5"}))
-        self.assertIn("A call that names neither runs on its agent's own model or the conversation's, within the cap.",
-                      text)
+        self.assertIn("A call that names neither runs on its agent's own model, else at the level its tools put it, "
+                      "within the cap.", text)
         self.assertEqual(self.decide("general-purpose", "list src")["model"], "haiku")
         self.assertIn("its agent's own model, capped, or CLAUDE_CODE_SUBAGENT_MODEL.",
                       note(cap="haiku", subagent_model="opus"))

@@ -39,8 +39,8 @@ Your `~/.claude/model-router.json` (in `$CLAUDE_CONFIG_DIR` when set) applies ev
 Agents are keyed by the name a call uses. Levels are in [the ladder](#the-ladder); efforts are `low`, `medium`, `high`, `xhigh` and `max`.
 
 - `agents.<name>.model`: yours sets it. A project's applies only when not weaker than the call's model without it.
-- `agents.<name>.level`: a floor in either file; a call below it runs on the level's model, unless the environment pins it.
-- `agents.<name>.route`: `false` in yours leaves the agent alone. A project's is ignored.
+- `agents.<name>.level`: a floor in either file; a call below it runs on the level's model, unless the environment pins it. A project's also raises the level a call naming no model gets from its agent's tools. Yours replaces that level: such a call runs on its parent's model, raised to yours.
+- `agents.<name>.route`: `false` in yours leaves the agent alone, with no level from its tools either. A project's is ignored.
 - `levels.<level>.needs` (the weakest model's strength) and `.effort`: yours sets them; a project's only raises them.
 - `models.<name>.strength` and `.cost`: yours adds or re-ranks a model, named by an alias the Agent tool accepts. A project's adds only new names, used only when named, never under `max_tier`.
 
@@ -55,11 +55,11 @@ Where your rule sets an agent's `level` or `model`, a project's rule for it is i
 3. A per-agent rule: yours, or a project's when not weaker.
 4. The agent's own `model` field.
 5. `CLAUDE_CODE_SUBAGENT_MODEL`. The router leaves the call alone unless it is a redo.
-6. The parent's model: the conversation's, or the subagent's for a nested call. The router changes it only for your cap, a rule's `level` or a [teammate](#agent-teams).
+6. The agent's tools. An agent whose `tools` hold none of Edit, Write, NotebookEdit and Bash, or whose `disallowedTools` remove them all, as the built-in Explore and Plan, runs at `lookup`; any other at `standard`. The router reads only the agent's definition here, never the brief. A [teammate](#agent-teams) starts no lower than `standard`. Under your own rule's `level`, the parent's model takes this place: the conversation's, or the subagent's for a nested call, changed only for your cap, that level or a teammate.
 
 For a workflow agent whose script names no model, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` ranks between 1 and 2, with only effort set. `max_tier` doesn't lower these environment pins; a session-start notice names them. Under 2, 3, 4 and 6, a rule's `level` first raises a weaker model. The model must then be inside `max_tier`, allowed by `availableModels` and `deniedModels`, and not routed around, else the next stronger usable model runs, or the strongest usable one.
 
-Effort set by the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` stays. Otherwise a model the call, a rule or the agent named gets its level's effort, one step more on a model weaker than the level (at most `xhigh`). A call left on its parent's model gets none unless capped. On the session's own model, a main-conversation call gets at least the session's effort.
+Effort set by the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL` or `CLAUDE_CODE_SUBAGENT_EFFORT` stays. Otherwise a model from 2, 3, 4 or 6 gets its level's effort, one step more on a model weaker than the level (at most `xhigh`). A call left on its parent's model gets none unless capped. On the session's own model, a main-conversation call gets at least the session's effort.
 
 ## The ladder
 
@@ -85,7 +85,7 @@ Claude marks a redo by starting the `description` with "Redo:" after a failed ch
 
 A redo naming more than that run runs as named; naming the same or less climbs anyway. It climbs past a rule's model, the agent's model and effort, and `CLAUDE_CODE_SUBAGENT_MODEL`, inside `max_tier`. When `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_EFFORT` or `maxEffortLevel` holds the effort, it moves to the next model; under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` it only gets the effort step, up to `max`. Where the mod runs, a redo climbs from the model and effort the run's requests carried, after any cap.
 
-No redo applies to a workflow stage, an agent whose definition isn't found, a model outside the registry, or `route: false`, nor, unless your rule's `level` covers it, to a call naming no model to Explore or Plan, or from inside a subagent without the mod. A redo changes only its own call.
+No redo applies to a workflow stage, an agent whose definition isn't found, a model outside the registry, or `route: false`. A redo of a call that named no model climbs from the level its agent's tools gave it. A redo changes only its own call.
 
 ## The check before a turn ends
 
@@ -97,11 +97,11 @@ A check is a test runner, linter or type checker run through Bash (`pytest`, `np
 
 ## Workflows and ultracode
 
-Workflow agents are routed only where the mod runs. The Workflow tool's description carries the same table as the session note, so a script Claude writes names a model and effort for each stage. A model the script names is capped and gets its level's effort, and a stage naming none, as in a saved script written without them, runs on its parent's model. The router only raises a stage's effort, since it can't see the script's, and never redoes a stage. Under ultracode the session's effort is the floor on the session's model.
+Workflow agents are routed only where the mod runs. The Workflow tool's description carries the same table as the session note, so a script Claude writes names a model and effort for each stage. A model the script names is capped and gets its level's effort, and a stage naming none, as in a saved script written without them, runs on its agent's own model, else at the level its tools put it. The router only raises a stage's effort, since it can't see the script's, and never redoes a stage. Under ultracode the session's effort is the floor on the session's model.
 
 ## Agent teams
 
-A teammate keeps one model for all its tasks, so one that nothing names a model for starts no lower than the `standard` level's model. Its effort is set even under `CLAUDE_CODE_SUBAGENT_EFFORT`, which doesn't reach teammates. Without the mod, a named call counts as a teammate only while `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is on.
+A teammate keeps one model for all its tasks, so one that nothing names a model for starts no lower than the `standard` level's model, even when its agent can only read. Its effort is set even under `CLAUDE_CODE_SUBAGENT_EFFORT`, which doesn't reach teammates. Without the mod, a named call counts as a teammate only while `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is on.
 
 ## Role agents
 
@@ -128,7 +128,6 @@ Its state is in `~/.claude/plugins/data/model-router-claude-code-model-router/`,
 ## What it can't do
 
 - It never changes the main conversation's model or effort, since a switch re-reads the conversation uncached. Use `ultrathink` or `/effort`.
-- It never picks a model from the work: a call nothing names a model for runs on its parent's model, Opus on an Opus session.
 - It leaves forks, resumed agents and agents whose definition it can't find alone, unless the call or your rule names a model.
 - It doesn't retry a failed call; set `fallbackModel`. After a model error it suggests a usable model (not under the force variable), and after two errors, or two runs on another model, it routes around that model for a day. With the mod, a run that another mod moved to another model doesn't count.
 - Where Fable bills to usage credits, a background session or teammate with nobody to answer the consent prompt ends its turn, and `claude -p` bills without asking; `max_tier` at `opus` avoids both.

@@ -12,6 +12,9 @@ from . import store
 
 # Built-ins that run on the conversation's model unless a call says otherwise.
 BUILTIN = ("general-purpose", "Explore", "Plan", "claude")
+READ_ONLY_BUILTINS = ("Explore", "Plan")
+# The tools that change files or run commands: an agent with none of them can only read.
+CHANGES = frozenset(("Edit", "Write", "NotebookEdit", "Bash"))
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---", re.S)
 
 
@@ -19,6 +22,31 @@ def _field(block: str, name: str) -> str | None:
     # A plain or quoted scalar, with an optional trailing YAML comment.
     match = re.search(r"^%s:[ \t]*['\"]?([^'\"\n#]+?)['\"]?[ \t]*(?:#.*)?$" % re.escape(name), block, re.M)
     return match.group(1).strip() if match else None
+
+
+def _list(block: str, name: str) -> list[str] | None:
+    """A comma list, a [flow] list or a block of `- item` lines; None when the field is absent."""
+    match = re.search(r"^%s:[ \t]*(.*)$" % re.escape(name), block, re.M)
+    if not match:
+        return None
+    inline = match.group(1).strip()
+    if inline:
+        items = inline.strip("[]").split(",")
+    else:
+        rest = re.match(r"(?:\n[ \t]+-[^\n]*)*", block[match.end():]).group(0)
+        items = re.findall(r"^[ \t]+-[ \t]*(.*)$", rest, re.M)
+    return [i for i in (item.strip().strip("'\"").strip() for item in items) if i]
+
+
+def read_only(definition: dict) -> bool:
+    """Whether the agent can change nothing: its tools hold none of CHANGES, or its disallowedTools remove them.
+    A scoped entry such as Bash(git status) counts as the whole tool in either list (sub-agents.md, frontmatter)."""
+    if definition.get("source") == "builtin":
+        return definition.get("name") in READ_ONLY_BUILTINS
+    tools = definition.get("tools")
+    names = None if tools is None else {t.split("(")[0].strip() for t in tools}
+    can = CHANGES if names is None or "*" in names else CHANGES & names
+    return not (can - {t.split("(")[0].strip() for t in definition.get("disallowed") or ()})
 
 
 def parse(path: Path, source: str) -> dict | None:
@@ -37,6 +65,8 @@ def parse(path: Path, source: str) -> dict | None:
         "name": _field(text, "name") or path.stem,
         "model": None if (model or "inherit").lower() == "inherit" else model,
         "effort": _field(text, "effort"),
+        "tools": _list(text, "tools"),
+        "disallowed": _list(text, "disallowedTools"),
     }
 
 

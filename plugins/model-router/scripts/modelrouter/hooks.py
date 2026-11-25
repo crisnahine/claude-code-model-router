@@ -17,6 +17,7 @@ def _context(event: str, text: str) -> dict:
 
 
 _HARD = "a judgment call with no check to run"
+_PICKED = "at the level its tools put it"
 _SUCH = "a design or a review"
 
 
@@ -32,13 +33,13 @@ def _rows(reg: Registry, efforts: bool) -> str:
 
 
 def _workflow_rules(options: settings.Settings, reg: Registry) -> str | None:
-    """The table for a workflow script's stages, which the mod adds to the Workflow tool's description: a stage
-    that names no model is left on the conversation's. None under the force pin, where a script can't set one."""
+    """The table for a workflow script's stages, which the mod adds to the Workflow tool's description.
+    None under the force pin, where a script can't set one."""
     if options.force:
         return None
     efforts = not options.effort_level
     pin = options.workflow_model if cfg._PLAIN_NAME.fullmatch(options.workflow_model or "") else None
-    runs_on = pin or "the conversation's model"
+    runs_on = pin or f"its agent's own model, else {_PICKED}"
     return (f"Model Router keeps the {'`model` and `effort`' if efforts else '`model`'} a workflow script names on an "
             f"`agent()` call, within the user's cap. Here every `agent()` call in a script names "
             f"{'both' if efforts else 'a model'}, by the work:\n{_rows(reg, efforts)}"
@@ -75,7 +76,7 @@ def _rules(options: settings.Settings, reg: Registry) -> str:
         # The cap doesn't lower CLAUDE_CODE_SUBAGENT_MODEL, only a model the agent names.
         neither = f"its agent's own model{', capped,' if options.cap else ''} or CLAUDE_CODE_SUBAGENT_MODEL"
     else:
-        neither = f"its agent's own model or the conversation's{', within the cap' if options.cap else ''}"
+        neither = f"its agent's own model, else {_PICKED}{', within the cap' if options.cap else ''}"
     if fixed:
         lead, efforts = (f"Model Router keeps the `model` an Agent call names, within the user's cap. {fixed} "
                          "Here every Agent call names a model, by the work:\n"), False

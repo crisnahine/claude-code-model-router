@@ -8,11 +8,11 @@ Short answers about Model Router 0.2.0, the Claude Code plugin with the id `mode
 
 ## What is Model Router?
 
-Model Router is an open-source Claude Code plugin that keeps the model and effort Claude names for each subagent, teammate and workflow agent within your limits. It fills in the effort when a call names only a model, raises a call to a rule's level, and runs a call Claude marks as a redo higher. It is an independent Apache-2.0 project by Cris Nahine, not made or endorsed by Anthropic, and needs Claude Code 2.1.329 or later and Python 3.9 or later.
+Model Router is an open-source Claude Code plugin that keeps the model and effort Claude names for each subagent, teammate and workflow agent within your limits. It fills in the effort when a call names only a model, gives a call that names no model a level from what its agent can do, raises a call to a rule's level, and runs a call Claude marks as a redo higher. It is an independent Apache-2.0 project by Cris Nahine, not made or endorsed by Anthropic, and needs Claude Code 2.1.329 or later and Python 3.9 or later.
 
 ## Does it pick the model, or does Claude?
 
-Claude does. A note at session start gives Claude a table: Haiku at `medium` for finding, reading and listing, Haiku at `high` for writing and fixing code, figures and documents to a brief, Sonnet at `high` for a judgment call with no check to run (a design or a review), and Fable at `high` for open-ended research. The plugin never reads a brief to choose, and a call that names no model runs on the agent's own model, `CLAUDE_CODE_SUBAGENT_MODEL` or the parent's model ([guide](GUIDE.md#who-decides-the-model)).
+Claude does. A note at session start gives Claude a table: Haiku at `medium` for finding, reading and listing, Haiku at `high` for writing and fixing code, figures and documents to a brief, Sonnet at `high` for a judgment call with no check to run (a design or a review), and Fable at `high` for open-ended research. The plugin never reads a brief to choose. A call that names no model runs on the agent's own model, else `CLAUDE_CODE_SUBAGENT_MODEL`, else at the level its tools put it: `lookup` for an agent that can't edit, write or run commands, `standard` for any other ([guide](GUIDE.md#who-decides-the-model)).
 
 ## What happens when a subagent gets it wrong?
 
@@ -24,7 +24,7 @@ The plugin is free and makes no model call of its own. The models it runs bill t
 
 ## What does it add to the context?
 
-A session-start note of about 700 characters holding the table above, which the mod also appends to the Agent tool's description, with a 520-character form of it in the Workflow tool's, and the descriptions Claude Code lists for its skills and five agents. Claude also gets one line when your prompt names a model, when a check is due before a turn ends, after a model error, a mid-run model swap or a redo with nothing stronger left, and, without the mod, on each call it rewrites. It adds nothing to a subagent's brief, and `claude plugin details model-router` shows what it adds to every session.
+A session-start note of about 700 characters holding the table above, which the mod also appends to the Agent tool's description, with a form of about 500 characters in the Workflow tool's, and the descriptions Claude Code lists for its skills and five agents. Claude also gets one line when your prompt names a model, when a check is due before a turn ends, after a model error, a mid-run model swap or a redo with nothing stronger left, and, without the mod, on each call it rewrites. It adds nothing to a subagent's brief, and `claude plugin details model-router` shows what it adds to every session.
 
 ## Does anything leave my machine?
 

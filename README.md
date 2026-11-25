@@ -10,7 +10,7 @@ A plugin for Claude Code that keeps each subagent's model and effort within the 
   <a href="LICENSE"><img src="docs/assets/badge-license.svg" height="28" alt="license: Apache-2.0"></a>
 </p>
 
-Model Router, a plugin for Claude Code, adds a session-start note that tells Claude which model and effort fit which work and asks it to name both on every Agent call. It keeps what Claude names within your cap and the models usable here, fills in the effort when only a model is named, and runs a call marked as a redo with more effort or on a stronger model.
+Model Router, a plugin for Claude Code, adds a session-start note that tells Claude which model and effort fit which work and asks it to name both on every Agent call. It keeps what Claude names within your cap and the models usable here, fills in the effort when only a model is named, gives a call that names no model a level from what its agent can do, and runs a call marked as a redo with more effort or on a stronger model.
 
 Model Router is an independent project, not made or endorsed by Anthropic.
 
@@ -48,11 +48,11 @@ The first that applies:
 4. A per-agent rule in `model-router.json`
 5. The agent's own `model` field
 6. `CLAUDE_CODE_SUBAGENT_MODEL`
-7. The parent's model
+7. The agent's tools: `lookup` for an agent that can't edit, write or run commands (its `tools` or `disallowedTools` leave out Edit, Write, NotebookEdit and Bash, as in Explore and Plan), `standard` for any other. A teammate starts no lower than `standard`. Under your own rule's `level`, the parent's model takes this place.
 
-A model from 3, 4, 5 or 7 is held to `max_tier`, `availableModels`, `deniedModels` and model health: one ruled out moves to the next stronger usable model, else the strongest usable. A rule's `level` raises a call below it, and a teammate left on a parent's model weaker than the standard level's starts on that level's model.
+A model from 3, 4, 5 or 7 is held to `max_tier`, `availableModels`, `deniedModels` and model health: one ruled out moves to the next stronger usable model, else the strongest usable. A rule's `level` raises a call below it.
 
-Levels: lookup (Haiku, `medium`), standard (Haiku, `high`), complex (Sonnet, `high`), hardest (Opus, `high`), frontier (Fable, `high`). With no effort set, a model from 1 to 5, or one Model Router moved the call to, gets an effort from its level. A call left on 6 or 7 gets none.
+Levels: lookup (Haiku, `medium`), standard (Haiku, `high`), complex (Sonnet, `high`), hardest (Opus, `high`), frontier (Fable, `high`). With no effort set, a model from 1 to 5 or 7, or one Model Router moved the call to, gets an effort from its level. A call left on 6, or on the parent's model, gets none.
 
 ## Redo
 
@@ -78,7 +78,6 @@ Its files stay in the plugin's data folder, private to your user on macOS and Li
 ## What it can't do
 
 - It never changes the main conversation's model or effort, or which agent a call runs.
-- It doesn't judge the work: on an Opus session, a call nothing names a model for runs on Opus.
 - It leaves forks alone, and an agent whose definition file it can't find, unless the call or your rule names a model.
 - A cloned repository's `.claude/model-router.json` can raise its agents up to your `max_tier`.
 - It retries nothing. After two model errors on a model, it routes around it for a day.

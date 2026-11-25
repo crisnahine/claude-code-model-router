@@ -4,7 +4,7 @@
 
 # Architecture
 
-Model Router changes two fields of an agent call, `model` and `effort`; the agent, prompt and tools stay as written. Claude names both on each Agent call, from a table in the session-start note, which the mod also puts in the Agent tool's description. The plugin holds them to the user's cap, the allowlist and model health, fills in the effort when only a model is named, raises a call to a rule's level, and runs a call marked "Redo:" higher. A Stop check asks for a check after unchecked edits.
+Model Router changes two fields of an agent call, `model` and `effort`; the agent, prompt and tools stay as written. Claude names both on each Agent call, from a table in the session-start note, which the mod also puts in the Agent tool's description. The plugin holds them to the user's cap, the allowlist and model health, fills in the effort when only a model is named, gives a call that names no model a level from its agent's tools, raises a call to a rule's level, and runs a call marked "Redo:" higher. A Stop check asks for a check after unchecked edits.
 
 ## Two paths, one router
 
@@ -54,7 +54,7 @@ In `scripts/modelrouter/`, standard library only:
 | `settings` | Options, environment facts, and each hook's `Snapshot` |
 | `allowlist`, `health` | `availableModels`, `deniedModels`, `maxEffortLevel`; model errors and substitutions |
 | `calls` | Routes, outcomes, the redo mark, tasks, done records |
-| `agents`, `session` | Agent definitions; the conversation's model and transcripts |
+| `agents`, `session` | Agent definitions and whether one can only read (`agents.read_only`); the conversation's model and transcripts |
 | `intake`, `request`, `gates` | Whether a prompt is the person's; the model it names; the Stop check |
 | `ledger`, `report`, `store` | Ledger rows; skill tables and `--json`; state files and locks |
 
@@ -93,18 +93,18 @@ A decision is `keep`, `rewrite` or `deny` (the guard's), with model, effort, lev
 | 5 | A project's rule `model` | Applies it only when not weaker than what the call runs on without it, and not a model the project added; else `held` says why |
 | 6 | The agent's own `model` | Keeps it; with no definition found, or a `model` outside the registry, leaves the call alone |
 | 7 | `CLAUDE_CODE_SUBAGENT_MODEL` | Leaves the call alone |
-| 8 | Nothing | The parent's model |
+| 8 | Nothing | The level the agent's tools put it at: `lookup` when its `tools` hold none of Edit, Write, NotebookEdit and Bash, or its `disallowedTools` remove them all, as for the built-in Explore and Plan; `standard` otherwise. The user's rule `level` puts the parent's model here instead |
 
 Then, for rows 3 to 6 and 8 (steps 5 and 6 on rows 1 and 2 too):
 
-1. **Floor.** A rule's `level` raises a weaker model to that level's model. On a call naming no model, a project's floor applies only when it moves to a model stronger than the parent's (`router._floor_lifts`).
-2. **Teammate.** A teammate naming nothing, on a parent weaker than standard needs, starts on standard's model.
+1. **Floor.** A rule's `level` raises a weaker model to that level's model. On row 8 a project's floor raises the tools' level, and the user's raises the parent's model, or sets that level's model when the parent's is unknown.
+2. **Teammate.** A teammate naming nothing starts no lower than standard: its row 8 level is at least standard, and on the parent's model a parent weaker than standard needs moves to standard's model.
 3. **Cap.** `Registry.clamp` keeps a usable model (inside `max_tier`, permitted, healthy), else takes the next stronger usable one, else the strongest. A parent's model it moves runs at the new model's level.
 4. **Effort.** If nobody chose it (the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL`, or `CLAUDE_CODE_SUBAGENT_EFFORT`, which skips teammates), the level's effort.
 5. **Session floor.** On a main-conversation call on the session's own model, an effort the router sets is at least the session's (`router._session_floor`): `session_effort` from the mod, `effort.level` from the hook.
 6. **`maxEffortLevel`.** The lowest cap any settings source sets for that model, a `modelSettings` entry replacing its source's top-level cap (`router.capped`). None without the mod's layers.
 
-The same model with no effort to set is a keep. Where the parent's model is unknown (inside a subagent on the fallback, the built-in Explore and Plan), a call naming no model is left alone unless a floor lifts it.
+The same model with no effort to set is a keep. Where the parent's model is unknown (inside a subagent on the fallback, the built-in Explore and Plan), row 8 still names a model.
 
 A full ID or `[1m]` variant the call or agent names is kept while its family is, if permitted and healthy (`mod.exact`). On a provider whose alias runs an older model (`older_aliases`), the mod sends the family's `newest` ID unless `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`, `modelOverrides`, the allowlist or health rules it out (`Registry.newest_id`); without one, the router's own picks move one family up (`Registry.past_lag`). The fallback sends aliases only.
 
@@ -139,7 +139,7 @@ A redo is left alone wherever a plain call is. It misses its record after a skip
 
 `hooks._rules` writes it while routing is `auto`. It says the plugin keeps the `model` and `effort` a call names within the cap and fills in `effort` when a call names only a model, then "Here every Agent call names both, by the work": haiku at medium for finding, reading and listing; haiku at high for writing and fixing code, figures and documents to a brief; sonnet at high for a judgment call with no check to run (a design or a review); fable at high for open-ended research. It ends with where a call naming neither runs, and how to mark a redo.
 
-The `mod-start` answer carries the same text as `rules`, and the mod's `tool.describe` hook appends it to the Agent tool's description, so Claude reads the table where it fills in the call. It also carries `workflow_rules` (`hooks._workflow_rules`), the same table worded for the `agent()` calls of a workflow script, which goes into the Workflow tool's description: a stage that names no model stays on the conversation's model, so the table is what gets a stage its own. Under the force pin there is none, since a script can't set a model then. The description keeps the text of the latest answer that had one, and is left as it is before any.
+The `mod-start` answer carries the same text as `rules`, and the mod's `tool.describe` hook appends it to the Agent tool's description, so Claude reads the table where it fills in the call. It also carries `workflow_rules` (`hooks._workflow_rules`), the same table worded for the `agent()` calls of a workflow script, which goes into the Workflow tool's description: a stage that names no model runs at the level its agent's tools put it, so the table is what gets a stage a model for its work. Under the force pin there is none, since a script can't set a model then. The description keeps the text of the latest answer that had one, and is left as it is before any.
 
 It is written as facts because, as `hooks._rules` records, the Agent tool sets `effort` only when instructions ask. Each pairing is the level's model and effort from the registry (`ladder.model_for`, `ladder.effort`), so a rules file that moves a level moves the note. The force pin, either effort variable, `max_tier` and `CLAUDE_CODE_SUBAGENT_MODEL` each trim or reword it to what still applies: under an effort variable, for one, a redo goes to a stronger model.
 
@@ -212,7 +212,7 @@ Only `/config` sets `routing_mode`. Bad types and non-finite numbers are dropped
 ## What the plugin never does
 
 - **Network calls.** The runtime imports no network module; the mod uses only the engine's own APIs.
-- **Reading a brief to pick a model.** A call's prompt is only hashed into its key (`calls.identify`) and matched to the agent's first turn. The person's prompt is read only for a model it names.
+- **Reading a brief to pick a model.** A call's prompt is only hashed into its key (`calls.identify`) and matched to the agent's first turn. A call that names no model gets its level from the agent definition's `tools` and `disallowedTools`. The person's prompt is read only for a model it names.
 - **Changing more than `model` and `effort`**, or the main conversation's model or effort.
 - **Approving a call.** No hook returns `permissionDecision: "allow"`.
 - **Blocking a spawn**, but for one case. A fallback rewrite waits in `pending.json`. If the same call comes back 5 seconds or more later with no result, the rewrite didn't run, so it passes through untouched rather than loop; if that would run it above `max_tier`, it is denied, with the model to use (`fallback._guard`).
