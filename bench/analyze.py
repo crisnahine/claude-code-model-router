@@ -523,6 +523,9 @@ def load(paths: list[Path]) -> Results:
 
 
 CACHE_FIELDS = ("cache_read_tokens", "cache_write_tokens", "fresh_input_tokens")
+# The apiKeySource values a run can report (https://code.claude.com/docs/en/agent-sdk/typescript#apikeysource).
+PAID = {"ANTHROPIC_API_KEY": "an API key (`ANTHROPIC_API_KEY`)",
+        "none": "a login token or a cloud provider (`none`: no API key)"}
 
 
 def _cache_line(by_config: dict[str, list[dict]]) -> str:
@@ -729,6 +732,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         for name, count in (r.get("agents_started") or {}).items():
             agents.setdefault(r["config"], {}).setdefault(name, 0)
             agents[r["config"]][name] += count
+    paid: dict[str, Counter] = {}
+    for r in rows:
+        paid.setdefault(r.get("main_model") or "unknown", Counter())[r.get("auth")] += 1
     shapes = {r.get("shape", "single") for r in rows}
     uncovered = [name for shape, name in (("fanout", "fan-out"), ("plan-build", "plan-then-build"), ("redo", "redo"),
                                           ("workflow", "workflow")) if shape not in shapes]
@@ -754,6 +760,11 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "## Setup", "",
         f"- Claude Code: {', '.join(versions)}. Session models: {', '.join(main) or 'n/a'} (`--model`), "
         "one results table each. Inside a table every configuration ran on that session model.",
+        "- How the runs were paid for, by session model (`auth`, the `apiKeySource` of the run's `system/init` event): "
+        + "; ".join(f"`{model}`: " + "; ".join(
+            f"{PAID.get(how, f'`{how}`') if how else 'not recorded'} in {n} run{'s' * (n != 1)}"
+            for how, n in sorted(counts.items(), key=lambda kv: (-kv[1], str(kv[0]))))
+            for model, counts in sorted(paid.items())) + ".",
         "- Configurations run: " + "; ".join(f"`{c}` ({described.get(c, '?')})" for c in used) + ".",
         "- Models that ran, with Claude Code's list-price cost across all runs: "
         + "; ".join(f"`{name}` ${sum(costs):.4f} over {len(costs)} runs" for name, costs in sorted(models.items()))

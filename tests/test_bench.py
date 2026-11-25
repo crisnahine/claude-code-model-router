@@ -728,6 +728,16 @@ class Analysis(unittest.TestCase):
         self.assertIn("1 router run(s) are set aside, outside the results, because a subagent ran but the router's "
                       "ledger holds no spawn row", page)
 
+    def test_the_page_says_per_session_model_how_the_runs_were_paid_for(self):
+        base = full_row(task="bugfix-median", config="defaults", **{"class": "bugfix"})
+        older = {k: v for k, v in base.items() if k != "auth"}  # a row from before the field was written
+        data = ([dict(base, main_model="sonnet", auth="ANTHROPIC_API_KEY")] * 3
+                + [dict(base, main_model=OPUS, auth="none")] * 2 + [dict(older, main_model=OPUS)])
+        page = analyze.build_page(dataclasses.replace(analyze.load([]), rows=data))
+        self.assertIn(f"- How the runs were paid for, by session model (`auth`, the `apiKeySource` of the run's "
+                      f"`system/init` event): `{OPUS}`: a login token or a cloud provider (`none`: no API key) in 2 "
+                      "runs; not recorded in 1 run; `sonnet`: an API key (`ANTHROPIC_API_KEY`) in 3 runs.", page)
+
     def test_the_page_gives_each_configurations_cache_read_share_and_never_reads_a_missing_field_as_zero(self):
         base = full_row(task="bugfix-median", main_model="sonnet", **{"class": "bugfix"})
         warm = dict(base, cache_read_tokens=80, cache_write_tokens=15, fresh_input_tokens=5)
@@ -788,6 +798,12 @@ class Recorder(unittest.TestCase):
 
     def row(self, result, **facts):
         return run.record(self.task, self.config, self.options, result, {**self.facts, **facts})
+
+    def test_a_row_records_which_credential_paid(self):
+        init = {"type": "system", "subtype": "init", "apiKeySource": "ANTHROPIC_API_KEY"}
+        self.assertEqual(self.row({}, init=init)["auth"], "ANTHROPIC_API_KEY")
+        self.assertIsNone(self.row({}, init={})["auth"])  # the stream never began
+        self.assertIsNone(self.row({})["auth"])
 
     def test_a_real_2_1_330_result_becomes_a_row(self):
         row = self.row(json.loads(FIXTURE.read_text(encoding="utf-8")))

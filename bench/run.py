@@ -791,12 +791,15 @@ def record(task: dict, config: dict, options: dict, result: dict, facts: dict) -
     priced = facts.get("transcript_cost")
     source = "result" if known else "transcripts" if priced is not None else "budget"
     started, overrides = facts.get("agents_started") or {}, facts.get("agent_overrides") or 0
+    # Which credential paid: with both ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN set, the key does.
+    auth = (facts.get("init") or {}).get("apiKeySource")
     return {
         "schema": ROW_SCHEMA, "task": task["id"], "task_revision": task.get("revision", 1), "class": task["class"],
         "shape": task.get("shape", "single"), "config": config["id"],
         "batch": options.get("batch"), "order_seed": options.get("seed"),
         "started_at": facts["started_at"], "claude_version": options["claude_version"],
         "main_model": options["model"],
+        "auth": auth if isinstance(auth, str) else None,
         "budget_usd": options["budget"], "bench_commit": options["commit"], "bench_dirty": options.get("dirty"),
         "plugin_hash": options.get("plugin_hash") if config.get("plugin") else None,
         "managed_settings": options.get("managed"),
