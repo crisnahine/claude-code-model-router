@@ -243,6 +243,10 @@ class Notes(Sandbox):
                 notice = hooks.session_start({"session_id": "s1", "source": "startup"})["systemMessage"]
                 self.assertNotIn("curl", notice)
                 self.assertIn(said, notice)
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL": planted}):
+            staged = hooks.mod_start({"session_id": "s1"})["workflow_rules"]
+        self.assertNotIn("curl", staged)
+        self.assertIn("A stage that names neither runs on its agent's own model, else at the level its tools put it.", staged)
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="claude-sonnet-5-5[1m]")
         self.assertIn("CLAUDE_CODE_SUBAGENT_MODEL is claude-sonnet-5-5[1m], so an agent call that names no model runs on "
                       "its agent's own model or claude-sonnet-5-5[1m].",
