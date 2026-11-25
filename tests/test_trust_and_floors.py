@@ -1,9 +1,8 @@
-"""A project's file never makes a call run weaker, and the router's floors and stops hold on every branch."""
+"""A project's file never makes a call run weaker, and the router's floors hold on every branch."""
 from __future__ import annotations
 
 import functools
 import itertools
-import os
 import unittest
 from unittest import mock
 
@@ -107,17 +106,6 @@ class ProjectRuleOnTheSameModel(Sandbox):
         hook_input = mod_input(self.project, "exact", nested=True)
         decision = spawn.decide({**hook_input, "agent_id": "sub1"}, settings.Snapshot(hook_input)).decision
         self.assertEqual(decision["version"], "claude-opus-5-5")
-
-
-class PinnedBranchesStopAtTheModelsTop(Sandbox):
-    def test_a_pinned_haiku_never_goes_past_its_effort_stop(self):
-        self.override({"levels": {"lookup": {"effort": "max"}}}, user=True)
-        self.options(CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1", CLAUDE_CODE_SUBAGENT_MODEL="haiku")
-        self.assertEqual(modpath.spawn(mod_input(self.project, "general-purpose"))["effort"], "high")
-        del os.environ["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"]
-        self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="haiku")
-        answer = modpath.spawn(mod_input(self.project, "general-purpose", kind="workflow"))
-        self.assertEqual(answer["effort"], "high")
 
 
 class NestedRedo(Sandbox):

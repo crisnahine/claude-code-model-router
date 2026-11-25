@@ -1371,12 +1371,12 @@ class Router(Sandbox):
         self.assertEqual(pick("frontier", ["haiku", "sonnet", "opus"]), ("opus", "xhigh"))
         self.assertEqual(ladder.pick(config, "complex", []), (None, "high"))
 
-    def test_no_effort_the_router_sets_on_haiku_goes_past_high(self):
+    def test_haiku_takes_the_same_extra_effort_step_as_any_model(self):
+        # Haiku 5.5 takes low to max (model-config.md#adjust-effort-level).
         config = cfg.shipped()
-        self.assertEqual(tuple(ladder.pick(config, "complex", ["haiku"])), ("haiku", "high"))
+        self.assertEqual(tuple(ladder.pick(config, "complex", ["haiku"])), ("haiku", "xhigh"))
         self.assertEqual(tuple(ladder.pick(config, "standard", ["haiku"])), ("haiku", "high"))
-        self.assertEqual(ladder.effort_on(config, Level.hardest, "haiku"), "high")  # the level's own effort too
-        self.assertEqual(ladder.effort_on(config, Level.hardest, "sonnet"), "xhigh")
+        self.assertEqual(ladder.effort_on(config, Level.hardest, "haiku"), "xhigh")
 
     def test_a_pick_at_or_above_the_levels_need_gets_no_extra_step(self):
         config = cfg.shipped()
@@ -1775,8 +1775,8 @@ class Router(Sandbox):
         self.assertEqual((again["level"], again["model"], again["effort"]), ("hardest", "opus", "xhigh"))
         self.assertIn("no stronger model is usable, so it runs one effort step up", again["reason"])
         held = self.facts(parent="opus", earlier=earlier, effort_caps={"opus": "high"}, usable=usable)
-        self.assertEqual((held["model"], held["effort"]), ("opus", "high"))  # nothing more to give
-        self.assertIn("effort held to high by maxEffortLevel", held["reason"])
+        self.assertEqual((held["model"], held["effort"], held["no_step"]), ("opus", "high", True))  # the cap leaves nothing
+        self.assertIn("no stronger model is usable, and opus gets no more effort", held["reason"])
         self.agent("pinned", "opus")
         self.assertEqual(self.facts("pinned", earlier=earlier)["model"], "fable")  # an agent's pin doesn't hold a redo back
 
@@ -1862,30 +1862,6 @@ class RepeatGuard(Sandbox):
         self.assertIn("a redo of the run that came back before (haiku at medium): one effort step up on haiku",
                       redo["reason"])
 
-    def test_a_redo_that_names_the_same_model_again_still_climbs(self):
-        # Claude names a model on every call, the redo included, so naming the same one must not repeat the run.
-        self.pre("general-purpose", LOOKUP, model="haiku", description="List src")
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="medium", description="List src")
-        redo = self.decide("general-purpose", LOOKUP, model="haiku", description="Redo: list src")
-        self.assertEqual((redo["action"], redo["model"], redo["effort"], redo["escalated_from"]),
-                         ("rewrite", "haiku", "high", "lookup"))
-        self.pre("general-purpose", LOOKUP, model="haiku", description="Redo: list src")
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="high", description="Redo: list src")
-        again = self.decide("general-purpose", LOOKUP, model="haiku", description="Redo: list src")
-        self.assertEqual((again["action"], again["model"], again["escalated_from"]), ("rewrite", "sonnet", "lookup"))
-
-    def test_a_redo_that_names_the_same_model_and_effort_twice_climbs_twice(self):
-        # Told to name both on every call, Claude repeats the first call's pair on each redo.
-        self.pre("general-purpose", LOOKUP, model="haiku", effort="medium", description="List files")
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="medium", description="List files")
-        first = self.decide("general-purpose", LOOKUP, model="haiku", effort="medium", description="Redo: list files")
-        self.assertEqual((first["model"], first["effort"]), ("haiku", "high"))
-        self.pre("general-purpose", LOOKUP, model="haiku", effort="medium", description="Redo: list files")
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="medium",
-                  description="Redo: list files")
-        second = self.decide("general-purpose", LOOKUP, model="haiku", effort="medium", description="Redo: list files")
-        self.assertEqual((second["action"], second["model"]), ("rewrite", "sonnet"))
-
     def test_a_redo_that_names_more_than_the_run_it_redoes_runs_as_named(self):
         self.pre("general-purpose", LOOKUP, model="haiku", description="List src")
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="medium", description="List src")
@@ -1894,14 +1870,6 @@ class RepeatGuard(Sandbox):
                          ("opus", "high", "caller", "lookup"))
         harder = self.decide("general-purpose", LOOKUP, model="haiku", effort="xhigh", description="Redo: list src")
         self.assertEqual((harder["model"], harder["source"], harder["escalated_from"]), ("haiku", "caller", "lookup"))
-
-    def test_a_redo_that_names_effort_its_model_gains_nothing_from_climbs_to_the_next_model(self):
-        # Haiku gets nothing past high (`effort_stops_at`), so haiku at xhigh after haiku at high asks for no more.
-        self.pre("general-purpose", LOOKUP, model="haiku", effort="high", description="List src")
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", model="haiku", effort="high", description="List src")
-        redo = self.decide("general-purpose", LOOKUP, model="haiku", effort="xhigh", description="Redo: list src")
-        self.assertEqual((redo["action"], redo["model"], redo["source"], redo["escalated_from"]),
-                         ("rewrite", "sonnet", "router", "lookup"))
 
     def test_a_redo_that_names_a_model_with_no_run_on_record_still_climbs(self):
         redo = self.decide("general-purpose", LOOKUP, model="haiku", description="Redo: list src")
@@ -1939,8 +1907,8 @@ class RepeatGuard(Sandbox):
         self.assertEqual(self.ledger()[-1]["escalated_from"], "standard")
 
     def test_a_marked_redo_climbs_only_from_a_run_inside_the_window(self):
-        self.pre("general-purpose", HARD, description="Second try")
-        self.done("general-purpose", HARD, "claude-opus-5-5", description="Second try")
+        self.pre("general-purpose", HARD, effort="high", description="Second try")
+        self.done("general-purpose", HARD, "claude-opus-5-5", effort="high", description="Second try")
         again = self.decide("general-purpose", BUILD, description="Redo: second try")
         self.assertEqual((again["level"], again["model"], again["effort"], again["escalated_from"]),
                          ("frontier", "fable", "high", "complex"))
@@ -1973,8 +1941,8 @@ class RepeatGuard(Sandbox):
         self.assertEqual(router.decide(found, snap.registry, snap.options)["escalated_from"], None)
 
     def test_a_background_run_is_climbed_from_only_after_it_stops(self):
-        self.pre("general-purpose", HARD, description="Second try")
-        self.launched("general-purpose", HARD, "claude-opus-5-5", "a1", description="Second try")
+        self.pre("general-purpose", HARD, effort="high", description="Second try")
+        self.launched("general-purpose", HARD, "claude-opus-5-5", "a1", effort="high", description="Second try")
         running = self.decide("general-purpose", BUILD, description="Redo: second try")
         self.assertIn("the run it would get unmarked", running["reason"])
         self.stopped("a1")
@@ -1991,8 +1959,8 @@ class RepeatGuard(Sandbox):
 
     def test_a_redo_runs_as_named_only_when_that_asks_for_more(self):
         # The caller may pick the lever, more effort or a stronger model. Naming less never repeats or lowers the run.
-        self.pre("general-purpose", HARD, description="Second try")
-        self.done("general-purpose", HARD, "claude-opus-5-5", description="Second try")
+        self.pre("general-purpose", HARD, effort="high", description="Second try")
+        self.done("general-purpose", HARD, "claude-opus-5-5", effort="high", description="Second try")
         for named, want in (({"effort": "max"}, ("keep", "hardest", None, None, None)),
                             ({"model": "fable"}, ("rewrite", "frontier", "fable", "high", "caller")),
                             ({"effort": "low"}, ("rewrite", "frontier", "fable", "high", "router")),
@@ -2005,8 +1973,8 @@ class RepeatGuard(Sandbox):
                 self.assertNotIn("on_record", self.ledger()[-1])
 
     def test_a_marked_redo_climbs_from_the_run_with_its_description_not_the_agents_latest(self):
-        self.pre("general-purpose", HARD, description="Second try")
-        self.done("general-purpose", HARD, "claude-opus-5-5", description="Second try")
+        self.pre("general-purpose", HARD, effort="high", description="Second try")
+        self.done("general-purpose", HARD, "claude-opus-5-5", effort="high", description="Second try")
         self.session_on("claude-haiku-5-5")
         self.pre("general-purpose", LOOKUP, description="Other job")  # a later, lighter run of the same agent
         self.done("general-purpose", LOOKUP, "claude-haiku-5-5", description="Other job")
@@ -2071,21 +2039,6 @@ class RepeatGuard(Sandbox):
             self.pre("general-purpose", BUILD, model="haiku")
         self.assertEqual(identify.call_count, 1)
 
-    def test_a_haiku_redo_never_runs_past_high(self):
-        self.options(max_tier="haiku")
-        self.pre("general-purpose", LOOKUP, description="List src")
-        self.done("general-purpose", LOOKUP, "claude-haiku-5-5", description="List src")
-        for want in ("high", "high"):
-            d = self.decide("general-purpose", LOOKUP, description="Redo: list src")
-            self.assertEqual((d["model"], d["effort"]), ("haiku", want))
-            self.pre("general-purpose", LOOKUP, description="Redo: list src")
-            self.done("general-purpose", LOOKUP, "claude-haiku-5-5", description="Redo: list src")
-        self.assertIn("no stronger model is usable, and haiku gets no more effort", d["reason"])
-        self.options(max_tier="", CLAUDE_CODE_SUBAGENT_MODEL="haiku", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
-        forced = self.decide("general-purpose", LOOKUP, description="Redo: list src")
-        self.assertEqual(forced["effort"], "high")
-        self.assertIn("a redo of the lookup run, and haiku gets no more effort", forced["reason"])
-
     def test_a_redo_climbs_past_the_subagent_model_default(self):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="sonnet")
         self.assertEqual(self.decide("general-purpose", BUILD, description="Parser change")["action"], "keep")
@@ -2104,23 +2057,12 @@ class RepeatGuard(Sandbox):
         self.assertIn("no stronger model is usable, so it runs one effort step up; opus is over the cap or unavailable here",
                       again["reason"])
 
-    def test_a_redo_on_a_forced_model_asks_for_one_more_effort_step(self):
-        self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
-        first = self.decide("general-purpose", LOOKUP, description="List src")
-        self.pre("general-purpose", LOOKUP, description="List src")
-        self.done("general-purpose", LOOKUP, "claude-opus-5-5", effort=first["effort"], description="List src")
-        again = self.decide("general-purpose", LOOKUP, description="Redo: list src")
-        self.assertEqual((first["effort"], again["level"], again["model"], again["effort"], again["escalated_from"]),
-                         ("high", "hardest", None, "xhigh", "complex"))
-        self.assertIn("pinned by CLAUDE_CODE_SUBAGENT_MODEL_FORCE, so only effort is set; a redo of the complex run, "
-                      "one effort step up", again["reason"])
-
     def test_a_redo_held_under_the_cap_on_its_model_takes_more_effort_up_to_max(self):
         self.options(max_tier="opus")
         first = self.decide("general-purpose", HARDEST, description="Second try")
         self.assertEqual((first["level"], first["model"], first["effort"]), ("complex", None, None))
-        self.pre("general-purpose", HARDEST, description="Second try")
-        self.done("general-purpose", HARDEST, "claude-opus-5-5", description="Second try")
+        self.pre("general-purpose", HARDEST, effort="high", description="Second try")
+        self.done("general-purpose", HARDEST, "claude-opus-5-5", effort="high", description="Second try")
         for want in (("hardest", "opus", "xhigh"), ("hardest", "opus", "max"), ("hardest", "opus", "max")):
             d = self.decide("general-purpose", HARDEST, description="Redo: second try")
             self.assertEqual((d["level"], d["model"], d["effort"]), want)
@@ -2130,8 +2072,8 @@ class RepeatGuard(Sandbox):
     def test_a_redo_on_the_top_model_takes_more_effort(self):
         self.session_on("claude-fable-5-2")
         self.assertEqual(self.decide("general-purpose", HARD)["level"], "frontier")
-        self.pre("general-purpose", HARD, description="Second try")
-        self.done("general-purpose", HARD, "claude-fable-5-2", description="Second try")
+        self.pre("general-purpose", HARD, effort="high", description="Second try")
+        self.done("general-purpose", HARD, "claude-fable-5-2", effort="high", description="Second try")
         again = self.decide("general-purpose", HARD, description="Redo: second try")
         self.assertEqual((again["level"], again["model"], again["effort"], again["escalated_from"]),
                          ("frontier", "fable", "xhigh", "frontier"))

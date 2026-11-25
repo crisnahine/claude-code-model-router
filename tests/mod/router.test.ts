@@ -636,6 +636,25 @@ test("a subagent's turn end sends Claude Code's own figures for it, and the main
   assert.deepEqual(mod.calls.map(c => c.stdin), [sent, sent, { ...sent, subscription: true }])
 })
 
+test("a routed subagent's turn end says what its last request carried, for the Agent call it came from", async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu7' }), (x: object) => ({ ...x, agentId: 'a7' }))
+  const sent = async (lastRequest: object | undefined) => {
+    mod.engine.agents = [{ id: 'a7', type: 'general-purpose', ...(lastRequest ? { lastRequest } : {}) }]
+    mod.calls.length = 0
+    await mod.complete(completeEvent({ agentId: 'a7', usage: TURN }))
+    return mod.calls.map(c => c.stdin)
+  }
+  const plain = { session_id: 's1', agent_id: 'a7', usage: TURN }
+  assert.deepEqual(await sent({ at: 1, model: 'claude-opus-5-5', effort: 'high' }),
+    [{ ...plain, tool_use_id: 'tu7', ran: { model: 'claude-opus-5-5', effort: 'high' } }])
+  // No effort sent is a fact; a number is an internal budget, and no request yet says nothing.
+  assert.deepEqual(await sent({ at: 1, model: 'claude-haiku-4-5' }),
+    [{ ...plain, tool_use_id: 'tu7', ran: { model: 'claude-haiku-4-5', effort: null } }])
+  assert.deepEqual(await sent({ at: 1, model: 'claude-opus-5-5', effort: 2048 }), [plain])
+  assert.deepEqual(await sent(undefined), [plain])
+})
+
 test('plugin options reach the CLI env', async () => {
   const mod = load({}, { max_tier: 'sonnet', verify_gate: false, tiers: ['haiku', 'sonnet'], budget: 3 })
   await mod.sessionStart({ source: 'startup' })
@@ -727,7 +746,7 @@ test('each payload the mod sends matches its fixture', async () => {
     parentAgentId: spawn.parent_agent_id, parentModel: spawn.parent_model, model: spawn.tool_input.model,
     subagentType: spawn.tool_input.subagent_type, prompt: spawn.tool_input.prompt, description: spawn.tool_input.description,
   }))
-  mod.engine.agents = [{ id: usage.agent_id, type: usage.subagent_type, usage: usage.models, cost: usage.cost }]
+  mod.engine.agents = [{ id: usage.agent_id, type: usage.subagent_type, usage: usage.models, cost: usage.cost, lastRequest: { at: 1, ...usage.ran } }]
   mod.engine.rateLimits = [{ kind: 'seven_day', percentUsed: 1 }]
   await mod.complete(completeEvent({ turnId: 't2', agentId: usage.agent_id, usage: usage.models[0] }))
   assert.deepEqual(Object.fromEntries(mod.calls.map(c => [c.command, c.stdin])), payloads)

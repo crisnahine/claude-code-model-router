@@ -141,17 +141,34 @@ async function sessionId($: EngineInterface): Promise<string | undefined> {
   }
 }
 
+type Listed = Awaited<ReturnType<EngineInterface['agent']['list']>>[number]
+
+// The model and effort the agent's last request carried, past caps and this mod's own turn.step rewrite: what a redo
+// climbs from. A null effort means none was sent. A number (internal builds only) says nothing, so no pair is sent.
+function ranAt(agent: Listed, usage: { model?: string } | undefined): object | undefined {
+  const last = agent.lastRequest
+  if (!last || typeof last.effort === 'number') return undefined
+  const model = last.model ?? usage?.model ?? agent.model
+  return model ? { model, effort: last.effort ?? null } : undefined
+}
+
 // Claude Code's own figures for one subagent: its tokens per model and its estimate in dollars, both over
-// all of its turns so far. None for an agent the engine doesn't list, such as a workflow's. Never throws.
-async function agentUsage($: EngineInterface, id: string): Promise<object | undefined> {
+// all of its turns so far, and what it ran at. None for an agent the engine doesn't list, such as a workflow's.
+// Never throws.
+async function agentUsage($: EngineInterface, id: string, usage?: { model?: string }): Promise<{ figures?: object; ran?: object } | undefined> {
   try {
     const agent = (await $.agent.list()).find(a => a.id === id)
-    if (!agent || (!agent.usage?.length && !agent.cost)) return undefined
+    if (!agent) return undefined
+    const ran = ranAt(agent, usage)
+    if (!agent.usage?.length && !agent.cost) return { ran }
     // Plan windows appear on a subscription only; a gateway's spend_limit is not one.
     const plan = (await $.session.usage()).rateLimits.some(r => r.kind === 'five_hour' || r.kind === 'seven_day')
     return {
-      subagent_type: agent.type, models: agent.usage ?? [],
-      ...(agent.cost ? { cost: agent.cost } : {}), ...(plan ? { subscription: true } : {}),
+      ran,
+      figures: {
+        subagent_type: agent.type, models: agent.usage ?? [],
+        ...(agent.cost ? { cost: agent.cost } : {}), ...(plan ? { subscription: true } : {}),
+      },
     }
   } catch {
     return undefined
@@ -190,6 +207,8 @@ export const register: Register = (on, options) => {
   const agentEffort = new Map<string, Want>()
   // The type of each workflow agent this mod started, so its usage can name it: the engine doesn't list it.
   const agentType = new Map<string, string>()
+  // The Agent call each routed subagent came from, so what it ran at reaches that call's route.
+  const agentCall = new Map<string, string>()
   // The main conversation's level, from its latest request: an agent on its model runs at it unless told otherwise.
   let sessionEffort: string | undefined
   // agent.spawn carries no effort: an effort the caller put on the Agent call is read here.
@@ -279,6 +298,7 @@ export const register: Register = (on, options) => {
       const started = await next(model ? { ...e, model } : e)
       if (mine && started.agentId) remember(agentEffort, started.agentId, mine)
       if (started.agentId && e.workflow && e.subagentType) remember(agentType, started.agentId, e.subagentType)
+      if (started.agentId && !e.workflow && PLAIN_ID.test(e.tool_use_id)) remember(agentCall, started.agentId, e.tool_use_id)
       // A run on the model another mod moved it to is no substitution for the one this mod sent.
       if (!e.workflow && PLAIN_ID.test(e.tool_use_id) && movedOn(next.trace, model || e.model)) {
         await mark($, `${e.tool_use_id}.moved`)
@@ -324,8 +344,11 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.agentId === undefined) return done
     const type = agentType.get(e.agentId)
-    const figures = await agentUsage($, e.agentId) ?? (e.usage ? { ...(type ? { subagent_type: type } : {}), usage: e.usage } : undefined)
-    if (figures) heard(await ask($, opts, 'mod-usage', { agent_id: e.agentId, ...figures }))
+    const listed = await agentUsage($, e.agentId, e.usage)
+    const figures = listed?.figures ?? (e.usage ? { ...(type ? { subagent_type: type } : {}), usage: e.usage } : undefined)
+    const call = agentCall.get(e.agentId)
+    const ran = call && listed?.ran ? { tool_use_id: call, ran: listed.ran } : undefined
+    if (figures || ran) heard(await ask($, opts, 'mod-usage', { agent_id: e.agentId, ...figures, ...ran }))
     return done
   }).catch(($, e, next) => next(e))
 }

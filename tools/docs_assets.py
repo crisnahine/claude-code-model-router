@@ -227,8 +227,7 @@ def diagram_ladder() -> str:
                     "availableModels, deniedModels or failures", "mut", 13))
     out.append(text(32, 452, "rule a model out, the pick moves to the nearest usable model above it, or to the "
                     "strongest one left. A redo adds effort first.", "mut", 13))
-    out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh (high on "
-                    "Haiku).", "mut", 13))
+    out.append(text(32, 472, "A pick weaker than its level needs gets one more effort step, up to xhigh.", "mut", 13))
     title = "The ladder: five levels to a model and an effort"
     label = ("Lookup runs on Haiku at medium effort, standard on Sonnet at medium, complex on Opus at high, hardest "
              "on Opus at xhigh, and frontier on Fable at high. A model named on a call stands for its lowest level. "
@@ -236,7 +235,7 @@ def diagram_ladder() -> str:
              "after that on the next stronger model: Haiku, Sonnet, Opus, then Fable. When the cap, the availableModels or "
              "deniedModels settings, or failures rule a model out, the pick moves to the nearest usable model above "
              "it, or to the strongest one left, and a pick weaker than its level needs gets one more effort step, up "
-             "to xhigh, or high on Haiku.")
+             "to xhigh.")
     return svg(w, h, title, label, "".join(out))
 
 
@@ -274,7 +273,7 @@ def diagram_redo() -> str:
     out.append(f'<circle cx="{last}" cy="{track}" r="11" class="halo" fill="none" stroke-width="5"/>'
                f'<circle cx="{last}" cy="{track}" r="9" class="rt"/>')
     note = ["The next model runs at its own level's effort; with no stronger usable model, one more effort step, at",
-            "most max (high on Haiku). Not a redo: the same call sent again unmarked. Run as named: a redo that names",
+            "most max. Not a redo: the same call sent again unmarked. Run as named: a redo that names",
             "a stronger model, or more effort on the same one. Never redone: a workflow stage. A background agent's",
             "call counts as finished when the agent stops with an answer."]
     out.append(lines(32, 264, note, "mut", 13, 20))

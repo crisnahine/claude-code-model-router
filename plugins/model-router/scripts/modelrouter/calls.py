@@ -46,9 +46,13 @@ class Route:
     at: float = 0.0
     was: str | None = None
     version: str | None = None
+    ran: dict | None = None  # what the agent's requests carried, when the mod saw it (`observed`)
 
     @property
     def run(self) -> dict:
+        """What the run ran at: as observed, else as the path set it at spawn."""
+        if self.ran:
+            return dict(self.ran)
         return {"level": self.level.value if self.level else None, "model": self.model, "effort": self.effort}
 
 
@@ -138,13 +142,14 @@ def _route(record: object) -> Route | None:
                  level=Level.parse(record.get("level")), effort=_text(record.get("effort")),
                  source=_text(record.get("source")), path=_text(record.get("path")) or "",
                  at=float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else 0.0,
-                 was=_text(record.get("was")), version=_text(record.get("version")))
+                 was=_text(record.get("was")), version=_text(record.get("version")),
+                 ran=record["ran"] if isinstance(record.get("ran"), dict) else None)
 
 
 def _record(route: Route, key: str) -> dict:
     record = {"model": route.model, "sent": route.sent, "level": route.level.value if route.level else None,
               "effort": route.effort, "source": route.source, "path": route.path, "was": route.was,
-              "version": route.version, "call": key}
+              "version": route.version, "ran": route.ran, "call": key}
     return {k: v for k, v in record.items() if v is not None}
 
 
@@ -210,11 +215,30 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
 
 
 def _wait_or_finish(session_id: str | None, outcome: Outcome, route: Route, finished: bool) -> None:
+    # The spawn id lets what the mod sees later still correct the record (`observed`).
+    run = {**route.run, **({"spawn": outcome.spawn_id} if outcome.spawn_id else {})}
     if finished:
-        _mutate("done", session_id, lambda done: store.keep(done, outcome.task, route.run))
+        _mutate("done", session_id, lambda done: store.keep(done, outcome.task, run))
     else:
-        run = {**route.run, "task": outcome.task}
-        _mutate("launched", session_id, lambda waiting: store.keep(waiting, outcome.agent_id, run))
+        _mutate("launched", session_id, lambda waiting: store.keep(waiting, outcome.agent_id, {**run, "task": outcome.task}))
+
+
+def observed(session_id: str | None, spawn_id: str, run: dict) -> None:
+    """What a spawn's agent ran at, as its requests carried it: it replaces what the route set at spawn, on the
+    route and on a run already waiting or finished, whichever order the result and this arrive in."""
+    def into(records: dict) -> None:
+        for record in records.values():
+            if isinstance(record, dict) and record.get("spawn") == spawn_id:
+                for key in ("level", "model", "effort", "no_effort"):
+                    record.pop(key, None)
+                record.update(run)
+
+    def on_route(routes: dict) -> None:
+        if isinstance(routes.get(spawn_id), dict):
+            routes[spawn_id]["ran"] = run
+    _mutate("routes", session_id, on_route)
+    _mutate("launched", session_id, into)
+    _mutate("done", session_id, into)
 
 
 def _failed(session_id: str | None, outcome: Outcome, route: Route | None, asked: str | None,
@@ -254,7 +278,7 @@ def _stopped(session_id: str | None, outcome: Outcome) -> Returned:
     _mutate("launched", session_id, take)
     finished = outcome.answered and Level.parse(run.get("level")) is not None and isinstance(run.get("task"), str)
     if finished:
-        done = {k: run.get(k) for k in ("level", "model", "effort")}
+        done = {k: run[k] for k in ("level", "model", "effort", "no_effort", "spawn") if k in run}
         _mutate("done", session_id, lambda records: store.keep(records, run["task"], done))
     return Returned(run.get("model") if isinstance(run.get("model"), str) else None, None, finished)
 

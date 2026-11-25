@@ -43,6 +43,7 @@
   "mod-usage": {
     "session_id": "s1",
     "agent_id": "a1",
+    "tool_use_id": "tu1",
     "subagent_type": "general-purpose",
     "models": [
       {
@@ -63,6 +64,10 @@
     "cost": {
       "usd": 6.0
     },
-    "subscription": true
+    "subscription": true,
+    "ran": {
+      "model": "claude-haiku-5-5",
+      "effort": "low"
+    }
   }
 }

@@ -21,7 +21,7 @@ Both paths run one launcher, `scripts/model-router.sh`, and one procedure, `spaw
 | `agent.spawn` | Sends the call, `parent_model`, `kind` and the session's effort; passes the answer's `model` on. Marks a spawn a later mod moved to another family. Forks and resumed runs pass untouched |
 | `turn.start` | On the main loop, sends the layers again when the session id changed, as it does at `/clear`. Gives an agent whose first request beats its spawn's return that spawn's effort, if its prompt's waiting spawns agree |
 | `turn.step` | Sets the agent's effort on each request (a workflow agent's only when higher); records the main loop's |
-| `turn.complete` | Sends a subagent's tokens and cost estimate to the ledger |
+| `turn.complete` | Sends a subagent's tokens and cost estimate to the ledger, and the model and effort its last request carried (`lastRequest`), with the Agent call it came from |
 
 The fallback is `PreToolUse` on `Agent` (`fallback.route`), which rewrites `model` and `effort` through `updatedInput`.
 
@@ -74,7 +74,7 @@ The agents `architect` and `reviewer` pin Opus at `high`, `scout` and `verifier`
 
 A level runs on the cheapest usable model whose strength meets its `needs` (`Registry.select`). A model stands for the lowest level it is the model of (`ladder.rung`), and a named effort lifts it on the same model: Opus at `xhigh` or `max` is hardest.
 
-The router's effort is the level's own, one step more (at most `xhigh`) on a model weaker than the level needs (`ladder.effort_on`), and never past the model's `effort_stops_at`, `high` on Haiku (`ladder.at_most`), except by the session floor.
+The router's effort is the level's own, one step more (at most `xhigh`) on a model weaker than the level needs (`ladder.effort_on`).
 
 ## The decision
 
@@ -118,18 +118,18 @@ A full ID or `[1m]` variant the call or agent names is kept while its family is,
 | :- | :- |
 | Mark | A `description` starting "Redo:", any case (`calls.marked_redo`). The same call sent unmarked is a new call. A workflow stage is never a redo |
 | Task | A hash of the agent type and the description without the mark (`calls.task`) |
-| Record | Each spawn's route goes in `routes.json`. A foreground result with no model swap keeps the run in `done.json` as its task's latest; a background one waits in `launched.json` for `SubagentStop` with an answer |
+| Record | Each spawn's route goes in `routes.json`, with the effort the run gets in Claude Code's order (`CLAUDE_CODE_EFFORT_LEVEL`, the call's as it ran, the agent's, `CLAUDE_CODE_SUBAGENT_EFFORT`, the session's on its own model), else Claude Code's default, `medium` (`router._ran_at`). On the mod, the model and effort the run's last request carried replace it, whenever they arrive (`calls.observed`). A foreground result with no model swap keeps the run in `done.json` as its task's latest; a background one waits in `launched.json` for `SubagentStop` with an answer |
 | Find | The task's latest run this session, at most 30 minutes old, from any request (`calls.last_run`) |
-| Run as named | If the call's unmarked decision asks for more than that run (a stronger model, or more effort up to `effort_stops_at`), it runs as decided (`spawn._asks_more`) |
+| Run as named | If the call's unmarked decision asks for more than that run (a stronger model, or more effort on a model that took one), it runs as decided (`spawn._asks_more`) |
 | Climb | Otherwise it climbs from that run, or with none on record from its unmarked run (`on_record: false`) |
 
 The climb (`router._redo`):
 
 1. Below `high` effort: the same model, one step up.
 2. Else the next stronger usable model, never a project's, at its level's effort.
-3. Else the same model one more step, at most `max` or `effort_stops_at`.
+3. Else the same model one more step, at most `max`.
 
-A step `maxEffortLevel` or `effort_stops_at` holds counts as none, and under an effort variable the router sets no effort, so the redo takes the next model. A nested run with no effort on record skips step 1. The call's model, the pin, a rule's model and `CLAUDE_CODE_SUBAGENT_MODEL` don't hold a redo back; under the force pin it gets one effort step. The session floor and `maxEffortLevel` apply after. `escalated_from` names the redone run's level.
+A step `maxEffortLevel` holds counts as none, and under an effort variable the router sets no effort, so the redo takes the next model. A nested run with no effort on record skips step 1, and a run whose requests carried none (a model that takes no effort) gets no effort step. The call's model, the pin, a rule's model and `CLAUDE_CODE_SUBAGENT_MODEL` don't hold a redo back; under the force pin it gets one effort step, and none past `max` (`no_step`). The session floor and `maxEffortLevel` apply after. `escalated_from` names the redone run's level.
 
 With no stronger usable model and no effort to gain, the redo runs as the run it redoes did, and the decision's `no_step` is set. Claude then reads one sentence after the result, such as "This redo ran on opus at max, the strongest model and the most effort usable here, the same as the run it redoes." (`spawn.redo_note`): `additionalContext` beside `updatedInput` on the fallback, the `tool.call` result's `context` on the mod.
 

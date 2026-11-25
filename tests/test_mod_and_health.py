@@ -163,7 +163,7 @@ class MovedByAnotherMod(Sandbox):
 class RedoWithNothingHigher(Sandbox):
     """A redo of a run already at the strongest usable model and its top effort runs the same again, and Claude is told."""
 
-    SAME = ("This redo ran on haiku at high, the strongest model and the most effort usable here, the same as the run "
+    SAME = ("This redo ran on haiku at max, the strongest model and the most effort usable here, the same as the run "
             "it redoes.")
 
     def setUp(self):
@@ -178,21 +178,23 @@ class RedoWithNothingHigher(Sandbox):
     def test_the_decision_says_so_only_when_no_step_is_left(self):
         self.options(max_tier="haiku")
         self.run_once("List src")
-        climbed = self.decide("general-purpose", LOOKUP, description="Redo: list src")
-        self.assertEqual((climbed["model"], climbed["effort"], climbed["no_step"]), ("haiku", "high", False))
-        self.assertIsNone(spawn.redo_note(climbed))
-        self.assertNotIn("the strongest model and the most effort usable here", self.run_once("Redo: list src")["additionalContext"])
+        for effort in ("high", "xhigh", "max"):
+            climbed = self.decide("general-purpose", LOOKUP, description="Redo: list src")
+            self.assertEqual((climbed["model"], climbed["effort"], climbed["no_step"]), ("haiku", effort, False))
+            self.assertIsNone(spawn.redo_note(climbed))
+            self.assertNotIn("the strongest model and the most effort usable here", self.run_once("Redo: list src")["additionalContext"])
         same = self.decide("general-purpose", LOOKUP, description="Redo: list src")
-        self.assertEqual((same["model"], same["effort"], same["no_step"]), ("haiku", "high", True))
+        self.assertEqual((same["model"], same["effort"], same["no_step"]), ("haiku", "max", True))
         self.assertEqual(spawn.redo_note(same), self.SAME)
         self.assertFalse(self.decide("general-purpose", LOOKUP, description="List src")["no_step"])
 
     def test_the_fallback_tells_claude_beside_its_rewrite(self):
         self.options(max_tier="haiku")
         self.run_once("List src")
-        self.run_once("Redo: list src")
+        for _ in range(3):
+            self.run_once("Redo: list src")
         out = self.run_once("Redo: list src")
-        self.assertEqual(out["updatedInput"]["effort"], "high")
+        self.assertEqual(out["updatedInput"]["effort"], "max")
         self.assertTrue(out["additionalContext"].startswith("Model Router set this agent's model to haiku"))
         self.assertTrue(out["additionalContext"].endswith(" " + self.SAME))
 
@@ -217,8 +219,9 @@ class RedoWithNothingHigher(Sandbox):
         redo = {"session_id": "s1", "parent_model": "claude-opus-5-5", "kind": "subagent",
                 "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP, "description": "Redo: list src"}}
         self.assertNotIn("note", modpath.spawn(redo))
-        self.run_once("Redo: list src")
-        self.assertEqual(modpath.spawn(redo), {"model": "haiku", "effort": "high", "reason": self.ledger()[-1]["reason"],
+        for _ in range(3):
+            self.run_once("Redo: list src")
+        self.assertEqual(modpath.spawn(redo), {"model": "haiku", "effort": "max", "reason": self.ledger()[-1]["reason"],
                                                "note": self.SAME})
 
 

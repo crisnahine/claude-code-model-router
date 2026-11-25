@@ -8,7 +8,8 @@ import re
 import time
 from pathlib import Path
 
-from . import allowlist, ledger, settings, store
+from . import allowlist, calls, ladder, ledger, settings, store
+from . import config as cfg
 from . import spawn as procedure
 
 # hooks/router.ts writes an empty file here per Agent call it routes at spawn, and `<id>.moved` for one a later mod moved
@@ -112,4 +113,23 @@ def usage(hook_input: dict) -> dict:
     ledger.usage(hook_input.get("session_id"), hook_input.get("agent_id"), agent if isinstance(agent, str) and agent else None,
                  models=hook_input.get("models"), cost=hook_input.get("cost"),
                  subscription=hook_input.get("subscription") is True, turn=hook_input.get("usage"))
+    _ran(hook_input)
     return OK
+
+
+def _ran(hook_input: dict) -> None:
+    """Keep what the agent's last request carried as what its run ran at, the fact a redo climbs from."""
+    ran, spawn_id = hook_input.get("ran"), hook_input.get("tool_use_id")
+    if not isinstance(ran, dict) or not isinstance(spawn_id, str) or not _PLAIN_ID.fullmatch(spawn_id):
+        return
+    reg = cfg.load(hook_input)
+    model, effort = reg.family(ran.get("model")), ran.get("effort")
+    if model not in reg.models or not (effort is None or effort in cfg.EFFORTS):
+        return
+    # No effort sent: the model takes none, so only a stronger model is a step up from it.
+    run = {"level": ladder.rung(reg, model, effort).value, "model": model,
+           **({"effort": effort} if effort else {"no_effort": True})}
+    try:
+        calls.observed(hook_input.get("session_id"), spawn_id, run)
+    except OSError:
+        pass
