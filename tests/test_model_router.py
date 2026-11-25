@@ -242,6 +242,14 @@ class Shipped(unittest.TestCase):
                             ("reviewer", "A small, tested change doesn't need one.")):
             self.assertIn(limit, frontmatter(PLUGIN / "agents" / f"{name}.md")["description"], name)
 
+    def test_the_reviewer_is_briefed_with_the_diff_file_it_needs(self):
+        # It has Read, Grep and Glob only, so it can't run git, and its body stops when no diff file was given.
+        reviewer = PLUGIN / "agents" / "reviewer.md"
+        self.assertIn("diff file named in your brief", reviewer.read_text(encoding="utf-8"))
+        self.assertNotIn("Bash", frontmatter(reviewer)["tools"])
+        for text in (frontmatter(reviewer)["description"], (PLUGIN / "skills" / "route" / "SKILL.md").read_text(encoding="utf-8")):
+            self.assertIn("a diff file the brief names, such as one `git diff > review.diff` wrote", text)
+
     # Each role agent carries its level in its definition, which holds with the router off; the implementer names
     # none, so the caller names one per step.
     LEVELS = {"scout": Level.lookup, "verifier": Level.lookup, "implementer": Level.standard,
@@ -529,6 +537,14 @@ class Intake(Sandbox):
             self.assertTrue(intake.is_user_prompt(text))
             self.assertLess(time.monotonic() - started, 0.5, text[:8])
 
+    def test_a_long_prompt_of_markup_with_hyphenated_tags_is_read_quickly(self):
+        item = '<mat-list-item class="row">\n  <span>Item text here</span>\n</mat-list-item>\n'
+        text = item * (100_000 // len(item)) + "Why does this list not scroll?"
+        self.assertGreater(len(text), 99_000)
+        started = time.monotonic()
+        self.assertTrue(intake.is_user_prompt(text))
+        self.assertLess(time.monotonic() - started, 0.5)
+
 
 class Store(Sandbox):
     def test_keyed_files_drop_the_least_recently_written(self):
@@ -566,6 +582,18 @@ class Store(Sandbox):
         store.ledger_path().write_text("".join(json.dumps(r) + "\n" for r in rows))
         store.append_ledger({"event": "spawn"})
         self.assertEqual([r.get("n") for r in ledger.read()], [29, 1, None])
+
+    def test_the_age_trim_waits_until_the_oldest_row_is_a_day_past_thirty_days(self):
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        def kept(*days: float) -> list:
+            rows = [{"ts": (now - datetime.timedelta(days=d)).isoformat(timespec="seconds"), "n": d} for d in days]
+            store.ledger_path().write_text("".join(json.dumps(r) + "\n" for r in rows))
+            store.append_ledger({"event": "spawn"})
+            return [r.get("n") for r in ledger.read()]
+
+        self.assertEqual(kept(30.5, 29), [30.5, 29, None])  # else each append past day 30 rewrites the whole file
+        self.assertEqual(kept(31.5, 30.5, 29), [29, None])
 
     def test_a_trim_drops_blank_lines_and_reads_a_time_with_no_zone_as_utc(self):
         now = datetime.datetime.now(datetime.timezone.utc)
@@ -924,6 +952,14 @@ class Registry(Sandbox):
         self.assertEqual([m for m in ("claude", "opus-5", "saga") if m in config.models], ["claude", "saga"])
         self.assertEqual([h.name for h in config.held], ["opus-5"])
 
+    def test_a_project_model_cannot_take_a_shipped_twins_name(self):
+        self.override({"models": {"mythos": {"strength": 0.1, "cost": 0.1}}})
+        config = cfg.load()
+        self.assertEqual(([h.name for h in config.held], config.family("mythos")), (["mythos"], "fable"))
+        self.options(max_tier="opus")
+        d = self.decide("general-purpose", HARD, model="mythos")
+        self.assertEqual((d["model"], d["was"]), ("opus", "fable"))
+
     def test_needs_never_fall_as_the_level_rises(self):
         shipped = [cfg.shipped().levels[level].needs for level in cfg.LEVELS]
         self.assertEqual(shipped, [1, 1, 2, 3, 4])
@@ -997,6 +1033,24 @@ class Allowlist(Sandbox):
                                   "settings": {"policy": {"availableModels": ["fable"]}}})["model"]
         self.assertEqual((sent(mythos), sent(fable)), ("fable", fable))
 
+    def test_an_id_the_lists_name_runs_as_named_though_its_family_is_not_open(self):
+        mythos = "claude-mythos-5-2"
+        self.agent("twin", mythos)
+
+        def sent(allow: list, **named) -> tuple:
+            out = modpath.spawn({"session_id": "s1", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
+                                 "tool_input": {"prompt": HARD, **named}, "settings": {"policy": {"availableModels": allow}}})
+            return out["model"], out["reason"]
+
+        for named in ({"model": mythos}, {"subagent_type": "twin"}):
+            model, reason = sent(["opus", "sonnet", "haiku", mythos], **named)
+            self.assertEqual(model, mythos, named)
+            self.assertNotIn("over the cap", reason)
+            self.assertEqual(sent(["opus", "sonnet", "haiku"], **named)[0], "opus", named)  # an ID the lists don't name
+            self.options(max_tier="opus")
+            self.assertEqual(sent(["opus", "sonnet", "haiku", mythos], **named)[0], "opus", named)  # over the cap
+            del os.environ["CLAUDE_PLUGIN_OPTION_MAX_TIER"]
+
     def test_entries_that_are_not_strings_match_nothing(self):
         self.assertEqual(self.permitted(policy={"availableModels": ["sonnet", {"id": "claude-opus-5-5"}],
                                                 "deniedModels": [{"id": "sonnet"}]}), {"sonnet"})
@@ -1058,6 +1112,14 @@ class Allowlist(Sandbox):
         self.assertEqual(caps(user=own, policy={"maxEffortLevel": "high"})["opus"], "high")
         self.assertEqual(caps(policy={"maxEffortLevel": "medium"}, user={"maxEffortLevel": "max"})["fable"], "medium")
         self.assertEqual(caps(user={"maxEffortLevel": "turbo", "modelSettings": ["opus"]})["opus"], None)
+
+    def test_a_model_settings_entry_for_a_twins_id_sets_nothing_for_its_family(self):
+        def read(model_id: str) -> tuple:
+            found = allowlist.from_layers({"user": {"modelSettings": {model_id: {"maxEffortLevel": "low", "effortLevel": "low"}}}})
+            return found.effort_cap(self.config, "fable"), found.saved_effort(self.config, "fable")
+
+        self.assertEqual(read("claude-mythos-5-2"), (None, None))
+        self.assertEqual(read("claude-fable-5-2"), ("low", "low"))
 
     def test_a_deny_list_over_the_cap_leaves_no_model_open_while_an_allow_list_is_only_cut(self):
         for denied in (["opus"] + ["x"] * allowlist.MAX_ENTRIES, ["opus", "y" * (allowlist.MAX_CHARS + 1)]):
@@ -1358,16 +1420,24 @@ class RoutingEvals(Sandbox):
     # Runs each grader must fail, then runs it must pass; the right answers are from live runs.
     RUNS = {
         ("route-review-subagent", "found-the-bypass"): (
-            [{"last_message": "The handler looks correct and there is no way to bypass the check."}],
+            [{"last_message": "The handler looks correct and there is no way to bypass the check."},
+             {"last_message": "The admin account is fine; an attacker could bypass hashing."}],
             [{"last_message": "The check uses `or` where it needs `and`. Because of that, anyone who enters the username "
                               "`admin` is logged in with any password."},
              {"last_message": "The `or` short-circuits, so anyone who submits `user='admin'` is authenticated without any "
-                              "password check."}]),
+                              "password check."},
+             {"last_message": "If the username is 'admin', the function returns True without evaluating the password at all."},
+             {"last_message": "The `or` means the password check is skipped entirely when the username is admin."}]),
         ("route-contract-summary", "flags-the-cap"): (
-            [{"last_message": "Liability is capped at $10. Nothing here is unusual."}],
+            [{"last_message": "Liability is capped at $10. Nothing here is unusual."},
+             {"last_message": "The $10 cap is common in these agreements; the termination clause is one-sided."}],
             [{"last_message": "- **Liability:** The Supplier's total liability is capped at $10.\n\n**Unusual points:**\n\n"
                               "1. **The $10 cap is extremely low.** Supplier caps are usually tied to fees paid."},
-             {"last_message": "1. **Liability is very one-sided.** A $10 cap leaves the Customer with almost no remedy."}]),
+             {"last_message": "1. **Liability is very one-sided.** A $10 cap leaves the Customer with almost no remedy."},
+             {"last_message": "The Supplier's liability cap of $10 is far too low to cover any real loss."},
+             {"last_message": "A $10 liability cap is ridiculously low."},
+             {"last_message": "The Supplier's liability is limited to $10 while the Customer's is unlimited, which heavily "
+                              "favors the Supplier."}]),
         ("route-redo-escalates", "first-redo-stayed-on-haiku"): (
             [{"trace": trace("claude-haiku-5-5", "claude-sonnet-5-5", "claude-sonnet-5-5")}],
             [{"trace": trace("claude-haiku-5-5", "claude-haiku-5-5", "claude-sonnet-5-5")}]),
@@ -1384,6 +1454,35 @@ class RoutingEvals(Sandbox):
                 self.assertFalse(passes(found, run), (case, name, run))
             for run in right:
                 self.assertTrue(passes(found, run), (case, name, run))
+
+    def test_the_redo_case_pins_its_calls_and_its_graders_pass_only_the_plugins_climb(self):
+        case = PLUGIN / "evals" / "route-redo-escalates"
+        named = re.findall(r'description "([^"]+)", model "(\w+)", effort "(\w+)"', (case / "prompt.md").read_text(encoding="utf-8"))
+        self.assertEqual(named, [("list files", "haiku", "medium")] + [("Redo: list files", "haiku", "medium")] * 2)
+        self.session_on(HAIKU, session_id="redo")
+        marks = store.data_dir() / modpath.MARKS
+        marks.mkdir(parents=True, exist_ok=True)
+        ran, calls_made = [], []
+        for i, (description, model, effort) in enumerate(named):
+            tool_input = {"subagent_type": "general-purpose", "description": description, "model": model, "effort": effort,
+                          "prompt": "List the files in the current directory."}
+            common = {"session_id": "redo", "tool_use_id": f"toolu_{i}", "cwd": str(self.project)}
+            (marks / common["tool_use_id"]).write_text("")  # as the mod's tool.call hook does
+            self.assertIsNone(hooks.pre_agent({**common, "tool_input": tool_input}))
+            answer = hooks.HANDLERS["mod-spawn"]({**common, "parent_model": HAIKU, "kind": "subagent",
+                                                  "session_effort": "medium", "tool_input": tool_input})
+            run = (cfg.load().family(answer.get("model")) or model, answer.get("effort") or effort)
+            hooks.HANDLERS["mod-usage"]({**common, "agent_id": f"agent_{i}", "ran": {"model": f"claude-{run[0]}-5-5", "effort": run[1]}})
+            hooks.post_agent({**common, "tool_input": tool_input,
+                              "tool_response": {"resolvedModel": f"claude-{run[0]}-5-5", "status": "completed"}})
+            ran.append(run)
+            calls_made.append(tool_input)
+        self.assertEqual(ran, [("haiku", "medium"), ("haiku", "high"), ("sonnet", "high")])
+        graders = {p.stem: grader(p) for p in (case / "graders").glob("*.md")}
+        routed = {"calls": calls_made, "trace": trace(*(f"claude-{m}-5-5" for m, _ in ran))}
+        self.assertEqual([n for n, g in graders.items() if not passes(g, routed)], [])
+        alone = {"calls": calls_made, "trace": trace(*[HAIKU] * 3)}  # each call runs as named
+        self.assertEqual([n for n, g in graders.items() if not passes(g, alone)], ["redo-ran-above-haiku"])
 
     def test_each_eval_case_routes_as_expected(self):
         cases = sorted((PLUGIN / "evals").glob("*/prompt.md"))

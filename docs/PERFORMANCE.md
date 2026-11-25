@@ -38,7 +38,7 @@ After 1,000 routed calls through the real hook functions, half the sessions on e
 
 | File | Bytes | Bounded by |
 | :- | -: | :- |
-| `ledger.jsonl` | 800,298 | 30 days; past 4 MiB, replaced usage rows go, then the older half (about 5,200 calls) |
+| `ledger.jsonl` | 800,298 | 30 days, trimmed once a day; past 4 MiB, replaced usage rows go, then the older half (about 5,200 calls) |
 | `routes.json`, `done.json`, `launched.json` | 185,849, 97,222, 1,603 | 200 sessions, a day idle, 100 records each |
 | `allowlist.json`, `edits.json`, `sessions.json` | 5,510, 3,109, 2,910 | 200 sessions |
 | `pending.json` | 796 | 200 sessions, 100 calls each |
@@ -56,7 +56,7 @@ Characters of plugin text Claude gets. Tokens weren't measured.
 | The same note, after two newlines, in the Agent tool's description (mod only) | all session | 673 with no option set, at most 689 | 720, the note's |
 | The table for a script's stages, after two newlines, in the Workflow tool's description (mod only) | all session | 509 with no option set | 540 |
 | A redo with no step left (`spawn.redo_note`) | after that call's result | 107 to 118 | none |
-| The five agents' descriptions | all session | 687 | 930 |
+| The five agents' descriptions | all session | 765 | 930 |
 | The `route` skill's description | all session | 199 | 200 |
 | A note that the prompt names a model | on such a prompt | about 135 | none |
 | The Stop ask (`gates.unverified_edit`) | once per batch of unchecked edits | 511 | none |

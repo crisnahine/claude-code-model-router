@@ -52,7 +52,7 @@ An agent whose definition sets its own model runs on it when the call names none
   - the tools and sources to use: the files, documents, pages or commands
   - the boundaries: what is out of scope, what not to change, and any rule it must keep
   - how to verify the result, and that the report includes the check it ran and its output
-- Have code changes verified, and reviewed when they are more than trivial. Other work gets a check that fits it, such as figures recomputed or a document read against the request.
+- Have code changes verified, and reviewed when they are more than trivial. `model-router:reviewer` can't run git, so it reads the change from a diff file the brief names, such as one `git diff > review.diff` wrote. Other work gets a check that fits it, such as figures recomputed or a document read against the request.
 
 ## Redo or continue
 

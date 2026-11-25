@@ -32,7 +32,9 @@ Set in `/config`:
 - `routing_mode`: `auto` (default) or `off`. `off` changes no call and adds no notes or checks, but still keeps records and tells Claude of a model error or a mid-run model swap.
 - `max_tier`: `none` (default), `haiku`, `sonnet`, `opus` or `fable`, the strongest model a subagent may run on. A stronger one is lowered, except an environment pin or a fork. A Mythos ID counts as Fable; a model ID the registry can't place in a family is left as it is.
 - `verify_gate`: `true` (default) or `false`, the [check before a turn ends](#the-check-before-a-turn-ends).
-- `session_check`: `ask` (default) or `off`, the [session check](#the-session-check). `/model-router check off` and `check on` write it too, unless managed settings own it, and only while Claude is idle: changing an option reloads Model Router, which would drop what it set for agents already running.
+- `session_check`: `ask` (default) or `off`, the [session check](#the-session-check). `/model-router check off` and `check on` write it too, unless managed settings own it.
+
+Where the mod runs, no option changes while Claude is working or an agent whose effort Model Router set is still running, a background agent or a team's teammate included. Changing an option reloads Model Router, which would drop the effort it set for those agents, so `/config` and `/model-router check` refuse it and say why. Change it once they finish.
 
 ### Rules files
 
@@ -162,7 +164,7 @@ Where a provider's alias runs an older model, as on Bedrock, Vertex AI and Found
 
 ## What it stores
 
-Its state is in `~/.claude/plugins/data/model-router-claude-code-model-router/`, readable only by you on macOS and Linux, and holds no prompt, brief or description. `ledger.jsonl` has a row per spawn, result, model error, check and subagent turn (agent, level, model, effort, reason, tokens, cost estimate) for 30 days, at most 4 MiB. `state.json` holds model health until `reset`. The rest track routes, redos, edits, locks and each session's switch and session check for a day or the newest 200 sessions. Delete the folder to remove it all. On a Python that writes no bytecode under the launcher, as the macOS system Python does, compiled code is cached in `~/.cache/model-router/pycache`, which you can delete at any time and which uninstalling leaves behind.
+Its state is in `~/.claude/plugins/data/model-router-claude-code-model-router/`, readable only by you on macOS and Linux, and holds no prompt, brief or description. `ledger.jsonl` has a row per spawn, result, model error, check and subagent turn (agent, level, model, effort, reason, tokens, cost estimate) for 30 days, trimmed once a day, at most 4 MiB. `state.json` holds model health until `reset`. The rest track routes, redos, edits, locks and each session's switch and session check for a day or the newest 200 sessions. Delete the folder to remove it all. On a Python that writes no bytecode under the launcher, as the macOS system Python does, compiled code is cached in `~/.cache/model-router/pycache`, which you can delete at any time and which uninstalling leaves behind.
 
 ## What it can't do
 

@@ -10,9 +10,9 @@ const SOURCES: readonly SettingsSource[] = ['policy', 'user', 'project', 'local'
 const KEYS = ['availableModels', 'deniedModels', 'availableModelsMatch', 'modelOverrides', 'maxEffortLevel', 'modelSettings', 'effortLevel']
 const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
 // The max_tier ladder, weakest first, for a call the runtime didn't answer, and the other names a family answers to
-// (config/models.json `twins`).
+// (config/models.json `twins` and `aliases`).
 const TIERS: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable']
-const TWINS: Readonly<Record<string, string>> = { mythos: 'fable' }
+const NAMES: Readonly<Record<string, string>> = { mythos: 'fable', best: 'opus' }
 // The id names a file the fallback looks up, so only a plain one is marked (scripts/modelrouter/mod.py routes).
 const PLAIN_ID = /^[A-Za-z0-9_-]{1,128}$/
 // A model a repository's settings can set is shown only as a plain name, as the runtime shows one (config._PLAIN_NAME).
@@ -20,6 +20,11 @@ const PLAIN_NAME = /^[A-Za-z0-9._:/@[\]-]{1,100}$/
 // The mod's slash command, and the session check's /config row, keyed as Claude Code keys a plugin's userConfig field.
 const COMMAND = 'model-router'
 const CHECK = 'model-router.session_check'
+const OPTIONS = /^model-router\./
+// A change to an option reloads this module, which then forgets the effort it set for each agent still running.
+const BUSY = 'Model Router is setting the effort of agents that are still running. Change this when they finish.'
+// An agent the engine lists in any other state may take another turn, an idle teammate on its next message.
+const ENDED: readonly string[] = ['completed', 'failed', 'killed']
 
 // What the runtime answers. A spawn's: `note` is for Claude after the Agent call's result; `rules` is the session note,
 // for the Agent tool's description. mod-status: `line`, `text`, `reply`, `routing`. mod-check: a Step's fields.
@@ -77,7 +82,7 @@ async function mark($: EngineInterface, name: string): Promise<boolean> {
 function family(model: string | undefined): string | undefined {
   const name = model?.toLowerCase()
   return name === undefined ? undefined
-    : TIERS.find(tier => name.includes(tier)) ?? Object.entries(TWINS).find(([twin]) => name.includes(twin))?.[1] ?? name
+    : TIERS.find(tier => name.includes(tier)) ?? Object.entries(NAMES).find(([other]) => name.includes(other))?.[1] ?? name
 }
 
 // Whether a later link moved the spawn to another family than this mod sent: the engine's own entry holds what core
@@ -232,6 +237,17 @@ function later($: EngineInterface, task: () => Promise<unknown>): boolean {
   }
 }
 
+// Whether an option change now would reload this module under a main-loop turn or an agent whose effort it set. A list
+// that fails counts as nothing running, so a change is never held for good. Never throws.
+async function busy($: EngineInterface, working: boolean, efforts: Map<string, Want>): Promise<boolean> {
+  if (working) return true
+  try {
+    return (await $.agent.list()).some(agent => efforts.has(agent.id) && !ENDED.includes(agent.status))
+  } catch {
+    return false
+  }
+}
+
 // Whether managed settings own the session check's option; a list that fails counts as owned, so nothing offers to write it.
 async function locked($: EngineInterface): Promise<boolean> {
   try {
@@ -306,7 +322,7 @@ type Live = {
   refreshing: boolean // one status refresh at a time: one asked for during it runs once more after it
   stale: boolean
   turned: boolean // the main loop's first turn started: a question now would land in the middle of work
-  working: boolean // a main-loop turn is in flight: an option change now reloads the module under running agents
+  working: boolean // a main-loop turn is in flight, so its agents may still be starting
 }
 
 function shown($: EngineInterface, live: Live, answer: Answer | undefined): void {
@@ -370,10 +386,12 @@ function remember<V>(map: Map<string, V>, key: string, value: V): void {
 export const register: Register = (on, options) => {
   const opts = optionEnv(options)
   // Whether the runtime answers. Only an answer turns it on, and none, or a failed round trip, turns it off. While
-  // it's off, the fallback routes each Agent call.
+  // it's off, the fallback routes each Agent call. With no Python (`silent`) no hook routes it, so this mod holds the cap.
   let answering = false
+  let silent = false
   const heard = (reply: Answer | undefined): Answer | undefined => {
     answering = !!reply
+    silent = reply === null
     return reply
   }
   // Each Agent call this mod heard, by tool_use_id: whether it marked the call or left it to the fallback.
@@ -460,7 +478,8 @@ export const register: Register = (on, options) => {
       shown($, live, answer)
       text = typeof answer?.reply === 'string' ? answer.reply : 'Routing is unchanged: the runtime did not answer.'
     } else if (words === 'check on' || words === 'check off') {
-      text = live.working ? 'Run this when Claude is idle: changing an option reloads Model Router.'
+      // This plugin's own $.config.set skips its config.set hook.
+      text = await busy($, live.working, agentEffort) ? `Session check stays as it is: ${BUSY}`
         : await setCheck($, words === 'check on' ? 'ask' : 'off')
     } else if (!words) {
       const answer = await ask($, opts, 'mod-status', live.setup ? { setup: live.setup } : {})
@@ -470,13 +489,18 @@ export const register: Register = (on, options) => {
     return { text, isTextDisplayOnly: true }
   }).catch(($, e, next) => next(e))
 
+  on('config.set', { key: OPTIONS }, async ($, e, next) => await busy($, live.working, agentEffort) ? { deny: BUSY } : next(e))
+    .catch(($, e, next) => next(e))
+
   on('agent.spawn', async ($, e, next) => {
     if (e.fork || e.resume) return next(e)
     const unmarked = marked.get(e.tool_use_id) === false
     marked.delete(e.tool_use_id)
     if (unmarked) {
       refresh($, opts, live)
-      return next(e) // the fallback routed it
+      // The fallback routed it, unless no Python ran it either.
+      const held = silent && (live.routingOn ?? routing(opts)) ? capped(e.model, opts.CLAUDE_PLUGIN_OPTION_MAX_TIER) : undefined
+      return next(held ? { ...e, model: held } : e)
     }
     const effort = callerEffort.get(e.tool_use_id)
     const layers = await modelSettings($, reads)

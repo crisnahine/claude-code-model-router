@@ -33,7 +33,7 @@
     "max_tier": {
       "type": "string",
       "title": "Strongest model allowed",
-      "description": "The most capable model subagents may run on: haiku, sonnet, opus or fable. A stronger model from the call, a rule, the agent's definition or a parent model the router can see is lowered to it. A model set by CLAUDE_CODE_SUBAGENT_MODEL, CLAUDE_CODE_SUBAGENT_MODEL_FORCE or CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL isn't, nor is a model ID the registry can't place, and a fork always runs on its conversation's model. Leave as none for no cap.",
+      "description": "The most capable model subagents may run on: haiku, sonnet, opus or fable. A stronger model from the call, a rule, the agent's definition or a parent model the router can see is lowered to it. A model set by CLAUDE_CODE_SUBAGENT_MODEL, CLAUDE_CODE_SUBAGENT_MODEL_FORCE or CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL isn't, nor is a model ID the registry can't place, and a fork always runs on its conversation's model. Without Python, only a model the call names is lowered. Leave as none for no cap.",
       "default": "none",
       "options": [
         "none",

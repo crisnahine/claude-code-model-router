@@ -165,7 +165,7 @@ class Allowlist:
             # shortcut: modelSettings is keyed by model ID, and several IDs of one family read as the
             # highest of their caps; Claude Code still applies the exact one to each request.
             own = [v["maxEffortLevel"] for k, v in (layer.get("modelSettings") or {}).items()
-                   if name and "maxEffortLevel" in v and reg.family(k) == name]
+                   if name and "maxEffortLevel" in v and reg.family(k, twins=False) == name]
             cap = max(own, key=EFFORTS.index) if own else layer.get("maxEffortLevel")
             if cap in EFFORTS and cap != "max":
                 found.append(cap)
@@ -176,7 +176,7 @@ class Allowlist:
         for that model, or a top-level one that applies to it (https://code.claude.com/docs/en/settings-reference.md#modelsettings)."""
         for source, layer in self.efforts:
             own = [v["effortLevel"] for k, v in (layer.get("modelSettings") or {}).items()
-                   if name and "effortLevel" in v and reg.family(k) == name]
+                   if name and "effortLevel" in v and reg.family(k, twins=False) == name]
             # shortcut: a user file's top-level effortLevel is skipped, as Opus 5.5 and later models skip it; older models
             # still take it, so read it for them if the registry ever routes to one.
             top = layer.get("effortLevel") if source != "user" else None

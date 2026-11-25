@@ -19,6 +19,7 @@ Both paths run one launcher, `scripts/model-router.sh`, and one procedure, `spaw
 | `session.start` | Sends the settings layers; the runtime stores them, clears day-old marks and answers the session-start note. When `isInteractive`, registers `/model-router`, then refreshes the status line and starts the session check once the hook has returned |
 | `session.end` | At `/clear`, forgets the session id the layers went to. In an interactive session, drops the session's switch and check (`mod-end`) |
 | `command.run` (`model-router`) | Answers `/model-router` itself, display only: the state, a switch (`mod-status`), or `session_check` through `$.config.set` |
+| `config.set` (`model-router.*`) | Refuses a change to the plugin's options while a main-loop turn runs or an agent whose effort the mod set is still running (`$.agent.list()`) |
 | `agent.spawn` | Sends the call, `parent_model`, `kind` and the session's effort; passes the answer's `model` on. Marks a spawn a later mod moved to another family. Forks and resumed runs pass untouched |
 | `turn.start` | On the main loop, notes that a turn has started, which keeps the session check away, and sends the layers again when the session id changed, as it does at `/clear`. Gives an agent whose first request beats its spawn's return that spawn's effort, if its prompt's waiting spawns agree |
 | `turn.step` | Sets the agent's effort on each request (a workflow agent's only when higher); records the main loop's |
@@ -34,6 +35,7 @@ While the runtime answers (its last command replied, if only `{"ok": true}`), th
 | :- | :- |
 | `Agent` call, mark written | The mod, at spawn |
 | `Agent` call, no mark (no reply yet, a failed one, a failed write, no mod) | The fallback; the mod passes its spawn untouched |
+| `Agent` call, no mark, after an empty reply (no Python) | Neither; the mod only lowers a named model to `max_tier` by family (`capped`) |
 | A spawn with no `Agent` call, such as a workflow stage | The mod |
 | A fork or a resumed run | Neither |
 | A marked call whose `mod-spawn` fails | The mod asks once more. If that fails too, neither path routes it, and the mod only lowers a named model to `max_tier` by family (`capped`) |
@@ -68,7 +70,7 @@ In `scripts/modelrouter/`, standard library only:
 | `intake`, `request`, `gates` | Whether a prompt is the person's; the model it names; the Stop check |
 | `ledger`, `report`, `store` | Ledger rows; skill tables, `--json` and the status line (`report.status`); state files and locks |
 
-The agents `scout` and `verifier` pin Haiku at `medium`, `implementer` Haiku at `high`, and `architect` and `reviewer` Sonnet at `high`. Models are entries in `config/models.json`; the four family names are also text in `hooks._rules` and the mod's `TIERS`. A model's `twins` are other names it is offered under (Fable's is Mythos): `Registry.family` and the mod's `TWINS` place a twin's ID in its family for the cap and the ladder, while the allowlist and the health table match it by its own name (`family(twins=False)`).
+The agents `scout` and `verifier` pin Haiku at `medium`, `implementer` Haiku at `high`, and `architect` and `reviewer` Sonnet at `high`. Models are entries in `config/models.json`; the four family names are also text in `hooks._rules` and the mod's `TIERS`. A model's `twins` are other names it is offered under (Fable's is Mythos): `Registry.family` and the mod's `NAMES`, which also holds the `aliases`, place a twin's ID in its family for the cap and the ladder, while the allowlist and the health table match it by its own name (`family(twins=False)`).
 
 ## The ladder
 
@@ -109,7 +111,7 @@ Then, for rows 3 to 6 and 8 (steps 5 and 6 on rows 1 and 2 too):
 
 1. **Floor.** A rule's `level` raises a weaker model to that level's model. On row 8 either file's floor raises the tools' level. On an inherited parent's model the user's floor applies wherever the call stands below it, and a project's only when its model is stronger than the parent's, or no registry model is stronger when the parent's is unknown (`router._floor_lifts`).
 2. **Teammate.** A teammate naming nothing starts no lower than standard: its row 8 level is at least standard, and an inherited parent's model weaker than standard needs moves to standard's model.
-3. **Cap.** `Registry.clamp` keeps a usable model (inside `max_tier`, permitted, healthy), else takes the next stronger usable one, else the strongest. A parent's model it moves runs at the new model's level.
+3. **Cap.** `Registry.clamp` keeps a usable model (inside `max_tier`, permitted, healthy), else takes the next stronger usable one, else the strongest. An exact ID the call or the agent names inside `max_tier` that `availableModels` and `deniedModels` let run, though they don't open its family, makes that family usable for the call, as for a Mythos ID the list names (`spawn._usable`). A parent's model it moves runs at the new model's level.
 4. **Effort.** If nobody chose it (the call, the agent, `CLAUDE_CODE_EFFORT_LEVEL`, or `CLAUDE_CODE_SUBAGENT_EFFORT`, which skips teammates), the level's effort.
 5. **Session floor.** On a main-conversation call on the session's own model, an effort the router sets is at least the session's (`router._session_floor`): `session_effort` from the mod, `effort.level` from the hook.
 6. **`maxEffortLevel`.** The lowest cap any settings source sets for that model, a `modelSettings` entry replacing its source's top-level cap (`router.capped`). None without the mod's layers.
@@ -189,7 +191,7 @@ The data folder is `${CLAUDE_PLUGIN_DATA}`, else `plugins/data/model-router-loca
 | `<file>.flock`, `mod-calls/` | OS lock files; the mod's marks |
 | `ledger.jsonl` | One row per spawn, result, model error, Stop ask and subagent turn |
 
-Per-session files keep 200 sessions and 100 records each. The ledger drops rows past 30 days. Past 4 MB it drops each running usage row a later one for the same agent replaces, then its older half if the rest still fills 2 MB, so a trim stays rare.
+Per-session files keep 200 sessions and 100 records each. The ledger drops rows past 30 days once its oldest is a day past that, so an age trim runs about once a day. Past 4 MB it drops each running usage row a later one for the same agent replaces, then its older half if the rest still fills 2 MB, so a trim stays rare.
 
 Writes are atomic. Each read-modify-write and ledger append holds an OS lock (`flock`, or `msvcrt.locking` on Windows) on the file's `.flock` (`store.locked`), since agents started together run their hooks at once. The OS frees a dead holder's lock. A held lock is `BlockingIOError` from `flock` and `PermissionError` (`EACCES`) from `msvcrt.locking`; any other lock error means the filesystem can't lock, and the write goes ahead unlocked.
 
@@ -208,7 +210,7 @@ The user's `~/.claude/model-router.json` is trusted in full. A project's `.claud
 
 - A level `needs` or `effort` below the shipped or user value is dropped, and a named model keeps the level it has without the file.
 - Its rule `level` is a floor, its rule `model` follows row 5, and `route: false` is ignored. A user rule setting an agent's level or model voids both of the project's.
-- A model it adds is never a pick, a clamp stand-in or a redo's next model, is ignored under a cap, and may not overlap a trusted name.
+- A model it adds is never a pick, a clamp stand-in or a redo's next model, is ignored under a cap, and may not overlap a trusted name or a shipped twin.
 
 Only `/config` sets `routing_mode`; `/model-router` switches routing for one session without writing it. Bad types and non-finite numbers are dropped, and `/model-router:models` lists what was dropped or held back. An override file that doesn't parse, nests past the parser's limit, is over 4 MiB or isn't a regular file says nothing (`store.load_dict`).
 
@@ -225,7 +227,7 @@ Only `/config` sets `routing_mode`; `/model-router` switches routing for one ses
 - **Network calls.** The runtime imports no network module; the mod uses only the engine's own APIs.
 - **Reading a brief to pick a model.** A call's prompt is only hashed into its key (`calls.identify`) and matched to the agent's first turn. A call that names no model gets its level from the agent definition's `tools` and `disallowedTools`. The person's prompt is read only for a model it names.
 - **Changing more than `model` and `effort`** of an agent call. The main conversation's model and effort change only through Claude Code's own `/model` and `/effort`, run for a setup the person picks in the session check.
-- **Writing settings**, but for one option: `session_check`, through `$.config.set`, from `/model-router check on` or `off` or the session check's "Don't ask again". An option change reloads the module and resets what it holds for running agents, so `check on` and `off` are refused while a main-loop turn is in flight.
+- **Writing settings**, but for one option: `session_check`, through `$.config.set`, from `/model-router check on` or `off` or the session check's "Don't ask again". An option change reloads the module and resets what it holds for running agents, so a change to any of the plugin's options, in `/config` or from `check on` and `off`, is refused while a main-loop turn is in flight or an agent whose effort the mod set is still running. A plugin's own `$.config.set` skips its `config.set` hook, so the command checks the same itself.
 - **Approving a call.** No hook returns `permissionDecision: "allow"`.
 - **Blocking a spawn**, but for one case. A fallback rewrite waits in `pending.json`. If the same call comes back 5 seconds to 30 minutes later with no result, the rewrite didn't run, so it passes through untouched rather than loop; if that would run it above `max_tier`, it is denied, with the model to use (`fallback._guard`).
 - **Blocking a session.** Hooks never exit 2.
