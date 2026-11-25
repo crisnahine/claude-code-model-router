@@ -172,7 +172,7 @@ The steps to update, pause and uninstall are in the [README](../README.md#update
 
 ### From 0.1.2
 
-0.3.0 changes who picks a subagent's model. The full list is in the [changelog](../CHANGELOG.md). What can change for you:
+0.2.0 changes who picks a subagent's model. The full list is in the [changelog](../CHANGELOG.md). What can change for you:
 
 - A call that nothing names a model for now runs on its parent's model, held to your cap, where 0.1.2 picked a model from the brief. So on an Opus or Fable session an unnamed lookup runs on Opus or Fable. To give such calls another default, set `CLAUDE_CODE_SUBAGENT_MODEL`, or a `model` for the agent in your own `model-router.json`.
 - The options `priority`, `agent_pins`, `main_effort`, `update_check` and `strong_agent_gate` are gone, and a value saved for one is ignored. `priority: quality` and `agent_pins: override` have no stand-in: name the model on the call, or set the agent's `model` or `level` in your own `model-router.json`. For the main conversation's effort, use `/effort` or `ultrathink`.

@@ -4,7 +4,7 @@
 
 # Caller-named levels and the redo signal: what the docs allow
 
-2026-11-25: the 0.3.0 redesign took this page's caller-named design, deleted the regex scorer it weighs (`profile.py`), and took the third redo signal: a call whose `description` starts with "Redo:" is a redo. A higher `model` or `effort` on the next call, the first signal, is kept as named but isn't read as a redo, and none of the failure signals in the second starts one. The [architecture review](architecture-review.md) has the reasons.
+2026-11-25: the 0.2.0 redesign took this page's caller-named design, deleted the regex scorer it weighs (`profile.py`), and took the third redo signal: a call whose `description` starts with "Redo:" is a redo. A higher `model` or `effort` on the next call, the first signal, is kept as named but isn't read as a redo, and none of the failure signals in the second starts one. The [architecture review](architecture-review.md) has the reasons.
 
 Researched 2026-11-24 against Claude Code **2.1.331** (`claude --version`; the plugin needs 2.1.329 or later), with every page fetched the same day as `.md` from `code.claude.com/docs/en/` and `platform.claude.com/docs/en/`. The question is whether to keep scoring a brief with regex (`scripts/modelrouter/profile.py` `SIGNALS`) or let the calling model name the level on each call while the plugin holds only a cap and a floor, and which redo signal fires in real use. What a plugin can control in general is in [model-control.md](model-control.md); this page reuses its short names. A claim that rests on the installed binary or the type files it writes says so. Anything the docs don't say is marked **not documented**.
 

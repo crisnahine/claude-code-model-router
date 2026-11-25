@@ -17,15 +17,17 @@ MANIFEST = Path("plugins/model-router/.claude-plugin/plugin.json")
 
 class PluginVersion(unittest.TestCase):
     def setUp(self):
+        # Versions moved around before the first release, then one release was tagged and two changes followed.
         self.repo = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.repo, True)
         self.git("init", "-q")
-        for version in ("0.1.0", "0.1.1", "0.2.0"):
-            self.set_version(version)
+        for step, version in enumerate(("0.1.0", "0.2.0", "0.1.1", "0.1.0")):
+            self.set_version(version, extra=str(step))
             self.commit()
         self.git("tag", "v0.1.0")
-        self.set_version("0.1.2")
-        self.commit()
+        for version in ("0.1.3", "0.1.2"):
+            self.set_version(version)
+            self.commit()
         self.base = self.git("rev-parse", "HEAD").strip()
 
     def git(self, *args):
@@ -62,13 +64,27 @@ class PluginVersion(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("0.1.2 was already carried", out)
 
-    def test_a_version_the_base_carried_before_fails_even_untagged(self):
-        for version in ("0.1.1", "0.2.0"):
-            self.set_version(version)
+    def test_a_version_carried_since_the_first_release_fails_even_untagged(self):
+        self.set_version("0.1.3", extra="x")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn("0.1.3 was already carried", out)
+
+    def test_a_version_carried_only_before_the_first_release_passes(self):
+        # Nobody could install a release then, so no install holds a cached copy under that version.
+        for version in ("0.2.0", "0.1.1"):
+            self.set_version(version, extra="x")
             self.commit()
             code, out = self.run_check()
-            self.assertEqual(code, 1, version)
-            self.assertIn(f"{version} was already carried", out)
+            self.assertEqual((code, out), (0, f"Version {version} was last carried before the first release, v0.1.0.\n"))
+
+    def test_the_first_releases_own_version_fails(self):
+        self.set_version("0.1.0", extra="x")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn("already tagged v0.1.0", out)
 
     def test_a_tagged_version_fails(self):
         self.git("tag", "v0.3.0", self.base)

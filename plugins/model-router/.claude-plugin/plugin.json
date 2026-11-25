@@ -1,7 +1,7 @@
 {
   "name": "model-router",
   "displayName": "Model Router",
-  "version": "0.3.0",
+  "version": "0.2.0",
   "description": "Keeps the Claude model and effort Claude names for every subagent, teammate and workflow agent within your cap, fills in the effort when only a model is named, and runs a marked redo with more effort or a stronger model.",
   "author": {
     "name": "Cris",

@@ -4,9 +4,9 @@
 
 # Changelog
 
-## 0.3.0 - 2026-11-25
+## 0.2.0 - 2026-11-25
 
-This release changes who picks a subagent's model. Claude now names the model and effort on each Agent call, from a table in the session-start note, and Model Router keeps them within your cap. A call that names neither runs on its agent's own model, on `CLAUDE_CODE_SUBAGENT_MODEL` when that is set, or on the conversation's, as Claude Code runs it, where 0.1.2 picked a level from the brief. This release has not been benchmarked: every stored benchmark row measured an older design, and on the six harder pilot tasks that older router cost more than no router. There is no 0.2.0 release: an early commit on `main` carried that version, and a version is never reused.
+This release changes who picks a subagent's model. Claude now names the model and effort on each Agent call, from a table in the session-start note, and Model Router keeps them within your cap. A call that names neither runs on its agent's own model, on `CLAUDE_CODE_SUBAGENT_MODEL` when that is set, or on the conversation's, as Claude Code runs it, where 0.1.2 picked a level from the brief. This release has not been benchmarked: every stored benchmark row measured an older design, and on the six harder pilot tasks that older router cost more than no router. `main` carried the version string 0.2.0 for parts of 2026-11-22 and 2026-11-23, before the first release was tagged. If you installed from `main` in that window, remove that cached copy first (`~/.claude/plugins/cache/claude-code-model-router/model-router/0.2.0`), or Claude Code keeps running it.
 
 ### Upgrading from 0.1.2
 
@@ -57,7 +57,7 @@ This release changes who picks a subagent's model. Claude now names the model an
 - `models --json` keys: `priority`, `levels`, `doc_aliases` and `not_in_registry`.
 - `usage --json` keys: `models[].tokens`, `spend.unpriced`, and the spend rows' `loop`, `model`, `turns` and `output_tokens`. Spend rows are now `agent`, `runs` and `usd`, beside `spend.unknown_price`, `spend.no_estimate` and `spend.subscription`.
 - Ledger fields: `description` and `signals` on spawn rows, `total_tokens` on result rows, and usage rows for main-loop turns. A usage row no longer carries one `model` with its token counts and the plugin's own price: it holds `models`, the agent's tokens per model so far, and `cost_usd`, Claude Code's estimate, or for a workflow agent, which Claude Code doesn't list, that turn's tokens alone.
-- State: `mod.json` and the session flag in it, `prompts.json`, and the copy of the options in `state.json`. Locks no longer use `<file>.json.lock`. A 0.1.2 session still open after the update (Claude Code keeps the old version's folder for 14 days) locks `state.json` and `locks.json` on `.json.lock` while 0.3.0 locks them on `.json.flock`, so the two releases don't wait for each other, and a write from one can overwrite the other's. Leftover `.json.lock` files can be deleted.
+- State: `mod.json` and the session flag in it, `prompts.json`, and the copy of the options in `state.json`. Locks no longer use `<file>.json.lock`. A 0.1.2 session still open after the update (Claude Code keeps the old version's folder for 14 days) locks `state.json` and `locks.json` on `.json.lock` while 0.2.0 locks them on `.json.flock`, so the two releases don't wait for each other, and a write from one can overwrite the other's. Leftover `.json.lock` files can be deleted.
 - `config/models.json` keys: `crew`, `main` and each model's `speed`.
 
 ### Fixed

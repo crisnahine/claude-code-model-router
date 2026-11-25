@@ -26,8 +26,8 @@ Facts, each with its source:
 ## Optional
 
 - [Research](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/research/model-control.md): what a plugin can and can't control in Claude Code, from primary sources
-- [Quality research](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/research/quality-first-routing.md): what the docs say about trading cost against quality, researched before the 0.3.0 redesign, from primary sources
+- [Quality research](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/research/quality-first-routing.md): what the docs say about trading cost against quality, researched before the 0.2.0 redesign, from primary sources
 - [Redo research](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/research/caller-levels-and-redo.md): who names a call's level and what marks a redo, from primary sources
-- [Architecture review](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/research/architecture-review.md): the design decisions checked against the docs, and what the 0.3.0 redesign changed
+- [Architecture review](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/research/architecture-review.md): the design decisions checked against the docs, and what the 0.2.0 redesign changed
 - [Changelog](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/CHANGELOG.md)
 - [Roadmap](https://raw.githubusercontent.com/crisnahine/claude-code-model-router/main/docs/ROADMAP.md)

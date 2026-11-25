@@ -11,7 +11,7 @@ abstract: >-
 authors:
   - given-names: Cris
     family-names: Nahine
-version: "0.3.0"
+version: "0.2.0"
 date-released: "2026-11-25"
 license: Apache-2.0
 repository-code: "https://github.com/crisnahine/claude-code-model-router"

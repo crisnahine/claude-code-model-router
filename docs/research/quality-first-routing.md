@@ -4,7 +4,7 @@
 
 # Quality-first routing: what the docs say about saving without losing quality
 
-2026-11-25: the 0.3.0 redesign replaced the conclusions here that rest on the router reading the brief: the `complex` floor for fix and hunt briefs, the `priority` option with its `fast` and `quality` steps, and the main-loop effort raise. Claude now names each call's model and effort from a table in the session note, which puts a bug's cause on Opus at `high`. The [architecture review](architecture-review.md) has the reasons.
+2026-11-25: the 0.2.0 redesign replaced the conclusions here that rest on the router reading the brief: the `complex` floor for fix and hunt briefs, the `priority` option with its `fast` and `quality` steps, and the main-loop effort raise. Claude now names each call's model and effort from a table in the session note, which puts a bug's cause on Opus at `high`. The [architecture review](architecture-review.md) has the reasons.
 
 Researched 2026-11-23 against Claude Code **2.1.330**, with every page fetched the same day. The rule under test is the user's: "Save only when quality is unaffected. If a saving costs quality, quality wins." What a plugin can control is in [model-control.md](model-control.md); this page reuses its short names. Anything not confirmed in a primary source is marked **UNCONFIRMED**.
 
