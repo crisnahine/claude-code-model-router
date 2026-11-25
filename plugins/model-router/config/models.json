@@ -46,16 +46,16 @@
       "effort": "medium"
     },
     "standard": {
-      "needs": 2,
-      "effort": "medium"
+      "needs": 1,
+      "effort": "high"
     },
     "complex": {
-      "needs": 3,
+      "needs": 2,
       "effort": "high"
     },
     "hardest": {
       "needs": 3,
-      "effort": "xhigh"
+      "effort": "high"
     },
     "frontier": {
       "needs": 4,

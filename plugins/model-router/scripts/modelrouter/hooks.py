@@ -16,11 +16,11 @@ def _context(event: str, text: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}
 
 
-_HARD = "work that is hard to check, high-stakes, ambiguous or broad"
-_SUCH = "a bug's cause, a design, a review, a contract or financial figures"
+_HARD = "a judgment call with no check to run"
+_SUCH = "a design or a review"
 
 
-_WORK = ((cfg.Level.lookup, "finding, reading and listing"), (cfg.Level.standard, "everyday work to a clear brief"),
+_WORK = ((cfg.Level.lookup, "finding, reading and listing"), (cfg.Level.standard, "writing and fixing code, figures and documents to a brief"),
          (cfg.Level.complex, f"{_HARD} ({_SUCH})"), (cfg.Level.frontier, "open-ended research"))
 
 
