@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from . import agents, calls, ladder, ledger, router, session, settings
+from . import agents, calls, ledger, router, session, settings
 from . import config as cfg
 from .config import EFFORTS, Level
 from .registry import Registry
@@ -76,15 +76,14 @@ def _inherited(run: dict, hook_input: dict) -> dict:
 
 def _asks_more(reg: Registry, named: dict, earlier: dict) -> bool:
     """What a redo names for itself asks for more than the run it redoes: a stronger model, or the same at more
-    effort, counted up to the model's `effort_stops_at`."""
+    effort on one that takes effort."""
     model, ran = reg.family(named.get("model")), reg.family(earlier.get("model"))
     levels = Level.parse(named.get("level")), Level.parse(earlier.get("level"))
     if not model or not ran or None in levels:
         return False
     if model != ran:
         return reg.stronger(model, ran)
-    asks = ladder.at_most(reg, model, router._ran_at(reg, named, levels[0]))
-    return router._above(asks, router._ran_at(reg, earlier, levels[1]))
+    return not earlier.get("no_effort") and router._above(router._ran_at(named), router._ran_at(earlier))
 
 
 def _runs_at(effort: str | None, model: str | None, found: router.Facts, snap: settings.Snapshot) -> str | None:

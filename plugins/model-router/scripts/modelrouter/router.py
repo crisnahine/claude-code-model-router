@@ -95,22 +95,23 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     if settings.force:
         model = env_default or facts.parent
         level = ladder.rung(reg, model, named_effort)
-        effort = None if decided or tool_input.get("model") or not level else ladder.at_most(reg, model, ladder.effort(reg, level))
+        effort = None if decided or tool_input.get("model") or not level else ladder.effort(reg, level)
         step = ""
         if redo:
             # The model is pinned, so effort is the one lever a redo has.
-            before = _ran_at(reg, done, done_level)
-            effort = ladder.at_most(reg, model, _one_step(before)) if free else None
-            level, out["escalated_from"] = ladder.rung(reg, model, effort) or done_level, done_level
+            before = _ran_at(done)
+            effort = _one_step(before) if free and not done.get("no_effort") else None
+            gains = _above(capped(effort, facts.effort_caps.get(model or ""))[0], before)
+            level, out["escalated_from"], out["no_step"] = ladder.rung(reg, model, effort) or done_level, done_level, not gains
             step = f"; a redo of the {done_level} run, " + (
-                "one effort step up" if _above(effort, before) else f"and {model} gets no more effort")
+                "one effort step up" if gains else f"and {model} gets no more effort")
         out["level"] = level
         return _pinned(out, "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "subagent", model, level, effort, facts, step)
     if facts.workflow and settings.workflow_model and not tool_input.get("model"):
         # This pin wins over the model a mod sets, so it is kept like the one above.
         model = reg.family(settings.workflow_model)
         level = out["level"] = ladder.rung(reg, model, named_effort)
-        effort = None if decided or not level else ladder.at_most(reg, model, ladder.effort(reg, level))
+        effort = None if decided or not level else ladder.effort(reg, level)
         return _pinned(out, "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL", "workflow agent", model, level, effort, facts)
 
     floor = rule.level or rule.floor
@@ -206,11 +207,12 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
 def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Level, free: bool, held: str) -> Decision:
     """A marked redo climbs from the run it redoes: one effort step up on the same model while that run's
     effort was below high, else the next stronger usable model at its own rung's effort, else one more effort
-    step, at most max or the model's `effort_stops_at`. A model or effort the call names that asks for no more
-    than that run, the agent's own, a rule's model and CLAUDE_CODE_SUBAGENT_MODEL don't hold it back."""
-    ran, before = reg.family(done.get("model")), _ran_at(reg, done, done_level)
-    up = ladder.at_most(reg, ran, _one_step(before))
-    gains = free and _above(capped(up, facts.effort_caps.get(ran))[0], before)
+    step, at most max. A model or effort the call names that asks for no more than that run, the agent's own,
+    a rule's model and CLAUDE_CODE_SUBAGENT_MODEL don't hold it back."""
+    ran, before = reg.family(done.get("model")), _ran_at(done)
+    up = _one_step(before)
+    # A run that sent no effort was on a model that takes none, so only a stronger model is a step up.
+    gains = free and not done.get("no_effort") and _above(capped(up, facts.effort_caps.get(ran))[0], before)
     stronger = next((n for n in facts.usable if reg.models[n].trusted and reg.stronger(n, ran)), None)
     # A nested run at its parent's effort (`spawn._inherited`) may already have run at the step up.
     if gains and not done.get("inherited") and EFFORTS.index(before) < EFFORTS.index("high"):
@@ -218,7 +220,7 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
     elif stronger:
         model, effort, how = stronger, ladder.effort(reg, ladder.rung(reg, stronger)), f"the next stronger model, {stronger}"
     else:
-        model, effort = ran, up
+        model, effort = ran, up if gains else None if done.get("no_effort") else before
         how = "no stronger model is usable" + (", so it runs one effort step up" if gains
                                                else f", and {ran} gets no more effort" if free else "")
     final = reg.clamp(model, facts.usable)
@@ -229,10 +231,10 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
         clamp_note += f"; {final}'s alias runs an older model here"
         final = reg.past_lag(final, facts.usable, facts.lagging)
         effort = ladder.effort(reg, ladder.rung(reg, final))
-    effort, floor_note = _session_floor(ladder.at_most(reg, final, effort) if free else None, final, facts)
+    effort, floor_note = _session_floor(effort if free else None, final, facts)
     effort, capped_note = capped(effort, facts.effort_caps.get(final))
     came = "the run that came back before" if facts.on_record else "the run it would get unmarked"
-    at = "its parent's effort" if done.get("inherited") else before or "its default effort"
+    at = "its parent's effort" if done.get("inherited") else "no effort" if done.get("no_effort") else before
     # Left alone, the call runs on its own model, else the agent's.
     out["version"] = _version(reg, facts.tool_input.get("model") or (facts.definition or {}).get("model"), final)
     out.update(model=final, source="router", level=ladder.rung(reg, final, effort), escalated_from=done_level,
@@ -289,9 +291,14 @@ def capped(effort: str | None, cap: str | None) -> tuple[str | None, str]:
     return effort, ""
 
 
-def _ran_at(reg: Registry, done: dict, level: Level) -> str | None:
-    """The effort the run a redo redoes ran at; one nothing on record set ran at its level's, as far as the router knows."""
-    return done.get("effort") if done.get("effort") in EFFORTS else ladder.effort(reg, level)
+# What Claude Code runs a subagent at when nothing sets its effort, on every model the registry names
+# (https://code.claude.com/docs/en/model-config.md#adjust-effort-level).
+DEFAULT_EFFORT = "medium"
+
+
+def _ran_at(done: dict) -> str:
+    """The effort the run a redo redoes ran at: the one on record, else Claude Code's default."""
+    return done.get("effort") if done.get("effort") in EFFORTS else DEFAULT_EFFORT
 
 
 def _one_step(effort: str | None) -> str | None:

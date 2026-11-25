@@ -27,7 +27,6 @@ class Model:
     cost: float | None = None
     use_for: str = ""
     project: bool = False  # added by a project's override file, so its rank is only that file's claim
-    effort_stops_at: str | None = None  # the most effort the router sets on this model, short of the session's own level
 
     @property
     def trusted(self) -> bool:
