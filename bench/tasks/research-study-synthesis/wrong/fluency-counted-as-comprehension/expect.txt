@@ -1,0 +1,1 @@
+excluded is {'S04': 'retracted'}, expected

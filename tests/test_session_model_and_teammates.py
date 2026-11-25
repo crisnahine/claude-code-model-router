@@ -5,7 +5,7 @@ import datetime
 import json
 from pathlib import Path
 
-from test_model_router import HARD, HARDEST, Sandbox, hooks, session
+from test_model_router import HARD, Sandbox, hooks, session
 
 
 class SessionModel(Sandbox):
@@ -21,8 +21,6 @@ class SessionModel(Sandbox):
         older = self.transcript("claude-opus-5-5", seconds_ago=60)
         hooks.model_switch({"session_id": "s1", "to_model": "claude-haiku-5-5"})
         self.assertEqual(session.model("s1", older), "claude-haiku-5-5")
-        out = hooks.user_prompt({"session_id": "s1", "prompt": HARDEST, "transcript_path": older})
-        self.assertIn("hardest", json.dumps(out))
         # A reply written after the record still wins, as does a row without a readable time.
         self.advance(120)
         self.assertEqual(session.model("s1", self.transcript("claude-sonnet-5-5", seconds_ago=1)), "claude-sonnet-5-5")
@@ -34,7 +32,7 @@ class SessionModel(Sandbox):
 class Teammates(Sandbox):
     def test_a_named_call_is_a_teammate_only_when_agent_teams_are_on(self):
         self.options(CLAUDE_CODE_SUBAGENT_EFFORT="low")
-        self.assertIsNone(self.decide("general-purpose", HARD, name="auditor")["effort"])
+        self.assertIsNone(self.decide("general-purpose", HARD, name="auditor", model="opus")["effort"])
         self.options(CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS="1")
-        out = self.pre("general-purpose", HARD, name="auditor")
+        out = self.pre("general-purpose", HARD, name="auditor", model="opus")
         self.assertEqual(out["updatedInput"]["effort"], "high")

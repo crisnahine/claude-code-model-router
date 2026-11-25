@@ -1,14 +1,13 @@
-"""The tables the skills print. Skills run through the Bash tool, so the settings passed in
-fall back to what the last SessionStart recorded."""
+"""The tables the skill commands print."""
 from __future__ import annotations
 
-from . import intake, ladder, learn, ledger, router, settings, spawn, store, upstream
+from . import agents, ladder, ledger, router, settings, spawn, store
 from . import config as cfg
 from . import registry
 
 # The --json shapes. A new key keeps the version; removing or renaming one bumps it.
-USAGE_SCHEMA = "model-router.usage/1"
-MODELS_SCHEMA = "model-router.models/1"
+USAGE_SCHEMA = "model-router.usage/2"
+MODELS_SCHEMA = "model-router.models/3"
 
 
 def _strongest(reg: registry.Registry, usable: list[str]) -> str | None:
@@ -26,33 +25,33 @@ def _effort(snap: settings.Snapshot, pick: ladder.Pick) -> str | None:
 def policy(snap: settings.Snapshot) -> str:
     reg, options, usable = snap.registry, snap.options, snap.usable
     limit = options.cap
-    lines = [f"Routing: **{options.mode}**. Priority: **{options.priority}**. "
-             f"Cap: **{limit or 'none'}**. Strongest model in use: **{_strongest(reg, usable) or 'none'}**.", "",
-             "| Subtask level | Model | Effort |", "| :- | :- | :- |"]
+    lines = [f"Routing: **{options.mode}**. Cap: **{limit or 'none'}**. "
+             f"Strongest model in use: **{_strongest(reg, usable) or 'none'}**.", "",
+             "A model named on a call, by a rule or by the agent stands for the lowest level it runs, and runs at that "
+             "level's effort when nobody chose one. A call that names none runs on its parent's model.", "",
+             "| Level | Model | Effort |", "| :- | :- | :- |"]
     for level in cfg.LEVELS:
         pick = snap.pick(level)
-        note = " (raised by feedback)" if snap.raises[level] else ""
-        lines.append(f"| {level} | {pick.model or 'left as it is'}{note} | {_effort(snap, pick) or 'as the agent or session sets it'} |")
-    lines += ["", "| Model | Strength | Speed | Cost | Use for |", "| :- | -: | -: | -: | :- |"]
+        lines.append(f"| {level} | {pick.model or 'left as it is'} | {_effort(snap, pick) or 'as the agent or session sets it'} |")
+    lines += ["", "| Model | Strength | Cost | Use for |", "| :- | -: | -: | :- |"]
     for name in reg.by_strength():
         info = reg.models[name]
         flag = "" if name in usable else " (not in use)"
-        lines.append(f"| {name}{flag} | {info.strength} | {'-' if info.speed is None else info.speed} | "
-                     f"{'-' if info.cost is None else info.cost} | {info.use_for} |")
-    lines += ["", "Strength, speed and cost are relative ranks, not prices.", "",
-              "A role agent with a model keeps it, also where the router doesn't route; the others are "
-              "routed by their brief, like any other agent.", "",
-              "| Role agent | Model | Role |", "| :- | :- | :- |"]
-    for name, agent in reg.crew.items():
-        lines.append(f"| {cfg.PLUGIN_NAME}:{name} | {agent.get('model') or 'routed by brief'} | {agent.get('role', '')} |")
+        lines.append(f"| {name}{flag} | {info.strength} | {'-' if info.cost is None else info.cost} | {info.use_for} |")
+    lines += ["", "Strength and cost are relative ranks, not prices.", "",
+              "| Role agent | Model | Effort |", "| :- | :- | :- |"]
+    for path in sorted((cfg.PLUGIN_ROOT / "agents").glob("*.md")):
+        agent = agents.parse(path, "plugin") or {}
+        lines.append(f"| {cfg.PLUGIN_NAME}:{agent.get('name') or path.stem} | {agent.get('model') or 'named on the call'} | "
+                     f"{agent.get('effort') or '-'} |")
     return "\n".join(lines)
 
 
 def models_data(snap: settings.Snapshot) -> dict:
-    """Each registry model's state here, in the `model-router.models/1` shape."""
+    """Each registry model's state here, in the `model-router.models/3` shape."""
     reg, options, table, usable = snap.registry, snap.options, snap.health, snap.usable
     limit = options.cap
-    allowed = snap.allowed.permitted(reg)
+    allowed = snap.allowed.permitted(reg, snap.sendable)
     rows = []
     for name in reg.by_strength():
         if limit and reg.strength(name) > reg.strength(limit):
@@ -68,21 +67,11 @@ def models_data(snap: settings.Snapshot) -> dict:
         else:
             status, detail = "not_used", "not used yet"
         rows.append({"model": name, "last_ran_as": table.last_ran_as(name), "status": status, "detail": detail})
-    learned = learn.stats()
-    levels = [{"level": level, "routed_calls": info.get("calls", 0), "votes_too_low": info.get("votes", 0),
-               "raised": bool(info.get("bump"))}
-              for level, info in ((lv, learned.get(lv)) for lv in cfg.LEVELS) if isinstance(info, dict)]
-    aliases = (upstream.load().get("cache") or {}).get("aliases")
-    aliases = aliases if isinstance(aliases, list) else []
     data = {
         "schema": MODELS_SCHEMA,
         "cap": limit or None,
         "strongest_in_use": _strongest(reg, usable),
-        "priority": options.priority,
         "models": rows,
-        "levels": levels,
-        "doc_aliases": aliases,
-        "not_in_registry": [f for f in upstream.model_families(aliases) if f not in reg.models],
         "set_aside": [str(p) for p in store.set_aside()],
         "newer_files": [str(p) for p in store.newer_files()],
         "newer_config": [str(p) for p in reg.newer],
@@ -110,14 +99,9 @@ def _held_back(reg: registry.Registry) -> list[dict]:
 
 def models(snap: settings.Snapshot) -> str:
     data = models_data(snap)
-    lines = [f"Cap: **{data['cap'] or 'none'}**. Strongest model in use: **{data['strongest_in_use'] or 'none'}**. "
-             f"Priority: **{data['priority']}**.",
+    lines = [f"Cap: **{data['cap'] or 'none'}**. Strongest model in use: **{data['strongest_in_use'] or 'none'}**.",
              "", "| Model | Last ran as | Status |", "| :- | :- | :- |"]
     lines += [f"| {m['model']} | {m['last_ran_as'] or '-'} | {m['detail']} |" for m in data["models"]]
-    if data["levels"]:
-        lines += ["", "| Subtask level | Routed calls | Votes it was too low | Raised |", "| :- | -: | -: | :- |"]
-        lines += [f"| {lv['level']} | {lv['routed_calls']} | {lv['votes_too_low']} | "
-                  f"{'yes' if lv['raised'] else 'no'} |" for lv in data["levels"]]
     if data.get("config_problems"):
         lines += ["", "Left out of the override files, so the registry runs without them: "
                   + "; ".join(data["config_problems"]) + "."]
@@ -126,12 +110,9 @@ def models(snap: settings.Snapshot) -> str:
                   "(a project's file can raise, never lower):"]
         lines += [f"- {h['kind']} {h['name']}: {h['reason']}" for h in data["held_back"]]
     if data["workflow_model"]:
-        lines += ["", f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins every workflow agent to {data['workflow_model']}, "
-                  "so Model Router sets only their effort. /model-router:usage shows the model each one ran on."]
-    if data["doc_aliases"]:
-        lines += ["", "Model aliases in the current Claude Code docs: " + ", ".join(data["doc_aliases"]) + "."]
-        if data["not_in_registry"]:
-            lines.append("Not in the registry yet, so not routed to: " + ", ".join(data["not_in_registry"]) + ".")
+        pin = data["workflow_model"] if cfg._PLAIN_NAME.fullmatch(data["workflow_model"]) else "one model"
+        lines += ["", f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL pins every workflow agent whose script names no model to "
+                  f"{pin}, so Model Router sets only their effort. /model-router:usage shows the model each one ran on."]
     if data["set_aside"]:
         lines += ["", "Set aside because it could not be read, so that state started fresh: "
                   + ", ".join(data["set_aside"]) + ". Look at them, then delete them."]
@@ -170,62 +151,39 @@ def lock_table(rows: list[dict]) -> list[str]:
             f"{store.LOCK_WAIT_SECONDS:g} seconds."]
 
 
-def explain(snap: settings.Snapshot, text: str, agent: str | None = None) -> str:
-    """What the router would make of an agent call with this brief, and why: a dry run of spawn.decide, which
-    writes nothing. Without an agent, the text also reads as the user's own request."""
-    options, usable = snap.options, snap.usable
-    call = {"session_id": snap.session_id, "tool_input": {"prompt": text, "subagent_type": agent or "general-purpose"}}
-    decision = spawn.decide(call, snap).decision
-    level = decision["level"]
-    why = ", ".join(decision["signals"]) or "no risk, scope or ambiguity wording"
-    out = [f"Level: **{level}** ({why})." if level else "Level: none, the call is not routed by level.",
-           f"Model: **{decision['model'] or 'left as it is'}**, effort: {decision['effort'] or 'unchanged'}.",
+def explain(snap: settings.Snapshot, text: str, agent: str | None = None, model: str | None = None,
+            effort: str | None = None) -> str:
+    """What an agent call naming `model` and `effort` would run on here, and why: a dry run of spawn.decide,
+    which writes nothing. `text` is the call's prompt."""
+    tool_input = {"prompt": text, "subagent_type": agent or "general-purpose",
+                  **({"model": model} if model else {}), **({"effort": effort} if effort else {})}
+    decision = spawn.decide({"session_id": snap.session_id, "tool_input": tool_input}, snap).decision
+    runs_on = decision["model"] or decision["was"]
+    out = [f"Level: **{decision['level']}**." if decision["level"] else "Level: none, the model it runs on isn't known.",
+           f"Model: **{runs_on or 'left as it is'}**, effort: {decision['effort'] or 'unchanged'}"
+           + (" (the call is changed)." if decision["action"] == "rewrite" else " (the call is left as it is)."),
            f"Why: {decision['reason']}.",
-           f"Priority {options.priority}; models in use: {', '.join(usable) or 'none: availableModels and deniedModels leave no registry model open'}."]
-    if not agent:
-        seen = intake.from_prompt(text, snap.project)
-        if seen.person:
-            need = snap.pick(seen.level).model
-            out.append(f"As your own request it reads **{seen.level}** ({', '.join(seen.signals) or 'no signals'}), "
-                       f"which needs about {need or 'no model change'}.")
+           f"Models in use: {', '.join(snap.usable) or 'none: availableModels and deniedModels leave no registry model open'}."]
+    return "\n".join(out)
+
+
+def _runs(rows: list[dict]) -> dict[str, dict]:
+    """Each subagent's usage, by agent id: a listed agent's newest row holds all of its turns so far, and a
+    row of one turn's tokens, a workflow agent's or one the engine stopped listing, adds on top."""
+    runs: dict[str, dict] = {}
+    for r in rows:
+        if r.get("event") != "usage" or not r.get("agent_id") or not isinstance(r.get("models"), list):
+            continue
+        key = str(r["agent_id"])
+        if r.get("running") or key not in runs:
+            runs[key] = {**r, "models": list(r["models"])}
         else:
-            out.append("It is not read as your own request: it is a delivered or machine message.")
-    return "\n".join(out)
-
-
-def status(changes: dict | None) -> str:
-    if changes is None:
-        return f"No upstream data cached yet. Run `/{cfg.PLUGIN_NAME}:refresh`."
-    out = [f"Last reviewed Claude Code version: {changes['reviewed_version']}"]
-    if changes["new_releases"]:
-        out.append(f"\nNew releases since then ({len(changes['new_releases'])}):")
-        out += [f"- {r.get('version')} ({r.get('date', '')}): {r.get('link', '')}" for r in changes["new_releases"]]
-    else:
-        out.append("No new releases.")
-    for label, key in (("Docs pages added", "pages_added"), ("Docs pages removed", "pages_removed"),
-                       ("Docs pages whose summary changed", "pages_changed")):
-        if changes[key]:
-            out.append(f"\n{label} ({len(changes[key])}):")
-            out += [f"- {u}" for u in changes[key][:25]]
-    if changes.get("new_model_families"):
-        out.append("\nNew model aliases in the docs, not in the registry yet: "
-                   + ", ".join(changes["new_model_families"]))
-    if changes.get("removed_model_families"):
-        out.append("\nRegistry models the docs no longer list: " + ", ".join(changes["removed_model_families"]))
-    for label, key in (("Models routed calls ran on that are deprecated or retired", "deprecated_in_use"),
-                       ("Models deprecated or retired since the last review", "newly_deprecated")):
-        if changes.get(key):
-            out.append(f"\n{label}:")
-            out += [f"- {m['model']}: {m['state']}, retires {m['retires']}"
-                    + (f", replacement {m['replacement']}" if m.get("replacement") else "") for m in changes[key]]
-    if changes["watched_pages_touched"]:
-        out.append("\nHigh impact (pages this plugin is built on):")
-        out += [f"- {u}" for u in changes["watched_pages_touched"]]
-    return "\n".join(out)
+            runs[key]["models"] += r["models"]
+    return runs
 
 
 def usage_data(days: int, exact: bool = False) -> dict:
-    """What the ledger shows for the last `days` days, in the `model-router.usage/1` shape.
+    """What the ledger shows for the last `days` days, in the `model-router.usage/2` shape.
     Dollars are rounded to six places unless `exact`, which the table uses."""
     rows = ledger.read(days)
     by_agent: dict[str, dict] = {}
@@ -234,6 +192,7 @@ def usage_data(days: int, exact: bool = False) -> dict:
         name = str(agent or "?")
         return by_agent.setdefault(name, {"agent": name, "calls": 0, "routed": 0, "levels": {}, "ran_on": {}})
 
+    redos: dict[str, int] = {}
     for r in rows:
         if r.get("event") == "spawn":
             a = row(r.get("agent"))
@@ -241,43 +200,43 @@ def usage_data(days: int, exact: bool = False) -> dict:
             a["routed"] += r.get("action") == "rewrite"
             if r.get("level"):
                 a["levels"][r["level"]] = a["levels"].get(r["level"], 0) + 1
+            # A marked redo with no run on record climbed from a level nothing shows ran.
+            if r.get("escalated_from") and r.get("on_record") is not False:
+                redos[r["escalated_from"]] = redos.get(r["escalated_from"], 0) + 1
+    redos = {level: redos[level] for level in cfg.LEVELS if level in redos}
     by_model: dict[str, dict] = {}
     for r in rows:
         if r.get("event") == "result":
             model = str(r.get("resolved_model") or "background (not reported)")
             a = row(r.get("agent"))
             a["ran_on"][model] = a["ran_on"].get(model, 0) + 1
-            m = by_model.setdefault(model, {"model": model, "runs": 0, "tokens": 0, "run_tokens": None})
+            m = by_model.setdefault(model, {"model": model, "runs": 0, "run_tokens": None})
             m["runs"] += 1
-            # totalTokens is the run's final request only (https://code.claude.com/docs/en/hooks.md).
-            m["tokens"] += r.get("total_tokens") if isinstance(r.get("total_tokens"), int) else 0
-    # A workflow agent has no result row, so its first usage row, which names its type, says what it ran on.
-    first_model: dict[tuple[str, str], str] = {}
-    for r in rows:
-        if r.get("event") == "usage" and r.get("agent") and r.get("agent_id"):
-            first_model.setdefault((str(r["agent"]), str(r["agent_id"])), str(r.get("model")))
-    for (agent, _), model in first_model.items():
-        a = row(agent)
-        a["ran_on"][model] = a["ran_on"].get(model, 0) + 1
-    for r in rows:
-        m = by_model.get(str(r.get("model"))) if r.get("event") == "usage" and r.get("agent_id") else None
-        if m is not None:
-            m["run_tokens"] = (m["run_tokens"] or 0) + sum(int(r.get(k) or 0) for k in (
-                "input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
-    spend: dict[tuple[str, str], dict] = {}
-    unpriced = set()
-    for r in rows:
-        if r.get("event") != "usage":
+    runs = _runs(rows)
+    for run in runs.values():
+        used = [m for m in run["models"] if isinstance(m, dict)]
+        # A workflow agent has no result row, so its first turn says what it ran on.
+        if not run.get("running") and run.get("agent") and used:
+            a = row(run["agent"])
+            model = str(used[0].get("model"))
+            a["ran_on"][model] = a["ran_on"].get(model, 0) + 1
+        for m in used:
+            found = by_model.get(str(m.get("model")))
+            if found is not None:
+                found["run_tokens"] = (found["run_tokens"] or 0) + sum(int(m.get(k) or 0) for k in ledger.TOKENS)
+    spend: dict[str, dict] = {}
+    unknown, no_estimate, subscription = set(), set(), False
+    for run in runs.values():
+        agent = str(run.get("agent") or "?")
+        if not isinstance(run.get("cost_usd"), (int, float)):
+            no_estimate.add(agent)
             continue
-        loop, model = "subagent" if r.get("agent_id") else "main", str(r.get("model"))
-        s_row = spend.setdefault((loop, model), {"loop": loop, "model": model, "turns": 0,
-                                                  "output_tokens": 0, "usd": 0.0})
-        s_row["turns"] += 1
-        s_row["output_tokens"] += int(r.get("output_tokens") or 0)
-        if isinstance(r.get("cost_usd"), (int, float)):
-            s_row["usd"] += r["cost_usd"]
-        else:
-            unpriced.add(model)
+        s_row = spend.setdefault(agent, {"agent": agent, "runs": 0, "usd": 0.0})
+        s_row["runs"] += 1
+        s_row["usd"] += run["cost_usd"]
+        if run.get("unknown_price"):
+            unknown.add(agent)
+        subscription = subscription or run.get("subscription") is True
     spend_rows = sorted(spend.values(), key=lambda v: -v["usd"])
     total = sum((v["usd"] for v in spend_rows), 0.0)
     if not exact:
@@ -290,9 +249,11 @@ def usage_data(days: int, exact: bool = False) -> dict:
         "days": days,
         **({"since": since} if since else {}),
         "agents": sorted(by_agent.values(), key=lambda a: -a["calls"]),
+        **({"redos": redos} if redos else {}),
         "models": [by_model[m] for m in sorted(by_model)],
         "model_errors": sum(1 for r in rows if r.get("event") == "model_error"),
-        "spend": {"total_usd": total, "rows": spend_rows, "unpriced": sorted(unpriced)},
+        "spend": {"total_usd": total, "rows": spend_rows, "unknown_price": sorted(unknown),
+                  "no_estimate": sorted(no_estimate - set(spend)), "subscription": subscription},
     }
 
 
@@ -303,25 +264,31 @@ def usage(days: int) -> str:
         return f"No activity recorded in the last {days} days."
     since = f" (the ledger starts {data['since'][:10]})" if data.get("since") else ""
     lines = [f"Subagent usage, last {days} days{since}", "",
-             "| Agent | Calls | Model set by router | Levels | Ran on |", "| :- | -: | -: | :- | :- |"]
+             "| Agent | Calls | Rewritten by router | Levels | Ran on |", "| :- | -: | -: | :- | :- |"]
     for a in data["agents"]:
         levels = ", ".join(f"{level} x{n}" for level, n in a["levels"].items()) or "-"
         ran = ", ".join(f"{m} x{n}" for m, n in sorted(a["ran_on"].items())) or "-"
         lines.append(f"| {a['agent']} | {a['calls']} | {a['routed']} | {levels} | {ran} |")
+    if data.get("redos"):
+        redone = ", ".join(f"{level} x{n}" for level, n in data["redos"].items())
+        lines += ["", f"Redos by the level they climbed from: {redone}. A level that keeps coming back can be raised "
+                  "under `levels` in ~/.claude/model-router.json."]
     if data["models"]:
-        lines += ["", "| Model | Agent runs | Final-request tokens | All subagent turns' tokens |", "| :- | -: | -: | -: |"]
-        lines += [f"| {m['model']} | {m['runs']} | {m['tokens']:,} | "
-                  f"{'-' if m['run_tokens'] is None else format(m['run_tokens'], ',')} |" for m in data["models"]]
+        lines += ["", "| Model | Agent runs | Subagent tokens |", "| :- | -: | -: |"]
+        lines += [f"| {m['model']} | {m['runs']} | {'-' if m['run_tokens'] is None else format(m['run_tokens'], ',')} |"
+                  for m in data["models"]]
     if data["model_errors"]:
         lines += ["", f"Agent calls that failed with a model error: {data['model_errors']}."]
     if spend["rows"]:
-        lines += ["", f"Spend at list price: ${spend['total_usd']:,.2f}", "",
-                  "| Loop | Model | Turns | Output tokens | USD |", "| :- | :- | -: | -: | -: |"]
-        lines += [f"| {v['loop']} | {v['model']} | {v['turns']} | {v['output_tokens']:,} | {v['usd']:,.2f} |"
-                  for v in spend["rows"]]
-        if spend["unpriced"]:
-            lines.append(f"\nNo price in the registry for: {', '.join(spend['unpriced'])}. "
-                         "Add one under `prices` in ~/.claude/model-router.json.")
-    else:
-        lines += ["", "Dollar totals are in /usage and /cost; this ledger shows what was routed where."]
+        lines += ["", f"Subagent spend, Claude Code's estimate and not the bill: ${spend['total_usd']:,.2f}"]
+        if spend["subscription"]:
+            lines.append("A session in this window was on a subscription: usage inside the plan isn't billed in dollars.")
+        lines += ["", "| Agent | Runs | USD |", "| :- | -: | -: |"]
+        lines += [f"| {v['agent']} | {v['runs']} | {v['usd']:,.2f} |" for v in spend["rows"]]
+        if spend["unknown_price"]:
+            lines.append("\nClaude Code priced a model with no known price at another model's rates for: "
+                         f"{', '.join(spend['unknown_price'])}.")
+    if spend["no_estimate"]:
+        lines += ["", f"Claude Code gives no estimate for these agents, such as workflow agents: {', '.join(spend['no_estimate'])}."]
+    lines += ["", "The session's own cost and plan usage are in /usage."]
     return "\n".join(lines)

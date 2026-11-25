@@ -3,3 +3,5 @@ __pycache__/
 plugins/model-router/evals/results/
 .DS_Store
 docs/superpowers/
+site/assets/
+bench/results/**/transcripts/
