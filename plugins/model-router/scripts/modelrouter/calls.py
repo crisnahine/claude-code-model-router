@@ -35,7 +35,7 @@ ROUTED_AROUND = "routed-around"  # ... and it is now routed around
 class Route:
     """Where one spawn went, written by `spawn.record` on either path. `sent` is the name or ID the
     path put on the call, a full ID where the alias lags; `was` is the model the call would have run on
-    untouched (the parent's, or the agent's pin); `version` is the exact model the caller or the agent
+    untouched (the one it names, the agent's own, CLAUDE_CODE_SUBAGENT_MODEL or the parent's); `version` is the exact model the caller or the agent
     named, when the call ran on it."""
     model: str | None
     sent: str | None

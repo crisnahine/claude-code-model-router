@@ -4,7 +4,7 @@
 
 # Model Router documentation
 
-Every page about Model Router, the Claude Code plugin that routes each agent to the cheapest Claude model and effort that should do the job. New here? Start with the [README](../README.md) and the [questions](FAQ.md), or watch the [22-second video](https://crisnahine.github.io/claude-code-model-router/assets/video.mp4).
+Every page about Model Router, the Claude Code plugin that keeps the Claude model and effort Claude names for each agent within your cap, fills in a missing effort and runs a marked redo higher. New here? Start with the [README](../README.md) and the [questions](FAQ.md), or watch the [22-second video](https://crisnahine.github.io/claude-code-model-router/assets/video.mp4), which shows the design before 0.2.0.
 
 <!-- Cards, written by tools/docs_assets.py from PAGES in tools/docs_pages.py. -->
 <table>
@@ -93,7 +93,7 @@ Every outside project, library, benchmark and tool these docs name, with its pri
 | Name | Used for | Primary source |
 | :- | :- | :- |
 | SWE-Bench Pro (Scale AI) | The cost and effort figures quoted from Anthropic's cost guide ([research](research/model-control.md)) | https://labs.scale.com/papers/swe_bench_pro |
-| Percentile bootstrap (Efron, Annals of Statistics 7(1)) | The 95% intervals in [BENCHMARKS.md](BENCHMARKS.md) | https://doi.org/10.1214/aos/1176344552 |
+| Percentile bootstrap (Efron, Annals of Statistics 7(1)) | The 95% cost and verdict intervals in [BENCHMARKS.md](BENCHMARKS.md) | https://doi.org/10.1214/aos/1176344552 |
 | `@anthropic-ai/claude-code` on npm | CI's `validate` and `eval` jobs and the daily `newest` job ([SECURITY.md](SECURITY.md)) | https://github.com/anthropics/claude-code (the package's homepage in the registry) |
 | TypeScript `tsc` 6.0.3 and `skipLibCheck` | The mod type check ([TEST_RESULTS.md](TEST_RESULTS.md)) | https://www.typescriptlang.org/tsconfig/#skipLibCheck |
 | `@types/node` 22.20.5 | The mod test's type check | https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node (the package's homepage in the registry) |

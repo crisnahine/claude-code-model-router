@@ -3,7 +3,7 @@
 A level's `needs` is a strength, and its model is the cheapest one at or above it. A model stands
 for its lowest rung, or for the rung its named effort reaches. A model weaker than a level needs (the
 cap, the allowlist or model health left nothing at or above it) gets one more effort step there,
-which makes up part of the loss, up to xhigh. No effort the router sets goes past a model's
+which makes up part of the loss, up to xhigh. No effort the ladder gives goes past a model's
 `effort_stops_at`."""
 from __future__ import annotations
 

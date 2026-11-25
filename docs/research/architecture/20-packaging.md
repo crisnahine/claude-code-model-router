@@ -1,6 +1,6 @@
 # Plugin packaging and versioning
 
-2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.3.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
+2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.2.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
 
 Researched 2026-11-24 on Claude Code 2.1.331 (`claude --version`). Every page was fetched that day as `.md`. `claude plugin validate` was not run for this page; CI runs it.
 
@@ -101,7 +101,7 @@ Short names used below:
 - With no `version`, a relative path inside a Git-hosted marketplace gets "The commit SHA of the installed directory" `[loading]` How Claude Code computes the version.
 - "Users get a new copy only when the plugin's computed version differs from the one they have." "Background auto-update is off for your marketplace by default, and `marketplace.json` has no field to turn it on." `[host]` Keep users up to date.
 - "If you set `version` in `plugin.json` and later push commits without changing it, `claude plugin update` prints `<name> is already at the latest version (1.0.0).` and users keep the old copy. Either increment `version` on every release, or omit it in a git-hosted marketplace so Claude Code uses the commit SHA instead." And for CI: "keep `--strict`, which also fails the run with exit code 1 on warnings such as an unknown manifest field or a missing `version`. Drop `--strict` if you chose to omit `version`" `[publish]` Prepare your plugin for release.
-- Applied to our history: an install made between 3f036a1 and da1e68c holds a 2026-11-23 copy recorded as `0.1.2`. Today's `main` is also `0.1.2`, so `claude plugin update` reports it current and the user keeps the old copy. An install made after 9e247d3 lacks c694a43's skill edits for the same reason. This applies the quoted rule to our git history; no real install was tested.
+- Applied to our history: an install made between 3f036a1 and da1e68c holds a 2026-11-23 copy recorded as `0.1.2`. On 2026-11-24 `main` was also `0.1.2`, so `claude plugin update` reports it current and the user keeps the old copy. An install made after 9e247d3 lacks c694a43's skill edits for the same reason. This applies the quoted rule to our git history; no real install was tested.
 - Tags: "Tag the release in git when other plugins declare a version range on yours, because those ranges resolve against tags." `claude plugin tag` "creates a `{name}--v{version}` tag" `[publish]` Tag a release. No plugin depends on ours, so the `v<version>` tags in `RELEASING.md` break nothing.
 - "When a copied plugin updates mid-session, hook commands, monitors, MCP servers, and LSP servers keep using the previous version's path. Run `/reload-plugins` to switch hooks, MCP servers, and LSP servers to the new path." `[loading]` When auto-update runs.
 

@@ -434,15 +434,6 @@ def render_sessions(parts: list[tuple], meta: dict, routers: frozenset[str], own
     return "\n".join([meta.get("header", "# Benchmarks"), "", *body, meta.get("body", "")]).rstrip() + "\n"
 
 
-def _newest_price(registry_config: Registry, alias: str) -> dict:
-    """The list price of a family's newest model: the registry's `newest` ID, else the highest priced version."""
-    prices = registry_config.prices
-    versions = [(tuple(int(n) for n in key.split("-")[2:] if n.isdigit()), key) for key in prices
-                if key.startswith(f"claude-{alias}-") and not key.endswith("*")]
-    named = registry_config.newest.get(alias) or (max(versions)[1] if versions else "")
-    return registry_config.price(named) or {}
-
-
 def _batch(path: Path) -> str:
     """A raw file's batch: its name without the date and the task class, so m6-05-bugfix-2026-11-22 is m6-05."""
     name = re.sub(r"-\d{4}-\d{2}-\d{2}$", "", path.stem)
@@ -731,7 +722,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
     body = "\n".join([
         "## How to read it", "",
         "- A task counts as solved only when its pass check passes. A wrong answer is a failure, the router's too.",
-        "- Cost per solved task is a configuration's total spend on a task class divided by the tasks it solved, "
+        "- Cost per solved task is a configuration's total spend on a task class divided by the runs it solved, "
         "so failed runs count against it.",
         "- The cells show each configuration's own figures: exact 95% binomial (Clopper-Pearson) pass-rate "
         "intervals, and 95% percentile bootstrap intervals of cost per solved task over runs (2,000 resamples, each "
@@ -778,8 +769,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "come from the run's `routed` line, and n/a means no run in the cell has it.", "",
         "## Setup", "",
         f"- Claude Code: {', '.join(versions) or 'n/a'}. Session models: {', '.join(main) or 'n/a'} (`--model`), "
-        "one results table each, and one per prompt arm. Inside a table every configuration ran on that session "
-        "model. A configuration that sets its own model is shown in every table of its arm.",
+        "one results table each, and one per prompt arm. Inside a table every configuration that sets no model of "
+        "its own ran on that session model. A configuration that sets its own model is shown in every table of "
+        "its arm.",
         "- Configurations run: " + "; ".join(f"`{c}` ({_described(c, current)})" for c in used) + ".",
         "- Models that ran, with Claude Code's list-price cost across all runs: "
         + "; ".join(f"`{name}` ${sum(costs):.4f} over {len(costs)} runs" for name, costs in sorted(models.items()))
@@ -816,7 +808,8 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "run's scratch copy, with `allowRead` for the run's own (https://code.claude.com/docs/en/sandboxing). "
         "`CLAUDE_CODE_TMPDIR` is the run's scratch copy, so its sandboxed commands get a temp folder of their own. "
         "`permissions.deny` rules `Read(//<path>/**)` and `Edit(//<path>/**)` keep the file tools out of the same "
-        "places (https://code.claude.com/docs/en/permissions). "
+        "places but the folder of scratch copies, which holds the run's own, since no rule re-opens a denied path "
+        "(https://code.claude.com/docs/en/permissions). "
         "`CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` are set. Every inherited "
         "`CLAUDE_CODE_*`, `CLAUDECODE` and `CLAUDE_PLUGIN_*` variable is dropped except the provider switches "
         "(`CLAUDE_CODE_USE_*`) and `CLAUDE_CODE_OAUTH_TOKEN`, so `CLAUDE_CODE_SUBAGENT_MODEL`, "

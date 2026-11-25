@@ -1,6 +1,6 @@
 # Security and privacy model
 
-2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.3.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
+2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.2.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
 
 Researched 2026-11-24 against Claude Code 2.1.331 (`claude --version`), with every page fetched the same day as `.md`. Code read in `.claude/worktrees/redo-fixes`. Three claims below were checked by calling the plugin's own functions from scratch scripts against an empty data folder (not the test suite); the scripts are `p1.py`, `p3.py`, `p4.py` and `p5.py` in a scratch folder outside the repository.
 

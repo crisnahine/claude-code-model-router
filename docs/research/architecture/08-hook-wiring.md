@@ -1,6 +1,6 @@
 # Hook wiring and what each event costs
 
-2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.3.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
+2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.2.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
 
 Checked 2026-11-24 against Claude Code 2.1.331 (`claude --version`), with every page fetched the same day as `.md` from `code.claude.com/docs/en/`. The mod type files named in the brief are not in the worktree; they are at `plugins/model-router/.claude-plugin/types/` in the main checkout, headed "Written by Claude Code 2.1.330", and are cited as `[mod-types]`.
 

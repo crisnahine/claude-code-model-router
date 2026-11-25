@@ -14,7 +14,7 @@ Run this pipeline yourself as the coordinator. Delegate each stage to the named 
 ## 0. Understand
 
 - If the task is a GitHub issue number or URL, read it with `gh issue view` (ask once if `gh` isn't available).
-- Read `CLAUDE.md` and the parts of the codebase the task touches. Use `model-router:scout` if that takes more than a few searches.
+- Read `CONTRIBUTING.md` and the parts of the codebase the task touches. Use `model-router:scout` if that takes more than a few searches.
 - Decide the size. When a few reads of the code settle the design and the change is a few edits, a single file or sequential steps, skip steps 1 and 2 and make it yourself. Otherwise plan with the architect, and delegate building only when it is more than a few edits or its parts can run in parallel or need their own context.
 - Make sure work happens on a branch, not the default branch. Create one named after the task if needed.
 

@@ -4,7 +4,7 @@
 
 # Quality-first routing: what the docs say about saving without losing quality
 
-2026-11-25: the 0.2.0 redesign replaced the conclusions here that rest on the router reading the brief: the `complex` floor for fix and hunt briefs, the `priority` option with its `fast` and `quality` steps, and the main-loop effort raise. Claude now names each call's model and effort from a table in the session note, which puts a bug's cause on Opus at `high`. The [architecture review](architecture-review.md) has the reasons.
+2026-11-25: the 0.2.0 redesign replaced the conclusions here that rest on the router reading the brief (the `complex` floor for fix and hunt briefs, and keeping code edits off Haiku by the brief's wording), the `priority` option with its `fast` and `quality` steps, the main-loop effort raise, the learning loop that raised a level after redos, the strong-agent gate, and a redo that climbed a level. Claude now names each call's model and effort from a table in the session note, which puts a bug's cause on Opus at `high`, and a redo is a call Claude marks "Redo:", which climbs effort before model. The [architecture review](architecture-review.md) has the reasons.
 
 Researched 2026-11-23 against Claude Code **2.1.330**, with every page fetched the same day. The rule under test is the user's: "Save only when quality is unaffected. If a saving costs quality, quality wins." What a plugin can control is in [model-control.md](model-control.md); this page reuses its short names. Anything not confirmed in a primary source is marked **UNCONFIRMED**.
 
@@ -134,7 +134,7 @@ The findings above were written on 2026-11-23 against the settings of that day. 
 - **Only `frontier` asks for Fable.** `config/models.json` gives `needs: 4` to `frontier` alone, and the session note's table names Fable only for open-ended research, matching "move to Fable when Opus at higher effort still falls short" `[plat-choosing]`. A redo of an Opus run at `high` or above also reaches it (`router._redo`).
 - **Effort is set when a call or its agent names a model and nobody chose an effort**: not the caller, the agent or the user's environment (`router.decide`, `ladder.effort_on`). It is never below the session's own effort on the session's model (`router._session_floor`).
 - **No level moves on its own.** `learn.py`, which raised a level after enough redos, was removed. A redo climbs for that call only, `/model-router:usage` counts redos by level, and the user can raise a level under `levels` in `model-router.json`. A raised level sets only the effort of a call that names a model and no effort, and the picks of a rule's `level`, a teammate's start and a redo's next model; only a rule's `level` raises the model a call names.
-- **The redo climbs, effort before model.** Only a call Claude marks "Redo:" is a redo. With no model or effort named, `router._redo` runs it one effort step up while the run it redoes was below `high`, else on the next stronger model. Claude's judgment triggers it, so it isn't the measured "re-run failures at a higher setting" policy, which needs a check's failure signal `[plat-optimizing]`.
+- **The redo climbs, effort before model.** Only a call Claude marks "Redo:" is a redo. When the model and effort it names ask for no more than the run it redoes, `router._redo` runs it one effort step up while the run it redoes was below `high`, else on the next stronger model. Claude's judgment triggers it, so it isn't the measured "re-run failures at a higher setting" policy, which needs a check's failure signal `[plat-optimizing]`.
 - **No stronger-agent check.** The strong-agent gate, which held a stop on a wording estimate of the request, was removed. The only Stop check is `verify_gate` (`gates.before_stop`). The router gives no `opusplan` or advisor advice; both measured as small or uncertain gains `[blog-which]`, `[plat-optimizing]`.
 
 ### Quality risks found, and where they stand
@@ -159,7 +159,7 @@ The findings above were written on 2026-11-23 against the settings of that day. 
 6. **Treat a mid-run model swap as its own result** (`hooks.post_agent`). Status: shipped.
 7. **Turn `main_effort` on where the cache survives.** Status: dropped. The option was removed with the request profile, so the router no longer changes the main loop's effort.
 8. **Say plainly that `priority: fast` trades quality**, and point to fast mode as the documented way to buy speed at the same quality (`docs/GUIDE.md`, `/model-router:*` output). Status: dropped with the `priority` option.
-9. **Pick effort or model on a redo by the failure kind.** A run that skipped checks should redo at more effort on the same model; one that tried and was wrong should redo on the next model `[blog-dials]`, `[blog-effort]`. The router can't read the failure kind, so the caller picks the lever. Status: shipped: a redo that names its own effort or model runs as named.
+9. **Pick effort or model on a redo by the failure kind.** A run that skipped checks should redo at more effort on the same model; one that tried and was wrong should redo on the next model `[blog-dials]`, `[blog-effort]`. The router can't read the failure kind, so the caller picks the lever. Status: shipped: a redo that names a stronger model, or more effort on the same one, than the run it redoes runs as named.
 
 ## Open questions
 

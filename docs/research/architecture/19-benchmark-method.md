@@ -1,6 +1,6 @@
 # The benchmark method
 
-2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.3.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
+2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.2.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
 
 ## What we built
 
@@ -89,7 +89,7 @@ Partly right. The core matches the sources: fresh temp copies, deterministic out
    - Deletes: the `CLAUDE_CODE_PLUGIN_CACHE_DIR` setting, the regex guess in `session_dir` ("as Claude Code 2.1.330 names it"), `_forget_session`, the `session_dir_removed` bookkeeping, and the home fallback in `plugin_data_dir`.
    - Sources: `~/.claude.json` "Always read" and relocated by `CLAUDE_CONFIG_DIR` (https://code.claude.com/docs/en/agent-sdk/claude-code-features); `CLAUDE_CODE_PROJECT_DIR_NAME` (https://code.claude.com/docs/en/env-vars); Keychain keyed to the folder (https://code.claude.com/docs/en/authentication); trials should start from a clean environment (https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents).
 4. **benchmark-method-4. Check that the plugin loaded, and stop reading undocumented fields** (judgment backed by a source).
-   - Change: in `run.command`, switch to `--output-format stream-json --verbose` and take the last `result` line as today's JSON. Set a router run aside when its `system/init` event lacks the plugin in `plugins` or has `plugin_errors`. Count agent types from Agent `tool_use` inputs in the stream.
+   - Change: in `run.command`, switch to `--output-format stream-json --verbose` and take the last `result` line as the JSON of 2026-11-24. Set a router run aside when its `system/init` event lacks the plugin in `plugins` or has `plugin_errors`. Count agent types from Agent `tool_use` inputs in the stream.
    - Deletes: the use of `subagent_stats` in `run.record` and `analyze._page`. Keep the `agent_types` meta.json reader only for the ledger spend join, and label it as resting on a file layout no page documents.
    - Sources: `system/init` plugin fields, stream `result` line, and `--bare` becoming the `-p` default while skipping a flag-loaded plugin's hooks (https://code.claude.com/docs/en/headless); the result type has no `subagent_stats` (https://code.claude.com/docs/en/agent-sdk/typescript).
 5. **benchmark-method-5. Rebuild the task set around tasks that split models, weighted like real work** (required by a source).
@@ -112,12 +112,12 @@ Partly right. The core matches the sources: fresh temp copies, deterministic out
    - Deletes: the router variants tuned after seeing results (`plugin-cheap`, `plugin-cheap-nomain`, `plugin-cheap-nomain-nogate`, `plugin-m6-08-b`, `plugin-m6-08-b-nogate`, `plugin-m6-10`) and their share of the full-suite estimate. Keep `sonnet`, which `splitting_tasks` needs.
    - Sources: "Baseline the model tiers across effort levels", "must beat the single model's whole curve", "judge a pairing against the same model at lower effort and against the next model down running alone", and the re-run policy "computed ... task by task" (https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence); the no-plugin baseline (https://code.claude.com/docs/en/plugin-evals).
 9. **benchmark-method-9. Measure the shapes people use, not only the one-subagent hand-off** (judgment backed by a source).
-   - Change: keep today's `PROMPT` arm. Add an arm that sends the brief as a user would type it, with no order to delegate, plus tasks for a fan-out, a workflow, and a redo after a failing check. Report main-loop spend apart from subagent spend, since the router never changes the session model and the main loop was 48% to 63% of router spend in `docs/BENCHMARKS.md`.
+   - Change: keep the `PROMPT` arm of 2026-11-24. Add an arm that sends the brief as a user would type it, with no order to delegate, plus tasks for a fan-out, a workflow, and a redo after a failing check. Report main-loop spend apart from subagent spend, since the router never changes the session model and the main loop was 48% to 63% of router spend in `docs/BENCHMARKS.md`.
    - Touches: `run.PROMPT`, `run_one`, a `shape` key in `task.json`, `analyze`.
    - Deletes: the "Not covered yet" shapes line once they run.
    - Sources: "functions roughly the same as the agent used in production" (https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents); tasks "weighted like real traffic" (https://platform.claude.com/docs/en/about-claude/models/optimizing-for-cost-and-intelligence).
 10. **benchmark-method-10. Run every arm of a comparison in one interleaved batch, on more than one day** (judgment backed by a source).
-    - Change: in `run.schedule`, shuffle the order with a recorded seed (today it only rotates). Run the router and every baseline it is compared with in the same batches, spread over at least two days. In `analyze._quality` and `_verdict`, refuse a verdict that pairs a router batch with baselines from another batch. Report each run's cache-read share beside cost, since runs share the prompt cache.
+    - Change: in `run.schedule`, shuffle the order with a recorded seed (on 2026-11-24 it only rotated). Run the router and every baseline it is compared with in the same batches, spread over at least two days. In `analyze._quality` and `_verdict`, refuse a verdict that pairs a router batch with baselines from another batch. Report each run's cache-read share beside cost, since runs share the prompt cache.
     - Deletes: cross-batch pooling in verdicts (`_batch` stays for the notes).
     - Sources: time of day, multiple days, and gaps under 3 points (https://www.anthropic.com/engineering/infrastructure-noise); "cached data" as shared state between runs (https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents).
 

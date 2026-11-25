@@ -1,6 +1,6 @@
 # The Stop gates: asking for a check or a stronger agent before a turn ends
 
-2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.3.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
+2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.2.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
 
 Researched 2026-11-24 against Claude Code 2.1.331 (`claude --version`), with every page fetched the same day as `.md` from code.claude.com and platform.claude.com, and as HTML from anthropic.com. Code read in the `redo-fixes` worktree.
 

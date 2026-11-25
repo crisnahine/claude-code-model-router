@@ -1,6 +1,6 @@
 # The model registry: aliases, newest IDs, allowlists and effort caps
 
-2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.3.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
+2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.2.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
 
 Checked 2026-11-24 against Claude Code 2.1.331, the docs pages named below fetched as `.md` the same day, and the mod type files written by 2.1.330 (`plugins/model-router/.claude-plugin/types/claude-code/index.d.ts` in the main checkout; the worktree has no `types/` folder).
 

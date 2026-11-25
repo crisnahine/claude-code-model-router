@@ -24,7 +24,7 @@ A call Claude marks as a redo, by starting its `description` with "Redo:", climb
 
 ## What does Model Router cost?
 
-The plugin is free. On the older design it added 683 tokens to the main conversation's context and none to subagents, measured on 2026-11-23 on a headless Sonnet run with seven role agents and a 128-token session-start note. Five role agents ship now and the note is about 170 tokens (687 characters, estimated at 4 a token), and neither has been measured again. Measured on 2026-11-25 on this release's code, each hook takes 45 to 50 ms (p50) on Python 3.13 and 164 to 171 ms on Apple's Python 3.9.6, which compiles the plugin again on every run, and a `mod-spawn` round trip takes 49 and 174 ms. Almost all of that is starting Python and loading the plugin ([PERFORMANCE.md](PERFORMANCE.md)). The models it routes to are billed to your Claude plan or API account as usual. Where the mod runs, `/model-router:usage` shows Claude Code's own cost estimate for each subagent, which isn't the bill.
+The plugin is free. On the older design it added 683 tokens to the main conversation's context and none to subagents, measured on 2026-11-23 on a headless Sonnet run with seven role agents and a 128-token session-start note. Five role agents ship now and the note is about 175 tokens (700 characters with no cap or pinned model, estimated at 4 a token), and neither has been measured again. Measured on 2026-11-25 on this release's code, each hook takes 45 to 50 ms (p50) on Python 3.13 and 164 to 171 ms on Apple's Python 3.9.6, which compiles the plugin again on every run, and a `mod-spawn` round trip takes 49 and 174 ms. Almost all of that is starting Python and loading the plugin ([PERFORMANCE.md](PERFORMANCE.md)). The models it routes to are billed to your Claude plan or API account as usual. Where the mod runs, `/model-router:usage` shows Claude Code's own cost estimate for each subagent, which isn't the bill.
 
 ## Does Model Router reduce Claude Code cost?
 
@@ -60,7 +60,7 @@ Yes, through the aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Cod
 
 ## What does Model Router store on my machine, and what leaves it?
 
-It keeps its state in its own plugin data directory and sends no prompt, brief, path or code anywhere. The ledger keeps levels, reasons, model names, token counts and Claude Code's cost estimate per subagent, never a call's brief or description, for 30 days; a call and its task are recognized by a hash. Its folder is readable by your user alone. It makes no network call: new Claude Code releases, docs changes and model retirements are checked in this repository's CI, and fixes reach you as plugin updates ([SECURITY.md](SECURITY.md#network)).
+It keeps its state in its own plugin data directory and sends no prompt, brief, path or code anywhere. The ledger keeps levels, reasons, model names, token counts and Claude Code's cost estimate per subagent, never a call's brief or description, for 30 days; a call and its task are recognized by a hash. On macOS and Linux its folder is readable by your user alone. It makes no network call: new Claude Code releases, docs changes and model retirements are checked in this repository's CI, and fixes reach you as plugin updates ([SECURITY.md](SECURITY.md#network)).
 
 ## Does it work with other plugins, skills and agents?
 

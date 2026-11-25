@@ -1,6 +1,6 @@
 # Redo escalation: the signal, the climb and the window
 
-2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.3.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
+2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.2.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
 
 Checked 2026-11-24 against Claude Code 2.1.331 (`claude --version`), with each page fetched the same day as `.md`. Builds on `docs/research/caller-levels-and-redo.md` (Q3, "Which design the docs support") and `docs/research/quality-first-routing.md` (Q4, rec 9) and does not repeat their field tables.
 
@@ -48,7 +48,7 @@ Is the description field a sound place for a marker?
 - It is display text: "the delegation appears as a tool call row showing the subagent's name followed by a short task description, such as `code-improver(Suggest code improvements)`". https://code.claude.com/docs/en/sub-agents (Quickstart). The mod type file says of `description`: "A rewrite is what the task shows as" (`claude-code/index.d.ts`, `AgentSpawnInput.description`).
 - It is in the schema, so it survives the input check that drops unknown keys (caller-levels-and-redo.md, Q3, citing the 2.1.300 changelog entry). No page gives it any meaning beyond display, and no page forbids text in it.
 - The documented fields for "run this harder" are `model` and `effort`. On effort, the tool text says: "Set this ONLY when the user, or instructions such as CLAUDE.md or a skill, explicitly ask that this agent or delegated work run at a specific effort level" (type file, `Agent.effort`). The docs: "When you ask Claude to run a non-fork subagent at a specific effort level, it can also pass an `effort` parameter for that invocation." https://code.claude.com/docs/en/sub-agents#choose-an-effort-level. A skill such as `route` counts as such an instruction.
-- Today a marked redo that carries the caller's `effort` still climbs a model in `router.decide`, so the caller asks for more effort and gets a different model as well.
+- On 2026-11-24 a marked redo that carried the caller's `effort` still climbed a model in `router.decide`, so the caller asks for more effort and gets a different model as well.
 
 Resuming a subagent instead of starting a new one
 

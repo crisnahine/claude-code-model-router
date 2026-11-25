@@ -1,6 +1,6 @@
 # The usage ledger and the cost reports
 
-2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.3.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
+2026-11-25: this note checks Model Router as it stood on 2026-11-24, before the 0.2.0 redesign. "What we built" describes that code, and some of what it names is gone or works differently now. What the code does now is in the [architecture review](../architecture-review.md).
 
 Researched 2026-11-24 on Claude Code 2.1.331 (`claude --version`). Every docs page was fetched the same day as `.md`. The mods type file used is `plugins/model-router/.claude-plugin/types/claude-code/index.d.ts`, headed "Written by Claude Code 2.1.330" and "EARLY ACCESS: this surface may change between releases without notice". It sits in the main checkout; the `redo-fixes` worktree has no `types/` folder. It is cited below as `[mod-types]`.
 
