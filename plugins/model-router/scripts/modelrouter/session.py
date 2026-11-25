@@ -164,10 +164,9 @@ def transcript_tail(transcript_path: object, size: int) -> str | None:
         return None
 
 
-def tool_calls(transcript_path: object, marker: str) -> Iterator[tuple[dict, dict]]:
-    """`(row, block)` for each tool_use block in the transcript's last 1 MiB. Only lines holding
-    `marker` are parsed, and unreadable rows are skipped."""
-    tail = transcript_tail(transcript_path, 1024 * 1024)
+def tool_calls(tail: str | None, marker: str) -> Iterator[tuple[dict, dict]]:
+    """`(row, block)` for each tool_use block in a transcript's tail. Only lines holding `marker` are parsed,
+    and unreadable rows are skipped."""
     for line in (tail or "").splitlines():
         if '"tool_use"' not in line or marker not in line:
             continue
@@ -183,7 +182,7 @@ def tool_calls(transcript_path: object, marker: str) -> Iterator[tuple[dict, dic
 
 def handed_back(transcript_path: object) -> bool:
     """Did the agent deliver a report through SubagentHandback?"""
-    for _, block in tool_calls(transcript_path, '"SubagentHandback"'):
+    for _, block in tool_calls(transcript_tail(transcript_path, 1024 * 1024), '"SubagentHandback"'):
         message = (block.get("input") or {}).get("message") if isinstance(block.get("input"), dict) else None
         if block.get("name") == "SubagentHandback" and isinstance(message, str) and message.strip():
             return True
