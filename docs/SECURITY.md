@@ -14,7 +14,7 @@ Report it privately through the repository's GitHub security advisory form ([Rep
 
 Everything goes in one data folder: `CLAUDE_PLUGIN_DATA`, else `~/.claude/plugins/data/model-router-local`, with `CLAUDE_CONFIG_DIR` in place of `~/.claude` when set (`store.data_dir`). On POSIX the folder is mode 0700 and each file the Python runtime writes is created 0600 (`store._private_file`).
 
-- `ledger.jsonl`: session and agent ids, agent names, levels, reasons, model names, token counts and Claude Code's dollar estimate. Rows older than 30 days go, and past 4 MiB the older half goes (`store.append_ledger`).
+- `ledger.jsonl`: session and agent ids, agent names, levels, reasons, model names, token counts and Claude Code's dollar estimate. Rows older than 30 days go, and past 4 MiB the usage rows a later one replaces go, then the older half if the rest still fills 2 MiB (`store.append_ledger`).
 - `routes.json`, `done.json`, `launched.json`, `pending.json`: where each call went and what came back. A call is known by a hash of its agent and prompt (`calls.identify`), its task by a hash of its agent and description (`calls.task`). No brief, prompt or description is stored (`SecurityClaims.test_no_brief_or_description_is_stored`).
 - `switches.json`: per session, the `/model-router` switch, whether the session check ran, and the model family and effort it found (`settings.switch`, `session.check`). Dropped at session end (`settings.forget`) or after a day unwritten.
 - `sessions.json`, `edits.json`, `allowlist.json` (the model settings the mod read, and the project path), `state.json` (model health), `locks.json`, a `.flock` file per state file, empty marks under `mod-calls/`, and up to three `.corrupt-<time>` copies of a file that failed to parse.

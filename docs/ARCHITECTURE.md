@@ -189,7 +189,7 @@ The data folder is `${CLAUDE_PLUGIN_DATA}`, else `plugins/data/model-router-loca
 | `<file>.flock`, `mod-calls/` | OS lock files; the mod's marks |
 | `ledger.jsonl` | One row per spawn, result, model error, Stop ask and subagent turn |
 
-Per-session files keep 200 sessions and 100 records each. The ledger drops rows past 30 days, and its older half past 4 MB.
+Per-session files keep 200 sessions and 100 records each. The ledger drops rows past 30 days. Past 4 MB it drops each running usage row a later one for the same agent replaces, then its older half if the rest still fills 2 MB, so a trim stays rare.
 
 Writes are atomic. Each read-modify-write and ledger append holds an OS lock (`flock`, or `msvcrt.locking` on Windows) on the file's `.flock` (`store.locked`), since agents started together run their hooks at once. The OS frees a dead holder's lock. A held lock is `BlockingIOError` from `flock` and `PermissionError` (`EACCES`) from `msvcrt.locking`; any other lock error means the filesystem can't lock, and the write goes ahead unlocked.
 

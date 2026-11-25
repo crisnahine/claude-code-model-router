@@ -693,6 +693,20 @@ class Store(Sandbox):
             store.append_ledger({"event": "spawn"})
         self.assertEqual(len(ledger.read()), 51)
 
+    def test_past_the_cap_a_trim_drops_the_usage_rows_a_later_one_replaces_before_any_older_half(self):
+        path = store.ledger_path()
+        store.append_ledger({"event": "spawn", "session": "s1"})
+        for turn in range(40):  # each row holds the agent's totals so far
+            ledger.usage("s1", "a1", "general-purpose", models=[tokens("claude-haiku-5-5", 10 * turn)], cost={"usd": turn})
+        for _ in range(2):  # a workflow agent's rows are one turn each, so all of them count
+            ledger.usage("s1", "w1", None, turn=tokens("claude-haiku-5-5", 5))
+        with mock.patch.object(store, "LEDGER_MAX_BYTES", path.stat().st_size - 1):
+            store.append_ledger({"event": "gate", "session": "s1"})
+        rows = ledger.read()
+        self.assertEqual([(r["event"], r.get("agent_id"), r.get("cost_usd")) for r in rows],
+                         [("spawn", None, None), ("usage", "a1", 39), ("usage", "w1", None), ("usage", "w1", None),
+                          ("gate", None, None)])
+
 
 class Snapshot(Sandbox):
     def test_each_hook_call_reads_the_registry_and_options_once(self):

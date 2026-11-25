@@ -425,9 +425,24 @@ def _older(line: str, cutoff: _dt.datetime) -> bool | None:
         return None
 
 
+def _replaced(lines: list[str]) -> list[str]:
+    """`lines` without each running usage row a later one for the same agent replaces: each holds the agent's totals."""
+    seen, kept = set(), []
+    for line in reversed(lines):
+        try:
+            row = loads(line)
+            agent = json.dumps([row["session"], row["agent_id"]]) if row["event"] == "usage" and row.get("running") else None
+        except (KeyError, ValueError, TypeError, AttributeError):
+            agent = None
+        if agent is None or agent not in seen:
+            kept.append(line)
+        seen.add(agent)
+    return kept[::-1]
+
+
 def append_ledger(entry: dict) -> None:
-    """Append one row. Rows older than LEDGER_MAX_DAYS go once the oldest one is, and past
-    LEDGER_MAX_BYTES the older half goes too."""
+    """Append one row. Rows older than LEDGER_MAX_DAYS go once the oldest one is. Past LEDGER_MAX_BYTES the usage
+    rows a later one replaces go, then the older half if the rest still fills half the cap, so trims stay rare."""
     now = _dt.datetime.now(_dt.timezone.utc)
     entry = {"ts": now.isoformat(timespec="seconds"), **entry}
     cutoff = now - _dt.timedelta(days=LEDGER_MAX_DAYS)
@@ -445,8 +460,10 @@ def append_ledger(entry: dict) -> None:
             if oldest or big:
                 lines = [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
                          if line.strip() and not _older(line, cutoff)]
-                if sum(len(line.encode("utf-8")) for line in lines) > LEDGER_MAX_BYTES:
-                    lines = lines[len(lines) // 2:]
+                if big:
+                    lines = _replaced(lines)
+                    if sum(len(line.encode("utf-8")) for line in lines) > LEDGER_MAX_BYTES // 2:
+                        lines = lines[len(lines) // 2:]
                 write_atomic(path, "".join(lines))
     except OSError:
         pass
