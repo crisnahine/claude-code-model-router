@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Mapping, Optional, TypedDict
 
 from . import agents, ladder
-from .config import _PLAIN_NAME, EFFORTS, Level
+from .config import EFFORTS, HIDDEN, Level, plain
 from .registry import Registry, Rule
 from .settings import Settings
 
@@ -87,7 +87,9 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         out["reason"] = "a rule in model-router.json leaves this agent alone"
         return out
     if tool_input.get("model") and not requested:
-        out.update(was=None, reason=f"the call names a model outside the registry ({tool_input['model']})")
+        # A workflow script's or another mod's model reaches here as well as Claude's.
+        shown = plain(tool_input["model"], HIDDEN)
+        out.update(was=None, reason=f"the call names a model outside the registry ({shown})")
         return out
     decided = _effort_decided(tool_input, definition, settings, facts.teammate)
     named_effort = next((str(e).lower() for e in (tool_input.get("effort"), (definition or {}).get("effort")) if e), None)
@@ -157,8 +159,7 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
             why = "this agent's definition wasn't found, so it is left alone"
         elif own_model and not pinned:
             # An agent file can come with a repository, so only a plain name is shown back.
-            shown = own_model if _PLAIN_NAME.fullmatch(str(own_model)) else "not a plain name"
-            why = f"the agent names a model outside the registry ({shown})"
+            why = f"the agent names a model outside the registry ({plain(own_model, HIDDEN)})"
         elif pinned:
             target, source, why = pinned, "pin", "the agent names its own model"
         elif env_default and not redo:

@@ -161,7 +161,7 @@ Model health lives in `state.json` (`health.py`):
 
 - A model error is a failed `Agent` call whose error text has `not_found_error`, `model_not_found` or `claude_code_version_too_old`. A substitution is a `resolvedModel` in another family than asked, outside the force pin, a swapped run, or the untouched model.
 - A spawn a later mod moved to another family strikes nothing. The mod compares the model it sent with the one the engine's entry in `next.trace` was asked for, and writes `mod-calls/<tool_use_id>.moved`; `post-agent` and `agent-failed` take it (`mod.moved`).
-- Two of either route the model around for a day; a run as asked clears it. A full ID the router sent (a newest ID, or an exact ID kept on a rewrite) is routed around after one model error or provider refusal (`health.REFUSED`). An exact ID on a call left as it is strikes nothing.
+- Two of either route the model around for a day; a run as asked clears it. The cause kept is the error's type identifier, never its display text, which can quote a model ID a repository's settings chose. A full ID the router sent (a newest ID, or an exact ID kept on a rewrite) is routed around after one model error or provider refusal (`health.REFUSED`). An exact ID on a call left as it is strikes nothing.
 - `Registry.available` drops the health filter rather than leave nothing usable, never the allowlist's.
 
 The allowlist (`allowlist.py`):

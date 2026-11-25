@@ -38,8 +38,7 @@ def _workflow_rules(options: settings.Settings, reg: Registry) -> str | None:
     if options.force:
         return None
     efforts = not options.effort_level
-    pin = options.workflow_model if cfg._PLAIN_NAME.fullmatch(options.workflow_model or "") else None
-    runs_on = pin or f"its agent's own model, else {_PICKED}"
+    runs_on = cfg.plain(options.workflow_model, None) or f"its agent's own model, else {_PICKED}"
     return (f"Model Router keeps the {'`model` and `effort`' if efforts else '`model`'} a workflow script names on an "
             f"`agent()` call, within the user's cap. Here every `agent()` call in a script names "
             f"{'both' if efforts else 'a model'}, by the work:\n{_rows(reg, efforts)}"
@@ -57,9 +56,8 @@ def _rules(options: settings.Settings, reg: Registry) -> str:
              if options.effort_level else "")
     if options.force:
         # Claude can't pass a model under FORCE (sub-agents.md), so only the effort half applies.
-        model = options.subagent_model if cfg._PLAIN_NAME.fullmatch(options.subagent_model or "") else "one model"
-        lead = (f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE runs every subagent on {model}, so a `model` on an Agent call has "
-                "no effect.")
+        lead = (f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE runs every subagent on {cfg.plain(options.subagent_model, 'one model')},"
+                " so a `model` on an Agent call has no effect.")
         if fixed:
             return f"{lead} {fixed}"
         work = {**dict(_WORK), cfg.Level.complex: f"{_HARD}, such as {_SUCH}"}
@@ -100,19 +98,21 @@ def session_start(hook_input: dict) -> dict | None:
     opens = hook_input.get("source") not in ("clear", "compact")
     if mode == "auto":
         note = _rules(options, snap.registry)
+        pin = cfg.plain(options.subagent_model, None)
         if options.force:
             notices.append(
-                f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent to {options.subagent_model or 'one model'}, "
+                f"CLAUDE_CODE_SUBAGENT_MODEL_FORCE pins every subagent to {pin or 'one model'}, "
                 "so Model Router sets only their effort. Without it, an agent call would run on the model it names, "
                 "within your cap.")
         elif options.subagent_model:
             notices.append(
-                f"CLAUDE_CODE_SUBAGENT_MODEL is {options.subagent_model}, so an agent call that names no model runs on "
-                f"its agent's own model or {options.subagent_model}. Model Router keeps the model a call names, within "
-                "your cap.")
+                f"CLAUDE_CODE_SUBAGENT_MODEL {f'is {pin}' if pin else 'is set'}, so an agent call that names no model "
+                f"runs on its agent's own model or {pin or 'the one it sets'}. Model Router keeps the model a call names, "
+                "within your cap.")
         if options.workflow_model:
-            notices.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on {options.workflow_model} "
-                           "when its script names no model, so the router sets only their effort.")
+            notices.append(f"CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL runs every workflow agent on "
+                           f"{cfg.plain(options.workflow_model, 'one model')} when its script names no model, so the "
+                           "router sets only their effort.")
     out = _context("SessionStart", note) if note else {}
     if notices and opens:
         out["systemMessage"] = "Model Router: " + " ".join(notices)

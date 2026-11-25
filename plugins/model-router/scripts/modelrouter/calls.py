@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from . import health, ledger, store
-from .config import Level
+from .config import HIDDEN, Level, plain
 
 # A marked redo climbs from a run of its task that finished at most this long ago.
 REDO_WINDOW = 30 * 60
@@ -21,7 +21,6 @@ REDO_WINDOW = 30 * 60
 # rewrites them whole under a lock it waits 1 s for, so old sessions there cost lost writes.
 KEPT_FOR = 24 * 3600
 
-_MODEL_ID = re.compile(r"[A-Za-z0-9._:/\[\]-]{1,100}")
 MAX_SWAPPED = 5
 
 # What a returned outcome says Claude should be told about.
@@ -126,7 +125,7 @@ def models_used(response: object) -> list[str]:
     used = response.get("modelsUsed") if isinstance(response, dict) else None
     if not isinstance(used, list):
         return []
-    ids = [m for m in used if isinstance(m, str) and _MODEL_ID.fullmatch(m)][:MAX_SWAPPED]
+    ids = [m for m in used if plain(m, None)][:MAX_SWAPPED]
     return ids if len(set(ids)) >= 2 else []
 
 
@@ -198,6 +197,8 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
         return _failed(session_id, outcome, route, asked, guessed)
     swapped = bool(outcome.models_used)
     finished = not outcome.launched and not swapped
+    # Settings a repository ships (ANTHROPIC_DEFAULT_*_MODEL, modelOverrides) can make this any text, which reports show.
+    ran_as = plain(outcome.ran_as, HIDDEN) if isinstance(outcome.ran_as, str) else None
     try:
         if route and route.level is not None and outcome.task and (finished or (outcome.launched and outcome.agent_id)):
             _wait_or_finish(session_id, outcome, route, finished)
@@ -205,12 +206,11 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
         pass
     try:
         if not outcome.moved and (not guessed or outcome.ran_family == asked):
-            health.ran(asked, outcome.ran_as, outcome.ran_family, outcome.forced, swapped=swapped,
+            health.ran(asked, ran_as, outcome.ran_family, outcome.forced, swapped=swapped,
                        untouched=route.was if route and route.path == "mod" else None)
     except OSError:
         pass
-    ledger.result(session_id, outcome.agent, asked, outcome.ran_as, outcome.status,
-                  models_used=list(outcome.models_used) or None)
+    ledger.result(session_id, outcome.agent, asked, ran_as, outcome.status, models_used=list(outcome.models_used) or None)
     return Returned(asked, route, finished, SWAPPED if swapped else None)
 
 

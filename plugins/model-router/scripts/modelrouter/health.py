@@ -108,9 +108,16 @@ def _route_around(info: dict, why: str) -> None:
     info["why"] = why
 
 
+def _cause(error: str) -> str:
+    """The error type identifier or provider refusal in an error's text. The rest is display text, which can quote a
+    model ID a repository's settings chose, and `models` prints the cause."""
+    found = MODEL_ERROR.search(error) or REFUSED.search(error)
+    return found.group(0) if found else "a model error"
+
+
 def _strike(info: dict, strikes: int, error: str) -> None:
     info["fail"] = int(store.stamp(info.get("fail"))) + 1
-    info["last_error"] = error[:200]
+    info["last_error"] = _cause(error)
     if info["fail"] >= strikes:
         _route_around(info, info["last_error"])
 

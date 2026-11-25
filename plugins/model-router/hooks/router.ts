@@ -13,6 +13,8 @@ const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const TIERS: readonly string[] = ['haiku', 'sonnet', 'opus', 'fable']
 // The id names a file the fallback looks up, so only a plain one is marked (scripts/modelrouter/mod.py routes).
 const PLAIN_ID = /^[A-Za-z0-9_-]{1,128}$/
+// A model a repository's settings can set is shown only as a plain name, as the runtime shows one (config._PLAIN_NAME).
+const PLAIN_NAME = /^[A-Za-z0-9._:/@[\]-]{1,100}$/
 // The mod's slash command, and the session check's /config row, keyed as Claude Code keys a plugin's userConfig field.
 const COMMAND = 'model-router'
 const CHECK = 'model-router.session_check'
@@ -290,7 +292,7 @@ async function apply($: EngineInterface, picks: Choice[]): Promise<void> {
     const now = await $.session.model()
     // A switch the allowlist or a declined consent refused: an effort set now would be saved for the old model.
     if (TIERS.find(tier => now.toLowerCase().includes(tier)) !== family) {
-      return toast($, `This session stays on ${now}: Claude Code did not switch it.`)
+      return toast($, `This session stays on ${PLAIN_NAME.test(now) ? now : 'its model'}: Claude Code did not switch it.`)
     }
     if ((command === 'effort' || !effort) && done) toast($, done)
   }
