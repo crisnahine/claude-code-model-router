@@ -2986,6 +2986,7 @@ class Harness(unittest.TestCase):
                                {"PATH": "/bin", "PWD": str(run.ROOT), "OLDPWD": str(run.ROOT / "bench")})
         return json.loads(cmd[cmd.index("--settings") + 1]), env, cmd
 
+    @unittest.skipIf(sys.platform == "win32", "the OS sandbox these paths are for runs on macOS, Linux and WSL2")
     def test_runs_cannot_read_the_repository(self):
         settings, env, _ = self.settings_for()
         self.assertIn(str(run.ROOT), settings["sandbox"]["filesystem"]["denyRead"])
@@ -2993,6 +2994,7 @@ class Harness(unittest.TestCase):
         self.assertIn(f"Edit(//{run.ROOT.as_posix().lstrip('/')}/**)", settings["permissions"]["deny"])
         self.assertEqual((env.get("PWD"), env.get("OLDPWD"), env["PATH"]), (None, None, "/bin"))
 
+    @unittest.skipIf(sys.platform == "win32", "the OS sandbox these paths are for runs on macOS, Linux and WSL2")
     def test_runs_cannot_read_any_checkout_worktree_or_shared_temp_folder(self):
         settings, _, cmd = self.settings_for()
         denied = settings["sandbox"]["filesystem"]["denyRead"]
@@ -3015,6 +3017,7 @@ class Harness(unittest.TestCase):
         self.assertFalse({"Read", "Edit", "Write", "Glob", "Grep"} & set(tools))
         self.assertEqual(tools, list(run.TOOLS))
 
+    @unittest.skipIf(sys.platform == "win32", "the OS sandbox these paths are for runs on macOS, Linux and WSL2")
     def test_a_run_reads_only_its_own_scratch_folder_and_has_a_temp_folder_of_its_own(self):
         row, seen = self.one()
         argv = seen["argv"]

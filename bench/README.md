@@ -1,6 +1,6 @@
 # Benchmark
 
-Measures what Model Router costs per solved task, and how often tasks get solved, against Claude Code without it. Results go to [docs/BENCHMARKS.md](../docs/BENCHMARKS.md). Standard-library Python only. Nothing here ships with the plugin.
+Measures what Model Router costs per solved task, and how often tasks get solved, against Claude Code without it. Results go to [docs/BENCHMARKS.md](../docs/BENCHMARKS.md). Standard-library Python only. Nothing here ships with the plugin. Runs need Claude Code's OS sandbox, so the bench runs on macOS, Linux and WSL2, not on native Windows.
 
 Every stored row measured an older design, in which the router read the brief and picked the level itself (`plugin_ref` 780ee86 and the checkout at 27b94e6 for the tables, `bench_commit` c42886d for the pilot, and 1bb2611 for the 12 router rows under `results/pilot/redo-mark/`). On the six harder pilot tasks that router cost more per run than `defaults`, Claude Code with no plugin. Today's plugin, where Claude names each call's model and effort, has not been benchmarked yet.
 

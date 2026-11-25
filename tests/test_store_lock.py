@@ -96,7 +96,9 @@ class StoreLock(Sandbox):
         path = self.data / "state.json"
         store.owner = "s1"
         with store.locked(path):
-            self.assertIn(b"s1", (self.data / "state.json.flock").read_bytes())
+            with open(self.data / "state.json.flock", "rb") as held:
+                held.seek(1)  # byte 0 is the locked byte, which Windows lets nobody else read
+                self.assertIn(b"s1", held.read())
         self.assertEqual((self.data / "state.json.flock").read_bytes(), b"")
 
     @unittest.skipIf(os.name == "nt", "flock is POSIX")

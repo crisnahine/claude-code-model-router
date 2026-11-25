@@ -43,6 +43,7 @@ class ProjectFromASubfolder(Sandbox):
         self.agent("outsider", "opus", folder=outer)
         self.assertIsNone(agents.find("outsider", self.sub))
 
+    @unittest.skipUnless(hasattr(os, "getuid"), "a file's owner is checked on POSIX only")
     def test_the_walk_stops_where_the_roots_git_or_claude_folder_is_another_users(self):
         del os.environ["CLAUDE_PROJECT_DIR"]
         real = os.stat
