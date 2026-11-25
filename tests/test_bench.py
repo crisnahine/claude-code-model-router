@@ -313,7 +313,7 @@ class Analysis(unittest.TestCase):
     def test_a_current_row_graded_by_another_check_stops_the_page(self):
         task = next(t for t in run.load_tasks() if t["id"] == "lookup-todo-count")
         today = {"verdict": "pass", "reason": "solved", "check_hash": run.check_hash(task["dir"] / "check.py")}
-        good = full_row(task=task["id"], grade=today)
+        good = full_row(task=task["id"], task_revision=task["revision"], grade=today)
         other = dict(good, grade=dict(today, check_hash="f" * 16))
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "a.jsonl"

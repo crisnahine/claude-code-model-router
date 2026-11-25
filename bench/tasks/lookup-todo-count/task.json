@@ -1,6 +1,9 @@
 {
   "class": "lookup",
-  "revision": 1,
+  "revision": 2,
+  "revisions": {
+    "2": "a count line that names 4 only to deny it fails"
+  },
   "brief": "How many `# TODO` comments are there in the .py files under src/, subfolders included? Reply with the number.",
   "reference_answer": "4",
   "wrong_answer": "5"
