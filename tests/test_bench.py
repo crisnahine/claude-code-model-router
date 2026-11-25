@@ -1570,7 +1570,6 @@ class Limits(unittest.TestCase):
                        "API Error: No internet route — check your connection or VPN (ENETUNREACH)",
                        "Connection lost"):
             row = {"is_error": True, "exit_code": 1, "api_error_status": None, "stderr": "", "answer": answer}
-            self.assertTrue(run.rate_limited(row), answer)
             self.assertEqual(run.refusal(row), "network", answer)
         self.assertEqual(run.refusal({"is_error": True, "exit_code": 1, "api_error_status": 429, "stderr": "",
                                       "answer": ""}), "limit")
@@ -1578,16 +1577,16 @@ class Limits(unittest.TestCase):
                      "answer": "The fix fails: socket code raises ENOTFOUND when DNS is down."},
                     {"is_error": False, "exit_code": 0, "api_error_status": None, "stderr": "",
                      "answer": "Connection lost errors come from the retry wrapper."}):
-            self.assertFalse(run.rate_limited(row), row["answer"])
+            self.assertIsNone(run.refusal(row), row["answer"])
 
     def test_an_answer_about_rate_limits_is_not_a_limit(self):
-        self.assertFalse(run.rate_limited({"is_error": False, "api_error_status": None, "stderr": "",
-                                           "answer": "Use a token bucket rate limiter; on the usage limit, return 429."}))
+        self.assertIsNone(run.refusal({"is_error": False, "api_error_status": None, "stderr": "",
+                                       "answer": "Use a token bucket rate limiter; on the usage limit, return 429."}))
         # An errored run whose task text talks about limits failed the task; it wasn't refused by the API.
         for answer in ("Draft: a token bucket rate limiter keyed per client, 429 when over.",
                        "Too many requests hit the cache; the overloaded node needs a usage limit."):
-            self.assertFalse(run.rate_limited({"is_error": True, "exit_code": 1, "api_error_status": None,
-                                               "stderr": "", "answer": answer}), answer)
+            self.assertIsNone(run.refusal({"is_error": True, "exit_code": 1, "api_error_status": None,
+                                           "stderr": "", "answer": answer}), answer)
 
     @unittest.skipUnless(shutil.which("git"), "needs git")
     def test_the_bench_s_own_results_do_not_make_the_code_dirty(self):
@@ -1610,11 +1609,12 @@ class Limits(unittest.TestCase):
         for answer in ("API Error: Repeated 529 Overloaded errors", "Request rejected (429)",
                        "Server is temporarily limiting requests", "You've hit your session limit · resets 3pm",
                        "You've hit your weekly limit", "You've hit your Sonnet limit"):
-            self.assertTrue(run.rate_limited({"is_error": True, "exit_code": 1, "api_error_status": None,
-                                              "stderr": "", "answer": answer}), answer)
-        self.assertTrue(run.rate_limited({"is_error": True, "api_error_status": 529, "stderr": "", "answer": ""}))
-        self.assertTrue(run.rate_limited({"is_error": False, "exit_code": 1, "api_error_status": None,
-                                          "stderr": "Error: API Error: Repeated 529 Overloaded errors", "answer": ""}))
+            self.assertEqual(run.refusal({"is_error": True, "exit_code": 1, "api_error_status": None,
+                                          "stderr": "", "answer": answer}), "limit", answer)
+        self.assertEqual(run.refusal({"is_error": True, "api_error_status": 529, "stderr": "", "answer": ""}), "limit")
+        self.assertEqual(run.refusal({"is_error": False, "exit_code": 1, "api_error_status": None,
+                                      "stderr": "Error: API Error: Repeated 529 Overloaded errors", "answer": ""}),
+                         "limit")
 
     def test_an_api_error_before_any_spend_is_set_aside_not_retried(self):
         # What Claude Code 2.1.330 printed for an invalid API key: an error, nothing spent, no model usage.
@@ -1622,7 +1622,6 @@ class Limits(unittest.TestCase):
         row = run.record({"id": "t", "class": "lookup"}, {"id": "defaults"}, Recorder.options, run.mrconfig.build({}),
                          result, dict(Recorder.facts, exit_code=1))
         self.assertEqual(run.refusal(row), "api_error")
-        self.assertFalse(run.rate_limited(row))  # waiting fixes no key, balance or model access
         self.assertEqual((row["total_cost_usd"], row["cost_known"]), (0, True))
         errored = {"is_error": True, "exit_code": 1, "api_error_status": None, "stderr": "", "subtype": "success"}
         # The messages for the other two at https://code.claude.com/docs/en/errors.md.
@@ -3105,12 +3104,12 @@ class Harness(unittest.TestCase):
 
 
 class Configurations(unittest.TestCase):
-    """The configurations a batch can run, after the plugin drops to three options."""
+    """The configurations a batch can run, with only the options and agents the plugin has."""
 
     configs = {c["id"]: c for c in run.load_configs()}
     options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p"}
 
-    def test_no_configuration_names_a_deleted_option_or_agent(self):
+    def test_no_configuration_names_an_option_or_agent_the_plugin_lacks(self):
         text = (ROOT / "bench" / "configs.json").read_text(encoding="utf-8")
         for gone in ("priority", "agent_pins", "main_effort", "update_check", "strong_agent_gate", "advise",
                      "deep-solver", "docs-researcher"):
@@ -3156,8 +3155,8 @@ class Configurations(unittest.TestCase):
                     self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL", env)
 
 
-class ReviewFixes(unittest.TestCase):
-    """What a run, its row and the page do at the edges a final review found."""
+class RunEdges(unittest.TestCase):
+    """What a run, its row and the page do at the edges."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

@@ -75,10 +75,6 @@ def load_dict(path: Path) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def save_json(path: Path, value: Any) -> None:
-    write_atomic(path, json.dumps(value, indent=2, sort_keys=True))
-
-
 def write_atomic(path: Path, text: str) -> None:
     # A unique temp name per process, then an atomic rename: a reader never sees a
     # half-written file.

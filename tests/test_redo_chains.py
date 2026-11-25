@@ -311,7 +311,7 @@ class RedoChains(Sandbox):
 
 
 class RedoChainCases(Sandbox):
-    """Chains that went wrong in live runs, on every path through the same simulator as the walk."""
+    """Chains seen in live runs, on every path through the same simulator as the walk."""
 
     def chain(self, setup: Setup, *named: tuple) -> list:
         """Each path's runs, the same on all of them, as "model@effort", with "=" on a run that had no step left."""

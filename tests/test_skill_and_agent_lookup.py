@@ -1,4 +1,4 @@
-"""Regression tests for plugin agent lookup."""
+"""Tests for plugin agent lookup."""
 from __future__ import annotations
 
 import json
