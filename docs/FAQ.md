@@ -36,7 +36,7 @@ The aliases `haiku`, `sonnet`, `opus` and `fable`, which Claude Code resolves fo
 
 ## What happens without Python, or on an older Claude Code?
 
-Without Python 3.9 or later on `PATH`, its hooks do nothing and its commands print one line saying why. Claude Code still runs the role agents on the models their definitions name, and the mod still lowers a model a call names above `max_tier`. Claude Code 2.1.323 to 2.1.328 refuse to load it, and older versions may load it without that check, so update Claude Code first.
+Without Python 3.9 or later on `PATH`, its hooks do nothing and its commands print one line saying why. Claude Code still runs the role agents on the models their definitions name, and the mod still lowers a model a call names above `max_tier`, though not one an agent's definition names. Claude Code 2.1.323 to 2.1.328 refuse to load it, and older versions may load it without that check, so update Claude Code first.
 
 ## How do I turn it off?
 

@@ -34,6 +34,7 @@ While the runtime answers (its last command replied, if only `{"ok": true}`), th
 | :- | :- |
 | `Agent` call, mark written | The mod, at spawn |
 | `Agent` call, no mark (no reply yet, a failed one, a failed write, no mod) | The fallback; the mod passes its spawn untouched |
+| `Agent` call, no mark, after an empty reply (no Python) | Neither; the mod only lowers a named model to `max_tier` by family (`capped`) |
 | A spawn with no `Agent` call, such as a workflow stage | The mod |
 | A fork or a resumed run | Neither |
 | A marked call whose `mod-spawn` fails | The mod asks once more. If that fails too, neither path routes it, and the mod only lowers a named model to `max_tier` by family (`capped`) |

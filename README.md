@@ -24,7 +24,7 @@ From a shell: `claude plugin install` with the same arguments. `claude plugin up
 
 ## Requirements
 
-Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. Without Python the hooks do nothing.
+Claude Code 2.1.329 or later, `sh`, and Python 3.9 or later as `python3` or `python` on your `PATH`. Without Python the hooks do nothing, and the mod only lowers a model a call names above `max_tier`.
 
 ## Options
 

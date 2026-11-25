@@ -370,10 +370,12 @@ function remember<V>(map: Map<string, V>, key: string, value: V): void {
 export const register: Register = (on, options) => {
   const opts = optionEnv(options)
   // Whether the runtime answers. Only an answer turns it on, and none, or a failed round trip, turns it off. While
-  // it's off, the fallback routes each Agent call.
+  // it's off, the fallback routes each Agent call. With no Python (`silent`) no hook routes it, so this mod holds the cap.
   let answering = false
+  let silent = false
   const heard = (reply: Answer | undefined): Answer | undefined => {
     answering = !!reply
+    silent = reply === null
     return reply
   }
   // Each Agent call this mod heard, by tool_use_id: whether it marked the call or left it to the fallback.
@@ -476,7 +478,9 @@ export const register: Register = (on, options) => {
     marked.delete(e.tool_use_id)
     if (unmarked) {
       refresh($, opts, live)
-      return next(e) // the fallback routed it
+      // The fallback routed it, unless no Python ran it either.
+      const held = silent && (live.routingOn ?? routing(opts)) ? capped(e.model, opts.CLAUDE_PLUGIN_OPTION_MAX_TIER) : undefined
+      return next(held ? { ...e, model: held } : e)
     }
     const effort = callerEffort.get(e.tool_use_id)
     const layers = await modelSettings($, reads)

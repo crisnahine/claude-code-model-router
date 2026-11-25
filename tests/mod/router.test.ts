@@ -588,7 +588,7 @@ test('a spawn the runtime answers with nothing stops the marks, since a keep sti
   await mod.toolCall(agentCall('toolu_1'))
   await mod.spawn(spawnEvent({ tool_use_id: 'toolu_1' }))
   await mod.toolCall(agentCall('toolu_2'))
-  replies['mod-spawn'] = { stdout: '' } // a handler that raised: cli.py prints nothing and exits 0
+  replies['mod-spawn'] = { stdout: '' } // no Python ran, or the spawn's input didn't parse: the launcher prints nothing and exits 0
   await mod.spawn(spawnEvent({ tool_use_id: 'toolu_2' }))
   await mod.toolCall(agentCall('toolu_3'))
   assert.deepEqual(mod.writes.map(([path]) => path), ['/tmp/x/mod-calls/toolu_1', '/tmp/x/mod-calls/toolu_2'])
@@ -634,6 +634,29 @@ test('with no Python the launcher answers nothing, so no call is marked', async 
   await mod.spawn(spawnEvent({ tool_use_id: 'tu9' }))
   await mod.toolCall(agentCall('toolu_2'))
   assert.deepEqual(mod.writes, [])
+})
+
+test('with no Python an unmarked call is still held to max_tier, and one a failed round trip left unmarked is the fallback\'s', async () => {
+  const none = { stdout: '' }
+  const seen: unknown[] = []
+  const next = (x: any) => { seen.push(x.model); return { agentId: 'a1' } }
+  const spawned = async (mod: ReturnType<typeof load>, id: string, model: string) => {
+    await mod.toolCall(agentCall(id))
+    await mod.spawn(spawnEvent({ tool_use_id: id, model }), next)
+  }
+  const mod = load({ 'mod-start': none, 'mod-spawn': none }, { max_tier: 'sonnet' })
+  await mod.sessionStart({ source: 'startup' })
+  await spawned(mod, 'toolu_1', 'opus')
+  await spawned(mod, 'toolu_2', 'haiku')
+  // The fallback keeps a model over the cap when nothing under it is usable, so its pick is left alone.
+  const failing = load({ 'mod-start': { exitCode: 1, stdout: '' } }, { max_tier: 'sonnet' })
+  await failing.sessionStart({ source: 'startup' })
+  await spawned(failing, 'toolu_3', 'opus')
+  const off = load({ 'mod-start': none }, { max_tier: 'sonnet', routing_mode: 'off' })
+  await off.sessionStart({ source: 'startup' })
+  await spawned(off, 'toolu_4', 'opus')
+  assert.deepEqual(seen, ['sonnet', 'haiku', 'opus', 'opus'])
+  assert.deepEqual([...mod.writes, ...failing.writes, ...off.writes], [])
 })
 
 test("a call the mod left unmarked is the fallback's alone, so its spawn asks the runtime nothing", async () => {
