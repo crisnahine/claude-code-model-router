@@ -20,7 +20,7 @@ Cost and quality of Model Router against Claude Code without it. No judged round
 ## Configurations
 
 - `plugin`: Model Router with today's defaults, loaded with --plugin-dir from a copy frozen at the start of the batch
-- `plugin-nogate`: Model Router with the Stop check's verifier request off (`verify_gate: false`)
+- `plugin-nogate`: Model Router with the Stop check off (`verify_gate: false`)
 - `defaults`: No plugin: subagents inherit the session model at its default effort
 - `pinned`: No plugin: three inline agents with a fixed model and effort each (--agents): a searcher on haiku at medium, a worker on sonnet at medium and a reviewer on opus at high, named in the delegate prompt
 - `haiku`: No plugin: every subagent on haiku (CLAUDE_CODE_SUBAGENT_MODEL=haiku, CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1)
