@@ -1439,6 +1439,35 @@ class RoutingEvals(Sandbox):
             for run in right:
                 self.assertTrue(passes(found, run), (case, name, run))
 
+    def test_the_redo_case_pins_its_calls_and_its_graders_pass_only_the_plugins_climb(self):
+        case = PLUGIN / "evals" / "route-redo-escalates"
+        named = re.findall(r'description "([^"]+)", model "(\w+)", effort "(\w+)"', (case / "prompt.md").read_text(encoding="utf-8"))
+        self.assertEqual(named, [("list files", "haiku", "medium")] + [("Redo: list files", "haiku", "medium")] * 2)
+        self.session_on(HAIKU, session_id="redo")
+        marks = store.data_dir() / modpath.MARKS
+        marks.mkdir(parents=True, exist_ok=True)
+        ran, calls_made = [], []
+        for i, (description, model, effort) in enumerate(named):
+            tool_input = {"subagent_type": "general-purpose", "description": description, "model": model, "effort": effort,
+                          "prompt": "List the files in the current directory."}
+            common = {"session_id": "redo", "tool_use_id": f"toolu_{i}", "cwd": str(self.project)}
+            (marks / common["tool_use_id"]).write_text("")  # as the mod's tool.call hook does
+            self.assertIsNone(hooks.pre_agent({**common, "tool_input": tool_input}))
+            answer = hooks.HANDLERS["mod-spawn"]({**common, "parent_model": HAIKU, "kind": "subagent",
+                                                  "session_effort": "medium", "tool_input": tool_input})
+            run = (cfg.load().family(answer.get("model")) or model, answer.get("effort") or effort)
+            hooks.HANDLERS["mod-usage"]({**common, "agent_id": f"agent_{i}", "ran": {"model": f"claude-{run[0]}-5-5", "effort": run[1]}})
+            hooks.post_agent({**common, "tool_input": tool_input,
+                              "tool_response": {"resolvedModel": f"claude-{run[0]}-5-5", "status": "completed"}})
+            ran.append(run)
+            calls_made.append(tool_input)
+        self.assertEqual(ran, [("haiku", "medium"), ("haiku", "high"), ("sonnet", "high")])
+        graders = {p.stem: grader(p) for p in (case / "graders").glob("*.md")}
+        routed = {"calls": calls_made, "trace": trace(*(f"claude-{m}-5-5" for m, _ in ran))}
+        self.assertEqual([n for n, g in graders.items() if not passes(g, routed)], [])
+        alone = {"calls": calls_made, "trace": trace(*[HAIKU] * 3)}  # each call runs as named
+        self.assertEqual([n for n, g in graders.items() if not passes(g, alone)], ["redo-ran-above-haiku"])
+
     def test_each_eval_case_routes_as_expected(self):
         cases = sorted((PLUGIN / "evals").glob("*/prompt.md"))
         self.assertGreaterEqual(len(cases), 5)
