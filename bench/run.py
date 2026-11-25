@@ -892,11 +892,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (or a CLAUDE_CODE_USE_* provider switch)")
     seed = args.seed if args.seed is not None else random.SystemRandom().randrange(2 ** 31)
     batch = args.batch or f"{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}-{seed}"
-    version = subprocess.run([*args.claude, "--version"], capture_output=True, text=True).stdout.strip()
+    # The file the installer's symlink names now: an update during the round moves the link, never this.
+    claude = [os.path.realpath(shutil.which(args.claude[0]) or args.claude[0]), *args.claude[1:]]
+    version = subprocess.run([*claude, "--version"], capture_output=True, text=True).stdout.strip()
     registry_config = mrconfig.shipped()
     frozen, digest = freeze_plugin()
     try:
-        options = {"claude": args.claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,
+        options = {"claude": claude, "model": args.model, "budget": args.budget, "timeout": args.timeout,
                    "plugin_dir": frozen, "plugin_hash": digest, "claude_version": version, "commit": _git_head(),
                    "dirty": _git_dirty(), "managed": managed_settings(), "seed": seed, "batch": batch,
                    "keep": str(args.keep) if args.keep else None,

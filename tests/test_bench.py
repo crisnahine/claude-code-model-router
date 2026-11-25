@@ -1012,6 +1012,27 @@ class Runner(unittest.TestCase):
                     self.fail(f"the run's child {pid} outlived the run")
 
 
+    @unittest.skipIf(sys.platform == "win32", "needs a symlink and a shebang")
+    def test_an_update_during_a_round_never_reaches_a_later_run(self):
+        # The installer moves the claude symlink on PATH to each new version; the first run here does that.
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_, out = Path(tmp) / "bin", Path(tmp) / "out.jsonl"
+            bin_.mkdir()
+            for version in ("1", "2"):
+                path = Path(tmp) / f"claude-{version}"
+                path.write_text(f"#!{sys.executable}\n" + VERSIONED_STUB.replace("<v>", version), encoding="utf-8")
+                path.chmod(0o755)
+            (bin_ / "claude").symlink_to(Path(tmp) / "claude-1")
+            env = {**AUTH, "PATH": f"{bin_}{os.pathsep}{os.environ['PATH']}"}
+            with unittest.mock.patch.dict("os.environ", env), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "2",
+                                 "--max-total", "3", "--claude", "claude", "--out", str(out)])
+            rows = [json.loads(line) for line in out.read_text().splitlines()]
+            self.assertEqual(os.readlink(bin_ / "claude"), str(Path(tmp) / "claude-2"))
+        self.assertEqual(code, 0)
+        self.assertEqual([(r["claude_version"], r["answer"][-4:]) for r in rows], [("1.0.0 (stub)", "(v1)")] * 2)
+
     @unittest.skipIf(sys.platform == "win32", "Windows ends a process without running its signal handlers")
     def test_a_runner_sent_sigterm_leaves_no_child_no_scratch_and_writes_the_row(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1041,6 +1062,19 @@ class Runner(unittest.TestCase):
             self.assertEqual(list(temp.iterdir()), [])  # the frozen plugin copy
             [row] = [json.loads(line) for line in out.read_text().splitlines()]
             self.assertIn("KeyboardInterrupt", row["grade"]["reason"])
+
+
+VERSIONED_STUB = '''import json, os, shutil, sys
+from pathlib import Path
+if "--version" in sys.argv:
+    print("<v>.0.0 (stub)"); sys.exit(0)
+link = Path(shutil.which("claude"))
+if os.readlink(link).endswith("claude-1"):
+    link.with_name("next").symlink_to(Path(os.readlink(link)).with_name("claude-2"))
+    os.replace(link.with_name("next"), link)
+print(json.dumps({"type": "result", "result": "read_retry_limit in app/settings.py (v<v>)", "total_cost_usd": 0.01,
+                  "modelUsage": {}}))
+'''
 
 
 ORPHAN_STUB = '''#!/usr/bin/env python3
