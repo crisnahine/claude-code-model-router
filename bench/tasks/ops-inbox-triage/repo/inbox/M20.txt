@@ -1,4 +1,4 @@
-From: Jo Hollis <jo@hollis-law.com>
+From: Jo Hollis <jo@hollis-law.test>
 Date: 2026-11-23 18:00 UTC
 Subject: Clause 7 data residency
 

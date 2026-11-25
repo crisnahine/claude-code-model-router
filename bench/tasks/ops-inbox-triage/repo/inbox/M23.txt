@@ -1,4 +1,4 @@
-From: Lee Morgan <lee@juniper-ai.com>
+From: Lee Morgan <lee@juniper-ai.test>
 Date: 2026-11-24 09:00 UTC
 Subject: Re: I can't log in
 

@@ -1,4 +1,4 @@
-From: Liam Becker <liam@juniper-ai.com>
+From: Liam Becker <liam@juniper-ai.test>
 Date: 2026-11-23 09:30 UTC
 Subject: Exporting reports
 

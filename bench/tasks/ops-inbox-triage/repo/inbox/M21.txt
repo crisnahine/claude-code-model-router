@@ -1,4 +1,4 @@
-From: Maria Lopez <maria@copperleaf.co>
+From: Maria Lopez <maria@copperleaf.test>
 Date: 2026-11-24 09:30 UTC
 Subject: Re: Charged twice for November
 

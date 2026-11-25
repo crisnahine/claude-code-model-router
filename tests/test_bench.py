@@ -34,6 +34,16 @@ def gradable_tasks():
     return [t for t in run.load_tasks() if not (t.get("posix_only") and sys.platform == "win32")]
 
 
+OPUS = "claude-opus-5-5"
+
+
+def full_row(**changes):
+    """A row as run.record writes it, from a real result line, with `changes` applied."""
+    result = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    return dict(run.record(Recorder.task, Recorder.config, Recorder.options, run.mrconfig.build({}), result,
+                           Recorder.facts), **changes)
+
+
 def rows(config, cls, costs, passes, task=None, **extra):
     return [{"config": config, "class": cls, "task": task or f"{cls}-1", "total_cost_usd": c, "passed": p,
              "schema": run.ROW_SCHEMA, **extra} for c, p in zip(costs, passes)]
@@ -111,8 +121,8 @@ class Analysis(unittest.TestCase):
         self.assertIn("Bash denied in 19 of 72 `defaults` runs", v["reason"])
 
     def test_a_class_with_no_verdict_has_no_rank(self):
-        old = [dict(r, schema=2) for r in spread("plugin", "lookup", 1, 4, 0.10) + spread("defaults", "lookup", 1, 4, 0.50)]
-        row = self.summary(old)["lookup"]
+        apart = spread("plugin", "lookup", 1, 4, 0.10, batch="b1") + spread("defaults", "lookup", 1, 4, 0.50, batch="b2")
+        row = self.summary(apart)["lookup"]
         self.assertEqual((row["status"], row["rank"]), ("REFUSED", None))
 
     PLAN = (("bugfix-statement-queries", "bugfix"), ("cross-amount-cents", "cross-module"),
@@ -126,7 +136,7 @@ class Analysis(unittest.TestCase):
                 for i, r in enumerate(rows(config, cls, [usd] * runs, [True] * runs))]
 
     def test_the_documented_plan_can_reach_a_win_over_all_tasks(self):
-        kwargs = {"routers": frozenset({"plugin"}), "router": "plugin", "session": analyze.OPUS}
+        kwargs = {"routers": frozenset({"plugin"}), "router": "plugin", "session": OPUS}
         for runs, verdict in ((6, "NONE"), (8, "NONE"), (10, "WIN")):
             with self.subTest(runs=runs):
                 data = self.plan_rows(runs)
@@ -139,35 +149,8 @@ class Analysis(unittest.TestCase):
         edge = analyze.overall(self.plan_rows(8), **kwargs)["verdicts"]["pinned"]
         self.assertEqual((edge["pass_ci"][0], edge["verdict"]), (-analyze.MARGIN, "NONE"))
 
-    def test_a_new_batch_beside_stored_rows_with_the_same_ids_gets_a_verdict(self):
-        stored = [{k: v for k, v in r.items() if k != "schema"} for r in
-                  spread("plugin", "lookup", 6, 4, 0.30) + spread("defaults", "lookup", 6, 4, 0.20)]
-        fresh = spread("plugin", "lookup", 6, 12, 0.10, batch="m1") + spread("defaults", "lookup", 6, 12, 0.50, batch="m1")
-        extra = {"main_model": analyze.OPUS, "started_at": "2026-11-25T10:00:00+00:00", "claude_version": "2.1.331",
-                 "models": {}}
-        with tempfile.TemporaryDirectory() as tmp:
-            res = Path(tmp) / "results"
-            res.mkdir()
-            for name, data in (("stored-lookup.jsonl", stored), ("measure-1.jsonl", fresh)):
-                (res / name).write_text("".join(json.dumps(dict(r, **extra)) + "\n" for r in data), encoding="utf-8")
-            results = analyze.load(sorted(res.glob("*.jsonl")))
-            out = Path(tmp) / "page.md"
-            analyze.main([*map(str, sorted(res.glob("*.jsonl"))), "--out", str(out)])
-            page = out.read_text(encoding="utf-8")
-        self.assertEqual((len(results.rows), len(results.legacy)), (144, 48))
-        (name, router, summary, every, _), = analyze.sessions(results)
-        self.assertEqual((router, summary[0]["verdicts"]["defaults"]["verdict"]), ("plugin", "WIN"))
-        self.assertEqual(every["verdicts"]["defaults"]["verdict"], "WIN")
-        (_, _, old, _, _), = analyze.sessions(results, legacy=True)
-        self.assertEqual((old[0]["status"], old[0]["rank"]), ("REFUSED", None))
-        current = page.split("## Results: session model")[1].split("## Before the sandbox")[0]
-        self.assertIn("WIN against `defaults`", current)
-        self.assertIn("$0.1000 per solved", current)
-        self.assertNotIn("$0.3000", current)  # the stored rows sit in their own tables
-        self.assertIn("$0.3000 per solved", page.split("## Before the sandbox: session model")[1])
-
     def test_the_judged_router_comes_from_configs_json_not_file_order(self):
-        data = [dict(r, main_model=analyze.OPUS) for r in spread("plugin", "lookup", 2, 4, 0.1)
+        data = [dict(r, main_model=OPUS) for r in spread("plugin", "lookup", 2, 4, 0.1)
                 + spread("plugin-nogate", "lookup", 2, 4, 0.1) + spread("defaults", "lookup", 2, 4, 0.1)]
         base = analyze.load([])
         self.assertEqual([c["id"] for c in base.configs if c.get("judged")], ["plugin"])
@@ -175,15 +158,6 @@ class Analysis(unittest.TestCase):
         results = dataclasses.replace(base, rows=data, configs=nogate_first)
         self.assertEqual([part[1] for part in analyze.sessions(results)], ["plugin"])
         self.assertEqual([part[1] for part in analyze.sessions(results, "plugin-nogate")], ["plugin-nogate"])
-
-    def test_archived_router_variants_are_never_baselines(self):
-        routers = analyze.router_ids(run.load_configs())
-        for name in ("plugin-cheap", "plugin-cheap-nomain", "plugin-cheap-nomain-nogate", "plugin-m6-08-b",
-                     "plugin-m6-08-b-nogate", "plugin-m6-10", "plugin", "plugin-next", "plugin-nogate"):
-            self.assertIn(name, routers)
-        data = spread("plugin", "lookup", 1, 4, 0.3) + spread("plugin-cheap", "lookup", 1, 4, 0.1)
-        row = {s["class"]: s for s in analyze.summarize(data, routers=routers, draws=100)}["lookup"]
-        self.assertEqual((row["verdicts"], row["best_baseline"]), ({}, None))
 
     def test_behind_beyond_noise_loses_however_cheap(self):
         v = self.verdict(rows("plugin", "lookup", [0.01] * 10, [True] * 2 + [False] * 8)
@@ -209,19 +183,6 @@ class Analysis(unittest.TestCase):
         self.assertTrue(line.endswith("| no difference shown |"), line)
         self.assertIn("lookup: no difference shown against `defaults`", "\n".join(undecided))
         self.assertNotIn("PASS", "\n".join(undecided))
-
-    def test_the_setup_claims_new_row_fields_only_for_rows_that_carry_them(self):
-        real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl")
-                          .read_text().splitlines()[0])
-        old = [dict(real, config=c) for c in ("plugin", "defaults") for _ in range(3)]
-        with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "a.jsonl").write_text("".join(json.dumps(r) + "\n" for r in old))
-            out = Path(tmp) / "page.md"
-            analyze.main([str(Path(tmp) / "a.jsonl"), "--out", str(out)])
-            setup = out.read_text(encoding="utf-8").split("## Setup")[1].split("## Task set")[0]
-        self.assertIn("A raw line at row schema 3 or later (0 of the 6 here) lists the managed settings", setup)
-        for claim in ("every router row records", "every raw line records (`order_seed`)", "Each raw line lists"):
-            self.assertNotIn(claim, setup)
 
     def test_tasks_are_paired_and_resampled_before_runs(self):
         # The router is cheaper on each task, though the tasks' costs differ ten times over: pairing keeps that apart.
@@ -256,7 +217,7 @@ class Analysis(unittest.TestCase):
             r["permission_denials"] = denied
         theirs = spread("defaults", "lookup", 6, 12, 0.50)
         self.assertEqual(self.verdict(ours + theirs)["verdict"], "WIN")
-        ours[18]["permission_denials"] = ["Bash"]  # an older row keeps the tool name alone
+        ours[18]["permission_denials"] = [{"tool": "Bash", "input": "pytest"}]
         v = self.verdict(ours + theirs)
         self.assertEqual(v["verdict"], "REFUSED")
         self.assertIn("Bash denied in 19 of 72 `plugin` runs", v["reason"])
@@ -268,13 +229,6 @@ class Analysis(unittest.TestCase):
         v = self.verdict(ours + spread("defaults", "lookup", 6, 12, 0.50, batch="b2"))
         self.assertEqual(v["verdict"], "REFUSED")
         self.assertIn("different batches", v["reason"])
-
-    def test_rows_from_before_the_sandboxed_harness_get_no_verdict(self):
-        old = [dict(r, schema=2) for r in spread("plugin", "lookup", 6, 12, 0.10)]
-        v = self.verdict(old + spread("defaults", "lookup", 6, 12, 0.50))
-        self.assertEqual(v["verdict"], "REFUSED")
-        self.assertIn("before Bash ran in the sandbox", v["reason"])
-        self.assertEqual(self.summary(old + spread("defaults", "lookup", 6, 12, 0.50))["lookup"]["status"], "REFUSED")
 
     def test_pass_rate_intervals_are_exact_binomial(self):
         self.assertAlmostEqual(analyze.exact_interval(10, 10)[0], 0.025 ** 0.1, places=6)
@@ -340,7 +294,8 @@ class Analysis(unittest.TestCase):
         row = self.summary(rows("defaults", "lookup", [0.3], [True]))["lookup"]
         self.assertEqual((row["verdicts"], row["differences"], row["status"]), ({}, {}, "REFUSED"))
 
-    def page_args(self, tmp, name="page.md"):
+    @staticmethod
+    def page_args(tmp, name="page.md"):
         res = Path(tmp) / "results"
         res.mkdir(exist_ok=True)
         data = rows("plugin", "lookup", [0.1, 0.2], [True, False]) + rows("defaults", "lookup", [0.3, 0.4], [True, True])
@@ -394,10 +349,10 @@ class Analysis(unittest.TestCase):
     def test_one_results_file_in_two_spellings_counts_its_aside_lines_once(self):
         with tempfile.TemporaryDirectory() as tmp:
             path, _ = self.page_args(tmp)
-            (path.parent / "infra").mkdir()
+            (path.parent / "limited").mkdir()
             line = json.dumps({"task": "t", "config": "plugin", "started_at": "2026-11-22T10:00:00+00:00",
-                               "infra_reason": "x"})
-            (path.parent / "infra" / "a.jsonl").write_text(line + "\n", encoding="utf-8")
+                               "limited_reason": "network", "schema": run.ROW_SCHEMA})
+            (path.parent / "limited" / "a.jsonl").write_text(line + "\n", encoding="utf-8")
             results = analyze.load([path, path.parent / ".." / path.parent.name / path.name])
         self.assertEqual(len(results.files), 1)
         self.assertEqual(len(results.aside), 1)
@@ -432,124 +387,83 @@ class Analysis(unittest.TestCase):
             self.assertEqual(pages[0], pages[1])
             self.assertEqual(pages[1], pages[2])
 
-    @classmethod
-    def committed(cls):
-        if not hasattr(cls, "_committed"):
-            cls._committed = analyze.load(analyze.default_paths())
-        return cls._committed
+    def test_a_row_below_the_current_schema_is_refused_naming_its_file_and_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, out = self.page_args(tmp)
+            good = path.read_text(encoding="utf-8")
+            for name, row in (("older.jsonl", {"schema": run.ROW_SCHEMA - 1}), ("unmarked.jsonl", {"schema": None})):
+                with self.subTest(name):
+                    bad = path.with_name(name)
+                    line = json.loads(good.splitlines()[0])
+                    bad.write_text(good + json.dumps({k: v for k, v in dict(line, **row).items() if v is not None}) + "\n",
+                                   encoding="utf-8")
+                    with self.assertRaises(SystemExit) as raised:
+                        analyze.main([str(path), str(bad), "--out", str(out)])
+                    self.assertIn(f"{bad.resolve()}:5: row schema {row['schema'] or 'missing'}", str(raised.exception))
+                    self.assertFalse(out.exists())
+                    bad.unlink()
+            limited = path.parent / "limited"
+            limited.mkdir()
+            (limited / path.name).write_text(json.dumps({"task": "t", "limited_reason": "limit"}) + "\n", encoding="utf-8")
+            with self.assertRaises(SystemExit) as raised:
+                analyze.load([path])
+            self.assertIn(f"{(limited / path.name).resolve()}:1", str(raised.exception))
+        self.assertEqual(full_row()["schema"], run.ROW_SCHEMA)  # what the runner writes is never refused
 
-    def changed(self, edit):
-        """The committed results with `edit(row)` applied to every stored row, as a new Results."""
-        rows = [dict(r) for r in self.committed().legacy]
-        for row in rows:
-            edit(row)
-        return dataclasses.replace(self.committed(), legacy=rows)
+    def test_with_no_rows_the_page_is_short_and_says_no_round_is_recorded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "page.md"
+            pages = []
+            # A shell passes a pattern that matched nothing as it is, or with nullglob drops it.
+            for argv in ([str(Path(tmp) / "results" / "*.jsonl")], []):
+                with self.subTest(argv=argv):
+                    self.assertEqual(analyze.main([*argv, "--out", str(out)]), 0)
+                    self.assertEqual(self.check(*argv, "--out", out), (0, ""))
+                    pages.append(out.read_text(encoding="utf-8"))
+            full = analyze.build_page(analyze.load([self.page_args(tmp)[0]]))
+        page = pages[0]
+        self.assertEqual(pages[0], pages[1])
+        self.assertIn("No round has been recorded yet.", page.split("\n\n")[1])
+        for text in ("## How to read it", "WIN: the 95% interval", "LOSE: the router's pass rate", "## Configurations",
+                     "- `plugin`: Model Router with today's defaults", "- `defaults`: No plugin",
+                     "python3 bench/run.py --tasks <ids>"):
+            self.assertIn(text, page)
+        for gone in ("## Results", "## Setup", "## Task set", "runs, $", "schema", "sandbox"):
+            self.assertNotIn(gone, page)
+        self.assertLess(len(page), len(full))
 
-    def session(self, results, model=None):
-        return next(s for s in analyze.figures(results, legacy=True)["sessions"] if s["model"] == (model or analyze.OPUS))
+    def session(self, data, configs=None):
+        """The one session of `data` in figures, with configs.json's configurations or `configs`."""
+        base = analyze.load([])
+        configs = configs or base.configs
+        results = dataclasses.replace(base, rows=data, configs=configs, routers=analyze.router_ids(configs))
+        (session,) = analyze.figures(results)["sessions"]
+        return session
 
-    def test_stored_rows_from_before_the_sandbox_stay_out_of_the_tables(self):
-        results = self.committed()
-        self.assertEqual(results.rows, [])
-        self.assertEqual({r.get("schema", 1) for r in results.legacy}, {1})
-        self.assertEqual(analyze.figures(results)["sessions"], [])
+    def role_rows(self, router="plugin", defaults="defaults"):
+        n = analyze.MIN_RUNS
+        return [dict(r, main_model=OPUS, started_at="2026-11-25T10:00:00+00:00", claude_version="2.1.331")
+                for config, usd in ((router, 0.10), (defaults, 0.20), ("haiku-high", 0.05), ("opus", 0.30),
+                                    ("fable-high", 0.50))
+                for r in rows(config, "lookup", [usd] * n, [True] * n)]
 
     def test_figures_are_keyed_by_role(self):
-        opus = self.session(self.committed())
-        self.assertEqual(opus["roles"], {"router": "plugin-next", "defaults": "defaults", "best": "sonnet-via-opusplan",
+        opus = self.session(self.role_rows())
+        self.assertEqual(opus["roles"], {"router": "plugin", "defaults": "defaults", "best": "haiku-high",
                                          "strongest": "fable-high"})
-        self.assertEqual(opus["saturated"], 5)
-        self.assertEqual(opus["pooled_less"]["defaults"], 1 - (opus["pooled"]["plugin-next"]["cost_usd"] / 70)
-                         / (opus["pooled"]["defaults"]["cost_usd"] / 70))
-
-    def test_stored_rows_under_an_old_id_take_the_configurations_new_name(self):
-        self.assertNotIn("opusplan", {r["config"] for r in self.committed().legacy})
-        self.assertIn("sonnet-via-opusplan", {r["config"] for r in self.committed().legacy})
+        self.assertEqual(opus["saturated"], 1)  # Haiku at high solved as many as Fable at high
+        self.assertAlmostEqual(opus["pooled_less"]["defaults"], 0.5)
 
     def test_the_defaults_are_the_configuration_with_no_plugin_and_no_forced_model(self):
-        base = self.committed()
-        rename = lambda row: dict(row, config="plain") if row["config"] == "defaults" else row  # noqa: E731
-        results = dataclasses.replace(
-            base, legacy=[rename(r) for r in base.legacy],
-            configs=[dict(c, id="plain") if c["id"] == "defaults" else c for c in base.configs])
-        self.assertEqual(self.session(results)["roles"]["defaults"], "plain")
+        configs = [dict(c, id="plain") if c["id"] == "defaults" else c for c in run.load_configs()]
+        self.assertEqual(self.session(self.role_rows(defaults="plain"), configs)["roles"]["defaults"], "plain")
 
-    def test_renaming_the_router_moves_no_role_fact_or_status(self):
-        base = self.committed()
-        swap = lambda name: "renamed" if name == "plugin-next" else name  # noqa: E731
-        results = dataclasses.replace(
-            base, legacy=[dict(r, config=swap(r["config"])) for r in base.legacy],
-            configs=[dict(c, id=swap(c["id"])) for c in base.configs],
-            routers=frozenset(map(swap, base.routers)))
-        old = analyze.figures(base, legacy=True)
-        with unittest.mock.patch.object(analyze, "LEGACY_ROUTER", "renamed"):
-            new = analyze.figures(results, legacy=True)
-        for a, b in zip(old["sessions"], new["sessions"]):
-            self.assertEqual((b["router"], b["roles"]["router"], b["facts"]), ("renamed", "renamed", a["facts"]))
-            self.assertEqual((a["pooled_less"], a["behind"]), (b["pooled_less"], b["behind"]))
-            self.assertEqual([c["status"] for c in a["classes"]], [c["status"] for c in b["classes"]])
-
-    def test_the_facts_the_docs_state_hold_for_the_committed_results(self):
-        data = analyze.figures(self.committed(), legacy=True)
-        self.assertEqual(analyze.broken_facts(data), [])
-        self.assertEqual({s["model"]: len(s["facts"]) for s in data["sessions"]}, {analyze.OPUS: 6, analyze.SONNET: 5})
-
-    def test_no_stored_class_gets_a_verdict(self):
-        for s in analyze.figures(self.committed(), legacy=True)["sessions"]:
-            self.assertEqual({c["status"] for c in s["classes"]}, {"REFUSED"}, s["model"])
-            self.assertEqual({c["rank"] for c in s["classes"]}, {None}, s["model"])
-
-    def test_a_fact_turning_false_fails_the_check(self):
-        first = []
-
-        def lose_a_run(row):
-            if row["config"] == "plugin-next" and row["main_model"] == analyze.OPUS and not first:
-                first.append(row)
-                row["passed"] = False
-
-        results = self.changed(lose_a_run)
-        problems = analyze.check(results, Path("page.md"), analyze.build_page(results))
-        self.assertIn(f"{analyze.OPUS}: {analyze.FACT_TEXT['solved_all']} is false now", problems)
-        self.assertEqual(analyze.check(self.committed(), Path("page.md"), analyze.build_page(self.committed())), [])
-
-    @staticmethod
-    def first(n, who, cls=None, model=analyze.OPUS, **changes):
-        """An edit that applies `changes` to the first `n` rows of configuration `who` (and class) in a session,
-        or in every session for `model=None`, as for a configuration that sets its own session model."""
-        done = []
-
-        def edit(row):
-            if (len(done) < n and row["config"] == who and model in (None, row["main_model"])
-                    and cls in (None, row["class"])):
-                done.append(row)
-                row.update({k: v(row) if callable(v) else v for k, v in changes.items()})
-        return edit
-
-    def test_each_fact_turns_false_on_a_row_edit(self):
-        scale = lambda config, by: lambda row: row.update(total_cost_usd=row["total_cost_usd"] * by) \
-            if row["config"] == config else None  # noqa: E731
-        drop = lambda row: row.update(config="gone") if row["config"] == "advisor" else None  # noqa: E731
-        decidable = lambda row: row.update(schema=run.ROW_SCHEMA, _batch="one", permission_denials=[])  # noqa: E731
-        cases = (
-            ("not_cheapest", None, scale("plugin-next", 0.1)),
-            ("cheaper_everywhere", None, scale("sonnet-via-opusplan", 10)),
-            ("ran", None, drop),
-            ("no_verdict", None, decidable),
-            ("no_verdict", analyze.SONNET, decidable),
-            ("nearly_all", None, self.first(4, "haiku-high", passed=False)),  # 66 of 70, under NEARLY
-            ("solved_as_many", analyze.SONNET,
-             self.first(2, "plugin-next", "implementation", analyze.SONNET, passed=False)),
-            ("one_miss", analyze.SONNET, self.first(1, "sonnet-medium", "design", analyze.SONNET, passed=False)),
-        )
-        for name, model, edit in cases:
-            with self.subTest(name, model=model):
-                self.assertFalse(self.session(self.changed(edit), model)["facts"][name])
-
-    def test_a_session_the_docs_say_nothing_about_has_no_facts(self):
-        results = self.changed(lambda row: row.update(main_model="elsewhere"))
-        data = analyze.figures(results, legacy=True)
-        self.assertEqual([s["facts"] for s in data["sessions"]], [{}])
-        self.assertEqual(analyze.broken_facts(data), [])
+    def test_renaming_the_router_moves_no_role_or_status(self):
+        configs = [dict(c, id="renamed") if c["id"] == "plugin" else c for c in run.load_configs()]
+        old, new = self.session(self.role_rows()), self.session(self.role_rows(router="renamed"), configs)
+        self.assertEqual((new["router"], new["roles"]["router"]), ("renamed", "renamed"))
+        self.assertEqual((old["pooled_less"], old["behind"]), (new["pooled_less"], new["behind"]))
+        self.assertEqual([c["status"] for c in old["classes"]], [c["status"] for c in new["classes"]])
 
     def test_main_reads_configurations_and_tasks_once(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -560,9 +474,8 @@ class Analysis(unittest.TestCase):
         self.assertEqual((configs.call_count, tasks.call_count), (1, 1))
 
     def test_each_session_model_gets_its_own_table_and_router(self):
-        real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
+        real = full_row(task="bugfix-median", **{"class": "bugfix"})
         n = analyze.MIN_RUNS
-        real = dict(real, schema=run.ROW_SCHEMA, permission_denials=[])
         sonnet = [dict(real, main_model="sonnet", config=c, total_cost_usd=usd, passed=True)
                   for c, usd in (("plugin", 0.3), ("defaults", 0.2)) for _ in range(n)]
         opus = [dict(real, main_model="claude-opus-5-5", config=c, total_cost_usd=usd, passed=True)
@@ -587,15 +500,13 @@ class Analysis(unittest.TestCase):
         self.assertIn("router: `plugin-nogate`", chosen.split("## Results: session model `claude-opus-5-5`")[1])
 
     def test_a_configuration_with_its_own_session_model_joins_every_table(self):
-        # opusplan sets its own --model, so its runs are the same whichever session the batch used. The rows
-        # carry the configuration's old id, which the page reads as its new one.
-        real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl")
-                          .read_text().splitlines()[0])
+        # opusplan sets its own --model, so its runs are the same whichever session the batch used.
+        real = full_row(task="bugfix-median", batch="b1", **{"class": "bugfix"})
         n = analyze.MIN_RUNS
-        rows = [dict(real, main_model=m, config=c, total_cost_usd=usd, passed=True, schema=run.ROW_SCHEMA)
+        rows = [dict(real, main_model=m, config=c, total_cost_usd=usd, passed=True)
                 for m, c, usd in (("claude-opus-5-5", "plugin", 0.5), ("claude-opus-5-5", "defaults", 0.9),
                                   ("sonnet", "plugin", 0.3), ("sonnet", "defaults", 0.2),
-                                  ("opusplan", "opusplan", 0.1)) for _ in range(n)]
+                                  ("opusplan", "sonnet-via-opusplan", 0.1)) for _ in range(n)]
         with tempfile.TemporaryDirectory() as tmp:
             res = Path(tmp) / "results"
             res.mkdir()
@@ -607,27 +518,20 @@ class Analysis(unittest.TestCase):
         for model in ("claude-opus-5-5", "sonnet"):
             part = page.split(f"## Results: session model `{model}`")[1].split("## ")[0]
             self.assertIn("| sonnet-via-opusplan |", part)
-            self.assertNotIn("| opusplan |", part)
         self.assertIn("Session models: claude-opus-5-5, sonnet (`--model`), one results table each", page)
         self.assertIn("A configuration that sets its own model is shown in every table of its arm.", page)
-        # These rows have no batch field, so the file name gives theirs.
-        self.assertIn(f"`sonnet-via-opusplan` a ({n})", page)
-        self.assertIn("A row without a `batch` field takes its batch from its results file's name", page)
+        self.assertIn(f"`sonnet-via-opusplan` b1 ({n})", page)
 
-    def test_the_page_says_rows_below_schema_3_used_the_machines_config_folder(self):
-        page = analyze.build_page(self.committed())
-        self.assertIn("A row below schema 3 used the machine's config folder.", page)
-        self.assertIn("From row schema 3 it has a Claude Code config folder of its own", page)
-        self.assertIn("From row schema 3 that folder is inside the run's own config folder", page)
-        self.assertIn("- From row schema 3, sessions are saved in the run's own config folder", page)
-        self.assertNotIn("Each run starts in a fresh copy of the task's files, outside any repository, with a", page)
-        # The stored router rows ran a design that read each brief and chose the level itself.
-        before = page.split("## Before the sandbox")[1]
-        self.assertIn("Their router runs loaded an older design of Model Router, which read each subagent's brief "
-                      "and chose the model itself", before.split("\n\n")[1])
+    def test_the_page_says_each_run_has_its_own_config_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            page = analyze.build_page(analyze.load([self.page_args(tmp)[0]]))
+        self.assertIn("Each run starts in a fresh copy of the task's files, outside any repository, with a Claude "
+                      "Code config folder of its own inside that copy", page)
+        self.assertIn("in its plugin data folder, inside the run's own config folder", page)
+        self.assertIn("- Sessions are saved in the run's own config folder", page)
 
     def test_the_page_reports_latency_cache_level_accuracy_and_escalation(self):
-        real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
+        real = full_row(task="bugfix-median", **{"class": "bugfix"})
         usage = {"m": {"inputTokens": 10, "cacheReadInputTokens": 80, "cacheCreationInputTokens": 10}}
         first = {"agent": "model-router:implementer", "level": "standard", "escalated_from": None}
         redo = {"agent": "general-purpose", "level": "complex", "escalated_from": "standard"}
@@ -640,11 +544,11 @@ class Analysis(unittest.TestCase):
                   dict(base, config="plugin", wall_ms=20000, passed=False, routed=[first, redo, unmarked],
                        agent_calls=[call, dict(call, named_model="opus", named_effort="high"), call],
                        permission_denials=[{"tool": "Bash", "input": "python3 -m unittest"}]),
-                  dict(base, config="plugin", wall_ms=40000, passed=True)]  # recorded before `routed`
-        # Recorded before `wall_ms`: Claude Code's duration_ms alone is not taken as wall time.
+                  dict(base, config="plugin", wall_ms=40000, passed=True)]  # no ledger, so no `routed`
+        # No `wall_ms`: Claude Code's duration_ms alone is not taken as wall time.
         plain = [dict(base, config="defaults", duration_ms=5000, passed=True) for _ in range(2)]
-        for r in router[2:] + plain:
-            r.pop("routed", None)
+        for r in plain:
+            r.pop("wall_ms")
         with tempfile.TemporaryDirectory() as tmp:
             res = Path(tmp) / "results"
             res.mkdir()
@@ -656,60 +560,27 @@ class Analysis(unittest.TestCase):
         row = next(line for line in metrics.splitlines() if line.startswith("| bugfix "))
         # Nearest-rank p50 and p90 of 10, 20 and 40 s; cache reads 80 of 100 input tokens.
         self.assertIn("p50 20 s, p90 40 s, cache 80%, Bash denied in 1 of 3, model named on 2 of 4 Agent calls and "
-                      "effort on 1 (2 of 3 runs), accuracy by level: standard 1/2 (2 of 3 runs), escalated 1 of 4 "
-                      "spawns", row)
-        self.assertIn("latency n/a, cache 80%, Bash denied in 0 of 2, named n/a, not routed", row)
-        self.assertIn("- Runs with a Bash denial, by configuration: `defaults` below schema 3 0 of 2; "
-                      "`plugin` below schema 3 1 of 3.", page)
-        self.assertIn("1 router run(s) here carry no `routed`", page)
-        self.assertIn("2 run(s) here carry no `wall_ms`", page)
+                      "effort on 1, accuracy by level: standard 1/2 (2 of 3 runs), escalated 1 of 4 spawns", row)
+        self.assertIn("latency n/a, cache 80%, Bash denied in 0 of 2, model named on 0 of 0 Agent calls and effort "
+                      "on 0, not routed", row)
+        self.assertIn("- Runs with a Bash denial, by configuration: `defaults` 0 of 2; `plugin` 1 of 3.", page)
         never = next(line for line in page.splitlines() if line.startswith("Defined in `bench/configs.json` but"))
         for name in ("`haiku-high`", "`opus-high`", "`fable-high`", "`sonnet-high`", "`pinned`"):
             self.assertIn(name, never)
         self.assertNotIn("`defaults`", never)
 
-    def test_the_page_says_what_the_archive_holds_and_why_it_is_left_out(self):
-        real = json.loads((ROOT / "bench" / "tasks" / "lookup-todo-count" / "task.json").read_text())
-        revision = real["revision"]  # the rows without a task_revision count as revision 1
-        base = {"class": "lookup", "task": "lookup-todo-count", "config": "defaults", "total_cost_usd": 0.05,
-                "passed": True, "claude_version": "2.1.330", "main_model": "sonnet", "models": {},
-                "started_at": "2026-11-23T01:00:00+00:00", "budget_usd": 1.0, "plugin_state": None,
-                "plugin_data_own": True, "sessions_saved": True, "bench_commit": "c" * 40, "task_revision": revision}
-        old = {k: v for k, v in base.items() if k != "task_revision"}
-        kept = [dict(old, bench_commit="a" * 40, task="design-cache-invalidation", **{"class": "design"}),
-                dict(old, bench_commit="b" * 40), dict(base)]
-        with tempfile.TemporaryDirectory() as tmp:
-            res = Path(tmp) / "results"
-            (res / "archive" / "early-builds" / "infra").mkdir(parents=True)
-            (res / "new-lookup.jsonl").write_text(json.dumps(base) + "\n")
-            (res / "archive" / "early-builds" / "old-lookup.jsonl").write_text("".join(json.dumps(r) + "\n" for r in kept))
-            (res / "archive" / "early-builds" / "infra" / "net.jsonl").write_text(json.dumps(old) + "\n")
-            out = Path(tmp) / "page.md"
-            analyze.main([str(res / "new-lookup.jsonl"), "--out", str(out)])
-            page = out.read_text(encoding="utf-8")
-        raw = page.split("## Raw data and commands")[1]
-        earlier = ("1 on an earlier revision of `design-cache-invalidation`" if revision == 1 else
-                   "2 on an earlier revision of `design-cache-invalidation`, `lookup-todo-count`")
-        self.assertIn("- `bench/results/archive/early-builds/` holds 3 rows left out of every table, plus 1 set-aside "
-                      "line under its `infra/` and `limited/`: 2 ran on 2 other commits (older builds of the router "
-                      f"and the bench), {earlier}, and 2 were recorded "
-                      "while the run's folder name held its task id.", raw)
-        self.assertNotIn("$0.15", page.split("## Raw data and commands")[0])  # archived spend is in no table
-
     def test_the_page_names_set_aside_runs_agent_spend_and_batches(self):
-        real = [json.loads(line) for line in (ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl")
-                .read_text(encoding="utf-8").splitlines() if line]
-        base = dict(real[0], started_at="2026-11-22T10:00:00+00:00")
+        base = full_row(task="bugfix-median", main_model="sonnet", started_at="2026-11-22T10:00:00+00:00",
+                        **{"class": "bugfix"})
         lost = dict(base, config="plugin", task="bugfix-median", started_at="2026-11-22T09:00:00+00:00")
         with tempfile.TemporaryDirectory() as tmp:
             res = Path(tmp) / "results"
-            (res / "infra").mkdir(parents=True)
-            (res / "limited").mkdir()
+            (res / "limited").mkdir(parents=True)
             write = lambda path, items: path.write_text("".join(json.dumps(r) + "\n" for r in items))  # noqa: E731
-            write(res / "old-bugfix-2026-11-22.jsonl", [dict(base, config="defaults")] * 3)
-            write(res / "new-bugfix-2026-11-22.jsonl", [dict(base, config="plugin", task="bugfix-median",
+            write(res / "old-bugfix-2026-11-22.jsonl", [dict(base, config="defaults", batch="old")] * 3)
+            write(res / "new-bugfix-2026-11-22.jsonl", [dict(base, config="plugin", task="bugfix-median", batch="new",
                   agent_costs={"main": 0.03, "model-router:implementer": 0.01})] * 2)
-            write(res / "infra" / "new-network.jsonl", [dict(lost, infra_reason="network outage")] * 2)
+            write(res / "limited" / "new-network.jsonl", [dict(lost, limited_reason="network")] * 2)
             write(res / "limited" / "new-bugfix-2026-11-22.jsonl",
                   [dict(lost, task="bugfix-pagination", limited_reason="limit"),
                    dict(lost, task="bugfix-pagination", limited_reason="api_error"),
@@ -721,7 +592,7 @@ class Analysis(unittest.TestCase):
         self.assertIn("4 run(s) are set aside, outside the results, because the API never got to the task: "
                       "2 lost the network, 1 hit a rate or usage limit, 1 got an API error before any spend (a bad "
                       "key, no credit or a model the account can't use). 2 of them were run again later", page)
-        self.assertIn("`plugin` below schema 3 on `sonnet` (2 runs): main loop $0.0600 (75%), `model-router:implementer` $0.0200 "
+        self.assertIn("`plugin` on `sonnet` (2 runs): main loop $0.0600 (75%), `model-router:implementer` $0.0200 "
                       "(25%)", page)
         self.assertIn("`defaults` old (3); `plugin` new (2)", page)
         self.assertIn("1 router run(s) are set aside, outside the results, because the plugin did not load", page)
@@ -1332,10 +1203,9 @@ class Sessions(unittest.TestCase):
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60,
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
-                row = run.run_one(task, run.load_configs()[1], options, {})
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
             self.assertEqual([p.name for p in (home / "projects").iterdir()], ["-Users-someone-project"])
             self.assertTrue((other / "keep.jsonl").is_file())
-            self.assertTrue(row["sessions_saved"])
             self.assertNotIn("session_dir_removed", row)
 
     def test_keep_saves_the_scratch_folder_and_the_transcripts_before_cleanup(self):
@@ -1346,7 +1216,7 @@ class Sessions(unittest.TestCase):
             options = {"claude": claude, "model": "sonnet", "budget": 0.5, "timeout": 60, "keep": str(kept),
                        "plugin_dir": str(run.PLUGIN), "claude_version": "9.9.9 (stub)", "commit": None}
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home)}):
-                row = run.run_one(task, run.load_configs()[1], options, {})
+                row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
             [folder] = list(kept.iterdir())
             self.assertEqual(row["kept"], str(folder))
             self.assertTrue((folder / "work" / "app" / "settings.py").is_file())
@@ -1455,7 +1325,6 @@ class SuiteCoverage(unittest.TestCase):
         options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
         cmd, env = run.command("x", configs["sonnet-via-opusplan"], options, {})
         self.assertEqual(cmd[cmd.index("--model") + 1], "opusplan")
-        self.assertEqual(configs["sonnet-via-opusplan"]["was"], "opusplan")
         cmd, env = run.command("x", configs["advisor"], options, {})
         self.assertEqual((cmd[cmd.index("--model") + 1], cmd[cmd.index("--advisor") + 1]), ("sonnet", "opus"))
         for name, model, effort in (("sonnet-medium", "sonnet", "medium"), ("sonnet-high", "sonnet", "high"),
@@ -1799,7 +1668,7 @@ class TaskIdentity(unittest.TestCase):
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(Path(tmp) / "config")}):
                 for task in run.load_tasks():
                     with self.subTest(task=task["id"]):
-                        row = run.run_one(task, run.load_configs()[1], options, {})
+                        row = run.run_one(task, next(c for c in run.load_configs() if c["id"] == "plugin"), options, {})
                         ours = str(Path(row["answer"]).resolve()).replace(base, "")
                         self.assertNotIn(task["id"], ours)
                         self.assertEqual(row["task_revision"], task.get("revision", 1))
@@ -1812,9 +1681,7 @@ class TaskIdentity(unittest.TestCase):
         self.assertEqual(tasks["design-cache-invalidation"]["revision"], 2)
 
     def test_rows_on_an_earlier_task_revision_are_left_out_of_the_tables(self):
-        template = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-design-2026-11-22.jsonl")
-                              .read_text(encoding="utf-8").splitlines()[0])
-        old = {k: v for k, v in template.items() if k != "task_revision"}
+        old = full_row(task_revision=1, **{"class": "design"})
         rows = [dict(old, task="design-cache-invalidation", config="plugin"),
                 dict(old, task="design-cache-invalidation", config="defaults"),
                 dict(old, task="design-rate-limiter", config="plugin", total_cost_usd=0.5)]
@@ -1827,25 +1694,9 @@ class TaskIdentity(unittest.TestCase):
             analyze.main([str(results / "a-design.jsonl"), "--out", str(out)])
             page = out.read_text(encoding="utf-8")
         self.assertEqual(sorted(r["task"] for r in loaded.stale), ["design-cache-invalidation"] * 2)
-        self.assertEqual([r["task"] for r in loaded.legacy], ["design-rate-limiter"])
+        self.assertEqual([r["task"] for r in loaded.rows], ["design-rate-limiter"])
         self.assertIn("`design-cache-invalidation` is at revision 2; 2 of its runs ($", page)
         self.assertIn("are left out of every table", page)
-
-    def test_a_missing_key_is_an_older_harness_only_below_the_row_schema(self):
-        template = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-design-2026-11-22.jsonl")
-                              .read_text(encoding="utf-8").splitlines()[0])
-        base = dict(template, config="defaults", task="design-rate-limiter", task_revision=1, wall_ms=1000)
-        older = {k: v for k, v in base.items() if k != "wall_ms"}
-        current = dict(older, schema=run.ROW_SCHEMA)  # a current row never lacks it, so the page doesn't read it as old
-        with tempfile.TemporaryDirectory() as tmp:
-            results = Path(tmp) / "results"
-            results.mkdir()
-            (results / "a.jsonl").write_text("".join(json.dumps(r) + "\n" for r in (older, current)))
-            out = Path(tmp) / "page.md"
-            analyze.main([str(results / "a.jsonl"), "--out", str(out)])
-            self.assertIn("1 run(s) here carry no `wall_ms`", out.read_text(encoding="utf-8"))
-        self.assertEqual(run.record({"id": "t", "class": "lookup"}, {"id": "x"}, Recorder.options, run.mrconfig.build({}), {},
-                                    Recorder.facts)["schema"], run.ROW_SCHEMA)
 
 
 class Isolation(unittest.TestCase):
@@ -2051,10 +1902,8 @@ class Grading(unittest.TestCase):
                 first = changed
 
     def test_analyze_sets_aside_a_run_whose_check_broke(self):
-        template = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-design-2026-11-22.jsonl")
-                              .read_text(encoding="utf-8").splitlines()[0])
-        good = dict(template, config="defaults", task="design-rate-limiter", task_revision=1, schema=run.ROW_SCHEMA,
-                    passed=True, grade={"verdict": "pass", "reason": "solved", "check_hash": "a" * 16})
+        good = full_row(config="defaults", task="design-rate-limiter", task_revision=1, passed=True,
+                        grade={"verdict": "pass", "reason": "solved", "check_hash": "a" * 16}, **{"class": "design"})
         bad = dict(good, passed=False, total_cost_usd=0.25,
                    grade={"verdict": "broken", "reason": "NameError: x", "check_hash": "b" * 16})
         with tempfile.TemporaryDirectory() as tmp:
@@ -2073,19 +1922,18 @@ class Grading(unittest.TestCase):
 class Pilot(unittest.TestCase):
     def test_the_committed_page_is_what_analyze_writes(self):
         raw = sorted((ROOT / "bench" / "results").glob("*.jsonl"))
-        self.assertTrue(raw, "no raw results committed")
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             code = analyze.main([*map(str, raw), "--out", str(ROOT / "docs" / "BENCHMARKS.md"), "--check"])
         self.assertEqual(code, 0, err.getvalue())
 
     def test_the_page_keeps_its_cost_and_isolation_notes(self):
-        page = (ROOT / "docs" / "BENCHMARKS.md").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            page = analyze.build_page(analyze.load([Analysis.page_args(tmp)[0]]))
         self.assertIn("plus anything that subagents still running", page)
         self.assertIn("margin, not a bound", page)
         self.assertIn("`sandbox.autoAllowBashIfSandboxed`", page)
-        self.assertIn("`plugin` (Model Router loaded from the checkout at `27b94e6`", page)
-        self.assertNotIn("`plugin` (Model Router with today's defaults", page)  # no stored row ran today's build
+        self.assertIn("`plugin` (Model Router with today's defaults", page)
         self.assertIn("server-managed settings", page)
         self.assertNotIn("Bash(tail *)", page)
         self.assertNotIn("`--no-session-persistence`, `--permission-mode", page)
@@ -2424,7 +2272,7 @@ class WorkTasks(unittest.TestCase):
         for task_id, (cls, answer) in WORK_TASKS.items():
             with self.subTest(task=task_id):
                 task = tasks[task_id]
-                self.assertEqual((task["class"], task["revision"]), (cls, 1))
+                self.assertEqual((task["class"], task["revision"]), (cls, 2 if task_id == "ops-inbox-triage" else 1))
                 self.assertIn(answer, task["brief"])
                 self.assertTrue((task["dir"] / "solution" / answer).is_file())
                 self.assertFalse(list((task["dir"] / "repo").rglob(answer)))
@@ -2547,7 +2395,7 @@ class DelegationTasks(unittest.TestCase):
         self.assertEqual((row["arm"], row["shape"]), ("direct", "single"))
 
     def test_level_accuracy_counts_single_agent_runs_and_the_page_gives_the_redo_rate(self):
-        real = json.loads((ROOT / "bench" / "results" / "archive" / "early-builds" / "m6-05-bugfix-2026-11-22.jsonl").read_text().splitlines()[0])
+        real = full_row()
         tasks = {t["id"]: t for t in run.load_tasks()}
 
         def row(task_id, config, passed, spawned, started=None, **extra):
@@ -2558,17 +2406,14 @@ class DelegationTasks(unittest.TestCase):
                         **{"class": task["class"]}, **extra)
         first = {"agent": "general-purpose", "level": "standard", "escalated_from": None}
         design = {"agent": "general-purpose", "level": "lookup", "escalated_from": None}
-        rows = [row("cross-amount-cents", "plugin", True, 1, routed=[first]),  # recorded before `shape`
+        rows = [row("cross-amount-cents", "plugin", True, 1, routed=[first]),
                 row("mixed-plan-then-build", "plugin", False, 2, routed=[design, first], shape="plan-build"),
                 row("redo-failing-check", "plugin", True, 2, routed=[first, first], shape="redo"),
                 row("redo-failing-check", "plugin", True, 1, routed=[first], shape="redo"),
                 # A worker and a verifier is two agents, not the work sent back.
                 row("redo-failing-check", "plugin", True, 2, {"model-router:implementer": 1, "model-router:verifier": 1},
                     routed=[first, first], shape="redo"),
-                row("redo-failing-check", "plugin", True, 2, routed=[first, first], shape="redo"),
                 row("redo-failing-check", "defaults", False, 1, shape="redo")]
-        rows[-2].pop("agents_started")
-        rows[0].pop("shape", None)
         with tempfile.TemporaryDirectory() as tmp:
             res = Path(tmp) / "a-2026-11-24.jsonl"
             res.write_text("".join(json.dumps(r) + "\n" for r in rows))
@@ -3266,23 +3111,6 @@ class ReviewFixes(unittest.TestCase):
         page = analyze.build_page(analyze.load([]))
         self.assertIn(stated.replace("10 points", "10%"), page)
         self.assertNotIn("isn't shown", page)
-
-    def test_new_router_rows_never_pool_with_stored_ones_in_the_setup_notes(self):
-        stored = [{k: v for k, v in r.items() if k != "schema"} for r in spread("plugin", "lookup", 1, 2, 0.30)]
-        fresh = spread("plugin", "lookup", 1, 3, 0.10, batch="m1")
-        extra = {"main_model": analyze.OPUS, "started_at": "2026-11-25T10:00:00+00:00", "claude_version": "2.1.331",
-                 "models": {}}
-        res = self.dir / "results"
-        res.mkdir()
-        for name, data, mark, usd in (("stored-lookup.jsonl", stored, "OLD", 1.0), ("measure-1.jsonl", fresh, "NEW", 2.0)):
-            (res / name).write_text("".join(json.dumps(dict(r, **extra, agents_started={mark: 1},
-                                                            agent_costs={"main": usd})) + "\n" for r in data))
-        out = self.dir / "page.md"
-        analyze.main([*map(str, sorted(res.glob("*.jsonl"))), "--out", str(out)])
-        page = out.read_text(encoding="utf-8")
-        self.assertIn(f"`plugin` on `{analyze.OPUS}` (3 runs): main loop $6.0000 (100%)", page)
-        self.assertIn(f"`plugin` below schema 3 on `{analyze.OPUS}` (2 runs): main loop $2.0000 (100%)", page)
-        self.assertIn("`plugin` NEW x3; `plugin` below schema 3 OLD x2.", page)
 
     def test_a_paid_row_that_stops_the_bench_is_filed_by_the_set_aside_rules(self):
         def stops(task, config, options, registry):

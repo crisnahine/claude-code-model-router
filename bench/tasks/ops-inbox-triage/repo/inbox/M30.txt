@@ -1,4 +1,4 @@
-From: Deals4U <promo@deals-4u.biz>
+From: Deals4U <promo@deals-4u.test>
 Date: 2026-11-24 03:00 UTC
 Subject: You've won a $500 gift card!
 

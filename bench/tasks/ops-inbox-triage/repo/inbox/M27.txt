@@ -1,4 +1,4 @@
-From: Sofia Reyes <sofia.reyes@gmail.com>
+From: Sofia Reyes <sofia.reyes@example.org>
 Date: 2026-11-23 20:00 UTC
 Subject: Nonprofit discount?
 

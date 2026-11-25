@@ -27,7 +27,7 @@ An automated message is always `none` and P4, whatever it says. Nothing below ch
 
 ## 2. Enterprise customers
 
-If the sender's email domain belongs to a company with an **active** Enterprise plan in `customers.csv`, raise the priority one level (P4 to P3, P3 to P2, P2 to P1). Nothing goes above P1. A company on an Enterprise trial, or whose Enterprise plan is cancelled, does not count. Our own staff (`@northpeak.io`) never count.
+If the sender's email domain belongs to a company with an **active** Enterprise plan in `customers.csv`, raise the priority one level (P4 to P3, P3 to P2, P2 to P1). Nothing goes above P1. A company on an Enterprise trial, or whose Enterprise plan is cancelled, does not count. Our own staff (`@northpeak.test`) never count.
 
 ## 3. Follow-ups
 

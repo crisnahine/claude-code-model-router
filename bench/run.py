@@ -33,7 +33,7 @@ sys.path.insert(0, str(PLUGIN / "scripts"))
 from modelrouter import config as mrconfig  # noqa: E402
 from modelrouter.registry import Registry  # noqa: E402
 from modelrouter.ledger import read as read_ledger  # noqa: E402
-ROW_SCHEMA = 3  # a row's schema says which harness wrote it; analyze reads a missing key as old only below this
+ROW_SCHEMA = 3  # a row's schema says which harness wrote it; analyze refuses a row below this
 CLASSES = ("lookup", "implementation", "bugfix", "cross-module", "security-review", "root-cause", "design", "research",
            "document", "analysis", "operations", "redo")
 
@@ -772,7 +772,7 @@ def record(task: dict, config: dict, options: dict, registry_config: Registry, r
         and (any(c.get("ran_on") for c in facts.get("agent_calls") or []) or bool(facts.get("agent_types")))
         and not any(r.get("event") == "spawn" for r in ledger or []),
         "gate_events": sum(r.get("event") == "gate" for r in ledger or []),
-        "plugin_ref": config.get("plugin_ref"), "plugin_data_own": True, "sessions_saved": True,
+        "plugin_ref": config.get("plugin_ref"),
         "exit_code": code, "subtype": result.get("subtype"), "is_error": result.get("is_error"),
         "api_error_status": result.get("api_error_status"), "terminal_reason": result.get("terminal_reason"),
         "errors": result.get("errors"),

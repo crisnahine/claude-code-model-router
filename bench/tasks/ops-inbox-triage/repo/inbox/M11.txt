@@ -1,4 +1,4 @@
-From: Tom Baker <tom@dunmore.edu>
+From: Tom Baker <tom@dunmore.test>
 Date: 2026-11-23 13:20 UTC
 Subject: Pricing for 200 more seats
 

@@ -1,4 +1,4 @@
-From: Raj Patel <raj@copperleaf.co>
+From: Raj Patel <raj@copperleaf.test>
 Date: 2026-11-24 08:00 UTC
 Subject: Re: Scheduled reports stopped sending
 

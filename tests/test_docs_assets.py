@@ -215,7 +215,8 @@ class BrokenInputs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             torn = Path(tmp) / "results" / "a-lookup.jsonl"
             torn.parent.mkdir()
-            torn.write_text('{"task": "lookup-todo-count"}\n{"task": "look', encoding="utf-8")
+            first = json.dumps({"task": "lookup-todo-count", "schema": analyze.run.ROW_SCHEMA})
+            torn.write_text(first + '\n{"task": "look', encoding="utf-8")
             self.stops(lambda: analyze.load([torn]), f"{torn.resolve()}:2")
 
 

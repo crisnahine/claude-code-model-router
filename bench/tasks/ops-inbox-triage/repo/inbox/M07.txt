@@ -1,9 +1,9 @@
-From: Sam Ortega <sam@northpeak.io>
+From: Sam Ortega <sam@northpeak.test>
 Date: 2026-11-23 11:02 UTC
 Subject: Fwd: Invoice overdue - action required
 
 I think I messed up. This looked like a supplier invoice, so I clicked the link and typed my email password on the page before I noticed the address was wrong. I've changed my password since. Forwarding it so you can check.
 
 ---------- Forwarded message ----------
-From: Accounts <billing@invoices-secure-pay.net>
+From: Accounts <billing@invoices-secure-pay.test>
 Subject: Invoice overdue - action required
