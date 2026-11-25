@@ -68,7 +68,7 @@ Notices about pinned models go to `systemMessage`, shown to the user and kept ou
 
 ## The one denial
 
-It never approves a tool call (`SecurityClaims.test_it_never_approves_a_tool_call`). It denies one thing, on the settings-hook path only: a call it rewrote to a lower model that comes back five or more seconds later with no result or error in between, when the model the call would run on untouched is above `max_tier`. The denial names the model to use (`fallback._guard`; `RepeatGuard.test_the_cap_holds_even_when_a_lowering_rewrite_did_not_take`). The mod denies nothing. With no answer from the runtime and routing on, it lowers a named model above `max_tier` to the cap (`capped` in `hooks/router.ts`).
+It never approves a tool call (`SecurityClaims.test_it_never_approves_a_tool_call`). It denies one thing, on the settings-hook path only: a call it rewrote to a lower model that comes back five seconds to 30 minutes later with no result or error in between, when the model the call would run on untouched is above `max_tier`. The denial names the model to use (`fallback._guard`; `RepeatGuard.test_the_cap_holds_even_when_a_lowering_rewrite_did_not_take`). The mod denies nothing. With no answer from the runtime and routing on, it lowers a named model above `max_tier` to the cap (`capped` in `hooks/router.ts`).
 
 ## The mod
 

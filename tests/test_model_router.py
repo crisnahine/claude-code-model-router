@@ -2208,6 +2208,15 @@ class RepeatGuard(Sandbox):
         self.assertEqual(again["permissionDecision"], "deny")
         self.assertIn('model: "sonnet"', again["permissionDecisionReason"])
 
+    def test_a_copy_long_after_a_rewrite_that_never_ran_is_a_new_call(self):
+        self.options(max_tier="sonnet")
+        self.assertEqual(self.pre("general-purpose", LOOKUP, model="fable")["updatedInput"]["model"], "sonnet")
+        self.advance(fallback.REFUSED_WITHIN + 1)  # that rewrite was denied and never came back
+        again = self.pre("general-purpose", LOOKUP, model="fable")
+        self.assertEqual(again["updatedInput"]["model"], "sonnet")  # rewritten again, not denied or passed through
+        self.next_message()
+        self.assertEqual(self.pre("general-purpose", LOOKUP, model="fable")["permissionDecision"], "deny")
+
     def test_pending_calls_survive_a_new_user_prompt(self):
         self.pre("general-purpose", LOOKUP, model="haiku")
         hooks.user_prompt({"session_id": "s1", "prompt": "try that again"})

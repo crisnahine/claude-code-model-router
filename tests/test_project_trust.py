@@ -72,6 +72,17 @@ class ProjectFromASubfolder(Sandbox):
             with self.subTest(planted=planted.name), mock.patch.object(os, "stat", stat):
                 self.assertIsNone(agents.find("pinned-helper", self.sub))
 
+    def test_inside_a_submodule_its_agent_comes_before_the_users_as_claude_code_takes_it(self):
+        # sub-agents.md: project agents are found walking up from the working directory to the repository root, the
+        # closest winning, and project agents outrank ~/.claude/agents. Inside a submodule, that root is the submodule.
+        sub = self.project / "vendor" / "lib"
+        sub.mkdir(parents=True)
+        (sub / ".git").write_text("gitdir: ../../.git/modules/lib\n")
+        self.agent("helper", "opus", folder=sub / ".claude" / "agents")
+        self.agent("helper", "sonnet", folder=self.home / "agents")
+        self.assertEqual(agents.find("helper", sub)["model"], "opus")
+        self.assertEqual(agents.find("helper", self.project)["model"], "sonnet")  # below the cwd, out of the walk
+
     def test_after_cd_into_another_repository_the_sessions_agent_still_wins(self):
         other = Path(self.tmp.name) / "other"
         (other / ".git").mkdir(parents=True)

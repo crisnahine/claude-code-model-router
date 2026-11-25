@@ -9,6 +9,8 @@ from . import router
 
 # shortcut: a refused call re-issued within this many seconds is rewritten again; key on a message id if hooks get one
 REFUSED_AFTER = 5
+# A copy later than this is a new call, not a re-issue: a denied rewrite's record gets no result to clear it.
+REFUSED_WITHIN = 30 * 60
 
 
 def route(hook_input: dict, snap: settings.Snapshot) -> dict | None:
@@ -52,12 +54,13 @@ def forget(session_id: str | None, key: str) -> None:
 
 
 def refused(session_id: str | None, key: str) -> dict | None:
-    """This call's fallback rewrite, when the call shows up again before its result: the
+    """This call's fallback rewrite, when the call shows up again before its result, within REFUSED_WITHIN: the
     rewrite didn't run. A rewrite only seconds from now, either way, is a copy issued alongside
     it: a clock stepped back a little mustn't pass a fan-out's copies through unrouted, and one
     stamped far ahead still counts as refused, so a big jump back can't loop a rewrite."""
     rewrite = store.load_entry("pending", session_id).get(key)
-    if not isinstance(rewrite, dict) or abs(store.now() - (rewrite.get("at") or 0)) < REFUSED_AFTER:
+    age = store.now() - store.stamp(rewrite.get("at")) if isinstance(rewrite, dict) else 0
+    if not isinstance(rewrite, dict) or abs(age) < REFUSED_AFTER or age > REFUSED_WITHIN:
         return None
     return rewrite
 

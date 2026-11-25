@@ -460,6 +460,9 @@ test('a spawn a later mod moved to another family is marked for the result, and 
   await mod.spawn(spawnEvent({ tool_use_id: '../x' }), traced(spawnEvent({ model: 'opus' })))
   const kept = load() // the runtime left the call's own sonnet
   await kept.spawn(spawnEvent({ tool_use_id: 'tu8', model: 'sonnet' }), traced(spawnEvent({ model: 'fable' })))
+  // A call that names no model and that the runtime leaves alone: the engine's entry holds what it was handed, which
+  // names none either (TraceEntry.received; AgentSpawnInput.model is the Agent tool's parameter as given), so no mark.
+  await kept.spawn(spawnEvent({ tool_use_id: 'tu9' }), traced(spawnEvent()))
   assert.deepEqual([...mod.writes, ...kept.writes], [['/tmp/x/mod-calls/tu1.moved', ''], ['/tmp/x/mod-calls/tu8.moved', '']])
 })
 
