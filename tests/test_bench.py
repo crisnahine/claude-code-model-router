@@ -416,7 +416,7 @@ class Analysis(unittest.TestCase):
             pages = []
             # A shell passes a pattern that matched nothing as it is, or with nullglob drops it.
             for argv in ([str(Path(tmp) / "results" / "*.jsonl")], []):
-                with self.subTest(argv=argv):
+                with self.subTest(argv=argv), unittest.mock.patch.object(analyze, "PILOT", Path(tmp) / "pilot"):
                     self.assertEqual(analyze.main([*argv, "--out", str(out)]), 0)
                     self.assertEqual(self.check(*argv, "--out", out), (0, ""))
                     pages.append(out.read_text(encoding="utf-8"))
@@ -432,38 +432,34 @@ class Analysis(unittest.TestCase):
             self.assertNotIn(gone, page)
         self.assertLess(len(page), len(full))
 
-    def session(self, data, configs=None):
-        """The one session of `data` in figures, with configs.json's configurations or `configs`."""
-        base = analyze.load([])
-        configs = configs or base.configs
-        results = dataclasses.replace(base, rows=data, configs=configs, routers=analyze.router_ids(configs))
-        (session,) = analyze.figures(results)["sessions"]
-        return session
-
-    def role_rows(self, router="plugin", defaults="defaults"):
-        n = analyze.MIN_RUNS
-        return [dict(r, main_model=OPUS, started_at="2026-11-25T10:00:00+00:00", claude_version="2.1.331")
-                for config, usd in ((router, 0.10), (defaults, 0.20), ("haiku-high", 0.05), ("opus", 0.30),
-                                    ("fable-high", 0.50))
-                for r in rows(config, "lookup", [usd] * n, [True] * n)]
-
-    def test_figures_are_keyed_by_role(self):
-        opus = self.session(self.role_rows())
-        self.assertEqual(opus["roles"], {"router": "plugin", "defaults": "defaults", "best": "haiku-high",
-                                         "strongest": "fable-high"})
-        self.assertEqual(opus["saturated"], 1)  # Haiku at high solved as many as Fable at high
-        self.assertAlmostEqual(opus["pooled_less"]["defaults"], 0.5)
-
-    def test_the_defaults_are_the_configuration_with_no_plugin_and_no_forced_model(self):
-        configs = [dict(c, id="plain") if c["id"] == "defaults" else c for c in run.load_configs()]
-        self.assertEqual(self.session(self.role_rows(defaults="plain"), configs)["roles"]["defaults"], "plain")
-
-    def test_renaming_the_router_moves_no_role_or_status(self):
-        configs = [dict(c, id="renamed") if c["id"] == "plugin" else c for c in run.load_configs()]
-        old, new = self.session(self.role_rows()), self.session(self.role_rows(router="renamed"), configs)
-        self.assertEqual((new["router"], new["roles"]["router"]), ("renamed", "renamed"))
-        self.assertEqual((old["pooled_less"], old["behind"]), (new["pooled_less"], new["behind"]))
-        self.assertEqual([c["status"] for c in old["classes"]], [c["status"] for c in new["classes"]])
+    def test_exploratory_rounds_get_a_table_each_and_no_verdict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pilot = Path(tmp) / "pilot"
+            pilot.mkdir()
+            batch = dict(batch="ladder-1", main_model="claude-opus-5-5")
+            lines = [full_row(config="plugin-cheap", plugin_ref="f" * 40, total_cost_usd=0.25, passed=True, **batch),
+                     full_row(config="plugin-cheap", plugin_ref="f" * 40, total_cost_usd=0.27, passed=True, **batch),
+                     full_row(config="defaults", plugin_ref=None, plugin_loaded=None, total_cost_usd=0.4, passed=False, **batch),
+                     full_row(config="defaults", plugin_ref=None, plugin_loaded=None, total_cost_usd=0.2, passed=True,
+                              batch="calibration-1", main_model="claude-opus-5-5", started_at="2020-01-01T00:00:00+00:00")]
+            (pilot / "rows.jsonl").write_text("".join(json.dumps(r) + "\n" for r in lines), encoding="utf-8")
+            (pilot / "notes.json").write_text(json.dumps({"ladder-1": "Two ladders beside the defaults."}), encoding="utf-8")
+            (pilot / "limited").mkdir()
+            (pilot / "limited" / "rows.jsonl").write_text(json.dumps(full_row(config="defaults", batch="ladder-1")) + "\n")
+            out = Path(tmp) / "page.md"
+            with unittest.mock.patch.object(analyze, "PILOT", pilot):
+                self.assertEqual(analyze.main(["--out", str(out)]), 0)
+                self.assertEqual(self.check("--out", out), (0, ""))
+            page = out.read_text(encoding="utf-8")
+        self.assertIn("No judged round has been recorded yet", page.split("\n\n")[1])
+        section = page.split("## Exploratory rounds", 1)[1]
+        self.assertLess(section.index("`calibration-1`"), section.index("`ladder-1`"))  # oldest first
+        self.assertIn("### `ladder-1`: 3 runs", section)
+        self.assertIn("Two ladders beside the defaults.", section)
+        self.assertIn("| `plugin-cheap` | 2 | 2 | $0.260 | `fffffff` |", section)
+        self.assertIn("| `defaults` | 1 | 0 | $0.400 |  |", section)  # a set-aside run is not counted
+        self.assertNotRegex(section, r"WIN|LOSE|no difference shown")
+        self.assertNotIn("## Results", page)  # a pilot row is never a judged row
 
     def test_main_reads_configurations_and_tasks_once(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,7 +1,6 @@
 """Turn bench results into docs/BENCHMARKS.md: pass rate (exact 95% binomial interval) and cost per solved task
 (95% bootstrap interval) for each task class and configuration, and one verdict per baseline from paired per-task
-differences, withheld when the runs can't support one. `figures` gives the docs the same numbers by role (router,
-defaults, best, strongest).
+differences, withheld when the runs can't support one. The rows under results/pilot/ get a plain table each.
 
   python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md
   python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md --check
@@ -15,7 +14,7 @@ import math
 import random
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -30,6 +29,7 @@ from modelrouter.registry import Registry  # noqa: E402
 from overhead import percentile  # noqa: E402
 
 RESULTS = BENCH / "results"
+PILOT = RESULTS / "pilot"  # exploratory rounds: shown on the page, never judged
 MIN_RUNS = 10  # fewer runs per forced baseline than this and a class isn't read as saturated
 ALPHA = 0.05  # the 95% intervals, and the one-sided level of the exact comparisons
 MARGIN = 0.10  # the non-inferiority margin on pass rate, fixed before any run
@@ -451,10 +451,8 @@ class Results:
     routers: frozenset[str]
     own_model: frozenset[str]
     forced: dict
-
-
-def default_paths() -> list[Path]:
-    return sorted(RESULTS.glob("*.jsonl"))
+    pilot: list = field(default_factory=list)
+    pilot_notes: dict = field(default_factory=dict)
 
 
 def router_ids(configs: list[dict]) -> frozenset[str]:
@@ -661,8 +659,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "python3 bench/analyze.py bench/results/*.jsonl --out docs/BENCHMARKS.md",
         "```", ""]
     if not rows:
-        return {"header": "# Benchmarks\n\nCost and quality of Model Router against Claude Code without it. No round "
-                          "has been recorded yet.",
+        none = ("No judged round has been recorded yet. The exploratory rounds are at the end of this page."
+                if results.pilot else "No round has been recorded yet.")
+        return {"header": f"# Benchmarks\n\nCost and quality of Model Router against Claude Code without it. {none}",
                 "body": "\n".join([*read, "## Configurations", "",
                                    *[f"- `{c['id']}`: {c['description']}" for c in results.configs], "",
                                    "## Commands", "", *commands])}
@@ -802,81 +801,53 @@ def _page(results: Results, summary: list[dict]) -> dict:
     return {"header": header, "body": body}
 
 
+def _exploratory(rows: list[dict], notes: dict) -> list[str]:
+    """A table per exploratory batch, oldest first: what each configuration solved and cost, and nothing judged."""
+    batches: dict[str, list[dict]] = {}
+    for r in sorted(rows, key=lambda r: r.get("started_at") or ""):
+        batches.setdefault(r.get("batch") or "unnamed", []).append(r)
+    out = ["## Exploratory rounds", "",
+           "Small rounds run to choose tasks and settings. They get no verdict: each has too few runs of a "
+           "configuration for one, and a router configuration here may run the plugin from another commit.", ""]
+    for name, runs in batches.items():
+        models = ", ".join(f"`{m}`" for m in sorted({r.get("main_model") or "unknown" for r in runs}))
+        out += [f"### `{name}`: {len(runs)} runs on {runs[0].get('started_at', '')[:10]}, "
+                f"${sum(r['total_cost_usd'] for r in runs):.2f}, session on {models}", ""]
+        if isinstance(notes.get(name), str):
+            out += [notes[name], ""]
+        out += ["| Configuration | Runs | Solved | Cost per run | Plugin commit |", "| :- | -: | -: | -: | :- |"]
+        cells: dict[str, list[dict]] = {}
+        for r in runs:
+            cells.setdefault(r["config"], []).append(r)
+        for config, cell in sorted(cells.items(), key=lambda kv: -sum(r["total_cost_usd"] for r in kv[1]) / len(kv[1])):
+            # A row says whether the plugin loaded only where its configuration loads one.
+            ran = {str(r.get("plugin_ref") or r.get("bench_commit") or "")[:7]
+                   for r in cell if r.get("plugin_loaded") is not None}
+            commit = ", ".join(f"`{c}`" for c in sorted(ran) if c)
+            out.append(f"| `{config}` | {len(cell)} | {sum(bool(r['passed']) for r in cell)} | "
+                       f"${sum(r['total_cost_usd'] for r in cell) / len(cell):.3f} | {commit} |")
+        out.append("")
+    return out
+
+
+def pilot_rows() -> tuple[list[dict], dict]:
+    """The rows under PILOT and the note each batch carries in its notes.json."""
+    try:
+        notes = json.loads((PILOT / "notes.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        notes = {}
+    return _jsonl(sorted(PILOT.glob("*.jsonl"))), notes if isinstance(notes, dict) else {}
+
+
 def build_page(results: Results, router: str | None = None, current: str | None = None) -> str:
     parts = sessions(results, router)
     summary = [row for part in parts for row in part[2]]
     kept = bool(current and current.startswith(HEAD_START) and HEAD_END in current)
     head = current.split(HEAD_END, 1)[0] + HEAD_END if kept else ""
-    return head + render_sessions(parts, _page(results, summary), results.routers, results.own_model)
-
-
-def _pooled(rows: list[dict]) -> dict:
-    out: dict[str, dict] = {}
-    for r in rows:
-        cell = out.setdefault(r["config"], {"runs": 0, "solved": 0, "cost_usd": 0.0})
-        cell["runs"] += 1
-        cell["solved"] += bool(r["passed"])
-        cell["cost_usd"] += float(r["total_cost_usd"])
-    return out
-
-
-def _per_solved(cell: dict | None) -> float | None:
-    return cell["cost_usd"] / cell["solved"] if cell and cell["solved"] else None
-
-
-def roles(results: Results, router: str, pooled: dict) -> dict:
-    """The configurations that play each part in a session: the router, Claude Code's defaults (no plugin, no
-    forced model), the baseline with the lowest cost per solved task over all runs, and the strongest forced one."""
-    base = [c for c in pooled if c != router and c not in results.routers]
-    best = min((c for c in base if pooled[c]["solved"]), key=lambda c: (_per_solved(pooled[c]), c), default=None)
-    plain = [c["id"] for c in results.configs if c["id"] in pooled
-             and not (c.get("plugin") or c.get("env") or c.get("model") or c.get("args"))]
-    return {"router": router if router in pooled else None, "defaults": plain[0] if plain else None, "best": best,
-            "strongest": max((c for c in base if c in results.forced), key=lambda c: (results.forced[c], c), default=None)}
-
-
-def _against(classes: list[dict], router: str, cfg: str) -> dict:
-    """How the router's cost stands against one baseline, class by class, where a verdict was given."""
-    cps = lambda c, name: c["configs"][name]["cost_per_solved"]  # noqa: E731
-    diffs = [(c, c["differences"][cfg]) for c in classes if c["differences"].get(cfg)]
-    below = [c for c, (lo, hi) in diffs if hi is not None and hi < 0]
-    less = [1 - cps(c, router) / cps(c, cfg) for c in below if cps(c, cfg) and cps(c, router) is not None]
-    return {"below": [c["class"] for c in below],
-            "level": [c["class"] for c, (lo, hi) in diffs if lo is not None and hi is not None and lo <= 0 <= hi],
-            "less": (min(less), max(less)) if less else None,
-            "best_in": [c["class"] for c in classes if c["best_baseline"] == cfg and c["status"] == "LOSE"]}
-
-
-def _behind(classes: list[dict], router: str) -> dict | None:
-    """The router's cost per solved task over the cheapest baseline's, as a fraction, in the LOSE classes."""
-    cps = lambda c, name: c["configs"][name]["cost_per_solved"]  # noqa: E731
-    over = [(cps(c, router) / cps(c, c["best_baseline"]) - 1, c["class"]) for c in classes
-            if c["status"] == "LOSE" and c["best_baseline"] and cps(c, router) is not None and cps(c, c["best_baseline"])]
-    return {"min": min(over, key=lambda o: o[0]), "max": max(over, key=lambda o: o[0])} if over else None
-
-
-def figures(results: Results, router: str | None = None) -> dict:
-    """The page's figures as data, for the docs: per session model, each table's classes, the figures over all
-    runs, the roles (router, defaults, best, strongest) and how the router stands against each baseline."""
-    rows = results.rows
-    dates = sorted(r["started_at"][:10] for r in rows)
-    out = []
-    for model, chosen, classes, _, group in sessions(results, router):
-        pooled = _pooled(group)
-        baselines = sorted({cfg for c in classes for cfg in c["verdicts"]})
-        pool_router = _per_solved(pooled[chosen]) if chosen in pooled else None
-        out.append({"model": model, "router": chosen, "classes": classes, "pooled": pooled,
-                    "roles": roles(results, chosen, pooled),
-                    "against": {cfg: _against(classes, chosen, cfg) for cfg in baselines},
-                    "behind": _behind(classes, chosen),
-                    "pooled_less": {cfg: 1 - pool_router / _per_solved(pooled[cfg]) for cfg in baselines
-                                    if pool_router is not None and cfg in pooled and pooled[cfg]["solved"]},
-                    "saturated": sum(bool(c["quality"]["saturated"]) for c in classes)})
-    return {"runs": len(rows), "usd": sum(float(r["total_cost_usd"]) for r in rows),
-            "dates": [dates[0], dates[-1]] if dates else [], "claude_versions": sorted({r["claude_version"] for r in rows}),
-            "per_cell": sorted({cell["runs"] for s in out for c in s["classes"] for cell in c["configs"].values()}),
-            "tasks": len({r["task"] for r in rows}), "tasks_total": len(results.tasks),
-            "sessions": out}
+    page = head + render_sessions(parts, _page(results, summary), results.routers, results.own_model)
+    if not results.pilot:
+        return page
+    return page.rstrip("\n") + "\n\n" + "\n".join(_exploratory(results.pilot, results.pilot_notes)).rstrip("\n") + "\n"
 
 
 def check(results: Results, out: Path, current: str | None, router: str | None = None) -> list[str]:
@@ -900,6 +871,8 @@ def main(argv: list[str] | None = None) -> int:
         current = None
     # A shell passes a pattern that matched no file as it is.
     results = load([Path(p) for arg in args.results for p in (glob.glob(arg) or ([] if re.search(r"[*?[]", arg) else [arg]))])
+    pilot, notes = pilot_rows()
+    results = replace(results, pilot=pilot, pilot_notes=notes)
     if not args.check:
         args.out.write_text(build_page(results, args.router, current), encoding="utf-8")
         return 0
