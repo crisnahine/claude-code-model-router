@@ -201,12 +201,13 @@ def _judge(base: str, pass_ci: tuple, cost_ci: tuple, fewer: bool, solved: tuple
     if p_hi < 0 or behind < ALPHA:
         return "LOSE", (f"pass rate behind beyond noise: solved {solved[0]} of {solved[1]} runs against {solved[2]} of "
                         f"{solved[3]} (exact one-sided p = {behind:.3f}); {seen}")
-    if c_hi < 0 and p_lo > -MARGIN:
+    # A bound with no value comes from draws where a side solved nothing, which says nothing about cost.
+    if math.isfinite(c_hi) and c_hi < 0 and p_lo > -MARGIN:
         if fewer:  # a saving counts only at an equal or higher pass rate
             return "NONE", f"cheaper per solved task beyond noise, but it solved a smaller share of the runs; {seen}"
         return "WIN", (f"cheaper per solved task beyond noise, at an equal or higher share of runs solved, pass rate "
                        f"within {MARGIN:.0%} of it; {seen}")
-    if c_lo > 0 and p_hi < MARGIN:
+    if math.isfinite(c_lo) and c_lo > 0 and p_hi < MARGIN:
         return "LOSE", f"dearer per solved task beyond noise, pass rate shown under {MARGIN:.0%} ahead; {seen}"
     return "NONE", seen
 
@@ -678,8 +679,10 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "zero, or an exact one-sided test at 5% of its solved runs against the baseline's, every run of the row "
         "pooled, puts it behind, which catches a gap the added runs shrink), "
         "or its cost per solved task is above beyond noise while the upper bound of its pass rate minus the "
-        f"baseline's is below plus {MARGIN:.0%}, the mirror of the WIN rule. "
-        "Anything else is \"no difference shown\", which is not parity. There is no verdict when the two didn't run "
+        f"baseline's is below plus {MARGIN:.0%}, the mirror of the WIN rule. A cost bound that is n/a decides "
+        "nothing: it comes from resamples in which one side solved none of the runs drawn, so it has no cost per "
+        "solved task, and a row where a side solved nothing, or nearly nothing, gets its verdict from the pass rate "
+        "alone. Anything else is \"no difference shown\", which is not parity. There is no verdict when the two didn't run "
         "each task the same number of times in each batch, since each side's cost is pooled over its runs and pass "
         f"rates drift between batches, when more than {DENIAL_SHARE:.0%} of either's runs had a Bash call denied, "
         "when the router's runs loaded more than one plugin build (`plugin_hash`), when the two ran a task at "
@@ -697,7 +700,7 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "task's current revision that a check other than today's graded stops the page from being built, since the "
         "check changed without a raise of the revision.",
         "- Rank is the router's place among the baselines by cost per solved task, 1 being cheapest, and n/a on a "
-        "row with no verdict. A router variant (another configuration that loads the plugin) has its own column "
+        "row with no verdict; a configuration that solved none of the row's runs counts as the dearest. A router variant (another configuration that loads the plugin) has its own column "
         "but is never a baseline.",
         "- Run metrics, per class and configuration: p50 and p90 are nearest-rank percentiles of each run's wall "
         "time (`wall_ms`, the runner's clock around the `claude` process). Cache is cache-read tokens over all input tokens, which are input plus cache reads "

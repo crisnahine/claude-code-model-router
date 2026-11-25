@@ -8,6 +8,7 @@ import fnmatch
 import importlib.util
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -115,6 +116,17 @@ class Analysis(unittest.TestCase):
     def test_one_win_and_one_undecided_baseline_leave_the_class_undecided(self):
         self.assertEqual(analyze._status({"a": {"verdict": "WIN"}, "b": {"verdict": "NONE"}}), "NONE")
         self.assertEqual(analyze._status({"a": {"verdict": "WIN"}, "b": {"verdict": "WIN"}}), "WIN")
+
+    def test_a_cost_bound_with_no_value_decides_nothing(self):
+        # The router dear and right, the baseline cheap and wrong on every run: every draw's gap is minus infinity.
+        data = spread("plugin", "lookup", 2, 2, 1.50) + spread("haiku-high", "lookup", 2, 2, 0.10, solved=0)
+        v = self.verdict(data, "haiku-high")
+        self.assertEqual((v["verdict"], v["cost_ci"]), ("NONE", (None, None)))
+        self.assertIn("cost per solved task n/a to n/a", v["reason"])
+        self.assertEqual(analyze._judge("b", (-0.05, 0.05), (math.inf, math.inf), False, (9, 10, 9, 10))[0], "NONE")
+        self.assertEqual(analyze._judge("b", (-0.05, 0.05), (-math.inf, -0.1), False, (9, 10, 9, 10))[0], "WIN")
+        self.assertEqual(analyze._judge("b", (-0.05, 0.05), (0.1, math.inf), False, (9, 10, 9, 10))[0], "LOSE")
+        self.assertIn("A cost bound that is n/a decides nothing", analyze.build_page(analyze.load([])))
 
     def test_behind_beyond_noise_loses_even_inside_the_margin(self):
         self.assertEqual(analyze._judge("defaults", (-0.08, -0.01), (-0.05, -0.01), False, (9, 10, 9, 10))[0], "LOSE")
