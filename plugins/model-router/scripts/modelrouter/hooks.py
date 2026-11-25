@@ -117,6 +117,13 @@ def user_prompt(hook_input: dict) -> dict | None:
                                         f"Agent call with model: \"{wanted}\" {runs}.")
 
 
+def mod_start(hook_input: dict) -> dict:
+    """The mod's session start. The answer carries the session note, which the mod adds to the Agent tool's description."""
+    answer = mod.start(hook_input)
+    snap = settings.Snapshot(hook_input)
+    return {**answer, "rules": _rules(snap.options, snap.registry)} if snap.options.mode == "auto" else answer
+
+
 def pre_agent(hook_input: dict) -> dict | None:
     if mod.routes(hook_input.get("tool_use_id")):
         return None  # the plugin's mod routes this call when it spawns
@@ -151,7 +158,7 @@ def post_agent(hook_input: dict) -> dict | None:
     session_id = hook_input.get("session_id")
     outcome = _outcome("result", hook_input, snap.registry, ran_as=ran_as, ran_family=snap.registry.family(ran_as),
                        forced=snap.options.force, status=response.get("status"),
-                       launched=launched, agent_id=agent_id if launched and isinstance(agent_id, str) else None,
+                       moved=mod.moved(hook_input.get("tool_use_id")), launched=launched, agent_id=agent_id if launched and isinstance(agent_id, str) else None,
                        models_used=() if launched else tuple(calls.models_used(response)))
     _settled(session_id, outcome.key)
     returned = calls.returned(session_id, outcome)
@@ -169,7 +176,7 @@ def agent_failed(hook_input: dict) -> dict | None:
     reg = snap.registry
     session_id = hook_input.get("session_id")
     outcome = _outcome("failure", hook_input, reg, error=str(hook_input.get("error") or ""),
-                       interrupted=bool(hook_input.get("is_interrupt")))
+                       interrupted=bool(hook_input.get("is_interrupt")), moved=mod.moved(hook_input.get("tool_use_id")))
     _settled(session_id, outcome.key)
     returned = calls.returned(session_id, outcome)
     if returned.note == calls.ID_FAILED and returned.route:
@@ -232,7 +239,7 @@ def model_switch(hook_input: dict) -> dict | None:
 
 HANDLERS = {
     # A spawn left as it is still answers OK, so an empty answer means the runtime didn't run.
-    "mod-start": mod.start, "mod-spawn": lambda hook_input: mod.spawn(hook_input) or mod.OK, "mod-usage": mod.usage,
+    "mod-start": mod_start, "mod-spawn": lambda hook_input: mod.spawn(hook_input) or mod.OK, "mod-usage": mod.usage,
     "session-start": session_start, "user-prompt": user_prompt, "pre-agent": pre_agent,
     "post-agent": post_agent, "agent-failed": agent_failed, "agent-stopped": agent_stopped,
     "post-edit": post_edit, "stop": stop,

@@ -20,6 +20,7 @@ def route(hook_input: dict, snap: settings.Snapshot) -> dict | None:
     # The Agent tool's model takes only an alias, so an exact model is kept by leaving the call's own.
     kept = mod.exact(snap, decision)
     spawn.record(spawned, "fallback", kept)
+    same = spawn.redo_note(decision)
     if decision["action"] == "rewrite":
         # A rewrite auto mode denies after review gets no result, so it stays pending and
         # the next copy counts as refused (https://code.claude.com/docs/en/hooks.md#pretooluse-decision-control).
@@ -29,10 +30,12 @@ def route(hook_input: dict, snap: settings.Snapshot) -> dict | None:
             pass
         return {"hookSpecificOutput": {
             "hookEventName": "PreToolUse", "updatedInput": _rewritten_input(cfg.tool_input(hook_input), decision, kept),
-            "additionalContext": _note(decision, kept)}}
+            "additionalContext": _note(decision, kept) + (f" {same}" if same else "")}}
     if decision["action"] == "deny":
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                        "permissionDecisionReason": decision["reason"]}}
+    if same:
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": same}}
     return None
 
 
@@ -79,7 +82,7 @@ def _guard(session_id: str | None, spawned: spawn.Spawn) -> None:
     # The route records what runs untouched, so a later redo climbs from that, not from the refused rewrite.
     ran_at = spawn._runs_at(None, untouched, spawned.facts, spawned.snap)
     decision.update(action="keep", model=None, effort=None, level=ladder.rung(reg, untouched, ran_at),
-                    repeat_of=earlier.get("model"), reason=(
+                    repeat_of=earlier.get("model"), no_step=False, reason=(
                         "this call was rewritten once and came back without having run, so it is passed through "
                         "unchanged"))
     if not changed:  # an effort-only rewrite: no repeat_of when `was` is unknown

@@ -72,6 +72,7 @@ class Outcome:
     error: str = ""
     interrupted: bool = False
     answered: bool = True
+    moved: bool = False  # a mod later in the chain moved the spawn to another family (mod.moved)
 
 
 @dataclass(frozen=True)
@@ -177,7 +178,8 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
     """A result, a failure or a stop came back. One rule set, whichever path routed the call:
     a result that is neither a background launch nor a swapped run finishes the call, and a run at a
     level is kept as its task's latest; a launch waits for its agent to stop; a stop with an answer
-    finishes it; a model error strikes the ID the spawn sent, or else the model it was routed to."""
+    finishes it; a model error strikes the ID the spawn sent, or else the model it was routed to. A spawn
+    another mod moved is no evidence about either."""
     if outcome.kind == "stop":
         return _stopped(session_id, outcome)
     route = route_of(session_id, outcome.key, outcome.spawn_id)
@@ -197,7 +199,7 @@ def returned(session_id: str | None, outcome: Outcome) -> Returned:
     except OSError:
         pass
     try:
-        if not guessed or outcome.ran_family == asked:
+        if not outcome.moved and (not guessed or outcome.ran_family == asked):
             health.ran(asked, outcome.ran_as, outcome.ran_family, outcome.forced, swapped=swapped,
                        untouched=route.was if route and route.path == "mod" else None)
     except OSError:
@@ -217,7 +219,7 @@ def _wait_or_finish(session_id: str | None, outcome: Outcome, route: Route, fini
 
 def _failed(session_id: str | None, outcome: Outcome, route: Route | None, asked: str | None,
             guessed: bool) -> Returned:
-    if guessed or not asked or outcome.interrupted:
+    if guessed or not asked or outcome.interrupted or outcome.moved:
         return Returned(asked, route, False)
     sent = route.sent if route and route.model == asked and not route.version else None
     if sent and sent.lower() != asked and health.is_refusal(outcome.error):

@@ -18,8 +18,8 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
   const catches: Record<string, Hook> = {}
   const calls: Call[] = []
   const writes: [string, string][] = []
-  // What $.agent.list() and $.session.usage() answer; a test sets them.
-  const engine: { agents: object[]; rateLimits: object[] } = { agents: [], rateLimits: [] }
+  // What $.agent.list(), $.session.usage() and $.session.id() answer; a test sets them.
+  const engine = { agents: [] as object[], rateLimits: [] as object[], session: 's1', idFails: false }
   const on = (event: string, ...rest: unknown[]) => {
     hooks[event] = rest.pop() as Hook
     if (rest.length) matchers[event] = rest[0]
@@ -44,9 +44,15 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
       write: async (path: string, text: string) => { writes.push([path, text]) },
     },
     agent: { list: async () => engine.agents },
-    session: { usage: async () => ({ startedAt: 0, context: {}, rateLimits: engine.rateLimits }) },
+    session: {
+      usage: async () => ({ startedAt: 0, context: {}, rateLimits: engine.rateLimits }),
+      id: async () => {
+        if (engine.idFails) throw new Error('no session id')
+        return engine.session
+      },
+    },
     process: {
-      hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: 's1', CLAUDE_PLUGIN_DATA: '/tmp/x' }),
+      hookEnv: async () => ({ CLAUDE_CODE_SESSION_ID: engine.session, CLAUDE_PLUGIN_DATA: '/tmp/x' }),
       run: async (argv: readonly string[], init: { stdin: string; env: Record<string, string> }) => {
         const command = argv[2] ?? ''
         calls.push({ command, argv, stdin: JSON.parse(init.stdin), env: init.env })
@@ -62,6 +68,8 @@ function load(replies: Record<string, Reply | Reply[]> = {}, options: PluginOpti
     hooks, matchers, catches, calls, writes, $, engine,
     toolCall: (e: object) => hooks['tool.call']!($, e, same),
     sessionStart: (e: object) => hooks['session.start']!($, e, same),
+    end: (e: object) => hooks['session.end']!($, e, same),
+    describe: (e: object) => hooks['tool.describe']!($, e, same),
     spawn: (e: object, next: Hook = (x: object) => ({ ...x, agentId: 'a1' })) => hooks['agent.spawn']!($, e, next),
     start: (e: object) => hooks['turn.start']!($, e, same),
     complete: (e: object) => hooks['turn.complete']!($, e, same),
@@ -336,12 +344,142 @@ test('an effort on the Agent call reaches mod-spawn', async () => {
   assert.equal(mod.calls.find(c => c.command === 'mod-spawn')!.stdin.tool_input.effort, 'high')
 })
 
-test("a main-loop turn's start asks the runtime nothing, and its effort is left alone", async () => {
+test("a main-loop turn's start in the session the layers went to asks the runtime nothing, and its effort is left alone", async () => {
   const mod = load({}, {}, { policy: { deniedModels: ['opus'] } })
+  await mod.sessionStart({ source: 'startup' })
   const start = { turnId: 't1', text: 'fix the auth migration' }
   assert.equal(await mod.start(start), start)
-  assert.equal(mod.calls.length, 0)
+  assert.equal(mod.calls.length, 1)
   assert.equal((await mod.step(stepEvent({ effort: 'medium' }))).effort, 'medium')
+})
+
+const mainTurn = { turnId: 't1', text: 'fix the auth migration' }
+
+test('after /clear, the first main-loop turn sends the settings layers again, under the new session id', async () => {
+  const mod = load({}, {}, { policy: { deniedModels: ['opus'] } })
+  await mod.sessionStart({ source: 'startup' })
+  mod.engine.session = 's2'
+  assert.equal(await mod.start(mainTurn), mainTurn)
+  await mod.start({ turnId: 'ta', agentId: 'a1', text: 'p' }) // a subagent's turn reads no id
+  await mod.start(mainTurn)
+  assert.deepEqual(mod.calls.map(c => [c.command, c.stdin.session_id, c.stdin.settings.policy]), [
+    ['mod-start', 's1', { deniedModels: ['opus'] }], ['mod-start', 's2', { deniedModels: ['opus'] }]])
+})
+
+test('a clear forgets the session the layers went to, and no other end does', async () => {
+  const mod = load()
+  await mod.sessionStart({ source: 'startup' })
+  const end = { reason: 'other', sessionId: 's1' }
+  assert.equal(await mod.end(end), end)
+  await mod.start(mainTurn)
+  assert.equal(mod.calls.length, 1)
+  await mod.end({ reason: 'clear', sessionId: 's1' })
+  await mod.start(mainTurn) // the id may not have moved on yet
+  await mod.start(mainTurn)
+  assert.deepEqual(mod.calls.map(c => c.command), ['mod-start', 'mod-start'])
+})
+
+test('a session id that fails to read sends nothing and passes the turn on once', async () => {
+  const mod = load()
+  mod.engine.idFails = true
+  await mod.sessionStart({ source: 'startup' })
+  let runs = 0
+  const next = (x: unknown) => { runs++; return x }
+  const result = await Promise.resolve(mod.hooks['turn.start']!(mod.$, mainTurn, next)).catch(() => mod.catches['turn.start']!(mod.$, mainTurn, next))
+  assert.equal(result, mainTurn)
+  assert.equal(runs, 1)
+  assert.equal(mod.calls.length, 1)
+})
+
+// A next() whose trace ends at the engine's own entry, which shows what core was asked for.
+function traced(received: unknown, extra: object[] = []) {
+  const next = (x: any) => ({ model: x.model ?? 'claude-sonnet-5-5', agentId: 'a1' })
+  const engineEntry = { index: extra.length + 1, plugin: 'engine', tier: 'core', event: 'agent.spawn', outcome: 'returned', ms: 1, received, returned: {} }
+  return Object.assign(next, { trace: [...extra, engineEntry] })
+}
+
+test('a spawn a later mod moved to another family is marked for the result, and one it left alone is not', async () => {
+  const later = { index: 1, plugin: 'other', tier: 'user', event: 'agent.spawn', outcome: 'passed', ms: 1, received: {}, returned: {} }
+  const mod = load({ 'mod-spawn': PICK }) // picks haiku
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu1' }), traced(spawnEvent({ model: 'opus' }), [later]))
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu2' }), traced(spawnEvent({ model: 'claude-haiku-5-5' }))) // the same family
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu3' }), traced(spawnEvent())) // core was asked for no model
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu4' }), traced(null))
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu5' }), Object.assign((x: any) => ({ model: x.model, agentId: 'a1' }), { trace: [later] }))
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu6' })) // no trace at all
+  await mod.spawn(spawnEvent({ tool_use_id: 'tu7', workflow: { runId: 'w1' } }), traced(spawnEvent({ model: 'opus' })))
+  await mod.spawn(spawnEvent({ tool_use_id: '../x' }), traced(spawnEvent({ model: 'opus' })))
+  const kept = load() // the runtime left the call's own sonnet
+  await kept.spawn(spawnEvent({ tool_use_id: 'tu8', model: 'sonnet' }), traced(spawnEvent({ model: 'fable' })))
+  assert.deepEqual([...mod.writes, ...kept.writes], [['/tmp/x/mod-calls/tu1.moved', ''], ['/tmp/x/mod-calls/tu8.moved', '']])
+})
+
+test('a trace of another shape, read after next, still runs next once', async () => {
+  for (const trace of [5, 'x', [5], [{ plugin: 'engine', received: 5 }]]) {
+    const mod = load({ 'mod-spawn': PICK })
+    let runs = 0
+    const next = Object.assign((x: any) => { runs++; return { model: x.model, agentId: 'a1' } }, { trace })
+    const e = spawnEvent()
+    await Promise.resolve(mod.hooks['agent.spawn']!(mod.$, e, next)).catch(() => mod.catches['agent.spawn']!(mod.$, e, next))
+    assert.equal(runs, 1, JSON.stringify(trace))
+    assert.deepEqual(mod.writes, [])
+  }
+})
+
+const SAME = 'This redo ran on opus at max, the same as the run it redoes: nothing stronger is usable here.'
+
+test("a redo the runtime says runs as the run it redoes tells Claude so after the agent's result", async () => {
+  const mod = load({ 'mod-spawn': { stdout: JSON.stringify({ model: 'opus', effort: 'max', reason: 'a redo', note: SAME }) } })
+  await mod.sessionStart({ source: 'startup' })
+  const call = (id: string) => ({ tool: 'Agent', tool_use_id: id, prompt: 'p', description: 'Redo: d' })
+  const ran = { result: { status: 'completed' }, text: 'done', ref: 1, context: ['from core'] }
+  const viaSpawn = (id: string, answer: object) => async (e: any) => { await mod.spawn(spawnEvent({ tool_use_id: e.tool_use_id })); return answer }
+  assert.deepEqual(await mod.hooks['tool.call']!(mod.$, call('tu1'), viaSpawn('tu1', ran)), { ...ran, context: ['from core', SAME] })
+  assert.equal(await mod.hooks['tool.call']!(mod.$, call('tu1'), async () => ran), ran) // the note answers its one call
+  for (const answer of [{ deny: 'no' }, { isError: true, result: 'boom', text: 'boom' }]) {
+    assert.equal(await mod.hooks['tool.call']!(mod.$, call('tu2'), viaSpawn('tu2', answer)), answer)
+  }
+  const plain = load({ 'mod-spawn': PICK })
+  await plain.sessionStart({ source: 'startup' })
+  const once = { result: {}, text: 'done' }
+  assert.equal(await plain.hooks['tool.call']!(plain.$, call('tu3'), async () => { await plain.spawn(spawnEvent({ tool_use_id: 'tu3' })); return once }), once)
+})
+
+test('a keep the runtime answers with a note still runs the call as named, and the note still reaches Claude', async () => {
+  const mod = load({ 'mod-spawn': { stdout: JSON.stringify({ ok: true, note: SAME }) } })
+  await mod.sessionStart({ source: 'startup' })
+  let seen: any
+  const ran = { result: {}, text: 'done' }
+  const out = await mod.hooks['tool.call']!(mod.$, { tool: 'Agent', tool_use_id: 'tu1', prompt: 'p' }, async () => {
+    const e = spawnEvent({ model: 'opus' })
+    await mod.spawn(e, (x: object) => { seen = x; return { model: 'opus', agentId: 'a1' } })
+    assert.equal(seen, e)
+    return ran
+  })
+  assert.deepEqual(out, { ...ran, context: [SAME] })
+})
+
+const RULES = 'Model Router keeps the `model` and `effort` an Agent call names, within the user\'s cap.'
+const agentTool = { tool: 'Agent', description: 'Launch a new agent.', provider: { plugin: 'engine', tier: 'core' } }
+
+test("the Agent tool's description gains the runtime's table once an answer brings one, and keeps it steady", async () => {
+  const replies: Record<string, Reply> = { 'mod-start': { stdout: JSON.stringify({ ok: true, rules: RULES }) } }
+  const mod = load(replies)
+  assert.deepEqual(mod.matchers['tool.describe'], { tool: 'Agent' })
+  assert.equal(await mod.describe(agentTool), agentTool) // no text yet
+  await mod.sessionStart({ source: 'startup' })
+  const described = await mod.describe(agentTool)
+  assert.deepEqual(described, { ...agentTool, description: `Launch a new agent.\n\n${RULES}` })
+  for (const [session, reply] of [['s2', RAN], ['s3', { exitCode: 1, stdout: '' }], ['s4', { stdout: JSON.stringify({ ok: true, rules: 5 }) }]] as const) {
+    replies['mod-start'] = reply
+    mod.engine.session = session
+    await mod.start(mainTurn)
+    assert.deepEqual(await mod.describe(agentTool), described, session) // an answer with no text keeps the last
+  }
+  replies['mod-start'] = { stdout: JSON.stringify({ ok: true, rules: 'another table' }) }
+  mod.engine.session = 's5'
+  await mod.start(mainTurn)
+  assert.equal((await mod.describe(agentTool)).description, 'Launch a new agent.\n\nanother table')
 })
 
 const agentCall = (id: string) => ({ tool: 'Agent', tool_use_id: id, prompt: 'p' })
@@ -538,7 +676,7 @@ test('a CLI that throws after next(e) ran does not run next again', async () => 
 
 test('every hook falls back to next(e) when it throws', async () => {
   const mod = load()
-  const events = ['agent.spawn', 'session.start', 'tool.call', 'turn.complete', 'turn.start', 'turn.step']
+  const events = ['agent.spawn', 'session.end', 'session.start', 'tool.call', 'tool.describe', 'turn.complete', 'turn.start', 'turn.step']
   assert.deepEqual(Object.keys(mod.hooks).sort(), events)
   assert.deepEqual(Object.keys(mod.catches).sort(), events)
   for (const [event, handler] of Object.entries(mod.catches)) {

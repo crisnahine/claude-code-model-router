@@ -1,4 +1,4 @@
-"""Regression tests for the mod's spawn answer and for what counts as a model error."""
+"""Regression tests for the mod's answers and for what counts as a model error."""
 from __future__ import annotations
 
 import io
@@ -7,7 +7,7 @@ import os
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-from test_model_router import Sandbox, cli, health, hooks, modpath
+from test_model_router import LOOKUP, Sandbox, cli, health, hooks, modpath, spawn, store
 
 BEDROCK_403 = ("Agent terminated early due to an API error: AWS authentication failed · enable the model for your "
                "account and region in the Amazon Bedrock console · API Error: 403 You don't have access to the "
@@ -126,3 +126,109 @@ class SpawnAnswer(Sandbox):
         self.assertEqual(json.loads(self.answer(kept)), {"ok": True})
         with mock.patch.object(modpath, "spawn", side_effect=RuntimeError("boom")), redirect_stderr(io.StringIO()):
             self.assertEqual(self.answer(kept), "")
+
+
+class MovedByAnotherMod(Sandbox):
+    """A later mod that moves a spawn to another family says nothing about the model this mod sent."""
+
+    def finish(self, tool_use_id: str, moved: bool, error: str | None = None) -> None:
+        tool_input = {"subagent_type": "general-purpose", "prompt": f"list the files under {tool_use_id}", "model": "haiku"}
+        modpath.spawn({"session_id": "s1", "parent_model": "claude-sonnet-5-5", "kind": "subagent",
+                       "tool_use_id": tool_use_id, "tool_input": tool_input})
+        mark = self.data / modpath.MARKS / f"{tool_use_id}.moved"
+        if moved:  # what hooks/router.ts writes when core was asked for another family than it sent
+            mark.parent.mkdir(parents=True, exist_ok=True)
+            mark.write_text("")
+        call = {"session_id": "s1", "cwd": str(self.project), "tool_use_id": tool_use_id, "tool_input": tool_input}
+        if error:
+            hooks.agent_failed({**call, "error": error})
+        else:
+            hooks.post_agent({**call, "tool_response": {"resolvedModel": "claude-opus-5-5", "status": "completed"}})
+        self.assertFalse(mark.exists())  # a mark answers its one call
+
+    def test_a_run_another_mod_moved_strikes_no_model(self):
+        for n in range(2):
+            self.finish(f"toolu_m{n}", moved=True)
+            self.finish(f"toolu_e{n}", moved=True, error="API Error: 404 not_found_error: model: claude-opus-5-5")
+        self.assertIsNone(store.load_state().get("health"))
+        for n in range(2):
+            self.finish(f"toolu_p{n}", moved=False)
+        self.assertEqual(health.load().why_routed_around("haiku"), "ran as claude-opus-5-5 instead")
+
+    def test_only_a_plain_tool_use_id_is_looked_up(self):
+        for bad in ("../x", "a/b", "", None, 5, "x" * 300):
+            self.assertFalse(modpath.moved(bad), bad)
+
+
+class RedoWithNothingHigher(Sandbox):
+    """A redo of a run already at the strongest usable model and its top effort runs the same again, and Claude is told."""
+
+    SAME = "This redo ran on haiku at high, the same as the run it redoes: nothing stronger is usable here."
+
+    def setUp(self):
+        super().setUp()
+        self.session_on("claude-opus-5-5")
+
+    def run_once(self, description: str, ran_as: str = "claude-haiku-5-5", **extra) -> dict | None:
+        out = self.pre("general-purpose", LOOKUP, description=description, **extra)
+        self.done("general-purpose", LOOKUP, ran_as, description=description, **extra)
+        return out
+
+    def test_the_decision_says_so_only_when_no_step_is_left(self):
+        self.options(max_tier="haiku")
+        self.run_once("List src")
+        climbed = self.decide("general-purpose", LOOKUP, description="Redo: list src")
+        self.assertEqual((climbed["model"], climbed["effort"], climbed["no_step"]), ("haiku", "high", False))
+        self.assertIsNone(spawn.redo_note(climbed))
+        self.assertNotIn("nothing stronger", self.run_once("Redo: list src")["additionalContext"])
+        same = self.decide("general-purpose", LOOKUP, description="Redo: list src")
+        self.assertEqual((same["model"], same["effort"], same["no_step"]), ("haiku", "high", True))
+        self.assertEqual(spawn.redo_note(same), self.SAME)
+        self.assertFalse(self.decide("general-purpose", LOOKUP, description="List src")["no_step"])
+
+    def test_the_fallback_tells_claude_beside_its_rewrite(self):
+        self.options(max_tier="haiku")
+        self.run_once("List src")
+        self.run_once("Redo: list src")
+        out = self.run_once("Redo: list src")
+        self.assertEqual(out["updatedInput"]["effort"], "high")
+        self.assertTrue(out["additionalContext"].startswith("Model Router set this agent's model to haiku"))
+        self.assertTrue(out["additionalContext"].endswith(" " + self.SAME))
+
+    def test_a_redo_left_as_it_is_still_tells_claude(self):
+        # The environment sets the effort and the call names the model, so the climb has nothing to change.
+        self.options(max_tier="haiku", CLAUDE_CODE_EFFORT_LEVEL="high")
+        self.assertIsNone(self.run_once("List src", model="haiku"))
+        out = self.run_once("Redo: list src", model="haiku")
+        self.assertEqual(out, {"hookEventName": "PreToolUse", "additionalContext":
+                               "This redo ran on haiku, the same as the run it redoes: nothing stronger is usable here."})
+
+    def test_a_copy_the_repeat_guard_passes_through_says_nothing(self):
+        self.run_once("Draft it", ran_as="claude-fable-5-5", model="fable", effort="max")
+        self.assertIn("nothing stronger", self.pre("general-purpose", LOOKUP, description="Redo: draft it",
+                                                   model="fable", effort="max")["additionalContext"])
+        self.next_message()
+        self.assertIsNone(self.pre("general-purpose", LOOKUP, description="Redo: draft it", model="fable", effort="max"))
+
+    def test_the_mod_hands_the_note_to_its_agent_call(self):
+        self.options(max_tier="haiku")
+        self.run_once("List src")
+        redo = {"session_id": "s1", "parent_model": "claude-opus-5-5", "kind": "subagent",
+                "tool_input": {"subagent_type": "general-purpose", "prompt": LOOKUP, "description": "Redo: list src"}}
+        self.assertNotIn("note", modpath.spawn(redo))
+        self.run_once("Redo: list src")
+        self.assertEqual(modpath.spawn(redo), {"model": "haiku", "effort": "high", "reason": self.ledger()[-1]["reason"],
+                                               "note": self.SAME})
+
+
+class ModStartRules(Sandbox):
+    """The mod puts the session note's table in the Agent tool's description, from the runtime's answer."""
+
+    def test_mod_start_answers_the_session_note_while_routing(self):
+        for env in ({}, {"max_tier": "sonnet"}, {"CLAUDE_CODE_EFFORT_LEVEL": "high"}):
+            with self.subTest(env=env):
+                self.options(**env)
+                note = hooks.session_start({"session_id": "s1"})["hookSpecificOutput"]["additionalContext"]
+                self.assertEqual(hooks.HANDLERS["mod-start"]({"session_id": "s1"}), {"ok": True, "rules": note})
+        self.options(routing_mode="off")
+        self.assertEqual(hooks.HANDLERS["mod-start"]({"session_id": "s1"}), {"ok": True})

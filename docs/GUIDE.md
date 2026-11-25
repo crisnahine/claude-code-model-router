@@ -75,7 +75,7 @@ Each model stands for its lowest level; Opus named at `xhigh` or `max` stands fo
 
 ## Redo
 
-Claude marks a redo by starting the `description` with "Redo:" after a failed check or a gap in a report. It climbs from the latest run of the same agent and description (case and spacing aside) that finished in this session in the last 30 minutes, else from what the call would run at unmarked: one effort step while that run was below `high`, else the next stronger usable model at its level's effort, else one more step. From Haiku at `medium`: Haiku `high`, Sonnet `medium`, Sonnet `high`, Opus `high`, Fable `high`, `xhigh`, `max`.
+Claude marks a redo by starting the `description` with "Redo:" after a failed check or a gap in a report. It climbs from the latest run of the same agent and description (case and spacing aside) that finished in this session in the last 30 minutes, else from what the call would run at unmarked: one effort step while that run was below `high`, else the next stronger usable model at its level's effort, else one more step. From Haiku at `medium`: Haiku `high`, Sonnet `medium`, Sonnet `high`, Opus `high`, Fable `high`, `xhigh`, `max`. With no step left, the redo runs as before, and Claude reads that nothing stronger is usable.
 
 A redo naming more than that run runs as named; naming the same or less climbs anyway. It climbs past a rule's model, the agent's model and effort, and `CLAUDE_CODE_SUBAGENT_MODEL`, inside `max_tier`. When `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_EFFORT` or `maxEffortLevel` holds the effort, it moves to the next model; under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` it only gets the effort step.
 
@@ -124,6 +124,6 @@ Its state is in `~/.claude/plugins/data/model-router-claude-code-model-router/`,
 - It never changes the main conversation's model or effort, since a switch re-reads the conversation uncached. Use `ultrathink` or `/effort`.
 - It never picks a model from the work: a call nothing names a model for runs on its parent's model, Opus on an Opus session.
 - It leaves forks, resumed agents and agents whose definition it can't find alone, unless the call or your rule names a model.
-- It doesn't retry a failed call; set `fallbackModel`. After a model error it suggests a usable model (not under the force variable), and after two errors, or two runs on another model, it routes around that model for a day.
+- It doesn't retry a failed call; set `fallbackModel`. After a model error it suggests a usable model (not under the force variable), and after two errors, or two runs on another model, it routes around that model for a day. With the mod, a run that another mod moved to another model doesn't count.
 - Where Fable bills to usage credits, a background session or teammate with nobody to answer the consent prompt ends its turn, and `claude -p` bills without asking; `max_tier` at `opus` avoids both.
-- Without the mod, as where an organization blocks user mods, it has no dollar figures, workflow routing, settings lists or newest IDs. With hooks off it does nothing.
+- Without the mod, as where an organization blocks user mods, it has no dollar figures, workflow routing, settings lists, newest IDs or model table in the Agent tool's description. With hooks off it does nothing.

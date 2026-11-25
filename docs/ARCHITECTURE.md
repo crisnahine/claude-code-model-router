@@ -4,7 +4,7 @@
 
 # Architecture
 
-Model Router changes two fields of an agent call, `model` and `effort`; the agent, prompt and tools stay as written. Claude names both on each Agent call, from a table in the session-start note. The plugin holds them to the user's cap, the allowlist and model health, fills in the effort when only a model is named, raises a call to a rule's level, and runs a call marked "Redo:" higher. A Stop check asks for a check after unchecked edits.
+Model Router changes two fields of an agent call, `model` and `effort`; the agent, prompt and tools stay as written. Claude names both on each Agent call, from a table in the session-start note, which the mod also puts in the Agent tool's description. The plugin holds them to the user's cap, the allowlist and model health, fills in the effort when only a model is named, raises a call to a rule's level, and runs a call marked "Redo:" higher. A Stop check asks for a check after unchecked edits.
 
 ## Two paths, one router
 
@@ -14,10 +14,12 @@ Both paths run one launcher, `scripts/model-router.sh`, and one procedure, `spaw
 
 | Event | What the mod does |
 | :- | :- |
-| `tool.call` (`Agent`) | Keeps the call's `effort`, which `agent.spawn` lacks, and writes the mark |
-| `session.start` | Sends the settings layers; the runtime stores them and clears day-old marks |
-| `agent.spawn` | Sends the call, `parent_model`, `kind` and the session's effort; passes the answer's `model` on. Forks and resumed runs pass untouched |
-| `turn.start` | Gives an agent whose first request beats its spawn's return that spawn's effort, if its prompt's waiting spawns agree |
+| `tool.call` (`Agent`) | Keeps the call's `effort`, which `agent.spawn` lacks, and writes the mark. After the result, adds the spawn answer's `note` to its `context` |
+| `tool.describe` (`Agent`) | Appends the session-start note the latest `mod-start` answer carried (`rules`) to the tool's description |
+| `session.start` | Sends the settings layers; the runtime stores them, clears day-old marks and answers the session-start note |
+| `session.end` | At `/clear`, forgets the session id the layers went to |
+| `agent.spawn` | Sends the call, `parent_model`, `kind` and the session's effort; passes the answer's `model` on. Marks a spawn a later mod moved to another family. Forks and resumed runs pass untouched |
+| `turn.start` | On the main loop, sends the layers again when the session id changed, as it does at `/clear`. Gives an agent whose first request beats its spawn's return that spawn's effort, if its prompt's waiting spawns agree |
 | `turn.step` | Sets the agent's effort on each request (a workflow agent's only when higher); records the main loop's |
 | `turn.complete` | Sends a subagent's tokens and cost estimate to the ledger |
 
@@ -78,7 +80,7 @@ The router's effort is the level's own, one step more (at most `xhigh`) on a mod
 
 `spawn.decide` gathers the facts (the agent's definition, the parent's model, the usable models, the session's effort, and for a redo the run it redoes) and calls `router.decide`, which reads no state. Neither writes. `spawn.record` then writes the ledger row and the route.
 
-A decision is `keep`, `rewrite` or `deny` (the guard's), with model, effort, level, source, `was` (the untouched model), `held` and a reason. The first source below that names a model wins. A fork, routing `off`, an allowlist that leaves no registry model open, a user rule's `route: false`, or a model outside the registry such as `inherit` is a keep.
+A decision is `keep`, `rewrite` or `deny` (the guard's), with model, effort, level, source, `was` (the untouched model), `held`, `no_step` (a redo with no step left) and a reason. The first source below that names a model wins. A fork, routing `off`, an allowlist that leaves no registry model open, a user rule's `route: false`, or a model outside the registry such as `inherit` is a keep.
 
 ### Order of authority
 
@@ -129,11 +131,15 @@ The climb (`router._redo`):
 
 A step `maxEffortLevel` or `effort_stops_at` holds counts as none, and under an effort variable the router sets no effort, so the redo takes the next model. A nested run with no effort on record skips step 1. The call's model, the pin, a rule's model and `CLAUDE_CODE_SUBAGENT_MODEL` don't hold a redo back; under the force pin it gets one effort step. The session floor and `maxEffortLevel` apply after. `escalated_from` names the redone run's level.
 
+With no stronger usable model and no effort to gain, the redo runs as the run it redoes did, and the decision's `no_step` is set. Claude then reads one sentence after the result, such as "This redo ran on opus at max, the same as the run it redoes: nothing stronger is usable here." (`spawn.redo_note`): `additionalContext` beside `updatedInput` on the fallback, the `tool.call` result's `context` on the mod.
+
 A redo is left alone wherever a plain call is. It misses its record after a skipped write, 30 minutes, 100 newer tasks, or a day idle. It never changes later calls. A run that swapped models mid-run (`modelsUsed`) finishes nothing and isn't health evidence.
 
 ## The session-start note
 
 `hooks._rules` writes it while routing is `auto`. It says the plugin keeps the `model` and `effort` a call names within the cap and fills in `effort` when a call names only a model, then "Here every Agent call names both, by the work": haiku at medium for finding, reading and listing; sonnet at medium for everyday work to a clear brief; opus at high for work that is hard to check, high-stakes, ambiguous or broad; fable at high for open-ended research. It ends with where a call naming neither runs, and how to mark a redo.
+
+The `mod-start` answer carries the same text as `rules`, and the mod's `tool.describe` hook appends it to the Agent tool's description, so Claude reads the table where it fills in the call. The description keeps the text of the latest answer that had one, and is left as it is before any.
 
 It is written as facts because, as `hooks._rules` records, the Agent tool sets `effort` only when instructions ask. Each pairing is the level's model and effort from the registry (`ladder.model_for`, `ladder.effort`), so a rules file that moves a level moves the note. The force pin, either effort variable, `max_tier` and `CLAUDE_CODE_SUBAGENT_MODEL` each trim or reword it to what still applies: under an effort variable, for one, a redo goes to a stronger model.
 
@@ -144,12 +150,13 @@ When the person's own prompt (`intake.is_user_prompt`) names a model, as in "use
 Model health lives in `state.json` (`health.py`):
 
 - A model error is a failed `Agent` call whose error text has `not_found_error`, `model_not_found` or `claude_code_version_too_old`. A substitution is a `resolvedModel` in another family than asked, outside the force pin, a swapped run, or the untouched model.
+- A spawn a later mod moved to another family strikes nothing. The mod compares the model it sent with the one the engine's entry in `next.trace` was asked for, and writes `mod-calls/<tool_use_id>.moved`; `post-agent` and `agent-failed` take it (`mod.moved`).
 - Two of either route the model around for a day; a run as asked clears it. A full ID the router sent (a newest ID, or an exact ID kept on a rewrite) is routed around after one model error or provider refusal (`health.REFUSED`). An exact ID on a call left as it is strikes nothing.
 - `Registry.available` drops the health filter rather than leave nothing usable, never the allowlist's.
 
 The allowlist (`allowlist.py`):
 
-- The mod reads each settings source at session start and each spawn and sends only the keys routing reads, kept per session in `allowlist.json`. Without them no list applies, and Claude Code enforces its own.
+- The mod reads each settings source at session start, at the first main-loop turn after `/clear`, and at each spawn, and sends only the keys routing reads, kept per session in `allowlist.json`. Without them no list applies, and Claude Code enforces its own.
 - A policy `availableModels` applies alone, else the sources' lists join; `deniedModels` and `availableModelsMatch` count only from policy. A deny entry blocks a family only when it names it with no version. With no registry model open, the call is left as it is.
 
 ## The Stop check
