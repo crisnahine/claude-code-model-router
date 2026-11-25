@@ -22,7 +22,7 @@ _SUCH = "a design or a review"
 
 
 _WORK = ((cfg.Level.lookup, "finding, reading and listing"), (cfg.Level.standard, "writing and fixing code, figures and documents to a brief"),
-         (cfg.Level.complex, f"{_HARD} ({_SUCH})"), (cfg.Level.frontier, "open-ended research"))
+         (cfg.Level.complex, f"{_HARD} ({_SUCH})"))
 
 
 def _rows(reg: Registry, efforts: bool) -> str:

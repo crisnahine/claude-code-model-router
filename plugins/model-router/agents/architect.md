@@ -22,4 +22,4 @@ Output a plan with these sections:
 3. Steps: an ordered list. Each step names the files, the change, and how to verify it. Mark which steps are independent and can run in parallel.
 4. Test plan.
 5. Risks and how each is mitigated.
-6. For each step, the `model` and `effort` its Agent call should name, by the work: `haiku` at `medium` for finding, reading and listing; `haiku` at `high` for writing and fixing code, figures and documents to a brief; `sonnet` at `high` for a judgment call with no check to run (a design or a review); `fable` at `high` for open-ended research.
+6. For each step, the `model` and `effort` its Agent call should name, by the work: `haiku` at `medium` for finding, reading and listing; `haiku` at `high` for writing and fixing code, figures and documents to a brief; `sonnet` at `high` for a judgment call with no check to run (a design or a review).

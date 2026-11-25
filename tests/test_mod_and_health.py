@@ -244,7 +244,7 @@ class ModStartRules(Sandbox):
         self.assertTrue(text.startswith("Model Router keeps the `model` and `effort` a workflow script names on an "
                                         "`agent()` call, within the user's cap. Here every `agent()` call in a script "
                                         "names both, by the work:\n- haiku at medium: finding, reading and listing\n"))
-        self.assertIn("- fable at high: open-ended research\nA stage that names neither runs on its agent's own model, "
+        self.assertIn("- sonnet at high: a judgment call with no check to run (a design or a review)\nA stage that names neither runs on its agent's own model, "
                       "else at the level its tools put it.", text)
         self.assertLessEqual(len(text), 540)  # it sits in the Workflow tool's description all session
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="haiku")

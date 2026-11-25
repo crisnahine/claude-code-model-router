@@ -36,7 +36,8 @@ Judge the work by whether it has a check to run (tests, a recompute, a reread ag
 | Finding, reading and listing, where a wrong answer is easy to spot | `haiku` | `medium` | the files that import a module, the open invoices in a sheet, the dates in a letter |
 | Writing and fixing code, figures and documents to a brief | `haiku` | `high` | a function to its spec, a bug fixed against a failing test, a refactor inside one module, a contract summarized, an email drafted from an outline |
 | A judgment call with no check to run: a design or a review | `sonnet` | `high` | two designs compared, a diff reviewed for security, a bug's cause with no reproduction |
-| Open-ended research with no known approach | `fable` | `high` | a literature survey weighed for evidence, a question spread over many sources |
+
+`opus` and `fable` have no row: they are for the session itself. A subagent runs on one when a redo climbs there, a rule sets its level, or the call names it.
 
 An agent whose definition sets its own model runs on it when the call names none, and the policy above shows which role agents do. Leave `model` off those calls unless the work needs a stronger model. Under `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` a `model` on a call has no effect, so name only `effort`.
 

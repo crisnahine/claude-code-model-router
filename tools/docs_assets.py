@@ -177,7 +177,7 @@ LADDER = [  # level, model, effort, needs, subtask
     ("standard", "Haiku", "high", 1, "Code, figures and documents to a brief"),
     ("complex", "Sonnet", "high", 2, "A judgment call: a design or a review"),
     ("hardest", "Opus", "high", 3, "When a redo, a call or a rule names it"),
-    ("frontier", "Fable", "high", 4, "Open-ended research"),
+    ("frontier", "Fable", "high", 4, "When a redo, a call or a rule names it"),
 ]
 
 

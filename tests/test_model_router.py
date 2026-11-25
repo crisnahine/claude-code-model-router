@@ -3130,9 +3130,11 @@ class Hooks(Sandbox):
         self.assertIn("Here every Agent call names both, by the work:\n", text)
         for line in ("- haiku at medium: finding, reading and listing",
                      "- haiku at high: writing and fixing code, figures and documents to a brief",
-                     "- sonnet at high: a judgment call with no check to run (a design or a review)",
-                     "- fable at high: open-ended research"):
+                     "- sonnet at high: a judgment call with no check to run (a design or a review)"):
             self.assertIn(line, text)
+        # Opus and Fable are for the session itself: a row for either had Claude name it for everyday work.
+        self.assertNotIn("- opus", text)
+        self.assertNotIn("- fable", text)
         self.assertIn("figures and documents", text)  # any kind of work, not only code
         self.assertIn("A call that names neither runs on its agent's own model, else at the level its tools put it, "
                       "within the cap.", text)
@@ -3182,7 +3184,7 @@ class Hooks(Sandbox):
         self.override({"levels": {"complex": {"needs": 3, "effort": "xhigh"}, "standard": {"effort": "medium"}}}, user=True)
         text = self.text(hooks.session_start({"session_id": "s1", "model": "claude-sonnet-5-5"}))
         for line in ("- haiku at medium: finding, reading and listing", "- haiku at medium: writing and fixing code",
-                     "- opus at xhigh: a judgment call with no check to run", "- fable at high: open-ended research"):
+                     "- opus at xhigh: a judgment call with no check to run"):
             self.assertIn(line, text)
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         forced = self.text(hooks.session_start({"session_id": "s1"}))

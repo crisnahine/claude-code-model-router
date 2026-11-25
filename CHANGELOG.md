@@ -8,7 +8,7 @@
 
 Model Router manages the Claude model and effort that each subagent, teammate and workflow agent runs on.
 
-- Claude names the `model` and `effort` on each Agent call, from a table in the session-start note: Haiku at `medium` for finding, reading and listing, Haiku at `high` for writing and fixing code, figures and documents to a brief, Sonnet at `high` for a judgment call with no check to run (a design or a review), and Fable at `high` for open-ended research.
+- Claude names the `model` and `effort` on each Agent call, from a table in the session-start note: Haiku at `medium` for finding, reading and listing, Haiku at `high` for writing and fixing code, figures and documents to a brief, and Sonnet at `high` for a judgment call with no check to run (a design or a review). Opus and Fable have no row: they are for the session itself, and a subagent runs on one when a redo climbs there, a rule sets its level or the call names it.
 - The plugin keeps each call within your cap and the models usable here, fills in the effort when a call names only a model, gives a call that names no model a level from what its agent can do (`lookup` when it can't edit, write or run commands, else `standard`), and raises an agent's calls to the `level` a rule in `model-router.json` sets.
 - A call whose `description` starts with "Redo:" runs higher than the run it redoes: more effort first, then a stronger model.
 - When Claude edited a project file and no check ran after it, the Stop check asks Claude once to run the work's own check before it finishes.

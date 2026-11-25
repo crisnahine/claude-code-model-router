@@ -12,7 +12,7 @@ Model Router is an open-source Claude Code plugin that keeps the model and effor
 
 ## Does it pick the model, or does Claude?
 
-Claude does. A note at session start gives Claude a table: Haiku at `medium` for finding, reading and listing, Haiku at `high` for writing and fixing code, figures and documents to a brief, Sonnet at `high` for a judgment call with no check to run (a design or a review), and Fable at `high` for open-ended research. The plugin never reads a brief to choose. A call that names no model runs on the agent's own model, else `CLAUDE_CODE_SUBAGENT_MODEL`, else at the level its tools put it: `lookup` for an agent that can't edit, write or run commands, `standard` for any other ([guide](GUIDE.md#who-decides-the-model)).
+Claude does. A note at session start gives Claude a table: Haiku at `medium` for finding, reading and listing, Haiku at `high` for writing and fixing code, figures and documents to a brief, and Sonnet at `high` for a judgment call with no check to run (a design or a review). Opus and Fable have no row: they are for the session itself, and a subagent runs on one when a redo climbs there, a rule sets its level or the call names it. The plugin never reads a brief to choose. A call that names no model runs on the agent's own model, else `CLAUDE_CODE_SUBAGENT_MODEL`, else at the level its tools put it: `lookup` for an agent that can't edit, write or run commands, `standard` for any other ([guide](GUIDE.md#who-decides-the-model)).
 
 ## What happens when a subagent gets it wrong?
 
