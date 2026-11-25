@@ -43,7 +43,16 @@ class ProjectFromASubfolder(Sandbox):
         self.agent("outsider", "opus", folder=outer)
         self.assertIsNone(agents.find("outsider", self.sub))
 
-    @unittest.skipUnless(hasattr(os, "getuid"), "a file's owner is checked on POSIX only")
+    def test_the_walk_stops_where_the_root_or_its_git_or_claude_folder_is_not_mine(self):
+        del os.environ["CLAUDE_PROJECT_DIR"]
+        with mock.patch.object(cfg, "_mine", return_value=True):
+            self.assertEqual(agents.find("pinned-helper", self.sub)["model"], "haiku")
+        for planted in (self.project, self.project / ".git", self.project / ".claude"):
+            with self.subTest(planted=planted.name), mock.patch.object(cfg, "_mine", lambda p: p != planted):
+                self.assertIsNone(agents.find("pinned-helper", self.sub))
+                self.assertNotEqual(cfg.load({"cwd": str(self.sub)}).levels[Level.complex].effort, "max")
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "st_uid is a real owner on POSIX only")
     def test_the_walk_stops_where_the_roots_git_or_claude_folder_is_another_users(self):
         del os.environ["CLAUDE_PROJECT_DIR"]
         real = os.stat
@@ -63,6 +72,22 @@ class ProjectFromASubfolder(Sandbox):
         self.assertEqual(agents.find("pinned-helper", other)["model"], "haiku")
         self.agent("pinned-helper", "sonnet", folder=self.sub / ".claude" / "agents")
         self.assertEqual(agents.find("pinned-helper", self.sub)["model"], "sonnet")
+
+
+class Owner(Sandbox):
+    def test_a_folder_and_file_this_process_made_are_mine(self):
+        made = self.project / "made"
+        made.mkdir()
+        (made / "file").write_text("x")
+        self.assertIs(cfg._mine(made), True)
+        self.assertIs(cfg._mine(made / "file"), True)
+
+    def test_a_path_that_does_not_exist_is_not_mine(self):
+        self.assertIs(cfg._mine(self.project / "gone"), False)
+
+    @unittest.skipUnless(os.name == "nt", "the Windows folder exists on Windows only")
+    def test_the_windows_folder_is_not_mine(self):
+        self.assertIs(cfg._mine(Path(os.environ["SystemRoot"])), False)
 
 
 class ProjectEffortOverAUserNull(Sandbox):
