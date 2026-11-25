@@ -153,12 +153,16 @@ def _refusal(name: str, ours: list[dict], base: str, theirs: list[dict]) -> str 
     return "; ".join(why) or None
 
 
-def _judge(base: str, pass_ci: tuple, cost_ci: tuple, fewer: bool) -> tuple[str, str]:
+def _judge(base: str, pass_ci: tuple, cost_ci: tuple, fewer: bool, solved: tuple) -> tuple[str, str]:
+    """The verdict against one baseline; `solved` is the router's solved runs and runs, then the baseline's."""
     (p_lo, p_hi), (c_lo, c_hi) = pass_ci, cost_ci
     seen = (f"cost per solved task {_fmt(c_lo)} to {_fmt(c_hi)}, pass rate {p_lo:+.0%} to {p_hi:+.0%} "
             "(95% intervals of the router's minus the baseline's)")
-    if p_hi < 0:
-        return "LOSE", f"pass rate behind beyond noise; {seen}"
+    # The runs added per task shrink a pass-rate gap, so the exact test can see a loss the interval hides.
+    behind = _lower_p(*solved)
+    if p_hi < 0 or behind < ALPHA:
+        return "LOSE", (f"pass rate behind beyond noise: solved {solved[0]} of {solved[1]} runs against {solved[2]} of "
+                        f"{solved[3]} (exact one-sided p = {behind:.3f}); {seen}")
     if c_hi < 0 and p_lo > -MARGIN:
         if fewer:  # a saving counts only at an equal or higher pass rate
             return "NONE", f"cheaper per solved task beyond noise, but it solved a smaller share of the runs; {seen}"
@@ -235,7 +239,8 @@ def _summary(cls: str, runs: list[dict], *, routers: frozenset[str], router: str
             verdicts[b] = {"verdict": "REFUSED", "reason": why}
             continue
         pass_ci, cost_ci, fewer = _paired(by[router], by[b], random.Random(f"{seed}/{session}/{cls}/{router}/{b}"), draws)
-        code, reason = _judge(b, pass_ci, cost_ci, fewer)
+        solved = [x for side in (by[router], by[b]) for x in (sum(bool(r["passed"]) for r in side), len(side))]
+        code, reason = _judge(b, pass_ci, cost_ci, fewer, tuple(solved))
         verdicts[b] = {"verdict": code, "reason": reason, "pass_ci": pass_ci, "cost_ci": tuple(map(_finite, cost_ci))}
     status = _status(verdicts)
     # A rank is a cost claim, which a row with no verdict can't support.
@@ -596,7 +601,9 @@ def _page(results: Results, summary: list[dict]) -> dict:
         "router's cost per solved task minus the baseline's is below zero, the lower bound of its pass rate "
         f"minus the baseline's is above minus {MARGIN:.0%}, and the router solved at least the baseline's share of "
         "runs (per-task pass rates averaged), so a saving counts only at an equal or higher pass rate. LOSE: the "
-        "router's pass rate is behind beyond noise, "
+        "router's pass rate is behind beyond noise (the upper bound of its pass rate minus the baseline's is below "
+        "zero, or an exact one-sided test at 5% of its solved runs against the baseline's, every run of the row "
+        "pooled, puts it behind, which catches a gap the added runs shrink), "
         "or its cost per solved task is above beyond noise while the upper bound of its pass rate minus the "
         f"baseline's is below plus {MARGIN:.0%}, the mirror of the WIN rule. "
         "Anything else is \"no difference shown\", which is not parity. There is no verdict when the two didn't run "

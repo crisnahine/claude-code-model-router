@@ -110,7 +110,15 @@ class Analysis(unittest.TestCase):
         self.assertEqual(analyze._status({"a": {"verdict": "WIN"}, "b": {"verdict": "WIN"}}), "WIN")
 
     def test_behind_beyond_noise_loses_even_inside_the_margin(self):
-        self.assertEqual(analyze._judge("defaults", (-0.08, -0.01), (-0.05, -0.01), False)[0], "LOSE")
+        self.assertEqual(analyze._judge("defaults", (-0.08, -0.01), (-0.05, -0.01), False, (9, 10, 9, 10))[0], "LOSE")
+
+    def test_a_pass_rate_the_exact_test_puts_behind_loses_where_the_added_runs_hide_it(self):
+        # The solved and failed runs added per task shrink every pass-rate gap by n / (n + 2).
+        v = self.verdict(spread("plugin", "lookup", 5, 3, 0.1, solved=2) + spread("defaults", "lookup", 5, 3, 0.5))
+        self.assertGreaterEqual(v["pass_ci"][1], 0)
+        self.assertEqual(v["verdict"], "LOSE")
+        self.assertIn("solved 10 of 15 runs against 15 of 15 (exact one-sided p = 0.021)", v["reason"])
+        self.assertIn("an exact one-sided test", analyze.build_page(analyze.load([])))
 
     def test_a_baseline_with_more_than_a_quarter_of_runs_denied_gets_no_verdict(self):
         theirs = spread("defaults", "lookup", 6, 12, 0.50)
@@ -3062,8 +3070,8 @@ class RunEdges(unittest.TestCase):
 
     def test_the_cost_lose_rule_is_the_mirror_of_the_win_rule_and_the_docs_say_so(self):
         # Dearer beyond noise: LOSE only once the pass rate's upper bound is below +10 points.
-        self.assertEqual(analyze._judge("defaults", (-0.08, 0.09), (0.1, 0.2), False)[0], "LOSE")
-        self.assertEqual(analyze._judge("defaults", (-0.12, 0.11), (0.1, 0.2), False)[0], "NONE")
+        self.assertEqual(analyze._judge("defaults", (-0.08, 0.09), (0.1, 0.2), False, (9, 10, 9, 10))[0], "LOSE")
+        self.assertEqual(analyze._judge("defaults", (-0.12, 0.11), (0.1, 0.2), False, (9, 10, 9, 10))[0], "NONE")
         stated = "the upper bound of its pass rate minus the baseline's is below plus 10 points"
         self.assertIn(stated, (ROOT / "bench" / "README.md").read_text(encoding="utf-8"))
         page = analyze.build_page(analyze.load([]))

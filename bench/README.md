@@ -83,7 +83,7 @@ Run five rounds on at least two days, 240 runs; rounds 2 to 5 change only `--fir
 The rule is fixed before any run. The router gets one verdict per baseline on each row: one per task class, and an `all tasks` row. Its runs and the baseline's are paired by task. Each of 2,000 resamples draws the row's tasks, then each task's runs, with replacement; for the pass rate each task gets one solved and one failed run added, so a cell where every run passed still has spread. The non-inferiority margin is 10 points.
 
 - WIN: the 95% interval of the router's cost per solved task minus the baseline's is below zero, the lower bound of its pass rate minus the baseline's is above minus 10 points, and the router solved at least the baseline's share of runs.
-- LOSE: the router's pass rate is behind beyond noise, or it costs more per solved task beyond noise while the upper bound of its pass rate minus the baseline's is below plus 10 points.
+- LOSE: the router's pass rate is behind beyond noise (the upper bound of its pass rate minus the baseline's is below zero, or an exact one-sided test at 5% of its solved runs against the baseline's, every run of the row pooled, puts it behind, which catches a gap the added runs shrink), or it costs more per solved task beyond noise while the upper bound of its pass rate minus the baseline's is below plus 10 points.
 - No difference shown: anything else. It is not parity.
 - No verdict: the two didn't run each task the same number of times in each batch, or Bash was denied in more than a quarter of either's runs. No verdict, no rank.
 
