@@ -1175,7 +1175,7 @@ class Options(Sandbox):
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="yes",
                      CLAUDE_CODE_USE_VERTEX="1", max_tier="nonsense", verify_gate="false")
         s = settings.resolve(cfg.load())
-        self.assertEqual((s.subagent_model, s.force, s.cloud, s.cap, s.verify_gate),
+        self.assertEqual((s.subagent_model, s.force, s.provider, s.cap, s.verify_gate),
                          ("opus", True, "vertex", None, False))
 
     def test_skill_commands_read_the_options_from_their_flags(self):
@@ -2757,7 +2757,6 @@ class Health(Sandbox):
         seen = health.load()
         self.assertEqual((seen.healthy("opus"), seen.why_routed_around("opus"), seen.last_ran_as("opus")),
                          (True, None, "claude-opus-5-5"))
-        self.assertEqual(seen.seen_running(), ["claude-opus-5-5"])
 
     def test_two_substitutions_route_a_model_around(self):
         health.ran("fable", "claude-opus-5-5", "opus", forced=False)
@@ -2826,7 +2825,6 @@ class Health(Sandbox):
                                                       "huge": {"unavailable_until": 10 ** 400, "fail": 10 ** 400}}))
         seen = health.load()
         self.assertEqual([seen.healthy(n) for n in ("opus", "sonnet", "haiku", "fable", "saga", "huge")], [True] * 6)
-        self.assertEqual(seen.seen_running(), [])
 
     def test_the_record_keeps_its_shape(self):
         health.failed("opus", "model not found")

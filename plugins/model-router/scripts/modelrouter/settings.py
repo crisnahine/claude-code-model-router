@@ -33,7 +33,6 @@ class Settings:
     workflow_model: str | None = None  # CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL, which pins every workflow agent's model
     effort_level: str | None = None  # CLAUDE_CODE_EFFORT_LEVEL
     agent_teams: bool = False  # CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
-    cloud: str | None = None  # bedrock, vertex or foundry, from CLAUDE_CODE_USE_<NAME>
     provider: str | None = None  # the provider the CLAUDE_CODE_USE_<NAME> switches select: None is the Anthropic API
 
 
@@ -81,7 +80,6 @@ def resolve(reg: Registry | None = None) -> Settings:
         workflow_model=env("CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL"),
         effort_level=env("CLAUDE_CODE_EFFORT_LEVEL"),
         agent_teams=truthy(env("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS")),
-        cloud=next((c for c in CLOUDS if truthy(env(f"CLAUDE_CODE_USE_{c.upper()}"))), None),
         # A host that manages the provider ignores these switches in settings files, and its alias table isn't documented.
         provider=UNKNOWN if env("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST")
         else _provider({p for p in PROVIDERS if truthy(env(f"CLAUDE_CODE_USE_{p.upper()}"))}),

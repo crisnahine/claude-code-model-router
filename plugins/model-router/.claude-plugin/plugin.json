@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "description": "Keeps the Claude model and effort Claude names for every subagent, teammate and workflow agent within your cap, fills in the effort when only a model is named, and runs a marked redo with more effort or a stronger model.",
   "author": {
-    "name": "Cris",
+    "name": "Cris Nahine",
     "url": "https://github.com/crisnahine"
   },
   "homepage": "https://github.com/crisnahine/claude-code-model-router",
@@ -14,8 +14,7 @@
     "model-router",
     "model-routing",
     "multi-model",
-    "subagents",
-    "code-review"
+    "subagents"
   ],
   "engines": {
     "claude-code": ">=2.1.329"

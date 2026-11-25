@@ -57,10 +57,6 @@ class Health:
             return f"ran as {info.get('substituted_by')} instead"  # a record written before the cause was kept
         return str(info.get("why") or info.get("last_error") or "calls failed with a model error")
 
-    def seen_running(self) -> list[str]:
-        return [i["last_model"] for i in self._table.values()
-                if isinstance(i, dict) and isinstance(i.get("last_model"), str)]
-
 
 def load() -> Health:
     return Health(store.load_state().get("health"))
