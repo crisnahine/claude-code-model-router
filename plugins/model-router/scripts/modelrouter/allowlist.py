@@ -70,8 +70,8 @@ def _layer(raw: object, policy: bool = False) -> dict:
     for key in ("maxEffortLevel", "effortLevel"):
         if raw.get(key) in EFFORTS:
             layer[key] = raw[key]
-    if _caps(raw.get("modelSettings")):
-        layer["modelSettings"] = _caps(raw["modelSettings"])
+    if caps := _caps(raw.get("modelSettings")):
+        layer["modelSettings"] = caps
     return layer
 
 
