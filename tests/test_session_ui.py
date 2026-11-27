@@ -292,6 +292,29 @@ class SessionCheck(Sandbox):
              "done": "This session is now on Fable at medium."}])
         self.assertEqual(self.labels(answer)[2:], ["Stay on Sonnet at medium"])
 
+    def test_an_effort_left_to_the_api_is_estimated_at_the_api_default(self):
+        self.options(CLAUDE_CODE_EFFORT_LEVEL="auto")
+        self.assertEqual(self.check(OPUS), {})  # medium, the API's default on Opus, meets its floor
+        answer = self.check(SONNET, "s2")
+        self.assertEqual(answer["options"][:2], [
+            {"label": "Opus (Recommended)", "family": "opus", "model": "opus", "done": "This session is now on Opus at medium."},
+            {"label": "Fable (the strongest model)", "family": "fable", "model": "fable", "done": "This session is now on Fable at high."}])
+        self.assertEqual(self.labels(answer)[2:], ["Stay on Sonnet at high"])
+
+    def test_unset_and_any_case_of_the_variable_read_the_same(self):
+        for i, value in enumerate(("unset", "AUTO")):
+            self.options(CLAUDE_CODE_EFFORT_LEVEL=value)
+            self.assertEqual(self.labels(self.check(SONNET, f"s{i}")), ["Opus (Recommended)", "Fable (the strongest model)",
+                                                                        "Stay on Sonnet at high"], value)
+        self.options(CLAUDE_CODE_EFFORT_LEVEL="High")
+        self.assertEqual(session.effort_on(snapshot("high"), SONNET), "high")
+
+    def test_an_effort_left_to_the_api_under_a_cap_is_estimated_at_the_cap(self):
+        self.options(CLAUDE_CODE_EFFORT_LEVEL="auto")
+        self.assertEqual(self.check(SONNET, policy={"maxEffortLevel": "low"}), {})  # nothing is offered under the cap
+        self.assertEqual(store.load_entry(settings.SWITCHES, "s1")["estimate"],
+                         {"model": "sonnet", "effort": "low", "recommended": False})
+
     def test_an_effort_the_session_already_saves_for_a_model_needs_no_effort_command(self):
         answer = self.check(SONNET, user={"modelSettings": {OPUS: {"effortLevel": "high"}}})
         self.assertEqual([o.get("effort") for o in self.choice(answer, "Opus")["then"]["options"]], ["medium", None, "xhigh", "max"])

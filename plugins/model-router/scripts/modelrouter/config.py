@@ -24,6 +24,9 @@ EFFORTS = ("low", "medium", "high", "xhigh", "max")
 # What Claude Code runs a model at when nothing sets its effort, on every model the registry names
 # (https://code.claude.com/docs/en/model-config.md#adjust-effort-level).
 DEFAULT_EFFORT = "medium"
+# shortcut: the API's default effort is medium on Opus 5.5 and Haiku 5.5 and high on the other models, kept here by family,
+# so an older Opus or Haiku is estimated one level low; upgrade when the session check estimates older models closely.
+API_MEDIUM = ("opus", "haiku")
 
 USER_FILE = "your model-router.json"
 PROJECT_FILE = "the project's model-router.json"
