@@ -74,11 +74,12 @@ class AgentTools(Sandbox):
         self.assertTrue(reads(READER))
         self.assertTrue(reads("tools: Read, WebFetch, mcp__docs__search\n"))
         for writes in ("tools: Read, Bash\n", "tools: Read, Bash(git status)\n", "tools: Edit\n", "tools: Write\n",
-                       "tools: NotebookEdit\n", ""):
+                       "tools: NotebookEdit\n", "tools: Read, PowerShell\n", "tools: Read, Monitor\n", ""):
             self.assertFalse(reads(writes), writes)
-        self.assertTrue(reads("disallowedTools: Edit, Write, NotebookEdit, Bash\n"))
+        self.assertTrue(reads("disallowedTools: Edit, Write, NotebookEdit, Bash, PowerShell, Monitor\n"))
+        self.assertFalse(reads("disallowedTools: Edit, Write, NotebookEdit, Bash\n"))
         self.assertFalse(reads("disallowedTools: Edit, Write\n"))
-        self.assertTrue(reads("disallowedTools: Edit, Write, NotebookEdit, Bash(rm:*)\n"))  # a scoped entry removes the tool
+        self.assertTrue(reads("disallowedTools: Edit, Write, NotebookEdit, Bash(rm:*), PowerShell, Monitor\n"))  # a scoped entry removes the tool
         self.assertTrue(reads("tools: Read, Bash\ndisallowedTools: Bash\n"))
         for builtin, only_reads in (("Explore", True), ("Plan", True), ("general-purpose", False), ("claude", False)):
             self.assertEqual(agents.read_only(agents.find(builtin, self.project)), only_reads, builtin)

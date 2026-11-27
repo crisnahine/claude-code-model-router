@@ -15,7 +15,7 @@ from . import store
 BUILTIN = ("general-purpose", "Explore", "Plan", "claude")
 READ_ONLY_BUILTINS = ("Explore", "Plan")
 # The tools that change files or run commands: an agent with none of them can only read.
-CHANGES = frozenset(("Edit", "Write", "NotebookEdit", "Bash"))
+CHANGES = frozenset(("Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "Monitor"))
 _FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---", re.S)
 HEAD_CHARS = 6000  # the frontmatter is read from this much of a file
 

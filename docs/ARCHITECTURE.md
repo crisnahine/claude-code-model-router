@@ -115,7 +115,7 @@ A decision is `keep`, `rewrite` or `deny` (the guard's), with a model, effort, l
 | 5 | A project's rule `model` | Applies it only when not weaker than what the call runs on without it, and not a model the project added; else `held` says why |
 | 6 | The agent's own `model` | Keeps it; for `inherit`, the parent's model, which outranks row 7. With no definition found, or a `model` outside the registry, leaves the call alone |
 | 7 | `CLAUDE_CODE_SUBAGENT_MODEL` | Leaves the call alone. Unforced, it doesn't move the built-in Explore and Plan, which go to row 8 |
-| 8 | Nothing | The level the agent's tools put it at: `lookup` when its `tools` hold none of Edit, Write, NotebookEdit and Bash, or its `disallowedTools` remove them all, as for the built-in Explore and Plan; `standard` otherwise. A list `agents._list` can't read with confidence counts as every tool, or as removing none |
+| 8 | Nothing | The level the agent's tools put it at: `lookup` when its `tools` hold none of Edit, Write, NotebookEdit, Bash, PowerShell and Monitor, or its `disallowedTools` remove them all, as for the built-in Explore and Plan; `standard` otherwise. A list `agents._list` can't read with confidence counts as every tool, or as removing none |
 
 Then, for rows 3 to 6 and 8 (steps 4 to 6 on rows 1 and 2 too):
 
