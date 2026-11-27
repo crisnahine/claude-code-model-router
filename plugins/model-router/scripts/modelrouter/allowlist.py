@@ -180,8 +180,8 @@ class Allowlist:
         for source, layer in self.efforts:
             own = [v["effortLevel"] for k, v in (layer.get("modelSettings") or {}).items()
                    if name and "effortLevel" in v and reg.family(k, twins=False) == name]
-            # shortcut: a user file's top-level effortLevel is skipped, as Opus 5.5 and later models skip it; older models
-            # still take it, so read it for them if the registry ever routes to one.
+            # shortcut: Opus 5.5 and later ignore a user file's top-level effortLevel, so it is skipped and a main session
+            # on an older model (Opus 5, Fable 5.1 or earlier) is estimated without it; upgrade when that estimate matters.
             top = layer.get("effortLevel") if source != "user" else None
             if own or top:
                 return max(own, key=EFFORTS.index) if own else top
