@@ -21,7 +21,7 @@ OVERRIDE_FILE = "model-router.json"
 CONFIG_SCHEMA = 1
 MODES = ("off", "auto")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-# What Claude Code runs a model at when nothing sets its effort, on every model the registry names
+# What Claude Code runs a model at when nothing sets its effort, on the current model of each family
 # (https://code.claude.com/docs/en/model-config.md#adjust-effort-level).
 DEFAULT_EFFORT = "medium"
 # shortcut: the API's default effort is medium on Opus 5.5 and Haiku 5.5 and high on the other models, kept here by family,
