@@ -3301,6 +3301,10 @@ class Ledger(Sandbox):
         ledger.spawn("s1", "fallback", self.decide("general-purpose", LOOKUP))
         self.assertNotIn("kind", ledger.read()[0])
 
+    def test_a_cost_too_large_for_a_float_is_left_out_of_the_row(self):
+        ledger.usage("s1", "a1", "Explore", models=[self.TURN], cost={"usd": 10 ** 400})
+        self.assertIsNone(ledger.read()[-1]["cost_usd"])
+
     def test_rows_are_read_from_an_explicit_path(self):
         other = Path(self.tmp.name) / "elsewhere.jsonl"
         other.write_text(json.dumps({"ts": "2099-01-01T00:00:00+00:00", "event": "spawn"}) + "\nnot json\n")
