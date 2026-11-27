@@ -191,7 +191,7 @@ def _refusal(name: str, ours: list[dict], base: str, theirs: list[dict]) -> str 
     return "; ".join(why) or None
 
 
-def _judge(base: str, pass_ci: tuple, cost_ci: tuple, fewer: bool, solved: tuple) -> tuple[str, str]:
+def _judge(pass_ci: tuple, cost_ci: tuple, fewer: bool, solved: tuple) -> tuple[str, str]:
     """The verdict against one baseline; `solved` is the router's solved runs and runs, then the baseline's."""
     (p_lo, p_hi), (c_lo, c_hi) = pass_ci, cost_ci
     seen = (f"cost per solved task {_fmt(c_lo)} to {_fmt(c_hi)}, pass rate {p_lo * 100:+.0f} to {p_hi * 100:+.0f} "
@@ -226,17 +226,17 @@ def _status(verdicts: dict) -> str:
     return "WIN" if codes and all(c == "WIN" for c in codes) else "NONE" if codes else "REFUSED"
 
 
-def splitting_tasks(runs: list[dict], strong: str = SPLIT_STRONG, weak: str = SPLIT_WEAK) -> list[str] | None:
-    """The tasks that tell two models apart: `strong` solved at least 2 of every 3 runs and `weak` at most 1 of
-    every 3. A reading rule for a few runs, not a significance test. None when either configuration has no runs."""
+def splitting_tasks(runs: list[dict]) -> list[str] | None:
+    """The tasks that tell two models apart: `SPLIT_STRONG` solved at least 2 of every 3 runs and `SPLIT_WEAK` at most
+    1 of every 3. A reading rule for a few runs, not a significance test. None when either configuration has no runs."""
     def solved(task: str, config: str) -> tuple[int, int]:
         ok = [bool(r["passed"]) for r in runs if r["task"] == task and r["config"] == config]
         return sum(ok), len(ok)
-    if not any(r["config"] == strong for r in runs) or not any(r["config"] == weak for r in runs):
+    if not any(r["config"] == SPLIT_STRONG for r in runs) or not any(r["config"] == SPLIT_WEAK for r in runs):
         return None
     out = []
     for task in sorted({r["task"] for r in runs}):
-        (s, sn), (w, wn) = solved(task, strong), solved(task, weak)
+        (s, sn), (w, wn) = solved(task, SPLIT_STRONG), solved(task, SPLIT_WEAK)
         if sn and wn and 3 * s >= 2 * sn and 3 * w <= wn:
             out.append(task)
     return out
@@ -276,7 +276,7 @@ def _summary(cls: str, runs: list[dict], *, routers: frozenset[str], router: str
     def judge(b: str, theirs: list[dict]) -> tuple:
         pass_ci, cost_ci, fewer = _paired(by[router], theirs, random.Random(f"{seed}/{session}/{cls}/{router}/{b}"), draws)
         solved = [x for side in (by[router], theirs) for x in (sum(bool(r["passed"]) for r in side), len(side))]
-        return (*_judge(b, pass_ci, cost_ci, fewer, tuple(solved)), pass_ci, cost_ci)
+        return (*_judge(pass_ci, cost_ci, fewer, tuple(solved)), pass_ci, cost_ci)
 
     for b in base if router in cells else []:
         why = _refusal(router, by[router], b, by[b])
@@ -616,20 +616,18 @@ def _notes(results: Results) -> list[str]:
     by_config: dict[str, list[dict]] = {}
     for r in rows:
         by_config.setdefault(r["config"], []).append(r)
-    if by_config:
-        caps = Counter(r["budget_usd"] for r in rows if r.get("budget_usd") is not None)
-        if caps:
-            lines.append("- Budget cap of a run (`--budget`, recorded as `budget_usd`): " + "; ".join(
-                f"${cap:.2f} in {n} run{'s' * (n != 1)}" for cap, n in sorted(caps.items())) + ".")
-        lines.append("- Runs the harness stopped, by configuration: " + "; ".join(
-            f"`{c}` {sum(bool(r.get('stopped_by')) for r in group)} of {len(group)}"
-            + (f" ({_stops(group)})" if any(r.get("stopped_by") for r in group) else "")
-            for c, group in sorted(by_config.items())) + ". They count as failed whatever their files held, so a "
-            "budget or timeout set too low shows here (`stopped_by`).")
-        lines.append("- Runs with a Bash denial, by configuration: " + "; ".join(
-            "`{}` {} of {}".format(c, *bash_denials(group)) for c, group in sorted(by_config.items())) + ".")
-    if by_config:
-        lines.append(_cache_line(by_config))
+    caps = Counter(r["budget_usd"] for r in rows if r.get("budget_usd") is not None)
+    if caps:
+        lines.append("- Budget cap of a run (`--budget`, recorded as `budget_usd`): " + "; ".join(
+            f"${cap:.2f} in {n} run{'s' * (n != 1)}" for cap, n in sorted(caps.items())) + ".")
+    lines.append("- Runs the harness stopped, by configuration: " + "; ".join(
+        f"`{c}` {sum(bool(r.get('stopped_by')) for r in group)} of {len(group)}"
+        + (f" ({_stops(group)})" if any(r.get("stopped_by") for r in group) else "")
+        for c, group in sorted(by_config.items())) + ". They count as failed whatever their files held, so a "
+        "budget or timeout set too low shows here (`stopped_by`).")
+    lines.append("- Runs with a Bash denial, by configuration: " + "; ".join(
+        "`{}` {} of {}".format(c, *bash_denials(group)) for c, group in sorted(by_config.items())) + ".")
+    lines.append(_cache_line(by_config))
     managed = sum(bool(r.get("managed_settings")) for r in rows)
     if managed:
         lines.append(f"- {managed} run(s) here ran on a machine with managed settings files or a macOS plist, which "

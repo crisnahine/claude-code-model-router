@@ -125,13 +125,13 @@ class Analysis(unittest.TestCase):
         v = self.verdict(data, "haiku-high")
         self.assertEqual((v["verdict"], v["cost_ci"]), ("NONE", (None, None)))
         self.assertIn("cost per solved task n/a to n/a", v["reason"])
-        self.assertEqual(analyze._judge("b", (-0.05, 0.05), (math.inf, math.inf), False, (9, 10, 9, 10))[0], "NONE")
-        self.assertEqual(analyze._judge("b", (-0.05, 0.05), (-math.inf, -0.1), False, (9, 10, 9, 10))[0], "WIN")
-        self.assertEqual(analyze._judge("b", (-0.05, 0.05), (0.1, math.inf), False, (9, 10, 9, 10))[0], "LOSE")
+        self.assertEqual(analyze._judge((-0.05, 0.05), (math.inf, math.inf), False, (9, 10, 9, 10))[0], "NONE")
+        self.assertEqual(analyze._judge((-0.05, 0.05), (-math.inf, -0.1), False, (9, 10, 9, 10))[0], "WIN")
+        self.assertEqual(analyze._judge((-0.05, 0.05), (0.1, math.inf), False, (9, 10, 9, 10))[0], "LOSE")
         self.assertIn("A cost bound that is n/a decides nothing", analyze.build_page(analyze.load([])))
 
     def test_behind_beyond_noise_loses_even_inside_the_margin(self):
-        self.assertEqual(analyze._judge("defaults", (-0.08, -0.01), (-0.05, -0.01), False, (9, 10, 9, 10))[0], "LOSE")
+        self.assertEqual(analyze._judge((-0.08, -0.01), (-0.05, -0.01), False, (9, 10, 9, 10))[0], "LOSE")
 
     def test_a_pass_rate_the_exact_test_puts_behind_loses_where_the_added_runs_hide_it(self):
         # The solved and failed runs added per task shrink every pass-rate gap by n / (n + 2).
@@ -459,7 +459,7 @@ class Analysis(unittest.TestCase):
         self.assertEqual((row["verdicts"], row["status"]), ({}, "REFUSED"))
 
     @staticmethod
-    def page_args(tmp, name="page.md"):
+    def page_args(tmp):
         res = Path(tmp) / "results"
         res.mkdir(exist_ok=True)
         data = rows("plugin", "lookup", [0.1, 0.2], [True, False]) + rows("defaults", "lookup", [0.3, 0.4], [True, True])
@@ -467,7 +467,7 @@ class Analysis(unittest.TestCase):
                         models={}) for r in data]
         path = res / "a-lookup-2026-11-22.jsonl"
         path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
-        return path, Path(tmp) / name
+        return path, Path(tmp) / "page.md"
 
     def check(self, *args):
         err = io.StringIO()
@@ -1628,13 +1628,11 @@ class Stopped(unittest.TestCase):
     """Once claude starts the run costs money: whatever stops it or the steps after it, its row is written and
     its scratch and session folders are removed."""
 
-    def stop(self, error: type, *argv: str, source: str = SESSION_STUB,
-             **patches) -> tuple[list[dict], list[Path], list[Path]]:
+    def stop(self, error: type, *argv: str, **patches) -> tuple[list[dict], list[Path], list[Path]]:
         with tempfile.TemporaryDirectory() as tmp:
             home, scratch, out = Path(tmp) / "config", Path(tmp) / "scratch", Path(tmp) / "out.jsonl"
             runs = Path(tmp) / "runs"  # each run's own scratch folder is made here
             scratch.mkdir()
-            (Path(tmp) / "a-file").write_text("not a folder")
             (Path(tmp) / "read-only").mkdir(mode=0o500)  # the runner can see it but no run can be kept in it
             argv = tuple(a.replace("<tmp>", tmp) for a in argv)
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home), **AUTH}), \
@@ -1643,7 +1641,7 @@ class Stopped(unittest.TestCase):
                     (unittest.mock.patch.multiple(run, **patches) if patches else contextlib.nullcontext()), \
                     self.assertRaises(error):
                 run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "1", "--max-total", "3",
-                          "--claude", *stub(tmp, source), "--out", str(out), *argv])
+                          "--claude", *stub(tmp, SESSION_STUB), "--out", str(out), *argv])
             rows = [json.loads(line) for line in out.read_text().splitlines()] if out.exists() else []
             sessions = list((home / "projects").iterdir()) if (home / "projects").exists() else []
             # The frozen plugin copy is made there too, and goes however the bench stops.
@@ -2994,10 +2992,6 @@ print(json.dumps([got, *(conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
                             self.assertNotIn(word.lower(), text.lower(), name)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 STREAM_STUB = '''#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
@@ -3451,7 +3445,6 @@ class Configurations(unittest.TestCase):
     """The configurations a batch can run, with only the options and agents the plugin has."""
 
     configs = {c["id"]: c for c in run.load_configs()}
-    options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p"}
 
     def test_no_configuration_names_an_option_or_agent_the_plugin_lacks(self):
         text = (ROOT / "bench" / "configs.json").read_text(encoding="utf-8")
@@ -3516,8 +3509,8 @@ class RunEdges(unittest.TestCase):
 
     def test_the_cost_lose_rule_is_the_mirror_of_the_win_rule_and_the_docs_say_so(self):
         # Dearer beyond noise: LOSE only once the pass rate's upper bound is below +10 points.
-        self.assertEqual(analyze._judge("defaults", (-0.08, 0.09), (0.1, 0.2), False, (9, 10, 9, 10))[0], "LOSE")
-        self.assertEqual(analyze._judge("defaults", (-0.12, 0.11), (0.1, 0.2), False, (9, 10, 9, 10))[0], "NONE")
+        self.assertEqual(analyze._judge((-0.08, 0.09), (0.1, 0.2), False, (9, 10, 9, 10))[0], "LOSE")
+        self.assertEqual(analyze._judge((-0.12, 0.11), (0.1, 0.2), False, (9, 10, 9, 10))[0], "NONE")
         stated = "the upper bound of its pass rate minus the baseline's is below plus 10 points"
         self.assertIn(stated, (ROOT / "bench" / "README.md").read_text(encoding="utf-8"))
         page = analyze.build_page(analyze.load([]))
@@ -3684,3 +3677,7 @@ class RunEdges(unittest.TestCase):
                 self.assertIn("can't write", err)
         readme = (ROOT / "bench" / "README.md").read_text(encoding="utf-8")
         self.assertNotIn("$TMPDIR", readme)
+
+
+if __name__ == "__main__":
+    unittest.main()
