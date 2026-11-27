@@ -1130,6 +1130,19 @@ class Allowlist(Sandbox):
         self.assertTrue(allowlist.from_layers({"policy": {"availableModels": ["claude-opus-5"]}}).lists_permit(
             self.config, "opus", "claude-opus-5-5"))
 
+    def test_an_exact_list_ignores_best_opusplan_and_default_entries(self):
+        # settings-reference.md, availableModelsMatch: those entries are ignored in exact mode, and only there.
+        def permitted(entries, match=None):
+            layers = {"policy": {"availableModels": entries, **({"availableModelsMatch": match} if match else {})}}
+            return allowlist.from_layers(layers).permitted(self.config)
+
+        self.assertEqual(permitted(["best"], "exact"), set())
+        self.assertEqual(permitted(["opusplan"], "exact"), set())
+        self.assertEqual(permitted(["opusplan", "sonnet"], "exact"), {"sonnet"})
+        self.assertEqual(permitted(["default[1m]", "sonnet"], "exact"), {"sonnet"})
+        self.assertEqual(permitted(["best"]), {"opus"})
+        self.assertEqual(permitted(["opusplan", "sonnet"]), {"opus", "sonnet"})
+
     def test_max_effort_level_caps_each_family_at_the_lowest_source(self):
         # settings-reference.md, maxEffortLevel: the lowest of any scope applies; a modelSettings entry replaces
         # that source's top-level cap for the model; "max" sets none.

@@ -17,6 +17,7 @@ from .registry import Registry
 SOURCES = ("policy", "user", "project", "local", "flag")
 # Settings precedence, highest first (https://code.claude.com/docs/en/settings.md#settings-precedence).
 PRECEDENCE = ("policy", "flag", "local", "project", "user")
+MODE_ALIASES = ("best", "opusplan", "default")  # aliases with no family of their own
 # Where a blocked family alias moves to the newest permitted version (https://code.claude.com/docs/en/model-config.md).
 # None is the Anthropic API.
 SUBSTITUTING = (None, "anthropic_aws")
@@ -86,7 +87,7 @@ def _blocked_family(reg: Registry, entry: str) -> str | None:
     A version, or a context variant such as sonnet[1m], blocks that model only. Where the alias
     doesn't move to the newest permitted version, `Allowlist.permitted` checks the version it runs."""
     e = entry.strip().lower()
-    if e in ("best", "opusplan", "default") or "[" in e:
+    if e in MODE_ALIASES or "[" in e:
         return None
     if e in reg.models:
         return e
@@ -199,8 +200,11 @@ def from_layers(layers: dict, provider: str | None = None) -> Allowlist:
         lists = [layers[s]["availableModels"] for s in SOURCES[1:] if "availableModels" in layers[s]]
         allow = sum(lists, []) if lists else None
     deny = policy.get("deniedModels")
+    exact = policy.get("availableModelsMatch") == "exact"
+    if exact and allow is not None:
+        allow = [e for e in allow if e.lower().split("[")[0] not in MODE_ALIASES]
     return Allowlist(allow=None if allow is None else tuple(allow), deny=None if deny is None else tuple(deny),
-                     exact=policy.get("availableModelsMatch") == "exact",
+                     exact=exact,
                      overrides=any(layer.get("modelOverrides") for layer in layers.values()),
                      effort_caps=tuple(layer for layer in layers.values()
                                        if "maxEffortLevel" in layer or "modelSettings" in layer),
