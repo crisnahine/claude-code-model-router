@@ -11,7 +11,7 @@ Every change passes these gates before merging. CI (`.github/workflows/ci.yml`) 
 | Unit tests | `python3 -m unittest discover -s tests` | The runtime, the eval cases offline, and the docs and benchmarks-page gates, on Linux, macOS and Windows with Python 3.9 and 3.13. |
 | Mod tests | `node --experimental-strip-types --test "tests/mod/*.test.ts"` | The mod on Node 22, on the same three systems. |
 | Type check | `sh tests/mod/typecheck.sh` | The mod and its test against Claude Code's mod API types, pinned to a commit. |
-| Plugin validate | `claude plugin validate --strict .` and `claude plugin validate --strict plugins/model-router` | The marketplace and the plugin, warnings as errors, on Claude Code 2.1.329, 2.1.331 and latest. |
+| Plugin validate | `claude plugin validate --strict .` and `claude plugin validate --strict plugins/model-router` | The marketplace and the plugin, warnings as errors, on Claude Code 2.1.329, 2.1.332 and latest. |
 | Version | `python3 tools/plugin_version.py origin/main` | A plugin change sets a new version. |
 | Docs | `python3 tools/docs_assets.py --check` | Every file the script writes is current. |
 | Benchmarks page | `python3 bench/analyze.py "bench/results/*.jsonl" --out docs/BENCHMARKS.md --check` | `docs/BENCHMARKS.md` matches `bench/results/`. |
