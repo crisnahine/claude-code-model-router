@@ -2671,6 +2671,13 @@ class Mod(Sandbox):
         self.assertIsNone(self.pre_call(LOOKUP, "toolu_9", session_id="s2"))
         self.assertEqual(self.ledger(), [])
 
+    def test_a_mark_that_cant_be_removed_counts_only_while_its_file_exists(self):
+        self.mark("toolu_3")
+        with mock.patch.object(Path, "unlink", side_effect=PermissionError):
+            self.assertTrue(modpath.routes("toolu_3"))
+            with mock.patch.object(Path, "is_file", return_value=False):
+                self.assertFalse(modpath.routes("toolu_3"))
+
     def test_only_a_plain_tool_use_id_is_looked_up(self):
         self.mark("toolu_1")  # with the marks folder there, "../x" resolves to the file below
         outside = self.data / "x"
@@ -3665,6 +3672,15 @@ class Gates(Sandbox):
         hooks.post_edit({"session_id": "s1", "cwd": str(sub), "tool_input": {"file_path": "../../cache/findings.json"}})
         self.assertIsNone(self.stop())
         hooks.post_edit({"session_id": "s1", "cwd": str(sub), "tool_input": {"file_path": "../src/app.py"}})
+        self.assertIn("model-router:verifier", self.ask())
+
+    def test_a_notebook_edit_counts(self):
+        hooks.post_edit({"session_id": "s1", "tool_input": {"notebook_path": "src/app.ipynb"}})
+        self.assertIn("model-router:verifier", self.ask())
+
+    def test_an_edit_still_counts_when_the_path_cant_be_resolved(self):
+        with mock.patch.object(Path, "resolve", side_effect=OSError):
+            hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": str(self.project / "src" / "app.py")}})
         self.assertIn("model-router:verifier", self.ask())
 
     def test_a_symlinked_cwd_matches_the_real_path(self):
