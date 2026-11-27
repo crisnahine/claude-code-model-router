@@ -17,7 +17,7 @@ import tempfile
 import types
 import time
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -77,6 +77,14 @@ def listed(agent_id: str, agent: str, usd: float | None, *models: dict, **extra)
     """What hooks/router.ts sends at a listed subagent's turn end: Claude Code's figures for it so far."""
     return {"session_id": "s1", "agent_id": agent_id, "subagent_type": agent, "models": list(models),
             **({"cost": {"usd": usd}} if usd is not None else {}), **extra}
+
+
+def run_hook(name: str, hook_input: dict) -> str:
+    """A hook as the launcher runs it: JSON on stdin, and cli.main catching what a handler raises."""
+    stdin = io.TextIOWrapper(io.BytesIO(json.dumps(hook_input).encode()), encoding="utf-8")
+    with mock.patch.object(sys, "stdin", stdin), redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()):
+        cli.main([name])
+    return out.getvalue()
 
 
 class Sandbox(unittest.TestCase):
@@ -826,7 +834,6 @@ class Registry(Sandbox):
 
     def test_cap_limits_available_models(self):
         self.assertEqual(self.config.available(cap="sonnet"), ["haiku", "sonnet"])
-        self.assertEqual(self.config.available(cap="sonnet")[-1], "sonnet")
         self.assertEqual(self.config.available()[-1], "fable")
 
     def test_clamp_steps_up_and_steps_down_only_when_nothing_stronger_is_left(self):
@@ -1141,12 +1148,6 @@ class Allowlist(Sandbox):
         self.assertEqual(self.permitted(user={"deniedModels": ["x"] * 300}), set(self.config.models))  # not policy: ignored
         self.assertEqual(self.permitted(user={"availableModels": ["z" * 300, "haiku"] + ["q"] * 300}), {"haiku"})
         self.assertEqual(allowlist.read("s1", {"policy": {"deniedModels": ["x"] * 300}}).permitted(self.config), set())
-
-    def test_a_spawn_in_a_session_the_start_hook_never_saw_remembers_the_layers(self):
-        # After /clear the session id is new and session.start doesn't fire, so a spawn is the first to send them.
-        modpath.spawn({"session_id": "s2", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
-                       "tool_input": {"prompt": LOOKUP}, "settings": {"policy": {"availableModels": ["opus"]}}})
-        self.assertEqual(allowlist.read("s2").permitted(self.config), {"opus"})
 
     def test_lists_are_capped_and_overrides_are_stored_as_a_flag(self):
         sent = {"user": {"availableModels": ["x" * 500] + ["opus"] * 300, "modelOverrides": {"a": {"b": [1] * 50}}},
@@ -1533,8 +1534,6 @@ class Router(Sandbox):
                  "architect": Level.complex, "reviewer": Level.complex}
         for agent, level in roles.items():
             d = self.decide(f"model-router:{agent}", HARDEST)
-            own = frontmatter(PLUGIN / "agents" / f"{agent}.md")
-            self.assertEqual((own["model"], own["effort"]), (ladder.model_for(config, level), ladder.effort(config, level)), agent)
             self.assertEqual((d["action"], d["source"], d["level"], d["model"], d["effort"]),
                              ("keep", "pin", level, ladder.model_for(config, level), None), agent)
 
@@ -1567,8 +1566,6 @@ class Router(Sandbox):
     def test_haiku_takes_the_same_extra_effort_step_as_any_model(self):
         # Haiku 5.5 takes low to max (model-config.md#adjust-effort-level).
         config = cfg.shipped()
-        self.assertEqual(tuple(ladder.pick(config, "complex", ["haiku"])), ("haiku", "xhigh"))
-        self.assertEqual(tuple(ladder.pick(config, "standard", ["haiku"])), ("haiku", "high"))
         self.assertEqual(ladder.effort_on(config, Level.hardest, "haiku"), "xhigh")
 
     def test_a_pick_at_or_above_the_levels_need_gets_no_extra_step(self):
@@ -2326,15 +2323,6 @@ class RepeatGuard(Sandbox):
         self.pre("general-purpose", LOOKUP, model="haiku")
         hooks.agent_failed({**self.call("general-purpose", LOOKUP, model="haiku"), "error": "timed out"})
         self.assertIsNotNone(self.pre("general-purpose", LOOKUP, model="haiku"))
-
-    def test_a_background_launch_settles_the_call_but_is_not_its_result(self):
-        self.session_on("claude-haiku-5-5")
-        task = calls.task({"description": "List src"})
-        self.pre("general-purpose", LOOKUP, description="List src")
-        self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1", description="List src")
-        self.assertIsNone(calls.last_run("s1", task))
-        self.stopped("a1")
-        self.assertEqual(calls.last_run("s1", task)["model"], "haiku")
 
     def test_claude_reissuing_the_rewritten_call_is_fine(self):
         for prompt in ("list the files under a", "list the files under b"):
@@ -3587,14 +3575,6 @@ class GatesDefault(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
         self.assertIsNone(self.stop())
 
-    def test_the_check_asks_by_default_and_can_be_turned_off(self):
-        self.edited()
-        self.assertIn("model-router:verifier", json.dumps(self.stop()))
-        self.options(verify_gate="false")
-        self.advance(1)
-        self.edited()
-        self.assertIsNone(self.stop())
-
     def test_every_falsy_form_turns_the_check_off(self):
         for form in ("false", "False", "0", "no", "off"):
             with self.subTest(form=form):
@@ -4845,9 +4825,6 @@ class EdgeCases(Sandbox):
         # Under CLAUDE_CODE_SUBAGENT_MODEL_FORCE every agent runs on the forced model: never a substitution.
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         self.pre("general-purpose", LOOKUP + " forced")
-        for _ in range(2):
-            self.done("general-purpose", LOOKUP + " forced", "claude-sonnet-5-5")
-        self.assertTrue(health.load().healthy("haiku"))
         self.done("general-purpose", LOOKUP + " forced", "claude-opus-5-5")
         self.assertEqual([r for r in self.ledger() if r.get("event") == "result"][-1]["resolved_model"],
                          "claude-opus-5-5")

@@ -7,7 +7,7 @@ import os
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-from test_model_router import LOOKUP, Sandbox, cli, health, hooks, modpath, spawn, store
+from test_model_router import LOOKUP, Sandbox, cli, health, hooks, modpath, run_hook, spawn, store
 
 BEDROCK_403 = ("Agent terminated early due to an API error: AWS authentication failed · enable the model for your "
                "account and region in the Amazon Bedrock console · API Error: 403 You don't have access to the "
@@ -115,10 +115,7 @@ class ExactModelKept(Sandbox):
 
 class SpawnAnswer(Sandbox):
     def answer(self, hook_input: dict) -> str:
-        with mock.patch("sys.stdin", io.TextIOWrapper(io.BytesIO(json.dumps(hook_input).encode()))), \
-                redirect_stdout(io.StringIO()) as out:
-            cli.main(["mod-spawn"])
-        return out.getvalue().strip()
+        return run_hook("mod-spawn", hook_input).strip()
 
     def test_a_spawn_left_as_it_is_answers_ok_so_silence_means_the_runtime_failed(self):
         kept = {"session_id": "s1", "parent_model": "claude-opus-5-5", "kind": "subagent",

@@ -1,7 +1,6 @@
 """What a project's files and the hook's cwd can and can't change."""
 from __future__ import annotations
 
-import io
 import json
 import os
 import subprocess
@@ -9,12 +8,11 @@ import sys
 import threading
 import time
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from test_model_router import BUILD, HARD, LOOKUP, SCRIPTS, Sandbox
-from modelrouter import agents, calls, cli, health, hooks, request, store
+from test_model_router import BUILD, HARD, LOOKUP, SCRIPTS, Sandbox, run_hook
+from modelrouter import agents, calls, health, hooks, request, store
 from modelrouter import config as cfg
 from modelrouter import mod as modpath
 from modelrouter.config import Level
@@ -164,14 +162,6 @@ class ModSpawnElsewhere(Sandbox):
         out = modpath.spawn({"session_id": "s1", "cwd": str(other), "parent_model": "claude-opus-5-5",
                              "kind": "subagent", "tool_input": {"subagent_type": "scout", "prompt": "list files"}})
         self.assertEqual(out["model"], "opus")
-
-
-def run_hook(name: str, hook_input: dict) -> str:
-    """A hook as the launcher runs it: JSON on stdin, and cli.main catching what a handler raises."""
-    stdin = io.TextIOWrapper(io.BytesIO(json.dumps(hook_input).encode()), encoding="utf-8")
-    with mock.patch.object(sys, "stdin", stdin), redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()):
-        cli.main([name])
-    return out.getvalue()
 
 
 class UnreadableProjectFiles(Sandbox):
