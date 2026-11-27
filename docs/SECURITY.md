@@ -64,7 +64,7 @@ All of it goes to the model provider with the conversation:
 - the Stop ask, and the notes after a model error or a mid-run model switch (`hooks.agent_failed`, `hooks.post_agent`);
 - skill output: the policy and `explain` from `/model-router:route`, model status, state file paths, held rules and a workflow pin named only as a plain name from `/model-router:models` (`Notes.test_the_models_report_names_a_workflow_pin_only_as_a_plain_name`), and agent and model names, plain ones only, tokens and dollar estimates from `/model-router:usage`.
 
-Notices about pinned models go to `systemMessage`, shown to the user and kept out of Claude's context ([hooks](https://code.claude.com/docs/en/hooks.md#json-output)), and name a pinned model only as a plain name. The mod's status line, toasts and session check dialog are drawn for the person, and its `/model-router` reply is marked for the person alone (`isTextDisplayOnly`).
+Notices about pinned models go to `systemMessage`, shown to the user ([hooks](https://code.claude.com/docs/en/hooks.md#json-output)), and name a pinned model only as a plain name. The plugin sends Claude its text through hook output such as `additionalContext` and `permissionDecisionReason`, or through the mod's tool description and results, and uses `systemMessage` only for notices to the person. The mod's status line, toasts and session check dialog are drawn for the person, and its `/model-router` reply is marked for the person alone (`isTextDisplayOnly`).
 
 ## What it denies
 
