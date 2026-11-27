@@ -9,8 +9,6 @@ import functools
 import itertools
 import os
 import shutil
-import sys
-import time
 import unittest
 from dataclasses import dataclass
 from unittest import mock
@@ -27,7 +25,6 @@ DEFAULT_EFFORT = "medium"
 FIRST = list(itertools.product((None, *ORDER), (None, *EFFORTS)))
 PROMPT = "make the parser keep quoted fields whole"
 TASK = "Parser fix"
-DEPTH = 6
 # The mod path three ways: what the agent ran at reaches the runtime before the Agent result, after it, or never.
 PATHS = ("fallback", "mod", "mod-late", "mod-unseen")
 
@@ -194,10 +191,9 @@ class Walk:
         return out
 
     # the walk --------------------------------------------------------------------------------------------
-    def run(self, check) -> tuple[int, int]:
-        """Walk every chain; `check(ok, message)` is each invariant's one assertion. Returns (states, longest)."""
+    def run(self, check) -> None:
+        """Walk every chain; `check(ok, message)` is each invariant's one assertion."""
         seen: set = set()
-        longest = 0
         for first in FIRST:
             starts = {p: self.step(p, None, first) for p in self.paths}
             for p, (run, decision, _, record) in starts.items():
@@ -211,7 +207,6 @@ class Walk:
                 if key in seen:
                     continue
                 seen.add(key)
-                longest = max(longest, len(chain) - 1)
                 if not check(len(chain) <= 2 * len(ORDER) * len(EFFORTS),
                              f"[reaches the top] {self.setup} | never settles: {' ; '.join(chain)}"):
                     continue
@@ -227,7 +222,6 @@ class Walk:
                     if all(outs[p][1]["no_step"] for p in self.paths):
                         continue  # at the top, where the invariants just held that it stays
                     stack.append(({p: (outs[p][3], outs[p][0]) for p in self.paths}, chain + [f"{policy} -> {self.show(outs)}"]))
-        return len(seen), longest
 
     def show(self, outs: dict) -> str:
         runs = {p: str(o[0]) for p, o in outs.items()}
@@ -274,8 +268,7 @@ ENVS = ([Setup(s, None, env) for env in ENV_CASES for s in ("haiku", "opus")]
         + [Setup(s, None, (), effort) for s in ("haiku", "opus") for effort in ("low", "xhigh")])
 
 
-def walk(case: Sandbox, setups: list, check, paths=PATHS) -> dict:
-    stats = {"setups": 0, "states": 0, "longest": 0, "spawns": 0}
+def walk(case: Sandbox, setups: list, check, paths=PATHS) -> None:
     for setup in setups:
         shutil.rmtree(case.data, ignore_errors=True)
         with mock.patch.dict(os.environ):
@@ -286,13 +279,7 @@ def walk(case: Sandbox, setups: list, check, paths=PATHS) -> dict:
             with contextlib.ExitStack() as stack:
                 for patch in w.patches:
                     stack.enter_context(patch)
-                states, longest = w.run(check)
-        stats["setups"] += 1
-        stats["states"] += states
-        stats["longest"] = max(stats["longest"], longest)
-        stats["spawns"] += sum(len(m) for m in w.memo.values())
-    stats["chains"] = len(setups) * len(FIRST) * len(POLICIES) ** DEPTH * len(paths)
-    return stats
+                w.run(check)
 
 
 class RedoChains(Sandbox):
@@ -393,20 +380,4 @@ class RedoChainCases(Sandbox):
 
 
 if __name__ == "__main__":
-    found: dict = {}
-
-    class Collect(RedoChains):
-        def check(self, ok, message):
-            if not ok:
-                found.setdefault(message.split("]")[0] + "]", []).append(message)
-            return ok
-
-        def runTest(self):
-            started = time.time()
-            print(walk(self, ENVS if "env" in sys.argv else MAIN, self.check), f"{time.time() - started:.1f}s")
-
-    unittest.TextTestRunner().run(Collect())
-    for kind, messages in found.items():
-        print(f"\n{kind}: {len(messages)}")
-        for m in messages[:int(os.environ.get("SHOW", "3"))]:
-            print("  ", m)
+    unittest.main()

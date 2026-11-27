@@ -17,7 +17,6 @@ import tempfile
 import types
 import time
 import unittest
-import unittest.mock
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -32,7 +31,7 @@ SWAP = json.loads((FIXTURES / "agent-model-swap.json").read_text())
 FRAMING = json.loads((FIXTURES / "prompt-framing.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, ladder, ledger, registry, report, request, router, session, settings, spawn, store  # noqa: E402
+from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, ladder, ledger, report, request, router, session, settings, spawn, store  # noqa: E402
 from modelrouter import mod as modpath  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 from modelrouter.config import Level  # noqa: E402
@@ -4100,14 +4099,14 @@ class Launcher(Sandbox):
         entry = self.entry()
         before = sys.dont_write_bytecode, sys.pycache_prefix
         try:
-            with unittest.mock.patch.object(entry, "private_cache", return_value=self.tmp.name):
+            with mock.patch.object(entry, "private_cache", return_value=self.tmp.name):
                 sys.dont_write_bytecode = False
                 entry.cache_bytecode()
                 self.assertEqual(sys.pycache_prefix, before[1])  # a Python that caches on its own is left alone
                 sys.dont_write_bytecode = True
                 entry.cache_bytecode()
                 self.assertEqual((sys.dont_write_bytecode, sys.pycache_prefix), (False, self.tmp.name))
-            with unittest.mock.patch.object(entry, "private_cache", return_value=None):
+            with mock.patch.object(entry, "private_cache", return_value=None):
                 sys.dont_write_bytecode, sys.pycache_prefix = True, before[1]
                 entry.cache_bytecode()
                 self.assertEqual((sys.dont_write_bytecode, sys.pycache_prefix), (True, before[1]))
