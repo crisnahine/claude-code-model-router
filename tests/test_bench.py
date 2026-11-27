@@ -322,6 +322,16 @@ class Analysis(unittest.TestCase):
         self.assertIn("--budget <usd> --max-total <usd>", page)
         self.assertNotIn("--budget 0.5", page)
 
+    def test_the_page_counts_runs_on_a_machine_with_managed_settings(self):
+        base = full_row(task="bugfix-median", main_model="sonnet", passed=True, **{"class": "bugfix"})
+        data = [dict(base, config="defaults", managed_settings=["/etc/claude-code/managed-settings.json"]),
+                dict(base, config="plugin")]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.jsonl"
+            path.write_text("".join(json.dumps(r) + "\n" for r in data), encoding="utf-8")
+            page = analyze.build_page(analyze.load([path]))
+        self.assertIn("- 1 run(s) here ran on a machine with managed settings files or a macOS plist", page)
+
     def test_a_run_the_harness_stopped_counts_as_failed_and_the_page_counts_them(self):
         base = full_row(task="bugfix-median", main_model="sonnet", passed=True, **{"class": "bugfix"})
         older = {k: v for k, v in base.items() if k != "stopped_by"}  # a row from before the field
@@ -3219,6 +3229,14 @@ class Harness(unittest.TestCase):
         (folder / "s.jsonl").write_text("\n".join(json.dumps(x) for x in (first, first, {"type": "user"})) + "\nnot json\n")
         self.assertAlmostEqual(run.transcript_cost(folder), 5.0)
         self.assertIsNone(run.transcript_cost(self.dir / "none"))
+
+    def test_list_cost_prices_cache_reads_and_both_cache_write_lengths(self):
+        # claude-haiku-4-5 lists at $1 input, $5 output, $0.10 cache read, $1.25 five-minute and $2 one-hour write.
+        tokens = {"input_tokens": 1000000, "output_tokens": 1000000, "cache_read_input_tokens": 1000000,
+                  "cache_creation_input_tokens": 1000000, "ephemeral_1h_input_tokens": 400000}
+        self.assertAlmostEqual(run.list_cost("claude-haiku-4-5", tokens), 7.65)
+        clamped = {"cache_creation_input_tokens": 1000000, "ephemeral_1h_input_tokens": 5000000}
+        self.assertAlmostEqual(run.list_cost("claude-haiku-4-5", clamped), 2.0)  # 1h writes cap at all writes
 
     def test_main_needs_a_token_or_an_api_key(self):
         bare = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
