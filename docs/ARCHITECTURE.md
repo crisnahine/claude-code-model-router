@@ -176,7 +176,7 @@ Model health lives in `state.json` (`health.py`):
 
 The allowlist (`allowlist.py`):
 
-- The mod reads each settings source at session start, at the first main-loop turn after `/clear`, and at each spawn it routes, and sends only the keys routing reads, kept per session in `allowlist.json`; a source whose read fails keeps what it last sent. A read waits at most 2 seconds; a source that missed that is read without waiting from then on, and its answer goes with a later command. Without the layers no list applies, and Claude Code enforces its own.
+- The mod reads each settings source at session start, at the first main-loop turn after the session id changes, as after `/clear`, `/resume` or `/branch`, and at each spawn it routes, and sends only the keys routing reads, kept per session in `allowlist.json`; a source whose read fails keeps what it last sent. A read waits at most 2 seconds; a source that missed that is read without waiting from then on, and its answer goes with a later command. Without the layers no list applies, and Claude Code enforces its own.
 - A policy `availableModels` applies alone, else the sources' lists join; `deniedModels` and `availableModelsMatch` count only from policy. A policy `availableModels` or `deniedModels` that isn't a list, or a policy deny list over 200 entries, leaves no model open. A deny entry blocks a family only when it names it with no version.
 
 ## The Stop check

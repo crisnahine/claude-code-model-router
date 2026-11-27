@@ -15,7 +15,7 @@ Warm p50 milliseconds per call over 30 runs, each through `sh scripts/model-rout
 | Command | 3.9.6 | 3.13 |
 | :- | -: | -: |
 | Each of the nine settings hooks in `hooks.json` | 80 to 93 | 60 to 64 |
-| `mod-start`, at the mod's `session.start` and the first main-loop turn after `/clear` | 84 | 61 |
+| `mod-start`, at the mod's `session.start` and the first main-loop turn after `/clear`, `/resume` or `/branch` | 84 | 61 |
 | `mod-spawn`, at `agent.spawn` | 86 | 63 |
 | `mod-usage`, at each subagent turn's `turn.complete` | 83 | 63 |
 
