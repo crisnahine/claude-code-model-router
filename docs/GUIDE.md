@@ -152,7 +152,7 @@ Five agents carry their own models, which hold with routing off: `model-router:s
 
 Agents from any plugin, the project or `~/.claude/agents` are routed, and Claude Code's built-ins. The router never changes which agent runs and never approves a tool call, so other plugins' hooks, your permission rules and auto mode still apply.
 
-Without the mod, the router rewrites the Agent call's `model` and `effort` and tells Claude. If a rewritten call comes back unrun, its repeat passes through unchanged, or is refused with the model to use if it would run above `max_tier`.
+Without the mod, the router rewrites the Agent call's `model` and `effort` and tells Claude. If a rewritten call comes back unrun, its repeat passes through unchanged, or is refused with the model to use if it would run above `max_tier`. Where an organization sets `allowManagedModsOnly`, Claude Code refuses a mod a user installed, so the router runs on its settings hooks alone, as without the mod. Where it sets `allowManagedHooksOnly`, or `disableAllHooks` is on, the router's hooks stop too unless managed settings force-enable the plugin (its mod then runs only if it counts as your organization's), and a managed `disableAllHooks` stops them even then.
 
 ### Organization allowlists
 
