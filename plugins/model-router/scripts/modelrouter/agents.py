@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterable
 from itertools import islice
 from pathlib import Path
 
@@ -142,12 +143,15 @@ def parse(path: Path, source: str) -> dict | None:
     }
 
 
+def _named(paths: Iterable[Path], source: str, name: str) -> dict | None:
+    return next((found for path in paths if (found := parse(path, source)) and found["name"] == name), None)
+
+
 def _search(folders: list[tuple[str, Path]], name: str) -> dict | None:
     for source, folder in folders:
-        for path in islice(_markdown_files(folder), 500):
-            found = parse(path, source)
-            if found and found["name"] == name:
-                return found
+        found = _named(islice(_markdown_files(folder), 500), source, name)
+        if found:
+            return found
     return None
 
 
@@ -239,11 +243,7 @@ def find(agent_type: str, project: Path) -> dict | None:
         roots = [cfg.PLUGIN_ROOT] if ours else installed_roots(plugin)
         listed = [path for root in roots for path in _listed(plugin, root)] if not ours else []
         if listed:
-            for path in listed:
-                found = parse(path, "plugin")
-                if found and found["name"] == leaf:
-                    return found
-            return None
+            return _named(listed, "plugin", leaf)
         found = _search([("plugin", root / "agents") for root in roots], leaf)
         if found or ours:
             return found
@@ -253,10 +253,9 @@ def find(agent_type: str, project: Path) -> dict | None:
                 paths = [p for p in islice(_markdown_files(root), 2000) if "agents" in p.parts]
             except OSError:
                 continue
-            for path in paths:
-                found = parse(path, "plugin")
-                if found and found["name"] == leaf:
-                    return found
+            found = _named(paths, "plugin", leaf)
+            if found:
+                return found
         return None
     found = _search([*(("project", f / ".claude" / "agents") for f in cfg.project_folders(project)),
                      ("user", store.claude_home() / "agents")], agent_type)
