@@ -91,7 +91,7 @@ It asks at most once per session, a plugin reload included, and never once the c
 
 ![Who decides the model, strongest first.](assets/precedence.svg)
 
-1. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` runs every subagent on `CLAUDE_CODE_SUBAGENT_MODEL`, else the conversation's model. The router sets only effort, and none on a call that names a model.
+1. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` runs every subagent on `CLAUDE_CODE_SUBAGENT_MODEL`, else the conversation's model. With only `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` set, the built-in Explore subagent runs on the model listed for it. The router sets only effort, and none on a call that names a model.
 2. A model named on the call, by Claude, a skill or a workflow script. When your prompt asks for one ("use opus"), Claude gets a note to pass it.
 3. A per-agent rule: yours, or a project's when not weaker.
 4. The agent's own `model` field. `inherit` there is the agent's choice of the parent's model, and it outranks 5.

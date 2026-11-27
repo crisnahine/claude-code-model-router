@@ -108,7 +108,7 @@ A decision is `keep`, `rewrite` or `deny` (the guard's), with a model, effort, l
 
 | # | Source | The router |
 | -: | :- | :- |
-| 1 | `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` | Sets effort only, none when the call names a model |
+| 1 | `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` | Sets effort only, none when the call names a model. With only this set, Explore runs on the model listed for it |
 | 2 | `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`, for a workflow agent whose call names no model | Sets effort only |
 | 3 | The call's `model` | Keeps it |
 | 4 | The user's rule `model` | Applies it |

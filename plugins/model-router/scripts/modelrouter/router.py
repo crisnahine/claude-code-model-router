@@ -101,6 +101,8 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
     keeps = bool(settings.subagent_effort and not settings.effort_level and not facts.teammate)
 
     if settings.force:
+        # shortcut: under the force variable alone Explore below a Fable parent can run on Opus and is rated as Fable;
+        # upgrade when its effort there matters.
         model = env_model or facts.parent
         level = ladder.rung(reg, model, named_effort)
         effort = None if decided or tool_input.get("model") or not level else ladder.effort(reg, level)
