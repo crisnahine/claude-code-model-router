@@ -22,6 +22,7 @@ REPO = "https://github.com/crisnahine/claude-code-model-router"
 
 SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif'
 MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
+ARROW = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
 
 # The five rung colors run from the cheapest level (lookup) to the strongest (frontier).
 LIGHT = {
@@ -262,8 +263,7 @@ def diagram_redo() -> str:
         if k < 3:
             ax = x + cw
             out.append(f'<path d="M{ax + 6} {top + 52}H{ax + gap - 6}M{ax + gap - 11} {top + 47}L{ax + gap - 6} '
-                       f'{top + 52}L{ax + gap - 11} {top + 57}" class="lnm" stroke-width="1.8" fill="none" '
-                       'stroke-linecap="round" stroke-linejoin="round"/>')
+                       f'{top + 52}L{ax + gap - 11} {top + 57}" {ARROW}/>')
     track = top + 126
     out.append(f'<path d="M{32 + cw / 2} {track}H{32 + 3 * (cw + gap) + cw / 2}" class="ln" stroke-width="3" '
                'stroke-linecap="round"/>')
@@ -320,10 +320,9 @@ def diagram_two_paths() -> str:
     out.append(lines(516, 278, ["Fallback: PreToolUse rewrites the Agent call where",
                                 "mods don't load, and stands down for each call",
                                 "the mod's tool.call hook marked."], "mut", 12.5, 18))
-    arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
-    out.append(f'<path d="M237 188V216M232 211L237 216L242 211" {arrow}/>')
-    out.append(f'<path d="M237 348V374H410V398M405 393L410 398L415 393" {arrow}/>')
-    out.append(f'<path d="M683 348V374H510V398M505 393L510 398L515 393" {arrow}/>')
+    out.append(f'<path d="M237 188V216M232 211L237 216L242 211" {ARROW}/>')
+    out.append(f'<path d="M237 348V374H410V398M405 393L410 398L415 393" {ARROW}/>')
+    out.append(f'<path d="M683 348V374H510V398M505 393L510 398L515 393" {ARROW}/>')
     out.append(text(250, 367, "sh model-router.sh mod-*", "mono mut", 11.5))
     out.append(text(696, 367, "sh model-router.sh <event>", "mono mut", 11.5))
     out.append(card(132, 404, 656, 110, rx=12))
@@ -367,9 +366,8 @@ def diagram_precedence() -> str:
         out.append(text(88, y + 22, head, ("mono ink b" if is_env else "ink b"), 13 if is_env else 14))
         out.append(text(88, y + 41, detail, "mut", 12.5))
     out.append(f'<rect x="22" y="{top + 5 * rh + 8}" width="5" height="36" rx="2.5" class="rt"/>')
-    arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
     out.append(f'<path d="M592 {top + 5 * rh + 26}H612V{top + 26}H624M619 {top + 21}L624 {top + 26}L619 {top + 31}" '
-               f'{arrow}/>')
+               f'{ARROW}/>')
     cap = ["For 2, 3, 4 and 6, the winner has to", "be usable: inside max_tier, allowed", "by your availableModels and",
            "deniedModels settings, and known to", "work. If it isn't, the next stronger", "usable model runs, else the strongest",
            "usable one left."]
@@ -410,8 +408,7 @@ def diagram_stop_checks() -> str:
            text(32, 66, "The Stop hook runs one check. It asks once, then lets the turn end.", "mut", 13.5)]
     out.append(card(320, 88, 280, 50, rx=25))
     out.append(text(460, 118, "Claude is about to end the turn", "ink b", 13.5, "middle"))
-    arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
-    out.append(f'<path d="M460 138V176M455 171L460 176L465 171" {arrow}/>')
+    out.append(f'<path d="M460 138V176M455 171L460 176L465 171" {ARROW}/>')
     x, name = 255, "verify_gate"
     when = ["a file in the project was edited, and no", "check command ran after the last edit, and",
             "the transcript can be read."]
