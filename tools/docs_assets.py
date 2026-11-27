@@ -290,7 +290,7 @@ def chip_row(x, y, labels, size=12, gap=8):
     for label in labels:
         w = width_of(label, size, True) + 16
         out.append(f'<rect x="{cx:g}" y="{y:g}" width="{w:.0f}" height="26" rx="6" class="card" stroke-width="1"/>'
-                   + text(cx + 9, y + 26 / 2 + size * 0.36, label, "mono ink", size))
+                   + text(cx + 9, y + 13 + size * 0.36, label, "mono ink", size))
         cx += w + gap
     return "".join(out)
 
