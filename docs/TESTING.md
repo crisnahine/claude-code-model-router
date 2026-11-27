@@ -41,22 +41,23 @@ Not run by hand: the Desktop app's Code tab and the VS Code extension's panel (t
 
 ## Latest results
 
-On 2026-11-25, at commit `4659b73`, the commit the judged benchmark rounds ran on, in [CI run 45641894749](https://github.com/crisnahine/claude-code-model-router/actions/runs/45641894749) unless a row says otherwise. The commits after it add those rounds' rows and numbers, and CI runs the same gates on each:
+On 2026-11-27, at commit `92c0554`, in [CI run 45967541839](https://github.com/crisnahine/claude-code-model-router/actions/runs/45967541839) unless a row says otherwise. The commit after it writes these results, and CI runs the same gates on it:
 
 | Gate | Result |
 | :- | :- |
-| Unit tests | 867 run and pass on Ubuntu, macOS and Windows, each with Python 3.9 and 3.13. 2 are skipped, 20 on Windows. |
-| Mod tests | 71 pass on the same three systems. |
+| Unit tests | 883 run and pass on Ubuntu, macOS and Windows, each with Python 3.9 and 3.13. 2 are skipped, 20 on Windows. |
+| Mod tests | 72 pass on the same three systems. |
 | Type check | Passes. |
-| Plugin validate | Passes on Claude Code 2.1.329, 2.1.331 and the newest release, 2.1.332. |
+| Plugin validate | Passes on Claude Code 2.1.329 and on 2.1.332, the newest release. |
 | Version, docs, benchmarks page | Pass. |
-| Live evals | Run by hand on Claude Code 2.1.332 with an API key, at `0f23016`: 0.98 against the 0.8 threshold, 5 of 5 cases pass, 14 of 15 runs pass. The same cases without the plugin score 0.21. |
+| Live evals | Run by hand on Claude Code 2.1.332 with a subscription login, on the same plugin files: 0.97 against the 0.8 threshold, 5 of 5 cases pass, 14 of 15 runs pass. The same cases without the plugin score 0.21. |
 
-Live runs of the plugin during this release, each a headless session that made an Agent call:
+Live runs of the plugin, each a headless session that made an Agent call:
 
 | Where | What ran |
 | :- | :- |
+| macOS, Claude Code 2.1.332, a subscription login | The 15 live eval runs with the plugin, at `92c0554`. |
 | macOS, Claude Code 2.1.332, an API key | The 300 runs of the judged benchmark rounds, at `4659b73`. |
-| The Claude Code inside the Desktop app (2.1.330) and the VS Code extension (2.1.331) | A call routed on the mod path and on the fallback path, on an earlier commit of this release. |
-| A Linux container (Debian 12, Python 3.11) with Claude Code 2.1.332 | A call routed on each path, on an earlier commit of this release. |
-| The Python Agent SDK 0.2.189 | A call routed through the mod, on an earlier commit of this release. |
+| The Claude Code inside the Desktop app (2.1.330) and the VS Code extension (2.1.331) | A call routed on the mod path and on the fallback path, on 0.2.0. |
+| A Linux container (Debian 12, Python 3.11) with Claude Code 2.1.332 | A call routed on each path, on 0.2.0. |
+| The Python Agent SDK 0.2.189 | A call routed through the mod, on 0.2.0. |
