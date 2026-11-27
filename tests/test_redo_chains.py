@@ -239,7 +239,7 @@ class Walk:
         return check(self.forced or not cap or not self.reg.stronger(run.model, cap), f"[max_tier] {where}, over {cap}")
 
     def recorded(self, check, where: str, run: Run, record: dict) -> bool:
-        climbs_from = (record.get("model"), router._ran_at(record) if cfg.Level.parse(record.get("level")) else None)
+        climbs_from = (record.get("model"), router.ran_at(record) if cfg.Level.parse(record.get("level")) else None)
         return check(climbs_from == (run.model, run.effort), f"[climbs from what ran] {where}: recorded {record}")
 
     def invariants(self, check, path, chain, prev: Run, named: tuple, run: Run, decision: dict, note, record) -> None:

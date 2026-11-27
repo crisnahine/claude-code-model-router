@@ -83,7 +83,7 @@ def _guard(session_id: str | None, spawned: spawn.Spawn) -> None:
             f"{untouched}. Re-issue it with model: \"{decision['model']}\"."))
         return
     # The route records what runs untouched, so a later redo climbs from that, not from the refused rewrite.
-    ran_at = spawn._runs_at(None, untouched, spawned.facts, spawned.snap)
+    ran_at = spawn.effort_at(None, untouched, spawned.facts, spawned.snap)
     decision.update(action="keep", model=None, effort=None, level=ladder.rung(reg, untouched, ran_at),
                     repeat_of=earlier.get("model"), no_step=False, reason=(
                         "this call was rewritten once and came back without having run, so it is passed through "

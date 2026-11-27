@@ -97,10 +97,10 @@ def _asks_more(reg: Registry, named: dict, earlier: dict) -> bool:
         return False
     if model != ran:
         return reg.stronger(model, ran)
-    return not earlier.get("no_effort") and router._above(router._ran_at(named), router._ran_at(earlier))
+    return not earlier.get("no_effort") and router.above(router.ran_at(named), router.ran_at(earlier))
 
 
-def _runs_at(effort: str | None, model: str | None, found: router.Facts, snap: settings.Snapshot) -> str | None:
+def effort_at(effort: str | None, model: str | None, found: router.Facts, snap: settings.Snapshot) -> str | None:
     """The effort a call runs at as far as the router can tell: `router.runs_at`, else the session's level on
     the session's own model (https://code.claude.com/docs/en/model-config.md#effort-level-of-subagents-and-teammates)."""
     chosen = router.runs_at(effort, found.tool_input, found.definition, snap.options, found.teammate)
@@ -112,7 +112,7 @@ def _unmarked_run(found: router.Facts, snap: settings.Snapshot) -> dict:
     run, so a cap, a pin or the session's floor can't leave it on the same model and effort."""
     plain = router.decide(found, snap.registry, snap.options)
     model = plain["model"] or plain["was"]
-    return {"level": plain["level"], "model": model, "effort": _runs_at(plain["effort"], model, found, snap)}
+    return {"level": plain["level"], "model": model, "effort": effort_at(plain["effort"], model, found, snap)}
 
 
 def redo_note(decision: router.Decision) -> str | None:
@@ -157,7 +157,7 @@ def _record(spawned: Spawn, via: str, newest: str | None) -> None:
     rewrote = decision["action"] == "rewrite"
     facts = spawned.facts
     # The effort it runs at, whoever chose it, so a redo climbs from what ran.
-    effort = _runs_at(decision["effort"], runs_on, facts, spawned.snap)
+    effort = effort_at(decision["effort"], runs_on, facts, spawned.snap)
     named = facts.tool_input.get("model") or (facts.definition or {}).get("model")
     reg = spawned.snap.registry
     # A full ID or a [1m] variant the call keeps is the caller's or the agent's own pick, not its family's.

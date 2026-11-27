@@ -140,7 +140,7 @@ A full ID or `[1m]` variant the call or the agent names is kept while its family
 | :- | :- |
 | Mark | A `description` starting "Redo:", any case (`calls.marked_redo`). The same call sent unmarked is a new call. A workflow stage is never a redo |
 | Task | A hash of the agent type and the description without the mark (`calls.task`) |
-| Record | Each route in `routes.json` holds the effort the run gets, in Claude Code's order (`CLAUDE_CODE_EFFORT_LEVEL`, the call's as sent, the agent's, `CLAUDE_CODE_SUBAGENT_EFFORT`, the session's on its own model), else `medium` (`router._ran_at`); on the mod, what the run's last request carried replaces it (`calls.observed`). A foreground result with no model swap makes the run its task's latest in `done.json`; a background one waits in `launched.json` for `SubagentStop` with an answer |
+| Record | Each route in `routes.json` holds the effort the run gets, in Claude Code's order (`CLAUDE_CODE_EFFORT_LEVEL`, the call's as sent, the agent's, `CLAUDE_CODE_SUBAGENT_EFFORT`, the session's on its own model), else `medium` (`router.ran_at`); on the mod, what the run's last request carried replaces it (`calls.observed`). A foreground result with no model swap makes the run its task's latest in `done.json`; a background one waits in `launched.json` for `SubagentStop` with an answer |
 | Find | The task's latest run this session, at most 30 minutes old, from any request (`calls.last_run`) |
 | Run as named | If the call's unmarked decision asks for more than that run (a stronger model, or more effort on a model that took one), it runs as decided (`spawn._asks_more`) |
 | Climb | Otherwise it climbs from that run, or with none on record from its unmarked run (`on_record: false`) |

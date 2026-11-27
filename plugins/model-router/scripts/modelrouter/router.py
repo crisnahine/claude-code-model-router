@@ -107,9 +107,9 @@ def decide(facts: Facts, reg: Registry, settings: Settings) -> Decision:
         step = ""
         if redo:
             # The model is pinned, so effort is the one lever a redo has.
-            before = _ran_at(done)
+            before = ran_at(done)
             effort = None if done.get("no_effort") else _one_step(before) if free else before if keeps else None
-            gains = _above(capped(effort, facts.effort_caps.get(model or ""))[0], before)
+            gains = above(capped(effort, facts.effort_caps.get(model or ""))[0], before)
             level, out["escalated_from"], out["no_step"] = ladder.rung(reg, model, effort) or done_level, done_level, not gains
             step = f"; a redo of the {done_level} run, " + (
                 "one effort step up" if gains else f"and {model} gets no more effort")
@@ -234,10 +234,10 @@ def _redo(out: Decision, facts: Facts, reg: Registry, done: dict, done_level: Le
     effort was below high, else the next stronger usable model at its own rung's effort, else one more effort
     step, at most max. A model or effort the call names that asks for no more than that run, the agent's own,
     a rule's model and CLAUDE_CODE_SUBAGENT_MODEL don't hold it back."""
-    ran, before = reg.family(done.get("model")), _ran_at(done)
+    ran, before = reg.family(done.get("model")), ran_at(done)
     up = _one_step(before)
     # A run that sent no effort was on a model that takes none, so only a stronger model is a step up.
-    gains = free and not done.get("no_effort") and _above(capped(up, facts.effort_caps.get(ran))[0], before)
+    gains = free and not done.get("no_effort") and above(capped(up, facts.effort_caps.get(ran))[0], before)
     stronger = next((n for n in facts.usable if reg.models[n].trusted and reg.stronger(n, ran)), None)
     # A nested run at its parent's effort (`spawn._inherited`) may already have run at the step up.
     if gains and not done.get("inherited") and EFFORTS.index(before) < EFFORTS.index("high"):
@@ -317,7 +317,7 @@ def capped(effort: str | None, cap: str | None) -> tuple[str | None, str]:
     return effort, ""
 
 
-def _ran_at(done: dict) -> str:
+def ran_at(done: dict) -> str:
     """The effort the run a redo redoes ran at: the one on record, else Claude Code's default."""
     return done.get("effort") if done.get("effort") in EFFORTS else DEFAULT_EFFORT
 
@@ -326,7 +326,7 @@ def _one_step(effort: str | None) -> str | None:
     return EFFORTS[min(EFFORTS.index(effort) + 1, len(EFFORTS) - 1)] if effort in EFFORTS else None
 
 
-def _above(effort: str | None, than: str | None) -> bool:
+def above(effort: str | None, than: str | None) -> bool:
     return effort in EFFORTS and than in EFFORTS and EFFORTS.index(effort) > EFFORTS.index(than)
 
 
