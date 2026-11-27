@@ -138,7 +138,7 @@ A check is a test runner, linter or type checker run through Bash (`pytest`, `np
 
 ## Workflows
 
-Workflow agents are routed only where the mod runs. The Workflow tool's description carries the session note's table, which asks a script to name a model and effort for each stage. A model the script names is capped, and a stage that names none, as in a saved script written without them, runs on its agent's own model, else at the level its tools put it. The router raises a stage's effort to its level's and never lowers it, since it can't see the one the script set, and never redoes a stage.
+Workflow agents are routed only where the mod runs. The Workflow tool's description carries the session note's table, which asks a script to name a model and effort for each stage. A model the script names is capped, and a stage that names none, as in a saved script written without them, runs on its agent's own model, else on `CLAUDE_CODE_SUBAGENT_MODEL` when that is set, else at the level its tools put it. The router raises a stage's effort to its level's and never lowers it, since it can't see the one the script set, and never redoes a stage.
 
 ## Agent teams
 

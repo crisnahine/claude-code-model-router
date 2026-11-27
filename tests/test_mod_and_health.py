@@ -253,6 +253,9 @@ class ModStartRules(Sandbox):
         self.assertIn("- sonnet at high: a judgment call with no check to run (a design or a review)\nA stage that names neither runs on its agent's own model, "
                       "else at the level its tools put it.", text)
         self.assertLessEqual(len(text), 540)  # it sits in the Workflow tool's description all session
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="haiku")
+        self.assertIn("A stage that names neither runs on its agent's own model or CLAUDE_CODE_SUBAGENT_MODEL.",
+                      hooks.HANDLERS["mod-start"]({"session_id": "s1"})["workflow_rules"])
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="haiku")
         self.assertIn("A stage that names neither runs on haiku.", hooks.HANDLERS["mod-start"]({"session_id": "s1"})["workflow_rules"])
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")

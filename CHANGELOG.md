@@ -15,6 +15,7 @@ This release follows Claude Code 2.1.332 and cleans up the code. Options and com
 - An agent that can use `PowerShell` or `Monitor` counts as one that can run commands, so a call to it that names no model gets the `standard` level.
 - A project or user agent file that Claude Code skips isn't read as an agent: one with no `name`, with a `name` that starts with `-`, contains `:` or is longer than 256 characters, or with no `description`.
 - With `CLAUDE_CODE_EFFORT_LEVEL` set to `auto` or `unset`, the session check estimates the session at the API's default effort for its model and offers no `/effort` pick. The variable is read in any letter case, as Claude Code reads it.
+- With `CLAUDE_CODE_SUBAGENT_MODEL` set, the workflow note says a stage that names no model runs on its agent's own model or that variable's.
 - A usage report whose cost is too large a number to store is recorded with no cost. Before, the usage hook stopped with an error on it.
 - Dead code, repeated helpers and repeated tests are gone from the runtime, the benchmark harness and the docs tooling.
 

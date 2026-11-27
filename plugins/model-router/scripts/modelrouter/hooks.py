@@ -38,7 +38,9 @@ def _workflow_rules(options: settings.Settings, reg: Registry) -> str | None:
     if options.force:
         return None
     efforts = not options.effort_level
-    runs_on = cfg.plain(options.workflow_model, None) or f"its agent's own model, else {_PICKED}"
+    neither = ("its agent's own model or CLAUDE_CODE_SUBAGENT_MODEL" if options.subagent_model
+               else f"its agent's own model, else {_PICKED}")
+    runs_on = cfg.plain(options.workflow_model, None) or neither
     return (f"Model Router keeps the {'`model` and `effort`' if efforts else '`model`'} a workflow script names on an "
             f"`agent()` call, within the user's cap. Here every `agent()` call in a script names "
             f"{'both' if efforts else 'a model'}, by the work:\n{_rows(reg, efforts)}"
