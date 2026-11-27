@@ -160,7 +160,7 @@ The mod reads `availableModels`, `deniedModels` and `maxEffortLevel` from your s
 
 ### Third-party providers
 
-Where a provider's alias runs an older model (the providers and families under `older_aliases` in `config/models.json`, such as `sonnet` and `haiku` on Bedrock), the mod sends the family's newest ID, `claude-opus-5-5`, `claude-sonnet-5-5` or `claude-haiku-5-5`. It sends the alias instead when `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` is set, when `availableModels`, `deniedModels` or `modelOverrides` rule the ID out, and for a day after the provider refuses it. Where no newest ID goes out, as on the fallback path, the router's own pick moves one family up from a lagging alias, unless that variable is set. None of these has had a live run.
+Where a provider's alias runs an older model (the providers and families under `older_aliases` in `config/models.json`, such as `sonnet` and `haiku` on Bedrock), the mod sends the family's newest ID, `claude-sonnet-5-5` or `claude-haiku-5-5`. The table is the one Claude Code 2.1.332 runs. On 2.1.329 to 2.1.331, `sonnet` on Google Cloud's Agent Platform and `opus` and `sonnet` on Microsoft Foundry run an older model too, and the router sends them as the alias. It sends the alias instead when `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` is set, when `availableModels`, `deniedModels` or `modelOverrides` rule the ID out, and for a day after the provider refuses it. Where no newest ID goes out, as on the fallback path, the router's own pick moves one family up from a lagging alias, unless that variable is set. None of these has had a live run.
 
 ## What it stores
 

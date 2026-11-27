@@ -1239,12 +1239,12 @@ class Allowlist(Sandbox):
                 return snap.allowed.permitted(self.config, snap.sendable)
 
         every = set(self.config.models)
-        newest_only = {"availableModels": ["claude-opus-5-5", "sonnet", "haiku", "fable"]}
-        for provider in (None, "anthropic_aws", "bedrock"):  # Foundry's opus alias runs Opus 4.6
+        newest_only = {"availableModels": ["opus", "claude-sonnet-5-5", "haiku", "fable"]}
+        for provider in (None, "anthropic_aws", "vertex"):  # Bedrock's sonnet alias runs Sonnet 4.5
             self.assertEqual(permitted(provider, **newest_only), every, provider)
-        self.assertEqual(permitted("foundry", **newest_only), every)  # the mod sends claude-opus-5-5
-        self.assertEqual(permitted("foundry", overrides=True, **newest_only), every - {"opus"})
-        self.assertEqual(permitted("foundry", sends_ids=False, **newest_only), every - {"opus"})  # the Agent call fallback
+        self.assertEqual(permitted("bedrock", **newest_only), every)  # the mod sends claude-sonnet-5-5
+        self.assertEqual(permitted("bedrock", overrides=True, **newest_only), every - {"sonnet"})
+        self.assertEqual(permitted("bedrock", sends_ids=False, **newest_only), every - {"sonnet"})  # the Agent call fallback
         old_and_new = {"deniedModels": ["claude-haiku-4-5", "claude-haiku-5-5"]}
         self.assertEqual(permitted(None, **old_and_new), every)
         self.assertEqual(permitted("vertex", **old_and_new), every - {"haiku"})
@@ -3051,7 +3051,7 @@ class NewestOnProviders(Sandbox):
     """Where a provider's alias resolves to an older model (the alias table in
     https://code.claude.com/docs/en/model-config.md), the mod sends the family's newest full ID."""
 
-    LAGS = {"bedrock": ("sonnet", "haiku"), "vertex": ("sonnet", "haiku"), "foundry": ("opus", "sonnet", "haiku"),
+    LAGS = {"bedrock": ("sonnet", "haiku"), "vertex": ("haiku",), "foundry": ("haiku",),
             "anthropic_aws": ("sonnet", "haiku"), "anthropic_google_cloud": ("haiku",)}
     NEWEST = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
 
@@ -3159,12 +3159,12 @@ class NewestOnProviders(Sandbox):
         self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "sonnet"))
 
     def test_a_lagging_pick_moves_one_family_up_at_most(self):
-        os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
-        modpath.start({"session_id": "s1", "settings": {"user": {"modelOverrides": {"claude-opus-5-5": "my-deployment"}}}})
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        modpath.start({"session_id": "s1", "settings": {"user": {"modelOverrides": {"claude-sonnet-5-5": "arn:aws:x"}}}})
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
-        self.assertEqual(snap.lagging, frozenset({"opus", "sonnet", "haiku"}))  # no newest ID is sent
+        self.assertEqual(snap.lagging, frozenset({"sonnet", "haiku"}))  # no newest ID is sent
         self.assertEqual([snap.pick(level).model for level in (Level.lookup, Level.standard, Level.complex, Level.hardest)],
-                         ["sonnet", "sonnet", "opus", "fable"])
+                         ["sonnet", "sonnet", "opus", "opus"])
         self.override({"agents": {"general-purpose": {"level": "lookup"}}}, user=True)
         out = self.decide("general-purpose", LOOKUP)
         self.assertEqual(out["model"], "sonnet")

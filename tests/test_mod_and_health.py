@@ -65,9 +65,9 @@ class ExactModelKept(Sandbox):
                               "tool_input": {"subagent_type": agent, "prompt": "design the store"}})
 
     def test_setting_effort_keeps_an_exact_id_where_the_alias_runs_an_older_model(self):
-        self.options(CLAUDE_CODE_USE_FOUNDRY="1")
-        self.agent("designer", "claude-opus-5-5")
-        self.assertEqual(self.spawn("designer")["model"], "claude-opus-5-5")
+        self.options(CLAUDE_CODE_USE_BEDROCK="1")
+        self.agent("designer", "claude-sonnet-5-5")
+        self.assertEqual(self.spawn("designer")["model"], "claude-sonnet-5-5")
         updated = self.pre("designer", "design the store")["updatedInput"]
         self.assertNotIn("model", updated)  # the agent's own model applies
         self.assertTrue(updated["effort"])
@@ -78,13 +78,13 @@ class ExactModelKept(Sandbox):
         self.assertNotIn("model", self.pre("reader", "design the store")["updatedInput"])
 
     def test_an_exact_id_the_lists_deny_or_that_failed_here_runs_on_the_alias(self):
-        self.options(CLAUDE_CODE_USE_FOUNDRY="1")
-        self.agent("designer", "claude-opus-5-5")
-        denied = {"policy": {"deniedModels": ["claude-opus-5-5"]}}
-        self.assertEqual(self.spawn("designer", "s2", settings=denied)["model"], "opus")
-        health.failed("claude-opus-5-5", "API Error: 404 not_found_error", newest=True)
-        self.assertEqual(self.spawn("designer")["model"], "opus")
-        self.assertEqual(self.pre("designer", "design the store")["updatedInput"]["model"], "opus")
+        self.options(CLAUDE_CODE_USE_BEDROCK="1")
+        self.agent("designer", "claude-sonnet-5-5")
+        denied = {"policy": {"deniedModels": ["claude-sonnet-5-5"]}}
+        self.assertEqual(self.spawn("designer", "s2", settings=denied)["model"], "sonnet")
+        health.failed("claude-sonnet-5-5", "API Error: 404 not_found_error", newest=True)
+        self.assertEqual(self.spawn("designer")["model"], "sonnet")
+        self.assertEqual(self.pre("designer", "design the store")["updatedInput"]["model"], "sonnet")
 
     def test_modeloverrides_still_keep_an_exact_id_the_agent_names(self):
         # Claude Code maps a named ID through modelOverrides whether or not the router keeps it.
