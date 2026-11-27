@@ -1143,6 +1143,18 @@ class Allowlist(Sandbox):
         self.assertEqual(permitted(["best"]), {"opus"})
         self.assertEqual(permitted(["opusplan", "sonnet"]), {"opus", "sonnet"})
 
+    def test_an_effort_level_of_max_is_unset_while_a_max_cap_still_counts(self):
+        # model-config.md: max isn't accepted as a level in effortLevel or modelSettings; maxEffortLevel takes it.
+        found = allowlist.from_layers({"local": {"effortLevel": "max"}, "project": {"effortLevel": "high"}})
+        self.assertEqual(found.saved_effort(self.config, "sonnet"), "high")
+        found = allowlist.from_layers({"local": {"modelSettings": {"sonnet": {"effortLevel": "max"}}},
+                                       "project": {"modelSettings": {"sonnet": {"effortLevel": "low"}}}})
+        self.assertEqual(found.saved_effort(self.config, "sonnet"), "low")
+        found = allowlist.from_layers({"local": {"modelSettings": {"sonnet": {"effortLevel": "max", "maxEffortLevel": "low"}}}})
+        self.assertEqual((found.saved_effort(self.config, "sonnet"), found.effort_cap(self.config, "sonnet")), (None, "low"))
+        found = allowlist.from_layers({"local": {"effortLevel": "high", "maxEffortLevel": "max"}})
+        self.assertEqual((found.saved_effort(self.config, "sonnet"), found.effort_cap(self.config, "sonnet")), ("high", None))
+
     def test_max_effort_level_caps_each_family_at_the_lowest_source(self):
         # settings-reference.md, maxEffortLevel: the lowest of any scope applies; a modelSettings entry replaces
         # that source's top-level cap for the model; "max" sets none.

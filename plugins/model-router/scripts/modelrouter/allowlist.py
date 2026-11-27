@@ -23,6 +23,8 @@ MODE_ALIASES = ("best", "opusplan", "default")  # aliases with no family of thei
 SUBSTITUTING = (None, "anthropic_aws")
 MAX_ENTRIES = 200
 MAX_CHARS = 200
+# effortLevel takes no "max"; maxEffortLevel takes all five (https://code.claude.com/docs/en/model-config.md).
+KEY_EFFORTS = {"maxEffortLevel": EFFORTS, "effortLevel": EFFORTS[:4]}
 
 
 def _entries(raw: list) -> list[str]:
@@ -39,7 +41,7 @@ def _denied(raw: list) -> list[str] | None:
 
 def _caps(raw: object) -> dict[str, dict]:
     """modelSettings cut to each model's maxEffortLevel and effortLevel."""
-    found = ((k, {f: v[f] for f in ("maxEffortLevel", "effortLevel") if v.get(f) in EFFORTS})
+    found = ((k, {f: v[f] for f in KEY_EFFORTS if v.get(f) in KEY_EFFORTS[f]})
              for k, v in raw.items() if isinstance(v, dict)) if isinstance(raw, dict) else ()
     return dict([(k, v) for k, v in found if v and 0 < len(k) <= MAX_CHARS][:MAX_ENTRIES])
 
@@ -68,8 +70,8 @@ def _layer(raw: object, policy: bool = False) -> dict:
         layer["availableModelsMatch"] = raw["availableModelsMatch"]
     if isinstance(raw.get("modelOverrides"), (dict, bool)):
         layer["modelOverrides"] = bool(raw["modelOverrides"])
-    for key in ("maxEffortLevel", "effortLevel"):
-        if raw.get(key) in EFFORTS:
+    for key in KEY_EFFORTS:
+        if raw.get(key) in KEY_EFFORTS[key]:
             layer[key] = raw[key]
     if caps := _caps(raw.get("modelSettings")):
         layer["modelSettings"] = caps
