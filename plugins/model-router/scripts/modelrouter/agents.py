@@ -29,6 +29,17 @@ def _field(block: str, name: str) -> str | None:
 # A tool entry as sub-agents.md writes them: Read, Bash(git status), mcp__github__*, Agent(worker, researcher).
 _TOOL = re.compile(r"[A-Za-z_*][\w*.-]*(?:\(.*\))?")
 _NOT_TEXT = re.compile(r"(?i)null|~|true|false|yes|no|on|off|[-+.\d]+")  # scalars YAML reads as no string
+# A name or description Claude Code reads as no text: empty, null, a boolean or a number.
+_NO_STRING = re.compile(r"(?i)|''|\"\"|null|~|true|false|[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?")
+
+
+def _is_text(block: str, key: str) -> bool:
+    """Whether the frontmatter's `key` is text to Claude Code, on its own line or on the indented lines under it."""
+    found = re.search(r"^%s:(.*)$" % key, block, re.M)
+    if not found:
+        return False
+    value = _uncomment(found.group(1))
+    return not _NO_STRING.fullmatch(value) or not value and bool(re.match(r"\n[ \t]+[^\s#]", block[found.end():]))
 
 
 def _uncomment(text: str) -> str:
@@ -130,10 +141,15 @@ def parse(path: Path, source: str) -> dict | None:
     if not block:
         return None
     text = block.group(1)
+    name = _field(text, "name")
+    # Claude Code skips such a project or user file; a plugin agent with no name keeps its filename.
+    if source != "plugin" and (not name or name.startswith("-") or ":" in name or len(name) > 256
+                               or not (_is_text(text, "name") and _is_text(text, "description"))):
+        return None
     model = _field(text, "model")
     return {
         "source": source,
-        "name": _field(text, "name") or path.stem,
+        "name": name or path.stem,
         "model": None if (model or "inherit").lower() == "inherit" else model,
         # An explicit inherit is the agent's own choice of the parent's model, which a missing field isn't.
         "inherits": (model or "").lower() == "inherit",

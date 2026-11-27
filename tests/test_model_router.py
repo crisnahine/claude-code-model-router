@@ -1439,7 +1439,7 @@ class AgentDiscovery(Sandbox):
     def test_a_file_saved_with_a_byte_order_mark(self):
         folder = self.project / ".claude" / "agents"
         folder.mkdir(parents=True)
-        (folder / "bom.md").write_text("\ufeff---\nname: bom\nmodel: opus\n---\nbody\n", encoding="utf-8")
+        (folder / "bom.md").write_text("\ufeff---\nname: bom\ndescription: does a job\nmodel: opus\n---\nbody\n", encoding="utf-8")
         self.assertEqual(agents.find("bom", self.project)["model"], "opus")
 
 
