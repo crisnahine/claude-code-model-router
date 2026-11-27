@@ -20,7 +20,7 @@ The project's own words, and the code behind each.
 
 **Done record**: a task's latest finished run, in `done.json`, which a redo climbs from (`calls.last_run`).
 
-**Exact ID**: a full model ID or `[1m]` variant the call or agent names, kept while its family is (`mod.exact`).
+**Exact ID**: a full model ID or `[1m]` variant the call or agent names, kept while its family is (`spawn.exact`).
 
 **Fallback path**: `PreToolUse` on `Agent`, which rewrites `model` and `effort` through `updatedInput` for a call the mod didn't mark (`fallback.route`).
 
@@ -56,7 +56,7 @@ The project's own words, and the code behind each.
 
 **Pin**: a model an agent's own definition names (the decision's source `pin`), or its effort. The router keeps it within the cap; a redo climbs past it. The force and workflow pins are the environment variables that set every subagent's or workflow agent's model.
 
-**Read-only agent**: one whose `tools` hold none of Edit, Write, NotebookEdit and Bash, or whose `disallowedTools` remove them all, and the built-in Explore and Plan (`agents.read_only`). A call that nothing names a model for runs at lookup on one, unless it is a teammate, and at standard on any other agent.
+**Read-only agent**: one whose `tools` hold none of Edit, Write, NotebookEdit, Bash, PowerShell and Monitor, or whose `disallowedTools` remove them all, and the built-in Explore and Plan (`agents.read_only`). A call that nothing names a model for runs at lookup on one, unless it is a teammate, and at standard on any other agent.
 
 **Recommended setup**: a model family and the lowest effort the session that plans and delegates should run it at: Opus and Fable at `medium`, Sonnet at `xhigh`, in `config/models.json` under `session` (`Registry.session`). A family left out is never one.
 

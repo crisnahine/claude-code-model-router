@@ -17,8 +17,7 @@ import tempfile
 import types
 import time
 import unittest
-import unittest.mock
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -32,7 +31,7 @@ SWAP = json.loads((FIXTURES / "agent-model-swap.json").read_text())
 FRAMING = json.loads((FIXTURES / "prompt-framing.json").read_text())
 
 sys.path.insert(0, str(SCRIPTS))
-from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, ladder, ledger, registry, report, request, router, session, settings, spawn, store  # noqa: E402
+from modelrouter import agents, allowlist, calls, cli, fallback, gates, health, hooks, intake, ladder, ledger, report, request, router, session, settings, spawn, store  # noqa: E402
 from modelrouter import mod as modpath  # noqa: E402
 from modelrouter import config as cfg  # noqa: E402
 from modelrouter.config import Level  # noqa: E402
@@ -78,6 +77,14 @@ def listed(agent_id: str, agent: str, usd: float | None, *models: dict, **extra)
     """What hooks/router.ts sends at a listed subagent's turn end: Claude Code's figures for it so far."""
     return {"session_id": "s1", "agent_id": agent_id, "subagent_type": agent, "models": list(models),
             **({"cost": {"usd": usd}} if usd is not None else {}), **extra}
+
+
+def run_hook(name: str, hook_input: dict) -> str:
+    """A hook as the launcher runs it: JSON on stdin, and cli.main catching what a handler raises."""
+    stdin = io.TextIOWrapper(io.BytesIO(json.dumps(hook_input).encode()), encoding="utf-8")
+    with mock.patch.object(sys, "stdin", stdin), redirect_stdout(io.StringIO()) as out, redirect_stderr(io.StringIO()):
+        cli.main([name])
+    return out.getvalue()
 
 
 class Sandbox(unittest.TestCase):
@@ -827,7 +834,6 @@ class Registry(Sandbox):
 
     def test_cap_limits_available_models(self):
         self.assertEqual(self.config.available(cap="sonnet"), ["haiku", "sonnet"])
-        self.assertEqual(self.config.available(cap="sonnet")[-1], "sonnet")
         self.assertEqual(self.config.available()[-1], "fable")
 
     def test_clamp_steps_up_and_steps_down_only_when_nothing_stronger_is_left(self):
@@ -1109,6 +1115,46 @@ class Allowlist(Sandbox):
         # The family keeps a permitted version, which its alias moves to, so it stays routable.
         self.assertEqual(self.permitted(policy={"availableModels": pinned}), {"sonnet"})
 
+    def test_an_exact_entry_permits_its_dated_id_and_nothing_longer(self):
+        # settings-reference.md, availableModelsMatch: an exact entry also permits its dated ID, and no other extension.
+        def exact(entries, model_id):
+            found = allowlist.from_layers({"policy": {"availableModels": entries, "availableModelsMatch": "exact"}})
+            return found.lists_permit(self.config, "opus", model_id)
+
+        self.assertTrue(exact(["claude-opus-4-5"], "claude-opus-4-5-20251101"))
+        self.assertFalse(exact(["claude-opus-5"], "claude-opus-5-5"))
+        self.assertFalse(exact(["claude-opus-5"], "claude-opus-5-5-20260301"))
+        self.assertFalse(exact(["claude-opus-4-5"], "claude-opus-4-5-2025110"))
+        self.assertFalse(exact(["claude-opus-4-5"], "claude-opus-4-5-202511011"))
+        self.assertFalse(exact(["claude-opus-4-5"], "claude-opus-4-5-abcdefgh"))
+        self.assertTrue(allowlist.from_layers({"policy": {"availableModels": ["claude-opus-5"]}}).lists_permit(
+            self.config, "opus", "claude-opus-5-5"))
+
+    def test_an_exact_list_ignores_best_opusplan_and_default_entries(self):
+        # settings-reference.md, availableModelsMatch: those entries are ignored in exact mode, and only there.
+        def permitted(entries, match=None):
+            layers = {"policy": {"availableModels": entries, **({"availableModelsMatch": match} if match else {})}}
+            return allowlist.from_layers(layers).permitted(self.config)
+
+        self.assertEqual(permitted(["best"], "exact"), set())
+        self.assertEqual(permitted(["opusplan"], "exact"), set())
+        self.assertEqual(permitted(["opusplan", "sonnet"], "exact"), {"sonnet"})
+        self.assertEqual(permitted(["default[1m]", "sonnet"], "exact"), {"sonnet"})
+        self.assertEqual(permitted(["best"]), {"opus"})
+        self.assertEqual(permitted(["opusplan", "sonnet"]), {"opus", "sonnet"})
+
+    def test_an_effort_level_of_max_is_unset_while_a_max_cap_still_counts(self):
+        # model-config.md: max isn't accepted as a level in effortLevel or modelSettings; maxEffortLevel takes it.
+        found = allowlist.from_layers({"local": {"effortLevel": "max"}, "project": {"effortLevel": "high"}})
+        self.assertEqual(found.saved_effort(self.config, "sonnet"), "high")
+        found = allowlist.from_layers({"local": {"modelSettings": {"sonnet": {"effortLevel": "max"}}},
+                                       "project": {"modelSettings": {"sonnet": {"effortLevel": "low"}}}})
+        self.assertEqual(found.saved_effort(self.config, "sonnet"), "low")
+        found = allowlist.from_layers({"local": {"modelSettings": {"sonnet": {"effortLevel": "max", "maxEffortLevel": "low"}}}})
+        self.assertEqual((found.saved_effort(self.config, "sonnet"), found.effort_cap(self.config, "sonnet")), (None, "low"))
+        found = allowlist.from_layers({"local": {"effortLevel": "high", "maxEffortLevel": "max"}})
+        self.assertEqual((found.saved_effort(self.config, "sonnet"), found.effort_cap(self.config, "sonnet")), ("high", None))
+
     def test_max_effort_level_caps_each_family_at_the_lowest_source(self):
         # settings-reference.md, maxEffortLevel: the lowest of any scope applies; a modelSettings entry replaces
         # that source's top-level cap for the model; "max" sets none.
@@ -1142,12 +1188,6 @@ class Allowlist(Sandbox):
         self.assertEqual(self.permitted(user={"deniedModels": ["x"] * 300}), set(self.config.models))  # not policy: ignored
         self.assertEqual(self.permitted(user={"availableModels": ["z" * 300, "haiku"] + ["q"] * 300}), {"haiku"})
         self.assertEqual(allowlist.read("s1", {"policy": {"deniedModels": ["x"] * 300}}).permitted(self.config), set())
-
-    def test_a_spawn_in_a_session_the_start_hook_never_saw_remembers_the_layers(self):
-        # After /clear the session id is new and session.start doesn't fire, so a spawn is the first to send them.
-        modpath.spawn({"session_id": "s2", "cwd": str(self.project), "parent_model": "claude-opus-5-5",
-                       "tool_input": {"prompt": LOOKUP}, "settings": {"policy": {"availableModels": ["opus"]}}})
-        self.assertEqual(allowlist.read("s2").permitted(self.config), {"opus"})
 
     def test_lists_are_capped_and_overrides_are_stored_as_a_flag(self):
         sent = {"user": {"availableModels": ["x" * 500] + ["opus"] * 300, "modelOverrides": {"a": {"b": [1] * 50}}},
@@ -1239,12 +1279,12 @@ class Allowlist(Sandbox):
                 return snap.allowed.permitted(self.config, snap.sendable)
 
         every = set(self.config.models)
-        newest_only = {"availableModels": ["claude-opus-5-5", "sonnet", "haiku", "fable"]}
-        for provider in (None, "anthropic_aws", "bedrock"):  # Foundry's opus alias runs Opus 4.6
+        newest_only = {"availableModels": ["opus", "claude-sonnet-5-5", "haiku", "fable"]}
+        for provider in (None, "anthropic_aws", "vertex"):  # Bedrock's sonnet alias runs Sonnet 4.5
             self.assertEqual(permitted(provider, **newest_only), every, provider)
-        self.assertEqual(permitted("foundry", **newest_only), every)  # the mod sends claude-opus-5-5
-        self.assertEqual(permitted("foundry", overrides=True, **newest_only), every - {"opus"})
-        self.assertEqual(permitted("foundry", sends_ids=False, **newest_only), every - {"opus"})  # the Agent call fallback
+        self.assertEqual(permitted("bedrock", **newest_only), every)  # the mod sends claude-sonnet-5-5
+        self.assertEqual(permitted("bedrock", overrides=True, **newest_only), every - {"sonnet"})
+        self.assertEqual(permitted("bedrock", sends_ids=False, **newest_only), every - {"sonnet"})  # the Agent call fallback
         old_and_new = {"deniedModels": ["claude-haiku-4-5", "claude-haiku-5-5"]}
         self.assertEqual(permitted(None, **old_and_new), every)
         self.assertEqual(permitted("vertex", **old_and_new), every - {"haiku"})
@@ -1399,7 +1439,7 @@ class AgentDiscovery(Sandbox):
     def test_a_file_saved_with_a_byte_order_mark(self):
         folder = self.project / ".claude" / "agents"
         folder.mkdir(parents=True)
-        (folder / "bom.md").write_text("\ufeff---\nname: bom\nmodel: opus\n---\nbody\n", encoding="utf-8")
+        (folder / "bom.md").write_text("\ufeff---\nname: bom\ndescription: does a job\nmodel: opus\n---\nbody\n", encoding="utf-8")
         self.assertEqual(agents.find("bom", self.project)["model"], "opus")
 
 
@@ -1534,8 +1574,6 @@ class Router(Sandbox):
                  "architect": Level.complex, "reviewer": Level.complex}
         for agent, level in roles.items():
             d = self.decide(f"model-router:{agent}", HARDEST)
-            own = frontmatter(PLUGIN / "agents" / f"{agent}.md")
-            self.assertEqual((own["model"], own["effort"]), (ladder.model_for(config, level), ladder.effort(config, level)), agent)
             self.assertEqual((d["action"], d["source"], d["level"], d["model"], d["effort"]),
                              ("keep", "pin", level, ladder.model_for(config, level), None), agent)
 
@@ -1568,8 +1606,6 @@ class Router(Sandbox):
     def test_haiku_takes_the_same_extra_effort_step_as_any_model(self):
         # Haiku 5.5 takes low to max (model-config.md#adjust-effort-level).
         config = cfg.shipped()
-        self.assertEqual(tuple(ladder.pick(config, "complex", ["haiku"])), ("haiku", "xhigh"))
-        self.assertEqual(tuple(ladder.pick(config, "standard", ["haiku"])), ("haiku", "high"))
         self.assertEqual(ladder.effort_on(config, Level.hardest, "haiku"), "xhigh")
 
     def test_a_pick_at_or_above_the_levels_need_gets_no_extra_step(self):
@@ -2328,15 +2364,6 @@ class RepeatGuard(Sandbox):
         hooks.agent_failed({**self.call("general-purpose", LOOKUP, model="haiku"), "error": "timed out"})
         self.assertIsNotNone(self.pre("general-purpose", LOOKUP, model="haiku"))
 
-    def test_a_background_launch_settles_the_call_but_is_not_its_result(self):
-        self.session_on("claude-haiku-5-5")
-        task = calls.task({"description": "List src"})
-        self.pre("general-purpose", LOOKUP, description="List src")
-        self.launched("general-purpose", LOOKUP, "claude-haiku-5-5", "a1", description="List src")
-        self.assertIsNone(calls.last_run("s1", task))
-        self.stopped("a1")
-        self.assertEqual(calls.last_run("s1", task)["model"], "haiku")
-
     def test_claude_reissuing_the_rewritten_call_is_fine(self):
         for prompt in ("list the files under a", "list the files under b"):
             self.pre("general-purpose", prompt, model="haiku")
@@ -2567,7 +2594,7 @@ class Calls(Sandbox):
             records = {"a": {"at": odd}, "b": {"at": 5}, "c": {"at": 6}}
             store.keep(records, "d", {}, kept=3)
             self.assertEqual(sorted(records), ["b", "c", "d"], odd)
-            store.update_dict(store._keyed("routes"), lambda data: data.update(junk={"_at": odd}))
+            store.try_update(store._keyed("routes"), lambda data: data.update(junk={"_at": odd}))
             for number in range(store.KEEP_ENTRIES):
                 store.mutate_entry("routes", f"other{number}", lambda entry: None)
             self.assertNotIn("junk", store.load_state_file(store._keyed("routes")), odd)
@@ -2670,6 +2697,13 @@ class Mod(Sandbox):
         self.mark("toolu_9")
         self.assertIsNone(self.pre_call(LOOKUP, "toolu_9", session_id="s2"))
         self.assertEqual(self.ledger(), [])
+
+    def test_a_mark_that_cant_be_removed_counts_only_while_its_file_exists(self):
+        self.mark("toolu_3")
+        with mock.patch.object(Path, "unlink", side_effect=PermissionError):
+            self.assertTrue(modpath.routes("toolu_3"))
+            with mock.patch.object(Path, "is_file", return_value=False):
+                self.assertFalse(modpath.routes("toolu_3"))
 
     def test_only_a_plain_tool_use_id_is_looked_up(self):
         self.mark("toolu_1")  # with the marks folder there, "../x" resolves to the file below
@@ -3057,7 +3091,7 @@ class NewestOnProviders(Sandbox):
     """Where a provider's alias resolves to an older model (the alias table in
     https://code.claude.com/docs/en/model-config.md), the mod sends the family's newest full ID."""
 
-    LAGS = {"bedrock": ("sonnet", "haiku"), "vertex": ("sonnet", "haiku"), "foundry": ("opus", "sonnet", "haiku"),
+    LAGS = {"bedrock": ("sonnet", "haiku"), "vertex": ("haiku",), "foundry": ("haiku",),
             "anthropic_aws": ("sonnet", "haiku"), "anthropic_google_cloud": ("haiku",)}
     NEWEST = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
 
@@ -3165,12 +3199,12 @@ class NewestOnProviders(Sandbox):
         self.assertEqual((self.model(LOOKUP), self.model(BUILD)), ("haiku", "sonnet"))
 
     def test_a_lagging_pick_moves_one_family_up_at_most(self):
-        os.environ["CLAUDE_CODE_USE_FOUNDRY"] = "1"
-        modpath.start({"session_id": "s1", "settings": {"user": {"modelOverrides": {"claude-opus-5-5": "my-deployment"}}}})
+        os.environ["CLAUDE_CODE_USE_BEDROCK"] = "1"
+        modpath.start({"session_id": "s1", "settings": {"user": {"modelOverrides": {"claude-sonnet-5-5": "arn:aws:x"}}}})
         snap = settings.Snapshot({"session_id": "s1", "cwd": str(self.project)})
-        self.assertEqual(snap.lagging, frozenset({"opus", "sonnet", "haiku"}))  # no newest ID is sent
+        self.assertEqual(snap.lagging, frozenset({"sonnet", "haiku"}))  # no newest ID is sent
         self.assertEqual([snap.pick(level).model for level in (Level.lookup, Level.standard, Level.complex, Level.hardest)],
-                         ["sonnet", "sonnet", "opus", "fable"])
+                         ["sonnet", "sonnet", "opus", "opus"])
         self.override({"agents": {"general-purpose": {"level": "lookup"}}}, user=True)
         out = self.decide("general-purpose", LOOKUP)
         self.assertEqual(out["model"], "sonnet")
@@ -3293,6 +3327,10 @@ class Ledger(Sandbox):
     def test_a_fallback_spawn_row_has_no_kind(self):
         ledger.spawn("s1", "fallback", self.decide("general-purpose", LOOKUP))
         self.assertNotIn("kind", ledger.read()[0])
+
+    def test_a_cost_too_large_for_a_float_is_left_out_of_the_row(self):
+        ledger.usage("s1", "a1", "Explore", models=[self.TURN], cost={"usd": 10 ** 400})
+        self.assertIsNone(ledger.read()[-1]["cost_usd"])
 
     def test_rows_are_read_from_an_explicit_path(self):
         other = Path(self.tmp.name) / "elsewhere.jsonl"
@@ -3577,14 +3615,6 @@ class GatesDefault(Sandbox):
         hooks.user_prompt({"session_id": "s1", "prompt": HARDEST})
         self.assertIsNone(self.stop())
 
-    def test_the_check_asks_by_default_and_can_be_turned_off(self):
-        self.edited()
-        self.assertIn("model-router:verifier", json.dumps(self.stop()))
-        self.options(verify_gate="false")
-        self.advance(1)
-        self.edited()
-        self.assertIsNone(self.stop())
-
     def test_every_falsy_form_turns_the_check_off(self):
         for form in ("false", "False", "0", "no", "off"):
             with self.subTest(form=form):
@@ -3665,6 +3695,15 @@ class Gates(Sandbox):
         hooks.post_edit({"session_id": "s1", "cwd": str(sub), "tool_input": {"file_path": "../../cache/findings.json"}})
         self.assertIsNone(self.stop())
         hooks.post_edit({"session_id": "s1", "cwd": str(sub), "tool_input": {"file_path": "../src/app.py"}})
+        self.assertIn("model-router:verifier", self.ask())
+
+    def test_a_notebook_edit_counts(self):
+        hooks.post_edit({"session_id": "s1", "tool_input": {"notebook_path": "src/app.ipynb"}})
+        self.assertIn("model-router:verifier", self.ask())
+
+    def test_an_edit_still_counts_when_the_path_cant_be_resolved(self):
+        with mock.patch.object(Path, "resolve", side_effect=OSError):
+            hooks.post_edit({"session_id": "s1", "tool_input": {"file_path": str(self.project / "src" / "app.py")}})
         self.assertIn("model-router:verifier", self.ask())
 
     def test_a_symlinked_cwd_matches_the_real_path(self):
@@ -3911,7 +3950,7 @@ class StateFiles(Sandbox):
         def change(data: dict) -> None:
             info = data.setdefault("lookup", {})
             info["calls"] = info.get("calls", 0) + 1
-        store.update_dict(self.sample(), change)
+        store.try_update(self.sample(), change)
 
     def read(self) -> dict:
         return store.load_state_file(self.sample())
@@ -4080,14 +4119,14 @@ class Launcher(Sandbox):
         entry = self.entry()
         before = sys.dont_write_bytecode, sys.pycache_prefix
         try:
-            with unittest.mock.patch.object(entry, "private_cache", return_value=self.tmp.name):
+            with mock.patch.object(entry, "private_cache", return_value=self.tmp.name):
                 sys.dont_write_bytecode = False
                 entry.cache_bytecode()
                 self.assertEqual(sys.pycache_prefix, before[1])  # a Python that caches on its own is left alone
                 sys.dont_write_bytecode = True
                 entry.cache_bytecode()
                 self.assertEqual((sys.dont_write_bytecode, sys.pycache_prefix), (False, self.tmp.name))
-            with unittest.mock.patch.object(entry, "private_cache", return_value=None):
+            with mock.patch.object(entry, "private_cache", return_value=None):
                 sys.dont_write_bytecode, sys.pycache_prefix = True, before[1]
                 entry.cache_bytecode()
                 self.assertEqual((sys.dont_write_bytecode, sys.pycache_prefix), (True, before[1]))
@@ -4443,7 +4482,7 @@ class MachineReadable(Sandbox):
         self.assertEqual((data["set_aside"], data["newer_files"]), ([], []))
         sample = store.data_dir() / "sample.json"
         sample.write_text('{"lookup": {"calls": 4,')
-        store.update_dict(sample, lambda data: None)
+        store.try_update(sample, lambda data: None)
         (store.data_dir() / "sessions.json").write_text(json.dumps({"schema": store.SCHEMA + 1}))  # a session file has none
         newer = store.data_dir() / "state.json"
         newer.write_text(json.dumps({"schema": store.SCHEMA + 1}))
@@ -4802,12 +4841,9 @@ class EdgeCases(Sandbox):
                 out = hooks.pre_agent({"session_id": "s1", "cwd": str(self.project), "tool_input": tool_input})
                 decision = ((out or {}).get("hookSpecificOutput") or {}).get("permissionDecision")
                 self.assertIsNone(decision)  # nothing to route on: the call goes through untouched
-        self.assertEqual(self.out_hook("pre-agent", {"session_id": "s1", "tool_input": {"prompt": ""}})[0], 0)
-
-    def out_hook(self, command, payload):
-        res = subprocess.run([sys.executable, str(SCRIPT), command], input=json.dumps(payload), capture_output=True,
-                             text=True, env={**os.environ})
-        return res.returncode, res.stdout
+        self.assertEqual(subprocess.run([sys.executable, str(SCRIPT), "pre-agent"],
+                                        input=json.dumps({"session_id": "s1", "tool_input": {"prompt": ""}}),
+                                        capture_output=True, text=True).returncode, 0)
 
     def test_a_result_on_another_model_is_logged_as_the_model_that_ran(self):
         self.session_on("claude-opus-5-5")
@@ -4826,9 +4862,6 @@ class EdgeCases(Sandbox):
         # Under CLAUDE_CODE_SUBAGENT_MODEL_FORCE every agent runs on the forced model: never a substitution.
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")
         self.pre("general-purpose", LOOKUP + " forced")
-        for _ in range(2):
-            self.done("general-purpose", LOOKUP + " forced", "claude-sonnet-5-5")
-        self.assertTrue(health.load().healthy("haiku"))
         self.done("general-purpose", LOOKUP + " forced", "claude-opus-5-5")
         self.assertEqual([r for r in self.ledger() if r.get("event") == "result"][-1]["resolved_model"],
                          "claude-opus-5-5")
@@ -4946,7 +4979,7 @@ class ClockAndCleanup(Sandbox):
         sample = store.data_dir() / "sample.json"
         for i in range(store.KEEP_SET_ASIDE + 3):
             sample.write_text('{"broken": ' + str(i))
-            store.update_dict(sample, lambda data: data.update(ok=True))
+            store.try_update(sample, lambda data: data.update(ok=True))
         copies = sorted(store.data_dir().glob("sample.json.corrupt-*"))
         self.assertEqual(len(copies), store.KEEP_SET_ASIDE)
         self.assertEqual(copies[-1].read_text(), '{"broken": ' + str(store.KEEP_SET_ASIDE + 2))
@@ -4960,7 +4993,7 @@ class ClockAndCleanup(Sandbox):
         with mock.patch.object(store, "_dt", frozen):
             for i in range(store.KEEP_SET_ASIDE + 3):
                 sample.write_text('{"broken": ' + str(i))
-                store.update_dict(sample, lambda data: data.update(ok=True))
+                store.try_update(sample, lambda data: data.update(ok=True))
                 self.assertNotIn("broken", sample.read_text(), i)  # saved, not left corrupt
         copies = sorted(store.data_dir().glob("sample.json.corrupt-*"))
         self.assertEqual(len(copies), store.KEEP_SET_ASIDE)

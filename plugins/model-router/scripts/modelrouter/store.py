@@ -35,13 +35,17 @@ def now() -> float:
     return (_clock or time.time)()
 
 
+def is_number(value: Any) -> bool:
+    """A finite int or float, not a bool: json.loads also yields nan, infinity and huge ints."""
+    try:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def stamp(value: Any) -> float:
     """A stored time or count: the number itself, or 0 when it is junk, nan, infinite or too big for a float."""
-    try:
-        ok = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
-    except OverflowError:
-        return 0
-    return value if ok else 0
+    return value if is_number(value) else 0
 
 
 def set_clock(clock: Callable[[], float] | None) -> None:
@@ -284,8 +288,8 @@ def load_state_file(path: Path, durable: bool = True) -> dict:
 
 
 def _set_aside(path: Path) -> bool:
-    stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    base = f"{path.name}.corrupt-{stamp}"
+    when = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    base = f"{path.name}.corrupt-{when}"
     # Two set-asides can share a stamp (Windows' clock ticks in about 15 ms), so a counter one
     # above the newest copy with this stamp keeps each one and still sorts it last. Never overwrite.
     taken = sorted(p.name for p in path.parent.glob(base + "*"))
@@ -338,10 +342,6 @@ def try_update(path: Path, change: Callable[[dict], Any], durable: bool = True) 
         return data, "busy"
 
 
-def update_dict(path: Path, change: Callable[[dict], Any]) -> dict:
-    return try_update(path, change)[0]
-
-
 def state_path() -> Path:
     return data_dir() / "state.json"
 
@@ -351,7 +351,7 @@ def load_state() -> dict:
 
 
 def update_state(change: Callable[[dict], Any]) -> dict:
-    return update_dict(state_path(), change)
+    return try_update(state_path(), change)[0]
 
 
 def _keyed(name: str) -> Path:
@@ -448,9 +448,9 @@ def append_ledger(entry: dict) -> None:
     """Append one row. Rows older than LEDGER_MAX_DAYS go once the oldest one is a day older, so an age trim runs about
     once a day. Past LEDGER_MAX_BYTES the usage rows a later one replaces go, then the older half if the rest still
     fills half the cap, so trims stay rare."""
-    now = _dt.datetime.now(_dt.timezone.utc)
-    entry = {"ts": now.isoformat(timespec="seconds"), **entry}
-    cutoff = now - _dt.timedelta(days=LEDGER_MAX_DAYS)
+    at = _dt.datetime.now(_dt.timezone.utc)
+    entry = {"ts": at.isoformat(timespec="seconds"), **entry}
+    cutoff = at - _dt.timedelta(days=LEDGER_MAX_DAYS)
     path = ledger_path()
     try:
         # The append takes the lock too: a row written between a trim's read and its

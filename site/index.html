@@ -61,7 +61,7 @@
       "description": "A plugin for Claude Code that keeps the model and effort Claude names for each subagent, teammate and workflow stage within your cap, fills in the effort when only a model is named, and runs a call marked as a redo with more effort or on a stronger model. An independent open-source project by Cris Nahine, not made or endorsed by Anthropic.",
       "applicationCategory": "DeveloperApplication",
       "applicationSubCategory": "Plugin for Claude Code",
-      "softwareVersion": "0.2.0",
+      "softwareVersion": "0.2.1",
       "datePublished": "2026-11-23",
       "softwareRequirements": "Claude Code 2.1.329 or later; Python 3.9 or later",
       "installUrl": "https://github.com/crisnahine/claude-code-model-router#install",
@@ -119,8 +119,7 @@ body { margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 var(-
 a { color: inherit; text-decoration-color: color-mix(in srgb, var(--route) 70%, transparent); text-underline-offset: 3px; }
 a:hover { color: var(--route); }
 :focus-visible { outline: 3px solid var(--route); outline-offset: 3px; border-radius: 6px; }
-img, video { max-width: 100%; height: auto; display: block; }
-.figure video { width: 100%; border-radius: 12px; }
+img { max-width: 100%; height: auto; display: block; }
 code { font: 0.88em var(--mono); background: var(--faint); padding: 0.1em 0.35em; border-radius: 5px; }
 .wrap { max-width: 1120px; margin: 0 auto; padding: 0 16px; }
 .skip { position: absolute; left: -999px; }
@@ -128,7 +127,7 @@ code { font: 0.88em var(--mono); background: var(--faint); padding: 0.1em 0.35em
 
 header.top { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
 header.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 64px; }
-.brand { display: flex; align-items: center; min-height: 44px; gap: 10px; text-decoration: none; font-weight: 600; }
+.brand { display: flex; align-items: center; min-height: 44px; text-decoration: none; font-weight: 600; }
 .brand img { width: 196px; }
 nav.links { display: flex; gap: 6px; font-size: 15px; }
 nav.links a { text-decoration: none; color: var(--muted); display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; }
@@ -145,7 +144,7 @@ nav.links a:hover { color: var(--ink); }
 h1 { font-size: clamp(34px, 5.2vw, 56px); line-height: 1.08; letter-spacing: -0.02em; margin: 0 0 20px; }
 .scope { font-size: 16px; color: var(--muted); margin: 0 0 14px; max-width: 40em; }
 .lead { font-size: 20px; color: var(--muted); margin: 0 0 28px; max-width: 34em; }
-.install { display: flex; align-items: stretch; gap: 0; background: var(--code-bg); color: var(--code-ink); border-radius: 14px; overflow: hidden; max-width: 620px; }
+.install { display: flex; background: var(--code-bg); color: var(--code-ink); border-radius: 14px; overflow: hidden; max-width: 620px; }
 .install code { background: none; color: inherit; font-size: 14px; line-height: 1.55; padding: 14px 18px; flex: 1; white-space: pre-wrap; overflow-wrap: break-word; }
 .install button { font: 600 14px var(--sans); border: 0; background: #1C2A42; color: #E7EDF6; padding: 0 18px; cursor: pointer; }
 .install button:hover { background: #26385A; }
@@ -171,7 +170,7 @@ h3 { font-size: 20px; margin: 0 0 6px; line-height: 1.3; }
 .figure { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 8px; margin: 0 0 14px; }
 figure { margin: 0 0 40px; }
 figcaption { color: var(--muted); font-size: 16px; max-width: 46em; }
-.steps { counter-reset: s; display: grid; gap: 40px; }
+.steps { display: grid; gap: 40px; }
 .figure a { display: block; }
 table { width: 100%; border-collapse: collapse; font-size: 15px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
 th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -221,25 +220,23 @@ footer nav a { display: inline-flex; align-items: center; min-height: 44px; padd
 <main id="main">
 <div class="hero" id="top">
   <div class="wrap">
-    <div>
-      <p class="eyebrow">A plugin for Claude Code</p>
-      <h1>Model Router</h1>
-      <p class="lead">Keeps each subagent's model and effort within the limits you set.</p>
-      <p class="scope">Claude names the model and effort on each Agent call, from a note the plugin adds at session start. The plugin keeps what Claude names within your cap and the models usable here, fills in the effort when only a model is named, and runs a call marked as a redo with more effort or on a stronger model. An independent project, not made or endorsed by Anthropic.</p>
-      <div class="install">
-        <code id="cmd">/plugin install model-router --marketplace crisnahine/claude-code-model-router</code>
-        <button type="button" id="copy" aria-label="Copy the install command">Copy</button>
-      </div>
-      <div class="cta">
-        <a class="btn primary" href="https://github.com/crisnahine/claude-code-model-router">View on GitHub</a>
-        <a class="btn" href="#how">How it works</a>
-      </div>
-      <div class="badges">
-        <img src="assets/badge-version.svg" width="144" height="28" alt="version 0.2.0">
-        <img src="assets/badge-claude-code.svg" width="254" height="28" alt="Claude Code 2.1.329 or later">
-        <img src="assets/badge-python.svg" width="188" height="28" alt="Python 3.9 or later">
-        <img src="assets/badge-license.svg" width="180" height="28" alt="license: Apache-2.0">
-      </div>
+    <p class="eyebrow">A plugin for Claude Code</p>
+    <h1>Model Router</h1>
+    <p class="lead">Keeps each subagent's model and effort within the limits you set.</p>
+    <p class="scope">Claude names the model and effort on each Agent call, from a note the plugin adds at session start. The plugin keeps what Claude names within your cap and the models usable here, fills in the effort when only a model is named, and runs a call marked as a redo with more effort or on a stronger model. An independent project, not made or endorsed by Anthropic.</p>
+    <div class="install">
+      <code id="cmd">/plugin install model-router --marketplace crisnahine/claude-code-model-router</code>
+      <button type="button" id="copy" aria-label="Copy the install command">Copy</button>
+    </div>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/crisnahine/claude-code-model-router">View on GitHub</a>
+      <a class="btn" href="#how">How it works</a>
+    </div>
+    <div class="badges">
+      <img src="assets/badge-version.svg" width="144" height="28" alt="version 0.2.1">
+      <img src="assets/badge-claude-code.svg" width="254" height="28" alt="Claude Code 2.1.329 or later">
+      <img src="assets/badge-python.svg" width="188" height="28" alt="Python 3.9 or later">
+      <img src="assets/badge-license.svg" width="180" height="28" alt="license: Apache-2.0">
     </div>
   </div>
 </div>
@@ -256,7 +253,7 @@ footer nav a { display: inline-flex; align-items: center; min-height: 44px; padd
       <div class="card"><span class="rung" style="background:var(--r4)"></span><h3>Asks for a check</h3><p>When Claude changed a project file with Edit, Write or NotebookEdit and no check ran since, Claude is asked once, before the turn ends, for the work's own check, such as tests for code or a reread of a document.</p></div>
       <div class="card"><span class="rung" style="background:var(--r5)"></span><h3>Shows what ran</h3><p><code>/model-router:usage</code> lists agents, levels, models and redos. Where the plugin's mod runs, it adds each subagent's tokens and Claude Code's cost estimate, and a line under the prompt shows this session's calls.</p></div>
     </div>
-    <p>Workflow stages: a model the script names is held to your cap like any call's, and <code>CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL</code> sets the model of a stage that names none; without it, such a stage runs on its agent's own model, else at the level its agent's tools put it. The effort Model Router sets on a stage only ever raises the one it runs at, and on the session's own model it is never below the session's (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/GUIDE.md">guide</a>).</p>
+    <p>Workflow stages: a model the script names is held to your cap like any call's, and <code>CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL</code> sets the model of a stage that names none; without it, such a stage runs on its agent's own model, else on <code>CLAUDE_CODE_SUBAGENT_MODEL</code> when that is set, else at the level its agent's tools put it. The effort Model Router sets on a stage only ever raises the one it runs at, and on the session's own model it is never below the session's (<a href="https://github.com/crisnahine/claude-code-model-router/blob/main/docs/GUIDE.md">guide</a>).</p>
   </div>
 </section>
 
@@ -362,7 +359,7 @@ footer nav a { display: inline-flex; align-items: center; min-height: 44px; padd
 
 <footer>
   <div class="wrap">
-    <span>Model Router, Apache-2.0 license, not made or endorsed by Anthropic, by <a href="https://github.com/crisnahine">Cris Nahine</a>. Version 0.2.0, released <time datetime="2026-11-26">2026-11-26</time>.</span>
+    <span>Model Router, Apache-2.0 license, not made or endorsed by Anthropic, by <a href="https://github.com/crisnahine">Cris Nahine</a>. Version 0.2.1, released <time datetime="2026-11-27">2026-11-27</time>.</span>
     <nav aria-label="Project">
       <a href="https://github.com/crisnahine/claude-code-model-router">GitHub</a>
       <a href="https://discord.gg/AHZZ7bABJy">Discord</a>

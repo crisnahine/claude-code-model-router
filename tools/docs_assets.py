@@ -22,6 +22,7 @@ REPO = "https://github.com/crisnahine/claude-code-model-router"
 
 SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif'
 MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
+ARROW = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
 
 # The five rung colors run from the cheapest level (lookup) to the strongest (frontier).
 LIGHT = {
@@ -78,9 +79,9 @@ def svg(w: int, h: int, title: str, label: str, body: str) -> str:
             f"{style()}\n{body}\n</svg>\n")
 
 
-def text(x, y, s, cls="ink", size=13, anchor=None, extra=""):
+def text(x, y, s, cls="ink", size=13, anchor=None):
     a = f' text-anchor="{anchor}"' if anchor else ""
-    return f'<text x="{x:g}" y="{y:g}" class="{cls}" font-size="{size}"{a}{extra}>{esc(s)}</text>'
+    return f'<text x="{x:g}" y="{y:g}" class="{cls}" font-size="{size}"{a}>{esc(s)}</text>'
 
 
 def lines(x, y, rows, cls="mut", size=13, step=None):
@@ -92,15 +93,14 @@ def card(x, y, w, h, rx=12, cls="card", sw=1):
     return f'<rect x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" rx="{rx}" class="{cls}" stroke-width="{sw}"/>'
 
 
-def pill(x, y, label, cls="faint", tcls="ink", size=12, mono=True, h=24, pad=10):
-    w = width_of(label, size, mono) + 2 * pad
-    t = "mono " + tcls if mono else tcls
+def pill(x, y, label, cls="faint", tcls="ink", size=12, h=24, pad=10):
+    w = width_of(label, size, True) + 2 * pad
     return (f'<rect x="{x:g}" y="{y:g}" width="{w:.0f}" height="{h}" rx="{h / 2:g}" class="{cls}"/>'
-            + text(x + w / 2, y + h / 2 + size * 0.36, label, t, size, "middle")), w
+            + text(x + w / 2, y + h / 2 + size * 0.36, label, "mono " + tcls, size, "middle"))
 
 
-def frame(w, h, rx=16):
-    return f'<rect x="0.5" y="0.5" width="{w - 1}" height="{h - 1}" rx="{rx}" class="card"/>'
+def frame(w, h):
+    return f'<rect x="0.5" y="0.5" width="{w - 1}" height="{h - 1}" rx="16" class="card"/>'
 
 
 # ---------------------------------------------------------------- the documentation index
@@ -208,8 +208,7 @@ def diagram_ladder() -> str:
         out.append(f'<path d="M96 {y}H152" class="r{i}s" stroke-width="6" stroke-linecap="round"/>')
         out.append(text(180, y + 5, lv, "ink b", 15))
         out.append(f'<circle cx="290" cy="{y}" r="5" class="r{i}"/>' + text(300, y + 5, model, "ink", 15))
-        p, _ = pill(392, y - 12, effort, size=13)
-        out.append(p)
+        out.append(pill(392, y - 12, effort, size=13))
         out.append("".join(f'<rect x="{482 + k * 24}" y="{y - 4}" width="18" height="8" rx="4" '
                            f'class="{f"r{i}" if k < needs else "faint"}"/>' for k in range(4)))
         out.append(text(590, y + 5, sub, "mut", 12.5))
@@ -220,7 +219,7 @@ def diagram_ladder() -> str:
     cy = ys["complex"]
     out.append(f'<circle cx="124" cy="{cy}" r="13" class="halo" fill="none" stroke-width="5"/>'
                f'<circle cx="124" cy="{cy}" r="11" class="rt"/>'
-               + pill(30, cy - 12, "redo", cls="rt", tcls="tag", size=12)[0])
+               + pill(30, cy - 12, "redo", cls="rt", tcls="tag", size=12))
     out.append(f'<path class="rts" d="M124 {ys["lookup"] - 4}V{cy + 18}" stroke-width="2.5" '
                f'stroke-dasharray="4 4" fill="none" stroke-linecap="round"/>')
     out.append(text(32, 432, "A model named on a call stands for its lowest level, or the one its named effort "
@@ -264,8 +263,7 @@ def diagram_redo() -> str:
         if k < 3:
             ax = x + cw
             out.append(f'<path d="M{ax + 6} {top + 52}H{ax + gap - 6}M{ax + gap - 11} {top + 47}L{ax + gap - 6} '
-                       f'{top + 52}L{ax + gap - 11} {top + 57}" class="lnm" stroke-width="1.8" fill="none" '
-                       'stroke-linecap="round" stroke-linejoin="round"/>')
+                       f'{top + 52}L{ax + gap - 11} {top + 57}" {ARROW}/>')
     track = top + 126
     out.append(f'<path d="M{32 + cw / 2} {track}H{32 + 3 * (cw + gap) + cw / 2}" class="ln" stroke-width="3" '
                'stroke-linecap="round"/>')
@@ -287,18 +285,13 @@ def diagram_redo() -> str:
     return svg(w, h, title, label, "".join(out))
 
 
-def chip(x, y, label, size=12, h=26):
-    w = width_of(label, size, True) + 16
-    return (f'<rect x="{x:g}" y="{y:g}" width="{w:.0f}" height="{h}" rx="6" class="card" stroke-width="1"/>'
-            + text(x + 9, y + h / 2 + size * 0.36, label, "mono ink", size)), w
-
-
-def chip_row(x, y, labels, size=12, gap=8, h=26):
+def chip_row(x, y, labels, size=12, gap=8):
     out, cx = [], x
     for label in labels:
-        c, cw = chip(cx, y, label, size, h)
-        out.append(c)
-        cx += cw + gap
+        w = width_of(label, size, True) + 16
+        out.append(f'<rect x="{cx:g}" y="{y:g}" width="{w:.0f}" height="26" rx="6" class="card" stroke-width="1"/>'
+                   + text(cx + 9, y + 13 + size * 0.36, label, "mono ink", size))
+        cx += w + gap
     return "".join(out)
 
 
@@ -327,10 +320,9 @@ def diagram_two_paths() -> str:
     out.append(lines(516, 278, ["Fallback: PreToolUse rewrites the Agent call where",
                                 "mods don't load, and stands down for each call",
                                 "the mod's tool.call hook marked."], "mut", 12.5, 18))
-    arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
-    out.append(f'<path d="M237 188V216M232 211L237 216L242 211" {arrow}/>')
-    out.append(f'<path d="M237 348V374H410V398M405 393L410 398L415 393" {arrow}/>')
-    out.append(f'<path d="M683 348V374H510V398M505 393L510 398L515 393" {arrow}/>')
+    out.append(f'<path d="M237 188V216M232 211L237 216L242 211" {ARROW}/>')
+    out.append(f'<path d="M237 348V374H410V398M405 393L410 398L415 393" {ARROW}/>')
+    out.append(f'<path d="M683 348V374H510V398M505 393L510 398L515 393" {ARROW}/>')
     out.append(text(250, 367, "sh model-router.sh mod-*", "mono mut", 11.5))
     out.append(text(696, 367, "sh model-router.sh <event>", "mono mut", 11.5))
     out.append(card(132, 404, 656, 110, rx=12))
@@ -374,9 +366,8 @@ def diagram_precedence() -> str:
         out.append(text(88, y + 22, head, ("mono ink b" if is_env else "ink b"), 13 if is_env else 14))
         out.append(text(88, y + 41, detail, "mut", 12.5))
     out.append(f'<rect x="22" y="{top + 5 * rh + 8}" width="5" height="36" rx="2.5" class="rt"/>')
-    arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
     out.append(f'<path d="M592 {top + 5 * rh + 26}H612V{top + 26}H624M619 {top + 21}L624 {top + 26}L619 {top + 31}" '
-               f'{arrow}/>')
+               f'{ARROW}/>')
     cap = ["For 2, 3, 4 and 6, the winner has to", "be usable: inside max_tier, allowed", "by your availableModels and",
            "deniedModels settings, and known to", "work. If it isn't, the next stronger", "usable model runs, else the strongest",
            "usable one left."]
@@ -417,8 +408,7 @@ def diagram_stop_checks() -> str:
            text(32, 66, "The Stop hook runs one check. It asks once, then lets the turn end.", "mut", 13.5)]
     out.append(card(320, 88, 280, 50, rx=25))
     out.append(text(460, 118, "Claude is about to end the turn", "ink b", 13.5, "middle"))
-    arrow = 'class="lnm" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"'
-    out.append(f'<path d="M460 138V176M455 171L460 176L465 171" {arrow}/>')
+    out.append(f'<path d="M460 138V176M455 171L460 176L465 171" {ARROW}/>')
     x, name = 255, "verify_gate"
     when = ["a file in the project was edited, and no", "check command ran after the last edit, and",
             "the transcript can be read."]
@@ -426,8 +416,7 @@ def diagram_stop_checks() -> str:
             "for a document. Turn it off in /config."]
     out.append(card(x, 182, 410, 252, rx=12))
     out.append(text(x + 20, 212, name, "mono ink b", 14))
-    p, _ = pill(x + 26 + width_of(name, 14, True), 194, "on by default", cls="r1", tcls="tag", size=11.5, h=24, pad=10)
-    out.append(p)
+    out.append(pill(x + 26 + width_of(name, 14, True), 194, "on by default", cls="r1", tcls="tag", size=11.5))
     out.append(text(x + 20, 244, "Asks when", "mut b", 12))
     out.append(lines(x + 20, 266, when, "ink", 13, 20))
     out.append(f'<path d="M{x + 20} 336H{x + 390}" class="ln" stroke-width="1"/>')
@@ -534,11 +523,11 @@ def site_files(faq: str, texts: dict, v: str, day: str, floor: str) -> dict:
     return out
 
 
-def site_asset_problems(page: str, root: Path = ROOT) -> list:
+def site_asset_problems(page: str) -> list:
     """The site's assets are copied from docs/assets when Pages deploys, so each one the page names must be there."""
     return [f"site/index.html: assets/{name} is not in docs/assets"
             for name in sorted(set(re.findall(r"\bassets/([\w.-]+\.\w+)", page)))
-            if not (root / "docs" / "assets" / name).exists()]
+            if not (ROOT / "docs" / "assets" / name).exists()]
 
 
 # ---------------------------------------------------------------- write and check
@@ -566,11 +555,11 @@ def release_date(v: str) -> str:
 @dataclasses.dataclass(frozen=True)
 class Snapshot:
     """Everything `build` reads, taken once: the plugin's version, its release date and its Claude Code floor, the
-    shipped ladder, the text of every page it rewrites and the page index."""
+    model registry, the text of every page it rewrites and the page index."""
     version: str
     released: str
     claude_code: str
-    ladder: dict
+    registry: dict
     texts: dict
     pages: list = dataclasses.field(default_factory=lambda: list(PAGES))
 
@@ -581,14 +570,14 @@ def snapshot() -> Snapshot:
               "site/sitemap.xml", "site/llms.txt"]
     return Snapshot(
         version=v, released=release_date(v), claude_code=manifest()["engines"]["claude-code"].removeprefix(">="),
-        ladder=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
+        registry=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
         texts={path: (ROOT / path).read_text(encoding="utf-8") for path in wanted if (ROOT / path).exists()})
 
 
 def build(snap: Snapshot) -> dict:
     """The files to write, by path, for a snapshot of the inputs. Reads no file."""
     LAYOUT.clear()
-    check_ladder_against_registry(snap.ladder)
+    check_ladder_against_registry(snap.registry)
     v = snap.version
     files = {}
     assets = badge_assets(v, snap.claude_code)

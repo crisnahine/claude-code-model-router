@@ -90,16 +90,12 @@ def vary(payload: dict, run: int) -> dict:
 
 
 class Sandbox:
-    """Throwaway data, home, project and bytecode folders, plus a 1 MB transcript. Each reset
-    makes new folders rather than deleting the old, so a file a scanner holds open can't break
-    the next run."""
+    """Throwaway data, home, project and bytecode folders, plus a 1 MB transcript. Each Sandbox gets new folders,
+    so a file a scanner holds open can't break the next run."""
     counter = itertools.count()
 
     def __init__(self, base: Path):
         self.base = base
-        self.reset()
-
-    def reset(self) -> None:
         self.root = self.base / f"box{next(self.counter)}"
         for name in ("data", "home", "project", "pycache"):
             (self.root / name).mkdir(parents=True)

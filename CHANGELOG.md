@@ -4,6 +4,23 @@
 
 # Changelog
 
+## 0.2.1 - 2026-11-27
+
+This release follows Claude Code 2.1.332 and cleans up the code. Options and commands are the same as in 0.2.0.
+
+- Reviewed against Claude Code 2.1.332 and the 37 docs pages whose text changed with it, which `compat/baseline.json` records. Nothing the plugin uses was removed or deprecated, and it doesn't use the release's new `PreSkillShellCommand` hook event.
+- On Google Cloud's Agent Platform `sonnet` goes out as the alias, and on Microsoft Foundry `opus` and `sonnet` do: Claude Code 2.1.332 runs the newest model for them. On 2.1.329 to 2.1.331 those three aliases run the provider's older model.
+- Under `availableModelsMatch: exact`, an `availableModels` entry such as `claude-opus-4-5` also permits its dated model ID, as in Claude Code.
+- Under `availableModelsMatch: exact`, `best`, `opusplan` and `default` entries in `availableModels` permit nothing, as in Claude Code.
+- An `effortLevel` of `max` in a settings file reads as unset, as in Claude Code.
+- An agent that can use `PowerShell` or `Monitor` counts as one that can run commands, so a call to it that names no model gets the `standard` level.
+- A project or user agent file that Claude Code skips isn't read as an agent: one with no `name`, with a `name` that starts with `-`, contains `:` or is longer than 256 characters, or with no `description`.
+- With `CLAUDE_CODE_EFFORT_LEVEL` set to `auto` or `unset`, the session check estimates the session at the API's default effort for its model and offers no `/effort` pick. The variable is read in any letter case, as Claude Code reads it.
+- With `CLAUDE_CODE_SUBAGENT_MODEL` set, the workflow note says a stage that names no model runs on its agent's own model or that variable's.
+- The benchmark harness prices a Haiku 5.5 request with a prompt over 100,000 tokens at its higher list rates.
+- A usage report whose cost is too large a number to store is recorded with no cost. Before, the usage hook stopped with an error on it.
+- Dead code, repeated helpers and repeated tests are gone from the runtime, the benchmark harness and the docs tooling.
+
 ## 0.2.0 - 2026-11-26
 
 Model Router manages the Claude model and effort that each subagent, teammate and workflow agent runs on.

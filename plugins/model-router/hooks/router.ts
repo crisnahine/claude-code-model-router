@@ -539,16 +539,16 @@ export const register: Register = (on, options) => {
     efforts.push(mine)
     inFlight.set(e.prompt, efforts)
     try {
-      const started = await next(model ? { ...e, model } : e)
-      if (mine && started.agentId) remember(agentEffort, started.agentId, mine)
-      if (started.agentId && e.workflow && e.subagentType) remember(agentType, started.agentId, e.subagentType)
-      if (started.agentId && !e.workflow && PLAIN_ID.test(e.tool_use_id)) remember(agentCall, started.agentId, e.tool_use_id)
+      const spawned = await next(model ? { ...e, model } : e)
+      if (mine && spawned.agentId) remember(agentEffort, spawned.agentId, mine)
+      if (spawned.agentId && e.workflow && e.subagentType) remember(agentType, spawned.agentId, e.subagentType)
+      if (spawned.agentId && !e.workflow && PLAIN_ID.test(e.tool_use_id)) remember(agentCall, spawned.agentId, e.tool_use_id)
       // A run on the model another mod moved it to is no substitution for the one this mod sent.
       if (!e.workflow && PLAIN_ID.test(e.tool_use_id) && movedOn(next.trace, model || e.model)) {
         await mark($, `${e.tool_use_id}.moved`)
       }
       refresh($, opts, live)
-      return started
+      return spawned
     } finally {
       efforts.splice(efforts.indexOf(mine), 1)
       if (!efforts.length) inFlight.delete(e.prompt)

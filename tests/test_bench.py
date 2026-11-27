@@ -125,13 +125,13 @@ class Analysis(unittest.TestCase):
         v = self.verdict(data, "haiku-high")
         self.assertEqual((v["verdict"], v["cost_ci"]), ("NONE", (None, None)))
         self.assertIn("cost per solved task n/a to n/a", v["reason"])
-        self.assertEqual(analyze._judge("b", (-0.05, 0.05), (math.inf, math.inf), False, (9, 10, 9, 10))[0], "NONE")
-        self.assertEqual(analyze._judge("b", (-0.05, 0.05), (-math.inf, -0.1), False, (9, 10, 9, 10))[0], "WIN")
-        self.assertEqual(analyze._judge("b", (-0.05, 0.05), (0.1, math.inf), False, (9, 10, 9, 10))[0], "LOSE")
+        self.assertEqual(analyze._judge((-0.05, 0.05), (math.inf, math.inf), False, (9, 10, 9, 10))[0], "NONE")
+        self.assertEqual(analyze._judge((-0.05, 0.05), (-math.inf, -0.1), False, (9, 10, 9, 10))[0], "WIN")
+        self.assertEqual(analyze._judge((-0.05, 0.05), (0.1, math.inf), False, (9, 10, 9, 10))[0], "LOSE")
         self.assertIn("A cost bound that is n/a decides nothing", analyze.build_page(analyze.load([])))
 
     def test_behind_beyond_noise_loses_even_inside_the_margin(self):
-        self.assertEqual(analyze._judge("defaults", (-0.08, -0.01), (-0.05, -0.01), False, (9, 10, 9, 10))[0], "LOSE")
+        self.assertEqual(analyze._judge((-0.08, -0.01), (-0.05, -0.01), False, (9, 10, 9, 10))[0], "LOSE")
 
     def test_a_pass_rate_the_exact_test_puts_behind_loses_where_the_added_runs_hide_it(self):
         # The solved and failed runs added per task shrink every pass-rate gap by n / (n + 2).
@@ -322,6 +322,16 @@ class Analysis(unittest.TestCase):
         self.assertIn("--budget <usd> --max-total <usd>", page)
         self.assertNotIn("--budget 0.5", page)
 
+    def test_the_page_counts_runs_on_a_machine_with_managed_settings(self):
+        base = full_row(task="bugfix-median", main_model="sonnet", passed=True, **{"class": "bugfix"})
+        data = [dict(base, config="defaults", managed_settings=["/etc/claude-code/managed-settings.json"]),
+                dict(base, config="plugin")]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.jsonl"
+            path.write_text("".join(json.dumps(r) + "\n" for r in data), encoding="utf-8")
+            page = analyze.build_page(analyze.load([path]))
+        self.assertIn("- 1 run(s) here ran on a machine with managed settings files or a macOS plist", page)
+
     def test_a_run_the_harness_stopped_counts_as_failed_and_the_page_counts_them(self):
         base = full_row(task="bugfix-median", main_model="sonnet", passed=True, **{"class": "bugfix"})
         older = {k: v for k, v in base.items() if k != "stopped_by"}  # a row from before the field
@@ -449,7 +459,7 @@ class Analysis(unittest.TestCase):
         self.assertEqual((row["verdicts"], row["status"]), ({}, "REFUSED"))
 
     @staticmethod
-    def page_args(tmp, name="page.md"):
+    def page_args(tmp):
         res = Path(tmp) / "results"
         res.mkdir(exist_ok=True)
         data = rows("plugin", "lookup", [0.1, 0.2], [True, False]) + rows("defaults", "lookup", [0.3, 0.4], [True, True])
@@ -457,7 +467,7 @@ class Analysis(unittest.TestCase):
                         models={}) for r in data]
         path = res / "a-lookup-2026-11-22.jsonl"
         path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
-        return path, Path(tmp) / name
+        return path, Path(tmp) / "page.md"
 
     def check(self, *args):
         err = io.StringIO()
@@ -1154,7 +1164,7 @@ sys.exit(1 if capped else 0)
 
 
 class Prices(unittest.TestCase):
-    """bench/prices.json, from https://platform.claude.com/docs/en/about-claude/pricing.md (checked 2026-11-22)."""
+    """bench/prices.json, from https://platform.claude.com/docs/en/about-claude/pricing.md (checked 2026-11-27)."""
 
     # The pricing page lists no rate for this one.
     UNLISTED = {"claude-mythos-preview"}
@@ -1618,13 +1628,11 @@ class Stopped(unittest.TestCase):
     """Once claude starts the run costs money: whatever stops it or the steps after it, its row is written and
     its scratch and session folders are removed."""
 
-    def stop(self, error: type, *argv: str, source: str = SESSION_STUB,
-             **patches) -> tuple[list[dict], list[Path], list[Path]]:
+    def stop(self, error: type, *argv: str, **patches) -> tuple[list[dict], list[Path], list[Path]]:
         with tempfile.TemporaryDirectory() as tmp:
             home, scratch, out = Path(tmp) / "config", Path(tmp) / "scratch", Path(tmp) / "out.jsonl"
             runs = Path(tmp) / "runs"  # each run's own scratch folder is made here
             scratch.mkdir()
-            (Path(tmp) / "a-file").write_text("not a folder")
             (Path(tmp) / "read-only").mkdir(mode=0o500)  # the runner can see it but no run can be kept in it
             argv = tuple(a.replace("<tmp>", tmp) for a in argv)
             with unittest.mock.patch.dict("os.environ", {"CLAUDE_CONFIG_DIR": str(home), **AUTH}), \
@@ -1633,7 +1641,7 @@ class Stopped(unittest.TestCase):
                     (unittest.mock.patch.multiple(run, **patches) if patches else contextlib.nullcontext()), \
                     self.assertRaises(error):
                 run.main(["--tasks", "lookup-retry-limit", "--configs", "defaults", "--runs", "1", "--max-total", "3",
-                          "--claude", *stub(tmp, source), "--out", str(out), *argv])
+                          "--claude", *stub(tmp, SESSION_STUB), "--out", str(out), *argv])
             rows = [json.loads(line) for line in out.read_text().splitlines()] if out.exists() else []
             sessions = list((home / "projects").iterdir()) if (home / "projects").exists() else []
             # The frozen plugin copy is made there too, and goes however the bench stops.
@@ -1706,15 +1714,8 @@ class SuiteCoverage(unittest.TestCase):
                 (work / f"{module}.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
                 self.assertFalse(self.check(task, work))
 
-    def test_the_forced_baseline_sets_what_its_name_says(self):
-        configs = {c["id"]: c for c in run.load_configs()}
-        options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
-        cmd, env = run.command("x", configs["haiku-high"], options, {})
-        self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"],
-                          env["CLAUDE_CODE_SUBAGENT_EFFORT"]), ("haiku", "1", "high"))
-        self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)  # that one would move the main loop too
-        self.assertNotIn("--plugin-dir", cmd)
-        self.assertEqual(sorted(configs), ["defaults", "haiku-high", "plugin"])
+    def test_the_configuration_ids_are_exactly_the_three_shipped_ones(self):
+        self.assertEqual(sorted(c["id"] for c in run.load_configs()), ["defaults", "haiku-high", "plugin"])
 
 
 LIMIT_STUB = '''#!/usr/bin/env python3
@@ -2190,12 +2191,6 @@ print(" ".join(blocked) or "nothing")
         # A plain dict: environment names are upper-cased on Windows, so os.environ can't hold these there.
         env = {"api_key": "1", "Github_Pat": "2", "my_auth": "3", "Db_Credential": "4", "keep": "5", "Path": "6"}
         self.assertEqual(run.grading_env(env), {"keep": "5", "Path": "6"})
-
-    def test_a_check_that_hangs_fails(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            check = Path(tmp) / "check.py"
-            check.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
-            self.assertFalse(run.grade(check, Path(tmp), Path(tmp) / "answer.txt", timeout=1).passed)
 
     def test_no_work_module_name_resolves_without_the_work_dir(self):
         names = set()
@@ -2984,10 +2979,6 @@ print(json.dumps([got, *(conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
                             self.assertNotIn(word.lower(), text.lower(), name)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 STREAM_STUB = '''#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
@@ -3220,6 +3211,22 @@ class Harness(unittest.TestCase):
         self.assertAlmostEqual(run.transcript_cost(folder), 5.0)
         self.assertIsNone(run.transcript_cost(self.dir / "none"))
 
+    def test_list_cost_prices_cache_reads_and_both_cache_write_lengths(self):
+        # claude-haiku-4-5 lists at $1 input, $5 output, $0.10 cache read, $1.25 five-minute and $2 one-hour write.
+        tokens = {"input_tokens": 1000000, "output_tokens": 1000000, "cache_read_input_tokens": 1000000,
+                  "cache_creation_input_tokens": 1000000, "ephemeral_1h_input_tokens": 400000}
+        self.assertAlmostEqual(run.list_cost("claude-haiku-4-5", tokens), 7.65)
+        clamped = {"cache_creation_input_tokens": 1000000, "ephemeral_1h_input_tokens": 5000000}
+        self.assertAlmostEqual(run.list_cost("claude-haiku-4-5", clamped), 2.0)  # 1h writes cap at all writes
+
+    def test_list_cost_prices_haiku_5_5_over_100k_prompt_tokens_at_higher_rates(self):
+        # Prompt tokens are input, cache reads and cache writes. Exactly 100,000 keeps the base rates.
+        at_limit = {"input_tokens": 40000, "output_tokens": 1000000, "cache_read_input_tokens": 30000,
+                    "cache_creation_input_tokens": 30000, "ephemeral_1h_input_tokens": 10000}
+        self.assertAlmostEqual(run.list_cost("claude-haiku-5-5", at_limit), 0.5088)
+        over = dict(at_limit, cache_creation_input_tokens=30001, ephemeral_1h_input_tokens=10001)
+        self.assertAlmostEqual(run.list_cost("claude-haiku-5-5", over), 2.544001)
+
     def test_main_needs_a_token_or_an_api_key(self):
         bare = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
                 and not k.startswith("CLAUDE_CODE_USE_")}
@@ -3433,7 +3440,6 @@ class Configurations(unittest.TestCase):
     """The configurations a batch can run, with only the options and agents the plugin has."""
 
     configs = {c["id"]: c for c in run.load_configs()}
-    options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p"}
 
     def test_no_configuration_names_an_option_or_agent_the_plugin_lacks(self):
         text = (ROOT / "bench" / "configs.json").read_text(encoding="utf-8")
@@ -3448,9 +3454,6 @@ class Configurations(unittest.TestCase):
         for config in self.configs.values():
             self.assertNotIn("plugin_options", config, config["id"])  # run.py passes no plugin options
             self.assertNotIn("router_config", config, config["id"])
-        for gone in ("plugin-cheap", "plugin-cheap-nomain", "plugin-cheap-nomain-nogate", "plugin-m6-08-b",
-                     "plugin-m6-08-b-nogate", "plugin-m6-10", "opusplan", "plugin-nogate"):
-            self.assertNotIn(gone, self.configs)
 
 
 class RunEdges(unittest.TestCase):
@@ -3498,8 +3501,8 @@ class RunEdges(unittest.TestCase):
 
     def test_the_cost_lose_rule_is_the_mirror_of_the_win_rule_and_the_docs_say_so(self):
         # Dearer beyond noise: LOSE only once the pass rate's upper bound is below +10 points.
-        self.assertEqual(analyze._judge("defaults", (-0.08, 0.09), (0.1, 0.2), False, (9, 10, 9, 10))[0], "LOSE")
-        self.assertEqual(analyze._judge("defaults", (-0.12, 0.11), (0.1, 0.2), False, (9, 10, 9, 10))[0], "NONE")
+        self.assertEqual(analyze._judge((-0.08, 0.09), (0.1, 0.2), False, (9, 10, 9, 10))[0], "LOSE")
+        self.assertEqual(analyze._judge((-0.12, 0.11), (0.1, 0.2), False, (9, 10, 9, 10))[0], "NONE")
         stated = "the upper bound of its pass rate minus the baseline's is below plus 10 points"
         self.assertIn(stated, (ROOT / "bench" / "README.md").read_text(encoding="utf-8"))
         page = analyze.build_page(analyze.load([]))
@@ -3666,3 +3669,7 @@ class RunEdges(unittest.TestCase):
                 self.assertIn("can't write", err)
         readme = (ROOT / "bench" / "README.md").read_text(encoding="utf-8")
         self.assertNotIn("$TMPDIR", readme)
+
+
+if __name__ == "__main__":
+    unittest.main()

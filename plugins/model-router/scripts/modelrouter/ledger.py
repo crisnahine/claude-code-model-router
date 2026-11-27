@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
-import math
 from pathlib import Path
 
 from . import router, store
@@ -67,7 +66,7 @@ def usage(session_id: str | None, agent_id: object, agent: str | None, models: o
     usd = cost.get("usd")
     if listed or cost:
         row = {"models": listed, "running": True,
-               "cost_usd": usd if isinstance(usd, (int, float)) and not isinstance(usd, bool) and math.isfinite(usd) else None,
+               "cost_usd": usd if store.is_number(usd) else None,
                **({"unknown_price": True} if cost.get("hasUnknownPrice") is True else {}),
                **({"subscription": True} if subscription else {})}
     elif _usage(turn):

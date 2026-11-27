@@ -85,7 +85,7 @@ jobs:
       fail-fast: false
       matrix:
         # The plugin's floor, the version it was last tested on, and the newest release.
-        claude-code: ["2.1.329", "2.1.331", "latest"]
+        claude-code: ["2.1.329", "2.1.332", "latest"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -114,7 +114,7 @@ jobs:
           node-version: "22"
       - name: Install Claude Code
         # The weekly run takes the newest release, so a change upstream shows end to end.
-        run: npm install -g @anthropic-ai/claude-code@${{ github.event_name == 'schedule' && 'latest' || '2.1.331' }}
+        run: npm install -g @anthropic-ai/claude-code@${{ github.event_name == 'schedule' && 'latest' || '2.1.332' }}
       - name: Routing evals
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

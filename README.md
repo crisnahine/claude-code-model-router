@@ -3,7 +3,7 @@
 A plugin for Claude Code that keeps each subagent's model and effort within the limits you set.
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="docs/assets/badge-version.svg" height="28" alt="version 0.2.0"></a>
+  <a href="CHANGELOG.md"><img src="docs/assets/badge-version.svg" height="28" alt="version 0.2.1"></a>
   <a href="#requirements"><img src="docs/assets/badge-claude-code.svg" height="28" alt="Claude Code 2.1.329 or later"></a>
   <a href="#requirements"><img src="docs/assets/badge-python.svg" height="28" alt="Python 3.9 or later"></a>
   <a href="CONTRIBUTING.md"><img src="docs/assets/badge-dependencies.svg" height="28" alt="dependencies: none, standard library only"></a>

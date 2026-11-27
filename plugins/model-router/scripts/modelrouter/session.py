@@ -8,7 +8,7 @@ import re
 from typing import Iterator
 
 from . import router, settings, store
-from .config import DEFAULT_EFFORT, EFFORTS
+from .config import API_MEDIUM, DEFAULT_EFFORT, EFFORTS
 from .registry import Registry
 
 HEADER = "Model Router"  # $.ui.ask's chip takes 12 characters at most
@@ -38,13 +38,27 @@ def older(reg: Registry, provider: str | None, model: object) -> bool:
     return () < _version(name, family) < _version(reg.newest[family], family)
 
 
+def _pinned(snap: settings.Snapshot, family: str) -> str | None:
+    """The effort CLAUDE_CODE_EFFORT_LEVEL fixes on `family`, or None when it leaves the choice open. Auto or unset sends no
+    level, so the session runs at the API's default for the family, or at Claude Code's default lowered to maxEffortLevel."""
+    env = str(snap.options.effort_level or "").lower()
+    if env in EFFORTS:
+        return env
+    if env not in ("auto", "unset"):
+        return None
+    cap = snap.allowed.effort_cap(snap.registry, family)
+    if cap:
+        return router.capped(DEFAULT_EFFORT, cap)[0]
+    return "medium" if family in API_MEDIUM else "high"
+
+
 def effort_on(snap: settings.Snapshot, family: str, launched: object = None) -> str | None:
-    """The effort the main session runs at on `family` before its first request shows it: CLAUDE_CODE_EFFORT_LEVEL, then
-    `launched` (a --effort flag, where the mod could read the session's command line), then the settings files, then
-    Claude Code's default, held to maxEffortLevel. An organization's default is not visible here
+    """The effort the main session runs at on `family` before its first request shows it: CLAUDE_CODE_EFFORT_LEVEL (see
+    _pinned), then `launched` (a --effort flag, where the mod could read the session's command line), then the settings
+    files, then Claude Code's default, held to maxEffortLevel. An organization's default is not visible here
     (https://code.claude.com/docs/en/model-config.md#adjust-effort-level)."""
-    reg, env = snap.registry, snap.options.effort_level
-    named = env if env in EFFORTS else launched if launched in EFFORTS else None
+    reg = snap.registry
+    named = _pinned(snap, family) or (launched if launched in EFFORTS else None)
     effort = named or snap.allowed.saved_effort(reg, family) or DEFAULT_EFFORT
     return router.capped(effort, snap.allowed.effort_cap(reg, family))[0]
 
@@ -56,11 +70,12 @@ def _named(family: str, effort: str | None) -> str:
 def _efforts(snap: settings.Snapshot, family: str) -> list[str]:
     """The efforts a session on `family` may pick: from its lowest recommended one up, held to maxEffortLevel. Under
     CLAUDE_CODE_EFFORT_LEVEL only that one, since it outranks /effort."""
-    reg, env = snap.registry, snap.options.effort_level
+    reg = snap.registry
     floor, cap = reg.session[family], snap.allowed.effort_cap(reg, family) or "max"
     levels = [e for e in EFFORTS[EFFORTS.index(floor):] if EFFORTS.index(e) <= EFFORTS.index(cap)]
-    if env in EFFORTS:
-        return [env] if env in levels else []
+    pinned = _pinned(snap, family)
+    if pinned:
+        return [pinned] if pinned in levels else []
     return levels
 
 

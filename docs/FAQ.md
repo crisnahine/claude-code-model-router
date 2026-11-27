@@ -4,7 +4,7 @@
 
 # Model Router FAQ: questions about the Claude Code model router
 
-Short answers about Model Router 0.2.0, the Claude Code plugin with the id `model-router`.
+Short answers about Model Router 0.2.1, the Claude Code plugin with the id `model-router`.
 
 ## What is Model Router?
 

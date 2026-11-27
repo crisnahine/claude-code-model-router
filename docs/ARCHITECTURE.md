@@ -61,7 +61,7 @@ None of this runs unless `session.start` reports `isInteractive`. The loader tak
 - **Status line.** `report.status` builds it from the options, the switch and the session's spawn rows: `auto · mod · cap opus · 14 calls · 5 changed · 2 redos`, or `off`. The second field is `fallback` when the latest spawn went that way, `(this session)` marks a switched mode, and zero counts are left out. The mod pins it with `$.ui.status`, one refresh at a time, folding any asked for meanwhile into one more.
 - **Switch.** `/model-router on` or `off` sends `routing` to `mod-status`. `settings.switch` keeps it in the session's `switches.json` entry (none when it matches `routing_mode`), and `settings.resolve` reads it for every snapshot with a session id, so both paths decide alike. The mod keeps the answer for a call whose round trip fails.
 - **Session check.** Runs after `session.start` returns, when `session_check` and routing are on and `$.session.turns()` is 0. `mod-check` sends `$.session.model()`, whether managed settings own `session_check` (`$.config.list()`), and a `--effort` flag read from the session's command line with `ps`. `session.check` marks the session checked first, so the reload a `$.config.set` causes asks nothing. It asks only when the session's model at its estimated effort matches no `session` setup in `config/models.json`, or is older than its family's `newest`, and offers each setup the allowlist and `maxEffortLevel` leave, then a way to stay. Each choice carries its label, its next question (`then`), what it does (`model`, `effort`, `check`) and the line to show after (`done`). The mod asks with `$.ui.ask` only before the first main-loop turn and acts only on a label it sent: `$.command.run` for `model`, `$.session.model()` to confirm the family, then `effort`; `$.config.set` for `check`.
-- **Effort estimate.** `session.effort_on`: `CLAUDE_CODE_EFFORT_LEVEL`, the `--effort` flag (`ultracode` reads as `xhigh`), `Allowlist.saved_effort` over the layers in `allowlist.PRECEDENCE` order (a model's `modelSettings` level before its file's top-level `effortLevel`, the user file's top-level one skipped), then `config.DEFAULT_EFFORT`, held to `maxEffortLevel`. After each main-loop turn, `session.observe` records the model and effort its latest request carried.
+- **Effort estimate.** `session.effort_on`: `CLAUDE_CODE_EFFORT_LEVEL` (`auto` or `unset`: the API's default for the family, or Claude Code's default under a `maxEffortLevel` cap), the `--effort` flag (`ultracode` reads as `xhigh`), `Allowlist.saved_effort` over the layers in `allowlist.PRECEDENCE` order (a model's `modelSettings` level before its file's top-level `effortLevel`, the user file's top-level one skipped), then `config.DEFAULT_EFFORT`, held to `maxEffortLevel`. After each main-loop turn, `session.observe` records the model and effort its latest request carried.
 
 ## Modules
 
@@ -108,14 +108,14 @@ A decision is `keep`, `rewrite` or `deny` (the guard's), with a model, effort, l
 
 | # | Source | The router |
 | -: | :- | :- |
-| 1 | `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` | Sets effort only, none when the call names a model |
+| 1 | `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` | Sets effort only, none when the call names a model. With only this set, Explore runs on the model listed for it |
 | 2 | `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`, for a workflow agent whose call names no model | Sets effort only |
 | 3 | The call's `model` | Keeps it |
 | 4 | The user's rule `model` | Applies it |
 | 5 | A project's rule `model` | Applies it only when not weaker than what the call runs on without it, and not a model the project added; else `held` says why |
 | 6 | The agent's own `model` | Keeps it; for `inherit`, the parent's model, which outranks row 7. With no definition found, or a `model` outside the registry, leaves the call alone |
 | 7 | `CLAUDE_CODE_SUBAGENT_MODEL` | Leaves the call alone. Unforced, it doesn't move the built-in Explore and Plan, which go to row 8 |
-| 8 | Nothing | The level the agent's tools put it at: `lookup` when its `tools` hold none of Edit, Write, NotebookEdit and Bash, or its `disallowedTools` remove them all, as for the built-in Explore and Plan; `standard` otherwise. A list `agents._list` can't read with confidence counts as every tool, or as removing none |
+| 8 | Nothing | The level the agent's tools put it at: `lookup` when its `tools` hold none of Edit, Write, NotebookEdit, Bash, PowerShell and Monitor, or its `disallowedTools` remove them all, as for the built-in Explore and Plan; `standard` otherwise. A list `agents._list` can't read with confidence counts as every tool, or as removing none |
 
 Then, for rows 3 to 6 and 8 (steps 4 to 6 on rows 1 and 2 too):
 
@@ -128,7 +128,7 @@ Then, for rows 3 to 6 and 8 (steps 4 to 6 on rows 1 and 2 too):
 
 The same model with no effort to set is a keep. Where the untouched model is unknown (a nested call on the fallback, the built-in Explore and Plan), row 8 still names a model, and an agent that inherits is left alone unless a floor lifts it.
 
-A full ID or `[1m]` variant the call or the agent names is kept while its family is, if the lists permit it and it is healthy (`mod.exact`). On a provider whose alias runs an older model (`older_aliases`), the mod sends the family's `newest` ID unless `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`, `modelOverrides`, the allowlist or health rules it out (`Registry.newest_id`). Where no newest ID goes (always on the fallback, which sends aliases only), the router's own picks (a level, a floor, a redo's next model) move one family up (`Registry.past_lag`), unless `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` pins that family.
+A full ID or `[1m]` variant the call or the agent names is kept while its family is, if the lists permit it and it is healthy (`spawn.exact`). On a provider whose alias runs an older model (`older_aliases`), the mod sends the family's `newest` ID unless `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`, `modelOverrides`, the allowlist or health rules it out (`Registry.newest_id`). Where no newest ID goes (always on the fallback, which sends aliases only), the router's own picks (a level, a floor, a redo's next model) move one family up (`Registry.past_lag`), unless `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` pins that family.
 
 `explain`, behind `/model-router:route`, runs `spawn.decide` with no session and writes nothing.
 
@@ -140,7 +140,7 @@ A full ID or `[1m]` variant the call or the agent names is kept while its family
 | :- | :- |
 | Mark | A `description` starting "Redo:", any case (`calls.marked_redo`). The same call sent unmarked is a new call. A workflow stage is never a redo |
 | Task | A hash of the agent type and the description without the mark (`calls.task`) |
-| Record | Each route in `routes.json` holds the effort the run gets, in Claude Code's order (`CLAUDE_CODE_EFFORT_LEVEL`, the call's as sent, the agent's, `CLAUDE_CODE_SUBAGENT_EFFORT`, the session's on its own model), else `medium` (`router._ran_at`); on the mod, what the run's last request carried replaces it (`calls.observed`). A foreground result with no model swap makes the run its task's latest in `done.json`; a background one waits in `launched.json` for `SubagentStop` with an answer |
+| Record | Each route in `routes.json` holds the effort the run gets, in Claude Code's order (`CLAUDE_CODE_EFFORT_LEVEL`, the call's as sent, the agent's, `CLAUDE_CODE_SUBAGENT_EFFORT`, the session's on its own model), else `medium` (`router.ran_at`); on the mod, what the run's last request carried replaces it (`calls.observed`). A foreground result with no model swap makes the run its task's latest in `done.json`; a background one waits in `launched.json` for `SubagentStop` with an answer |
 | Find | The task's latest run this session, at most 30 minutes old, from any request (`calls.last_run`) |
 | Run as named | If the call's unmarked decision asks for more than that run (a stronger model, or more effort on a model that took one), it runs as decided (`spawn._asks_more`) |
 | Climb | Otherwise it climbs from that run, or with none on record from its unmarked run (`on_record: false`) |
@@ -176,7 +176,7 @@ Model health lives in `state.json` (`health.py`):
 
 The allowlist (`allowlist.py`):
 
-- The mod reads each settings source at session start, at the first main-loop turn after `/clear`, and at each spawn it routes, and sends only the keys routing reads, kept per session in `allowlist.json`; a source whose read fails keeps what it last sent. A read waits at most 2 seconds; a source that missed that is read without waiting from then on, and its answer goes with a later command. Without the layers no list applies, and Claude Code enforces its own.
+- The mod reads each settings source at session start, at the first main-loop turn after the session id changes, as after `/clear`, `/resume` or `/branch`, and at each spawn it routes, and sends only the keys routing reads, kept per session in `allowlist.json`; a source whose read fails keeps what it last sent. A read waits at most 2 seconds; a source that missed that is read without waiting from then on, and its answer goes with a later command. Without the layers no list applies, and Claude Code enforces its own.
 - A policy `availableModels` applies alone, else the sources' lists join; `deniedModels` and `availableModelsMatch` count only from policy. A policy `availableModels` or `deniedModels` that isn't a list, or a policy deny list over 200 entries, leaves no model open. A deny entry blocks a family only when it names it with no version.
 
 ## The Stop check

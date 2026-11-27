@@ -209,7 +209,7 @@ LIMIT_RETRIES = 5
 LIMIT_PAUSE = 60  # seconds before the first retry; each later pause is twice as long
 API_ERROR_STOP = 3  # account errors, in a row, that stop the bench: the key or the account is wrong
 # The messages Claude Code prints when the API refuses for a limit (https://code.claude.com/docs/en/errors.md).
-_LIMIT_MESSAGE = (r"API Error: (?:Repeated )?(?:429|529)\b|API Error: Repeated 529 Overloaded|Request rejected \(429\)|"
+_LIMIT_MESSAGE = (r"API Error: (?:Repeated )?(?:429|529)\b|Request rejected \(429\)|"
                   r"Server is temporarily limiting requests|You've hit your (?:session|weekly|Opus|Sonnet) limit")
 
 
@@ -480,10 +480,10 @@ def list_cost(model_id: str, tokens: dict) -> float | None:
     rates = price(model_id)
     if not rates:
         return None
-    long = rates.get("long_prompt")
-    prompt = sum(tokens.get(k, 0) for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
-    if isinstance(long, dict) and prompt > long.get("over", float("inf")):
-        rates = long
+    prompt = (tokens.get("input_tokens", 0) + tokens.get("cache_read_input_tokens", 0)
+              + tokens.get("cache_creation_input_tokens", 0))
+    if "over_100k" in rates and prompt > 100000:
+        rates = rates["over_100k"]
     # The rest of the writes count as five minutes.
     hour = max(0, min(tokens.get("ephemeral_1h_input_tokens", 0), tokens.get("cache_creation_input_tokens", 0)))
     total = (tokens.get("input_tokens", 0) * rates.get("input", 0)

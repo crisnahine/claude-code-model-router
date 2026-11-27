@@ -142,9 +142,8 @@ def diff(reviewed: dict, live: dict, routed: list[str] | None = None) -> dict:
 
 
 def snapshot(live: dict) -> dict:
-    latest = live["releases"][0]["version"] if live.get("releases") else "0"
-    return {"claude_code_version": latest, "pages": live.get("pages", []), "watched": live.get("watched", {}),
-            "aliases": live.get("aliases", []), "lifecycle": live.get("lifecycle", {})}
+    return {"claude_code_version": live["releases"][0]["version"], "pages": live["pages"], "watched": live["watched"],
+            "aliases": live["aliases"], "lifecycle": live["lifecycle"]}
 
 
 def has_pending(changes: dict) -> bool:

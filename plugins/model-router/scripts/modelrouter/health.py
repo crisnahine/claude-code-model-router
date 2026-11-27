@@ -86,19 +86,15 @@ def _edit(name: str, change: Callable[[dict], Any]) -> dict:
     return result
 
 
-def _clamp(name: str, latest: float) -> float:
+def _clamp(name: str, latest: float) -> None:
     """Shorten a far-future outage to `latest`, if it is still that long once the lock is held."""
-    kept: list = []
-
     def change(state: dict) -> None:
         table = state.get("health")
         info = table.get(name) if isinstance(table, dict) else None
         if isinstance(info, dict) and store.stamp(info.get("unavailable_until")) > latest:
             info["unavailable_until"] = latest
-        kept.append(store.stamp(info.get("unavailable_until")) if isinstance(info, dict) else 0)
 
     store.update_state(change)
-    return kept[0]
 
 
 def _route_around(info: dict, why: str) -> None:

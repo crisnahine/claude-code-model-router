@@ -4,7 +4,7 @@
 
 # Guide
 
-How to install, use and configure Model Router 0.2.0.
+How to install, use and configure Model Router 0.2.1.
 
 ## Install, update and uninstall
 
@@ -85,18 +85,18 @@ When a new interactive session starts below these, with `routing_mode` at `auto`
 
 Picking a setup runs Claude Code's own `/model` when the model differs, then `/effort` when the effort differs, and one line says where the session is now, as "This session is now on Opus at medium." If Claude Code doesn't switch the model, for example under an allowlist, the line says the session stayed and no effort is set, since Claude Code saves effort per model. If it switches the model but doesn't run `/effort`, the line says so. A dismissal, text typed under the dialog's own rows, or Stay changes nothing.
 
-It asks at most once per session, a plugin reload included, and never once the conversation has a prompt in it: a prompt given at launch, or typed before the question shows, keeps it away. Before the first request the session's effort is an estimate: `CLAUDE_CODE_EFFORT_LEVEL`, then a `--effort` flag at launch (`ultracode` reads as `xhigh`), then the settings files as Claude Code reads them (a model's own level before a top-level `effortLevel`), then `medium`, held to `maxEffortLevel`. Where the session's command line can't be read, the estimate goes without the flag, and it never sees an organization's default effort. From the first request on, the main loop's own effort is read, and `/model-router` shows it, as `session: opus at medium` or `session: sonnet at medium (below the recommended setups)`.
+It asks at most once per session, a plugin reload included, and never once the conversation has a prompt in it: a prompt given at launch, or typed before the question shows, keeps it away. Before the first request the session's effort is an estimate: `CLAUDE_CODE_EFFORT_LEVEL` (under `auto` or `unset`, the API's default for the model, `medium` on Opus and `high` on Sonnet and Fable, or `medium` lowered to `maxEffortLevel` where that sets a cap), then a `--effort` flag at launch (`ultracode` reads as `xhigh`), then the settings files as Claude Code reads them (a model's own level before a top-level `effortLevel`), then `medium`, held to `maxEffortLevel`. Where the session's command line can't be read, the estimate goes without the flag, and it never sees an organization's default effort. From the first request on, the main loop's own effort is read, and `/model-router` shows it, as `session: opus at medium` or `session: sonnet at medium (below the recommended setups)`.
 
 ## Who decides the model
 
 ![Who decides the model, strongest first.](assets/precedence.svg)
 
-1. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` runs every subagent on `CLAUDE_CODE_SUBAGENT_MODEL`, else the conversation's model. The router sets only effort, and none on a call that names a model.
+1. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` runs every subagent on `CLAUDE_CODE_SUBAGENT_MODEL`, else the conversation's model. With only `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` set, the built-in Explore subagent runs on the model listed for it. The router sets only effort, and none on a call that names a model.
 2. A model named on the call, by Claude, a skill or a workflow script. When your prompt asks for one ("use opus"), Claude gets a note to pass it.
 3. A per-agent rule: yours, or a project's when not weaker.
 4. The agent's own `model` field. `inherit` there is the agent's choice of the parent's model, and it outranks 5.
 5. `CLAUDE_CODE_SUBAGENT_MODEL`. The router leaves the call alone unless it is a redo. Unforced, the variable doesn't move the built-in Explore and Plan, so they go on to 6.
-6. The agent's tools. An agent whose `tools` hold none of Edit, Write, NotebookEdit and Bash, or whose `disallowedTools` remove them all, as the built-in Explore and Plan, runs at `lookup`; any other at `standard`. A tool list Model Router can't read with confidence counts as every tool. Only the agent's definition counts here, never the brief. A [teammate](#agent-teams) starts no lower than `standard`.
+6. The agent's tools. An agent whose `tools` hold none of Edit, Write, NotebookEdit, Bash, PowerShell and Monitor, or whose `disallowedTools` remove them all, as the built-in Explore and Plan, runs at `lookup`; any other at `standard`. A tool list Model Router can't read with confidence counts as every tool. Only the agent's definition counts here, never the brief. A [teammate](#agent-teams) starts no lower than `standard`.
 
 For a workflow agent whose script names no model, `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` ranks between 1 and 2, with only effort set. `max_tier` doesn't lower these environment pins, and a notice at session start names any that is set. Under 2, 3, 4 and 6, a rule's `level` first raises a weaker model. The model must then be inside `max_tier`, allowed by `availableModels` and `deniedModels`, and not routed around, else the next stronger usable model runs, or the strongest usable one.
 
@@ -138,7 +138,7 @@ A check is a test runner, linter or type checker run through Bash (`pytest`, `np
 
 ## Workflows
 
-Workflow agents are routed only where the mod runs. The Workflow tool's description carries the session note's table, which asks a script to name a model and effort for each stage. A model the script names is capped, and a stage that names none, as in a saved script written without them, runs on its agent's own model, else at the level its tools put it. The router raises a stage's effort to its level's and never lowers it, since it can't see the one the script set, and never redoes a stage.
+Workflow agents are routed only where the mod runs. The Workflow tool's description carries the session note's table, which asks a script to name a model and effort for each stage. A model the script names is capped, and a stage that names none, as in a saved script written without them, runs on its agent's own model, else on `CLAUDE_CODE_SUBAGENT_MODEL` when that is set, else at the level its tools put it. The router raises a stage's effort to its level's and never lowers it, since it can't see the one the script set, and never redoes a stage.
 
 ## Agent teams
 
@@ -152,7 +152,7 @@ Five agents carry their own models, which hold with routing off: `model-router:s
 
 Agents from any plugin, the project or `~/.claude/agents` are routed, and Claude Code's built-ins. The router never changes which agent runs and never approves a tool call, so other plugins' hooks, your permission rules and auto mode still apply.
 
-Without the mod, the router rewrites the Agent call's `model` and `effort` and tells Claude. If a rewritten call comes back unrun, its repeat passes through unchanged, or is refused with the model to use if it would run above `max_tier`.
+Without the mod, the router rewrites the Agent call's `model` and `effort` and tells Claude. If a rewritten call comes back unrun, its repeat passes through unchanged, or is refused with the model to use if it would run above `max_tier`. Where an organization sets `allowManagedModsOnly`, Claude Code refuses a mod a user installed, so the router runs on its settings hooks alone, as without the mod. Where it sets `allowManagedHooksOnly`, or `disableAllHooks` is on, the router's hooks stop too unless managed settings force-enable the plugin (its mod then runs only if it counts as your organization's), and a managed `disableAllHooks` stops them even then.
 
 ### Organization allowlists
 
@@ -160,7 +160,7 @@ The mod reads `availableModels`, `deniedModels` and `maxEffortLevel` from your s
 
 ### Third-party providers
 
-Where a provider's alias runs an older model (the providers and families under `older_aliases` in `config/models.json`, such as `sonnet` and `haiku` on Bedrock), the mod sends the family's newest ID, `claude-opus-5-5`, `claude-sonnet-5-5` or `claude-haiku-5-5`. It sends the alias instead when `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` is set, when `availableModels`, `deniedModels` or `modelOverrides` rule the ID out, and for a day after the provider refuses it. Where no newest ID goes out, as on the fallback path, the router's own pick moves one family up from a lagging alias, unless that variable is set. None of these has had a live run.
+Where a provider's alias runs an older model (the providers and families under `older_aliases` in `config/models.json`, such as `sonnet` and `haiku` on Bedrock), the mod sends the family's newest ID, `claude-sonnet-5-5` or `claude-haiku-5-5`. The table is the one Claude Code 2.1.332 runs. On 2.1.329 to 2.1.331, `sonnet` on Google Cloud's Agent Platform and `opus` and `sonnet` on Microsoft Foundry run an older model too, and the router sends them as the alias. It sends the alias instead when `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` is set, when `availableModels`, `deniedModels` or `modelOverrides` rule the ID out, and for a day after the provider refuses it. Where no newest ID goes out, as on the fallback path, the router's own pick moves one family up from a lagging alias, unless that variable is set. None of these has had a live run.
 
 ## What it stores
 
@@ -169,7 +169,8 @@ Its state is in `~/.claude/plugins/data/model-router-claude-code-model-router/`,
 ## What it can't do
 
 - It never changes the main conversation's model or effort by itself, since a switch re-reads the conversation uncached. Only a setup you pick in the [session check](#the-session-check) runs `/model` and `/effort`; otherwise run them yourself.
-- It leaves forks and resumed agents alone, and an agent whose definition it can't find unless the call or your rule names a model. It finds a plugin's agent through Claude Code's install record, so one from a plugin loaded with `--plugin-dir` isn't found.
+- It leaves forks and resumed agents alone, and an agent whose definition it can't find unless the call or your rule names a model. It finds a plugin's agent through Claude Code's install record, so a plugin with no record, such as one loaded with `--plugin-dir`, isn't found.
 - It doesn't retry a failed call; set `fallbackModel` for that. After a model error it tells Claude a usable model to re-issue the call on (not under the force variable), and after two errors, or two runs on another model, it routes around that model for a day. Where the mod runs, a run that another mod moved to another model doesn't count.
 - Where Fable bills to usage credits, a subagent or teammate on Fable can meet Claude Code's consent prompt: with nobody to answer, as in a background session or a teammate's session, the turn ends at the prompt's deadline, and `claude -p` bills without asking. `max_tier` at `opus` keeps subagents off Fable.
 - Without the mod it has no dollar figures, workflow routing, reading of `availableModels`, `deniedModels` or `maxEffortLevel`, newest IDs, table in the Agent and Workflow tools' descriptions, status line, `/model-router` or session check. Its state is then in `/config`, `/model-router:models` and `/model-router:usage`.
+- Under `claude --bare` Claude Code runs no plugin hooks or mods, so no call is routed.

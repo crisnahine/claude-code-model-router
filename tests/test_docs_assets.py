@@ -192,6 +192,40 @@ class DocsAssets(unittest.TestCase):
         self.assertIn("not valid XML", docs_assets.problems_in_svg("a.svg", "<svg>")[0])
         self.assertIn("aria-label", docs_assets.problems_in_svg("b.svg", ok.replace(' aria-label="a"', ""))[0])
 
+    def test_a_registry_level_that_drifts_from_the_ladder_stops_the_build(self):
+        registry = json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8"))
+        registry["levels"]["lookup"]["effort"] = "xhigh"
+        with self.assertRaises(SystemExit) as raised:
+            docs_assets.check_ladder_against_registry(registry)
+        self.assertIn("LADDER differs", str(raised.exception))
+
+    def test_a_site_url_move_rewrites_the_body_and_the_sitemap(self):
+        page = (ROOT / "site" / "index.html").read_text(encoding="utf-8")
+        url = docs_assets.SITE_URL.search(page).group(1)
+        old = "https://old.example.com/"
+        head, sep, tail = page.partition("-->")
+        texts = {"site/index.html": head + sep + tail.replace(url, old),
+                 "site/sitemap.xml": f"<urlset><url><loc>{old}</loc></url></urlset>"}
+        files = docs_assets.site_files(self.snap.texts["docs/FAQ.md"], texts, "2.0.0", "2030-01-01", "2.1.0")
+        moved_tail = files["site/index.html"].partition("-->")[2]
+        self.assertIn(url, moved_tail)
+        self.assertNotIn(old, moved_tail)
+        self.assertIn(f"<loc>{url}</loc>", files["site/sitemap.xml"])
+
+    def test_a_low_contrast_ink_is_reported_and_the_palette_is_restored(self):
+        self.assertEqual(docs_assets.palette_problems(), [])
+        with unittest.mock.patch.dict(docs_assets.LIGHT, {"ink": docs_assets.LIGHT["card"]}):
+            problems = docs_assets.palette_problems()
+        self.assertIn("light: ink on card is 1.00:1, under 7", problems)
+        self.assertEqual(docs_assets.palette_problems(), [])
+
+    def test_a_label_past_its_limit_is_reported_on_the_layout(self):
+        docs_assets.LAYOUT.clear()
+        self.addCleanup(docs_assets.LAYOUT.clear)
+        docs_assets.room("ladder.svg: test", 80, 90)
+        docs_assets.room("ladder.svg: test", 100, 90)
+        self.assertEqual(docs_assets.LAYOUT, ["ladder.svg: test: text ends at 100, past 90"])
+
 
 class BrokenInputs(unittest.TestCase):
     """A missing marker or a torn file stops the tools with the file and what is missing, not a traceback."""

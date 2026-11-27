@@ -41,8 +41,8 @@ def facts(hook_input: dict, snap: settings.Snapshot, call: tuple[str, str] | Non
     # The mod says so. On the fallback, a named call from the main conversation without `isolation` launches
     # as a teammate only when agent teams are on (agent-teams.md); under -p it never does, which a hook can't see.
     name = tool_input.get("name")
-    named = isinstance(name, str) and bool(name.strip()) and not tool_input.get("isolation") and not hook_input.get("agent_id")
-    teammate = hook_input.get("kind") == "teammate" or (named and snap.options.agent_teams)
+    has_name = isinstance(name, str) and bool(name.strip()) and not tool_input.get("isolation") and not hook_input.get("agent_id")
+    teammate = hook_input.get("kind") == "teammate" or (has_name and snap.options.agent_teams)
     caps = {n: c for n in reg.models for c in [snap.allowed.effort_cap(reg, n)] if c}
     # The main conversation's level: the mod reads it from the main loop's requests, a hook gets it as `effort`.
     # A nested call runs at its parent's effort instead, so it gets none.
@@ -97,10 +97,10 @@ def _asks_more(reg: Registry, named: dict, earlier: dict) -> bool:
         return False
     if model != ran:
         return reg.stronger(model, ran)
-    return not earlier.get("no_effort") and router._above(router._ran_at(named), router._ran_at(earlier))
+    return not earlier.get("no_effort") and router.above(router.ran_at(named), router.ran_at(earlier))
 
 
-def _runs_at(effort: str | None, model: str | None, found: router.Facts, snap: settings.Snapshot) -> str | None:
+def effort_at(effort: str | None, model: str | None, found: router.Facts, snap: settings.Snapshot) -> str | None:
     """The effort a call runs at as far as the router can tell: `router.runs_at`, else the session's level on
     the session's own model (https://code.claude.com/docs/en/model-config.md#effort-level-of-subagents-and-teammates)."""
     chosen = router.runs_at(effort, found.tool_input, found.definition, snap.options, found.teammate)
@@ -112,7 +112,18 @@ def _unmarked_run(found: router.Facts, snap: settings.Snapshot) -> dict:
     run, so a cap, a pin or the session's floor can't leave it on the same model and effort."""
     plain = router.decide(found, snap.registry, snap.options)
     model = plain["model"] or plain["was"]
-    return {"level": plain["level"], "model": model, "effort": _runs_at(plain["effort"], model, found, snap)}
+    return {"level": plain["level"], "model": model, "effort": effort_at(plain["effort"], model, found, snap)}
+
+
+def exact(snap: settings.Snapshot, decision: dict) -> str | None:
+    """The exact model the caller or the agent named, which a rewrite keeps in place of its family's alias:
+    on some providers the alias runs an older model, and an alias drops a [1m] variant."""
+    version = decision["version"]
+    if decision["action"] != "rewrite" or not version:
+        return None
+    # Only the lists count: Claude Code maps a named ID through modelOverrides whether it is sent or left alone.
+    permitted = snap.allowed.lists_permit(snap.registry, decision["model"], version) and snap.health.healthy(version)
+    return version if permitted else None
 
 
 def redo_note(decision: router.Decision) -> str | None:
@@ -157,7 +168,7 @@ def _record(spawned: Spawn, via: str, newest: str | None) -> None:
     rewrote = decision["action"] == "rewrite"
     facts = spawned.facts
     # The effort it runs at, whoever chose it, so a redo climbs from what ran.
-    effort = _runs_at(decision["effort"], runs_on, facts, spawned.snap)
+    effort = effort_at(decision["effort"], runs_on, facts, spawned.snap)
     named = facts.tool_input.get("model") or (facts.definition or {}).get("model")
     reg = spawned.snap.registry
     # A full ID or a [1m] variant the call keeps is the caller's or the agent's own pick, not its family's.

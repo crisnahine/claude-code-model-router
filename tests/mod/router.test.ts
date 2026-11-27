@@ -306,6 +306,14 @@ test('a spawn sends its Agent call id, and a workflow agent sends none', async (
   assert.equal('tool_use_id' in mod.calls[2]!.stdin, false)
 })
 
+test('a spawn tells the picker whether it is a workflow, a teammate or a subagent', async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  await mod.spawn(spawnEvent({ workflow: { runId: 'w1' } }))
+  await mod.spawn(spawnEvent({ isTeammate: true }))
+  await mod.spawn(spawnEvent())
+  assert.deepEqual(mod.calls.map(c => c.stdin.kind), ['workflow', 'teammate', 'subagent'])
+})
+
 test('a routed agent steps at the pick effort', async () => {
   const mod = load({ 'mod-spawn': PICK })
   await mod.spawn(spawnEvent())
@@ -501,11 +509,11 @@ test("a redo the runtime says runs as the run it redoes tells Claude so after th
   await mod.sessionStart({ source: 'startup' })
   const call = (id: string) => ({ tool: 'Agent', tool_use_id: id, prompt: 'p', description: 'Redo: d' })
   const ran = { result: { status: 'completed' }, text: 'done', ref: 1, context: ['from core'] }
-  const viaSpawn = (id: string, answer: object) => async (e: any) => { await mod.spawn(spawnEvent({ tool_use_id: e.tool_use_id })); return answer }
-  assert.deepEqual(await mod.hooks['tool.call']!(mod.$, call('tu1'), viaSpawn('tu1', ran)), { ...ran, context: ['from core', SAME] })
+  const viaSpawn = (answer: object) => async (e: any) => { await mod.spawn(spawnEvent({ tool_use_id: e.tool_use_id })); return answer }
+  assert.deepEqual(await mod.hooks['tool.call']!(mod.$, call('tu1'), viaSpawn(ran)), { ...ran, context: ['from core', SAME] })
   assert.equal(await mod.hooks['tool.call']!(mod.$, call('tu1'), async () => ran), ran) // the note answers its one call
   for (const answer of [{ deny: 'no' }, { isError: true, result: 'boom', text: 'boom' }]) {
-    assert.equal(await mod.hooks['tool.call']!(mod.$, call('tu2'), viaSpawn('tu2', answer)), answer)
+    assert.equal(await mod.hooks['tool.call']!(mod.$, call('tu2'), viaSpawn(answer)), answer)
   }
   const plain = load({ 'mod-spawn': PICK })
   await plain.sessionStart({ source: 'startup' })

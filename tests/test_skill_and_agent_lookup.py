@@ -42,3 +42,35 @@ class ManifestAgents(Sandbox):
         self.agent("tester", "sonnet", root / "custom")
         self.assertIsNone(agents.find("acme:reviewer", self.project))
         self.assertEqual(agents.find("acme:tester", self.project)["model"], "sonnet")
+
+
+class SkippedAgentFiles(Sandbox):
+    def test_a_project_file_with_no_name_is_skipped_so_a_user_agent_of_its_stem_is_found(self):
+        folder = self.project / ".claude" / "agents"
+        folder.mkdir(parents=True)
+        (folder / "probe.md").write_text("---\ndescription: does a job\nmodel: haiku\n---\nbody\n")
+        self.assertIsNone(agents.find("probe", self.project))
+        self.agent("probe", "opus", self.home / "agents")
+        found = agents.find("probe", self.project)
+        self.assertEqual((found["source"], found["model"]), ("user", "opus"))
+
+    def test_a_file_whose_name_claude_code_refuses_or_that_has_no_description_is_skipped(self):
+        # sub-agents.md, "Subagent files Claude Code skips"
+        folder = self.project / ".claude" / "agents"
+        folder.mkdir(parents=True)
+        # The name and description forms are as Claude Code 2.1.332 reads them.
+        none = ("", "description:\n", "description:   \n", 'description: ""\n', "description: ~\n", "description: null\n",
+                "description: true\n", "description: 5\n", "description: 1.5\n", "description: # none\n")
+        for i, head in enumerate(("name: -probe\ndescription: does a job\n", "name: a:probe\ndescription: does a job\n",
+                                  f"name: {'p' * 257}\ndescription: does a job\n", "name: 12345\ndescription: does a job\n",
+                                  "name: true\ndescription: does a job\n", *("name: probe\n" + d for d in none))):
+            path = folder / f"skipped{i}.md"
+            path.write_text(f"---\n{head}model: haiku\n---\nbody\n")
+            self.assertIsNone(agents.parse(path, "project"), head)
+            self.assertIsNotNone(agents.parse(path, "plugin"), head)
+        for i, described in enumerate(("description: >\n  does a job\n", "description: |\n  does a job\n",
+                                       "description:\n  does a job\n", "description: yes\n", 'description: "does a job"\n',
+                                       "description: does a job  # why\n", "model: haiku\ndescription: 5 jobs\n")):
+            kept = folder / f"kept{i}.md"
+            kept.write_text(f"---\nname: {'p' * 256}\n{described}---\nbody\n")
+            self.assertEqual(agents.parse(kept, "user")["name"], "p" * 256, described)

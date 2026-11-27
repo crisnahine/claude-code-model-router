@@ -1,5 +1,5 @@
 {
-  "$comment": "List prices in USD per million tokens on the Anthropic API (https://platform.claude.com/docs/en/about-claude/pricing.md). bench/run.py prices a run with no result from its transcripts by them and records them on each row. A key is one model version, or ends in -* to cover every version of a family. cache_write is the five-minute cache write price and cache_write_1h the one-hour one.",
+  "$comment": "List prices in USD per million tokens on the Anthropic API (https://platform.claude.com/docs/en/about-claude/pricing.md). bench/run.py prices a run with no result from its transcripts by them and records them on each row. A key is one model version, or ends in -* to cover every version of a family. cache_write is the five-minute cache write price and cache_write_1h the one-hour one. An entry can also carry over_100k rates, for a request whose prompt (input, cache reads and cache writes) is over 100,000 tokens.",
   "claude-fable-5-2": {
     "input": 8,
     "output": 40,
@@ -110,7 +110,14 @@
     "output": 0.5,
     "cache_read": 0.01,
     "cache_write": 0.125,
-    "cache_write_1h": 0.2
+    "cache_write_1h": 0.2,
+    "over_100k": {
+      "input": 0.5,
+      "output": 2.5,
+      "cache_read": 0.05,
+      "cache_write": 0.625,
+      "cache_write_1h": 1
+    }
   },
   "claude-haiku-4-5": {
     "input": 1,

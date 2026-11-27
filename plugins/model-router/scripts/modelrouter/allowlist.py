@@ -17,11 +17,14 @@ from .registry import Registry
 SOURCES = ("policy", "user", "project", "local", "flag")
 # Settings precedence, highest first (https://code.claude.com/docs/en/settings.md#settings-precedence).
 PRECEDENCE = ("policy", "flag", "local", "project", "user")
+MODE_ALIASES = ("best", "opusplan", "default")  # aliases with no family of their own
 # Where a blocked family alias moves to the newest permitted version (https://code.claude.com/docs/en/model-config.md).
 # None is the Anthropic API.
 SUBSTITUTING = (None, "anthropic_aws")
 MAX_ENTRIES = 200
 MAX_CHARS = 200
+# effortLevel takes no "max"; maxEffortLevel takes all five (https://code.claude.com/docs/en/model-config.md).
+KEY_EFFORTS = {"maxEffortLevel": EFFORTS, "effortLevel": EFFORTS[:4]}
 
 
 def _entries(raw: list) -> list[str]:
@@ -38,7 +41,7 @@ def _denied(raw: list) -> list[str] | None:
 
 def _caps(raw: object) -> dict[str, dict]:
     """modelSettings cut to each model's maxEffortLevel and effortLevel."""
-    found = ((k, {f: v[f] for f in ("maxEffortLevel", "effortLevel") if v.get(f) in EFFORTS})
+    found = ((k, {f: v[f] for f in KEY_EFFORTS if v.get(f) in KEY_EFFORTS[f]})
              for k, v in raw.items() if isinstance(v, dict)) if isinstance(raw, dict) else ()
     return dict([(k, v) for k, v in found if v and 0 < len(k) <= MAX_CHARS][:MAX_ENTRIES])
 
@@ -67,11 +70,11 @@ def _layer(raw: object, policy: bool = False) -> dict:
         layer["availableModelsMatch"] = raw["availableModelsMatch"]
     if isinstance(raw.get("modelOverrides"), (dict, bool)):
         layer["modelOverrides"] = bool(raw["modelOverrides"])
-    for key in ("maxEffortLevel", "effortLevel"):
-        if raw.get(key) in EFFORTS:
+    for key in KEY_EFFORTS:
+        if raw.get(key) in KEY_EFFORTS[key]:
             layer[key] = raw[key]
-    if _caps(raw.get("modelSettings")):
-        layer["modelSettings"] = _caps(raw["modelSettings"])
+    if caps := _caps(raw.get("modelSettings")):
+        layer["modelSettings"] = caps
     return layer
 
 
@@ -86,7 +89,7 @@ def _blocked_family(reg: Registry, entry: str) -> str | None:
     A version, or a context variant such as sonnet[1m], blocks that model only. Where the alias
     doesn't move to the newest permitted version, `Allowlist.permitted` checks the version it runs."""
     e = entry.strip().lower()
-    if e in ("best", "opusplan", "default") or "[" in e:
+    if e in MODE_ALIASES or "[" in e:
         return None
     if e in reg.models:
         return e
@@ -142,8 +145,10 @@ class Allowlist:
         own = reg.family(model_id, twins=False) == name  # a twin's ID isn't in its family's name to Claude Code
 
         def names(entries: tuple[str, ...], prefix: bool) -> bool:
-            return any(e.lower() == model_id or own and e.lower() == name or prefix and model_id.startswith(e.lower() + "-")
-                       for e in entries)
+            # Past an entry and a hyphen, prefix mode takes any ID and exact mode only the entry's dated one.
+            return any(e == model_id or own and e == name
+                       or model_id.startswith(e + "-") and (prefix or re.fullmatch(r"\d{8}", model_id[len(e) + 1:]))
+                       for e in map(str.lower, entries))
 
         if self.allow is not None and not names(_effective(reg, self.allow), not self.exact):
             return False
@@ -175,8 +180,8 @@ class Allowlist:
         for source, layer in self.efforts:
             own = [v["effortLevel"] for k, v in (layer.get("modelSettings") or {}).items()
                    if name and "effortLevel" in v and reg.family(k, twins=False) == name]
-            # shortcut: a user file's top-level effortLevel is skipped, as Opus 5.5 and later models skip it; older models
-            # still take it, so read it for them if the registry ever routes to one.
+            # shortcut: Opus 5.5 and later ignore a user file's top-level effortLevel, so it is skipped and a main session
+            # on an older model (Opus 5, Fable 5.1 or earlier) is estimated without it; upgrade when that estimate matters.
             top = layer.get("effortLevel") if source != "user" else None
             if own or top:
                 return max(own, key=EFFORTS.index) if own else top
@@ -197,8 +202,11 @@ def from_layers(layers: dict, provider: str | None = None) -> Allowlist:
         lists = [layers[s]["availableModels"] for s in SOURCES[1:] if "availableModels" in layers[s]]
         allow = sum(lists, []) if lists else None
     deny = policy.get("deniedModels")
+    exact = policy.get("availableModelsMatch") == "exact"
+    if exact and allow is not None:
+        allow = [e for e in allow if e.lower().split("[")[0] not in MODE_ALIASES]
     return Allowlist(allow=None if allow is None else tuple(allow), deny=None if deny is None else tuple(deny),
-                     exact=policy.get("availableModelsMatch") == "exact",
+                     exact=exact,
                      overrides=any(layer.get("modelOverrides") for layer in layers.values()),
                      effort_caps=tuple(layer for layer in layers.values()
                                        if "maxEffortLevel" in layer or "modelSettings" in layer),

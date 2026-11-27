@@ -7,7 +7,7 @@ import os
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-from test_model_router import LOOKUP, Sandbox, cli, health, hooks, modpath, spawn, store
+from test_model_router import LOOKUP, Sandbox, cli, health, hooks, modpath, run_hook, spawn, store
 
 BEDROCK_403 = ("Agent terminated early due to an API error: AWS authentication failed · enable the model for your "
                "account and region in the Amazon Bedrock console · API Error: 403 You don't have access to the "
@@ -65,9 +65,9 @@ class ExactModelKept(Sandbox):
                               "tool_input": {"subagent_type": agent, "prompt": "design the store"}})
 
     def test_setting_effort_keeps_an_exact_id_where_the_alias_runs_an_older_model(self):
-        self.options(CLAUDE_CODE_USE_FOUNDRY="1")
-        self.agent("designer", "claude-opus-5-5")
-        self.assertEqual(self.spawn("designer")["model"], "claude-opus-5-5")
+        self.options(CLAUDE_CODE_USE_BEDROCK="1")
+        self.agent("designer", "claude-sonnet-5-5")
+        self.assertEqual(self.spawn("designer")["model"], "claude-sonnet-5-5")
         updated = self.pre("designer", "design the store")["updatedInput"]
         self.assertNotIn("model", updated)  # the agent's own model applies
         self.assertTrue(updated["effort"])
@@ -78,13 +78,13 @@ class ExactModelKept(Sandbox):
         self.assertNotIn("model", self.pre("reader", "design the store")["updatedInput"])
 
     def test_an_exact_id_the_lists_deny_or_that_failed_here_runs_on_the_alias(self):
-        self.options(CLAUDE_CODE_USE_FOUNDRY="1")
-        self.agent("designer", "claude-opus-5-5")
-        denied = {"policy": {"deniedModels": ["claude-opus-5-5"]}}
-        self.assertEqual(self.spawn("designer", "s2", settings=denied)["model"], "opus")
-        health.failed("claude-opus-5-5", "API Error: 404 not_found_error", newest=True)
-        self.assertEqual(self.spawn("designer")["model"], "opus")
-        self.assertEqual(self.pre("designer", "design the store")["updatedInput"]["model"], "opus")
+        self.options(CLAUDE_CODE_USE_BEDROCK="1")
+        self.agent("designer", "claude-sonnet-5-5")
+        denied = {"policy": {"deniedModels": ["claude-sonnet-5-5"]}}
+        self.assertEqual(self.spawn("designer", "s2", settings=denied)["model"], "sonnet")
+        health.failed("claude-sonnet-5-5", "API Error: 404 not_found_error", newest=True)
+        self.assertEqual(self.spawn("designer")["model"], "sonnet")
+        self.assertEqual(self.pre("designer", "design the store")["updatedInput"]["model"], "sonnet")
 
     def test_modeloverrides_still_keep_an_exact_id_the_agent_names(self):
         # Claude Code maps a named ID through modelOverrides whether or not the router keeps it.
@@ -115,10 +115,7 @@ class ExactModelKept(Sandbox):
 
 class SpawnAnswer(Sandbox):
     def answer(self, hook_input: dict) -> str:
-        with mock.patch("sys.stdin", io.TextIOWrapper(io.BytesIO(json.dumps(hook_input).encode()))), \
-                redirect_stdout(io.StringIO()) as out:
-            cli.main(["mod-spawn"])
-        return out.getvalue().strip()
+        return run_hook("mod-spawn", hook_input).strip()
 
     def test_a_spawn_left_as_it_is_answers_ok_so_silence_means_the_runtime_failed(self):
         kept = {"session_id": "s1", "parent_model": "claude-opus-5-5", "kind": "subagent",
@@ -256,6 +253,9 @@ class ModStartRules(Sandbox):
         self.assertIn("- sonnet at high: a judgment call with no check to run (a design or a review)\nA stage that names neither runs on its agent's own model, "
                       "else at the level its tools put it.", text)
         self.assertLessEqual(len(text), 540)  # it sits in the Workflow tool's description all session
+        self.options(CLAUDE_CODE_SUBAGENT_MODEL="haiku")
+        self.assertIn("A stage that names neither runs on its agent's own model or CLAUDE_CODE_SUBAGENT_MODEL.",
+                      hooks.HANDLERS["mod-start"]({"session_id": "s1"})["workflow_rules"])
         self.options(CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL="haiku")
         self.assertIn("A stage that names neither runs on haiku.", hooks.HANDLERS["mod-start"]({"session_id": "s1"})["workflow_rules"])
         self.options(CLAUDE_CODE_SUBAGENT_MODEL="opus", CLAUDE_CODE_SUBAGENT_MODEL_FORCE="1")

@@ -79,24 +79,13 @@ def spawn(hook_input: dict) -> dict | None:
     spawned = procedure.decide({**hook_input, "agent_id": hook_input.get("parent_agent_id")}, snap)
     decision = spawned.decision
     newest = _newest(snap, decision)
-    sent = newest or exact(snap, decision)
+    sent = newest or procedure.exact(snap, decision)
     procedure.record(spawned, "mod", sent)
     same = procedure.redo_note(decision)
     note = {"note": same} if same else {}  # the mod adds it to the Agent call's result, where Claude reads it
     if decision["action"] != "rewrite" and not newest:
         return {**OK, **note} if note else None
     return {"model": sent or decision["model"], "effort": decision["effort"], "reason": decision["reason"], **note}
-
-
-def exact(snap: settings.Snapshot, decision: dict) -> str | None:
-    """The exact model the caller or the agent named, which a rewrite keeps in place of its family's alias:
-    on some providers the alias runs an older model, and an alias drops a [1m] variant."""
-    version = decision["version"]
-    if decision["action"] != "rewrite" or not version:
-        return None
-    # Only the lists count: Claude Code maps a named ID through modelOverrides whether it is sent or left alone.
-    permitted = snap.allowed.lists_permit(snap.registry, decision["model"], version) and snap.health.healthy(version)
-    return version if permitted else None
 
 
 def _newest(snap: settings.Snapshot, decision: dict) -> str | None:
