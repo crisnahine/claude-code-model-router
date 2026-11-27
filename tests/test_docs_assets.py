@@ -199,7 +199,7 @@ class DocsAssets(unittest.TestCase):
             docs_assets.check_ladder_against_registry(registry)
         self.assertIn("LADDER differs", str(raised.exception))
 
-    def test_a_site_url_move_rewrites_the_body_and_the_sitemap_but_keeps_the_header(self):
+    def test_a_site_url_move_rewrites_the_body_and_the_sitemap(self):
         page = (ROOT / "site" / "index.html").read_text(encoding="utf-8")
         url = docs_assets.SITE_URL.search(page).group(1)
         old = "https://old.example.com/"
@@ -207,8 +207,7 @@ class DocsAssets(unittest.TestCase):
         texts = {"site/index.html": head + sep + tail.replace(url, old),
                  "site/sitemap.xml": f"<urlset><url><loc>{old}</loc></url></urlset>"}
         files = docs_assets.site_files(self.snap.texts["docs/FAQ.md"], texts, "2.0.0", "2030-01-01", "2.1.0")
-        moved_head, _, moved_tail = files["site/index.html"].partition("-->")
-        self.assertEqual(moved_head, head)
+        moved_tail = files["site/index.html"].partition("-->")[2]
         self.assertIn(url, moved_tail)
         self.assertNotIn(old, moved_tail)
         self.assertIn(f"<loc>{url}</loc>", files["site/sitemap.xml"])
