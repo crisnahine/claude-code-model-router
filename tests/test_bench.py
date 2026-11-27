@@ -1164,7 +1164,7 @@ sys.exit(1 if capped else 0)
 
 
 class Prices(unittest.TestCase):
-    """bench/prices.json, from https://platform.claude.com/docs/en/about-claude/pricing.md (checked 2026-11-22)."""
+    """bench/prices.json, from https://platform.claude.com/docs/en/about-claude/pricing.md (checked 2026-11-27)."""
 
     # The pricing page lists no rate for this one.
     UNLISTED = {"claude-mythos-preview"}
@@ -3218,6 +3218,14 @@ class Harness(unittest.TestCase):
         self.assertAlmostEqual(run.list_cost("claude-haiku-4-5", tokens), 7.65)
         clamped = {"cache_creation_input_tokens": 1000000, "ephemeral_1h_input_tokens": 5000000}
         self.assertAlmostEqual(run.list_cost("claude-haiku-4-5", clamped), 2.0)  # 1h writes cap at all writes
+
+    def test_list_cost_prices_haiku_5_5_over_100k_prompt_tokens_at_higher_rates(self):
+        # Prompt tokens are input, cache reads and cache writes. Exactly 100,000 keeps the base rates.
+        at_limit = {"input_tokens": 40000, "output_tokens": 1000000, "cache_read_input_tokens": 30000,
+                    "cache_creation_input_tokens": 30000, "ephemeral_1h_input_tokens": 10000}
+        self.assertAlmostEqual(run.list_cost("claude-haiku-5-5", at_limit), 0.5088)
+        over = dict(at_limit, cache_creation_input_tokens=30001, ephemeral_1h_input_tokens=10001)
+        self.assertAlmostEqual(run.list_cost("claude-haiku-5-5", over), 2.544001)
 
     def test_main_needs_a_token_or_an_api_key(self):
         bare = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")

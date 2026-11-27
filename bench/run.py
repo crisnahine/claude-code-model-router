@@ -480,6 +480,10 @@ def list_cost(model_id: str, tokens: dict) -> float | None:
     rates = price(model_id)
     if not rates:
         return None
+    prompt = (tokens.get("input_tokens", 0) + tokens.get("cache_read_input_tokens", 0)
+              + tokens.get("cache_creation_input_tokens", 0))
+    if "over_100k" in rates and prompt > 100000:
+        rates = rates["over_100k"]
     # The rest of the writes count as five minutes.
     hour = max(0, min(tokens.get("ephemeral_1h_input_tokens", 0), tokens.get("cache_creation_input_tokens", 0)))
     total = (tokens.get("input_tokens", 0) * rates.get("input", 0)
