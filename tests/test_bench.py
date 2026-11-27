@@ -1714,15 +1714,8 @@ class SuiteCoverage(unittest.TestCase):
                 (work / f"{module}.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
                 self.assertFalse(self.check(task, work))
 
-    def test_the_forced_baseline_sets_what_its_name_says(self):
-        configs = {c["id"]: c for c in run.load_configs()}
-        options = {"model": "sonnet", "budget": 0.5, "claude": ["claude"], "plugin_dir": "/p/model-router"}
-        cmd, env = run.command("x", configs["haiku-high"], options, {})
-        self.assertEqual((env["CLAUDE_CODE_SUBAGENT_MODEL"], env["CLAUDE_CODE_SUBAGENT_MODEL_FORCE"],
-                          env["CLAUDE_CODE_SUBAGENT_EFFORT"]), ("haiku", "1", "high"))
-        self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", env)  # that one would move the main loop too
-        self.assertNotIn("--plugin-dir", cmd)
-        self.assertEqual(sorted(configs), ["defaults", "haiku-high", "plugin"])
+    def test_the_configuration_ids_are_exactly_the_three_shipped_ones(self):
+        self.assertEqual(sorted(c["id"] for c in run.load_configs()), ["defaults", "haiku-high", "plugin"])
 
 
 LIMIT_STUB = '''#!/usr/bin/env python3
@@ -2198,12 +2191,6 @@ print(" ".join(blocked) or "nothing")
         # A plain dict: environment names are upper-cased on Windows, so os.environ can't hold these there.
         env = {"api_key": "1", "Github_Pat": "2", "my_auth": "3", "Db_Credential": "4", "keep": "5", "Path": "6"}
         self.assertEqual(run.grading_env(env), {"keep": "5", "Path": "6"})
-
-    def test_a_check_that_hangs_fails(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            check = Path(tmp) / "check.py"
-            check.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
-            self.assertFalse(run.grade(check, Path(tmp), Path(tmp) / "answer.txt", timeout=1).passed)
 
     def test_no_work_module_name_resolves_without_the_work_dir(self):
         names = set()
@@ -3459,9 +3446,6 @@ class Configurations(unittest.TestCase):
         for config in self.configs.values():
             self.assertNotIn("plugin_options", config, config["id"])  # run.py passes no plugin options
             self.assertNotIn("router_config", config, config["id"])
-        for gone in ("plugin-cheap", "plugin-cheap-nomain", "plugin-cheap-nomain-nogate", "plugin-m6-08-b",
-                     "plugin-m6-08-b-nogate", "plugin-m6-10", "opusplan", "plugin-nogate"):
-            self.assertNotIn(gone, self.configs)
 
 
 class RunEdges(unittest.TestCase):

@@ -341,9 +341,7 @@ def _cell_text(cell: dict) -> str:
 
 
 def _table(summary: list[dict]) -> list[str]:
-    configs = []
-    for row in summary:
-        configs += [c for c in row["configs"] if c not in configs]
+    configs = list(dict.fromkeys(c for row in summary for c in row["configs"]))
     lines = ["| Task class | " + " | ".join(configs) + " | Rank | Status |",
              "| :- | " + " | ".join(":-" for _ in configs) + " | -: | :- |"]
     for row in summary:
@@ -430,9 +428,7 @@ def _metric_text(cell: list[dict], routed: bool) -> str:
 
 
 def _metrics(summary: list[dict], rows: list[dict], routers: frozenset[str]) -> list[str]:
-    configs = []
-    for row in summary:
-        configs += [c for c in row["configs"] if c not in configs]
+    configs = list(dict.fromkeys(c for row in summary for c in row["configs"]))
     lines = ["### Run metrics", "", "| Task class | " + " | ".join(configs) + " |",
              "| :- | " + " | ".join(":-" for _ in configs) + " |"]
     for row in summary:
