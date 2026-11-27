@@ -115,6 +115,17 @@ def _unmarked_run(found: router.Facts, snap: settings.Snapshot) -> dict:
     return {"level": plain["level"], "model": model, "effort": effort_at(plain["effort"], model, found, snap)}
 
 
+def exact(snap: settings.Snapshot, decision: dict) -> str | None:
+    """The exact model the caller or the agent named, which a rewrite keeps in place of its family's alias:
+    on some providers the alias runs an older model, and an alias drops a [1m] variant."""
+    version = decision["version"]
+    if decision["action"] != "rewrite" or not version:
+        return None
+    # Only the lists count: Claude Code maps a named ID through modelOverrides whether it is sent or left alone.
+    permitted = snap.allowed.lists_permit(snap.registry, decision["model"], version) and snap.health.healthy(version)
+    return version if permitted else None
+
+
 def redo_note(decision: router.Decision) -> str | None:
     """What Claude reads after a redo that had no step left, so it doesn't send the same call again expecting more."""
     if not decision["no_step"]:

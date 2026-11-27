@@ -3,7 +3,7 @@ the rewrite waiting for its result, the refused-rewrite guard and the one deny. 
 for the call is `calls.py`'s, the same on both paths."""
 from __future__ import annotations
 
-from . import ladder, mod, settings, spawn, store
+from . import ladder, settings, spawn, store
 from . import config as cfg
 from . import router
 
@@ -20,7 +20,7 @@ def route(hook_input: dict, snap: settings.Snapshot) -> dict | None:
     session_id, decision = hook_input.get("session_id"), spawned.decision
     _guard(session_id, spawned)
     # The Agent tool's model takes only an alias, so an exact model is kept by leaving the call's own.
-    kept = mod.exact(snap, decision)
+    kept = spawn.exact(snap, decision)
     spawn.record(spawned, "fallback", kept)
     same = spawn.redo_note(decision)
     if decision["action"] == "rewrite":

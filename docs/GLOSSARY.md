@@ -20,7 +20,7 @@ The project's own words, and the code behind each.
 
 **Done record**: a task's latest finished run, in `done.json`, which a redo climbs from (`calls.last_run`).
 
-**Exact ID**: a full model ID or `[1m]` variant the call or agent names, kept while its family is (`mod.exact`).
+**Exact ID**: a full model ID or `[1m]` variant the call or agent names, kept while its family is (`spawn.exact`).
 
 **Fallback path**: `PreToolUse` on `Agent`, which rewrites `model` and `effort` through `updatedInput` for a call the mod didn't mark (`fallback.route`).
 

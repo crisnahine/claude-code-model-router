@@ -128,7 +128,7 @@ Then, for rows 3 to 6 and 8 (steps 4 to 6 on rows 1 and 2 too):
 
 The same model with no effort to set is a keep. Where the untouched model is unknown (a nested call on the fallback, the built-in Explore and Plan), row 8 still names a model, and an agent that inherits is left alone unless a floor lifts it.
 
-A full ID or `[1m]` variant the call or the agent names is kept while its family is, if the lists permit it and it is healthy (`mod.exact`). On a provider whose alias runs an older model (`older_aliases`), the mod sends the family's `newest` ID unless `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`, `modelOverrides`, the allowlist or health rules it out (`Registry.newest_id`). Where no newest ID goes (always on the fallback, which sends aliases only), the router's own picks (a level, a floor, a redo's next model) move one family up (`Registry.past_lag`), unless `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` pins that family.
+A full ID or `[1m]` variant the call or the agent names is kept while its family is, if the lists permit it and it is healthy (`spawn.exact`). On a provider whose alias runs an older model (`older_aliases`), the mod sends the family's `newest` ID unless `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`, `modelOverrides`, the allowlist or health rules it out (`Registry.newest_id`). Where no newest ID goes (always on the fallback, which sends aliases only), the router's own picks (a level, a floor, a redo's next model) move one family up (`Registry.past_lag`), unless `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` pins that family.
 
 `explain`, behind `/model-router:route`, runs `spawn.decide` with no session and writes nothing.
 
