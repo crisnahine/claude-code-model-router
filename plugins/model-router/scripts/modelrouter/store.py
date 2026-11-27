@@ -342,10 +342,6 @@ def try_update(path: Path, change: Callable[[dict], Any], durable: bool = True) 
         return data, "busy"
 
 
-def update_dict(path: Path, change: Callable[[dict], Any]) -> dict:
-    return try_update(path, change)[0]
-
-
 def state_path() -> Path:
     return data_dir() / "state.json"
 
@@ -355,7 +351,7 @@ def load_state() -> dict:
 
 
 def update_state(change: Callable[[dict], Any]) -> dict:
-    return update_dict(state_path(), change)
+    return try_update(state_path(), change)[0]
 
 
 def _keyed(name: str) -> Path:

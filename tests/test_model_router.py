@@ -2567,7 +2567,7 @@ class Calls(Sandbox):
             records = {"a": {"at": odd}, "b": {"at": 5}, "c": {"at": 6}}
             store.keep(records, "d", {}, kept=3)
             self.assertEqual(sorted(records), ["b", "c", "d"], odd)
-            store.update_dict(store._keyed("routes"), lambda data: data.update(junk={"_at": odd}))
+            store.try_update(store._keyed("routes"), lambda data: data.update(junk={"_at": odd}))
             for number in range(store.KEEP_ENTRIES):
                 store.mutate_entry("routes", f"other{number}", lambda entry: None)
             self.assertNotIn("junk", store.load_state_file(store._keyed("routes")), odd)
@@ -3931,7 +3931,7 @@ class StateFiles(Sandbox):
         def change(data: dict) -> None:
             info = data.setdefault("lookup", {})
             info["calls"] = info.get("calls", 0) + 1
-        store.update_dict(self.sample(), change)
+        store.try_update(self.sample(), change)
 
     def read(self) -> dict:
         return store.load_state_file(self.sample())
@@ -4463,7 +4463,7 @@ class MachineReadable(Sandbox):
         self.assertEqual((data["set_aside"], data["newer_files"]), ([], []))
         sample = store.data_dir() / "sample.json"
         sample.write_text('{"lookup": {"calls": 4,')
-        store.update_dict(sample, lambda data: None)
+        store.try_update(sample, lambda data: None)
         (store.data_dir() / "sessions.json").write_text(json.dumps({"schema": store.SCHEMA + 1}))  # a session file has none
         newer = store.data_dir() / "state.json"
         newer.write_text(json.dumps({"schema": store.SCHEMA + 1}))
@@ -4966,7 +4966,7 @@ class ClockAndCleanup(Sandbox):
         sample = store.data_dir() / "sample.json"
         for i in range(store.KEEP_SET_ASIDE + 3):
             sample.write_text('{"broken": ' + str(i))
-            store.update_dict(sample, lambda data: data.update(ok=True))
+            store.try_update(sample, lambda data: data.update(ok=True))
         copies = sorted(store.data_dir().glob("sample.json.corrupt-*"))
         self.assertEqual(len(copies), store.KEEP_SET_ASIDE)
         self.assertEqual(copies[-1].read_text(), '{"broken": ' + str(store.KEEP_SET_ASIDE + 2))
@@ -4980,7 +4980,7 @@ class ClockAndCleanup(Sandbox):
         with mock.patch.object(store, "_dt", frozen):
             for i in range(store.KEEP_SET_ASIDE + 3):
                 sample.write_text('{"broken": ' + str(i))
-                store.update_dict(sample, lambda data: data.update(ok=True))
+                store.try_update(sample, lambda data: data.update(ok=True))
                 self.assertNotIn("broken", sample.read_text(), i)  # saved, not left corrupt
         copies = sorted(store.data_dir().glob("sample.json.corrupt-*"))
         self.assertEqual(len(copies), store.KEEP_SET_ASIDE)
