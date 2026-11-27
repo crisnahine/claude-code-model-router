@@ -208,16 +208,6 @@ def _merge(base: dict, override: dict) -> dict:
     return out
 
 
-def _number(value: Any) -> bool:
-    """A finite number: json.loads accepts NaN and Infinity, which would poison every comparison."""
-    if not isinstance(value, (int, float)) or isinstance(value, bool):
-        return False
-    try:
-        return math.isfinite(value)
-    except OverflowError:  # an integer too large for a float
-        return False
-
-
 def parse_mode(value: Any) -> str | None:
     value = value.strip().lower() if isinstance(value, str) else None
     return value if value in MODES else None
@@ -253,9 +243,9 @@ def _clean(override: Any, source: str, problems: list[str], plain_keys: bool = F
                 bad(f"models.{name}", "is not an object")
                 continue
             for field in ("strength", "cost"):
-                if spec.get(field) is not None and not _number(spec[field]):
+                if spec.get(field) is not None and not store.is_number(spec[field]):
                     bad(f"models.{name}.{field}", "is not a finite number")
-            out["models"][name.lower()] = {f: spec[f] for f in ("strength", "cost") if _number(spec.get(f))}
+            out["models"][name.lower()] = {f: spec[f] for f in ("strength", "cost") if store.is_number(spec.get(f))}
     elif models is not None:
         bad("models", "is not an object")
     levels = override.get("levels")
@@ -269,7 +259,7 @@ def _clean(override: Any, source: str, problems: list[str], plain_keys: bool = F
                 bad(f"levels.{name}", "is not a level with an object")
                 continue
             kept: dict = {}
-            if _number(spec.get("needs")):
+            if store.is_number(spec.get("needs")):
                 kept["needs"] = spec["needs"]
             elif spec.get("needs") is not None:
                 bad(f"levels.{name}.needs", "is not a finite number")
@@ -324,7 +314,7 @@ def _raises_only(project: dict, shipped: dict, held: list[Held]) -> None:
     value, never less: a cloned repository can't lower a level the user relies on."""
     for name, spec in project.items():
         floor = shipped.get(name) or {}
-        if _number(floor.get("needs")) and spec.get("needs", floor["needs"]) < floor["needs"]:
+        if store.is_number(floor.get("needs")) and spec.get("needs", floor["needs"]) < floor["needs"]:
             held.append(Held("level", name, f"needs {spec.pop('needs')} is below {floor['needs']}"))
         effort = floor.get("effort")
         if "effort" in spec and spec["effort"] != effort and _effort_rank(spec["effort"]) < _effort_rank(effort or DEFAULT_EFFORT):
@@ -345,14 +335,14 @@ def base_config() -> dict:
 
 
 def _optional(spec: dict, key: str) -> float | None:
-    return spec[key] if _number(spec.get(key)) else None
+    return spec[key] if store.is_number(spec.get(key)) else None
 
 
 def _models(raw: dict, added: set, base: dict, problems: list[str]) -> dict[str, Model]:
     """A model needs a strength to be routed to; half-defined ones are dropped."""
     found = {}
     for name, spec in raw.items():
-        if not isinstance(spec, dict) or not _number(spec.get("strength")):
+        if not isinstance(spec, dict) or not store.is_number(spec.get("strength")):
             if name not in base:
                 problems.append(f"models.{name} has no strength, so it is left out")
             continue
@@ -371,7 +361,7 @@ def _levels(raw: dict, problems: list[str]) -> dict[Level, LevelSpec]:
     for level in LEVELS:
         spec = raw.get(level.value)
         spec = spec if isinstance(spec, dict) else {}
-        needs = float(spec["needs"]) if _number(spec.get("needs")) and spec["needs"] else float(level.rank + 1)
+        needs = float(spec["needs"]) if store.is_number(spec.get("needs")) and spec["needs"] else float(level.rank + 1)
         effort = spec.get("effort")
         if effort is not None and effort not in EFFORTS:
             problems.append(f"levels.{level}.effort is not one of {', '.join(EFFORTS)}, dropped")

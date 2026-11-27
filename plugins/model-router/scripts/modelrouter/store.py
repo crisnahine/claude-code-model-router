@@ -35,13 +35,17 @@ def now() -> float:
     return (_clock or time.time)()
 
 
+def is_number(value: Any) -> bool:
+    """A finite int or float, not a bool: json.loads also yields nan, infinity and huge ints."""
+    try:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def stamp(value: Any) -> float:
     """A stored time or count: the number itself, or 0 when it is junk, nan, infinite or too big for a float."""
-    try:
-        ok = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
-    except OverflowError:
-        return 0
-    return value if ok else 0
+    return value if is_number(value) else 0
 
 
 def set_clock(clock: Callable[[], float] | None) -> None:
