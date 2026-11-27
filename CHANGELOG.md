@@ -9,6 +9,7 @@
 This release follows Claude Code 2.1.332 and cleans up the code. Options and commands are the same as in 0.2.0.
 
 - On Google Cloud's Agent Platform `sonnet` goes out as the alias, and on Microsoft Foundry `opus` and `sonnet` do: Claude Code 2.1.332 runs the newest model for them. On 2.1.329 to 2.1.331 those three aliases run the provider's older model.
+- Under `availableModelsMatch: exact`, an `availableModels` entry such as `claude-opus-4-5` also permits its dated model ID, as in Claude Code.
 - A usage report whose cost is too large a number to store is recorded with no cost. Before, the usage hook stopped with an error on it.
 - Dead code, repeated helpers and repeated tests are gone from the runtime, the benchmark harness and the docs tooling.
 

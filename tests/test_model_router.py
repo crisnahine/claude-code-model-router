@@ -1115,6 +1115,21 @@ class Allowlist(Sandbox):
         # The family keeps a permitted version, which its alias moves to, so it stays routable.
         self.assertEqual(self.permitted(policy={"availableModels": pinned}), {"sonnet"})
 
+    def test_an_exact_entry_permits_its_dated_id_and_nothing_longer(self):
+        # settings-reference.md, availableModelsMatch: an exact entry also permits its dated ID, and no other extension.
+        def exact(entries, model_id):
+            found = allowlist.from_layers({"policy": {"availableModels": entries, "availableModelsMatch": "exact"}})
+            return found.lists_permit(self.config, "opus", model_id)
+
+        self.assertTrue(exact(["claude-opus-4-5"], "claude-opus-4-5-20251101"))
+        self.assertFalse(exact(["claude-opus-5"], "claude-opus-5-5"))
+        self.assertFalse(exact(["claude-opus-5"], "claude-opus-5-5-20260301"))
+        self.assertFalse(exact(["claude-opus-4-5"], "claude-opus-4-5-2025110"))
+        self.assertFalse(exact(["claude-opus-4-5"], "claude-opus-4-5-202511011"))
+        self.assertFalse(exact(["claude-opus-4-5"], "claude-opus-4-5-abcdefgh"))
+        self.assertTrue(allowlist.from_layers({"policy": {"availableModels": ["claude-opus-5"]}}).lists_permit(
+            self.config, "opus", "claude-opus-5-5"))
+
     def test_max_effort_level_caps_each_family_at_the_lowest_source(self):
         # settings-reference.md, maxEffortLevel: the lowest of any scope applies; a modelSettings entry replaces
         # that source's top-level cap for the model; "max" sets none.

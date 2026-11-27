@@ -142,8 +142,10 @@ class Allowlist:
         own = reg.family(model_id, twins=False) == name  # a twin's ID isn't in its family's name to Claude Code
 
         def names(entries: tuple[str, ...], prefix: bool) -> bool:
-            return any(e.lower() == model_id or own and e.lower() == name or prefix and model_id.startswith(e.lower() + "-")
-                       for e in entries)
+            # Past an entry and a hyphen, prefix mode takes any ID and exact mode only the entry's dated one.
+            return any(e == model_id or own and e == name
+                       or model_id.startswith(e + "-") and (prefix or re.fullmatch(r"\d{8}", model_id[len(e) + 1:]))
+                       for e in map(str.lower, entries))
 
         if self.allow is not None and not names(_effective(reg, self.allow), not self.exact):
             return False
