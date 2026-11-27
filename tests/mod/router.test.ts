@@ -306,6 +306,14 @@ test('a spawn sends its Agent call id, and a workflow agent sends none', async (
   assert.equal('tool_use_id' in mod.calls[2]!.stdin, false)
 })
 
+test('a spawn tells the picker whether it is a workflow, a teammate or a subagent', async () => {
+  const mod = load({ 'mod-spawn': PICK })
+  await mod.spawn(spawnEvent({ workflow: { runId: 'w1' } }))
+  await mod.spawn(spawnEvent({ isTeammate: true }))
+  await mod.spawn(spawnEvent())
+  assert.deepEqual(mod.calls.map(c => c.stdin.kind), ['workflow', 'teammate', 'subagent'])
+})
+
 test('a routed agent steps at the pick effort', async () => {
   const mod = load({ 'mod-spawn': PICK })
   await mod.spawn(spawnEvent())
