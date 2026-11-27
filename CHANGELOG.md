@@ -4,6 +4,13 @@
 
 # Changelog
 
+## 0.2.1 - 2026-11-27
+
+A cleanup release. Routing, options and commands are the same as in 0.2.0.
+
+- A usage report whose cost is too large a number to store is recorded with no cost. Before, the usage hook stopped with an error on it.
+- Dead code, repeated helpers and repeated tests are gone from the runtime, the benchmark harness and the docs tooling.
+
 ## 0.2.0 - 2026-11-26
 
 Model Router manages the Claude model and effort that each subagent, teammate and workflow agent runs on.

@@ -1,7 +1,7 @@
 {
   "name": "model-router",
   "displayName": "Model Router",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Routes Claude Code subagents, teammates and workflow agents. Claude names each one's model and effort from a short table; the plugin holds them to your cap, fills in what is missing, and runs a redo one step higher.",
   "author": {
     "name": "Cris Nahine",

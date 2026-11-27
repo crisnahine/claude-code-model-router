@@ -4,7 +4,7 @@
 
 # Guide
 
-How to install, use and configure Model Router 0.2.0.
+How to install, use and configure Model Router 0.2.1.
 
 ## Install, update and uninstall
 
