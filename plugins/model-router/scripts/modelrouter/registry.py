@@ -63,7 +63,7 @@ class Held:
 class Registry:
     models: Mapping[str, Model]
     levels: Mapping[Level, LevelSpec]  # in level order; `needs` never falls as the level rises
-    trusted_levels: Mapping[Level, LevelSpec] = field(default_factory=dict)  # the levels without a project's file
+    trusted_levels: Mapping[Level, LevelSpec]  # the levels without a project's file
     aliases: Mapping[str, str] = field(default_factory=dict)
     newest: Mapping[str, str] = field(default_factory=dict)
     older_aliases: Mapping[str, Mapping[str, str]] = field(default_factory=dict)  # provider: family: the ID its alias runs

@@ -33,7 +33,7 @@ def rung(reg: Registry, model: str | None, named_effort: str | None = None) -> L
     Rungs are read from the ladder without a project's file, whose raised `needs` would move a model down one."""
     if not model:
         return None
-    levels = reg.trusted_levels or reg.levels
+    levels = reg.trusted_levels
     own = [level for level in LEVELS if reg.select(levels[level].needs, reg.by_strength()) == model]
     if not own:
         own = [level for level in LEVELS if levels[level].needs <= reg.strength(model)][-1:] or [LEVELS[0]]

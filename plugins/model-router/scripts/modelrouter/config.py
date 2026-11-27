@@ -56,8 +56,6 @@ class Level(str, Enum):
     @classmethod
     def parse(cls, value: object) -> Level | None:
         """The level `value` names, or None for anything else."""
-        if isinstance(value, Level):
-            return value
         try:
             return cls(value) if isinstance(value, str) else None
         except ValueError:
@@ -470,5 +468,5 @@ def load(hook_input: dict | None = None) -> Registry:
 
 
 def shipped() -> Registry:
-    """The registry as the plugin ships it, with no override file: what the benchmark measures."""
+    """The registry as the plugin ships it, with no override file."""
     return build(base_config())
