@@ -4801,12 +4801,9 @@ class EdgeCases(Sandbox):
                 out = hooks.pre_agent({"session_id": "s1", "cwd": str(self.project), "tool_input": tool_input})
                 decision = ((out or {}).get("hookSpecificOutput") or {}).get("permissionDecision")
                 self.assertIsNone(decision)  # nothing to route on: the call goes through untouched
-        self.assertEqual(self.out_hook("pre-agent", {"session_id": "s1", "tool_input": {"prompt": ""}})[0], 0)
-
-    def out_hook(self, command, payload):
-        res = subprocess.run([sys.executable, str(SCRIPT), command], input=json.dumps(payload), capture_output=True,
-                             text=True, env={**os.environ})
-        return res.returncode, res.stdout
+        self.assertEqual(subprocess.run([sys.executable, str(SCRIPT), "pre-agent"],
+                                        input=json.dumps({"session_id": "s1", "tool_input": {"prompt": ""}}),
+                                        capture_output=True, text=True).returncode, 0)
 
     def test_a_result_on_another_model_is_logged_as_the_model_that_ran(self):
         self.session_on("claude-opus-5-5")
