@@ -8,6 +8,7 @@
 
 This release follows Claude Code 2.1.332 and cleans up the code. Options and commands are the same as in 0.2.0.
 
+- Reviewed against Claude Code 2.1.332 and the 37 docs pages whose text changed with it, which `compat/baseline.json` records. Nothing the plugin uses was removed or deprecated, and it doesn't use the release's new `PreSkillShellCommand` hook event.
 - On Google Cloud's Agent Platform `sonnet` goes out as the alias, and on Microsoft Foundry `opus` and `sonnet` do: Claude Code 2.1.332 runs the newest model for them. On 2.1.329 to 2.1.331 those three aliases run the provider's older model.
 - Under `availableModelsMatch: exact`, an `availableModels` entry such as `claude-opus-4-5` also permits its dated model ID, as in Claude Code.
 - Under `availableModelsMatch: exact`, `best`, `opusplan` and `default` entries in `availableModels` permit nothing, as in Claude Code.
