@@ -555,11 +555,11 @@ def release_date(v: str) -> str:
 @dataclasses.dataclass(frozen=True)
 class Snapshot:
     """Everything `build` reads, taken once: the plugin's version, its release date and its Claude Code floor, the
-    shipped ladder, the text of every page it rewrites and the page index."""
+    model registry, the text of every page it rewrites and the page index."""
     version: str
     released: str
     claude_code: str
-    ladder: dict
+    registry: dict
     texts: dict
     pages: list = dataclasses.field(default_factory=lambda: list(PAGES))
 
@@ -570,14 +570,14 @@ def snapshot() -> Snapshot:
               "site/sitemap.xml", "site/llms.txt"]
     return Snapshot(
         version=v, released=release_date(v), claude_code=manifest()["engines"]["claude-code"].removeprefix(">="),
-        ladder=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
+        registry=json.loads((ROOT / "plugins/model-router/config/models.json").read_text(encoding="utf-8")),
         texts={path: (ROOT / path).read_text(encoding="utf-8") for path in wanted if (ROOT / path).exists()})
 
 
 def build(snap: Snapshot) -> dict:
     """The files to write, by path, for a snapshot of the inputs. Reads no file."""
     LAYOUT.clear()
-    check_ladder_against_registry(snap.ladder)
+    check_ladder_against_registry(snap.registry)
     v = snap.version
     files = {}
     assets = badge_assets(v, snap.claude_code)
